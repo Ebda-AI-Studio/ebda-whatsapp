@@ -1,0 +1,62 @@
+/**
+ * Customer-facing words for the Store link: template names, the ordering bot and the order messages.
+ * The product supplies an instance (see configureStoreLink); the core only knows the shape.
+ */
+export type Locale = 'ar' | 'en';
+export type Localised = Record<Locale, string>;
+
+export type OrderingCopy = {
+  templates: {
+    orderConfirmation: string;
+    codConfirmation: string;
+    shippingUpdate: string;
+    cartRecovery: string;
+    otp: string;
+  };
+  /** Words that restart the flow from any state, matched against the whole normalised message. */
+  restartWords: readonly string[];
+  /** Words that switch language. */
+  languageWords: Readonly<Record<Locale, readonly string[]>>;
+  ordersWords: readonly string[];
+  /** Quick-reply button titles of the COD template, used when a reply carries no payload. */
+  codConfirmTitles: readonly string[];
+  codRefuseTitles: readonly string[];
+  customerName: Localised;
+  money: (minor: number, currency: string, locale: Locale) => string;
+  shipmentPhrase: (status: string, locale: Locale) => string | null;
+  t: {
+    greeting: (storeName: string, locale: Locale) => string;
+    browseBody: Localised;
+    browseButton: Localised;
+    moreRow: Localised;
+    outOfStockTag: Localised;
+    emptyCatalog: Localised;
+    storeUnavailable: Localised;
+    askQuantity: (title: string, locale: Locale) => string;
+    cartSummary: (lines: { title: string; quantity: number }[], subtotal: string, locale: Locale) => string;
+    cartButtons: { checkout: Localised; addMore: Localised; clear: Localised };
+    cartEmpty: Localised;
+    choosePayment: Localised;
+    paymentTitles: { cod: Localised; link: Localised; instapay: Localised };
+    chooseAddress: Localised;
+    addressesButton: Localised;
+    newAddressRow: Localised;
+    askAddress: Localised;
+    outOfStock: (names: string[], locale: Locale) => string;
+    codPlaced: (orderNumber: string, total: string | null, locale: Locale) => string;
+    linkPlaced: (orderNumber: string, url: string, locale: Locale) => string;
+    instapayPlaced: (orderNumber: string, ipa: string, amount: string, reference: string, locale: Locale) => string;
+    proofReceived: Localised;
+    proofAlready: Localised;
+    proofExpired: Localised;
+    paymentConfirmed: (orderNumber: string, locale: Locale) => string;
+    orderFailed: Localised;
+    useButtons: Localised;
+    codConfirmed: Localised;
+    codRefused: Localised;
+    ordersHeader: Localised;
+    orderLine: (orderNumber: string, status: string, locale: Locale) => string;
+    noOrders: Localised;
+    orderStatusNames: Record<string, Localised>;
+  };
+};
