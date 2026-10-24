@@ -42,7 +42,7 @@
 - No preview/staging environments (INFRA-PREVIEW-1): production only, new behaviour behind switches.
 - Wake on webhooks/events only: no polling, no crons shorter than 1 h.
 - Every write path is tenant-scoped by construction: the only way to touch tenant data is `env.WORKSPACE_DO.get(idFromName(workspaceId))`; D1 holds no message content.
-- Message bodies over 1 KB and all media go to R2; the DO keeps metadata plus a 280-character preview for FTS5.
+- Message bodies over 1 KB and all media go to R2; bodies up to 1 KB are kept in full in the DO (`messages.body`), plus a 280-grapheme preview for FTS5.
 - Zod at every edge (webhooks, API, queue messages, RPC, contract events). The contract file must use the Zod subset that also runs on Zod 3 (Store uses `zod ^3.22.4`): `z.object`, `z.string().uuid()`, `z.enum`, `z.number().int()`, `z.literal`.
 - Never log raw phone numbers or message bodies; log `buyerKey`/the last 4 digits.
 - Secrets via `wrangler secret`: `META_APP_SECRET`, `META_VERIFY_TOKEN`, `META_SYSTEM_TOKEN` (spike), `TOKEN_ENC_KEY`, `SUITE_BUYER_KEY_SECRET`, `SENTRY_DSN`.

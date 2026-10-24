@@ -8,10 +8,12 @@ export type StatusEvent = { wamid: string; status: 'sent' | 'delivered' | 'read'
 export type WebhookEvents = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[] };
 
 // Permissive on purpose: Meta adds fields often, and an unknown field must never drop a message.
+const unixSeconds = z.string().regex(/^\d{1,12}$/);
+
 const messageSchema = z.object({
   from: z.string(),
   id: z.string(),
-  timestamp: z.string(),
+  timestamp: unixSeconds,
   type: z.string(),
   text: z.object({ body: z.string() }).loose().optional(),
 }).loose();
@@ -19,15 +21,16 @@ const messageSchema = z.object({
 const statusSchema = z.object({
   id: z.string(),
   status: z.enum(['sent', 'delivered', 'read', 'failed']),
-  timestamp: z.string(),
+  timestamp: unixSeconds,
   errors: z.array(z.object({ code: z.number() }).loose()).optional(),
 }).loose();
 
 const valueSchema = z.object({
   metadata: z.object({ phone_number_id: z.string() }).loose(),
   contacts: z.array(z.object({ wa_id: z.string(), profile: z.object({ name: z.string() }).loose().optional() }).loose()).optional(),
-  messages: z.array(messageSchema).optional(),
-  statuses: z.array(statusSchema).optional(),
+  // Items are parsed one by one below, so one bad item never drops its siblings.
+  messages: z.array(z.unknown()).optional(),
+  statuses: z.array(z.unknown()).optional(),
 }).loose();
 
 const payloadSchema = z.object({
@@ -50,11 +53,20 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
     for (const change of entry.changes) {
       if (change.field !== 'messages') continue;
       const v = valueSchema.safeParse(change.value);
-      if (!v.success) continue;
+      if (!v.success) {
+        console.warn('meta webhook: change value rejected', v.error.issues[0]?.path.join('.'));
+        continue;
+      }
       const pn = v.data.metadata.phone_number_id;
       const ev = byNumber.get(pn) ?? { phoneNumberId: pn, inbound: [], statuses: [] };
       const names = new Map((v.data.contacts ?? []).map((c) => [c.wa_id, c.profile?.name]));
-      for (const m of v.data.messages ?? []) {
+      for (const item of v.data.messages ?? []) {
+        const parsedMsg = messageSchema.safeParse(item);
+        if (!parsedMsg.success) {
+          console.warn('meta webhook: message item rejected', parsedMsg.error.issues[0]?.path.join('.'));
+          continue;
+        }
+        const m = parsedMsg.data;
         ev.inbound.push({
           wamid: m.id,
           from: m.from,
@@ -64,7 +76,13 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
           ...(names.get(m.from) ? { profileName: names.get(m.from) } : {}),
         });
       }
-      for (const s of v.data.statuses ?? []) {
+      for (const item of v.data.statuses ?? []) {
+        const parsedStatus = statusSchema.safeParse(item);
+        if (!parsedStatus.success) {
+          console.warn('meta webhook: status item rejected', parsedStatus.error.issues[0]?.path.join('.'));
+          continue;
+        }
+        const s = parsedStatus.data;
         const code = s.errors?.[0]?.code;
         ev.statuses.push({ wamid: s.id, status: s.status, ts: Number(s.timestamp), ...(code !== undefined ? { errorCode: code } : {}) });
       }

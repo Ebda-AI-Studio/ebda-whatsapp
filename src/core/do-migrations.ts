@@ -38,13 +38,19 @@ export const DO_MIGRATIONS: readonly string[] = [
    );
    CREATE INDEX status_events_wamid ON message_status_events (wamid);`,
   `ALTER TABLE messages ADD COLUMN claim_attempts INTEGER NOT NULL DEFAULT 0;`,
+  // v3: full text for bodies up to 1 KB (larger ones live in R2); one row per distinct status event.
+  `ALTER TABLE messages ADD COLUMN body TEXT;
+   CREATE UNIQUE INDEX status_events_unique ON message_status_events (wamid, status, ts);`,
 ];
 
-export function migrate(sql: SqlStorage): void {
-  sql.exec('CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
-  const done = sql.exec<{ v: number | null }>('SELECT max(version) AS v FROM _migrations').one().v ?? 0;
-  for (let v = done + 1; v <= DO_MIGRATIONS.length; v++) {
-    sql.exec(DO_MIGRATIONS[v - 1]!);
-    sql.exec('INSERT INTO _migrations (version, applied_at) VALUES (?, ?)', v, Date.now());
-  }
+export function migrate(storage: DurableObjectStorage): void {
+  const sql = storage.sql;
+  storage.transactionSync(() => {
+    sql.exec('CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
+    const done = sql.exec<{ v: number | null }>('SELECT max(version) AS v FROM _migrations').one().v ?? 0;
+    for (let v = done + 1; v <= DO_MIGRATIONS.length; v++) {
+      sql.exec(DO_MIGRATIONS[v - 1]!);
+      sql.exec('INSERT INTO _migrations (version, applied_at) VALUES (?, ?)', v, Date.now());
+    }
+  });
 }

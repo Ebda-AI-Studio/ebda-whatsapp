@@ -1,19 +1,35 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
 import { migrate } from './do-migrations';
-import type { InboundMessage, StatusEvent } from './meta/webhook-schema';
 import type { SendResult } from './meta/client';
+import type { InboundMessage, StatusEvent } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
 
 export const PREVIEW_CHARS = 280;
 export const INLINE_BODY_BYTES = 1024;
 /** A claim older than this is presumed crashed and may be re-claimed once (duplicate risk vs drop risk: we accept one possible duplicate). */
 export const STALE_CLAIM_MS = 2 * 60 * 1000;
-const STATUS_RANK = { sent: 1, delivered: 2, read: 3 } as const;
+/** failed sits between sent and delivered: it beats a late 'sent', but never undoes a delivery. */
+const STATUS_RANK = { sent: 1, failed: 2, delivered: 3, read: 4 } as const;
 
 export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[]; receivedAt: number };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string };
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/** First PREVIEW_CHARS user-perceived characters; never splits an emoji or a combining mark. */
+export function previewOf(text: string): string {
+  let out = '';
+  let n = 0;
+  for (const { segment } of graphemes.segment(text)) {
+    if (n++ === PREVIEW_CHARS) break;
+    out += segment;
+  }
+  return out;
+}
+
+const byteLength = (s: string) => new TextEncoder().encode(s).byteLength;
 
 /** One tenant's data: a SQLite-backed Durable Object per workspace. */
 export class WorkspaceDO extends DurableObject<Env> {
@@ -22,22 +38,31 @@ export class WorkspaceDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    ctx.blockConcurrencyWhile(async () => migrate(this.sql));
+    ctx.blockConcurrencyWhile(async () => migrate(ctx.storage));
   }
 
+  /** The workspace id is the DO name. Never fall back to the hex id: idFromName(hex) is a different, empty DO. */
   private get workspaceId(): string {
-    return this.ctx.id.name ?? this.ctx.id.toString();
+    const name = this.ctx.id.name;
+    if (!name) throw new Error('WorkspaceDO must be addressed with idFromName(workspaceId)');
+    return name;
+  }
+
+  private bodyColumns(text: string | undefined, r2Key: string | undefined): { preview: string | null; body: string | null; key: string | null } {
+    if (text === undefined) return { preview: null, body: null, key: null };
+    return { preview: previewOf(text), body: r2Key ? null : text, key: r2Key ?? null };
   }
 
   async ingest(batch: IngestBatch, config: WorkspaceConfig = {}): Promise<IngestResult> {
-    // Large bodies go to R2 first (outside the transaction); the key is content-addressed by wamid so a retry rewrites the same object.
+    const workspaceId = this.workspaceId;
+    // Large bodies go to R2 first (outside the transaction); skipped for a wamid we already stored, so redelivery writes nothing.
     const bodies = new Map<string, string>();
     for (const m of batch.inbound) {
-      if (m.text && new TextEncoder().encode(m.text).byteLength > INLINE_BODY_BYTES) {
-        const key = `bodies/${this.workspaceId}/${m.wamid}`;
-        await this.env.MEDIA.put(key, m.text);
-        bodies.set(m.wamid, key);
-      }
+      if (!m.text || byteLength(m.text) <= INLINE_BODY_BYTES) continue;
+      if (this.sql.exec('SELECT 1 FROM messages WHERE wamid = ?', m.wamid).toArray().length) continue;
+      const key = `bodies/${workspaceId}/${m.wamid}`;
+      await this.env.MEDIA.put(key, m.text);
+      bodies.set(m.wamid, key);
     }
     const result: IngestResult = { stored: 0, duplicates: 0, replies: [] };
     this.ctx.storage.transactionSync(() => {
@@ -55,31 +80,30 @@ export class WorkspaceDO extends DurableObject<Env> {
            RETURNING id`,
           contactId, m.ts,
         ).one().id;
+        const cols = this.bodyColumns(m.text, bodies.get(m.wamid));
         const inserted = this.sql.exec(
-          `INSERT INTO messages (wamid, conversation_id, direction, type, preview, body_r2_key, created_at, updated_at)
-           VALUES (?, ?, 'in', ?, ?, ?, ?, ?) ON CONFLICT(wamid) DO NOTHING`,
-          m.wamid, conversationId, m.type, m.text ? [...m.text].slice(0, PREVIEW_CHARS).join('') : null, bodies.get(m.wamid) ?? null, m.ts * 1000, now,
+          `INSERT INTO messages (wamid, conversation_id, direction, type, preview, body, body_r2_key, created_at, updated_at)
+           VALUES (?, ?, 'in', ?, ?, ?, ?, ?, ?) ON CONFLICT(wamid) DO NOTHING`,
+          m.wamid, conversationId, m.type, cols.preview, cols.body, cols.key, m.ts * 1000, now,
         ).rowsWritten;
         if (inserted === 0) {
           result.duplicates++;
           // Redelivery heals a lost enqueue: offer the reply again until its send is claimed (claimSend dedupes).
           const claimed = this.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', `reply:${m.wamid}`).toArray().length > 0;
-          if (!claimed && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(batch, m, config.autoReplyText));
+          if (!claimed && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
           continue;
         }
         result.stored++;
         this.sql.exec('UPDATE conversations SET unread = unread + 1 WHERE id = ?', conversationId);
-        if (m.type === 'text' && config.autoReplyText) {
-          result.replies.push(this.replyJob(batch, m, config.autoReplyText));
-        }
+        if (m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
       }
       for (const st of batch.statuses) this.applyStatusSync(st);
     });
     return result;
   }
 
-  private replyJob(batch: IngestBatch, m: InboundMessage, text: string): SendJob {
-    return { workspaceId: this.workspaceId, phoneNumberId: batch.phoneNumberId, to: m.from, text, idempotencyKey: `reply:${m.wamid}`, inboundAt: m.ts * 1000, receivedAt: batch.receivedAt };
+  private replyJob(workspaceId: string, batch: IngestBatch, m: InboundMessage, text: string): SendJob {
+    return { workspaceId, phoneNumberId: batch.phoneNumberId, to: m.from, text, idempotencyKey: `reply:${m.wamid}`, inboundAt: m.ts * 1000, receivedAt: batch.receivedAt };
   }
 
   /** Claims the right to send `job` once. Only 'claimed' may call Meta. */
@@ -98,9 +122,9 @@ export class WorkspaceDO extends DurableObject<Env> {
           contactId, Math.floor(now / 1000),
         ).one().id;
         this.sql.exec(
-          `INSERT INTO messages (conversation_id, direction, type, preview, status, idempotency_key, claim_attempts, created_at, updated_at)
-           VALUES (?, 'out', 'text', ?, 'claimed', ?, 1, ?, ?)`,
-          conversationId, [...job.text].slice(0, PREVIEW_CHARS).join(''), job.idempotencyKey, now, now,
+          `INSERT INTO messages (conversation_id, direction, type, preview, body, status, idempotency_key, claim_attempts, created_at, updated_at)
+           VALUES (?, 'out', 'text', ?, ?, 'claimed', ?, 1, ?, ?)`,
+          conversationId, previewOf(job.text), job.text, job.idempotencyKey, now, now,
         );
         return 'claimed';
       }
@@ -113,33 +137,49 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   async recordOutbound(idempotencyKey: string, result: SendResult): Promise<void> {
-    const now = Date.now();
-    if (result.ok) {
-      this.sql.exec("UPDATE messages SET wamid = ?, status = 'accepted', updated_at = ? WHERE idempotency_key = ?", result.wamid, now, idempotencyKey);
-    } else if (result.retryable) {
-      this.sql.exec("UPDATE messages SET status = 'retry', error_code = ?, updated_at = ? WHERE idempotency_key = ?", result.code, now, idempotencyKey);
-    } else {
-      this.sql.exec("UPDATE messages SET status = 'failed', error_code = ?, updated_at = ? WHERE idempotency_key = ?", result.code, now, idempotencyKey);
-    }
+    this.ctx.storage.transactionSync(() => {
+      const now = Date.now();
+      if (result.ok) {
+        this.sql.exec("UPDATE messages SET wamid = ?, status = 'accepted', updated_at = ? WHERE idempotency_key = ?", result.wamid, now, idempotencyKey);
+        // Meta often sends 'sent'/'failed' before we store the wamid: replay what arrived early, oldest first.
+        const early = this.sql
+          .exec<{ id: number; status: StatusEvent['status']; ts: number; error_code: number | null }>(
+            'SELECT id, status, ts, error_code FROM message_status_events WHERE wamid = ? AND applied = 0 ORDER BY ts, id', result.wamid,
+          )
+          .toArray();
+        for (const e of early) {
+          if (this.applyToMessage({ wamid: result.wamid, status: e.status, ts: e.ts, ...(e.error_code !== null ? { errorCode: e.error_code } : {}) })) {
+            this.sql.exec('UPDATE message_status_events SET applied = 1 WHERE id = ?', e.id);
+          }
+        }
+      } else {
+        this.sql.exec('UPDATE messages SET status = ?, error_code = ?, updated_at = ? WHERE idempotency_key = ?', result.retryable ? 'retry' : 'failed', result.code, now, idempotencyKey);
+      }
+    });
   }
 
   async applyStatus(e: StatusEvent): Promise<{ applied: boolean }> {
     return this.ctx.storage.transactionSync(() => ({ applied: this.applyStatusSync(e) }));
   }
 
-  /** Records every status event; the message keeps its highest state. 'failed' applies only before delivery. */
+  /** Records each distinct status event once; the message keeps its highest state. */
   private applyStatusSync(e: StatusEvent): boolean {
-    const msg = this.sql.exec<{ id: number; status_rank: number }>('SELECT id, status_rank FROM messages WHERE wamid = ?', e.wamid).toArray()[0];
-    let applied = false;
-    if (msg) {
-      if (e.status === 'failed') applied = msg.status_rank < STATUS_RANK.delivered;
-      else applied = STATUS_RANK[e.status] > msg.status_rank;
-      if (applied) {
-        const rank = e.status === 'failed' ? msg.status_rank : STATUS_RANK[e.status];
-        this.sql.exec('UPDATE messages SET status = ?, status_rank = ?, error_code = coalesce(?, error_code), updated_at = ? WHERE id = ?', e.status, rank, e.errorCode ?? null, Date.now(), msg.id);
-      }
-    }
-    this.sql.exec('INSERT INTO message_status_events (wamid, status, ts, applied, error_code) VALUES (?, ?, ?, ?, ?)', e.wamid, e.status, e.ts, applied ? 1 : 0, e.errorCode ?? null);
+    const isNew = this.sql.exec(
+      'INSERT INTO message_status_events (wamid, status, ts, applied, error_code) VALUES (?, ?, ?, 0, ?) ON CONFLICT(wamid, status, ts) DO NOTHING',
+      e.wamid, e.status, e.ts, e.errorCode ?? null,
+    ).rowsWritten > 0;
+    if (!isNew) return false;
+    const applied = this.applyToMessage(e);
+    if (applied) this.sql.exec('UPDATE message_status_events SET applied = 1 WHERE wamid = ? AND status = ? AND ts = ?', e.wamid, e.status, e.ts);
     return applied;
+  }
+
+  private applyToMessage(e: StatusEvent): boolean {
+    const msg = this.sql.exec<{ id: number; status_rank: number }>('SELECT id, status_rank FROM messages WHERE wamid = ?', e.wamid).toArray()[0];
+    if (!msg) return false;
+    const rank = STATUS_RANK[e.status];
+    if (rank <= msg.status_rank || (e.status === 'failed' && msg.status_rank >= STATUS_RANK.delivered)) return false;
+    this.sql.exec('UPDATE messages SET status = ?, status_rank = ?, error_code = coalesce(?, error_code), updated_at = ? WHERE id = ?', e.status, rank, e.errorCode ?? null, Date.now(), msg.id);
+    return true;
   }
 }

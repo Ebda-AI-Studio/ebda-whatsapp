@@ -11,10 +11,11 @@ let graph: ReturnType<typeof stubGraph> | undefined;
 afterEach(() => graph?.restore());
 
 function job(ws: string, key: string): SendJob {
-  return { workspaceId: ws, phoneNumberId: 'pn-1', to: '201001234567', text: 'أهلاً 👋', idempotencyKey: key };
+  return { workspaceId: ws, phoneNumberId: `pn-${ws}`, to: '201001234567', text: 'أهلاً 👋', idempotencyKey: key };
 }
 
 async function runBatch(jobs: SendJob[], attempts = 1) {
+  for (const j of jobs) if (j.workspaceId) await seedNumber(j.phoneNumberId, j.workspaceId).catch(() => {}); // already seeded on redelivery
   const batch = createMessageBatch<SendJob>('ebda-wa-send', jobs.map((body, i) => ({ id: `m${i}`, timestamp: new Date(), attempts, body })));
   const ctx = createExecutionContext();
   await worker.queue(batch, env, ctx);
@@ -28,7 +29,7 @@ it('sends a reply job once and stores the outbound wamid', async () => {
   const res = await runBatch([job('ws-s1', 'reply:a')]);
   expect(res.explicitAcks).toEqual(['m0']);
   expect(graph.calls).toHaveLength(1);
-  expect(graph.calls[0]!.url).toBe('https://graph.facebook.com/v23.0/pn-1/messages');
+  expect(graph.calls[0]!.url).toBe('https://graph.facebook.com/v23.0/pn-ws-s1/messages');
   expect(graph.calls[0]!.body).toEqual({ messaging_product: 'whatsapp', recipient_type: 'individual', to: '201001234567', type: 'text', text: { body: 'أهلاً 👋' } });
   expect(await rows<Out>('ws-s1', "SELECT wamid, status, direction FROM messages WHERE direction = 'out'")).toEqual([{ wamid: 'wamid.out1', status: 'accepted', direction: 'out' }]);
 });
