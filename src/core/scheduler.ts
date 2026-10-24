@@ -24,10 +24,23 @@ export function addTask(sql: SqlStorage, kind: TaskKind, dueAt: number, payload?
   sql.exec('INSERT INTO scheduled_tasks (kind, due_at, payload) VALUES (?, ?, ?)', kind, dueAt, body);
 }
 
+/** A claimed task's lease: longer than any single task run (backup export, media download) is expected to take. */
+export const TASK_LEASE_MS = 5 * 60_000;
+
+/** Earliest moment any task can run: a leased task counts from its lease end, so the alarm never spins on it. */
 export function earliestDue(sql: SqlStorage): number | null {
-  return sql.exec<{ d: number | null }>('SELECT min(due_at) AS d FROM scheduled_tasks').one().d;
+  return sql.exec<{ d: number | null }>('SELECT min(max(due_at, coalesce(lease_until, 0))) AS d FROM scheduled_tasks').one().d;
 }
 
-export function dueTasks(sql: SqlStorage, now: number, limit: number): DueTask[] {
-  return sql.exec<DueTask>('SELECT id, kind, due_at, payload, attempts FROM scheduled_tasks WHERE due_at <= ? ORDER BY due_at, id LIMIT ?', now, limit).toArray();
+/**
+ * Claims up to `limit` due, unleased tasks. Select and lease happen in one synchronous step (no await), so two runners
+ * interleaving at an await can never claim the same row. Leases are measured on the real clock.
+ */
+export function claimDueTasks(sql: SqlStorage, now: number, limit: number, realNow = Date.now()): DueTask[] {
+  const rows = sql.exec<DueTask>(
+    'SELECT id, kind, due_at, payload, attempts FROM scheduled_tasks WHERE due_at <= ? AND (lease_until IS NULL OR lease_until <= ?) ORDER BY due_at, id LIMIT ?',
+    now, realNow, limit,
+  ).toArray();
+  for (const r of rows) sql.exec('UPDATE scheduled_tasks SET lease_until = ? WHERE id = ?', realNow + TASK_LEASE_MS, r.id);
+  return rows;
 }

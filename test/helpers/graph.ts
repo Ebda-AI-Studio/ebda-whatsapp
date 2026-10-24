@@ -12,7 +12,7 @@ const MEDIA_HOST = 'https://lookaside.fbsbx.com/';
  */
 export function stubGraph(
   responder: (call: GraphCall, n: number) => GraphReply = (_c, n) => ({ status: 200, json: { messages: [{ id: `wamid.out${n}` }] } }),
-  opts: { jwks?: JWK[] } = {},
+  opts: { jwks?: JWK[]; delayMs?: number } = {},
 ) {
   const calls: GraphCall[] = [];
   const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -27,6 +27,8 @@ export function stubGraph(
       headers: Object.fromEntries(new Headers(init?.headers).entries()),
     };
     calls.push(call);
+    // A real delay lets the DO's input gate open, as a real network call does, so overlapping runs can interleave.
+    if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs));
     const r = responder(call, calls.length);
     if (r.body !== undefined) return new Response(r.body, { status: r.status, headers: r.headers });
     return new Response(JSON.stringify(r.json ?? null), { status: r.status, headers: { 'content-type': 'application/json' } });

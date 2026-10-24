@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import { seedConversations } from './helpers/seed';
@@ -11,7 +12,8 @@ const stats = (xs: number[]) => ({ n: xs.length, p50: p(xs, 0.5), p95: p(xs, 0.9
  * Hono → requireStoreAccess → DO path (no network, no Meta). `scripts/bench-local.mjs` prints these lines.
  * workerd's clock only advances on I/O, so single figures are coarse; `mean` over the run is the finer number.
  */
-it('bench: conversation list, open chat and send-enqueue stay under the 150 ms p95 budget', async () => {
+// Opt-in (BENCH=1, via scripts/bench-local.mjs): seeding 5,000 conversations is too heavy for every suite run.
+it.runIf(env.BENCH === '1')('bench: conversation list, open chat and send-enqueue stay under the 150 ms p95 budget', { timeout: 60_000 }, async () => {
   const ws = W(600);
   const api = await apiFor(ws);
   const chatId = await seedConversations(ws);

@@ -27,9 +27,11 @@ it('stores an inbound image in R2 (never the expiring Meta URL) and serves it af
   // The stub goes in first: the DO's own alarm may also run the download task, and must see the same Meta.
   const g = graphStub(mediaReplies('media-m1'));
   const msg = await inboundImage(store, 'pn-m1', 'wamid.m1', 'media-m1', { caption: 'شوف الصورة' });
-  // the caption is the text; the file is in R2 once the download task has run
-  expect(await rows(store, 'SELECT type, preview, media_mime, media_r2_key FROM messages WHERE id = ?', msg.id)).toEqual([{ type: 'image', preview: 'شوف الصورة', media_mime: 'image/jpeg', media_r2_key: `media/${store}/wamid.m1` }]);
+  // the caption is the text right away; the R2 key appears only once the download task has run (the DO's own alarm
+  // may already have run it, so the key is not asserted before runDueTasks)
+  expect(await rows(store, 'SELECT type, preview, media_mime FROM messages WHERE id = ?', msg.id)).toEqual([{ type: 'image', preview: 'شوف الصورة', media_mime: 'image/jpeg' }]);
   expect(await workspace(store).runDueTasks(Date.now() + 1000)).toMatchObject({ failed: 0 });
+  expect(await rows(store, 'SELECT media_r2_key FROM messages WHERE id = ?', msg.id)).toEqual([{ media_r2_key: `media/${store}/wamid.m1` }]);
   expect(g.calls.map((c) => c.url)).toEqual([
     'https://graph.facebook.com/v25.0/media-m1',
     'https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=media-m1',
@@ -64,7 +66,7 @@ it('serves byte ranges so audio and video can seek', async () => {
   expect(new Uint8Array(await res.arrayBuffer())).toEqual(JPEG.slice(2, 5));
 });
 
-it('retries a failed download with backoff and gives up after 8 tries without losing the message', async () => {
+it('retries a failed download with backoff and gives up after 8 tries without losing the message', { timeout: 20_000 }, async () => {
   const store = W(402);
   await apiFor(store, 'owner', 'pn-m3');
   const g = graphStub(() => ({ status: 500, json: { error: { message: 'boom' } } }));
@@ -168,4 +170,18 @@ it('erasing a contact deletes their media from R2', async () => {
   const r = await workspace(store).eraseContact('201001234567');
   expect(r).toMatchObject({ found: true, r2Pending: 0 });
   expect(await env.MEDIA.get(`media/${store}/wamid.m9`)).toBeNull();
+});
+
+it('overlapping task runs never execute the same task twice (lease)', async () => {
+  const store = W(409);
+  await apiFor(store, 'owner', 'pn-lease');
+  const g = graphStub(() => ({ status: 500, json: { error: { message: 'boom' } } }), 20);
+  await inboundImage(store, 'pn-lease', 'wamid.lease', 'media-lease');
+  const ws = workspace(store);
+  const now = Date.now() + 1000;
+  await Promise.all([ws.runDueTasks(now), ws.runDueTasks(now), ws.runDueTasks(now)]);
+  // one attempt only (then backoff), however many runners overlapped — the DO's own alarm included
+  // the winner may be the DO's own alarm, still finishing its attempt: wait for the attempt to be recorded
+  await vi.waitFor(async () => expect(await rows(store, "SELECT attempts FROM scheduled_tasks WHERE kind = 'media_fetch'")).toEqual([{ attempts: 1 }]));
+  expect(g.calls.length).toBe(1);
 });

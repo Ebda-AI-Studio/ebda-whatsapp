@@ -126,6 +126,8 @@ export const DO_MIGRATIONS: readonly string[] = [
    );`,
   // v10 (Phase 2, erasure follow-up): idempotency keys of erased messages, so a send job still in the queue is dropped instead of re-creating the contact.
   `CREATE TABLE erased_keys (key TEXT PRIMARY KEY);`,
+  // Lease: a task being run is claimed until lease_until, so overlapping runners (alarm + direct calls) never run it twice.
+  `ALTER TABLE scheduled_tasks ADD COLUMN lease_until INTEGER;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

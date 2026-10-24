@@ -10,7 +10,7 @@ import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOut } from './consent';
-import { DAILY_KINDS, addTask, backoffMs, dueTasks, earliestDue, type TaskKind } from './scheduler';
+import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText } from './text-normalise';
 import { conversationDto, type ConversationRow } from './dto';
@@ -788,18 +788,18 @@ export class WorkspaceDO extends DurableObject<Env> {
     let ran = 0;
     let failed = 0;
     for (;;) {
-      const due = dueTasks(this.sql, now, 50);
+      const due = claimDueTasks(this.sql, now, 50);
       if (!due.length) break;
       for (const t of due) {
         ran++;
         try {
           const nextDue = await this.runTask(t.kind, t.payload, now, t.attempts);
           if (nextDue === undefined) this.sql.exec('DELETE FROM scheduled_tasks WHERE id = ?', t.id);
-          else this.sql.exec('UPDATE scheduled_tasks SET due_at = ?, attempts = 0, last_error = NULL WHERE id = ?', nextDue, t.id);
+          else this.sql.exec('UPDATE scheduled_tasks SET due_at = ?, attempts = 0, last_error = NULL, lease_until = NULL WHERE id = ?', nextDue, t.id);
         } catch (err) {
           failed++;
           const attempts = t.attempts + 1;
-          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ? WHERE id = ?', attempts, now + backoffMs(attempts), String((err as Error).message).slice(0, 200), t.id);
+          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ?', attempts, now + backoffMs(attempts), String((err as Error).message).slice(0, 200), t.id);
           console.error(JSON.stringify({ alert: `${t.kind}_failed`, workspace: this.workspaceId, attempts, error: (err as Error).message }));
         }
       }

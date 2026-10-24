@@ -3,7 +3,7 @@
 // Docker, no network) and prints the BENCH line it logs as a table. Numbers are "measured (local)", never live figures.
 import { spawnSync } from 'node:child_process';
 
-const r = spawnSync('npx', ['vitest', 'run', 'test/perf.test.ts', '--reporter=verbose'], { encoding: 'utf8' });
+const r = spawnSync('npx', ['vitest', 'run', 'test/perf.test.ts', '--reporter=verbose'], { encoding: 'utf8', env: { ...process.env, BENCH: '1' } });
 const line = (r.stdout + r.stderr).split('\n').find((l) => l.startsWith('BENCH '));
 if (!line) {
   console.error(r.stdout, r.stderr);
