@@ -2,7 +2,8 @@ import type { ErrorEvent } from '@sentry/cloudflare';
 
 // A run of 8+ digits (ASCII, Arabic-Indic or Persian), optionally with +, spaces, dashes, dots or parentheses between them.
 const DIGIT = '[0-9\\u0660-\\u0669\\u06f0-\\u06f9]';
-const PHONE_LIKE = new RegExp(`\\+?${DIGIT}(?:[\\s\\-().]*${DIGIT}){7,}`, 'g');
+// Separators include Unicode format characters (\p{Cf}: bidi marks, zero-width joiners) so they cannot split a number past the mask.
+const PHONE_LIKE = new RegExp(`\\+?${DIGIT}(?:[\\s\\-().\\p{Cf}]*${DIGIT}){7,}`, 'gu');
 // Allowlist: anything else (auth, cookies, signatures, client IPs) never leaves the worker.
 const SAFE_HEADERS = new Set(['user-agent', 'content-type', 'content-length', 'cf-ray', 'accept']);
 

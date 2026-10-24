@@ -198,10 +198,12 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     const next = nextLocalHour(Date.now() + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
+    // Owed erasure deletes run first and independently: a failed backup must never block them.
+    const stillOwed = await this.drainR2Deletes();
+    if (stillOwed > 0) console.error(JSON.stringify({ alert: 'r2_deletes_still_owed', workspace: this.workspaceId, keys: stillOwed }));
     try {
       const date = new Intl.DateTimeFormat('en-CA', { timeZone: BACKUP_TIME_ZONE }).format(Date.now());
       await this.exportSnapshot(date);
-      await this.drainR2Deletes();
     } catch (err) {
       // Re-arm first so one bad night never silently ends the schedule, then fail loudly (Workers Logs + alarm retry).
       await this.ctx.storage.setAlarm(next);

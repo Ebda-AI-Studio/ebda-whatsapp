@@ -62,3 +62,9 @@ it('scrubs breadcrumbs and drops extra, contexts and tags', () => {
   expect(out.extra).toBeUndefined();
   expect(out.tags).toBeUndefined();
 });
+
+it('masks phone numbers interleaved with bidi or zero-width format characters', () => {
+  const e = base();
+  e.message = 'to +20‎100‏123⁦456⁩7 and 01​00‍1234567';
+  expect(scrubEvent(e).message).toBe('to [phone] and [phone]');
+});

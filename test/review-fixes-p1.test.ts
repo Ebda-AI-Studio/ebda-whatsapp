@@ -128,3 +128,11 @@ it('ignores an unknown pa value instead of failing the login', async () => {
   const p = await verifier().verify(await sign({ pa: 'support' }, (j) => j.setAudience('whatsapp').setIssuedAt().setExpirationTime('10m').setJti('j')));
   expect(p.superAdmin).toBe(false);
 });
+
+it('the nightly alarm drains owed R2 deletes even when the backup export fails', async () => {
+  await seedBig('ws-r8');
+  await runInDurableObject(workspace('ws-r8'), (_i, s) => s.storage.sql.exec("INSERT INTO r2_pending_deletes (key) VALUES ('bodies/ws-r8/old')"));
+  vi.spyOn(env.BACKUPS, 'put').mockRejectedValue(new Error('bucket missing'));
+  await runDurableObjectAlarm(workspace('ws-r8')).catch(() => {});
+  expect(await rows('ws-r8', 'SELECT key FROM r2_pending_deletes')).toEqual([]);
+});
