@@ -591,7 +591,7 @@ export class WorkspaceDO extends DurableObject<Env> {
    * The merchant answers a COD confirmation from the inbox. Expected refusals are data. The Store is told right away when it
    * can be reached; otherwise a scheduled task keeps trying and `pushed` is false.
    */
-  async merchantCodOutcome(a: MerchantCodArgs): Promise<{ ok: true; orderNumber: string; outcome: 'confirmed' | 'refused'; pushed: boolean } | { ok: false; reason: 'unknown_order' | 'conflict' | 'closed' }> {
+  async merchantCodOutcome(a: MerchantCodArgs): Promise<{ ok: true; orderNumber: string; outcome: 'confirmed' | 'refused'; pushed: boolean } | { ok: false; reason: 'unknown_order' | 'conflict' | 'closed' | 'not_cod' }> {
     const res = this.ctx.storage.transactionSync(() => merchantCod(this.host(), a, Date.now()));
     if (!res.ok) return res;
     await this.arm();

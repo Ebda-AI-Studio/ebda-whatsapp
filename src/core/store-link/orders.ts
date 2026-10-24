@@ -8,11 +8,14 @@ import type { LinkHost } from './host';
 import { locale, upsertOrder } from './order-store';
 import { queueFreeText, setTag } from './outbound';
 
-export type CodResolution = 'resolved' | 'already' | 'conflict' | 'closed' | 'unknown_order';
+export type CodResolution = 'resolved' | 'already' | 'conflict' | 'closed' | 'not_cod' | 'unknown_order';
 
-type CodRow = { order_id: string; order_number: string | null; wa_id: string | null; cod_state: string | null; outcome: string | null; locale: string | null };
+/** An order in one of these Store statuses can no longer be confirmed or refused. */
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['cancelled', 'refunded', 'delivered', 'returned']);
+
+type CodRow = { order_id: string; order_number: string | null; wa_id: string | null; cod_state: string | null; outcome: string | null; locale: string | null; payment_method: string | null; status: string | null };
 const codRow = (host: LinkHost, where: string, ...params: SqlStorageValue[]) =>
-  host.sql.exec<CodRow>(`SELECT order_id, order_number, wa_id, cod_state, outcome, locale FROM store_orders WHERE ${where}`, ...params).toArray()[0];
+  host.sql.exec<CodRow>(`SELECT order_id, order_number, wa_id, cod_state, outcome, locale, payment_method, status FROM store_orders WHERE ${where}`, ...params).toArray()[0];
 
 /**
  * Records the answer to a COD confirmation, once. A first answer wins; the same answer again is a no-op; a different one
@@ -22,7 +25,9 @@ const codRow = (host: LinkHost, where: string, ...params: SqlStorageValue[]) =>
 export function resolveCod(host: LinkHost, orderId: string, outcome: CodOutcome, now: number, idempotencyKey?: string): CodResolution {
   const row = codRow(host, 'order_id = ?', orderId);
   if (!row) return 'unknown_order';
-  if (row.cod_state === 'closed') return 'closed';
+  // Only cash-on-delivery orders have this question, and not once the order is over.
+  if (row.payment_method !== 'cod') return 'not_cod';
+  if (row.cod_state === 'closed' || (row.status !== null && TERMINAL_STATUSES.has(row.status))) return 'closed';
   if (row.outcome === outcome) return 'already';
   const open = row.cod_state === null || row.cod_state === 'pending' || (row.cod_state === 'no_reply' && outcome !== 'no_reply');
   if (!open) return 'conflict';
@@ -71,11 +76,12 @@ export type MerchantCodArgs = {
   /** What the Store said about an order this workspace had never heard of (looked up by the route). */
   known?: { orderId: string; totalMinor: number; currency: string; buyerKey: string };
 };
-export type MerchantCodResult = { ok: true; orderId: string; orderNumber: string; resolution: 'resolved' | 'already' } | { ok: false; reason: 'unknown_order' | 'conflict' | 'closed' };
+export type MerchantCodResult = { ok: true; orderId: string; orderNumber: string; resolution: 'resolved' | 'already' } | { ok: false; reason: 'unknown_order' | 'conflict' | 'closed' | 'not_cod' };
 
 /** The merchant answers for a customer from the inbox. Call inside a transaction. */
 export function merchantCod(host: LinkHost, a: MerchantCodArgs, now: number): MerchantCodResult {
-  let row = codRow(host, 'order_number = ? AND (wa_id = ? OR wa_id IS NULL) ORDER BY updated_at DESC LIMIT 1', a.orderNumber, a.waId);
+  // The number alone is guessable: the order must belong to this very customer.
+  let row = codRow(host, 'order_number = ? AND wa_id = ? ORDER BY updated_at DESC LIMIT 1', a.orderNumber, a.waId);
   if (!row && a.known) {
     upsertOrder(host, { orderId: a.known.orderId, orderNumber: a.orderNumber, waId: a.waId, buyerKey: a.known.buyerKey, paymentMethod: 'cod', totalMinor: a.known.totalMinor, currency: a.known.currency }, now);
     row = codRow(host, 'order_id = ?', a.known.orderId);
@@ -83,7 +89,7 @@ export function merchantCod(host: LinkHost, a: MerchantCodArgs, now: number): Me
   if (!row) return { ok: false, reason: 'unknown_order' };
   const res = resolveCod(host, row.order_id, a.outcome, now, a.idempotencyKey);
   if (res === 'resolved' || res === 'already') return { ok: true, orderId: row.order_id, orderNumber: a.orderNumber, resolution: res };
-  return { ok: false, reason: res === 'unknown_order' ? 'unknown_order' : res };
+  return { ok: false, reason: res };
 }
 
 /** Deterministic v4-shaped uuid from a key, so a retried push carries the same event id and the Store dedupes it. */

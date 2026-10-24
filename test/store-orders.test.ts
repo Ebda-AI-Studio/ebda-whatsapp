@@ -5,7 +5,7 @@ import { apiFor, graphStub, useApiKey } from './helpers/api';
 import { postWebhook } from './helpers/meta';
 import { rawMessagePayload, templateButton } from './helpers/payload';
 import { BUYER_KEY_1, PHONE_1, WA_1, deliver, flush, iso, storeEvent, storeWorkspace, useStoreLink } from './helpers/store-link';
-import { rows, workspace } from './helpers/workspace';
+import { exec, rows, workspace } from './helpers/workspace';
 
 useApiKey();
 const link = useStoreLink();
@@ -224,5 +224,71 @@ describe('store-link settings', () => {
     expect(await res.json()).toMatchObject({ orderingBot: false, catalogId: '1234567890' });
     expect((await owner.call('PATCH', '/store-link/settings', {})).status).toBe(400);
     expect((await owner.call('PATCH', '/store-link/settings', { catalogId: 'abc' })).status).toBe(400);
+  });
+});
+
+describe('who may answer for which order', () => {
+  const created = (ws: string, orderId: string, orderNumber: string, paymentMethod: string, waPhone = PHONE_1) =>
+    storeEvent(ws, 'order.created', { orderId, orderNumber, buyerKey: BUYER_KEY_1, phoneE164: waPhone, locale: 'ar', totalMinor: 5000, currency: 'EGP', paymentMethod, channel: 'web' });
+  const OTHER = '201112223334';
+
+  it('(a) a customer, or a merchant acting for another customer, cannot answer for an order that is not theirs', async () => {
+    const ws = S(40);
+    const pn = await storeWorkspace(ws);
+    const api = await apiFor(ws);
+    const o = await codOrder(ws);
+    // a row that knows no customer at all (e.g. only a status event reached us) must not be claimable by guessing its number
+    await exec(ws, "INSERT INTO store_orders (order_id, order_number, wa_id, payment_method, status, updated_at) VALUES ('orphan', '555', NULL, 'cod', 'created', 1)");
+    const guess = await api.call('POST', `/contacts/${OTHER}/orders/555/cod-outcome`, { outcome: 'confirmed', idempotencyKey: K(40) });
+    expect(guess.status).toBe(404);
+    expect(await rows(ws, "SELECT outcome FROM store_orders WHERE order_id = 'orphan'")).toEqual([{ outcome: null }]);
+    const wrongOwner = await api.call('POST', `/contacts/${OTHER}/orders/${o.orderNumber}/cod-outcome`, { outcome: 'confirmed', idempotencyKey: K(41) });
+    expect(wrongOwner.status).toBe(404);
+    await tap(pn, 'wamid.x1', `cod:y:${o.orderId}`, 'أيوه، أكّد الطلب', OTHER);
+    await flush(ws);
+    expect(link.fake.count('recordCodOutcome')).toBe(0);
+    expect(await rows(ws, "SELECT cod_state, outcome FROM store_orders WHERE order_id = ?", o.orderId)).toEqual([{ cod_state: 'pending', outcome: null }]);
+  });
+
+  it('(b) an order that is not cash on delivery cannot be confirmed or refused', async () => {
+    const ws = S(41);
+    const pn = await storeWorkspace(ws);
+    const api = await apiFor(ws);
+    await deliver([created(ws, 'ip1', '7001', 'instapay'), created(ws, 'cd1', '7002', 'card')]);
+    for (const n of ['7001', '7002']) {
+      const res = await api.call('POST', `/contacts/${WA_1}/orders/${n}/cod-outcome`, { outcome: 'confirmed', idempotencyKey: K(42) });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ message: 'not_cod_order' });
+    }
+    await tap(pn, 'wamid.x2', 'cod:y:ip1');
+    await flush(ws);
+    expect(await rows(ws, 'SELECT order_id, cod_state, outcome FROM store_orders ORDER BY order_id')).toEqual([{ order_id: 'cd1', cod_state: null, outcome: null }, { order_id: 'ip1', cod_state: null, outcome: null }]);
+    expect(link.fake.count('recordCodOutcome')).toBe(0);
+  });
+
+  it('(c) after a cancellation nothing can be answered, whatever the COD state was', async () => {
+    const ws = S(42);
+    const pn = await storeWorkspace(ws);
+    const api = await apiFor(ws);
+    const pending = await codOrder(ws, 'k42a');
+    const answered = await codOrder(ws, 'k42b');
+    await deliver([storeEvent(ws, 'order.created', { orderId: 'fresh', orderNumber: '8003', buyerKey: BUYER_KEY_1, phoneE164: PHONE_1, locale: 'ar', totalMinor: 1, currency: 'EGP', paymentMethod: 'cod', channel: 'web' })]);
+    await tap(pn, 'wamid.x3', `cod:y:${answered.orderId}`);
+    await flush(ws);
+    expect(link.fake.count('recordCodOutcome')).toBe(1);
+    const cancel = (orderId: string, at: number) => storeEvent(ws, 'order.status_changed', { orderId, status: 'cancelled', updatedAt: iso(at) });
+    await deliver([cancel(pending.orderId, Date.now()), cancel(answered.orderId, Date.now()), cancel('fresh', Date.now())]);
+    expect(await rows(ws, 'SELECT order_id, cod_state FROM store_orders ORDER BY order_id')).toEqual(
+      [{ order_id: 'fresh', cod_state: 'closed' }, { order_id: answered.orderId, cod_state: 'closed' }, { order_id: pending.orderId, cod_state: 'closed' }].sort((a, b) => a.order_id.localeCompare(b.order_id)),
+    );
+    for (const n of [pending.orderNumber, '8003']) {
+      const res = await api.call('POST', `/contacts/${WA_1}/orders/${n}/cod-outcome`, { outcome: 'refused', idempotencyKey: K(43) });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ message: 'order_closed' });
+    }
+    await tap(pn, 'wamid.x4', `cod:n:${pending.orderId}`, 'إلغاء الطلب');
+    await flush(ws);
+    expect(link.fake.count('recordCodOutcome')).toBe(1); // only the earlier confirmation
+    expect(await tags(ws)).toEqual([]);
   });
 });

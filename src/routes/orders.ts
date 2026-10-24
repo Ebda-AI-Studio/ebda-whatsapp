@@ -56,7 +56,7 @@ ordersRoutes.post('/stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outco
   }
   if (res.ok) return c.json({ orderNumber: res.orderNumber, outcome: res.outcome, pushed: res.pushed });
   if (res.reason === 'unknown_order') return apiError(c, 404, 'not_found');
-  return apiError(c, 409, 'invalid_request', res.reason === 'closed' ? 'order_closed' : 'already_resolved');
+  return apiError(c, 409, 'invalid_request', res.reason === 'closed' ? 'order_closed' : res.reason === 'not_cod' ? 'not_cod_order' : 'already_resolved');
 });
 
 ordersRoutes.get('/stores/:storeId/store-link/settings', async (c) => {

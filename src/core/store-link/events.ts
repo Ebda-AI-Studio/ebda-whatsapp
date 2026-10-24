@@ -217,9 +217,9 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       upsertOrder(host, { orderId: d.orderId, status: d.status }, now);
       if (!have) return { status: 'applied' };
       const closing = d.status === 'cancelled' || d.status === 'refunded';
-      if (closing && have.cod_state === 'pending') {
-        // The Store cancelled it first: the question is moot, and no outcome is recorded for it.
-        host.sql.exec("UPDATE store_orders SET cod_state = 'closed', updated_at = ? WHERE order_id = ?", now, d.orderId);
+      if (closing) {
+        // Cancelled at the Store: whatever the COD state was, the question is over and no further outcome is accepted.
+        host.sql.exec("UPDATE store_orders SET cod_state = 'closed', updated_at = ? WHERE order_id = ? AND (cod_state IS NULL OR cod_state != 'closed')", now, d.orderId);
         if (have.wa_id) setTag(host, have.wa_id, 'cod_pending', false);
       }
       if (d.status === 'paid' && have.wa_id && have.order_number && copy && opts.phoneNumberId && (have.payment_method === 'instapay' || have.payment_method === 'link')) {
