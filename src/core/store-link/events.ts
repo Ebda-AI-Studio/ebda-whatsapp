@@ -1,3 +1,4 @@
+import { scheduleCatalogEmbed } from '../ai/knowledge';
 import type { StoreEvent } from '../api/store-events';
 import type { Locale } from '../ordering/copy';
 import { plainAmount } from '../ordering/money';
@@ -161,6 +162,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       );
       // One pending sync at most; scheduling again keeps the earlier due time, which is the debounce.
       addTask(host.sql, 'catalog_sync', now + CATALOG_DEBOUNCE_MS);
+      scheduleCatalogEmbed(host, now); // the AI agent's product search index (only while the agent is on)
       return { status: 'applied' };
     }
 

@@ -84,7 +84,7 @@ export class FakeStore implements StoreBridge {
   }
 
   getProducts(storeId: string, productIds: string[]) {
-    return this.gate('getProducts', storeId, [storeId, productIds], () => ({ ok: true, value: { items: this.catalog.filter((c) => productIds.includes(c.productId)) } }));
+    return this.gate('getProducts', storeId, [storeId, productIds], () => ({ ok: true, value: { items: this.catalog.filter((c) => productIds.includes(c.productId)).map((c) => ({ ...c, availability: (this.stock[c.retailerId] ?? 0) > 0 ? ('in_stock' as const) : ('out_of_stock' as const) })) } }));
   }
 
   createCheckoutLink(storeId: string, req: { items: OrderLine[]; buyer: Buyer }) {

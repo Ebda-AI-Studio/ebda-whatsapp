@@ -111,9 +111,14 @@ function optedOutSince(host: LinkHost, input: BotInput): boolean {
   return !!r && r.opted_out_at !== null && r.opted_out_at >= r.created_at;
 }
 
+/** True when the customer was erased or said stop after sending this message: nothing more may be written or sent for it. */
+export function turnGone(host: LinkHost, input: BotInput): boolean {
+  return erasedOrGone(host, input) || optedOutSince(host, input);
+}
+
 /** Called after every await that precedes a write: stops the turn without writing when the customer is gone or opted out. */
 function alive(t: Turn): void {
-  if (erasedOrGone(t.host, t.input) || optedOutSince(t.host, t.input)) throw new TurnAborted();
+  if (turnGone(t.host, t.input)) throw new TurnAborted();
 }
 
 // ---- the turn ----------------------------------------------------------------------------------------------------------
@@ -129,7 +134,8 @@ const say = (t: Turn, text: string): void => {
 };
 
 const queues = new Map<string, Promise<unknown>>();
-/** Turns of one customer run one at a time, in arrival order. */
+/** Turns of one customer (the ordering bot's and the AI agent's alike) run one at a time, in arrival order. */
+export const serialisedTurn = <T>(host: Pick<LinkHost, 'workspaceId'>, from: string, run: () => Promise<T>): Promise<T> => serialised(`${host.workspaceId}:${from}`, run);
 function serialised<T>(key: string, run: () => Promise<T>): Promise<T> {
   const prev = queues.get(key) ?? Promise.resolve();
   const next = prev.catch(() => undefined).then(run);
@@ -161,29 +167,49 @@ function saveSession(t: Turn): void {
 }
 
 export async function runBotTurn(host: LinkHost, input: BotInput, now: number): Promise<void> {
+  await serialisedTurn(host, input.from, () => runBotTurnLocked(host, input, now));
+}
+
+/** A session this old is a forgotten browse, not a conversation in progress: the agent may answer instead. */
+export const ORDERING_STALE_MS = 30 * 60_000;
+
+/**
+ * Does the ordering bot own this message? Yes while the customer is mid-order (a recent session that is not idle), for
+ * everything that is not free text (list/button taps, a Meta cart, a payment picture) and for its keywords.
+ */
+export function orderingEngaged(host: Pick<LinkHost, 'sql'>, input: BotInput, now: number): boolean {
+  if (input.type !== 'text' || input.reply || input.order) return true;
+  const row = host.sql.exec<{ state: string; updated_at: number }>('SELECT state, updated_at FROM bot_sessions WHERE wa_id = ?', input.from).toArray()[0];
+  if (row && row.state !== 'idle' && now - row.updated_at < ORDERING_STALE_MS) return true;
+  const copy = storeLink().copy;
+  const word = input.text ? normaliseText(input.text) : '';
+  if (!copy || !word) return false;
+  return normIn(copy.restartWords).has(word) || normIn(copy.ordersWords).has(word) || (['ar', 'en'] as const).some((l) => normIn(copy.languageWords[l]).has(word));
+}
+
+/** The ordering turn itself; the caller holds the customer's turn lock (`serialisedTurn`). `restart` opens the catalog regardless of the message (the AI agent hands over with it). */
+export async function runBotTurnLocked(host: LinkHost, input: BotInput, now: number, opts: { restart?: boolean } = {}): Promise<void> {
   const copy = storeLink().copy;
   const bridge = bridgeFor(host.env);
   if (!copy || !bridge || !orderingActive(host)) return;
-  await serialised(`${host.workspaceId}:${input.from}`, async () => {
-    const session = loadSession(host, input.from);
-    if (session.data.lastMessageId >= input.messageId) return; // already applied (a replayed task)
-    const t: Turn = { host, copy, bridge, ws: host.workspaceId, input, now, session, out: [] };
-    try {
-      alive(t);
-      if (session.fresh) {
-        const p = await profile(t);
-        if (p) session.locale = p.locale;
-      }
-      await dispatch(t);
-      alive(t);
-      await flush(t);
-      alive(t);
-      saveSession(t);
-    } catch (err) {
-      if (!(err instanceof TurnAborted)) throw err;
-      // erased or opted out meanwhile: nothing is written, nothing more is sent
+  const session = loadSession(host, input.from);
+  if (session.data.lastMessageId >= input.messageId) return; // already applied (a replayed task)
+  const t: Turn = { host, copy, bridge, ws: host.workspaceId, input, now, session, out: [] };
+  try {
+    alive(t);
+    if (session.fresh) {
+      const p = await profile(t);
+      if (p) session.locale = p.locale;
     }
-  });
+    await (opts.restart ? restart(t) : dispatch(t));
+    alive(t);
+    await flush(t);
+    alive(t);
+    saveSession(t);
+  } catch (err) {
+    if (!(err instanceof TurnAborted)) throw err;
+    // erased or opted out meanwhile: nothing is written, nothing more is sent
+  }
 }
 
 async function profile(t: Turn): Promise<StoreProfile | null> {
@@ -216,7 +242,7 @@ async function flush(t: Turn): Promise<void> {
       alive(t); // never re-create a contact that was erased since the last send
       if (host.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', key).toArray().length) return;
       const { conversationId } = host.ensureConversation(t.input.from, t.now);
-      host.insertOutbound(conversationId, { type: built.type, preview: built.preview, body: built.preview, key }, t.now);
+      host.insertOutbound(conversationId, { type: built.type, preview: built.preview, body: built.preview, key, author: 'bot' }, t.now);
     });
     await host.deliver(built.job);
     if (i < t.out.length - 1 && host.sendGapMs > 0) await new Promise((r) => setTimeout(r, host.sendGapMs));

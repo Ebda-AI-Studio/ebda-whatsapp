@@ -4,12 +4,12 @@ export const WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /** The columns messageDto needs, selected in one place so every reader maps the same shape. */
 export const MESSAGE_COLUMNS = `m.id, m.wamid, m.direction, m.type, m.preview, m.body, m.body_r2_key, m.status, m.error_code, m.idempotency_key,
-  m.template_name, m.template_lang, m.media_mime, m.media_size, m.media_r2_key, m.created_at`;
+  m.template_name, m.template_lang, m.media_mime, m.media_size, m.media_r2_key, m.author, m.created_at`;
 
 export type MessageRow = {
   id: number; wamid: string | null; direction: 'in' | 'out'; type: string; preview: string | null; body: string | null; body_r2_key: string | null;
   status: string | null; error_code: number | null; idempotency_key: string | null; template_name: string | null; template_lang: string | null;
-  media_mime: string | null; media_size: number | null; media_r2_key: string | null; created_at: number;
+  media_mime: string | null; media_size: number | null; media_r2_key: string | null; author: string | null; created_at: number;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -36,6 +36,8 @@ export function messageDto(r: MessageRow, workspaceId: string): MessageDto {
     status: (r.status as MessageDto['status']) ?? null,
     errorCode: r.error_code,
     at: r.created_at,
+    // Only set for the AI agent, the ordering bot and staff; a system message or a customer's keeps the Phase 2 shape.
+    ...(r.author === 'agent' || r.author === 'bot' || r.author === 'staff' ? { author: r.author } : {}),
   };
 }
 

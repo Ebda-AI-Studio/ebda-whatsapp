@@ -17,6 +17,16 @@ export type Env = {
   PROOF_URL_SECRET?: string;
   /** Public origin of this Worker (no trailing slash), used in the signed links the Store fetches payment screenshots from. */
   PUBLIC_BASE_URL?: string;
+  /** Workers AI: the agent's default model and the knowledge-base embeddings. Absent = the agent cannot answer (it hands off). */
+  AI?: Ai;
+  /** Vectorize index `ebda-wa-kb` (knowledge base + catalog search). Unbound = the agent answers without a knowledge base. */
+  VECTORIZE?: Vectorize;
+  /** Base64 of 32 random bytes: encrypts merchants' own model keys (AES-GCM). Unset = bring-your-own-key is unavailable. */
+  AGENT_SECRETS_KEY?: string;
+  /** Comma-separated extra hosts merchants may use as their own model endpoint (white-label); the built-in provider list always applies. */
+  AGENT_ALLOWED_HOSTS?: string;
+  /** Overrides the default Workers AI model of the agent. */
+  AGENT_MODEL?: string;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
   META_SYSTEM_TOKEN: string;

@@ -26,6 +26,8 @@ export const messageDto = z.object({
   status: messageStatus.nullable(),
   errorCode: z.number().int().nullable(),
   at: z.number().int(), // epoch ms
+  /** Who wrote an outgoing message, so the inbox can mark it (additive; absent = a person or a system message). */
+  author: z.enum(['agent', 'bot', 'staff']).nullable().optional(),
 });
 
 export const conversationDto = z.object({
@@ -141,6 +143,30 @@ export const storeLinkSettingsPatch = z.object({
   catalogId: z.string().regex(/^\d{5,25}$/).nullable(),
 }).partial().refine((p) => Object.keys(p).length > 0, 'nothing to change');
 
+/** AI agent settings (owner only). `apiKey` never comes back: only `hasApiKey` does. */
+export const agentSettingsFields = z.object({
+  enabled: z.boolean(),
+  persona: z.string().max(1000),
+  language: z.enum(['ar', 'en', 'auto']),
+  handoffMinutes: z.number().int().min(5).max(1440),
+  faqText: z.string().max(20_000),
+  provider: z.enum(['workers-ai', 'openai-compatible']),
+  /** Only for `openai-compatible`; the platform chooses the Workers AI model. */
+  model: z.string().min(1).max(100).regex(/^[\w./:@+-]+$/).nullable(),
+  baseUrl: z.string().max(300).nullable(),
+});
+export const agentSettingsDto = agentSettingsFields.extend({
+  hasApiKey: z.boolean(),
+  /** AI credits available now (a workspace with its own key is never debited). */
+  credits: z.number().int(),
+  /** The knowledge base text is searchable (indexed); false while it is being indexed or when it is off. */
+  knowledgeReady: z.boolean(),
+});
+/** Partial update (PUT merges): `apiKey` string = set, null = remove, absent = keep. */
+export const agentSettingsUpdate = agentSettingsFields.extend({ apiKey: z.string().min(8).max(400).nullable() }).partial().refine((p) => Object.keys(p).length > 0, 'nothing to change');
+export type AgentSettingsDto = z.infer<typeof agentSettingsDto>;
+export type AgentSettingsUpdate = z.infer<typeof agentSettingsUpdate>;
+
 export const customerOrdersResponse = z.object({ items: z.array(orderSummaryDto), source: z.enum(['store', 'sample']) });
 
 export type ContactDto = z.infer<typeof contactDto>;
@@ -172,4 +198,5 @@ export const ROUTES = {
   codOutcome: 'POST /contacts/:waId/orders/:orderNumber/cod-outcome',
   me: 'GET /me',
   storeLinkSettings: 'GET|PATCH /store-link/settings',
+  agent: 'GET|PUT /agent',
 } as const;

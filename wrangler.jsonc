@@ -30,10 +30,17 @@
     "producers": [{ "binding": "SEND_QUEUE", "queue": "ebda-wa-send" }],
     "consumers": [{ "queue": "ebda-wa-send", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-send-dlq" }]
   },
+  // Workers AI: the AI agent's default model and the knowledge-base embeddings (@cf/baai/bge-m3). Billed to this account.
+  "ai": { "binding": "AI" },
   "analytics_engine_datasets": [
     { "binding": "USAGE", "dataset": "ebda_wa_usage" },
     { "binding": "CI_OUTCOMES", "dataset": "ebda_ci_outcomes" }
   ]
+  // ---- AI agent (Phase 5). The knowledge base and the catalog search use a Vectorize index; it does not exist yet, so the binding
+  // stays commented out (a binding to a missing index fails the deploy) and the agent answers without a knowledge base meanwhile.
+  // Create it, then uncomment: `npx wrangler vectorize create ebda-wa-kb --dimensions=1024 --metric=cosine`
+  //   "vectorize": [{ "binding": "VECTORIZE", "index_name": "ebda-wa-kb" }],
+  // Secrets: AGENT_SECRETS_KEY (base64, 32 random bytes; encrypts merchants' own model keys). Var AGENT_MODEL overrides the default Workers AI model.
   // ---- Store link (Phase 4). Left OFF until the Store side exists: a binding to a service or queue that is not
   // deployed fails the whole deploy. When the Store Worker, `ebda-wa-events` and `ebda-store-events` exist, add:
   //   "services": [{ "binding": "STORE_BRIDGE", "service": "<store api worker name>", "entrypoint": "WhatsAppBridge" }],
