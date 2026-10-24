@@ -24,6 +24,7 @@ import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { errClass, safeMessage } from './observability';
+import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, cancelCampaign, createCampaign, deleteDraft, endInstance, gateFor, getCampaign, launchCampaign, listCampaigns, pauseCampaign, resumeCampaign, sendCampaign, settleWallet, sweepCampaigns, type CreateArgs } from './campaigns/campaigns';
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
 import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
@@ -252,6 +253,19 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.emitMessageCreated(replyId);
         this.emitConversationUpdated(conversationId);
         return 'claimed';
+      }
+      if ((existing.status === 'queued' || existing.status === 'retry') && job.idempotencyKey.startsWith('camp:')) {
+        // A campaign message follows its campaign: cancelled = never sent; paused = parked until resume (the send_release row moves, nothing is lost).
+        const gate = gateFor(this.host(), job.idempotencyKey);
+        if (gate === 'cancelled') {
+          this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'campaign_cancelled', updated_at = ? WHERE id = ?", now, existing.id);
+          this.emitMessageStatus(existing.id);
+          return 'dropped';
+        }
+        if (gate === 'paused') {
+          this.addReleaseOnce(job, now + PARK_MS, 'campaign_paused');
+          return 'deferred';
+        }
       }
       if (existing.status === 'queued' || existing.status === 'retry') {
         // A marketing template that waited (tier, throughput or Meta's frequency cap) must honour an opt-out given meanwhile.
@@ -809,6 +823,77 @@ export class WorkspaceDO extends DurableObject<Env> {
     return audiencePage(this.host(), criteria, afterId, limit);
   }
 
+  // ---- Campaigns (Phase 6): broadcasts ---------------------------------------------------------------------------------
+
+  /** Recipients per workflow page; a field so a test can use small pages. */
+  campaignPageSize = PAGE_SIZE;
+
+  async createCampaign(a: Omit<CreateArgs, 'now'>) {
+    return createCampaign(this.host(), { ...a, now: Date.now() });
+  }
+
+  async getCampaign(id: string) {
+    return getCampaign(this.host(), id);
+  }
+
+  async listCampaigns(q: { status?: Parameters<typeof listCampaigns>[1]['status']; cursor?: number; limit: number }) {
+    return listCampaigns(this.host(), q);
+  }
+
+  async deleteCampaignDraft(id: string) {
+    return deleteDraft(this.host(), id);
+  }
+
+  /** draft -> running / scheduled, then starts the workflow. A failed start is retried by the sweep, so the campaign is never left dormant. */
+  async sendCampaign(id: string, scheduledAt?: number) {
+    const now = Date.now();
+    const r = await sendCampaign(this.host(), id, scheduledAt, now);
+    if (r.ok) await launchCampaign(this.host(), id, now);
+    return r;
+  }
+
+  async pauseCampaign(id: string, reason: 'manual' = 'manual') {
+    const r = await pauseCampaign(this.host(), id, reason, Date.now());
+    if (r.ok) await endInstance(this.host(), id, this.campaignAttempt(id));
+    return r;
+  }
+
+  async resumeCampaign(id: string) {
+    const now = Date.now();
+    const r = await resumeCampaign(this.host(), id, now);
+    if (r.ok) {
+      await this.arm();
+      await launchCampaign(this.host(), id, now);
+    }
+    return r;
+  }
+
+  async cancelCampaign(id: string) {
+    const r = await cancelCampaign(this.host(), id, Date.now(), (mid) => this.emitMessageStatus(mid));
+    if (r.ok) {
+      await endInstance(this.host(), id, this.campaignAttempt(id));
+      await settleWallet(this.host(), id);
+    }
+    return r;
+  }
+
+  private campaignAttempt(id: string): number {
+    return this.sql.exec<{ attempt: number }>('SELECT attempt FROM campaigns WHERE id = ?', id).toArray()[0]?.attempt ?? 0;
+  }
+
+  // The three steps of the campaign workflow (see campaigns/workflows.ts).
+  async campaignStart(id: string, attempt: number) {
+    return campaignStart(this.host(), id, attempt);
+  }
+
+  async campaignActivate(id: string, attempt: number) {
+    return campaignActivate(this.host(), id, attempt, Date.now());
+  }
+
+  async campaignPage(id: string, attempt: number, page: number) {
+    return campaignPage(this.host(), id, attempt, page, Date.now(), this.campaignPageSize);
+  }
+
   /** Deletes the R2 objects owed so far; whatever R2 refuses stays owed and is retried within the hour. */
   private async settleR2(): Promise<void> {
     if ((await this.drainR2Deletes()) > 0) await this.schedule('r2_drain', Date.now() + 3_600_000);
@@ -1275,8 +1360,10 @@ export class WorkspaceDO extends DurableObject<Env> {
         return runCatalogSync(this.host(), now);
       case 'catalog_reconcile':
         return runCatalogReconcile(this.host(), now);
+      case 'campaign_step':
+        return sweepCampaigns(this.host(), now);
       default:
-        return undefined; // campaign_step: Phase 6 placeholder; cod_no_reply, bot_turn arrive with their tasks
+        return undefined;
     }
   }
 
@@ -1305,7 +1392,10 @@ export class WorkspaceDO extends DurableObject<Env> {
   async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest } | { ok: false; reason: string }> {
     try {
       const manifest = await this.importSnapshotOrThrow(prefix);
+      // A restored campaign that was running has no workflow in this account's engine: the sweep starts one.
+      if (this.sql.exec("SELECT 1 FROM campaigns WHERE status IN ('scheduled', 'running') LIMIT 1").toArray().length) addTask(this.sql, 'campaign_step', Date.now() + 60_000);
       await this.ensureBackupAlarm();
+      await this.arm();
       return { ok: true, manifest };
     } catch (e) {
       return { ok: false, reason: (e as Error).message };
@@ -1383,6 +1473,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM contact_tags WHERE contact_id = ?', contact.id);
+      this.sql.exec('DELETE FROM campaign_recipients WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM agent_handoffs WHERE wa_id = ?', waId);

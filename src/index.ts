@@ -36,13 +36,14 @@ import { agentRoutes } from './routes/agent';
 import { contactsRoutes } from './routes/contacts';
 import { importsRoutes } from './routes/imports';
 import { segmentsRoutes } from './routes/segments';
+import { campaignsRoutes } from './routes/campaigns';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY });
 const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 
 export { WorkspaceDO } from './core/workspace-do';
-export { ImportWorkflow } from './core/campaigns/workflows';
+export { CampaignWorkflow, ImportWorkflow } from './core/campaigns/workflows';
 
 /**
  * Internal RPC for the accounts service (bind it with `entrypoint: "WhatsAppOtp"`; never a public URL):
@@ -94,6 +95,7 @@ api.route('/', agentRoutes);
 api.route('/', contactsRoutes);
 api.route('/', importsRoutes);
 api.route('/', segmentsRoutes);
+api.route('/', campaignsRoutes);
 app.route('/api/v1', api);
 
 function sameString(a: string, b: string): boolean {

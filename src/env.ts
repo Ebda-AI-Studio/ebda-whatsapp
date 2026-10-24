@@ -29,6 +29,8 @@ export type Env = {
   AGENT_MODEL?: string;
   /** Phase 6: contact-import workflow (one instance per uploaded file). */
   IMPORT_WORKFLOW: Workflow<{ workspaceId: string; importId: string }>;
+  /** Phase 6: campaign broadcasts (one instance per campaign generation, id `<campaignId>-<attempt>`). */
+  CAMPAIGN_WORKFLOW: Workflow<{ workspaceId: string; campaignId: string; attempt: number }>;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
   META_SYSTEM_TOKEN: string;

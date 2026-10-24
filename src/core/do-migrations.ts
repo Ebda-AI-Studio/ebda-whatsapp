@@ -244,6 +244,61 @@ export const DO_MIGRATIONS: readonly string[] = [
      updated_at INTEGER NOT NULL
    );
    CREATE UNIQUE INDEX segments_name ON segments (name);`,
+  // v23 (Phase 6.3, broadcasts): a campaign, the pages of its audience already queued (one row per page, the unit a Workflow step
+  // repeats safely), and one row per recipient. A recipient's message is found by its stable idempotency key camp:<campaign>:<contact>,
+  // so per-status counts are read from the messages themselves and cannot drift. The partial index keeps "how many sends are still
+  // waiting" cheap. Erasing a contact deletes its recipient rows.
+  `CREATE TABLE campaigns (
+     id TEXT PRIMARY KEY,
+     name TEXT NOT NULL,
+     template_name TEXT NOT NULL,
+     template_language TEXT NOT NULL,
+     category TEXT NOT NULL,
+     params TEXT NOT NULL,
+     criteria TEXT NOT NULL,
+     segment_id INTEGER,
+     phone_number_id TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled')),
+     pause_reason TEXT,
+     scheduled_at INTEGER,
+     daily_send_limit INTEGER,
+     attempt INTEGER NOT NULL DEFAULT 0,
+     next_page INTEGER NOT NULL DEFAULT 0,
+     cursor INTEGER NOT NULL DEFAULT 0,
+     created_by TEXT,
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL,
+     started_at INTEGER,
+     finished_at INTEGER
+   );
+   CREATE INDEX campaigns_status ON campaigns (status);
+   CREATE TABLE campaign_pages (
+     campaign_id TEXT NOT NULL,
+     page INTEGER NOT NULL,
+     from_id INTEGER NOT NULL,
+     to_id INTEGER NOT NULL,
+     count INTEGER NOT NULL,
+     done INTEGER NOT NULL,
+     reserve_ref TEXT NOT NULL,
+     reserved_minor INTEGER NOT NULL,
+     settled INTEGER NOT NULL DEFAULT 0,
+     at INTEGER NOT NULL,
+     PRIMARY KEY (campaign_id, page)
+   ) WITHOUT ROWID;
+   CREATE TABLE campaign_recipients (
+     campaign_id TEXT NOT NULL,
+     contact_id INTEGER NOT NULL,
+     page INTEGER NOT NULL,
+     idem TEXT NOT NULL,
+     state TEXT NOT NULL CHECK (state IN ('queued', 'skipped')),
+     skip_reason TEXT,
+     at INTEGER NOT NULL,
+     PRIMARY KEY (campaign_id, contact_id)
+   ) WITHOUT ROWID;
+   CREATE INDEX campaign_recipients_idem ON campaign_recipients (idem);
+   CREATE INDEX campaign_recipients_at ON campaign_recipients (campaign_id, at);
+   CREATE INDEX campaign_recipients_contact ON campaign_recipients (contact_id);
+   CREATE INDEX messages_pending ON messages (idempotency_key) WHERE status IN ('queued', 'claimed', 'retry') AND direction = 'out';`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

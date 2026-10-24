@@ -38,7 +38,8 @@
   ],
   // Phase 6: contact imports (parsed in steps) and campaign broadcasts (paged, paced against the number's tier) run as Workflows.
   "workflows": [
-    { "name": "ebda-wa-import", "binding": "IMPORT_WORKFLOW", "class_name": "ImportWorkflow" }
+    { "name": "ebda-wa-import", "binding": "IMPORT_WORKFLOW", "class_name": "ImportWorkflow" },
+    { "name": "ebda-wa-campaign", "binding": "CAMPAIGN_WORKFLOW", "class_name": "CampaignWorkflow" }
   ]
   // ---- AI agent (Phase 5). The knowledge base and the catalog search use a Vectorize index; it does not exist yet, so the binding
   // stays commented out (a binding to a missing index fails the deploy) and the agent answers without a knowledge base meanwhile.

@@ -232,6 +232,60 @@ export const listSegmentsResponse = z.object({ items: z.array(segmentDto) });
 export type SegmentDto = z.infer<typeof segmentDto>;
 export type SegmentPreviewDto = z.infer<typeof segmentPreviewDto>;
 
+/** Phase 6.3: broadcast campaigns. A template send to an audience, paged, paced against the number's tier, pausable. */
+export const campaignParam = z.discriminatedUnion('kind', [
+  /** The same text for everyone. A media header takes its https link here. */
+  z.object({ kind: z.literal('text'), value: z.string().min(1).max(1000) }),
+  /** The contact's name; `fallback` when we have none. */
+  z.object({ kind: z.literal('name'), fallback: z.string().min(1).max(60) }),
+]);
+export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled']);
+export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error']);
+export const campaignCreate = z.object({
+  name: z.string().trim().min(1).max(80),
+  template: z.object({ name: z.string().min(1).max(512), language: z.string().min(2).max(10) }),
+  params: z.array(campaignParam).max(20).default([]),
+  audience: z.union([z.strictObject({ segmentId: z.number().int().positive() }), z.strictObject({ criteria: segmentCriteria })]),
+  /** At most this many recipients are queued per rolling 24 h; the rest wait for the next day. */
+  dailySendLimit: z.number().int().min(1).max(1_000_000).optional(),
+});
+export type CampaignCreate = z.input<typeof campaignCreate>;
+/** `scheduledAt` (epoch ms, at most a year ahead) = start then; absent = start now. */
+export const sendCampaignRequest = z.object({ scheduledAt: z.number().int().positive().optional() });
+export const campaignCounts = z.object({
+  queued: z.number().int(), claimed: z.number().int(), retry: z.number().int(), accepted: z.number().int(), sent: z.number().int(),
+  delivered: z.number().int(), read: z.number().int(), failed: z.number().int(), skipped: z.number().int(),
+});
+export const campaignDto = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: campaignStatus,
+  pauseReason: campaignPauseReason.nullable(),
+  template: z.object({ name: z.string(), language: z.string() }),
+  category: z.string(),
+  params: z.array(campaignParam),
+  audience: z.object({ segmentId: z.number().int().nullable(), criteria: segmentCriteria }),
+  scheduledAt: z.number().int().nullable(),
+  dailySendLimit: z.number().int().nullable(),
+  createdAt: z.number().int(),
+  startedAt: z.number().int().nullable(),
+  finishedAt: z.number().int().nullable(),
+  /** Messages by their own status, plus `skipped` (a recipient who could not be messaged, never sent). */
+  counts: campaignCounts,
+  /** Roll-up: sent = accepted by Meta or further; delivered/read are cumulative; pending = not yet with Meta. */
+  totals: z.object({ recipients: z.number().int(), pending: z.number().int(), sent: z.number().int(), delivered: z.number().int(), read: z.number().int(), failed: z.number().int(), skipped: z.number().int() }),
+  /** Before sending: how many people it would reach and what the wallet expects it to cost (piasters; 0 until a wallet is configured). */
+  estimate: z.object({ audience: z.number().int(), perMessageMinor: z.number().int(), totalMinor: z.number().int() }).optional(),
+});
+export const listCampaignsQuery = z.object({
+  status: campaignStatus.optional(),
+  cursor: z.string().regex(/^\d{1,15}$/).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export const listCampaignsResponse = z.object({ items: z.array(campaignDto), nextCursor: z.string().nullable() });
+export type CampaignDto = z.infer<typeof campaignDto>;
+export type CampaignParam = z.infer<typeof campaignParam>;
+
 export const customerOrdersResponse = z.object({ items: z.array(orderSummaryDto), source: z.enum(['store', 'sample']) });
 
 export type ContactDto = z.infer<typeof contactDto>;
@@ -273,4 +327,10 @@ export const ROUTES = {
   segment: 'GET|PUT|DELETE /segments/:segmentId',
   segmentPreview: 'POST /segments/preview',
   segmentCount: 'GET /segments/:segmentId/preview',
+  campaigns: 'GET|POST /campaigns',
+  campaign: 'GET|DELETE /campaigns/:campaignId',
+  campaignSend: 'POST /campaigns/:campaignId/send',
+  campaignPause: 'POST /campaigns/:campaignId/pause',
+  campaignResume: 'POST /campaigns/:campaignId/resume',
+  campaignCancel: 'POST /campaigns/:campaignId/cancel',
 } as const;
