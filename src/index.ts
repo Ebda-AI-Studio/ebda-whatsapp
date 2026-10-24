@@ -3,7 +3,7 @@ import type { Env } from './env';
 import { verifyMetaSignature } from './core/meta/signature';
 import { extractEvents } from './core/meta/webhook-schema';
 import { workspaceForPhoneNumber } from './core/routing';
-import type { SendJob } from './core/send-queue';
+import { consumeSendBatch, type SendJob } from './core/send-queue';
 import { EBDA_COPY } from './addons/ebda/copy';
 
 export { WorkspaceDO } from './core/workspace-do';
@@ -50,7 +50,13 @@ app.post('/meta/webhook', async (c) => {
     const res = await stub.ingest({ ...ev, receivedAt }, { autoReplyText: EBDA_COPY.spikeAutoReply });
     replies.push(...res.replies);
   }
+  if (replies.length) await c.env.SEND_QUEUE.sendBatch(replies.map((body) => ({ body })));
   return c.text('ok');
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async queue(batch: MessageBatch<unknown>, env: Env, _ctx: ExecutionContext): Promise<void> {
+    await consumeSendBatch(batch, env);
+  },
+} satisfies ExportedHandler<Env>;

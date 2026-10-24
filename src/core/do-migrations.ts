@@ -37,6 +37,7 @@ export const DO_MIGRATIONS: readonly string[] = [
      error_code INTEGER
    );
    CREATE INDEX status_events_wamid ON message_status_events (wamid);`,
+  `ALTER TABLE messages ADD COLUMN claim_attempts INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 export function migrate(sql: SqlStorage): void {

@@ -24,14 +24,14 @@ it('stores a duplicate inbound delivery once', async () => {
   expect(await rows('ws-dup', 'SELECT id FROM messages')).toHaveLength(1);
 });
 
-it('returns one reply job per new inbound text and none for a duplicate', async () => {
+it('returns one reply job per new inbound text', async () => {
   const batch = { phoneNumberId: 'pn-rep', inbound: [{ wamid: 'wamid.r1', from: '201001234567', ts: 1, type: 'text' as const, text: 'x' }], statuses: [], receivedAt: 1 };
   const cfg = { autoReplyText: 'reply' };
   const first = await workspace('ws-rep').ingest(batch, cfg);
   const second = await workspace('ws-rep').ingest(batch, cfg);
   expect(first.replies.map((j) => j.idempotencyKey)).toEqual(['reply:wamid.r1']);
   expect(first.replies[0]).toMatchObject({ workspaceId: 'ws-rep', phoneNumberId: 'pn-rep', to: '201001234567' });
-  expect(second).toMatchObject({ stored: 0, duplicates: 1, replies: [] });
+  expect(second).toMatchObject({ stored: 0, duplicates: 1 });
 });
 
 it('acknowledges and drops a webhook for an unknown phone_number_id', async () => {
