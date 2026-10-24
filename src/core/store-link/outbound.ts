@@ -32,6 +32,8 @@ export type TemplateSend = {
   /** Marketing sends need a recorded opt-in, not just the absence of an opt-out. */
   requireConsent?: boolean;
   profileName?: string | null;
+  /** False when the caller sends the job itself (one-time codes): then no scheduler row holds the code. Default true. */
+  scheduleRelease?: boolean;
   now?: number;
 };
 
@@ -65,7 +67,7 @@ export function queueTemplate(host: LinkHost, a: TemplateSend): QueueResult {
     workspaceId: host.workspaceId, phoneNumberId: a.phoneNumberId, to: a.waId, idempotencyKey: a.idempotencyKey, kind: 'template',
     template: { name: a.name, language: t.language, components: [...rendered.components, ...(a.extraComponents ?? [])] },
   };
-  addTask(host.sql, 'send_release', now, { job, reason: 'event' });
+  if (a.scheduleRelease !== false) addTask(host.sql, 'send_release', now, { job, reason: 'event' });
   return { ok: true, duplicate: false, messageId, job };
 }
 

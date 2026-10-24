@@ -23,6 +23,9 @@ import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
+import { OTP_RATE_MAX, OTP_RATE_WINDOW_MS, type OtpResult } from './otp';
+import { queueTemplate } from './store-link/outbound';
+import { storeLink } from './store-link';
 import { botInputFrom, botInputSchema, orderingActive, runBotTurn } from './ordering/bot';
 import { closeUnanswered, handleCodReply, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
@@ -642,6 +645,32 @@ export class WorkspaceDO extends DurableObject<Env> {
       console.error(JSON.stringify({ alert: 'cod_outcome_push_failed', workspace: this.workspaceId, error: (err as Error).message }));
       return false;
     }
+  }
+
+  /**
+   * One-time code over WhatsApp (OTP-1), gated by the `otpViaWhatsApp` setting (default off). Stored masked; sent at once
+   * (a code is useless late) with no scheduler row holding it; at most 5 per phone per 10 minutes.
+   */
+  async queueOtp(waId: string, phoneNumberId: string, code: string): Promise<OtpResult> {
+    const copy = storeLink().copy;
+    if (!copy) return { ok: false, reason: 'unavailable' };
+    if (!readSettings(this.host()).otpViaWhatsApp) return { ok: false, reason: 'disabled' };
+    const now = Date.now();
+    const key = `otp:${crypto.randomUUID()}`;
+    const queued = this.ctx.storage.transactionSync((): OtpResult | { job: SendJob } => {
+      const recent = this.sql.exec<{ n: number }>(
+        `SELECT count(*) AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
+         WHERE ct.wa_id = ? AND m.template_name = ? AND m.created_at > ?`, waId, copy.templates.otp, now - OTP_RATE_WINDOW_MS,
+      ).one().n;
+      if (recent >= OTP_RATE_MAX) return { ok: false, reason: 'rate_limited' };
+      const r = queueTemplate(this.host(), { waId, phoneNumberId, name: copy.templates.otp, language: 'ar', fallbackLanguage: 'en', params: [code], idempotencyKey: key, scheduleRelease: false, now });
+      if (!r.ok) return { ok: false, reason: r.reason === 'template_not_approved' ? 'template_unavailable' : 'invalid' };
+      return r.duplicate ? { ok: true } : { job: r.job };
+    });
+    if (!('job' in queued)) return queued;
+    await this.deliverNow(queued.job);
+    const status = this.sql.exec<{ status: string }>('SELECT status FROM messages WHERE idempotency_key = ?', key).toArray()[0]?.status;
+    return status === 'failed' ? { ok: false, reason: 'send_failed' } : { ok: true };
   }
 
   async getStoreLinkSettings(): Promise<StoreLinkSettings> {

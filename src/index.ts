@@ -25,6 +25,8 @@ import { EBDA_ORDERING_COPY } from './addons/ebda/store-copy';
 import { createServiceBindingBridge } from './addons/ebda/store-bridge';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
+import { sendOtp, type OtpResult } from './core/otp';
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import { createStoreEventSink } from './addons/ebda/store-events';
 import { bridgeFor } from './core/store-link';
 import { ordersRoutes } from './routes/orders';
@@ -35,6 +37,16 @@ configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEven
 const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 
 export { WorkspaceDO } from './core/workspace-do';
+
+/**
+ * Internal RPC for the accounts service (bind it with `entrypoint: "WhatsAppOtp"`; never a public URL):
+ * `sendOtp(storeId, phone, code)`. Off until the store switches `otpViaWhatsApp` on. No UI.
+ */
+export class WhatsAppOtp extends WorkerEntrypoint<Env> {
+  async sendOtp(storeId: string, phone: string, code: string): Promise<OtpResult> {
+    return sendOtp(this.env, { storeId, phone, code });
+  }
+}
 
 const app = new Hono<{ Bindings: Env }>();
 
