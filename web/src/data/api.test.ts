@@ -40,6 +40,14 @@ describe('createApiSource', () => {
     await expect(src.send(1, { type: 'text', clientId: '0b6f1c7e-1d2a-4f3b-9c8d-7e6f5a4b3c2d', text: 'x' })).rejects.toMatchObject({ code: 'window_closed' });
   });
 
+  it('sends COD outcomes with keepalive so they survive the page closing', async () => {
+    const { f, calls } = fetchStub({ '/cod-outcome': () => ({ status: 200, body: {} }) });
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    await src.recordCodOutcome('201001234567', '#1048', 'confirmed');
+    expect(calls[0]!.url).toBe(`https://wa.test/api/v1/stores/${STORE}/contacts/201001234567/orders/%231048/cod-outcome`);
+    expect(calls[0]!.init?.keepalive).toBe(true);
+  });
+
   it('uses search for a non-empty query', async () => {
     const { f, calls } = fetchStub({ '/search?q=': () => ({ status: 200, body: { items: [] } }), '/conversations': () => ({ status: 200, body: { items: [conv], nextCursor: null } }) });
     const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });

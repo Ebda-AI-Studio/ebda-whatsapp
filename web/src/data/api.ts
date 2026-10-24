@@ -70,7 +70,7 @@ export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: n
     async recordCodOutcome(waId, orderNumber, outcome) {
       const headers = { authorization: `Bearer ${await o.getToken()}`, 'content-type': 'application/json' };
       const res = await f(`${root}/contacts/${encodeURIComponent(waId)}/orders/${encodeURIComponent(orderNumber)}/cod-outcome`, {
-        method: 'POST', headers, body: JSON.stringify({ outcome, idempotencyKey: crypto.randomUUID() }),
+        method: 'POST', headers, keepalive: true, body: JSON.stringify({ outcome, idempotencyKey: crypto.randomUUID() }),
       });
       if (!res.ok) throw new ApiError('invalid_request', res.status);
     },
