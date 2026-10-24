@@ -72,6 +72,16 @@ export const DO_MIGRATIONS: readonly string[] = [
      r2_key TEXT NOT NULL,
      created_at INTEGER NOT NULL
    );`,
+  // v6 (Phase 2, scheduler): every deferred piece of work, so the single DO alarm can serve backup, R2 drain, throttled sends and more.
+  `CREATE TABLE scheduled_tasks (
+     id INTEGER PRIMARY KEY,
+     kind TEXT NOT NULL,
+     due_at INTEGER NOT NULL,
+     payload TEXT,
+     attempts INTEGER NOT NULL DEFAULT 0,
+     last_error TEXT
+   );
+   CREATE INDEX scheduled_tasks_due ON scheduled_tasks (due_at);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

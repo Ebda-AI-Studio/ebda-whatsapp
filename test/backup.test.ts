@@ -1,7 +1,7 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { BACKUP_TABLES, nextLocalHour } from '../src/core/backup';
-import { rows, workspace } from './helpers/workspace';
+import { exec, rows, workspace } from './helpers/workspace';
 
 async function seed(ws: string, n: number, offset = 0) {
   const inbound = Array.from({ length: n }, (_, i) => ({ wamid: `wamid.${ws}.${offset + i}`, from: `2010000000${(offset + i) % 10}`, ts: 1000 + offset + i, type: 'text' as const, text: `رسالة ${offset + i} 👋` }));
@@ -56,6 +56,7 @@ it('ingest arms a daily alarm once', async () => {
 it('alarm exports and re-arms about 24 h later', async () => {
   await seed('ws-b6', 2);
   const before = await runInDurableObject(workspace('ws-b6'), (_i, s) => s.storage.getAlarm());
+  await exec('ws-b6', 'UPDATE scheduled_tasks SET due_at = 1'); // the alarm fires when the task is due; make it due now
   expect(await runDurableObjectAlarm(workspace('ws-b6'))).toBe(true);
   const listed = await env.BACKUPS.list({ prefix: 'backups/ws-b6/' });
   expect(listed.objects.some((o) => o.key.endsWith('/manifest.json'))).toBe(true);

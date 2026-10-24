@@ -10,6 +10,8 @@ import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
 import { outboundMediaFor } from './media';
 import { detectOptIn, detectOptOut } from './consent';
+import { DAILY_KINDS, addTask, backoffMs, dueTasks, earliestDue, type TaskKind } from './scheduler';
+import { sendJobSchema } from './send-queue';
 import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
 import type { TemplateDto } from './api/contract';
 
@@ -25,6 +27,8 @@ export type IngestResult = { stored: number; duplicates: number; replies: SendJo
 export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
+/** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
+export type TaskPayload = { job?: SendJob; reason?: 'tier' | 'throughput' | 'frequency_cap'; n?: number };
 export type ClaimResult = 'claimed' | 'already_sent' | 'in_flight' | 'dropped';
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
@@ -345,28 +349,96 @@ export class WorkspaceDO extends DurableObject<Env> {
     return true;
   }
 
-  /** Arms the nightly backup alarm once; alarm() re-arms it. */
-  private async ensureBackupAlarm(): Promise<void> {
-    if ((await this.ctx.storage.getAlarm()) === null) {
-      await this.ctx.storage.setAlarm(nextLocalHour(Date.now(), BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE));
+  /** Schedules the nightly backup and R2 drain if they are not pending yet (idempotent; cheap enough for every ingest). */
+  private ensureDaily(now: number): boolean {
+    const have = new Set(this.sql.exec<{ kind: string }>("SELECT kind FROM scheduled_tasks WHERE kind IN ('backup', 'r2_drain')").toArray().map((r) => r.kind));
+    let added = false;
+    for (const kind of DAILY_KINDS) {
+      if (have.has(kind)) continue;
+      addTask(this.sql, kind, nextLocalHour(now, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE));
+      added = true;
     }
+    return added;
+  }
+
+  private async ensureBackupAlarm(): Promise<void> {
+    if (this.ensureDaily(Date.now())) await this.arm();
+  }
+
+  /** The one DO alarm always points at the earliest pending task. */
+  private async arm(): Promise<void> {
+    const next = earliestDue(this.sql);
+    if (next === null) await this.ctx.storage.deleteAlarm();
+    else await this.ctx.storage.setAlarm(next);
+  }
+
+  /** Schedules a task and re-arms the alarm. Backup and r2_drain keep only their earliest due time. */
+  async schedule(kind: TaskKind, dueAt: number, payload?: TaskPayload): Promise<void> {
+    addTask(this.sql, kind, dueAt, payload);
+    await this.arm();
   }
 
   async alarm(): Promise<void> {
-    const next = nextLocalHour(Date.now() + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
-    // Owed erasure deletes run first and independently: a failed backup must never block them.
-    const stillOwed = await this.drainR2Deletes();
-    if (stillOwed > 0) console.error(JSON.stringify({ alert: 'r2_deletes_still_owed', workspace: this.workspaceId, keys: stillOwed }));
-    try {
-      const date = new Intl.DateTimeFormat('en-CA', { timeZone: BACKUP_TIME_ZONE }).format(Date.now());
-      await this.exportSnapshot(date);
-    } catch (err) {
-      // Re-arm first so one bad night never silently ends the schedule, then fail loudly (Workers Logs + alarm retry).
-      await this.ctx.storage.setAlarm(next);
-      console.error(JSON.stringify({ alert: 'backup_failed', workspace: this.workspaceId, error: (err as Error).message }));
-      throw err;
+    await this.runDueTasks(Date.now());
+  }
+
+  /**
+   * Runs every due task, each in isolation: a failure is recorded with exponential backoff and never stops the others.
+   * A handler may return the next due time (daily tasks reschedule themselves) or nothing (the task is done).
+   */
+  async runDueTasks(now = Date.now()): Promise<{ ran: number; failed: number }> {
+    let ran = 0;
+    let failed = 0;
+    for (;;) {
+      const due = dueTasks(this.sql, now, 50);
+      if (!due.length) break;
+      for (const t of due) {
+        ran++;
+        try {
+          const nextDue = await this.runTask(t.kind, t.payload, now);
+          if (nextDue === undefined) this.sql.exec('DELETE FROM scheduled_tasks WHERE id = ?', t.id);
+          else this.sql.exec('UPDATE scheduled_tasks SET due_at = ?, attempts = 0, last_error = NULL WHERE id = ?', nextDue, t.id);
+        } catch (err) {
+          failed++;
+          const attempts = t.attempts + 1;
+          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ? WHERE id = ?', attempts, now + backoffMs(attempts), String((err as Error).message).slice(0, 200), t.id);
+          console.error(JSON.stringify({ alert: `${t.kind}_failed`, workspace: this.workspaceId, attempts, error: (err as Error).message }));
+        }
+      }
     }
-    await this.ctx.storage.setAlarm(next);
+    this.ensureDaily(now);
+    await this.arm();
+    return { ran, failed };
+  }
+
+  /** One task. Returns the next due time for self-rescheduling tasks. Throws to be retried with backoff. */
+  private async runTask(kind: TaskKind, payload: string | null, now: number): Promise<number | undefined> {
+    switch (kind) {
+      case 'backup': {
+        const date = new Intl.DateTimeFormat('en-CA', { timeZone: BACKUP_TIME_ZONE }).format(now);
+        await this.exportSnapshot(date);
+        return nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
+      }
+      case 'r2_drain': {
+        const stillOwed = await this.drainR2Deletes();
+        if (stillOwed > 0) {
+          console.error(JSON.stringify({ alert: 'r2_deletes_still_owed', workspace: this.workspaceId, keys: stillOwed }));
+          return now + 3_600_000;
+        }
+        return nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
+      }
+      case 'send_release': {
+        const job = sendJobSchema.safeParse((JSON.parse(payload ?? 'null') as { job?: unknown } | null)?.job);
+        if (!job.success) {
+          console.error(JSON.stringify({ alert: 'scheduled_task_invalid', kind, workspace: this.workspaceId }));
+          return undefined; // a payload that can never parse must not retry forever
+        }
+        await this.env.SEND_QUEUE.sendBatch([{ body: job.data }]);
+        return undefined;
+      }
+      default:
+        return undefined; // campaign_step: Phase 6 placeholder
+    }
   }
 
   /**
@@ -465,6 +537,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       return { found: true, keys, messages: msgs.length, statusEvents };
     });
     const r2Pending = await this.drainR2Deletes();
+    if (r2Pending > 0) await this.schedule('r2_drain', Date.now() + 3_600_000); // R2 refused some deletes: try again within the hour
     return { found: found.found, messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys, r2Pending };
   }
 
