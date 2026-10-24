@@ -32,11 +32,15 @@ api.get('/stores/:storeId/me', (c) => {
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   const role = c.get('storeRole');
   if (role !== 'owner' && role !== 'super_admin') return c.json({ error: 'forbidden' }, 403);
-  const e164 = normaliseE164(decodeURIComponent(c.req.param('waId')));
+  // Hono has already percent-decoded the param; decoding again would turn a literal % into a 500.
+  const e164 = normaliseE164(c.req.param('waId'));
   if (!e164) return c.json({ error: 'invalid phone number' }, 400);
   const storeId = c.req.param('storeId');
-  // For Ebda stores the workspace id is the store id (Phase 1 ruling).
+  // For Ebda stores the workspace id is the store id (Phase 1 ruling). Never touch a DO for an unregistered workspace.
+  const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(storeId).first();
+  if (!known) return c.json({ error: 'workspace not found' }, 404);
   const result = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId)).eraseContact(e164.slice(1));
+  if (!result.found && result.r2Pending === 0) return c.json({ error: 'contact not found' }, 404);
   const who = c.env.SUITE_BUYER_KEY_SECRET ? await buyerKey(c.env.SUITE_BUYER_KEY_SECRET, e164) : `…${e164.slice(-4)}`;
   console.log(JSON.stringify({ audit: 'contact_erased', storeId, by: c.get('principal').userId, buyer: who, ...result }));
   return c.json(result);

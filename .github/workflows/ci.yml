@@ -22,6 +22,7 @@ jobs:
     # Never run code from a fork's PR on a self-hosted runner.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Umbra self-hosted runner when the repo variable EBDA_RUNS_ON is set, else GitHub-hosted.
+    # EBDA_RUNS_ON must be a JSON value, e.g. ["self-hosted","umbra-ebda"], not a bare label.
     runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 15
     steps:

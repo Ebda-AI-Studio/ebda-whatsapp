@@ -21,7 +21,7 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     const membership = principal.stores.find((s) => s.id === storeId);
     if (!membership && !principal.superAdmin) return c.json({ error: 'forbidden' }, 403);
     c.set('principal', principal);
-    c.set('storeRole', membership?.role ?? 'super_admin');
+    c.set('storeRole', principal.superAdmin ? 'super_admin' : membership!.role);
     await next();
   };
 }

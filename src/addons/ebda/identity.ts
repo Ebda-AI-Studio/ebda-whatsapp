@@ -7,12 +7,15 @@ const JWKS_CACHE_MS = 10 * 60 * 1000;
 // Bounds how often an unknown kid can trigger a refetch (one per 5 s per isolate).
 export const JWKS_COOLDOWN_MS = 5 * 1000;
 const CLOCK_SKEW_S = 60;
+// Access tokens live 15 minutes; one extra minute covers skew.
+const MAX_TOKEN_AGE = '16m';
 
 const claimsSchema = z.object({
   sub: z.string().uuid(),
   sid: z.string().min(1),
-  stores: z.array(z.object({ id: z.string().min(1), role: z.enum(['owner', 'staff']) })),
-  pa: z.literal('super_admin').optional(),
+  aud: z.string(), // one audience per token (contract v1); an array is rejected
+  stores: z.array(z.object({ id: z.string().uuid(), role: z.enum(['owner', 'staff']) })),
+  pa: z.string().optional(), // only "super_admin" grants anything; unknown values are ignored
 });
 
 export function createEbdaAccountsVerifier(opts: { jwksUrl: string; issuer: string; audience: string; fetchJwks?: typeof fetch }): IdentityVerifier {
@@ -31,6 +34,8 @@ export function createEbdaAccountsVerifier(opts: { jwksUrl: string; issuer: stri
           audience: opts.audience,
           clockTolerance: CLOCK_SKEW_S,
           typ: 'at+jwt',
+          requiredClaims: ['exp', 'iat', 'sub', 'sid', 'jti'],
+          maxTokenAge: MAX_TOKEN_AGE,
         }));
       } catch {
         throw new IdentityError(401, 'invalid token');

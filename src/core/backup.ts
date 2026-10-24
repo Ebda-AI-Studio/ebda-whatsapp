@@ -1,11 +1,15 @@
+import { z } from 'zod';
+
 export const BACKUP_TABLES = ['contacts', 'conversations', 'messages', 'message_status_events'] as const;
 export type BackupTable = (typeof BACKUP_TABLES)[number];
-export type BackupManifest = {
-  workspaceId: string;
-  date: string;
-  schemaVersion: number;
-  tables: Record<BackupTable, { rows: number; sha256: string }>;
-};
+const tableEntry = z.object({ rows: z.number().int().nonnegative(), sha256: z.string().regex(/^[0-9a-f]{64}$/) });
+export const backupManifestSchema = z.object({
+  workspaceId: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  schemaVersion: z.number().int().positive(),
+  tables: z.object({ contacts: tableEntry, conversations: tableEntry, messages: tableEntry, message_status_events: tableEntry }),
+});
+export type BackupManifest = z.infer<typeof backupManifestSchema>;
 
 export const BACKUP_HOUR_LOCAL = 2;
 export const BACKUP_TIME_ZONE = 'Africa/Cairo';

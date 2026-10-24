@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
-import { BACKUP_HOUR_LOCAL, BACKUP_TABLES, BACKUP_TIME_ZONE, backupPrefix, nextLocalHour, sha256Hex, toNdjson, type BackupManifest } from './backup';
+import { BACKUP_HOUR_LOCAL, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, toNdjson, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
 import type { SendResult } from './meta/client';
 import type { InboundMessage, StatusEvent } from './meta/webhook-schema';
@@ -31,6 +31,10 @@ export function previewOf(text: string): string {
 }
 
 const byteLength = (s: string) => new TextEncoder().encode(s).byteLength;
+/** R2 accepts at most 1000 keys per delete call. */
+export const R2_DELETE_BATCH = 1000;
+
+export type EraseResult = { found: boolean; messages: number; statusEvents: number; r2Objects: number; r2Pending: number };
 
 /** One tenant's data: a SQLite-backed Durable Object per workspace. */
 export class WorkspaceDO extends DurableObject<Env> {
@@ -193,9 +197,18 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
-    const date = new Intl.DateTimeFormat('en-CA', { timeZone: BACKUP_TIME_ZONE }).format(Date.now());
-    await this.exportSnapshot(date);
-    await this.ctx.storage.setAlarm(nextLocalHour(Date.now() + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE));
+    const next = nextLocalHour(Date.now() + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
+    try {
+      const date = new Intl.DateTimeFormat('en-CA', { timeZone: BACKUP_TIME_ZONE }).format(Date.now());
+      await this.exportSnapshot(date);
+      await this.drainR2Deletes();
+    } catch (err) {
+      // Re-arm first so one bad night never silently ends the schedule, then fail loudly (Workers Logs + alarm retry).
+      await this.ctx.storage.setAlarm(next);
+      console.error(JSON.stringify({ alert: 'backup_failed', workspace: this.workspaceId, error: (err as Error).message }));
+      throw err;
+    }
+    await this.ctx.storage.setAlarm(next);
   }
 
   /**
@@ -222,7 +235,9 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** Restores a snapshot into THIS workspace, which must be empty. Verifies counts and hashes before writing anything. */
   async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest } | { ok: false; reason: string }> {
     try {
-      return { ok: true, manifest: await this.importSnapshotOrThrow(prefix) };
+      const manifest = await this.importSnapshotOrThrow(prefix);
+      await this.ensureBackupAlarm();
+      return { ok: true, manifest };
     } catch (e) {
       return { ok: false, reason: (e as Error).message };
     }
@@ -231,7 +246,9 @@ export class WorkspaceDO extends DurableObject<Env> {
   private async importSnapshotOrThrow(prefix: string): Promise<BackupManifest> {
     const manifestObj = await this.env.BACKUPS.get(`${prefix}manifest.json`);
     if (!manifestObj) throw new Error('backup manifest not found');
-    const manifest = (await manifestObj.json()) as BackupManifest;
+    const parsed = backupManifestSchema.safeParse(await manifestObj.json().catch(() => null));
+    if (!parsed.success) throw new Error('backup manifest is invalid');
+    const manifest = parsed.data;
     if (manifest.schemaVersion > DO_MIGRATIONS.length) throw new Error('backup is newer than this schema');
     const files: { t: (typeof BACKUP_TABLES)[number]; rows: Record<string, unknown>[] }[] = [];
     for (const t of BACKUP_TABLES) {
@@ -258,19 +275,25 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /**
-   * Erases one contact (data-protection request): the contact, its conversation, every message in and out,
-   * their status events, and R2 bodies. Rows go in one transaction; R2 deletes follow (a repeat finds no rows).
+   * Erases one contact (data-protection request): the contact, its conversation, every message in and out and their
+   * status events. R2 body keys are recorded in r2_pending_deletes in the SAME transaction as the row deletes, and a
+   * key leaves that table only after R2 confirms; any leftover is retried on the next erase and by the nightly alarm.
    */
-  async eraseContact(waId: string): Promise<{ messages: number; statusEvents: number; r2Objects: number }> {
+  async eraseContact(waId: string): Promise<EraseResult> {
     const found = this.ctx.storage.transactionSync(() => {
       const contact = this.sql.exec<{ id: number }>('SELECT id FROM contacts WHERE wa_id = ?', waId).toArray()[0];
-      if (!contact) return { keys: [] as string[], messages: 0, statusEvents: 0 };
+      if (!contact) return { found: false, keys: 0, messages: 0, statusEvents: 0 };
       const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
       const msgs = conv
         ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null }>('SELECT wamid, body_r2_key FROM messages WHERE conversation_id = ?', conv.id).toArray()
         : [];
       let statusEvents = 0;
+      let keys = 0;
       for (const m of msgs) {
+        if (m.body_r2_key) {
+          this.sql.exec('INSERT OR IGNORE INTO r2_pending_deletes (key) VALUES (?)', m.body_r2_key);
+          keys++;
+        }
         if (!m.wamid) continue;
         // Count first: rowsWritten also counts index entries, so it is not a row count.
         statusEvents += this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM message_status_events WHERE wamid = ?', m.wamid).one().n;
@@ -281,9 +304,26 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.sql.exec('DELETE FROM conversations WHERE id = ?', conv.id);
       }
       this.sql.exec('DELETE FROM contacts WHERE id = ?', contact.id);
-      return { keys: msgs.map((m) => m.body_r2_key).filter((k): k is string => !!k), messages: msgs.length, statusEvents };
+      return { found: true, keys, messages: msgs.length, statusEvents };
     });
-    if (found.keys.length) await this.env.MEDIA.delete(found.keys);
-    return { messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys.length };
+    const r2Pending = await this.drainR2Deletes();
+    return { found: found.found, messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys, r2Pending };
+  }
+
+  /** Deletes owed R2 objects in batches; returns how many are still owed (0 when R2 confirmed them all). */
+  private async drainR2Deletes(): Promise<number> {
+    for (;;) {
+      const batch = this.sql.exec<{ key: string }>('SELECT key FROM r2_pending_deletes ORDER BY key LIMIT ?', R2_DELETE_BATCH).toArray().map((r) => r.key);
+      if (!batch.length) return 0;
+      try {
+        await this.env.MEDIA.delete(batch);
+      } catch (err) {
+        console.error(JSON.stringify({ alert: 'r2_delete_failed', workspace: this.workspaceId, keys: batch.length, error: (err as Error).message }));
+        return this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM r2_pending_deletes').one().n;
+      }
+      this.ctx.storage.transactionSync(() => {
+        for (const k of batch) this.sql.exec('DELETE FROM r2_pending_deletes WHERE key = ?', k);
+      });
+    }
   }
 }

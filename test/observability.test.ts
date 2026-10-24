@@ -39,3 +39,26 @@ it('keeps only allowlisted headers (drops IP-carrying headers)', () => {
   e.request!.headers = { 'cf-connecting-ip': '1.2.3.4', 'x-forwarded-for': '1.2.3.4', 'x-real-ip': '1.2.3.4', 'content-type': 'application/json', 'cf-ray': 'abc', 'user-agent': 'ua' };
   expect(scrubEvent(e).request?.headers).toEqual({ 'content-type': 'application/json', 'cf-ray': 'abc', 'user-agent': 'ua' });
 });
+
+it('masks phone numbers written with separators or Arabic-Indic digits', () => {
+  const e = base();
+  e.message = 'failed for 20 100 123 4567 and ٠١٠٠١٢٣٤٥٦٧';
+  expect(scrubEvent(e).message).toBe('failed for [phone] and [phone]');
+});
+
+it('masks the contact segment of the URL by position', () => {
+  const e = base();
+  e.request!.url = 'https://x/api/v1/stores/s1/contacts/%2B20%20100%20123%204567';
+  expect(scrubEvent(e).request?.url).toBe('https://x/api/v1/stores/s1/contacts/[phone]');
+});
+
+it('scrubs breadcrumbs and drops extra, contexts and tags', () => {
+  const e = base();
+  e.breadcrumbs = [{ message: 'sent to +201001234567', data: { body: 'secret' } }];
+  e.extra = { phone: '+201001234567' };
+  e.tags = { to: '201001234567' };
+  const out = scrubEvent(e);
+  expect(out.breadcrumbs).toEqual([{ message: 'sent to [phone]' }]);
+  expect(out.extra).toBeUndefined();
+  expect(out.tags).toBeUndefined();
+});

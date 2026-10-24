@@ -22,7 +22,7 @@ async function seed(ws: string) {
 it('removes the contact, conversation, messages and status events, and deletes R2 bodies', async () => {
   await seed('ws-e1');
   const r = await workspace('ws-e1').eraseContact(A);
-  expect(r).toEqual({ messages: 2, statusEvents: 1, r2Objects: 1 });
+  expect(r).toEqual({ found: true, messages: 2, statusEvents: 1, r2Objects: 1, r2Pending: 0 });
   expect(await rows('ws-e1', 'SELECT wa_id FROM contacts')).toEqual([{ wa_id: B }]);
   expect(await rows('ws-e1', 'SELECT count(*) AS n FROM conversations')).toEqual([{ n: 1 }]);
   expect(await rows('ws-e1', 'SELECT wamid FROM messages')).toEqual([{ wamid: 'ws-e1.b1' }]);
@@ -33,7 +33,7 @@ it('removes the contact, conversation, messages and status events, and deletes R
 it('is idempotent', async () => {
   await seed('ws-e2');
   await workspace('ws-e2').eraseContact(A);
-  expect(await workspace('ws-e2').eraseContact(A)).toEqual({ messages: 0, statusEvents: 0, r2Objects: 0 });
+  expect(await workspace('ws-e2').eraseContact(A)).toEqual({ found: false, messages: 0, statusEvents: 0, r2Objects: 0, r2Pending: 0 });
 });
 
 it('also erases outbound replies to that contact', async () => {
@@ -66,13 +66,15 @@ it('route: staff gets 403', async () => {
 
 it('route: owner erases, phone input normalised', async () => {
   stubJwks();
+  await env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(STORE, 's', 1).run();
   await seed(STORE);
   const r = await del(await mint(k, { stores: [{ id: STORE, role: 'owner' }] }));
   expect(r.status).toBe(200);
-  expect(await r.json()).toEqual({ messages: 2, statusEvents: 1, r2Objects: 1 });
+  expect(await r.json()).toEqual({ found: true, messages: 2, statusEvents: 1, r2Objects: 1, r2Pending: 0 });
 });
 
 it('route: 400 for an invalid phone', async () => {
   stubJwks();
+  await env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(STORE, 's', 1).run();
   expect((await del(await mint(k, { stores: [{ id: STORE, role: 'owner' }] }), 'abc')).status).toBe(400);
 });

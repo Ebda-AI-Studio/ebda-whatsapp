@@ -19,3 +19,11 @@ describe('buyerKey', () => {
     await expect(buyerKey('s', '01001234567')).rejects.toThrow();
   });
 });
+
+describe('normaliseE164 (review fixes)', () => {
+  it('strips RTL direction marks pasted from WhatsApp', () => expect(normaliseE164('‎+20 100 123 4567‏')).toBe('+201001234567'));
+  it('strips isolate/embedding marks', () => expect(normaliseE164('⁦‪01001234567‬⁩')).toBe('+201001234567'));
+  it('drops a trunk 0 kept after +20', () => expect(normaliseE164('+20 0100 123 4567')).toBe('+201001234567'));
+  it('treats a 10-digit number starting with 1 as Egyptian mobile without its 0', () => expect(normaliseE164('1001234567')).toBe('+201001234567'));
+  it('rejects bare digits with no country code', () => expect(normaliseE164('96550001234')).toBeNull());
+});

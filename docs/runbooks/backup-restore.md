@@ -9,7 +9,7 @@
 
 ## Mac copy
 `scripts/backup-pull.sh [date]` mirrors one night's backups plus a D1 export to `~/Backups/ebda-whatsapp/<date>/`,
-asserts every file's line count against the manifest, and keeps 30 days.
+asserts every file's line count against the manifest, keeps 30 days (prunes only `YYYY-MM-DD` folders), exports D1 first, and skips (then reports, exit 1) workspaces that have no snapshot yet.
 Install the daily 04:00 job only when Ahmad approves (it is not installed):
 `cp ops/com.ebda.wa-backup-pull.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.ebda.wa-backup-pull.plist`
 
@@ -17,11 +17,13 @@ Install the daily 04:00 job only when Ahmad approves (it is not installed):
 1. Pick the snapshot prefix, e.g. `backups/ws-123/2026-10-24/`.
 2. Restore into a FRESH workspace id (the target must be empty): call `WorkspaceDO.importSnapshot(prefix)` on
    `idFromName('<new id>')` (operator route lands in Phase 3; until then a one-off `wrangler` script).
-3. It verifies every table's sha256 and row count BEFORE writing; on mismatch it returns `{ ok: false, reason }` and writes nothing.
+3. It verifies every table's sha256 and row count BEFORE writing; on mismatch it returns `{ ok: false, reason }` and writes nothing. The hash proves **integrity** (corruption, truncation), not authenticity: anyone with write access to the bucket can rewrite a file and its manifest together. If tampering enters scope, switch the manifest hash to HMAC with a secret.
+   Restored `body_r2_key` values still point at the source workspace's `bodies/<old id>/…` objects, which stay valid; erasing in the restored workspace deletes them.
+   The restored workspace arms its own nightly backup alarm.
 4. Point the phone number's D1 row (`phone_numbers.workspace_id`) at the restored id.
 
 ## Drill
-`test/backup.test.ts` runs export → import → equal counts and hashes, the tamper case and the non-empty-target case on every test run.
+`test/backup.test.ts` runs export → import → equal counts and hashes, the corrupted-file case and the non-empty-target case on every test run.
 A live drill on the real account is part of the launch checklist.
 
 ## Erasure vs backups

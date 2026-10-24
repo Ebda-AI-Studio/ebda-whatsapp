@@ -41,6 +41,8 @@ export const DO_MIGRATIONS: readonly string[] = [
   // v3: full text for bodies up to 1 KB (larger ones live in R2); one row per distinct status event.
   `ALTER TABLE messages ADD COLUMN body TEXT;
    CREATE UNIQUE INDEX status_events_unique ON message_status_events (wamid, status, ts);`,
+  // v4: R2 objects owed a delete (erasure); rows leave only after R2 confirms.
+  `CREATE TABLE r2_pending_deletes (key TEXT PRIMARY KEY);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
