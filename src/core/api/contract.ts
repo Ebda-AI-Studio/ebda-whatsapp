@@ -107,13 +107,39 @@ export const orderSummaryDto = z.object({
   status: z.enum(['pending_confirmation', 'confirmed', 'refused', 'shipped', 'delivered', 'cancelled', 'returned']),
   totalMinor: z.number().int(),
   currency: z.string().length(3),
-  paymentMethod: z.enum(['cod', 'link', 'card', 'wallet']),
+  paymentMethod: z.enum(['cod', 'link', 'card', 'wallet', 'instapay']),
   itemsCount: z.number().int().positive(),
   at: z.number().int(),
 });
 /** The merchant confirms or refuses a COD order from the inbox; the Worker forwards it to the store (recordCodOutcome). */
 export const codOutcomeRequest = z.object({ outcome: z.enum(['confirmed', 'refused']), idempotencyKey: z.string().uuid() });
 export type CodOutcomeRequest = z.infer<typeof codOutcomeRequest>;
+
+export const codOutcomeResponse = z.object({ orderNumber: z.string(), outcome: z.enum(['confirmed', 'refused']), pushed: z.boolean() });
+export type CodOutcomeResponse = z.infer<typeof codOutcomeResponse>;
+
+/** GET /me. `capabilities` lets the UI show what the deployment can do (additive: older clients ignore it). */
+export const meResponse = z.object({
+  userId: z.string(),
+  storeId: z.string(),
+  role: z.enum(['owner', 'staff', 'super_admin']),
+  capabilities: z.object({ codOutcome: z.boolean() }),
+});
+export type MeResponse = z.infer<typeof meResponse>;
+
+/** Store-link settings (owner only to change). */
+export const storeLinkSettingsResponse = z.object({
+  orderConfirmations: z.boolean(),
+  orderingBot: z.boolean(),
+  otpViaWhatsApp: z.boolean(),
+  catalogId: z.string().nullable(),
+});
+export const storeLinkSettingsPatch = z.object({
+  orderConfirmations: z.boolean(),
+  orderingBot: z.boolean(),
+  otpViaWhatsApp: z.boolean(),
+  catalogId: z.string().regex(/^\d{5,25}$/).nullable(),
+}).partial().refine((p) => Object.keys(p).length > 0, 'nothing to change');
 
 export const customerOrdersResponse = z.object({ items: z.array(orderSummaryDto), source: z.enum(['store', 'sample']) });
 
@@ -145,4 +171,5 @@ export const ROUTES = {
   orders: 'GET /contacts/:waId/orders',
   codOutcome: 'POST /contacts/:waId/orders/:orderNumber/cod-outcome',
   me: 'GET /me',
+  storeLinkSettings: 'GET|PATCH /store-link/settings',
 } as const;

@@ -8,7 +8,7 @@ export type SendResult = { ok: true; wamid: string } | { ok: false; code: number
 type Base = { token: string; graphVersion: string; phoneNumberId: string; to: string };
 export type MediaKind = 'image' | 'audio' | 'video' | 'document';
 type Link = { link: string };
-export type TemplateParameter = { type: string; text?: string; image?: Link; video?: Link; document?: Link };
+export type TemplateParameter = { type: string; text?: string; image?: Link; video?: Link; document?: Link; payload?: string };
 /** A Graph send-time template component. Concrete on purpose: Workers RPC rejects open-ended (`unknown`/`any`) shapes. */
 export type TemplateComponent = { type: 'header' | 'body' | 'button'; sub_type?: string; index?: string; parameters: TemplateParameter[] };
 
@@ -63,4 +63,23 @@ export function sendMedia(opts: Base & { kind: MediaKind; mediaId: string; capti
   if (opts.caption && opts.kind !== 'audio') media.caption = opts.caption;
   if (opts.filename && opts.kind === 'document') media.filename = opts.filename;
   return postMessage(opts, { type: opts.kind, [opts.kind]: media });
+}
+
+export type ListRow = { id: string; title: string; description?: string };
+/** An interactive list (up to 10 rows). Row ids come back verbatim in the customer's reply. */
+export function sendList(opts: Base & { body: string; button: string; rows: ListRow[]; footer?: string }): Promise<SendResult> {
+  return postMessage(opts, {
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      body: { text: opts.body },
+      ...(opts.footer ? { footer: { text: opts.footer } } : {}),
+      action: { button: opts.button, sections: [{ rows: opts.rows.map((r) => ({ id: r.id, title: r.title, ...(r.description ? { description: r.description } : {}) })) }] },
+    },
+  });
+}
+
+/** An image Meta fetches from a public https link (product pictures), with an optional caption. */
+export function sendImageLink(opts: Base & { link: string; caption?: string }): Promise<SendResult> {
+  return postMessage(opts, { type: 'image', image: { link: opts.link, ...(opts.caption ? { caption: opts.caption } : {}) } });
 }

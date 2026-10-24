@@ -30,5 +30,16 @@
     "producers": [{ "binding": "SEND_QUEUE", "queue": "ebda-wa-send" }],
     "consumers": [{ "queue": "ebda-wa-send", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-send-dlq" }]
   },
-  "analytics_engine_datasets": [{ "binding": "USAGE", "dataset": "ebda_wa_usage" }]
+  "analytics_engine_datasets": [
+    { "binding": "USAGE", "dataset": "ebda_wa_usage" },
+    { "binding": "CI_OUTCOMES", "dataset": "ebda_ci_outcomes" }
+  ]
+  // ---- Store link (Phase 4). Left OFF until the Store side exists: a binding to a service or queue that is not
+  // deployed fails the whole deploy. When the Store Worker, `ebda-wa-events` and `ebda-store-events` exist, add:
+  //   "services": [{ "binding": "STORE_BRIDGE", "service": "<store api worker name>", "entrypoint": "WhatsAppBridge" }],
+  //   queues.producers += { "binding": "STORE_EVENTS", "queue": "ebda-store-events" },
+  //   queues.consumers += { "queue": "ebda-wa-events", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-events-dlq" },
+  // and set the PROOF_URL_SECRET secret (wrangler secret put) and the PUBLIC_BASE_URL var (this Worker's public origin).
+  // The accounts service reaches the one-time-code RPC with a service binding whose entrypoint is "WhatsAppOtp". Until then the link is inert: the consumer is never
+  // called, /me reports codOutcome:false and the ordering bot stays silent.
 }

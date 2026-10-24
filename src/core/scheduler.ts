@@ -2,9 +2,9 @@
  * Deferred work for one workspace. A DO has a single alarm, so every delayed thing (nightly backup, owed R2 deletes,
  * throttled sends, later campaign steps) is a row in scheduled_tasks and the alarm is always armed for the earliest one.
  */
-export type TaskKind = 'backup' | 'r2_drain' | 'send_release' | 'campaign_step' | 'media_fetch';
+export type TaskKind = 'backup' | 'r2_drain' | 'send_release' | 'campaign_step' | 'media_fetch' | 'catalog_sync' | 'catalog_reconcile' | 'cod_no_reply' | 'cod_outcome_push' | 'bot_turn' | 'erased_order_notify';
 /** One pending row at most: scheduling again keeps the earlier due time. */
-const SINGLETONS: ReadonlySet<TaskKind> = new Set(['backup', 'r2_drain']);
+const SINGLETONS: ReadonlySet<TaskKind> = new Set(['backup', 'r2_drain', 'catalog_sync', 'catalog_reconcile']);
 export const DAILY_KINDS = ['backup', 'r2_drain'] as const;
 
 export type DueTask = { id: number; kind: TaskKind; due_at: number; payload: string | null; attempts: number };

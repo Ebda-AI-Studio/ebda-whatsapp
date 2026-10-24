@@ -29,3 +29,12 @@ export async function numberForDisplayPhone(db: D1Database, wabaId: string, disp
   const hit = results.find((r) => r.display_phone.replace(/\D/g, '') === want);
   return hit ? { phoneNumberId: hit.phone_number_id, workspaceId: hit.workspace_id } : null;
 }
+
+/** The workspace's active sender (first connected number), or null when it has none. */
+export async function activeNumberFor(db: D1Database, workspaceId: string): Promise<{ phoneNumberId: string; wabaId: string } | null> {
+  const row = await db
+    .prepare("SELECT phone_number_id, waba_id FROM phone_numbers WHERE workspace_id = ? AND status = 'active' ORDER BY rowid LIMIT 1")
+    .bind(workspaceId)
+    .first<{ phone_number_id: string; waba_id: string }>();
+  return row ? { phoneNumberId: row.phone_number_id, wabaId: row.waba_id } : null;
+}

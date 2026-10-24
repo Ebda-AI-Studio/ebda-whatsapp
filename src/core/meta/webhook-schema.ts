@@ -4,8 +4,23 @@ export const MESSAGE_TYPES = ['text', 'interactive', 'image', 'audio', 'video', 
 export type MessageType = (typeof MESSAGE_TYPES)[number] | 'unsupported';
 
 export type InboundMedia = { id: string; mime: string; filename?: string };
-export type InboundMessage = { wamid: string; from: string; ts: number; type: MessageType; text?: string; caption?: string; media?: InboundMedia; profileName?: string };
+/** A tap on a button, a list row or a template quick-reply. `id` is what we set when we sent it (a template button without a payload echoes its title). */
+export type InboundReply = { kind: 'button' | 'list'; id: string; title: string };
+/** A cart sent from Meta's catalog. Prices stay the decimal strings Meta sent (no float arithmetic on money). */
+export type InboundOrder = { catalogId?: string; note?: string; items: { retailerId: string; quantity: number; price: string; currency: string }[] };
+export type InboundMessage = { wamid: string; from: string; ts: number; type: MessageType; text?: string; caption?: string; media?: InboundMedia; profileName?: string; reply?: InboundReply; order?: InboundOrder };
 export const MEDIA_MESSAGE_TYPES = ['image', 'audio', 'video', 'document', 'sticker'] as const;
+const replySchema = z.object({
+  type: z.enum(['button_reply', 'list_reply']),
+  button_reply: z.object({ id: z.string().min(1), title: z.string() }).loose().optional(),
+  list_reply: z.object({ id: z.string().min(1), title: z.string() }).loose().optional(),
+}).loose();
+const templateButtonSchema = z.object({ payload: z.string().optional(), text: z.string() }).loose();
+const orderSchema = z.object({
+  catalog_id: z.string().optional(),
+  text: z.string().optional(),
+  product_items: z.array(z.object({ product_retailer_id: z.string().min(1), quantity: z.union([z.number(), z.string()]), item_price: z.union([z.number(), z.string()]), currency: z.string() }).loose()).default([]),
+}).loose();
 const mediaBodySchema = z.object({ id: z.string().min(1), mime_type: z.string().optional(), caption: z.string().optional(), filename: z.string().optional() }).loose();
 export type StatusEvent = { wamid: string; status: 'sent' | 'delivered' | 'read' | 'failed'; ts: number; errorCode?: number };
 export type WebhookEvents = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[] };
@@ -70,7 +85,31 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
           continue;
         }
         const m = parsedMsg.data;
-        const type = toType(m.type);
+        const raw = m as Record<string, unknown>;
+        let reply: InboundReply | undefined;
+        let order: InboundOrder | undefined;
+        let type = toType(m.type);
+        if (m.type === 'interactive') {
+          const r = replySchema.safeParse(raw.interactive);
+          const body = r.success ? (r.data.type === 'button_reply' ? r.data.button_reply : r.data.list_reply) : undefined;
+          if (r.success && body) reply = { kind: r.data.type === 'button_reply' ? 'button' : 'list', id: body.id, title: body.title };
+        } else if (m.type === 'button') {
+          // A tap on a template quick-reply arrives as type "button"; shown in the inbox as an interactive reply.
+          const b = templateButtonSchema.safeParse(raw.button);
+          if (b.success) {
+            reply = { kind: 'button', id: b.data.payload ?? b.data.text, title: b.data.text };
+            type = 'interactive';
+          }
+        } else if (m.type === 'order') {
+          const o = orderSchema.safeParse(raw.order);
+          if (o.success) {
+            order = {
+              ...(o.data.catalog_id ? { catalogId: o.data.catalog_id } : {}),
+              ...(o.data.text ? { note: o.data.text } : {}),
+              items: o.data.product_items.map((i) => ({ retailerId: i.product_retailer_id, quantity: Math.max(1, Math.min(99, Math.trunc(Number(i.quantity)) || 1)), price: String(i.item_price), currency: i.currency })),
+            };
+          }
+        }
         const media = (MEDIA_MESSAGE_TYPES as readonly string[]).includes(type) ? mediaBodySchema.safeParse((m as Record<string, unknown>)[m.type]) : null;
         ev.inbound.push({
           wamid: m.id,
@@ -78,6 +117,8 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
           ts: Number(m.timestamp),
           type,
           ...(m.text ? { text: m.text.body } : {}),
+          ...(reply ? { text: reply.title, reply } : {}),
+          ...(order ? { order, text: `🛒 ${order.items.reduce((n, i) => n + i.quantity, 0)}` } : {}),
           ...(media?.success ? { media: { id: media.data.id, mime: media.data.mime_type ?? 'application/octet-stream', ...(media.data.filename ? { filename: media.data.filename } : {}) }, ...(media.data.caption ? { caption: media.data.caption } : {}) } : {}),
           ...(names.get(m.from) ? { profileName: names.get(m.from) } : {}),
         });

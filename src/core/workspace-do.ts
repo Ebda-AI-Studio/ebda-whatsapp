@@ -5,7 +5,7 @@ import { DO_MIGRATIONS, migrate } from './do-migrations';
 import type { SendResult } from './meta/client';
 import type { InboundMessage, StatusEvent } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
-import { jobKind } from './send-queue';
+import { jobKind, sendToMeta } from './send-queue';
 import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
@@ -18,6 +18,19 @@ import type { ConversationDto, NoteDto } from './api/contract';
 import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './throttle';
 import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
 import type { TemplateDto } from './api/contract';
+import type { StoreEvent } from './api/store-events';
+import type { LinkHost, OutboundRow } from './store-link/host';
+import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
+import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
+import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
+import { errClass, safeMessage } from './observability';
+import { OTP_RATE_WINDOW_MS } from './otp-policy';
+import { OTP_MASK } from './templates';
+import type { OtpResult } from './otp';
+import { queueTemplate } from './store-link/outbound';
+import { storeLink } from './store-link';
+import { botInputFrom, botInputSchema, orderingActive, runBotTurn } from './ordering/bot';
+import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
 export const EVENTS_KEPT = 1000;
@@ -30,6 +43,7 @@ export const WS_ROLE_HEADER = 'x-socket-role';
 /** Close code for a socket whose access token has expired: the client refreshes its token and reconnects. */
 export const WS_CLOSE_TOKEN_EXPIRED = 4401;
 type SocketAttachment = { exp: number; role: string };
+export const BOT_TURN_MAX_ATTEMPTS = 6;
 export const STALE_CLAIM_MS = 2 * 60 * 1000;
 /** failed sits between sent and delivered: it beats a late 'sent', but never undoes a delivery. */
 const STATUS_RANK = { sent: 1, failed: 2, delivered: 3, read: 4 } as const;
@@ -40,7 +54,7 @@ export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[]
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
-export type TaskPayload = { job?: SendJob; reason?: 'tier' | 'throughput' | 'frequency_cap'; n?: number; messageId?: number; mediaId?: string };
+export type TaskPayload = { job?: SendJob; phoneNumberId?: string; reason?: 'tier' | 'throughput' | 'frequency_cap' | 'event'; n?: number; messageId?: number; mediaId?: string; orderId?: string };
 export type ClaimResult = 'claimed' | 'already_sent' | 'in_flight' | 'dropped' | 'deferred';
 export type ThrottleReport = { tier: number; mps: number; usedInWindow: number; waiting: number; nextSlotAt: number | null };
 
@@ -94,8 +108,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { preview: previewOf(text), body: r2Key ? null : text, key: r2Key ?? null };
   }
 
-  async ingest(batch: IngestBatch, config: WorkspaceConfig = {}): Promise<IngestResult> {
+  async ingest(batch: IngestBatch, initialConfig: WorkspaceConfig = {}): Promise<IngestResult> {
+    let config = initialConfig;
     const workspaceId = this.workspaceId;
+    // While the ordering bot is on it owns the conversation: the generic auto reply would talk over it.
+    const ordering = orderingActive(this.host());
+    if (ordering) config = { ...config, autoReplyText: undefined };
     // Large bodies go to R2 first (outside the transaction); skipped for a wamid we already stored, so redelivery writes nothing.
     const bodies = new Map<string, string>();
     for (const m of batch.inbound) {
@@ -108,6 +126,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     await this.ensureBackupAlarm();
     const result: IngestResult = { stored: 0, duplicates: 0, replies: [] };
     let scheduledMedia = false;
+    let linkWork = false;
     this.ctx.storage.transactionSync(() => {
       const now = Date.now();
       for (const m of batch.inbound) {
@@ -147,16 +166,22 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.sql.exec('UPDATE conversations SET unread = unread + 1 WHERE id = ?', conversationId);
         if (optOut) {
           // A reply to STOP is optional under Meta's rules and we send none: the opt-out is silent and immediate.
-          this.sql.exec("UPDATE contacts SET opted_out_at = coalesce(opted_out_at, ?), consent_source = 'keyword_stop', consent_at = ? WHERE id = ?", m.ts * 1000, now, contactId);
+          this.sql.exec("UPDATE contacts SET opted_out_at = max(coalesce(opted_out_at, 0), ?), consent_source = 'keyword_stop', consent_at = ? WHERE id = ?", m.ts * 1000, now, contactId);
         } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
           this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId);
+        }
+        const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
+        if (wasCodReply) linkWork = true;
+        else if (ordering && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image')) {
+          addTask(this.sql, 'bot_turn', now, botInputFrom(m, inserted.id, batch.phoneNumberId));
+          linkWork = true;
         }
         this.emitConversationUpdated(conversationId);
         if (!optOut && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
       }
       for (const st of batch.statuses) this.applyStatusSync(st);
     });
-    if (scheduledMedia) await this.arm();
+    if (scheduledMedia || linkWork) await this.arm();
     return result;
   }
 
@@ -168,13 +193,19 @@ export class WorkspaceDO extends DurableObject<Env> {
    * Claims the right to send `job` once. Only 'claimed' may call Meta. 'dropped' = nothing left to send (the row was
    * erased with its contact, or an API job lost its row): the consumer acks it without calling Meta.
    */
-  async claimSend(job: SendJob, now = Date.now()): Promise<ClaimResult> {
+  async claimSend(job: SendJob, now = Date.now(), opts: { noDefer?: boolean } = {}): Promise<ClaimResult> {
     let deferred = false;
     const result = this.ctx.storage.transactionSync((): ClaimResult => {
       const claim = this.claimRow(job, now);
       if (claim !== 'claimed') return claim;
       const wait = this.throttle(job, now);
       if (!wait) return 'claimed';
+      if (opts.noDefer) {
+        // Time-critical content (a one-time code) is never parked: it fails now and the caller falls back to another channel.
+        const row = this.sql.exec<{ id: number }>("UPDATE messages SET status = 'failed', error_reason = 'rate_limited', claim_attempts = max(0, claim_attempts - 1), updated_at = ? WHERE idempotency_key = ? RETURNING id", now, job.idempotencyKey).toArray()[0];
+        if (row) this.emitMessageStatus(row.id);
+        return 'dropped';
+      }
       // Over a Meta limit: give the claim back, keep the message 'queued', and let the scheduler release it later.
       this.sql.exec("UPDATE messages SET status = 'queued', claim_attempts = max(0, claim_attempts - 1), updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
       this.addReleaseOnce(job, wait.dueAt, wait.reason);
@@ -528,6 +559,173 @@ export class WorkspaceDO extends DurableObject<Env> {
     return true;
   }
 
+  // ---- Store link (Phase 4) ---------------------------------------------------------------------------------------
+
+  private linkHost?: LinkHost;
+  /** Pause between two sends of one bot turn (WhatsApp keeps them in order). A field so tests can set it to 0. */
+  botSendGapMs = 150;
+  /** The narrow view of this DO the Store-link code works against (see store-link/host.ts). */
+  private host(): LinkHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
+    return (this.linkHost ??= {
+      sql: this.sql,
+      storage: this.ctx.storage,
+      env: this.env,
+      workspaceId: this.workspaceId,
+      ensureConversation: (waId, now, profileName) => this.ensureConversation(waId, now, profileName),
+      insertOutbound: (conversationId, row, now) => this.insertOutbound(conversationId, row, now),
+      emitConversationUpdated: (id) => this.emitConversationUpdated(id),
+      arm: () => this.arm(),
+      eraseContact: (waId) => this.eraseContact(waId),
+      deliver: (job) => this.deliverNow(job),
+      get sendGapMs() { return self.botSendGapMs; },
+    });
+  }
+
+  /**
+   * Sends a stored message right now, through the same claim/throttle/record steps as the queue consumer. Used where the
+   * order of messages matters (the ordering bot); a retryable Meta failure hands the job to the send queue, whose retry ladder takes over.
+   */
+  private async deliverNow(job: SendJob): Promise<void> {
+    const claim = await this.claimSend(job);
+    if (claim !== 'claimed') return; // deferred (the scheduler releases it), or already sent / in flight / dropped
+    const sent = await sendToMeta(this.env, sendJobSchema.parse(job));
+    if (!sent.ok && sent.code === 131049) {
+      await this.rescheduleFrequencyCap(job);
+      return;
+    }
+    await this.recordOutbound(job.idempotencyKey, sent);
+    if (!sent.ok && sent.retryable) await this.env.SEND_QUEUE.sendBatch([{ body: job }]);
+  }
+
+  /** Contact and conversation for a WhatsApp id, created when missing (a business-initiated message to a customer who never wrote). Inside a transaction. */
+  private ensureConversation(waId: string, now: number, profileName?: string | null): { contactId: number; conversationId: number } {
+    const contactId = this.sql.exec<{ id: number }>(
+      'INSERT INTO contacts (wa_id, profile_name) VALUES (?, ?) ON CONFLICT(wa_id) DO UPDATE SET profile_name = coalesce(profile_name, excluded.profile_name) RETURNING id', waId, profileName ?? null,
+    ).one().id;
+    const conversationId = this.sql.exec<{ id: number }>(
+      `INSERT INTO conversations (contact_id, last_message_at) VALUES (?, ?)
+       ON CONFLICT(contact_id) DO UPDATE SET last_message_at = max(coalesce(last_message_at, 0), excluded.last_message_at) RETURNING id`, contactId, Math.floor(now / 1000),
+    ).one().id;
+    return { contactId, conversationId };
+  }
+
+  private insertOutbound(conversationId: number, row: OutboundRow, now: number): number {
+    const id = this.sql.exec<{ id: number }>(
+      `INSERT INTO messages (conversation_id, direction, type, preview, body, status, idempotency_key, template_name, template_lang, created_at, updated_at)
+       VALUES (?, 'out', ?, ?, ?, 'queued', ?, ?, ?, ?, ?) RETURNING id`,
+      conversationId, row.type, row.preview, row.body, row.key, row.templateName ?? null, row.templateLang ?? null, now, now,
+    ).one().id;
+    this.indexMessage(id, row.preview.length ? row.preview : null);
+    this.sql.exec('UPDATE conversations SET last_message_at = max(coalesce(last_message_at, 0), ?) WHERE id = ?', Math.floor(now / 1000), conversationId);
+    this.emitMessageCreated(id);
+    this.emitConversationUpdated(conversationId);
+    return id;
+  }
+
+  /**
+   * One event from the Store queue. Expected outcomes (duplicate, stale, skipped) come back as data; a thrown error means
+   * "retry this message". `phoneNumberId` is the workspace's active sender, or null when it has none.
+   */
+  async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null }): Promise<StoreEventOutcome> {
+    return applyStoreEvent(this.host(), event, opts);
+  }
+
+  /**
+   * The merchant answers a COD confirmation from the inbox. Expected refusals are data. The Store is told right away when it
+   * can be reached; otherwise a scheduled task keeps trying and `pushed` is false.
+   */
+  async merchantCodOutcome(a: MerchantCodArgs): Promise<{ ok: true; orderNumber: string; outcome: 'confirmed' | 'refused'; pushed: boolean } | { ok: false; reason: 'unknown_order' | 'conflict' | 'closed' | 'not_cod' }> {
+    const res = this.ctx.storage.transactionSync(() => merchantCod(this.host(), a, Date.now()));
+    if (!res.ok) return res;
+    await this.arm();
+    const pushed = await this.tryPushCod(res.orderId);
+    return { ok: true, orderNumber: res.orderNumber, outcome: a.outcome, pushed };
+  }
+
+  /** One attempt now; the scheduled task is the retry. */
+  private async tryPushCod(orderId: string): Promise<boolean> {
+    try {
+      const r = await pushCodOutcome(this.host(), orderId);
+      if (r.pushed) this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'cod_outcome_push' AND json_extract(payload, '$.orderId') = ? AND lease_until IS NULL", orderId);
+      return r.pushed || (r.reason === 'nothing_to_push');
+    } catch (err) {
+      console.error(JSON.stringify({ alert: 'cod_outcome_push_failed', workspace: this.workspaceId, error: errClass(err) }));
+      return false;
+    }
+  }
+
+  /**
+   * One-time code over WhatsApp (OTP-1), gated by the `otpViaWhatsApp` setting (default off). Only an AUTHENTICATION template
+   * may carry it; the text is stored masked. It is sent at once or not at all: a throttled, capped or retryable-failed code
+   * is marked failed (the caller falls back to email) and no scheduler row or queue message ever holds it. Bounded per phone
+   * and per workspace (toll fraud), counted in the same transaction that stores the message.
+   */
+  async queueOtp(waId: string, phoneNumberId: string, code: string): Promise<OtpResult> {
+    const copy = storeLink().copy;
+    if (!copy) return { ok: false, reason: 'unavailable' };
+    if (!readSettings(this.host()).otpViaWhatsApp) return { ok: false, reason: 'disabled' };
+    const policy = storeLink().otp;
+    const now = Date.now();
+    const key = `otp:${crypto.randomUUID()}`;
+    const queued = this.ctx.storage.transactionSync((): OtpResult | { job: SendJob } => {
+      const since = now - OTP_RATE_WINDOW_MS;
+      const count = (extra: string, ...params: SqlStorageValue[]) => this.sql.exec<{ n: number }>(
+        `SELECT count(*) AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
+         WHERE m.template_name = ? AND m.created_at > ? ${extra}`, copy.templates.otp, since, ...params,
+      ).one().n;
+      if (count('') >= policy.workspaceMax || count('AND ct.wa_id = ?', waId) >= policy.phoneMax) return { ok: false, reason: 'rate_limited' };
+      const r = queueTemplate(this.host(), {
+        waId, phoneNumberId, name: copy.templates.otp, language: 'ar', fallbackLanguage: 'en', params: [code], idempotencyKey: key,
+        requireCategory: 'AUTHENTICATION', maskText: OTP_MASK, scheduleRelease: false, now,
+      });
+      if (!r.ok) return { ok: false, reason: r.reason === 'template_not_approved' || r.reason === 'wrong_category' ? 'template_unavailable' : 'invalid' };
+      return r.duplicate ? { ok: true } : { job: r.job };
+    });
+    if (!('job' in queued)) return queued;
+    await this.deliverOtp(queued.job);
+    const row = this.sql.exec<{ status: string; error_reason: string | null }>('SELECT status, error_reason FROM messages WHERE idempotency_key = ?', key).toArray()[0];
+    if (row?.status === 'failed') return { ok: false, reason: row.error_reason === 'rate_limited' ? 'rate_limited' : 'send_failed' };
+    return { ok: true };
+  }
+
+  /** claim (never deferring) -> Meta -> record; any failure, retryable or not, is final. */
+  private async deliverOtp(job: SendJob): Promise<void> {
+    const claim = await this.claimSend(job, Date.now(), { noDefer: true });
+    if (claim !== 'claimed') return; // 'dropped' = failed rate_limited already recorded
+    const sent = await sendToMeta(this.env, sendJobSchema.parse(job));
+    await this.recordOutbound(job.idempotencyKey, sent.ok ? sent : { ...sent, retryable: false });
+  }
+
+  async getStoreLinkSettings(): Promise<StoreLinkSettings> {
+    return readSettings(this.host());
+  }
+
+  /**
+   * Saves settings. A catalog id is a capability on the platform token, so changing it needs the WABA it was verified
+   * against (`catalogWabaId`, checked by the caller against Meta); without it the change is refused.
+   */
+  async setStoreLinkSettings(patch: Partial<StoreLinkSettings>, opts: { catalogWabaId?: string } = {}): Promise<{ ok: true; settings: StoreLinkSettings } | { ok: false; reason: 'catalog_not_verified' }> {
+    const before = readSettings(this.host()).catalogId;
+    if (patch.catalogId && patch.catalogId !== before && !opts.catalogWabaId) return { ok: false, reason: 'catalog_not_verified' };
+    const settings = this.ctx.storage.transactionSync(() => {
+      const saved = writeSettings(this.host(), patch);
+      if (patch.catalogId && opts.catalogWabaId) putState(this.host(), 'catalog.waba', opts.catalogWabaId);
+      if (patch.catalogId === null) this.sql.exec("DELETE FROM store_state WHERE key = 'catalog.waba'");
+      // A newly configured catalog gets a full reconcile soon, then nightly.
+      if (saved.catalogId && saved.catalogId !== before) ensureCatalogReconcile(this.host(), Date.now(), true);
+      return saved;
+    });
+    await this.arm();
+    return { ok: true, settings };
+  }
+
+  /** Operator action: a full reconcile now. `allowMassDelete` lifts the automatic safety limit on archiving. */
+  async reconcileCatalog(opts: { allowMassDelete?: boolean } = {}): Promise<void> {
+    await runCatalogReconcile(this.host(), Date.now(), opts);
+  }
+
   // ---- realtime ---------------------------------------------------------------------------------------------------
 
   /** Upgrade to a WebSocket (hibernation API: an idle socket costs nothing and the DO can be evicted). */
@@ -844,13 +1042,14 @@ export class WorkspaceDO extends DurableObject<Env> {
         ran++;
         try {
           const nextDue = await this.runTask(t.kind, t.payload, now, t.attempts);
-          if (nextDue === undefined) this.sql.exec('DELETE FROM scheduled_tasks WHERE id = ?', t.id);
-          else this.sql.exec('UPDATE scheduled_tasks SET due_at = ?, attempts = 0, last_error = NULL, lease_until = NULL WHERE id = ?', nextDue, t.id);
+          // The row may have been deleted while the task ran (erasure) and its id reused by a NEW task: only touch the leased row we claimed.
+          if (nextDue === undefined) this.sql.exec('DELETE FROM scheduled_tasks WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', t.id, t.kind);
+          else this.sql.exec('UPDATE scheduled_tasks SET due_at = ?, attempts = 0, last_error = NULL, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', nextDue, t.id, t.kind);
         } catch (err) {
           failed++;
           const attempts = t.attempts + 1;
-          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ?', attempts, now + backoffMs(attempts), String((err as Error).message).slice(0, 200), t.id);
-          console.error(JSON.stringify({ alert: `${t.kind}_failed`, workspace: this.workspaceId, attempts, error: (err as Error).message }));
+          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', attempts, now + backoffMs(attempts), safeMessage(err), t.id, t.kind);
+          console.error(JSON.stringify({ alert: `${t.kind}_failed`, workspace: this.workspaceId, attempts, error: errClass(err) }));
         }
       }
     }
@@ -892,12 +1091,44 @@ export class WorkspaceDO extends DurableObject<Env> {
         } catch (err) {
           if (attempts + 1 < MEDIA_FETCH_MAX_ATTEMPTS) throw err;
           // Meta media ids live 30 days and we retried for hours: stop, say so, keep the message (without its media).
-          console.error(JSON.stringify({ alert: 'media_fetch_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: (err as Error).message }));
+          console.error(JSON.stringify({ alert: 'media_fetch_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: errClass(err) }));
         }
         return undefined;
       }
+      case 'cod_outcome_push': {
+        const orderId = (JSON.parse(payload ?? 'null') as { orderId?: string } | null)?.orderId;
+        if (typeof orderId === 'string') await pushCodOutcome(this.host(), orderId, now);
+        return undefined;
+      }
+      case 'erased_order_notify':
+        await pushErasedOrders(this.host());
+        return undefined;
+      case 'cod_no_reply': {
+        const orderId = (JSON.parse(payload ?? 'null') as { orderId?: string } | null)?.orderId;
+        if (typeof orderId === 'string') this.ctx.storage.transactionSync(() => closeUnanswered(this.host(), orderId, now));
+        return undefined; // the push it schedules runs in this same pass
+      }
+      case 'bot_turn': {
+        const input = botInputSchema.safeParse(JSON.parse(payload ?? 'null'));
+        if (!input.success) {
+          console.error(JSON.stringify({ alert: 'scheduled_task_invalid', kind, workspace: this.workspaceId }));
+          return undefined;
+        }
+        try {
+          await runBotTurn(this.host(), input.data, now);
+        } catch (err) {
+          // Give up quietly after a few tries: the customer can simply write again.
+          if (attempts + 1 < BOT_TURN_MAX_ATTEMPTS) throw err;
+          console.error(JSON.stringify({ alert: 'bot_turn_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: errClass(err) }));
+        }
+        return undefined;
+      }
+      case 'catalog_sync':
+        return runCatalogSync(this.host(), now);
+      case 'catalog_reconcile':
+        return runCatalogReconcile(this.host(), now);
       default:
-        return undefined; // campaign_step: Phase 6 placeholder
+        return undefined; // campaign_step: Phase 6 placeholder; cod_no_reply, bot_turn arrive with their tasks
     }
   }
 
@@ -1003,6 +1234,9 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.sql.exec('DELETE FROM message_status_events WHERE wamid = ?', m.wamid);
       }
       this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
+      this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
+      this.sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', waId);
+      this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       if (conv) {
         this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
         this.sql.exec("DELETE FROM events WHERE json_extract(payload, '$.conversationId') = ? OR json_extract(payload, '$.conversation.id') = ?", conv.id, conv.id);
@@ -1027,7 +1261,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       try {
         await this.env.MEDIA.delete(batch);
       } catch (err) {
-        console.error(JSON.stringify({ alert: 'r2_delete_failed', workspace: this.workspaceId, keys: batch.length, error: (err as Error).message }));
+        console.error(JSON.stringify({ alert: 'r2_delete_failed', workspace: this.workspaceId, keys: batch.length, error: errClass(err) }));
         return this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM r2_pending_deletes').one().n;
       }
       this.ctx.storage.transactionSync(() => {

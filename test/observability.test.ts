@@ -1,5 +1,5 @@
 import type { ErrorEvent } from '@sentry/cloudflare';
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { scrubEvent } from '../src/core/observability';
 
 const base = (): ErrorEvent => ({
@@ -67,4 +67,24 @@ it('masks phone numbers interleaved with bidi or zero-width format characters', 
   const e = base();
   e.message = 'to +20‎100‏123⁦456⁩7 and 01​00‍1234567';
   expect(scrubEvent(e).message).toBe('to [phone] and [phone]');
+});
+
+describe('errClass / safeMessage', () => {
+  it('reports a class (and a short code), never the text', async () => {
+    const { errClass } = await import('../src/core/observability');
+    expect(errClass(new TypeError('call +20 100 123 4567'))).toBe('TypeError');
+    expect(errClass(Object.assign(new Error('x'), { code: 'ECONNRESET' }))).toBe('Error:ECONNRESET');
+    expect(errClass(Object.assign(new Error('x'), { code: 'has spaces and a+201001234567' }))).toBe('Error');
+    expect(errClass('thrown string +201001234567')).toBe('string');
+    expect(errClass(null)).toBe('null');
+    expect(errClass({ message: 'a@b.com' })).toBe('object');
+  });
+
+  it('masks phones (separators, Arabic digits, format characters) and e-mails in stored text', async () => {
+    const { safeMessage } = await import('../src/core/observability');
+    const text = safeMessage(new Error('to +20 100 123 4567 or ٠١٠٠١٢٣٤٥٦٧ or 0100‎1234567, mail ahmad@example.co.uk'));
+    expect(text).toBe('to [phone] or [phone] or [phone], mail [email]');
+    expect(safeMessage('plain +201001234567')).toBe('plain [phone]');
+    expect(safeMessage(undefined).length).toBeLessThanOrEqual(200);
+  });
 });

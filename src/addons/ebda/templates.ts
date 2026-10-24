@@ -33,4 +33,22 @@ export const EBDA_DEFAULT_TEMPLATES: readonly TemplateSeed[] = [
       { type: 'BUTTONS', buttons: [{ type: 'OTP', otp_type: 'COPY_CODE', text: 'نسخ الكود' }] },
     ],
   },
+  {
+    name: 'cart_recovery',
+    language: 'ar',
+    category: 'MARKETING',
+    components: [{ type: 'BODY', text: 'أهلاً {{1}} 👋 لسه عندك حاجات في السلة مستنياك. كمّل طلبك من هنا: {{2}}', example: { body_text: [['أحمد', 'https://shop.example/cart/abc']] } }],
+  },
+  {
+    name: 'shipping_tracking',
+    language: 'ar',
+    category: 'UTILITY',
+    components: [{ type: 'BODY', text: 'أهلاً {{1}}، طلبك رقم {{2}} {{3}}. تابع شحنتك من هنا: {{4}}', example: { body_text: [['أحمد', '1001', 'خرج للشحن', 'https://shop.example/track/abc']] } }],
+  },
+  {
+    name: 'shipping_status',
+    language: 'ar',
+    category: 'UTILITY',
+    components: [{ type: 'BODY', text: 'أهلاً {{1}}، طلبك رقم {{2}} {{3}}.', example: { body_text: [['أحمد', '1001', 'اتسلّم']] } }],
+  },
 ];
