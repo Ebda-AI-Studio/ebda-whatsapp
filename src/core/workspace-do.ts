@@ -177,7 +177,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (!wait) return 'claimed';
       // Over a Meta limit: give the claim back, keep the message 'queued', and let the scheduler release it later.
       this.sql.exec("UPDATE messages SET status = 'queued', claim_attempts = max(0, claim_attempts - 1), updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
-      addTask(this.sql, 'send_release', wait.dueAt, { job, reason: wait.reason });
+      this.addReleaseOnce(job, wait.dueAt, wait.reason);
       deferred = true;
       return 'deferred';
     });
@@ -291,6 +291,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     return null;
   }
 
+  /** One pending release per idempotency key: a duplicate queue delivery of a throttled job must not release (and so send) it twice. */
+  private addReleaseOnce(job: SendJob, dueAt: number, reason: string): void {
+    const pending = this.sql.exec("SELECT 1 FROM scheduled_tasks WHERE kind = 'send_release' AND json_extract(payload, '$.job.idempotencyKey') = ? LIMIT 1", job.idempotencyKey).toArray().length;
+    if (!pending) addTask(this.sql, 'send_release', dueAt, { job, reason });
+  }
+
   private waitingFor(phoneNumberId: string): number {
     return this.sql.exec<{ n: number }>(
       "SELECT count(*) AS n FROM scheduled_tasks WHERE kind = 'send_release' AND json_extract(payload, '$.reason') = 'tier' AND json_extract(payload, '$.job.phoneNumberId') = ?", phoneNumberId,
@@ -327,7 +333,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (row) this.emitMessageStatus(row.id);
     });
     if (status === 'failed') return 'failed';
-    addTask(this.sql, 'send_release', now + TIER_WINDOW_MS, { job: { ...job, deferrals: deferrals + 1 }, reason: 'frequency_cap' });
+    this.addReleaseOnce({ ...job, deferrals: deferrals + 1 }, now + TIER_WINDOW_MS, 'frequency_cap');
     await this.arm();
     return 'rescheduled';
   }

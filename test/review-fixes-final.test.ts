@@ -3,6 +3,8 @@ import { expect, it, vi } from 'vitest';
 import type { SendJob } from '../src/core/send-queue';
 import { apiFor, graphStub, storeId as W, tokenFor, useApiKey } from './helpers/api';
 import { consume } from './helpers/queue';
+import { postWebhook } from './helpers/meta';
+import { templateStatusPayload } from './helpers/payload';
 import { exec, openChat, rows, seedNumber, workspace } from './helpers/workspace';
 
 useApiKey();
@@ -132,4 +134,25 @@ it('Final #7: assign accepts null, the caller, or a user already assigned in thi
   // a user who is already an assignee in this workspace may be assigned by another staff member
   await exec(ws, 'UPDATE conversations SET assignee_user_id = ? WHERE id = ?', stranger, b);
   expect((await api.call('POST', `/conversations/${a}/assign`, { userId: stranger })).status).toBe(200);
+});
+
+it('Final #8: a template-status webhook reaches every workspace that shares the WABA', async () => {
+  await seedNumber('pn-sh1', W(506), 'active', 'waba-shared');
+  await seedNumber('pn-sh2', W(507), 'active', 'waba-shared');
+  for (const w of [W(506), W(507)]) await exec(w, "INSERT INTO templates (name, language, category, status, components, updated_at) VALUES ('shared', 'ar', 'UTILITY', 'PENDING', '[]', 1)");
+  expect((await postWebhook(SELF, templateStatusPayload('waba-shared', { event: 'APPROVED', name: 'shared', language: 'ar' }))).status).toBe(200);
+  for (const w of [W(506), W(507)]) expect(await rows(w, 'SELECT status FROM templates')).toEqual([{ status: 'APPROVED' }]);
+});
+
+it('Final #10: a duplicate queue delivery of a throttled job creates one send_release task', async () => {
+  const ws = 'ws-dup-release';
+  const stub = workspace(ws);
+  await stub.setNumberLimits('pn-d', { mps: 1 });
+  await openChat(ws);
+  const job = (key: string): SendJob => ({ workspaceId: ws, phoneNumberId: 'pn-d', to: '201001234567', text: 'x', idempotencyKey: key });
+  const now = Date.now();
+  expect(await stub.claimSend(job('reply:first'), now)).toBe('claimed');
+  expect(await stub.claimSend(job('reply:dup'), now)).toBe('deferred');
+  expect(await stub.claimSend(job('reply:dup'), now)).toBe('deferred'); // the queue delivered it twice
+  expect(await rows(ws, "SELECT count(*) AS n FROM scheduled_tasks WHERE kind = 'send_release'")).toEqual([{ n: 1 }]);
 });
