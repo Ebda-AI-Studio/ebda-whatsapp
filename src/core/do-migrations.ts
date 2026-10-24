@@ -176,6 +176,30 @@ export const DO_MIGRATIONS: readonly string[] = [
   `ALTER TABLE messages ADD COLUMN author TEXT;
    CREATE TABLE agent_turns (message_id INTEGER PRIMARY KEY, outcome TEXT NOT NULL, at INTEGER NOT NULL);
    CREATE TABLE agent_handoffs (wa_id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, until_at INTEGER NOT NULL, reason TEXT NOT NULL);`,
+  // v19 (Phase 5, AI credits; the Phase 7 money design): an append-only ledger (unique ref per row, no update or delete) and the
+  // holds that reserve a credit before the model is called. Rows carry no phone number or name; money rows are never deleted.
+  `CREATE TABLE credit_ledger (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     at INTEGER NOT NULL,
+     kind TEXT NOT NULL CHECK (kind IN ('grant', 'purchase', 'ai_charge', 'expire', 'refund', 'adjustment')),
+     amount INTEGER NOT NULL CHECK (amount <> 0),
+     balance_after INTEGER NOT NULL,
+     ref TEXT NOT NULL UNIQUE,
+     parent_ref TEXT,
+     actor TEXT,
+     note TEXT
+   );
+   CREATE TRIGGER credit_ledger_no_update BEFORE UPDATE ON credit_ledger BEGIN SELECT RAISE(ABORT, 'credit_ledger is append-only'); END;
+   CREATE TRIGGER credit_ledger_no_delete BEFORE DELETE ON credit_ledger BEGIN SELECT RAISE(ABORT, 'credit_ledger is append-only'); END;
+   CREATE TABLE credit_holds (
+     ref TEXT PRIMARY KEY,
+     amount INTEGER NOT NULL CHECK (amount > 0),
+     state TEXT NOT NULL CHECK (state IN ('held', 'charged', 'released', 'expired')),
+     created_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL,
+     settled_at INTEGER
+   );
+   CREATE TRIGGER credit_holds_no_delete BEFORE DELETE ON credit_holds BEGIN SELECT RAISE(ABORT, 'credit holds are never deleted'); END;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

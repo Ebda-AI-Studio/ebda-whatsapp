@@ -13,6 +13,7 @@ import type { LinkHost } from '../store-link/host';
 import { normaliseText } from '../text-normalise';
 import { agentConfig } from './config';
 import { markHandoff, type HandoffReason } from './handoff';
+import { holdCredits, releaseHold, settleHold } from './credits';
 import { LlmError, type ChatTurn, type LlmProvider, type LlmResponse } from './provider';
 import { getAgentState, providerFor, putAgentState, readAgentSettings, type AgentSettings } from './settings';
 import { MAX_CALLS_PER_ROUND, MAX_TOOL_ROUNDS, runTool, toolDefs, type ToolContext } from './tools';
@@ -207,16 +208,34 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
   if (!windowOpen(host, input.from, now)) return; // AI replies only inside the 24 h window
 
   try {
-    const provider = await providerFor(host.env, host.workspaceId, host.sql, settings);
-    if (!provider) return await handoff(host, input, 'misconfigured', locale, now);
+    const real = await providerFor(host.env, host.workspaceId, host.sql, settings);
+    if (!real) return await handoff(host, input, 'misconfigured', locale, now);
+    // One credit is held before the model is called (concurrent messages cannot overdraw) and settled after it answered. A workspace
+    // with its own model key is never debited. No credit left: the agent stops and a person takes over.
+    const holdRef = `ai:${input.messageId}`;
+    if (!real.byoKey) {
+      const held = host.storage.transactionSync(() => holdCredits(host.sql, holdRef, now));
+      if (held === 'insufficient') {
+        console.error(JSON.stringify({ alert: 'agent_no_credits', workspace: host.workspaceId }));
+        return await handoff(host, input, 'no_credits', locale, now);
+      }
+    }
+    let answered = 0;
+    const provider: LlmProvider = { byoKey: real.byoKey, complete: async (r) => { const out = await real.complete(r); answered++; return out; } };
+    const finishHold = () => {
+      if (real.byoKey) return;
+      host.storage.transactionSync(() => (answered > 0 ? settleHold(host.sql, holdRef, now) : releaseHold(host.sql, holdRef, now)));
+    };
     let outcome: Outcome;
     try {
       outcome = await converse(host, input, provider, settings, locale, now, []);
     } catch (err) {
+      finishHold();
       if (err instanceof Aborted) return;
       console.error(JSON.stringify({ alert: 'agent_model_failed', workspace: host.workspaceId, error: errClass(err) }));
       return await handoff(host, input, 'provider_error', locale, now);
     }
+    finishHold();
     if (outcome.kind === 'handoff') return await handoff(host, input, outcome.reason, locale, now);
     if (outcome.kind === 'order') {
       host.storage.transactionSync(() => {

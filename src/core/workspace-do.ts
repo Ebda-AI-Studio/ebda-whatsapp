@@ -25,6 +25,8 @@ import { putState, readSettings, writeSettings, type StoreLinkSettings } from '.
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { errClass, safeMessage } from './observability';
 import type { AgentSettingsDto } from './api/contract';
+import { creditBalance, creditsAvailable, expireGrant, grantCredits, postCredit, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
+import { staffReplied } from './ai/handoff';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
 import { OTP_RATE_WINDOW_MS } from './otp-policy';
 import { OTP_MASK } from './templates';
@@ -443,6 +445,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec('UPDATE conversations SET last_message_at = max(coalesce(last_message_at, 0), ?) WHERE id = ?', Math.floor(now / 1000), conversationId);
       const row = this.sql.exec<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?`, id).one();
       this.emitMessageCreated(id);
+      staffReplied(this.host(), conv.wa_id, now); // a person is on it: the bot stays out of the way
       this.emitConversationUpdated(conversationId);
       return { ok: true, message: messageDto(row, workspaceId), job };
     });
@@ -734,7 +737,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   private agentDto(): AgentSettingsDto {
-    return { ...readAgentSettings(this.sql), hasApiKey: hasApiKey(this.sql), credits: 0, knowledgeReady: false };
+    return { ...readAgentSettings(this.sql), hasApiKey: hasApiKey(this.sql), credits: creditsAvailable(this.sql, Date.now()), knowledgeReady: false };
   }
 
   /** Saves (merges) the agent's settings; a refusal comes back as data and nothing is written. */
@@ -745,6 +748,29 @@ export class WorkspaceDO extends DurableObject<Env> {
       writeAgentSettings(this.sql, plan.settings, plan.secret);
     });
     return { ok: true, settings: this.agentDto() };
+  }
+
+  // AI credits (Phase 7 hooks: packages call these; there is no public route). All answers are result objects.
+
+  async aiCredits(now = Date.now()): Promise<{ balance: number; available: number }> {
+    return { balance: creditBalance(this.sql), available: creditsAvailable(this.sql, now) };
+  }
+  /** The period's grant, once per (period, package). */
+  async grantAiCredits(a: { periodStart: number; packageId: string; credits: number; actor?: string }, now = Date.now()): Promise<Posted> {
+    return this.ctx.storage.transactionSync(() => grantCredits(this.sql, { ...a, now }));
+  }
+  /** An upgrade mid-period grants only the difference. */
+  async upgradeAiCredits(a: { periodStart: number; toPackage: string; toCredits: number; actor?: string }, now = Date.now()): Promise<Posted> {
+    return this.ctx.storage.transactionSync(() => upgradeGrant(this.sql, { ...a, now }));
+  }
+  /** Period end: unused granted credits expire; returns how many. */
+  async expireAiCredits(periodStart: number, now = Date.now()): Promise<{ expired: number }> {
+    return { expired: this.ctx.storage.transactionSync(() => expireGrant(this.sql, { periodStart, now })) };
+  }
+  /** A purchase, refund or operator adjustment: the ref makes it idempotent; an operator adjustment needs an actor and a reason. */
+  async postAiCredits(a: { kind: Extract<CreditKind, 'purchase' | 'refund' | 'adjustment'>; amount: number; ref: string; actor?: string; note?: string }, now = Date.now()): Promise<Posted | { ok: false; reason: 'actor_and_note_required' }> {
+    if (a.kind === 'adjustment' && (!a.actor || !a.note)) return { ok: false, reason: 'actor_and_note_required' };
+    return this.ctx.storage.transactionSync(() => postCredit(this.sql, { ...a, now }));
   }
 
   /** Operator action: a full reconcile now. `allowMassDelete` lifts the automatic safety limit on archiving. */

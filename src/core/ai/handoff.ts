@@ -31,3 +31,14 @@ export function markHandoff(host: LinkHost, waId: string, reason: HandoffReason,
   );
   setTag(host, waId, NEEDS_HUMAN_TAG, true);
 }
+
+/**
+ * A person wrote to the customer: the tag goes (someone is on it) and the bot stays silent for a fresh handoff window counted
+ * from this reply, so it never talks over the human. Call inside a transaction. No-op when there is no open handoff.
+ */
+export function staffReplied(host: LinkHost, waId: string, now: number): void {
+  if (!host.sql.exec('SELECT 1 FROM agent_handoffs WHERE wa_id = ?', waId).toArray().length) return;
+  const minutes = readAgentSettings(host.sql).handoffMinutes;
+  host.sql.exec('UPDATE agent_handoffs SET until_at = max(until_at, ?) WHERE wa_id = ?', now + minutes * 60_000, waId);
+  setTag(host, waId, NEEDS_HUMAN_TAG, false);
+}
