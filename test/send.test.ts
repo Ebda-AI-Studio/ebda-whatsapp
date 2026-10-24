@@ -29,7 +29,7 @@ it('sends a reply job once and stores the outbound wamid', async () => {
   const res = await runBatch([job('ws-s1', 'reply:a')]);
   expect(res.explicitAcks).toEqual(['m0']);
   expect(graph.calls).toHaveLength(1);
-  expect(graph.calls[0]!.url).toBe('https://graph.facebook.com/v23.0/pn-ws-s1/messages');
+  expect(graph.calls[0]!.url).toBe('https://graph.facebook.com/v25.0/pn-ws-s1/messages');
   expect(graph.calls[0]!.body).toEqual({ messaging_product: 'whatsapp', recipient_type: 'individual', to: '201001234567', type: 'text', text: { body: 'أهلاً 👋' } });
   expect(await rows<Out>('ws-s1', "SELECT wamid, status, direction FROM messages WHERE direction = 'out'")).toEqual([{ wamid: 'wamid.out1', status: 'accepted', direction: 'out' }]);
 });
