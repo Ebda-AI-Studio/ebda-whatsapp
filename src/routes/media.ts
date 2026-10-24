@@ -42,7 +42,7 @@ mediaRoutes.get('/stores/:storeId/media/:messageId', async (c) => {
 
 /** Stages a file for sending: validates type and size, uploads it to Meta, keeps a copy in R2, returns an uploadId. */
 mediaRoutes.post('/stores/:storeId/media', async (c) => {
-  // Refuse on the declared size before a single body byte is read; without a length the cap cannot be enforced.
+  // Refuse on the declared size before a single body byte is read; without a length the cap cannot be applied.
   const declared = c.req.header('content-length');
   if (declared === undefined || !/^\d+$/.test(declared)) return apiError(c, 411, 'invalid_request', 'length_required');
   if (Number(declared) > MAX_UPLOAD_BYTES) return apiError(c, 413, 'invalid_request', 'file_too_large');
