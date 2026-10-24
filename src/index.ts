@@ -1,9 +1,11 @@
+import * as Sentry from '@sentry/cloudflare';
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { verifyMetaSignature } from './core/meta/signature';
 import { extractEvents } from './core/meta/webhook-schema';
 import { workspaceForPhoneNumber } from './core/routing';
 import { mark } from './core/timing';
+import { scrubEvent } from './core/observability';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
 import { EBDA_COPY } from './addons/ebda/copy';
 import { createEbdaAccountsVerifier } from './addons/ebda/identity';
@@ -86,9 +88,17 @@ app.post('/meta/webhook', async (c) => {
   return c.text('ok');
 });
 
-export default {
+let warnedNoDsn = false;
+
+export default Sentry.withSentry((env: Env) => {
+  if (!env.SENTRY_DSN && !warnedNoDsn) {
+    warnedNoDsn = true;
+    console.warn('sentry: SENTRY_DSN not set, error tracking is off');
+  }
+  return env.SENTRY_DSN ? { dsn: env.SENTRY_DSN, release: env.COMMIT_SHA, beforeSend: scrubEvent, tracesSampleRate: 0 } : undefined;
+}, {
   fetch: app.fetch,
   async queue(batch: MessageBatch<unknown>, env: Env, _ctx: ExecutionContext): Promise<void> {
     await consumeSendBatch(batch, env);
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env>);
