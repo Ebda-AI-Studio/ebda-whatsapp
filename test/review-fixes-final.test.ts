@@ -1,9 +1,9 @@
-import { env } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
 import type { SendJob } from '../src/core/send-queue';
-import { apiFor, graphStub, storeId as W, useApiKey } from './helpers/api';
+import { apiFor, graphStub, storeId as W, tokenFor, useApiKey } from './helpers/api';
 import { consume } from './helpers/queue';
-import { exec, openChat, rows, workspace } from './helpers/workspace';
+import { exec, openChat, rows, seedNumber, workspace } from './helpers/workspace';
 
 useApiKey();
 const cid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -55,4 +55,27 @@ it('Final #3: an AUTHENTICATION template (copy-code button shaped as type URL) i
   }
   const list = await (await api.call('GET', '/templates')).json() as { items: { name: string; paramCount: number }[] };
   expect(list.items.find((t) => t.name === 'otp')!.paramCount).toBe(1);
+});
+
+it('Final #6: a socket whose token has expired is closed with 4401 at the next broadcast and receives nothing', async () => {
+  const ws = W(502);
+  await seedNumber('pn-ws-exp', ws);
+  const expired = await tokenFor(ws, -30); // inside the verifier's 60 s skew tolerance, so the upgrade is accepted
+  const fresh = await tokenFor(ws, 900);
+  const open = async (token: string) => {
+    const res = await SELF.fetch(`https://x/api/v1/stores/${ws}/ws`, { headers: { upgrade: 'websocket', 'sec-websocket-protocol': `inbox.v1, bearer.${token}` } });
+    expect(res.status).toBe(101);
+    const sock = res.webSocket!;
+    sock.accept();
+    const state = { frames: 0, closeCode: 0 };
+    sock.addEventListener('message', () => { state.frames++; });
+    sock.addEventListener('close', (e) => { state.closeCode = e.code; });
+    return state;
+  };
+  const dead = await open(expired);
+  const live = await open(fresh);
+  await openChat(ws); // an ingest broadcasts
+  await vi.waitFor(() => expect(live.frames).toBeGreaterThan(0), { timeout: 3000, interval: 10 });
+  await vi.waitFor(() => expect(dead.closeCode).toBe(4401), { timeout: 3000, interval: 10 });
+  expect(dead.frames).toBe(0);
 });

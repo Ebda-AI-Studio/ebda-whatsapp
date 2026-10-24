@@ -26,7 +26,8 @@ describe('EbdaAccountsVerifier', () => {
   it('accepts a valid token and returns the principal', async () => {
     const { verifier } = verifierWith([k1]);
     const p = await verifier.verify(await mint(k1, { stores: [{ id: STORE, role: 'owner' }] }));
-    expect(p).toEqual({ userId: '6f1d2c1e-8a8f-4a3b-9f1e-1a2b3c4d5e6f', sessionId: 'sess-1', stores: [{ id: STORE, role: 'owner' }], superAdmin: false });
+    expect(p).toEqual({ userId: '6f1d2c1e-8a8f-4a3b-9f1e-1a2b3c4d5e6f', sessionId: 'sess-1', stores: [{ id: STORE, role: 'owner' }], superAdmin: false, expiresAt: expect.any(Number) });
+    expect(p.expiresAt).toBeGreaterThan(Date.now() / 1000);
   });
   it('rejects HS256 (alg confusion)', async () => {
     const { verifier } = verifierWith([k1]);

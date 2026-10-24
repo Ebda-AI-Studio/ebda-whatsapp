@@ -24,6 +24,12 @@ export const EVENTS_KEPT = 1000;
 export const PREVIEW_CHARS = 280;
 export const INLINE_BODY_BYTES = 1024;
 /** A claim older than this is presumed crashed and may be re-claimed once (duplicate risk vs drop risk: we accept one possible duplicate). */
+/** Headers the Worker sets on the upgrade it forwards to the DO (never read from the client: the route overwrites them). */
+export const WS_EXP_HEADER = 'x-socket-token-exp';
+export const WS_ROLE_HEADER = 'x-socket-role';
+/** Close code for a socket whose access token has expired: the client refreshes its token and reconnects. */
+export const WS_CLOSE_TOKEN_EXPIRED = 4401;
+type SocketAttachment = { exp: number; role: string };
 export const STALE_CLAIM_MS = 2 * 60 * 1000;
 /** failed sits between sent and delivered: it beats a late 'sent', but never undoes a delivery. */
 const STATUS_RANK = { sent: 1, failed: 2, delivered: 3, read: 4 } as const;
@@ -524,6 +530,9 @@ export class WorkspaceDO extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server);
+    // Survives hibernation: the token's expiry (epoch s) and the caller's role, so a long-lived socket is re-authorised on every push.
+    const exp = Number(request.headers.get(WS_EXP_HEADER));
+    server.serializeAttachment({ exp: Number.isFinite(exp) && exp > 0 ? exp : 0, role: request.headers.get(WS_ROLE_HEADER) ?? 'unknown' } satisfies SocketAttachment);
     return new Response(null, { status: 101, webSocket: client, headers: { 'sec-websocket-protocol': 'inbox.v1' } });
   }
 
@@ -556,7 +565,18 @@ export class WorkspaceDO extends DurableObject<Env> {
     const pending = this.sql.exec<{ seq: number; payload: string }>('SELECT seq, payload FROM events WHERE seq > ? ORDER BY seq', this.lastBroadcast).toArray();
     if (!pending.length) return;
     this.lastBroadcast = pending[pending.length - 1]!.seq;
-    const sockets = this.ctx.getWebSockets();
+    const nowS = Date.now() / 1000;
+    const sockets = this.ctx.getWebSockets().filter((ws) => {
+      const att = ws.deserializeAttachment() as SocketAttachment | null;
+      // No attachment or no expiry = not a socket we vetted: refuse it as well.
+      if (att && att.exp > nowS) return true;
+      try {
+        ws.close(WS_CLOSE_TOKEN_EXPIRED, 'token expired');
+      } catch {
+        // already closed
+      }
+      return false;
+    });
     if (!sockets.length) return;
     for (const e of pending) {
       const frame = JSON.stringify({ ...(JSON.parse(e.payload) as object), seq: e.seq });
