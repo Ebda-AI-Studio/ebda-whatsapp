@@ -5,6 +5,7 @@
 import type { Env } from '../env';
 import type { OutboundStoreEvent } from './api/store-events';
 import type { OrderingCopy } from './ordering/copy';
+import { DEFAULT_OTP_POLICY, type OtpPolicy } from './otp-policy';
 import type { StoreBridge } from './store-bridge';
 
 /** Where outcomes for the Store are queued (the messaging-to-store queue); `send` may reject and the caller retries. */
@@ -20,11 +21,13 @@ export type StoreLinkConfig = {
   buyerSecret: (env: Env) => string | undefined;
   /** Where payment screenshots are served from, and the key that signs those links; null = not configured. */
   proof: (env: Env) => { secret: string; baseUrl: string } | null;
+  /** Limits for one-time codes over WhatsApp. */
+  otp: OtpPolicy;
   /** Customer-facing copy and template names; supplied by the product addon. */
   copy: OrderingCopy | null;
 };
 
-let current: StoreLinkConfig = { bridge: () => null, events: () => null, buyerSecret: (env) => env.SUITE_BUYER_KEY_SECRET, proof: (env) => (env.PROOF_URL_SECRET && env.PUBLIC_BASE_URL ? { secret: env.PROOF_URL_SECRET, baseUrl: env.PUBLIC_BASE_URL.replace(/\/$/, '') } : null), copy: null };
+let current: StoreLinkConfig = { bridge: () => null, events: () => null, buyerSecret: (env) => env.SUITE_BUYER_KEY_SECRET, proof: (env) => (env.PROOF_URL_SECRET && env.PUBLIC_BASE_URL ? { secret: env.PROOF_URL_SECRET, baseUrl: env.PUBLIC_BASE_URL.replace(/\/$/, '') } : null), otp: DEFAULT_OTP_POLICY, copy: null };
 
 export function configureStoreLink(next: Partial<StoreLinkConfig>): StoreLinkConfig {
   const previous = current;

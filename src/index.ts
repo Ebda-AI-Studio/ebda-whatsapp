@@ -22,6 +22,7 @@ import { realtimeRoutes } from './routes/ws';
 import { templatesRoutes } from './routes/templates';
 import { EBDA_DEFAULT_TEMPLATES } from './addons/ebda/templates';
 import { EBDA_ORDERING_COPY } from './addons/ebda/store-copy';
+import { EBDA_OTP_POLICY } from './addons/ebda/otp-policy';
 import { createServiceBindingBridge } from './addons/ebda/store-bridge';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
@@ -33,7 +34,7 @@ import { ordersRoutes } from './routes/orders';
 import { proofRoutes } from './routes/proof';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
-configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY });
+configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY });
 const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 
 export { WorkspaceDO } from './core/workspace-do';

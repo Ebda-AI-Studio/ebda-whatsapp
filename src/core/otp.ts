@@ -2,11 +2,9 @@ import { z } from 'zod';
 import type { Env } from '../env';
 import { normaliseE164 } from './phone';
 import { activeNumberFor } from './routing';
+import { storeLink } from './store-link';
 
-export const OTP_RATE_WINDOW_MS = 10 * 60 * 1000;
-export const OTP_RATE_MAX = 5;
-
-export type OtpFailure = 'invalid' | 'not_found' | 'disabled' | 'no_number' | 'template_unavailable' | 'rate_limited' | 'send_failed' | 'unavailable';
+export type OtpFailure = 'invalid' | 'country_not_allowed' | 'not_found' | 'disabled' | 'no_number' | 'template_unavailable' | 'rate_limited' | 'send_failed' | 'unavailable';
 export type OtpResult = { ok: true } | { ok: false; reason: OtpFailure };
 
 const requestSchema = z.object({
@@ -25,6 +23,7 @@ export async function sendOtp(env: Env, input: unknown): Promise<OtpResult> {
   const e164 = parsed.success ? normaliseE164(parsed.data.phone) : null;
   if (!parsed.success || !e164) return { ok: false, reason: 'invalid' };
   const { storeId, code } = parsed.data;
+  if (!storeLink().otp.allowedCallingCodes.some((c) => e164.startsWith(`+${c}`))) return { ok: false, reason: 'country_not_allowed' };
   try {
     const known = await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(storeId).first();
     if (!known) return { ok: false, reason: 'not_found' };

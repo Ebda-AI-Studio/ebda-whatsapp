@@ -23,7 +23,9 @@ import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
-import { OTP_RATE_MAX, OTP_RATE_WINDOW_MS, type OtpResult } from './otp';
+import { OTP_RATE_WINDOW_MS } from './otp-policy';
+import { OTP_MASK } from './templates';
+import type { OtpResult } from './otp';
 import { queueTemplate } from './store-link/outbound';
 import { storeLink } from './store-link';
 import { botInputFrom, botInputSchema, orderingActive, runBotTurn } from './ordering/bot';
@@ -190,13 +192,19 @@ export class WorkspaceDO extends DurableObject<Env> {
    * Claims the right to send `job` once. Only 'claimed' may call Meta. 'dropped' = nothing left to send (the row was
    * erased with its contact, or an API job lost its row): the consumer acks it without calling Meta.
    */
-  async claimSend(job: SendJob, now = Date.now()): Promise<ClaimResult> {
+  async claimSend(job: SendJob, now = Date.now(), opts: { noDefer?: boolean } = {}): Promise<ClaimResult> {
     let deferred = false;
     const result = this.ctx.storage.transactionSync((): ClaimResult => {
       const claim = this.claimRow(job, now);
       if (claim !== 'claimed') return claim;
       const wait = this.throttle(job, now);
       if (!wait) return 'claimed';
+      if (opts.noDefer) {
+        // Time-critical content (a one-time code) is never parked: it fails now and the caller falls back to another channel.
+        const row = this.sql.exec<{ id: number }>("UPDATE messages SET status = 'failed', error_reason = 'rate_limited', claim_attempts = max(0, claim_attempts - 1), updated_at = ? WHERE idempotency_key = ? RETURNING id", now, job.idempotencyKey).toArray()[0];
+        if (row) this.emitMessageStatus(row.id);
+        return 'dropped';
+      }
       // Over a Meta limit: give the claim back, keep the message 'queued', and let the scheduler release it later.
       this.sql.exec("UPDATE messages SET status = 'queued', claim_attempts = max(0, claim_attempts - 1), updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
       this.addReleaseOnce(job, wait.dueAt, wait.reason);
@@ -648,29 +656,45 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /**
-   * One-time code over WhatsApp (OTP-1), gated by the `otpViaWhatsApp` setting (default off). Stored masked; sent at once
-   * (a code is useless late) with no scheduler row holding it; at most 5 per phone per 10 minutes.
+   * One-time code over WhatsApp (OTP-1), gated by the `otpViaWhatsApp` setting (default off). Only an AUTHENTICATION template
+   * may carry it; the text is stored masked. It is sent at once or not at all: a throttled, capped or retryable-failed code
+   * is marked failed (the caller falls back to email) and no scheduler row or queue message ever holds it. Bounded per phone
+   * and per workspace (toll fraud), counted in the same transaction that stores the message.
    */
   async queueOtp(waId: string, phoneNumberId: string, code: string): Promise<OtpResult> {
     const copy = storeLink().copy;
     if (!copy) return { ok: false, reason: 'unavailable' };
     if (!readSettings(this.host()).otpViaWhatsApp) return { ok: false, reason: 'disabled' };
+    const policy = storeLink().otp;
     const now = Date.now();
     const key = `otp:${crypto.randomUUID()}`;
     const queued = this.ctx.storage.transactionSync((): OtpResult | { job: SendJob } => {
-      const recent = this.sql.exec<{ n: number }>(
+      const since = now - OTP_RATE_WINDOW_MS;
+      const count = (extra: string, ...params: SqlStorageValue[]) => this.sql.exec<{ n: number }>(
         `SELECT count(*) AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
-         WHERE ct.wa_id = ? AND m.template_name = ? AND m.created_at > ?`, waId, copy.templates.otp, now - OTP_RATE_WINDOW_MS,
+         WHERE m.template_name = ? AND m.created_at > ? ${extra}`, copy.templates.otp, since, ...params,
       ).one().n;
-      if (recent >= OTP_RATE_MAX) return { ok: false, reason: 'rate_limited' };
-      const r = queueTemplate(this.host(), { waId, phoneNumberId, name: copy.templates.otp, language: 'ar', fallbackLanguage: 'en', params: [code], idempotencyKey: key, scheduleRelease: false, now });
-      if (!r.ok) return { ok: false, reason: r.reason === 'template_not_approved' ? 'template_unavailable' : 'invalid' };
+      if (count('') >= policy.workspaceMax || count('AND ct.wa_id = ?', waId) >= policy.phoneMax) return { ok: false, reason: 'rate_limited' };
+      const r = queueTemplate(this.host(), {
+        waId, phoneNumberId, name: copy.templates.otp, language: 'ar', fallbackLanguage: 'en', params: [code], idempotencyKey: key,
+        requireCategory: 'AUTHENTICATION', maskText: OTP_MASK, scheduleRelease: false, now,
+      });
+      if (!r.ok) return { ok: false, reason: r.reason === 'template_not_approved' || r.reason === 'wrong_category' ? 'template_unavailable' : 'invalid' };
       return r.duplicate ? { ok: true } : { job: r.job };
     });
     if (!('job' in queued)) return queued;
-    await this.deliverNow(queued.job);
-    const status = this.sql.exec<{ status: string }>('SELECT status FROM messages WHERE idempotency_key = ?', key).toArray()[0]?.status;
-    return status === 'failed' ? { ok: false, reason: 'send_failed' } : { ok: true };
+    await this.deliverOtp(queued.job);
+    const row = this.sql.exec<{ status: string; error_reason: string | null }>('SELECT status, error_reason FROM messages WHERE idempotency_key = ?', key).toArray()[0];
+    if (row?.status === 'failed') return { ok: false, reason: row.error_reason === 'rate_limited' ? 'rate_limited' : 'send_failed' };
+    return { ok: true };
+  }
+
+  /** claim (never deferring) -> Meta -> record; any failure, retryable or not, is final. */
+  private async deliverOtp(job: SendJob): Promise<void> {
+    const claim = await this.claimSend(job, Date.now(), { noDefer: true });
+    if (claim !== 'claimed') return; // 'dropped' = failed rate_limited already recorded
+    const sent = await sendToMeta(this.env, sendJobSchema.parse(job));
+    await this.recordOutbound(job.idempotencyKey, sent.ok ? sent : { ...sent, retryable: false });
   }
 
   async getStoreLinkSettings(): Promise<StoreLinkSettings> {

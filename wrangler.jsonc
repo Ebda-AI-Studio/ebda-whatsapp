@@ -39,6 +39,7 @@
   //   "services": [{ "binding": "STORE_BRIDGE", "service": "<store api worker name>", "entrypoint": "WhatsAppBridge" }],
   //   queues.producers += { "binding": "STORE_EVENTS", "queue": "ebda-store-events" },
   //   queues.consumers += { "queue": "ebda-wa-events", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-events-dlq" },
-  // and set the PROOF_URL_SECRET secret (wrangler secret put). Until then the link is inert: the consumer is never
+  // and set the PROOF_URL_SECRET secret (wrangler secret put) and the PUBLIC_BASE_URL var (this Worker's public origin).
+  // The accounts service reaches the one-time-code RPC with a service binding whose entrypoint is "WhatsAppOtp". Until then the link is inert: the consumer is never
   // called, /me reports codOutcome:false and the ordering bot stays silent.
 }

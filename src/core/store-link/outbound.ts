@@ -16,7 +16,7 @@ export function cleanParam(value: string | null | undefined, fallback: string, m
 export type QueueResult =
   | { ok: true; duplicate: false; messageId: number; job: SendJob }
   | { ok: true; duplicate: true }
-  | { ok: false; reason: 'template_not_approved' | 'opted_out' | 'no_consent' | 'invalid_request'; message?: string };
+  | { ok: false; reason: 'template_not_approved' | 'wrong_category' | 'opted_out' | 'no_consent' | 'invalid_request'; message?: string };
 
 export type TemplateSend = {
   waId: string;
@@ -32,6 +32,10 @@ export type TemplateSend = {
   /** Marketing sends need a recorded opt-in, not just the absence of an opt-out. */
   requireConsent?: boolean;
   profileName?: string | null;
+  /** Refuse unless the approved template has exactly this Meta category. */
+  requireCategory?: string;
+  /** Store only a mask as the message text (a code must not reach the inbox, search or events whatever the template). */
+  maskText?: string;
   /** False when the caller sends the job itself (one-time codes): then no scheduler row holds the code. Default true. */
   scheduleRelease?: boolean;
   now?: number;
@@ -52,6 +56,7 @@ export function queueTemplate(host: LinkHost, a: TemplateSend): QueueResult {
     if (t) break;
   }
   if (!t) return { ok: false, reason: 'template_not_approved' };
+  if (a.requireCategory && t.category !== a.requireCategory) return { ok: false, reason: 'wrong_category' };
   const contact = host.sql.exec<{ opted_out_at: number | null; consent_at: number | null }>('SELECT opted_out_at, consent_at FROM contacts WHERE wa_id = ?', a.waId).toArray()[0];
   if (t.category === 'MARKETING') {
     if (contact?.opted_out_at != null) return { ok: false, reason: 'opted_out' };
@@ -61,8 +66,9 @@ export function queueTemplate(host: LinkHost, a: TemplateSend): QueueResult {
   if (!stored.success) return { ok: false, reason: 'invalid_request', message: 'stored template is malformed' };
   const rendered = renderTemplate(stored.data, a.params, t.category);
   if (!rendered.ok) return { ok: false, reason: 'invalid_request', message: rendered.message };
+  const shown = a.maskText ?? rendered.text;
   const { conversationId } = host.ensureConversation(a.waId, now, a.profileName);
-  const messageId = host.insertOutbound(conversationId, { type: 'template', preview: rendered.text, body: rendered.text.length ? rendered.text : null, key: a.idempotencyKey, templateName: a.name, templateLang: t.language }, now);
+  const messageId = host.insertOutbound(conversationId, { type: 'template', preview: shown, body: shown.length ? shown : null, key: a.idempotencyKey, templateName: a.name, templateLang: t.language }, now);
   const job: SendJob = {
     workspaceId: host.workspaceId, phoneNumberId: a.phoneNumberId, to: a.waId, idempotencyKey: a.idempotencyKey, kind: 'template',
     template: { name: a.name, language: t.language, components: [...rendered.components, ...(a.extraComponents ?? [])] },
