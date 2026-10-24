@@ -8,7 +8,7 @@ import { initials } from './ConversationList';
 type Props = {
   t: Strings; lang: Lang; now: number;
   conversation: ConversationDto | null; userNames: Record<string, string>; currentOrder: OrderSummaryDto | null; messages: MessageDto[]; templates: TemplateDto[];
-  onSendText: (text: string) => void; onSendTemplate: (tpl: TemplateDto) => void; onRetry: (m: MessageDto) => void;
+  onSendText: (text: string) => void; onSendTemplate: (tpl: TemplateDto, params: string[]) => void; onRetry: (m: MessageDto) => void;
   onBack: () => void; onShowOrders: () => void;
 };
 
@@ -27,9 +27,10 @@ function dayKey(at: number): string {
 export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, messages, templates, onSendText, onSendTemplate, onRetry, onBack, onShowOrders }: Props) {
   const [draft, setDraft] = useState('');
   const [picker, setPicker] = useState(false);
+  const [filling, setFilling] = useState<{ tpl: TemplateDto; params: string[] } | null>(null);
   const thread = useRef<HTMLDivElement>(null);
   useEffect(() => { thread.current?.scrollTo?.({ top: thread.current.scrollHeight }); }, [messages.length, conversation?.id]);
-  useEffect(() => { setDraft(''); setPicker(false); }, [conversation?.id]);
+  useEffect(() => { setDraft(''); setPicker(false); setFilling(null); }, [conversation?.id]);
 
   if (!conversation) return <main className="chat"><div className="placeholder">{t.pickChat}</div></main>;
 
@@ -68,7 +69,7 @@ export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, 
           const sep = d !== lastDay ? <span className="tag day" key={`d${d}`}>{d === today ? t.today : new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG' : 'en-GB', { day: 'numeric', month: 'long' }).format(m.at)}</span> : null;
           lastDay = d;
           return [sep, (
-            <div key={m.id} className={`bubble ${m.direction}`}>
+            <div key={m.id} className={`bubble ${m.direction}`} data-client-id={m.clientId ?? undefined}>
               <bdi dir="auto" className="text">{m.text}</bdi>
               <div className="meta" data-status={m.status ?? undefined}>
                 <span>{clockTime(m.at, lang)}</span>
@@ -88,10 +89,26 @@ export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, 
         </div>
       )}
       <div className="composer" data-closed={closed}>
+        {filling && (
+          <form className="popover fill" aria-label={t.templateNames[filling.tpl.name] ?? filling.tpl.name} onSubmit={(e) => { e.preventDefault(); onSendTemplate(filling.tpl, filling.params); setFilling(null); }}>
+            <b style={{ fontWeight: 500 }}>{t.templateNames[filling.tpl.name] ?? filling.tpl.name}</b>
+            <span className="muted" dir="auto">{filling.tpl.bodyText}</span>
+            {filling.params.map((v, i) => (
+              <label key={i} className="field">
+                <span>{t.templateVar(i + 1)}</span>
+                <input dir="auto" value={v} onChange={(e) => setFilling({ ...filling, params: filling.params.map((p, j) => (j === i ? e.target.value : p)) })} />
+              </label>
+            ))}
+            <div className="order-actions">
+              <button type="submit" className="btn gold" disabled={filling.params.some((p) => !p.trim())}>{t.sendTemplate}</button>
+              <button type="button" className="btn" onClick={() => setFilling(null)}>{t.refuseCancel}</button>
+            </div>
+          </form>
+        )}
         {picker && (
           <div className="popover" role="menu" aria-label={t.pickTemplate}>
             {templates.filter((x) => x.status === 'APPROVED').map((tpl) => (
-              <button key={tpl.name} type="button" role="menuitem" onClick={() => { onSendTemplate(tpl); setPicker(false); }}>
+              <button key={tpl.name} type="button" role="menuitem" onClick={() => { setPicker(false); if (tpl.paramCount > 0) setFilling({ tpl, params: Array.from({ length: tpl.paramCount }, () => '') }); else onSendTemplate(tpl, []); }}>
                 <b style={{ fontWeight: 500 }}>{t.templateNames[tpl.name] ?? tpl.name}</b>
                 <span className="muted" dir="auto">{tpl.bodyText}</span>
               </button>

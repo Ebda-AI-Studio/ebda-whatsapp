@@ -8,7 +8,7 @@ const H = 60 * MIN;
 
 type Seed = { id: number; name: string; waId: string; preview: string; ago: number; unread: number; assignee: string | null; windowH: number | null; tags: string[] };
 const SEEDS: Seed[] = [
-  { id: 1, name: 'منى عبد الرحمن', waId: '201001112233', preview: 'عايزة أأكد الأوردر بتاع امبارح', ago: 2 * MIN, unread: 2, assignee: 'u-dina', windowH: 22, tags: ['COD'] },
+  { id: 1, name: 'منى عبد الرحمن', waId: '201001112233', preview: 'عايزة أأكد الأوردر بتاع امبارح', ago: 2 * MIN, unread: 2, assignee: 'u-dina', windowH: 22, tags: ['cod_pending'] },
   { id: 2, name: 'كريم سمير', waId: '201002223344', preview: 'الشحنة اتأخرت يومين', ago: 12 * MIN, unread: 1, assignee: null, windowH: 23, tags: ['شحن'] },
   { id: 3, name: 'هالة فؤاد', waId: '201003334455', preview: 'تمام شكرًا ليكي', ago: 35 * MIN, unread: 0, assignee: 'u-me', windowH: 23, tags: [] },
   { id: 4, name: 'أحمد ناصر', waId: '201004445566', preview: 'ممكن أغيّر المقاس؟', ago: 1 * H, unread: 1, assignee: 'u-me', windowH: 0.5, tags: ['استبدال'] },
@@ -80,7 +80,10 @@ export function createSampleSource(): InboxSource {
       return threads[id] ?? [];
     },
     async send(id, req) {
-      const text = req.type === 'text' ? req.text : req.type === 'template' ? `[${req.name}]` : req.type === 'interactive' ? req.body : (req.caption ?? '');
+      const tpl = req.type === 'template' ? TEMPLATES.find((x) => x.name === req.name) : undefined;
+      const text = req.type === 'text' ? req.text
+        : req.type === 'template' ? (tpl?.bodyText ?? req.name).replace(/\{\{(\d+)\}\}/g, (_m, i) => req.params[Number(i) - 1] ?? '')
+        : req.type === 'interactive' ? req.body : (req.caption ?? '');
       const m: MessageDto = { ...msg(nextId++, 'out', text, Date.now(), 'queued'), clientId: req.clientId, type: req.type === 'template' ? 'template' : 'text' };
       (threads[id] ??= []).push(m);
       const c = convs.find((x) => x.id === id);

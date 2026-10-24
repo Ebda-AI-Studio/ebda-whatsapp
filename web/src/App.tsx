@@ -23,8 +23,9 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
   const [error, setError] = useState(false);
-  const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
-  const pendingOutcome = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [toast, setToast] = useState<{ kind: 'confirmed' | 'refused'; orderNumber: string } | { kind: 'error' } | null>(null);
+  type Pending = { waId: string; orderNumber: string; outcome: 'confirmed' | 'refused'; before: OrderSummaryDto['status']; timer: ReturnType<typeof setTimeout> };
+  const pending = useRef(new Map<string, Pending>());
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -77,7 +78,11 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     if (e.type === 'message.status' && e.conversationId === selectedId) {
       setMessages((ms) => ms.map((m) => (m.id === e.messageId ? { ...m, status: e.status, errorCode: e.errorCode } : m)));
     } else if (e.type === 'message.created') {
-      if (e.conversationId === selectedId) setMessages((ms) => (ms.some((m) => m.id === e.message.id) ? ms : [...ms, e.message]));
+      // Reconcile with an optimistic bubble by clientId first, then dedupe by id.
+      if (e.conversationId === selectedId) setMessages((ms) => {
+        if (e.message.clientId && ms.some((m) => m.clientId === e.message.clientId)) return ms.map((m) => (m.clientId === e.message.clientId ? e.message : m));
+        return ms.some((m) => m.id === e.message.id) ? ms : [...ms, e.message];
+      });
       void refresh();
     } else if (e.type === 'conversation.updated') {
       void refresh();
@@ -99,36 +104,51 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     }
   };
   const sendText = (text: string) => sendOptimistic({ type: 'text', clientId: crypto.randomUUID(), text }, text);
-  const sendTemplate = (tpl: TemplateDto) => sendOptimistic({ type: 'template', clientId: crypto.randomUUID(), name: tpl.name, language: tpl.language, params: [] }, tpl.bodyText);
+  const sendTemplate = (tpl: TemplateDto, params: string[]) =>
+    sendOptimistic({ type: 'template', clientId: crypto.randomUUID(), name: tpl.name, language: tpl.language, params }, tpl.bodyText.replace(/\{\{(\d+)\}\}/g, (_m, i) => params[Number(i) - 1] ?? ''));
   const retry = async (m: MessageDto) => {
     setMessages((ms) => ms.filter((x) => x.id !== m.id));
     if (m.text) await sendText(m.text);
   };
 
-  // COD outcome: the rail moves at once; the store is told after a 5-second undo window.
+  // COD outcome: the rail moves at once; the store is told after a 5-second undo window. A pending decision is never
+  // dropped: a newer decision flushes it immediately, and so does leaving or hiding the page.
+  const setStatus = (orderNumber: string, status: OrderSummaryDto['status']) =>
+    setOrders((os) => os?.map((o) => (o.orderNumber === orderNumber ? { ...o, status } : o)) ?? os);
+  const flush = useCallback((orderNumber: string) => {
+    const p = pending.current.get(orderNumber);
+    if (!p) return;
+    clearTimeout(p.timer);
+    pending.current.delete(orderNumber);
+    setToast((tt) => (tt && tt.kind !== 'error' && tt.orderNumber === orderNumber ? null : tt));
+    void source.recordCodOutcome(p.waId, p.orderNumber, p.outcome).catch(() => {
+      setStatus(p.orderNumber, p.before);
+      setToast({ kind: 'error' });
+    });
+  }, [source]);
+  useEffect(() => {
+    const flushAll = () => [...pending.current.keys()].forEach(flush);
+    const onHide = () => { if (document.visibilityState === 'hidden') flushAll(); };
+    window.addEventListener('pagehide', flushAll);
+    document.addEventListener('visibilitychange', onHide);
+    return () => { window.removeEventListener('pagehide', flushAll); document.removeEventListener('visibilitychange', onHide); };
+  }, [flush]);
   const recordOutcome = (order: OrderSummaryDto, outcome: 'confirmed' | 'refused') => {
     const waId = selected?.contact.waId;
     if (!waId) return;
-    const before = order.status;
-    setOrders((os) => os?.map((o) => (o.orderNumber === order.orderNumber ? { ...o, status: outcome } : o)) ?? os);
-    if (pendingOutcome.current) clearTimeout(pendingOutcome.current);
-    pendingOutcome.current = setTimeout(() => {
-      pendingOutcome.current = null;
-      setToast(null);
-      void source.recordCodOutcome(waId, order.orderNumber, outcome).catch(() => {
-        setOrders((os) => os?.map((o) => (o.orderNumber === order.orderNumber ? { ...o, status: before } : o)) ?? os);
-        setToast({ text: t.loadError });
-      });
-    }, 5000);
-    setToast({
-      text: outcome === 'confirmed' ? t.confirmedToast(order.orderNumber) : t.refusedToast(order.orderNumber),
-      undo: () => {
-        if (pendingOutcome.current) clearTimeout(pendingOutcome.current);
-        pendingOutcome.current = null;
-        setOrders((os) => os?.map((o) => (o.orderNumber === order.orderNumber ? { ...o, status: before } : o)) ?? os);
-        setToast(null);
-      },
-    });
+    [...pending.current.keys()].forEach(flush);
+    setStatus(order.orderNumber, outcome);
+    const timer = setTimeout(() => flush(order.orderNumber), 5000);
+    pending.current.set(order.orderNumber, { waId, orderNumber: order.orderNumber, outcome, before: order.status, timer });
+    setToast({ kind: outcome, orderNumber: order.orderNumber });
+  };
+  const undo = (orderNumber: string) => {
+    const p = pending.current.get(orderNumber);
+    if (!p) return;
+    clearTimeout(p.timer);
+    pending.current.delete(orderNumber);
+    setStatus(orderNumber, p.before);
+    setToast(null);
   };
 
   return (
@@ -143,8 +163,12 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
       <OrderPane key={selectedId ?? 'none'} t={t} lang={lang} orders={selected ? orders : null} hasChat={!!selected} onConfirm={(o) => recordOutcome(o, 'confirmed')} onRefuse={(o) => recordOutcome(o, 'refused')} onClose={() => setOrdersOpen(false)} />
       {toast && (
         <div className="toast" role="status">
-          <span>{toast.text}</span>
-          {toast.undo && <button type="button" className="btn ghost" onClick={toast.undo}>{t.undo}</button>}
+          {toast.kind === 'error' ? <span>{t.loadError}</span> : (
+            <>
+              <span>{(toast.kind === 'confirmed' ? t.confirmedToast : t.refusedToast)('\u2068' + toast.orderNumber + '\u2069')}</span>
+              <button type="button" className="btn ghost" onClick={() => undo(toast.orderNumber)}>{t.undo}</button>
+            </>
+          )}
         </div>
       )}
       <button type="button" className="sheet-backdrop" aria-label={t.close} tabIndex={-1} onClick={() => setOrdersOpen(false)} />

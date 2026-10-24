@@ -43,7 +43,7 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
         {items.map((c) => (
           <li key={c.id}>
             <button type="button" className="row" aria-current={c.id === selectedId} onClick={() => onOpen(c.id)}>
-              <span className="avatar" data-selected={c.id === selectedId} aria-hidden>{initials(c.contact.name)}{c.unread > 0 && c.id !== selectedId && <span className="lit" />}</span>
+              <span className="avatar" data-selected={c.id === selectedId} aria-hidden>{initials(c.contact.name)}{c.tags.includes('cod_pending') && c.id !== selectedId && <span className="lit" title={t.codPending} />}</span>
               <span className="row-body">
                 <span className="row-top">
                   <span className="row-name" dir="auto">{c.contact.name ?? `+${c.contact.waId}`}</span>

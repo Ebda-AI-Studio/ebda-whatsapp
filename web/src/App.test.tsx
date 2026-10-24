@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { createSampleSource } from './data/sample';
 
@@ -123,5 +123,62 @@ describe('inbox', () => {
     await act(async () => fireEvent.click(target));
     const tpl = screen.getByRole('button', { name: 'اختيار قالب' });
     expect(tpl.className).toContain('gold');
+  });
+
+  it('never drops a COD decision: a second decision flushes the first, and leaving the page flushes too', async () => {
+    const source = createSampleSource();
+    const spy = vi.spyOn(source, 'recordCodOutcome');
+    render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
+    let target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    const orders = () => screen.getByRole('complementary', { name: 'طلبات العميل' });
+    await act(async () => fireEvent.click(await within(orders()).findByRole('button', { name: 'تأكيد الطلب' })));
+    expect(spy).not.toHaveBeenCalled();
+    await act(async () => window.dispatchEvent(new Event('pagehide')));
+    expect(spy).toHaveBeenCalledWith('201001112233', '#1048', 'confirmed');
+  });
+
+  it('a live event for a message already shown optimistically does not duplicate it', async () => {
+    const source = createSampleSource();
+    let emit: (e: Parameters<Parameters<typeof source.subscribe>[0]>[0]) => void = () => undefined;
+    source.subscribe = (cb) => { emit = cb; return () => undefined; };
+    let release: (m: Awaited<ReturnType<typeof source.send>>) => void = () => undefined;
+    source.send = (_id, req) => new Promise((r) => { release = r; void req; });
+    render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'اكتب رسالة' }), { target: { value: 'مرة واحدة بس' } }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'إرسال' })));
+    const clientId = (screen.getByRole('log').lastElementChild as HTMLElement).dataset.clientId!;
+    const real = { id: 777, clientId, wamid: 'w', direction: 'out' as const, type: 'text' as const, text: 'مرة واحدة بس', hasLongBody: false, media: null, template: null, status: 'accepted' as const, errorCode: null, at: 1 };
+    await act(async () => emit({ type: 'message.created', seq: 1, conversationId: 1, message: real }));
+    await act(async () => release(real));
+    expect(within(screen.getByRole('log')).getAllByText('مرة واحدة بس')).toHaveLength(1);
+  });
+
+  it('the undo toast follows the language switch', async () => {
+    setup();
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    await act(async () => fireEvent.click(await within(screen.getByRole('complementary', { name: 'طلبات العميل' })).findByRole('button', { name: 'تأكيد الطلب' })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'English' })));
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('confirmed');
+  });
+
+  it('asks for template variables before sending a template that has them', async () => {
+    setup();
+    const target = await screen.findByRole('button', { name: /يوسف علي/ });
+    await act(async () => fireEvent.click(target));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'اختيار قالب' })));
+    await act(async () => fireEvent.click(screen.getByRole('menuitem', { name: /تحديث الشحن/ })));
+    const fields = screen.getAllByRole('textbox', { name: /متغير/ });
+    expect(fields).toHaveLength(2);
+    const send = screen.getByRole('button', { name: 'ابعت القالب' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    await act(async () => { fireEvent.change(fields[0]!, { target: { value: '#0996' } }); fireEvent.change(fields[1]!, { target: { value: 'https://track.example/0996' } }); });
+    expect(send.disabled).toBe(false);
+    await act(async () => fireEvent.click(send));
+    expect(within(screen.getByRole('log')).getByText(/طلبك #0996 اتشحن/)).toBeTruthy();
   });
 });
