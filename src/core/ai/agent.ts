@@ -13,7 +13,8 @@ import type { LinkHost } from '../store-link/host';
 import { normaliseText } from '../text-normalise';
 import { agentConfig } from './config';
 import { markHandoff, type HandoffReason } from './handoff';
-import { holdCredits, releaseHold, settleHold } from './credits';
+import { retrieveKnowledge } from './knowledge';
+import { heartbeatHold, holdCredits, releaseHold, settleHold } from './credits';
 import { LlmError, type ChatTurn, type LlmProvider, type LlmResponse } from './provider';
 import { getAgentState, providerFor, putAgentState, readAgentSettings, type AgentSettings } from './settings';
 import { MAX_CALLS_PER_ROUND, MAX_TOOL_ROUNDS, runTool, toolDefs, type ToolContext } from './tools';
@@ -214,21 +215,22 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     // with its own model key is never debited. No credit left: the agent stops and a person takes over.
     const holdRef = `ai:${input.messageId}`;
     if (!real.byoKey) {
-      const held = host.storage.transactionSync(() => holdCredits(host.sql, holdRef, now));
+      const held = host.storage.transactionSync(() => holdCredits(host.sql, holdRef, Date.now()));
       if (held === 'insufficient') {
         console.error(JSON.stringify({ alert: 'agent_no_credits', workspace: host.workspaceId }));
         return await handoff(host, input, 'no_credits', locale, now);
       }
     }
     let answered = 0;
-    const provider: LlmProvider = { byoKey: real.byoKey, complete: async (r) => { const out = await real.complete(r); answered++; return out; } };
+    // Hold times use the real clock: a turn can outlast the moment it started. Each round tells the hold the turn is still alive.
+    const provider: LlmProvider = { byoKey: real.byoKey, complete: async (r) => { if (!real.byoKey) heartbeatHold(host.sql, holdRef, Date.now()); const out = await real.complete(r); answered++; return out; } };
     const finishHold = () => {
       if (real.byoKey) return;
-      host.storage.transactionSync(() => (answered > 0 ? settleHold(host.sql, holdRef, now) : releaseHold(host.sql, holdRef, now)));
+      host.storage.transactionSync(() => (answered > 0 ? settleHold(host.sql, holdRef, Date.now()) : releaseHold(host.sql, holdRef, Date.now())));
     };
     let outcome: Outcome;
     try {
-      outcome = await converse(host, input, provider, settings, locale, now, []);
+      outcome = await converse(host, input, provider, settings, locale, now, await retrieveKnowledge(host, input.text ?? ''));
     } catch (err) {
       finishHold();
       if (err instanceof Aborted) return;

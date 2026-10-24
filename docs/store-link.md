@@ -62,4 +62,4 @@ v13 `processed_events`, `entity_versions`, `store_state`, `contacts.buyer_key`, 
 `catalog_sync` (singleton, debounce), `catalog_reconcile` (singleton, nightly), `cod_no_reply`, `cod_outcome_push`, `bot_turn`.
 
 ## Not done / needs the other side
-Native Meta `catalog_message`/`product_list` sends; the Store's real RPC and queues; `PUBLIC_BASE_URL`/`PROOF_URL_SECRET` values; wallet checks (Phase 7); AI agent handoff words (Phase 5).
+Native Meta `catalog_message`/`product_list` sends; the Store's real RPC and queues; `PUBLIC_BASE_URL`/`PROOF_URL_SECRET` values; wallet checks (Phase 7). The AI agent and its handoff words are in `docs/ai-agent.md`.

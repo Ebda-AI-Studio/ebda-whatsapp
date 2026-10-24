@@ -50,12 +50,29 @@ export function holdCredits(sql: Sql, ref: string, now: number, amount = AI_TURN
   return 'held';
 }
 
-/** Turns a hold into a charge (`ref` of the ledger row = the hold's ref). Idempotent. Call inside a transaction. */
-export function settleHold(sql: Sql, ref: string, now: number): void {
-  const h = sql.exec<{ amount: number; state: string }>('SELECT amount, state FROM credit_holds WHERE ref = ?', ref).toArray()[0];
-  if (!h || h.state === 'charged' || h.state === 'released') return;
+/** A live turn calls this at every model/tool round so its hold never lapses while it works. */
+export function heartbeatHold(sql: Sql, ref: string, now: number): void {
+  sql.exec("UPDATE credit_holds SET expires_at = ? WHERE ref = ? AND state = 'held'", now + HOLD_TTL_MS, ref);
+}
+
+/**
+ * Turns a hold into a charge (`ref` of the ledger row = the hold's ref). Idempotent. Call inside a transaction.
+ * A hold that lapsed (its turn was silent for longer than the TTL) no longer protects its credit, which may have been given to
+ * another call: it is charged only if a credit is still available; otherwise nothing is posted ('refused', alerted) so the
+ * balance can never go negative.
+ */
+export function settleHold(sql: Sql, ref: string, now: number): 'charged' | 'refused' | 'noop' {
+  const h = sql.exec<{ amount: number; state: string; expires_at: number }>('SELECT amount, state, expires_at FROM credit_holds WHERE ref = ?', ref).toArray()[0];
+  if (!h || h.state === 'charged' || h.state === 'released') return 'noop';
+  const lapsed = h.state === 'expired' || h.expires_at <= now;
+  if (lapsed && creditsAvailable(sql, now) < h.amount) {
+    sql.exec("UPDATE credit_holds SET state = 'released', settled_at = ? WHERE ref = ?", now, ref);
+    console.error(JSON.stringify({ alert: 'ai_overdraw_refused', ref: ref.slice(0, 40) }));
+    return 'refused';
+  }
   postCredit(sql, { kind: 'ai_charge', amount: -h.amount, ref, parentRef: ref, now });
   sql.exec("UPDATE credit_holds SET state = 'charged', settled_at = ? WHERE ref = ?", now, ref);
+  return 'charged';
 }
 
 /** Gives a hold back unused (the model never answered). Idempotent. Call inside a transaction. */

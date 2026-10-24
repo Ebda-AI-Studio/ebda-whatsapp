@@ -208,6 +208,47 @@ describe('AI credits', () => {
     expect((await rows<{ n: number }>(ws, 'SELECT min(balance_after) AS n FROM credit_ledger'))[0]!.n).toBeGreaterThanOrEqual(0);
   });
 
+  it('heartbeat: a hold that was about to lapse is extended at each round of the same turn', async () => {
+    const ws = W(46);
+    const pn = await agentWorkspace(ws);
+    await grant(ws, 1);
+    let seen = 0;
+    const base = model([{ tools: [{ name: 'search_catalog', arguments: { query: 'item' } }] }, { text: 'تمام' }]);
+    const orig = base.complete.bind(base);
+    let n = 0;
+    base.complete = async (r) => {
+      n++;
+      if (n === 1) await exec(ws, 'UPDATE credit_holds SET expires_at = ?', Date.now() + 50); // nearly lapsed
+      if (n === 2) seen = (await rows<{ expires_at: number }>(ws, 'SELECT expires_at FROM credit_holds'))[0]!.expires_at;
+      return orig(r);
+    };
+    await say(ws, pn, text('hi'), stubGraph());
+    expect(seen).toBeGreaterThan(Date.now() + 60_000);
+    expect(await balance(ws)).toBe(0);
+  });
+
+  it('a hold that lapsed and whose credit was spent elsewhere is not charged: the answer goes out, the balance stays >= 0', async () => {
+    const ws = W(47);
+    const pn = await agentWorkspace(ws);
+    await grant(ws, 1);
+    const base = model([{ text: 'جاوبت' }]);
+    const orig = base.complete.bind(base);
+    base.complete = async (r) => {
+      // while the model "thinks": the hold lapses and another call spends the only credit
+      await exec(ws, "UPDATE credit_holds SET state = 'expired', expires_at = 1");
+      await workspace(ws).postAiCredits({ kind: 'adjustment', amount: -1, ref: 'adj:other', actor: 'u', note: 'other call' });
+      return orig(r);
+    };
+    const log: string[] = [];
+    const spy = (await import('vitest')).vi.spyOn(console, 'error').mockImplementation((...a) => { log.push(a.join(' ')); });
+    const out = await say(ws, pn, text('hi'), stubGraph());
+    spy.mockRestore();
+    expect(out.map((s) => s.text)).toEqual(['جاوبت']);
+    expect(await balance(ws)).toBe(0);
+    expect(await rows(ws, "SELECT 1 FROM credit_ledger WHERE kind = 'ai_charge'")).toEqual([]);
+    expect(log.join(' ')).toContain('ai_overdraw_refused');
+  });
+
   it('the settings answer shows the credits available', async () => {
     const ws = storeId(5410);
     const api = await apiFor(ws);

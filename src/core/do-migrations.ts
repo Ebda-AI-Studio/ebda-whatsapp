@@ -200,6 +200,11 @@ export const DO_MIGRATIONS: readonly string[] = [
      settled_at INTEGER
    );
    CREATE TRIGGER credit_holds_no_delete BEFORE DELETE ON credit_holds BEGIN SELECT RAISE(ABORT, 'credit holds are never deleted'); END;`,
+  // v20 (Phase 5, knowledge base): the merchant's FAQ text in chunks (a new version per change; the old one is dropped once the new
+  // one is searchable), and which catalog variants are in the vector index (hash of the text that was embedded). Derived data; not backed up.
+  `CREATE TABLE kb_chunks (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, idx INTEGER NOT NULL, vec_id TEXT NOT NULL UNIQUE, text TEXT NOT NULL, indexed INTEGER NOT NULL DEFAULT 0);
+   CREATE INDEX kb_chunks_version ON kb_chunks (version, indexed);
+   CREATE TABLE catalog_vectors (retailer_id TEXT PRIMARY KEY, vec_id TEXT NOT NULL, hash TEXT NOT NULL);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

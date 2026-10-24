@@ -27,6 +27,7 @@ import { errClass, safeMessage } from './observability';
 import type { AgentSettingsDto } from './api/contract';
 import { creditBalance, creditsAvailable, expireGrant, grantCredits, postCredit, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
+import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
 import { OTP_RATE_WINDOW_MS } from './otp-policy';
 import { OTP_MASK } from './templates';
@@ -737,16 +738,23 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   private agentDto(): AgentSettingsDto {
-    return { ...readAgentSettings(this.sql), hasApiKey: hasApiKey(this.sql), credits: creditsAvailable(this.sql, Date.now()), knowledgeReady: false };
+    return { ...readAgentSettings(this.sql), hasApiKey: hasApiKey(this.sql), credits: creditsAvailable(this.sql, Date.now()), knowledgeReady: knowledgeReady(this.sql) };
   }
 
   /** Saves (merges) the agent's settings; a refusal comes back as data and nothing is written. */
   async setAgentSettings(patch: AgentSettingsUpdate): Promise<{ ok: true; settings: AgentSettingsDto } | { ok: false; reason: SettingsRefusal }> {
     const plan = await planAgentUpdate(this.env, this.workspaceId, this.sql, patch);
     if (!plan.ok) return plan;
+    const before = readAgentSettings(this.sql);
+    // The FAQ is chunked (ids are hashes, hence async) before the write; a changed text becomes a new version, indexed by a task.
+    const faqChanged = plan.settings.faqText !== before.faqText;
+    const chunks = faqChanged ? await prepareChunks(this.workspaceId, nextKbVersion(this.sql), plan.settings.faqText) : [];
     this.ctx.storage.transactionSync(() => {
       writeAgentSettings(this.sql, plan.settings, plan.secret);
+      if (faqChanged) stageFaq(this.host(), chunks, Date.now());
+      if (plan.settings.enabled && !before.enabled) scheduleCatalogEmbed(this.host(), Date.now(), 0);
     });
+    await this.arm();
     return { ok: true, settings: this.agentDto() };
   }
 
@@ -1175,6 +1183,10 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
         return undefined;
       }
+      case 'kb_index':
+        return runKbIndex(this.host(), now);
+      case 'catalog_embed':
+        return runCatalogEmbed(this.host(), now);
       case 'catalog_sync':
         return runCatalogSync(this.host(), now);
       case 'catalog_reconcile':

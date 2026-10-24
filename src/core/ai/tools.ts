@@ -11,6 +11,7 @@ import type { LinkHost } from '../store-link/host';
 import type { CatalogRow, StoreBridge } from '../store-bridge';
 import { storeLink } from '../store-link';
 import { normaliseText } from '../text-normalise';
+import { catalogCandidates } from './knowledge';
 import type { ToolCall, ToolDef } from './provider';
 
 export const MAX_TOOL_ROUNDS = 3;
@@ -116,6 +117,15 @@ export function rankRows(rows: CatalogRow[], query: string): CatalogRow[] {
  */
 async function searchCatalog(ctx: ToolContext, query: string): Promise<{ results: Hit[] } | { error: string }> {
   const bridge = ctx.bridge!;
+  // The index only names candidate products; what is shown (price, stock, link) is read from the Store right now.
+  const ids = await catalogCandidates(ctx.host, query);
+  if (ids) {
+    const fresh = await bridge.getProducts(ctx.host.workspaceId, ids);
+    if (fresh.ok && fresh.value.items.length) {
+      const rank = new Map(ids.map((id, i) => [id, i]));
+      return { results: fresh.value.items.sort((a, b) => (rank.get(a.productId) ?? 99) - (rank.get(b.productId) ?? 99)).slice(0, SEARCH_RESULTS).map(toHit) };
+    }
+  }
   const rows: CatalogRow[] = [];
   let cursor: string | null = null;
   for (let p = 0; p < SEARCH_PAGES; p++) {

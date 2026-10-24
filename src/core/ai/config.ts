@@ -24,7 +24,19 @@ export type AgentCopy = {
   };
 };
 
+/** The vector index (Vectorize in production). Namespaced per workspace; ids are opaque. */
+export interface VectorStore {
+  upsert(vectors: { id: string; values: number[]; namespace: string; metadata?: Record<string, string> }[]): Promise<void>;
+  query(values: number[], opts: { namespace: string; topK: number }): Promise<{ id: string; score: number; metadata?: Record<string, string> }[]>;
+  deleteByIds(ids: string[]): Promise<void>;
+}
+/** Turns texts into vectors (Workers AI `@cf/baai/bge-m3` in production). */
+export type Embedder = (texts: string[]) => Promise<number[][]>;
+
 export type AgentConfig = {
+  /** The vector index, or null when none is bound: the agent then answers without a knowledge base. */
+  vectors: (env: Env) => VectorStore | null;
+  embedder: (env: Env) => Embedder | null;
   copy: AgentCopy | null;
   /** The model for a workspace, or null when none can be built (no AI binding, no key). Tests return a scripted fake. */
   provider: (env: Env, ws: { settings: { provider: 'workers-ai' | 'openai-compatible'; model: string | null; baseUrl: string | null }; apiKey: string | null }) => LlmProvider | null;
@@ -43,6 +55,27 @@ export const EMBEDDING_MODEL = '@cf/baai/bge-m3';
 
 let current: AgentConfig = {
   copy: null,
+  vectors: (env) => {
+    const v = env.VECTORIZE;
+    if (!v) return null;
+    return {
+      upsert: async (vectors) => { await v.upsert(vectors); },
+      query: async (values, o) => {
+        const r = await v.query(values, { namespace: o.namespace, topK: o.topK, returnMetadata: 'all' });
+        return r.matches.map((m) => ({ id: m.id, score: m.score, ...(m.metadata ? { metadata: Object.fromEntries(Object.entries(m.metadata).map(([k, x]) => [k, String(x)])) } : {}) }));
+      },
+      deleteByIds: async (ids) => { await v.deleteByIds(ids); },
+    };
+  },
+  embedder: (env) => {
+    const ai = env.AI;
+    if (!ai) return null;
+    return async (texts) => {
+      const out = (await ai.run(EMBEDDING_MODEL, { text: texts })) as { data?: number[][] };
+      if (!out.data || out.data.length !== texts.length) throw new Error('embedding answer malformed');
+      return out.data;
+    };
+  },
   provider: (env, ws) => {
     if (ws.settings.provider === 'openai-compatible') {
       return ws.settings.baseUrl && ws.settings.model && ws.apiKey ? new OpenAiCompatibleProvider({ baseUrl: ws.settings.baseUrl, apiKey: ws.apiKey, model: ws.settings.model }) : null;

@@ -1,6 +1,6 @@
 import { runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-import { HOLD_TTL_MS, creditBalance, creditsAvailable, expireGrant, grantCredits, holdCredits, postCredit, releaseHold, settleHold, upgradeGrant } from '../src/core/ai/credits';
+import { describe, expect, it, vi } from 'vitest';
+import { HOLD_TTL_MS, heartbeatHold, creditBalance, creditsAvailable, expireGrant, grantCredits, holdCredits, postCredit, releaseHold, settleHold, upgradeGrant } from '../src/core/ai/credits';
 import { backupPrefix } from '../src/core/backup';
 import { rows, workspace } from './helpers/workspace';
 
@@ -66,6 +66,49 @@ describe('credit ledger', () => {
       expect(holdCredits(sql, 'ai:2', T0 + HOLD_TTL_MS + 1)).toBe('held');
     });
     expect(await rows(ws, 'SELECT ref, state FROM credit_holds ORDER BY ref')).toEqual([{ ref: 'ai:1', state: 'expired' }, { ref: 'ai:2', state: 'held' }]);
+  });
+
+  it('settling a hold that expired mid-turn re-checks the credits: another call may have taken them (no overdraw, nothing posted, alerted)', async () => {
+    const ws = W(9);
+    const log: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a) => { log.push(a.join(' ')); });
+    await inDo(ws, (sql) => {
+      grantCredits(sql, { periodStart: T0, packageId: 'p', credits: 1, now: T0 });
+      expect(holdCredits(sql, 'ai:slow', T0)).toBe('held');
+      const later = T0 + HOLD_TTL_MS + 5;
+      expect(holdCredits(sql, 'ai:other', later)).toBe('held'); // the slow turn's hold lapsed, the credit was re-offered
+      settleHold(sql, 'ai:other', later);
+      expect(creditBalance(sql)).toBe(0);
+      expect(settleHold(sql, 'ai:slow', later + 1)).toBe('refused');
+      expect(creditBalance(sql)).toBe(0); // never negative
+    });
+    spy.mockRestore();
+    expect(log.join(' ')).toContain('ai_overdraw_refused');
+    expect(await rows(ws, "SELECT ref FROM credit_ledger WHERE kind = 'ai_charge'")).toEqual([{ ref: 'ai:other' }]);
+  });
+
+  it('an expired hold whose credit is still free is charged normally', async () => {
+    const ws = W(10);
+    await inDo(ws, (sql) => {
+      grantCredits(sql, { periodStart: T0, packageId: 'p', credits: 1, now: T0 });
+      holdCredits(sql, 'ai:slow', T0);
+      expect(settleHold(sql, 'ai:slow', T0 + HOLD_TTL_MS + 5)).toBe('charged');
+      expect(creditBalance(sql)).toBe(0);
+    });
+  });
+
+  it('a heartbeat keeps a long turn\'s hold alive: nobody else can take its credit', async () => {
+    const ws = W(11);
+    await inDo(ws, (sql) => {
+      grantCredits(sql, { periodStart: T0, packageId: 'p', credits: 1, now: T0 });
+      holdCredits(sql, 'ai:long', T0);
+      let t = T0;
+      for (let i = 0; i < 5; i++) { t += HOLD_TTL_MS - 1000; heartbeatHold(sql, 'ai:long', t); }
+      expect(holdCredits(sql, 'ai:other', t + 1)).toBe('insufficient');
+      expect(settleHold(sql, 'ai:long', t + 2)).toBe('charged');
+      heartbeatHold(sql, 'ai:long', t + 3); // no effect on a settled hold
+      expect(creditBalance(sql)).toBe(0);
+    });
   });
 
   it('an upgrade grants the difference; expiry removes only unused GRANTED credits, purchased ones roll over', async () => {
