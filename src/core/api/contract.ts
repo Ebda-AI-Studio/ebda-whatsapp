@@ -203,6 +203,35 @@ export const listImportsResponse = z.object({ items: z.array(importDto) });
 export const importRejectsResponse = z.object({ items: z.array(z.object({ line: z.number().int(), reason: z.string() })) });
 export type ImportDto = z.infer<typeof importDto>;
 
+/**
+ * Phase 6.2: who a campaign may reach. At least one filter, or `everyone: true` (the explicit "all contacts who agreed" audience): an
+ * empty filter never silently widens to everybody. Contacts who opted out, or have no consent on record, are never in an audience
+ * (`optedOut: false` is accepted for clarity; `true` is refused).
+ */
+export const segmentCriteria = z.strictObject({
+  tags: z.strictObject({ any: z.array(tagName).max(10).optional(), all: z.array(tagName).max(10).optional() }).optional(),
+  /** Epoch ms. A contact who never wrote to us has no last inbound and matches neither bound. */
+  lastInboundAfter: z.number().int().nonnegative().optional(),
+  lastInboundBefore: z.number().int().nonnegative().optional(),
+  /** true = has at least one order that is not cancelled / refunded / refused / failed; false = has none. */
+  hasOrdered: z.boolean().optional(),
+  everyone: z.literal(true).optional(),
+  optedOut: z.literal(false).optional(),
+}).refine(
+  (c) => !!c.tags?.any?.length || !!c.tags?.all?.length || c.lastInboundAfter !== undefined || c.lastInboundBefore !== undefined || c.hasOrdered !== undefined || c.everyone === true,
+  { message: 'empty_criteria' },
+).refine((c) => c.lastInboundAfter === undefined || c.lastInboundBefore === undefined || c.lastInboundAfter < c.lastInboundBefore, { message: 'empty_range' });
+export type SegmentCriteria = z.infer<typeof segmentCriteria>;
+export const segmentDto = z.object({ id: z.number().int(), name: z.string(), criteria: segmentCriteria, createdAt: z.number().int(), updatedAt: z.number().int() });
+export const createSegmentRequest = z.object({ name: z.string().trim().min(1).max(60), criteria: segmentCriteria });
+export const updateSegmentRequest = createSegmentRequest.partial().refine((p) => Object.keys(p).length > 0, 'nothing to change');
+export const segmentPreviewRequest = z.object({ criteria: segmentCriteria });
+/** `count` = people who would receive a marketing send; `excluded` = people the filter matches but who cannot be messaged, and why. */
+export const segmentPreviewDto = z.object({ count: z.number().int().nonnegative(), excluded: z.object({ optedOut: z.number().int().nonnegative(), noConsent: z.number().int().nonnegative() }) });
+export const listSegmentsResponse = z.object({ items: z.array(segmentDto) });
+export type SegmentDto = z.infer<typeof segmentDto>;
+export type SegmentPreviewDto = z.infer<typeof segmentPreviewDto>;
+
 export const customerOrdersResponse = z.object({ items: z.array(orderSummaryDto), source: z.enum(['store', 'sample']) });
 
 export type ContactDto = z.infer<typeof contactDto>;
@@ -240,4 +269,8 @@ export const ROUTES = {
   imports: 'GET|POST /imports',
   import: 'GET /imports/:importId',
   importRejects: 'GET /imports/:importId/rejects',
+  segments: 'GET|POST /segments',
+  segment: 'GET|PUT|DELETE /segments/:segmentId',
+  segmentPreview: 'POST /segments/preview',
+  segmentCount: 'GET /segments/:segmentId/preview',
 } as const;

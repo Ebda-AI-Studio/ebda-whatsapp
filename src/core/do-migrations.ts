@@ -233,6 +233,17 @@ export const DO_MIGRATIONS: readonly string[] = [
      finished_at INTEGER
    );
    CREATE TABLE import_rejects (import_id TEXT NOT NULL, line INTEGER NOT NULL, reason TEXT NOT NULL, PRIMARY KEY (import_id, line)) WITHOUT ROWID;`,
+  // v22 (Phase 6.2, segments): saved audience filters. Criteria are JSON validated by the API; the audience query always adds
+  // "not opted out" and "consent on record", whatever the criteria say.
+  `CREATE TABLE segments (
+     id INTEGER PRIMARY KEY,
+     name TEXT NOT NULL,
+     criteria TEXT NOT NULL,
+     created_by TEXT,
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL
+   );
+   CREATE UNIQUE INDEX segments_name ON segments (name);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

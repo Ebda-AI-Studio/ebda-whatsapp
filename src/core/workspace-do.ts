@@ -24,6 +24,8 @@ import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { errClass, safeMessage } from './observability';
+import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
+import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
 import type { AgentSettingsDto } from './api/contract';
 import { creditBalance, creditsAvailable, expireGrant, grantCredits, postCredit, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
@@ -775,6 +777,36 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   async setContactTags(waId: string, tags: string[]) {
     return setContactTags(this.host(), waId, tags);
+  }
+
+  // ---- Campaigns (Phase 6): segments ---------------------------------------------------------------------------------
+
+  async listSegments() {
+    return listSegments(this.host());
+  }
+
+  async getSegment(id: number) {
+    return getSegment(this.host(), id);
+  }
+
+  async createSegment(a: { name: string; criteria: SegmentCriteria; actor: string }) {
+    return createSegment(this.host(), { ...a, now: Date.now() });
+  }
+
+  async updateSegment(id: number, patch: { name?: string; criteria?: SegmentCriteria }) {
+    return updateSegment(this.host(), id, patch, Date.now());
+  }
+
+  async deleteSegment(id: number): Promise<boolean> {
+    return deleteSegment(this.host(), id);
+  }
+
+  async previewAudience(criteria: SegmentCriteria) {
+    return previewAudience(this.host(), criteria);
+  }
+
+  async audiencePage(criteria: SegmentCriteria, afterId: number, limit: number) {
+    return audiencePage(this.host(), criteria, afterId, limit);
   }
 
   /** Deletes the R2 objects owed so far; whatever R2 refuses stays owed and is retried within the hour. */

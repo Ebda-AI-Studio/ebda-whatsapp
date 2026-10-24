@@ -35,6 +35,7 @@ import { proofRoutes } from './routes/proof';
 import { agentRoutes } from './routes/agent';
 import { contactsRoutes } from './routes/contacts';
 import { importsRoutes } from './routes/imports';
+import { segmentsRoutes } from './routes/segments';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY });
@@ -92,6 +93,7 @@ api.route('/', proofRoutes);
 api.route('/', agentRoutes);
 api.route('/', contactsRoutes);
 api.route('/', importsRoutes);
+api.route('/', segmentsRoutes);
 app.route('/api/v1', api);
 
 function sameString(a: string, b: string): boolean {
