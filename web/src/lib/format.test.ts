@@ -29,3 +29,11 @@ describe('format (ar)', () => {
     expect(orderStops('refused').at(1)).toMatchObject({ key: 'confirmed', halted: true });
   });
 });
+
+import { STRINGS } from '../i18n';
+describe('payment method labels', () => {
+  it('names InstaPay in both languages', () => {
+    expect(STRINGS.ar.instapay).toBe('إنستاباي');
+    expect(STRINGS.en.instapay).toBe('InstaPay');
+  });
+});

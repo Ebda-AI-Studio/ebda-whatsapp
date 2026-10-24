@@ -32,6 +32,7 @@ async function boot(): Promise<void> {
       onReload: api.reload,
       fetchEvents: api.fetchEvents,
     });
+    await api.loadCapabilities();
     source = api;
   }
   root.render(

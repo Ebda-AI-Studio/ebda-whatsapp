@@ -17,7 +17,9 @@ type Opts = {
 };
 
 /** The live inbox source: every response is validated against the shared contract. */
-export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: number) => Promise<z.infer<typeof eventsResponse>>; emit: (e: RealtimeEvent) => void; reload: () => void } {
+export type LiveSource = InboxSource & { fetchEvents: (after: number) => Promise<z.infer<typeof eventsResponse>>; emit: (e: RealtimeEvent) => void; reload: () => void; loadCapabilities: () => Promise<void> };
+
+export function createApiSource(o: Opts): LiveSource {
   const f = o.fetchImpl ?? fetch;
   const root = `${o.baseUrl}/api/v1/stores/${o.storeId}`;
 
@@ -39,9 +41,10 @@ export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: n
   const listeners = new Set<(e: RealtimeEvent) => void>();
   const reloaders = new Set<() => void>();
 
-  return {
+  const source: LiveSource = {
     kind: 'live',
-    capabilities: { codOutcome: false }, // the store route lands in Phase 4; until then no Confirm/Refuse in live mode
+    // Off until the server says the store link is bound (GET /me → capabilities): never offer an action that would 404.
+    capabilities: { codOutcome: false },
     currentUserId: o.currentUserId,
     userNames: o.userNames,
     async listConversations(filter, q) {
@@ -110,7 +113,16 @@ export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: n
     fetchEvents: (after) => call(`/events?after=${after}`, eventsResponse),
     emit: (e) => listeners.forEach((l) => l(e)),
     reload: () => reloaders.forEach((r) => r()),
+    async loadCapabilities() {
+      try {
+        const me = await call('/me', z.object({ capabilities: z.object({ codOutcome: z.boolean() }).optional() }).loose());
+        source.capabilities = { codOutcome: me.capabilities?.codOutcome === true };
+      } catch {
+        source.capabilities = { codOutcome: false };
+      }
+    },
   };
+  return source;
 }
 
 export interface SocketLike {

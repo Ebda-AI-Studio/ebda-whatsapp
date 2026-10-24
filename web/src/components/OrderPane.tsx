@@ -44,7 +44,7 @@ export function OrderPane({ t, lang, orders, hasChat, canDecide, onConfirm, onRe
       {current && (
         <article className="order-card" aria-label={current.orderNumber}>
           <div className="order-top"><b><bdi>{current.orderNumber}</bdi></b><span className="order-total">{formatMoney(current.totalMinor, current.currency, lang)}</span></div>
-          <div className="muted">{t.items(num(current.itemsCount, lang))} · {t[current.paymentMethod]}</div>
+          <div className="muted">{t.items(num(current.itemsCount, lang))} · {t[current.paymentMethod as 'cod'] ?? current.paymentMethod}</div>
           <span className="status" data-status={current.status}>{t.orderStatus[current.status]}</span>
           <OrderRail t={t} status={current.status} />
           {canDecide && current.status === 'pending_confirmation' && !askingRefuse && (

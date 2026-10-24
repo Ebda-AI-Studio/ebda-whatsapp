@@ -59,6 +59,20 @@ describe('createApiSource', () => {
     expect((await src.listConversations('all', 'كلمة')).map((c) => c.id)).toEqual([99]);
   });
 
+  it('turns COD outcomes on when /me reports the store link', async () => {
+    const { f } = fetchStub({ '/me': () => ({ status: 200, body: { userId: 'u', storeId: STORE, role: 'owner', capabilities: { codOutcome: true } } }) });
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    await src.loadCapabilities();
+    expect(src.capabilities).toEqual({ codOutcome: true });
+  });
+
+  it('keeps COD outcomes off when /me says nothing or fails', async () => {
+    const { f } = fetchStub({ '/me': () => ({ status: 500, body: {} }) });
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    await src.loadCapabilities();
+    expect(src.capabilities).toEqual({ codOutcome: false });
+  });
+
   it('declares COD outcomes unavailable until the store route exists', () => {
     const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', userNames: {}, currentUserId: 'u' });
     expect(src.capabilities).toEqual({ codOutcome: false });
