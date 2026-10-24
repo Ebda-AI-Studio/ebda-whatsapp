@@ -205,12 +205,27 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.emitConversationUpdated(conversationId);
         return 'claimed';
       }
+      if (existing.status === 'queued' || existing.status === 'retry') {
+        // A marketing template that waited (tier, throughput or Meta's frequency cap) must honour an opt-out given meanwhile.
+        if (this.marketingToOptedOut(job)) {
+          this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'opted_out', updated_at = ? WHERE id = ?", now, existing.id);
+          this.emitMessageStatus(existing.id);
+          return 'dropped';
+        }
+      }
       if (existing.status === 'queued' || existing.status === 'retry' || (existing.status === 'claimed' && now - existing.updated_at > STALE_CLAIM_MS && existing.claim_attempts < 2)) {
         this.sql.exec("UPDATE messages SET status = 'claimed', claim_attempts = claim_attempts + 1, updated_at = ? WHERE id = ?", now, existing.id);
         return 'claimed';
       }
       return existing.status === 'claimed' ? 'in_flight' : 'already_sent';
     }
+  }
+
+  private marketingToOptedOut(job: SendJob): boolean {
+    if (jobKind(job) !== 'template' || !job.template) return false;
+    const cat = this.sql.exec<{ category: string }>('SELECT category FROM templates WHERE name = ? AND language = ?', job.template.name, job.template.language).toArray()[0]?.category;
+    if (cat !== 'MARKETING') return false;
+    return this.sql.exec<{ opted_out_at: number | null }>('SELECT opted_out_at FROM contacts WHERE wa_id = ?', job.to).toArray()[0]?.opted_out_at != null;
   }
 
   private limitsFor(phoneNumberId: string): { tier: number; mps: number; tokens: number; tokens_at: number; alerted_at: number } {

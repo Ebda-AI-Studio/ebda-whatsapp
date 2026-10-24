@@ -128,6 +128,8 @@ export const DO_MIGRATIONS: readonly string[] = [
   `CREATE TABLE erased_keys (key TEXT PRIMARY KEY);`,
   // Lease: a task being run is claimed until lease_until, so overlapping runners (alarm + direct calls) never run it twice.
   `ALTER TABLE scheduled_tasks ADD COLUMN lease_until INTEGER;`,
+  // v12 (final review): why a message failed when Meta never saw it (error_code is Meta's numbers only), e.g. 'opted_out'.
+  `ALTER TABLE messages ADD COLUMN error_reason TEXT;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
