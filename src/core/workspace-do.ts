@@ -377,7 +377,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           if (t.category === 'MARKETING' && conv.opted_out_at !== null) return { ok: false, reason: 'opted_out' };
           const stored = componentsSchema.safeParse(JSON.parse(t.components));
           if (!stored.success) return { ok: false, reason: 'invalid_request', message: 'stored template is malformed' };
-          const rendered = renderTemplate(stored.data, req.params);
+          const rendered = renderTemplate(stored.data, req.params, t.category);
           if (!rendered.ok) return { ok: false, reason: 'invalid_request', message: rendered.message };
           type = 'template'; preview = rendered.text;
           col = { template_name: req.name, template_lang: req.language };
@@ -411,7 +411,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         const parts = comps.success ? comps.data : [];
         return {
           name: t.name, language: t.language, category: t.category as TemplateDto['category'], status: t.status as TemplateDto['status'],
-          bodyText: bodyTextOf(parts), paramCount: paramCount(parts), rejectedReason: t.rejected_reason,
+          bodyText: bodyTextOf(parts), paramCount: paramCount(parts, t.category), rejectedReason: t.rejected_reason,
         };
       });
   }

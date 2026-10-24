@@ -33,3 +33,26 @@ it('Final #2: a deferred marketing template is dropped as opted_out when the con
   await consume([util]);
   expect(g.calls).toHaveLength(1);
 });
+
+it('Final #3: an AUTHENTICATION template (copy-code button shaped as type URL) is masked everywhere; the code only reaches the job', async () => {
+  const ws = W(501);
+  const api = await apiFor(ws);
+  const conv = await openChat(ws);
+  const stored = [
+    { type: 'BODY', text: '{{1}} is your verification code.' },
+    { type: 'BUTTONS', buttons: [{ type: 'URL', text: 'Copy code', url: 'https://www.whatsapp.com/otp/code/?otp_type=COPY_CODE&code=otp{{1}}' }] },
+  ];
+  await exec(ws, "INSERT INTO templates (name, language, category, status, components, updated_at) VALUES ('otp', 'en', 'AUTHENTICATION', 'APPROVED', ?, 1)", JSON.stringify(stored));
+  const res = await api.call('POST', `/conversations/${conv}/messages`, { type: 'template', clientId: cid(3), name: 'otp', language: 'en', params: ['482913'] });
+  expect(res.status).toBe(202);
+  const body = JSON.stringify(await res.json());
+  expect(body).not.toContain('482913');
+  expect(body).toContain('••••••');
+  const job = queuedJob();
+  expect(JSON.stringify(job.template!.components)).toContain('482913'); // the one place it must go: the Graph call
+  for (const q of ['SELECT preview, body FROM messages', 'SELECT payload FROM events', "SELECT text FROM messages_fts WHERE messages_fts MATCH '482913'"]) {
+    expect(JSON.stringify(await rows(ws, q))).not.toContain('482913');
+  }
+  const list = await (await api.call('GET', '/templates')).json() as { items: { name: string; paramCount: number }[] };
+  expect(list.items.find((t) => t.name === 'otp')!.paramCount).toBe(1);
+});
