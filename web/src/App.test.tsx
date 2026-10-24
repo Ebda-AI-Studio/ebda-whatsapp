@@ -181,4 +181,19 @@ describe('inbox', () => {
     await act(async () => fireEvent.click(send));
     expect(within(screen.getByRole('log')).getByText(/طلبك #0996 اتشحن/)).toBeTruthy();
   });
+
+  it('updates an existing bubble when message.created is re-sent for the same id (media landed)', async () => {
+    const source = createSampleSource();
+    let emit: (e: Parameters<Parameters<typeof source.subscribe>[0]>[0]) => void = () => undefined;
+    source.subscribe = (cb) => { emit = cb; return () => undefined; };
+    render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    const base = { clientId: null, wamid: 'w.img', direction: 'in' as const, type: 'image' as const, hasLongBody: false, template: null, status: null, errorCode: null, at: Date.UTC(2026, 9, 24, 16, 59) };
+    await act(async () => emit({ type: 'message.created', seq: 1, conversationId: 1, message: { ...base, id: 900, text: 'صورة', media: null } }));
+    await act(async () => emit({ type: 'message.created', seq: 2, conversationId: 1, message: { ...base, id: 900, text: 'صورة المقاس', media: { mime: 'image/jpeg', size: 9, url: '/m/900' } } }));
+    const log = within(screen.getByRole('log'));
+    expect(log.queryByText('صورة')).toBeNull();
+    expect(log.getByText('صورة المقاس')).toBeTruthy();
+  });
 });

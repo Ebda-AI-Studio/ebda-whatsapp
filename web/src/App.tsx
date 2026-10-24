@@ -81,7 +81,8 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
       // Reconcile with an optimistic bubble by clientId first, then dedupe by id.
       if (e.conversationId === selectedId) setMessages((ms) => {
         if (e.message.clientId && ms.some((m) => m.clientId === e.message.clientId)) return ms.map((m) => (m.clientId === e.message.clientId ? e.message : m));
-        return ms.some((m) => m.id === e.message.id) ? ms : [...ms, e.message];
+        // Same id again (e.g. media finished downloading): update the bubble in place.
+        return ms.some((m) => m.id === e.message.id) ? ms.map((m) => (m.id === e.message.id ? e.message : m)) : [...ms, e.message];
       });
       void refresh();
     } else if (e.type === 'conversation.updated') {

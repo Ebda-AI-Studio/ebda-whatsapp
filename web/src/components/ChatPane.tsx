@@ -51,7 +51,7 @@ export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, 
           <span className="win" data-state={win.state}>{win.label}</span>
         </div>
         <div className="head-actions">
-          <span className="tag assignee">{conversation.assigneeUserId ? `${t.assignedTo}: ${userNames[conversation.assigneeUserId] ?? t.unassignedLabel}` : t.unassignedLabel}</span>
+          <span className="tag assignee">{conversation.assigneeUserId ? `${t.assignedTo}: ${userNames[conversation.assigneeUserId] ?? conversation.assigneeUserId.slice(0, 8)}` : t.unassignedLabel}</span>
         </div>
       </header>
       {currentOrder && (

@@ -21,7 +21,7 @@ async function listen(storeId: string, token: string) {
   const ws = res.webSocket!;
   ws.accept();
   const events: RealtimeEvent[] = [];
-  ws.addEventListener('message', (e) => events.push(realtimeEvent.parse(JSON.parse(String(e.data)))));
+  ws.addEventListener('message', (e) => { events.push(realtimeEvent.parse(JSON.parse(String(e.data)))); });
   return { ws, events, res };
 }
 const waitFor = (fn: () => boolean) => vi.waitFor(() => expect(fn()).toBe(true), { timeout: 3000, interval: 10 });

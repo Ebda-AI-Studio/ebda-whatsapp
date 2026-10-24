@@ -72,7 +72,7 @@ describe('connectRealtime', () => {
     const fetchEvents = vi.fn(async (after: number) => ({ items: [{ type: 'conversation.updated' as const, seq: after + 1, conversation: conv }], latestSeq: after + 1 }));
     const stop = connectRealtime({ url: 'wss://wa.test/ws', getToken: async () => 'tok', onEvent: (e) => got.push(e.seq), fetchEvents, socketImpl: FakeSocket as never, backoffMs: () => 0 });
     await vi.waitFor(() => expect(FakeSocket.last).toBeTruthy());
-    expect(FakeSocket.last.protocols).toEqual(['bearer.tok']);
+    expect(FakeSocket.last.protocols).toEqual(['inbox.v1', 'bearer.tok']);
     FakeSocket.last.onopen?.();
     FakeSocket.last.onmessage?.({ data: JSON.stringify({ type: 'conversation.updated', seq: 1, conversation: conv }) });
     FakeSocket.last.onmessage?.({ data: JSON.stringify({ type: 'conversation.updated', seq: 3, conversation: conv }) });

@@ -196,7 +196,7 @@ A warm-neutral field with one metallic accent and three muted status inks.
 
 ### Named Rules
 **The Tabular Rule.** Numerals are tabular everywhere (`font-variant-numeric: tabular-nums` on root).
-**The Own-Direction Rule.** Customer-authored text uses `dir="auto"` / `unicode-bidi: plaintext` and `text-align: start`; never force the UI direction onto it.
+**The Own-Direction Rule.** Customer-authored text uses `dir="auto"` / `unicode-bidi: plaintext` and `text-align: start`; never impose the UI direction on it.
 **The No Letter Motion Rule.** No per-letter animation (breaks Arabic joining).
 
 ## Layout
@@ -262,5 +262,5 @@ Notices are Sand Selected strips (offline = pale brick tint with Brick text). To
 - **Don't** add orange, gradients (beyond the quick-reply fade mask), glass or resting shadows.
 - **Don't** put a coloured stripe or border-inline-start accent on rows; selection is tint plus avatar ring.
 - **Don't** use gold as text colour on light grounds; use Gold Ink.
-- **Don't** animate text per letter or force UI direction onto customer content.
+- **Don't** animate text per letter or impose the UI direction on customer content.
 - **Don't** hard-code "Ebda" in the brand-neutral core; white-label copies reuse it.

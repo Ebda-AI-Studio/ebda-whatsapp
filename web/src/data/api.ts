@@ -17,7 +17,7 @@ type Opts = {
 };
 
 /** The live inbox source: every response is validated against the shared contract. */
-export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: number) => Promise<z.infer<typeof eventsResponse>> } {
+export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: number) => Promise<z.infer<typeof eventsResponse>>; emit: (e: RealtimeEvent) => void } {
   const f = o.fetchImpl ?? fetch;
   const root = `${o.baseUrl}/api/v1/stores/${o.storeId}`;
 
@@ -79,6 +79,7 @@ export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: n
       return () => listeners.delete(onEvent);
     },
     fetchEvents: (after) => call(`/events?after=${after}`, eventsResponse),
+    emit: (e) => listeners.forEach((l) => l(e)),
   };
 }
 
@@ -124,7 +125,8 @@ export function connectRealtime(o: RealtimeOpts): () => void {
 
   const open = async () => {
     if (stopped) return;
-    const s = new Socket(o.url, [`bearer.${await o.getToken()}`]);
+    // The server echoes "inbox.v1"; the token rides alongside because browsers cannot set WebSocket headers.
+    const s = new Socket(o.url, ['inbox.v1', `bearer.${await o.getToken()}`]);
     socket = s;
     s.onopen = () => {
       const hadState = lastSeq > 0;

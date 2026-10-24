@@ -117,7 +117,7 @@
       { "name": "The No Orange Rule", "body": "No orange anywhere in Ebda's own UI; the gold is brass, not amber.", "section": "colors" },
       { "name": "The Gold Is Not Text Rule", "body": "Gold on light grounds is a fill or ring; text in that role uses Gold Ink.", "section": "colors" },
       { "name": "The Tabular Rule", "body": "Numerals are tabular everywhere.", "section": "typography" },
-      { "name": "The Own-Direction Rule", "body": "Customer-authored text uses dir=auto / unicode-bidi: plaintext and text-align: start; never force the UI direction onto it.", "section": "typography" },
+      { "name": "The Own-Direction Rule", "body": "Customer-authored text uses dir=auto / unicode-bidi: plaintext and text-align: start; never impose the UI direction on it.", "section": "typography" },
       { "name": "The No Letter Motion Rule", "body": "No per-letter animation (breaks Arabic joining).", "section": "typography" },
       { "name": "The Floating-Only Rule", "body": "If it is not floating above the page, it has no shadow.", "section": "elevation" },
       { "name": "The No Gradient Rule", "body": "No gradients, no glass. The single exception is the mask fade at the quick-reply strip's scroll edge.", "section": "elevation" }
@@ -133,7 +133,7 @@
       "Don't add orange, gradients (beyond the quick-reply fade mask), glass or resting shadows.",
       "Don't put a coloured stripe or border-inline-start accent on rows; selection is tint plus avatar ring.",
       "Don't use gold as text colour on light grounds; use Gold Ink.",
-      "Don't animate text per letter or force UI direction onto customer content.",
+      "Don't animate text per letter or impose the UI direction on customer content.",
       "Don't hard-code \"Ebda\" in the brand-neutral core; white-label copies reuse it."
     ]
   }
