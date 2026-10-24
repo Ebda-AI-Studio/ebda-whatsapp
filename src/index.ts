@@ -16,6 +16,7 @@ import { normaliseE164 } from './core/phone';
 import { TIER_LIMITS } from './core/throttle';
 import { buyerKey } from './core/buyer-key';
 import { messagesRoutes } from './routes/messages';
+import { conversationsRoutes } from './routes/conversations';
 import { templatesRoutes } from './routes/templates';
 import { EBDA_DEFAULT_TEMPLATES } from './addons/ebda/templates';
 
@@ -51,6 +52,7 @@ api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   return c.json(result);
 });
 api.route('/', messagesRoutes);
+api.route('/', conversationsRoutes);
 api.route('/', templatesRoutes(EBDA_DEFAULT_TEMPLATES));
 app.route('/api/v1', api);
 

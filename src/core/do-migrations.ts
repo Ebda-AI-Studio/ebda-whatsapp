@@ -98,6 +98,27 @@ export const DO_MIGRATIONS: readonly string[] = [
      PRIMARY KEY (phone_number_id, contact_id)
    ) WITHOUT ROWID;
    CREATE INDEX tier_slots_started ON tier_slots (phone_number_id, started_at);`,
+  // v8 (Phase 2, inbox): assignment, notes, tags, list/sort indexes and full-text search over message previews.
+  `ALTER TABLE conversations ADD COLUMN assignee_user_id TEXT;
+   CREATE TABLE notes (
+     id INTEGER PRIMARY KEY,
+     conversation_id INTEGER NOT NULL,
+     author_user_id TEXT NOT NULL,
+     text TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   );
+   CREATE INDEX notes_conversation ON notes (conversation_id, id);
+   CREATE TABLE conversation_tags (
+     conversation_id INTEGER NOT NULL,
+     tag TEXT NOT NULL,
+     PRIMARY KEY (conversation_id, tag)
+   ) WITHOUT ROWID;
+   CREATE INDEX conversations_recent ON conversations (last_message_at DESC, id DESC);
+   CREATE INDEX conversations_unread ON conversations (last_message_at DESC, id DESC) WHERE unread > 0;
+   CREATE INDEX conversations_unassigned ON conversations (last_message_at DESC, id DESC) WHERE assignee_user_id IS NULL;
+   CREATE INDEX conversations_assignee ON conversations (assignee_user_id, last_message_at DESC, id DESC);
+   CREATE INDEX messages_conversation_id ON messages (conversation_id, id);
+   CREATE VIRTUAL TABLE messages_fts USING fts5(text);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

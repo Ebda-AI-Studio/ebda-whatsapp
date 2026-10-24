@@ -12,6 +12,9 @@ import { outboundMediaFor } from './media';
 import { detectOptIn, detectOptOut } from './consent';
 import { DAILY_KINDS, addTask, backoffMs, dueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
+import { normaliseText } from './text-normalise';
+import { conversationDto, type ConversationRow } from './dto';
+import type { ConversationDto, NoteDto } from './api/contract';
 import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './throttle';
 import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
 import type { TemplateDto } from './api/contract';
@@ -59,7 +62,10 @@ export class WorkspaceDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    ctx.blockConcurrencyWhile(async () => migrate(ctx.storage));
+    ctx.blockConcurrencyWhile(async () => {
+      migrate(ctx.storage);
+      this.reindexIfEmpty();
+    });
   }
 
   /** The workspace id is the DO name. Never fall back to the hex id: idFromName(hex) is a different, empty DO. */
@@ -104,12 +110,12 @@ export class WorkspaceDO extends DurableObject<Env> {
         ).one().id;
         const optOut = m.type === 'text' && !!m.text && detectOptOut(m.text);
         const cols = this.bodyColumns(m.text, bodies.get(m.wamid));
-        const inserted = this.sql.exec(
+        const inserted = this.sql.exec<{ id: number }>(
           `INSERT INTO messages (wamid, conversation_id, direction, type, preview, body, body_r2_key, created_at, updated_at)
-           VALUES (?, ?, 'in', ?, ?, ?, ?, ?, ?) ON CONFLICT(wamid) DO NOTHING`,
+           VALUES (?, ?, 'in', ?, ?, ?, ?, ?, ?) ON CONFLICT(wamid) DO NOTHING RETURNING id`,
           m.wamid, conversationId, m.type, cols.preview, cols.body, cols.key, m.ts * 1000, now,
-        ).rowsWritten;
-        if (inserted === 0) {
+        ).toArray()[0];
+        if (!inserted) {
           result.duplicates++;
           // Redelivery heals a lost enqueue: offer the reply again until its send is claimed (claimSend dedupes).
           const claimed = this.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', `reply:${m.wamid}`).toArray().length > 0;
@@ -117,6 +123,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           continue;
         }
         result.stored++;
+        this.indexMessage(inserted.id, cols.preview);
         this.sql.exec('UPDATE conversations SET unread = unread + 1 WHERE id = ?', conversationId);
         if (optOut) {
           // A reply to STOP is optional under Meta's rules and we send none: the opt-out is silent and immediate.
@@ -171,11 +178,12 @@ export class WorkspaceDO extends DurableObject<Env> {
           'INSERT INTO conversations (contact_id, last_message_at) VALUES (?, ?) ON CONFLICT(contact_id) DO UPDATE SET last_message_at = excluded.last_message_at RETURNING id',
           contactId, Math.floor(now / 1000),
         ).one().id;
-        this.sql.exec(
+        const replyId = this.sql.exec<{ id: number }>(
           `INSERT INTO messages (conversation_id, direction, type, preview, body, status, idempotency_key, claim_attempts, created_at, updated_at)
-           VALUES (?, 'out', 'text', ?, ?, 'claimed', ?, 1, ?, ?)`,
+           VALUES (?, 'out', 'text', ?, ?, 'claimed', ?, 1, ?, ?) RETURNING id`,
           conversationId, previewOf(job.text), job.text, job.idempotencyKey, now, now,
-        );
+        ).one().id;
+        this.indexMessage(replyId, previewOf(job.text));
         return 'claimed';
       }
       if (existing.status === 'queued' || existing.status === 'retry' || (existing.status === 'claimed' && now - existing.updated_at > STALE_CLAIM_MS && existing.claim_attempts < 2)) {
@@ -348,6 +356,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         conversationId, type, previewOf(preview), preview.length ? preview : null, key,
         col.template_name ?? null, col.template_lang ?? null, col.media_mime ?? null, col.media_size ?? null, col.media_r2_key ?? null, now, now,
       ).one().id;
+      this.indexMessage(id, preview.length ? previewOf(preview) : null);
       this.sql.exec('UPDATE conversations SET last_message_at = max(coalesce(last_message_at, 0), ?) WHERE id = ?', Math.floor(now / 1000), conversationId);
       const row = this.sql.exec<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?`, id).one();
       return { ok: true, message: messageDto(row, workspaceId), job };
@@ -462,6 +471,141 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (rank <= msg.status_rank || (e.status === 'failed' && msg.status_rank >= STATUS_RANK.delivered)) return false;
     this.sql.exec('UPDATE messages SET status = ?, status_rank = ?, error_code = coalesce(?, error_code), updated_at = ? WHERE id = ?', e.status, rank, e.errorCode ?? null, Date.now(), msg.id);
     return true;
+  }
+
+  // ---- search index ----------------------------------------------------------------------------------------------
+
+  /** Adds one message to the full-text index. Text is normalised here and at query time with the same function. */
+  private indexMessage(messageId: number, preview: string | null): void {
+    const t = preview ? normaliseText(preview) : '';
+    if (t) this.sql.exec('INSERT INTO messages_fts (rowid, text) VALUES (?, ?)', messageId, t);
+  }
+
+  /** Rebuilds the index from message previews (after a restore, or for rows older than the index). */
+  private rebuildFts(): void {
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec('DELETE FROM messages_fts');
+      for (const m of this.sql.exec<{ id: number; preview: string }>('SELECT id, preview FROM messages WHERE preview IS NOT NULL').toArray()) this.indexMessage(m.id, m.preview);
+    });
+  }
+
+  private reindexIfEmpty(): void {
+    if (this.sql.exec('SELECT 1 FROM messages_fts LIMIT 1').toArray().length) return;
+    if (this.sql.exec('SELECT 1 FROM messages WHERE preview IS NOT NULL LIMIT 1').toArray().length) this.rebuildFts();
+  }
+
+  // ---- inbox reads and edits --------------------------------------------------------------------------------------
+
+  private static readonly CONVERSATION_SELECT = `SELECT c.id, ct.wa_id, ct.profile_name, ct.opted_out_at, ct.last_inbound_at, c.unread, c.assignee_user_id, c.last_message_at,
+      lm.preview AS lm_preview, lm.direction AS lm_direction, lm.type AS lm_type, lm.status AS lm_status, lm.created_at AS lm_at
+    FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
+    LEFT JOIN messages lm ON lm.id = (SELECT id FROM messages WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1)`;
+
+  private tagsFor(ids: number[]): Map<number, string[]> {
+    const out = new Map<number, string[]>();
+    if (!ids.length) return out;
+    for (const t of this.sql.exec<{ conversation_id: number; tag: string }>(`SELECT conversation_id, tag FROM conversation_tags WHERE conversation_id IN (${ids.map(() => '?').join(',')}) ORDER BY tag`, ...ids)) {
+      (out.get(t.conversation_id) ?? out.set(t.conversation_id, []).get(t.conversation_id)!).push(t.tag);
+    }
+    return out;
+  }
+
+  private conversationById(id: number, now: number): ConversationDto | null {
+    const row = this.sql.exec<ConversationRow>(`${WorkspaceDO.CONVERSATION_SELECT} WHERE c.id = ?`, id).toArray()[0];
+    return row ? conversationDto(row, this.tagsFor([id]).get(id) ?? [], now) : null;
+  }
+
+  /** Newest first by (last_message_at, id); `cursor` is the opaque "<at>.<id>" of the last row of the previous page. */
+  async listConversations(opts: { filter: 'all' | 'unread' | 'mine' | 'unassigned'; userId: string; cursor?: string; limit: number }, now = Date.now()): Promise<{ items: ConversationDto[]; nextCursor: string | null }> {
+    const where: string[] = [];
+    const params: SqlStorageValue[] = [];
+    if (opts.filter === 'unread') where.push('c.unread > 0');
+    else if (opts.filter === 'mine') { where.push('c.assignee_user_id = ?'); params.push(opts.userId); }
+    else if (opts.filter === 'unassigned') where.push('c.assignee_user_id IS NULL');
+    const m = opts.cursor ? /^(\d+)\.(\d+)$/.exec(opts.cursor) : null;
+    if (m) { where.push('(c.last_message_at, c.id) < (?, ?)'); params.push(Number(m[1]), Number(m[2])); }
+    const rows = this.sql
+      .exec<ConversationRow>(`${WorkspaceDO.CONVERSATION_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY c.last_message_at DESC, c.id DESC LIMIT ?`, ...params, opts.limit + 1)
+      .toArray();
+    const page = rows.slice(0, opts.limit);
+    const tags = this.tagsFor(page.map((r) => r.id));
+    const last = page.at(-1);
+    return { items: page.map((r) => conversationDto(r, tags.get(r.id) ?? [], now)), nextCursor: rows.length > opts.limit && last ? `${last.last_message_at ?? 0}.${last.id}` : null };
+  }
+
+  /** The newest `limit` messages before message id `before`, oldest first. Null when the conversation does not exist. */
+  async getMessages(conversationId: number, before: number | undefined, limit: number): Promise<{ items: MessageDto[]; nextBefore: number | null } | null> {
+    if (!this.sql.exec('SELECT 1 FROM conversations WHERE id = ?', conversationId).toArray().length) return null;
+    const workspaceId = this.workspaceId;
+    const rows = this.sql
+      .exec<MessageRow>(
+        `SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.conversation_id = ? ${before !== undefined ? 'AND m.id < ?' : ''} ORDER BY m.id DESC LIMIT ?`,
+        ...(before !== undefined ? [conversationId, before, limit + 1] : [conversationId, limit + 1]),
+      )
+      .toArray();
+    const page = rows.slice(0, limit).reverse();
+    return { items: page.map((r) => messageDto(r, workspaceId)), nextBefore: rows.length > limit && page[0] ? page[0].id : null };
+  }
+
+  /** The whole text of a message whose body lives in R2 (or inline). Null when there is no such message. */
+  async getBody(messageId: number): Promise<{ text: string } | null> {
+    const m = this.sql.exec<{ body: string | null; body_r2_key: string | null; preview: string | null }>('SELECT body, body_r2_key, preview FROM messages WHERE id = ?', messageId).toArray()[0];
+    if (!m) return null;
+    if (m.body !== null) return { text: m.body };
+    if (m.body_r2_key) {
+      const obj = await this.env.MEDIA.get(m.body_r2_key);
+      if (obj) return { text: await obj.text() };
+    }
+    return { text: m.preview ?? '' };
+  }
+
+  async markRead(conversationId: number, now = Date.now()): Promise<ConversationDto | null> {
+    this.sql.exec('UPDATE conversations SET unread = 0 WHERE id = ?', conversationId);
+    return this.conversationById(conversationId, now);
+  }
+
+  async assign(conversationId: number, userId: string | null, now = Date.now()): Promise<ConversationDto | null> {
+    this.sql.exec('UPDATE conversations SET assignee_user_id = ? WHERE id = ?', userId, conversationId);
+    return this.conversationById(conversationId, now);
+  }
+
+  async setTags(conversationId: number, tags: string[], now = Date.now()): Promise<ConversationDto | null> {
+    if (!this.sql.exec('SELECT 1 FROM conversations WHERE id = ?', conversationId).toArray().length) return null;
+    const clean = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec('DELETE FROM conversation_tags WHERE conversation_id = ?', conversationId);
+      for (const t of clean) this.sql.exec('INSERT INTO conversation_tags (conversation_id, tag) VALUES (?, ?)', conversationId, t);
+    });
+    return this.conversationById(conversationId, now);
+  }
+
+  async addNote(conversationId: number, authorUserId: string, text: string, now = Date.now()): Promise<NoteDto | null> {
+    if (!this.sql.exec('SELECT 1 FROM conversations WHERE id = ?', conversationId).toArray().length) return null;
+    const id = this.sql.exec<{ id: number }>('INSERT INTO notes (conversation_id, author_user_id, text, created_at) VALUES (?, ?, ?, ?) RETURNING id', conversationId, authorUserId, text, now).one().id;
+    return { id, authorUserId, text, at: now };
+  }
+
+  async listNotes(conversationId: number): Promise<NoteDto[] | null> {
+    if (!this.sql.exec('SELECT 1 FROM conversations WHERE id = ?', conversationId).toArray().length) return null;
+    return this.sql
+      .exec<{ id: number; author_user_id: string; text: string; created_at: number }>('SELECT id, author_user_id, text, created_at FROM notes WHERE conversation_id = ? ORDER BY id', conversationId)
+      .toArray()
+      .map((n) => ({ id: n.id, authorUserId: n.author_user_id, text: n.text, at: n.created_at }));
+  }
+
+  /** Full-text search over message previews: every word is a prefix match, both sides normalised the same way. */
+  async search(q: string, limit: number): Promise<{ conversationId: number; messageId: number; snippet: string; at: number }[]> {
+    const tokens = normaliseText(q).split(' ').filter(Boolean).slice(0, 8);
+    if (!tokens.length) return [];
+    // Tokens are letters/digits only after normalisation, so quoting them cannot be broken out of.
+    const match = tokens.map((t) => `"${t}"*`).join(' ');
+    return this.sql
+      .exec<{ id: number; conversation_id: number; preview: string | null; created_at: number }>(
+        'SELECT m.id, m.conversation_id, m.preview, m.created_at FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?',
+        match, limit,
+      )
+      .toArray()
+      .map((r) => ({ conversationId: r.conversation_id, messageId: r.id, snippet: Array.from(r.preview ?? '').slice(0, 160).join(''), at: r.created_at }));
   }
 
   /** Schedules the nightly backup and R2 drain if they are not pending yet (idempotent; cheap enough for every ingest). */
@@ -616,6 +760,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
       }
     });
+    this.rebuildFts();
     return manifest;
   }
 
@@ -646,6 +791,9 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
       if (conv) {
+        this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
+        this.sql.exec('DELETE FROM notes WHERE conversation_id = ?', conv.id);
+        this.sql.exec('DELETE FROM conversation_tags WHERE conversation_id = ?', conv.id);
         this.sql.exec('DELETE FROM messages WHERE conversation_id = ?', conv.id);
         this.sql.exec('DELETE FROM conversations WHERE id = ?', conv.id);
       }
