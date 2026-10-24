@@ -3,7 +3,10 @@ import { z } from 'zod';
 export const MESSAGE_TYPES = ['text', 'interactive', 'image', 'audio', 'video', 'document', 'sticker', 'location', 'order'] as const;
 export type MessageType = (typeof MESSAGE_TYPES)[number] | 'unsupported';
 
-export type InboundMessage = { wamid: string; from: string; ts: number; type: MessageType; text?: string; profileName?: string };
+export type InboundMedia = { id: string; mime: string; filename?: string };
+export type InboundMessage = { wamid: string; from: string; ts: number; type: MessageType; text?: string; caption?: string; media?: InboundMedia; profileName?: string };
+export const MEDIA_MESSAGE_TYPES = ['image', 'audio', 'video', 'document', 'sticker'] as const;
+const mediaBodySchema = z.object({ id: z.string().min(1), mime_type: z.string().optional(), caption: z.string().optional(), filename: z.string().optional() }).loose();
 export type StatusEvent = { wamid: string; status: 'sent' | 'delivered' | 'read' | 'failed'; ts: number; errorCode?: number };
 export type WebhookEvents = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[] };
 
@@ -67,12 +70,15 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
           continue;
         }
         const m = parsedMsg.data;
+        const type = toType(m.type);
+        const media = (MEDIA_MESSAGE_TYPES as readonly string[]).includes(type) ? mediaBodySchema.safeParse((m as Record<string, unknown>)[m.type]) : null;
         ev.inbound.push({
           wamid: m.id,
           from: m.from,
           ts: Number(m.timestamp),
-          type: toType(m.type),
+          type,
           ...(m.text ? { text: m.text.body } : {}),
+          ...(media?.success ? { media: { id: media.data.id, mime: media.data.mime_type ?? 'application/octet-stream', ...(media.data.filename ? { filename: media.data.filename } : {}) }, ...(media.data.caption ? { caption: media.data.caption } : {}) } : {}),
           ...(names.get(m.from) ? { profileName: names.get(m.from) } : {}),
         });
       }

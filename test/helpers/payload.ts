@@ -1,4 +1,4 @@
-type Msg = { id: string; from?: string; type?: string; text?: string; ts?: number };
+type Msg = { id: string; from?: string; type?: string; text?: string; ts?: number; mime?: string; caption?: string; mediaId?: string };
 type Status = { id: string; status: 'sent' | 'delivered' | 'read' | 'failed'; ts?: number; errorCode?: number };
 
 const BASE_TS = 1761300000;
@@ -20,7 +20,7 @@ export function inboundPayload(phoneNumberId: string, msgs: Msg[], profileName =
             id: m.id,
             timestamp: String(m.ts ?? BASE_TS),
             type: m.type ?? 'text',
-            ...((m.type ?? 'text') === 'text' ? { text: { body: m.text ?? 'hi' } } : { [m.type!]: { id: 'media-1' } }),
+            ...((m.type ?? 'text') === 'text' ? { text: { body: m.text ?? 'hi' } } : { [m.type!]: { id: m.mediaId ?? 'media-1', mime_type: m.mime ?? 'image/jpeg', sha256: 'abc', ...(m.caption ? { caption: m.caption } : {}) } }),
           })),
         },
       }],

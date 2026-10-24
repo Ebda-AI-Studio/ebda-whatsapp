@@ -8,7 +8,7 @@ import type { SendJob } from './send-queue';
 import { jobKind } from './send-queue';
 import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
-import { outboundMediaFor } from './media';
+import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOut } from './consent';
 import { DAILY_KINDS, addTask, backoffMs, dueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
@@ -34,7 +34,7 @@ export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[]
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
-export type TaskPayload = { job?: SendJob; reason?: 'tier' | 'throughput' | 'frequency_cap'; n?: number };
+export type TaskPayload = { job?: SendJob; reason?: 'tier' | 'throughput' | 'frequency_cap'; n?: number; messageId?: number; mediaId?: string };
 export type ClaimResult = 'claimed' | 'already_sent' | 'in_flight' | 'dropped' | 'deferred';
 export type ThrottleReport = { tier: number; mps: number; usedInWindow: number; waiting: number; nextSlotAt: number | null };
 
@@ -101,6 +101,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     }
     await this.ensureBackupAlarm();
     const result: IngestResult = { stored: 0, duplicates: 0, replies: [] };
+    let scheduledMedia = false;
     this.ctx.storage.transactionSync(() => {
       const now = Date.now();
       for (const m of batch.inbound) {
@@ -117,11 +118,11 @@ export class WorkspaceDO extends DurableObject<Env> {
           contactId, m.ts,
         ).one().id;
         const optOut = m.type === 'text' && !!m.text && detectOptOut(m.text);
-        const cols = this.bodyColumns(m.text, bodies.get(m.wamid));
+        const cols = this.bodyColumns(m.text ?? m.caption, bodies.get(m.wamid));
         const inserted = this.sql.exec<{ id: number }>(
-          `INSERT INTO messages (wamid, conversation_id, direction, type, preview, body, body_r2_key, created_at, updated_at)
-           VALUES (?, ?, 'in', ?, ?, ?, ?, ?, ?) ON CONFLICT(wamid) DO NOTHING RETURNING id`,
-          m.wamid, conversationId, m.type, cols.preview, cols.body, cols.key, m.ts * 1000, now,
+          `INSERT INTO messages (wamid, conversation_id, direction, type, preview, body, body_r2_key, media_mime, created_at, updated_at)
+           VALUES (?, ?, 'in', ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(wamid) DO NOTHING RETURNING id`,
+          m.wamid, conversationId, m.type, cols.preview, cols.body, cols.key, m.media?.mime ?? null, m.ts * 1000, now,
         ).toArray()[0];
         if (!inserted) {
           result.duplicates++;
@@ -132,6 +133,10 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
         result.stored++;
         this.indexMessage(inserted.id, cols.preview);
+        if (m.media) {
+          addTask(this.sql, 'media_fetch', now, { messageId: inserted.id, mediaId: m.media.id });
+          scheduledMedia = true;
+        }
         this.emitMessageCreated(inserted.id);
         this.sql.exec('UPDATE conversations SET unread = unread + 1 WHERE id = ?', conversationId);
         if (optOut) {
@@ -145,6 +150,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       for (const st of batch.statuses) this.applyStatusSync(st);
     });
+    if (scheduledMedia) await this.arm();
     return result;
   }
 
@@ -574,6 +580,34 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (conversation) this.recordEvent({ type: 'conversation.updated', conversation });
   }
 
+  // ---- media ------------------------------------------------------------------------------------------------------
+
+  /** Downloads an inbound file to R2 and tells clients the media is ready. A message erased meanwhile leaves nothing behind. */
+  private async fetchInboundMedia(messageId: number, mediaId: string): Promise<void> {
+    const msg = this.sql.exec<{ wamid: string | null; media_mime: string | null }>('SELECT wamid, media_mime FROM messages WHERE id = ?', messageId).toArray()[0];
+    if (!msg?.wamid) return; // erased before we got to it
+    const key = `media/${this.workspaceId}/${msg.wamid}`;
+    const got = await downloadToR2(this.env, mediaId, key, msg.media_mime ?? 'application/octet-stream');
+    const stillThere = this.ctx.storage.transactionSync(() => {
+      const r = this.sql.exec('UPDATE messages SET media_r2_key = ?, media_size = ?, media_mime = ?, updated_at = ? WHERE id = ?', key, got.size, got.mime, Date.now(), messageId);
+      if (r.rowsWritten === 0) return false;
+      this.emitMessageCreated(messageId);
+      return true;
+    });
+    if (!stillThere) await this.env.MEDIA.delete(key);
+  }
+
+  /** Where a message's file lives in R2 (inbound after download, outbound from upload). Null when it has none yet. */
+  async getMedia(messageId: number): Promise<{ key: string; mime: string; size: number | null } | null> {
+    const m = this.sql.exec<{ media_r2_key: string | null; media_mime: string | null; media_size: number | null }>('SELECT media_r2_key, media_mime, media_size FROM messages WHERE id = ?', messageId).toArray()[0];
+    return m?.media_r2_key && m.media_mime ? { key: m.media_r2_key, mime: m.media_mime, size: m.media_size } : null;
+  }
+
+  /** A file we uploaded to Meta, kept in R2 so the inbox can show it and a later send can reference it. */
+  async recordUpload(u: { id: string; metaMediaId: string; mime: string; size: number; filename: string; r2Key: string }): Promise<void> {
+    this.sql.exec('INSERT INTO uploads (id, meta_media_id, mime, size, filename, r2_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', u.id, u.metaMediaId, u.mime, u.size, u.filename, u.r2Key, Date.now());
+  }
+
   // ---- search index ----------------------------------------------------------------------------------------------
 
   /** Adds one message to the full-text index. Text is normalised here and at query time with the same function. */
@@ -758,7 +792,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       for (const t of due) {
         ran++;
         try {
-          const nextDue = await this.runTask(t.kind, t.payload, now);
+          const nextDue = await this.runTask(t.kind, t.payload, now, t.attempts);
           if (nextDue === undefined) this.sql.exec('DELETE FROM scheduled_tasks WHERE id = ?', t.id);
           else this.sql.exec('UPDATE scheduled_tasks SET due_at = ?, attempts = 0, last_error = NULL WHERE id = ?', nextDue, t.id);
         } catch (err) {
@@ -775,7 +809,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** One task. Returns the next due time for self-rescheduling tasks. Throws to be retried with backoff. */
-  private async runTask(kind: TaskKind, payload: string | null, now: number): Promise<number | undefined> {
+  private async runTask(kind: TaskKind, payload: string | null, now: number, attempts: number): Promise<number | undefined> {
     switch (kind) {
       case 'backup': {
         const date = new Intl.DateTimeFormat('en-CA', { timeZone: BACKUP_TIME_ZONE }).format(now);
@@ -797,6 +831,18 @@ export class WorkspaceDO extends DurableObject<Env> {
           return undefined; // a payload that can never parse must not retry forever
         }
         await this.env.SEND_QUEUE.sendBatch([{ body: job.data }]);
+        return undefined;
+      }
+      case 'media_fetch': {
+        const p = JSON.parse(payload ?? 'null') as { messageId?: number; mediaId?: string } | null;
+        if (typeof p?.messageId !== 'number' || typeof p.mediaId !== 'string') return undefined;
+        try {
+          await this.fetchInboundMedia(p.messageId, p.mediaId);
+        } catch (err) {
+          if (attempts + 1 < MEDIA_FETCH_MAX_ATTEMPTS) throw err;
+          // Meta media ids live 30 days and we retried for hours: stop, say so, keep the message (without its media).
+          console.error(JSON.stringify({ alert: 'media_fetch_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: (err as Error).message }));
+        }
         return undefined;
       }
       default:
@@ -879,13 +925,15 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (!contact) return { found: false, keys: 0, messages: 0, statusEvents: 0 };
       const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
       const msgs = conv
-        ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null }>('SELECT wamid, body_r2_key FROM messages WHERE conversation_id = ?', conv.id).toArray()
+        ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null; media_r2_key: string | null }>('SELECT wamid, body_r2_key, media_r2_key FROM messages WHERE conversation_id = ?', conv.id).toArray()
         : [];
       let statusEvents = 0;
       let keys = 0;
       for (const m of msgs) {
-        if (m.body_r2_key) {
-          this.sql.exec('INSERT OR IGNORE INTO r2_pending_deletes (key) VALUES (?)', m.body_r2_key);
+        for (const k of [m.body_r2_key, m.media_r2_key]) {
+          if (!k) continue;
+          this.sql.exec('INSERT OR IGNORE INTO r2_pending_deletes (key) VALUES (?)', k);
+          this.sql.exec('DELETE FROM uploads WHERE r2_key = ?', k);
           keys++;
         }
         if (!m.wamid) continue;

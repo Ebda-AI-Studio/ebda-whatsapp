@@ -31,7 +31,7 @@ export function messageDto(r: MessageRow, workspaceId: string): MessageDto {
     // Up to 1 KB the whole text is inline; longer bodies expose their first 280 characters here and the rest via /messages/:id/body.
     text: r.body ?? r.preview,
     hasLongBody: r.body_r2_key !== null,
-    media: r.media_mime ? { mime: r.media_mime, size: r.media_size, url: `/api/v1/stores/${workspaceId}/media/${r.id}` } : null,
+    media: r.media_mime && r.media_r2_key ? { mime: r.media_mime, size: r.media_size, url: `/api/v1/stores/${workspaceId}/media/${r.id}` } : null,
     template: r.template_name ? { name: r.template_name, language: r.template_lang ?? '' } : null,
     status: (r.status as MessageDto['status']) ?? null,
     errorCode: r.error_code,
