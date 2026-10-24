@@ -2,10 +2,10 @@ export type Lang = 'ar' | 'en';
 
 const ar = {
   nav: 'التنقل الرئيسي', inbox: 'المحادثات', templates: 'القوالب', campaigns: 'الحملات', settings: 'الإعدادات',
-  conversations: 'المحادثات', all: 'الكل', unread: 'غير مقروءة', mine: 'ليا', unassigned: 'من غير مسؤول',
+  conversations: 'المحادثات', all: 'الكل', unread: 'غير مقروءة', mine: 'ليا', unassigned: 'بدون مسؤول',
   search: 'ابحث في المحادثات', noResults: 'مفيش محادثات هنا دلوقتي.', pickChat: 'اختار محادثة من القايمة علشان تبدأ ترد.',
   typeMessage: 'اكتب رسالة', send: 'إرسال', quickReplies: 'ردود سريعة', pickTemplate: 'اختيار قالب', attach: 'إرفاق ملف',
-  today: 'النهارده', yesterday: 'أمس', assignedTo: 'مسندة لـ', unassignedLabel: 'من غير مسؤول',
+  today: 'النهارده', yesterday: 'أمس', assignedTo: 'مع', unassignedLabel: 'بدون مسؤول',
   customerOrders: 'طلبات العميل', ordersCount: (n: string) => `${n} طلبات`, delivered: (a: string, b: string) => `استلم ${a} من ${b}`,
   confirmOrder: 'تأكيد الطلب', refuseOrder: 'رفض', total: 'الإجمالي', cod: 'الدفع عند الاستلام', link: 'رابط دفع', card: 'كارت', wallet: 'محفظة',
   items: (n: string) => `${n} منتج`, noOrders: 'العميل ده لسه ما طلبش حاجة.',

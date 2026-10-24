@@ -67,6 +67,7 @@ export function createSampleSource(): InboxSource {
   return {
     kind: 'sample',
     currentUserId: 'u-me',
+    userNames: { 'u-me': 'أنا', 'u-dina': 'دينا' },
     async listConversations(filter, q) {
       const query = q.trim();
       return convs

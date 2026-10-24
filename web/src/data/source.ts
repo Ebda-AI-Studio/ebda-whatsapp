@@ -6,6 +6,8 @@ export type ConversationFilter = 'all' | 'unread' | 'mine' | 'unassigned';
 export interface InboxSource {
   kind: 'live' | 'sample';
   currentUserId: string;
+  /** Display names of staff for assignee labels. */
+  userNames: Record<string, string>;
   listConversations(filter: ConversationFilter, q: string): Promise<ConversationDto[]>;
   getMessages(conversationId: number): Promise<MessageDto[]>;
   send(conversationId: number, req: SendMessageRequest): Promise<MessageDto>;

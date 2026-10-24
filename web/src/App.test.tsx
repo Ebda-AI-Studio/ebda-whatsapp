@@ -55,6 +55,15 @@ describe('inbox', () => {
     expect(screen.getByRole('button', { name: 'اختيار قالب' })).toBeTruthy();
   });
 
+  it('keeps Arabic customer text in its own direction inside the English UI', async () => {
+    setup();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'English' })));
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    const text = await within(screen.getByRole('log')).findByText('عايزة أأكد الأوردر بتاع امبارح');
+    expect(text.getAttribute('dir')).toBe('auto');
+  });
+
   it('switches to English LTR', async () => {
     setup();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'English' })));

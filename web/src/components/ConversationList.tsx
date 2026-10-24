@@ -40,14 +40,14 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
         {items.map((c) => (
           <li key={c.id}>
             <button type="button" className="row" aria-current={c.id === selectedId} onClick={() => onOpen(c.id)}>
-              <span className="avatar" aria-hidden>{initials(c.contact.name)}{c.unread > 0 && c.id !== selectedId && <span className="lit" />}</span>
+              <span className="avatar" aria-hidden>{initials(c.contact.name)}</span>
               <span className="row-body">
                 <span className="row-top">
-                  <span className="row-name">{c.contact.name ?? `+${c.contact.waId}`}</span>
+                  <span className="row-name" dir="auto">{c.contact.name ?? `+${c.contact.waId}`}</span>
                   {c.lastMessage && <span className="muted">{relativeTime(c.lastMessage.at, now, lang)}</span>}
                 </span>
                 <span className="row-bottom">
-                  <span className="row-preview">{c.lastMessage?.preview ?? ''}</span>
+                  <span className="row-preview" dir="auto">{c.lastMessage?.preview ?? ''}</span>
                   {c.unread > 0 && <span className="pill">{num(c.unread, lang)}<span className="vh"> {t.unread}</span></span>}
                 </span>
               </span>

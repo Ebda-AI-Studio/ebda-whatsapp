@@ -92,10 +92,10 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     <div className="app" data-view={selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
       <Rail t={t} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} />
       <ConversationList t={t} lang={lang} now={now()} items={items} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} onFilter={setFilter} onQuery={setQuery} onOpen={open} />
-      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+      <div className="center">
         {!online && <p className="notice offline" role="status">{t.offline}</p>}
         {error && <p className="notice offline" role="alert">{t.loadError} <button type="button" className="btn ghost" onClick={() => void refresh()}>{t.retry}</button></p>}
-        <ChatPane t={t} lang={lang} now={now()} conversation={selected} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onRetry={retry} onBack={() => setSelectedId(null)} onShowOrders={() => setOrdersOpen(true)} />
+        <ChatPane t={t} lang={lang} now={now()} conversation={selected} userNames={source.userNames} currentOrder={orders?.[0] ?? null} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onRetry={retry} onBack={() => setSelectedId(null)} onShowOrders={() => setOrdersOpen(true)} />
       </div>
       {selected && <OrderPane t={t} lang={lang} orders={orders} onConfirm={() => undefined} onRefuse={() => undefined} onClose={() => setOrdersOpen(false)} />}
       <button type="button" className="sheet-backdrop" aria-label={t.close} tabIndex={-1} onClick={() => setOrdersOpen(false)} />

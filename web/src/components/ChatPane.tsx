@@ -1,13 +1,13 @@
-import { ArrowRight, Check, CheckCheck, Clock, FileText, Package, Paperclip, Send, TriangleAlert } from 'lucide-react';
+import { ArrowRight, Check, CheckCheck, ChevronLeft, Clock, FileText, Paperclip, Send, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { ConversationDto, MessageDto, TemplateDto } from '../../../src/core/api/contract';
+import type { ConversationDto, MessageDto, OrderSummaryDto, TemplateDto } from '../../../src/core/api/contract';
 import type { Lang, Strings } from '../i18n';
-import { clockTime, windowLeft } from '../lib/format';
+import { clockTime, formatMoney, windowLeft } from '../lib/format';
 import { initials } from './ConversationList';
 
 type Props = {
   t: Strings; lang: Lang; now: number;
-  conversation: ConversationDto | null; messages: MessageDto[]; templates: TemplateDto[];
+  conversation: ConversationDto | null; userNames: Record<string, string>; currentOrder: OrderSummaryDto | null; messages: MessageDto[]; templates: TemplateDto[];
   onSendText: (text: string) => void; onSendTemplate: (tpl: TemplateDto) => void; onRetry: (m: MessageDto) => void;
   onBack: () => void; onShowOrders: () => void;
 };
@@ -24,7 +24,7 @@ function dayKey(at: number): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo' }).format(at);
 }
 
-export function ChatPane({ t, lang, now, conversation, messages, templates, onSendText, onSendTemplate, onRetry, onBack, onShowOrders }: Props) {
+export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, messages, templates, onSendText, onSendTemplate, onRetry, onBack, onShowOrders }: Props) {
   const [draft, setDraft] = useState('');
   const [picker, setPicker] = useState(false);
   const thread = useRef<HTMLDivElement>(null);
@@ -46,14 +46,21 @@ export function ChatPane({ t, lang, now, conversation, messages, templates, onSe
         <button type="button" className="icon-btn back" onClick={onBack} aria-label={t.back}><ArrowRight size={18} aria-hidden style={{ transform: lang === 'en' ? 'scaleX(-1)' : undefined }} /></button>
         <span className="avatar" aria-hidden>{initials(conversation.contact.name)}</span>
         <div className="who">
-          <b>{conversation.contact.name ?? `+${conversation.contact.waId}`}</b>
+          <b dir="auto">{conversation.contact.name ?? `+${conversation.contact.waId}`}</b>
           <span className="win" data-state={win.state}>{win.label}</span>
         </div>
         <div className="head-actions">
-          <span className="tag">{conversation.assigneeUserId ? `${t.assignedTo}: ${conversation.assigneeUserId === 'u-me' ? t.mine : conversation.assigneeUserId.replace(/^u-/, '')}` : t.unassignedLabel}</span>
-          <button type="button" className="btn ghost orders-toggle" onClick={onShowOrders}><Package size={17} aria-hidden />{t.showOrders}</button>
+          <span className="tag assignee">{conversation.assigneeUserId ? `${t.assignedTo}: ${userNames[conversation.assigneeUserId] ?? t.unassignedLabel}` : t.unassignedLabel}</span>
         </div>
       </header>
+      {currentOrder && (
+        <button type="button" className="order-strip" onClick={onShowOrders} aria-label={`${t.showOrders}: ${currentOrder.orderNumber}`}>
+          <b>{currentOrder.orderNumber}</b>
+          <span>{formatMoney(currentOrder.totalMinor, currentOrder.currency, lang)}</span>
+          <span className="status" data-status={currentOrder.status}>{t.orderStatus[currentOrder.status]}</span>
+          <ChevronLeft size={18} aria-hidden style={{ marginInlineStart: 'auto', transform: lang === 'en' ? 'scaleX(-1)' : undefined }} />
+        </button>
+      )}
       {conversation.contact.optedOut && <p className="notice">{t.optedOut}</p>}
       <div className="thread" ref={thread} role="log" aria-live="polite">
         {messages.map((m) => {
@@ -62,7 +69,7 @@ export function ChatPane({ t, lang, now, conversation, messages, templates, onSe
           lastDay = d;
           return [sep, (
             <div key={m.id} className={`bubble ${m.direction}`}>
-              {m.text}
+              <bdi dir="auto" className="text">{m.text}</bdi>
               <div className="meta" data-status={m.status ?? undefined}>
                 <span>{clockTime(m.at, lang)}</span>
                 {m.direction === 'out' && <><StatusIcon status={m.status} /><span className="vh">{m.status ? t.status[m.status] : ''}</span></>}
@@ -79,7 +86,7 @@ export function ChatPane({ t, lang, now, conversation, messages, templates, onSe
             {templates.filter((x) => x.status === 'APPROVED').map((tpl) => (
               <button key={tpl.name} type="button" role="menuitem" onClick={() => { onSendTemplate(tpl); setPicker(false); }}>
                 <b style={{ fontWeight: 500 }}>{tpl.name}</b>
-                <span className="muted">{tpl.bodyText}</span>
+                <span className="muted" dir="auto">{tpl.bodyText}</span>
               </button>
             ))}
           </div>
@@ -87,8 +94,8 @@ export function ChatPane({ t, lang, now, conversation, messages, templates, onSe
         <button type="button" className="icon-btn" aria-label={t.pickTemplate} aria-expanded={picker} onClick={() => setPicker((v) => !v)}><FileText size={18} aria-hidden /></button>
         <button type="button" className="icon-btn" aria-label={t.attach} disabled={closed}><Paperclip size={18} aria-hidden /></button>
         <label className="vh" htmlFor="composer">{t.typeMessage}</label>
-        <textarea id="composer" rows={1} value={draft} disabled={closed} placeholder={closed ? t.windowClosed : `${t.typeMessage}…`} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} />
-        <button type="button" className="btn primary" onClick={send} disabled={closed || !draft.trim()} aria-label={t.send}><Send size={17} aria-hidden style={{ transform: lang === 'ar' ? 'scaleX(-1)' : undefined }} /><span>{t.send}</span></button>
+        <textarea id="composer" rows={1} value={draft} disabled={closed} placeholder={`${t.typeMessage}…`} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} />
+        <button type="button" className="btn primary" onClick={send} disabled={closed || !draft.trim()} aria-label={t.send}><Send size={17} aria-hidden style={{ transform: lang === 'ar' ? 'scaleX(-1)' : undefined }} /><span className="send-label">{t.send}</span></button>
       </div>
     </main>
   );
