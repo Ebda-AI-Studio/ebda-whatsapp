@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { eventsQuery } from '../core/api/contract';
+import { WS_EXP_HEADER, WS_ROLE_HEADER } from '../core/workspace-do';
 import { apiError, workspaceStub, type ApiEnv } from './shared';
 
 export const realtimeRoutes = new Hono<ApiEnv>();
@@ -9,7 +10,11 @@ realtimeRoutes.get('/stores/:storeId/ws', async (c) => {
   if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') return c.text('expected a websocket upgrade', 426);
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
-  return ws.fetch(c.req.raw);
+  // The DO remembers when this token dies (and the caller's role) so it can drop the socket after that moment.
+  const req = new Request(c.req.raw);
+  req.headers.set(WS_EXP_HEADER, String(c.get('principal').expiresAt));
+  req.headers.set(WS_ROLE_HEADER, c.get('storeRole'));
+  return ws.fetch(req);
 });
 
 /** Resync after a gap (reconnect, sleeping phone): everything after `after`, by seq. */

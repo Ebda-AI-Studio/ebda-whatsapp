@@ -24,14 +24,19 @@ export function placeholderCount(text: string | undefined): number {
 
 const find = (components: StoredComponent[], type: string) => components.find((c) => c.type.toUpperCase() === type);
 
-/** Authentication templates carry Meta's fixed text and an OTP button; a send supplies just the code. */
-const isOtp = (components: StoredComponent[]) => (find(components, 'BUTTONS')?.buttons ?? []).some((b) => b.type.toUpperCase() === 'OTP');
+/**
+ * Authentication templates carry Meta's fixed text and a copy-code button; a send supplies just the code. Decided by
+ * Meta's template CATEGORY, never by the button shape (Meta returns copy-code buttons as type URL, not OTP).
+ */
+const isOtp = (category: string) => category.toUpperCase() === 'AUTHENTICATION';
+/** Index of the copy-code button among the template's buttons (the code goes there as well as in the body). */
+const otpButtonIndex = (components: StoredComponent[]) => Math.max(0, (find(components, 'BUTTONS')?.buttons ?? []).findIndex((b) => ['OTP', 'URL'].includes(b.type.toUpperCase())));
 /** What the inbox shows for an OTP send: the code must never be stored or displayed. */
 export const OTP_MASK = '••••••';
 
 /** Total parameters a send must supply, in order: header, body, then each URL button that has a placeholder. */
-export function paramCount(components: StoredComponent[]): number {
-  if (isOtp(components)) return 1;
+export function paramCount(components: StoredComponent[], category: string): number {
+  if (isOtp(category)) return 1;
   const header = find(components, 'HEADER');
   let n = 0;
   if (header) {
@@ -52,10 +57,10 @@ export type RenderResult = { ok: true; components: TemplateComponent[]; text: st
 const badText = (s: string) => s.length === 0 || s.length > MAX_PARAM_CHARS || /[\n\t]/.test(s) || / {4,}/.test(s);
 
 /** Validates `params` against the stored template and builds the Graph `components` array plus the text shown in the inbox. */
-export function renderTemplate(stored: StoredComponent[], params: string[]): RenderResult {
-  const expected = paramCount(stored);
+export function renderTemplate(stored: StoredComponent[], params: string[], category: string): RenderResult {
+  const expected = paramCount(stored, category);
   if (params.length !== expected) return { ok: false, message: `template needs ${expected} parameters, got ${params.length}` };
-  if (isOtp(stored)) {
+  if (isOtp(category)) {
     const code = params[0]!;
     if (!/^[A-Za-z0-9]{1,15}$/.test(code)) return { ok: false, message: 'an OTP code is 1 to 15 letters or digits' };
     return {
@@ -63,7 +68,7 @@ export function renderTemplate(stored: StoredComponent[], params: string[]): Ren
       text: OTP_MASK,
       components: [
         { type: 'body', parameters: [{ type: 'text', text: code }] },
-        { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: code }] },
+        { type: 'button', sub_type: 'url', index: String(otpButtonIndex(stored)), parameters: [{ type: 'text', text: code }] },
       ],
     };
   }

@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env } from './env';
 import { verifyMetaSignature } from './core/meta/signature';
 import { extractEvents, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
-import { numberForDisplayPhone, workspaceForPhoneNumber, workspaceForWaba } from './core/routing';
+import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
 import { scrubEvent } from './core/observability';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
@@ -89,8 +89,9 @@ app.post('/meta/webhook', async (c) => {
     return c.text('ok'); // a 5xx would make Meta retry a body that can never parse
   }
   for (const t of extractTemplateStatuses(payload)) {
-    const workspaceId = await workspaceForWaba(c.env.DB, t.wabaId);
-    if (workspaceId) await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
+    for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
+      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
+    }
   }
   for (const u of extractTierUpdates(payload)) {
     const tier = TIER_LIMITS[u.currentLimit];

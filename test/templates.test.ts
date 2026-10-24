@@ -115,8 +115,8 @@ it('renderTemplate: header formats, URL button placeholders, OTP templates, para
     { type: 'BODY', text: 'أهلاً {{1}}، طلب {{2}}' },
     { type: 'BUTTONS', buttons: [{ type: 'QUICK_REPLY', text: 'تمام' }, { type: 'URL', text: 'تتبع', url: 'https://t.example/{{1}}' }] },
   ]);
-  expect(paramCount(t)).toBe(4);
-  const ok = renderTemplate(t, ['https://img.example/a.png', 'أحمد', '#1', 'abc123']);
+  expect(paramCount(t, 'UTILITY')).toBe(4);
+  const ok = renderTemplate(t, ['https://img.example/a.png', 'أحمد', '#1', 'abc123'], 'UTILITY');
   expect(ok).toEqual({
     ok: true,
     text: 'أهلاً أحمد، طلب #1',
@@ -126,13 +126,13 @@ it('renderTemplate: header formats, URL button placeholders, OTP templates, para
       { type: 'button', sub_type: 'url', index: '1', parameters: [{ type: 'text', text: 'abc123' }] },
     ],
   });
-  expect(renderTemplate(t, ['http://insecure/a.png', 'a', 'b', 'c'])).toMatchObject({ ok: false });
-  expect(renderTemplate(t, ['https://i/a.png', 'سطر\nجديد', 'b', 'c'])).toMatchObject({ ok: false });
-  expect(renderTemplate(t, ['https://i/a.png', 'a', 'b', 'c d'])).toMatchObject({ ok: false });
-  expect(renderTemplate(comps([{ type: 'BODY', text: 'x {{1}}' }]), ['a    b'])).toMatchObject({ ok: false });
+  expect(renderTemplate(t, ['http://insecure/a.png', 'a', 'b', 'c'], 'UTILITY')).toMatchObject({ ok: false });
+  expect(renderTemplate(t, ['https://i/a.png', 'سطر\nجديد', 'b', 'c'], 'UTILITY')).toMatchObject({ ok: false });
+  expect(renderTemplate(t, ['https://i/a.png', 'a', 'b', 'c d'], 'UTILITY')).toMatchObject({ ok: false });
+  expect(renderTemplate(comps([{ type: 'BODY', text: 'x {{1}}' }]), ['a    b'], 'UTILITY')).toMatchObject({ ok: false });
   const otp = comps([{ type: 'BODY', add_security_recommendation: true }, { type: 'BUTTONS', buttons: [{ type: 'OTP', otp_type: 'COPY_CODE', text: 'copy' }] }]);
-  expect(paramCount(otp)).toBe(1);
-  expect(renderTemplate(otp, ['482913'])).toEqual({
+  expect(paramCount(otp, 'AUTHENTICATION')).toBe(1);
+  expect(renderTemplate(otp, ['482913'], 'AUTHENTICATION')).toEqual({
     ok: true,
     text: '••••••',
     components: [{ type: 'body', parameters: [{ type: 'text', text: '482913' }] }, { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: '482913' }] }],

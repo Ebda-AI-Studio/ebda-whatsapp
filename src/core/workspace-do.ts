@@ -24,6 +24,12 @@ export const EVENTS_KEPT = 1000;
 export const PREVIEW_CHARS = 280;
 export const INLINE_BODY_BYTES = 1024;
 /** A claim older than this is presumed crashed and may be re-claimed once (duplicate risk vs drop risk: we accept one possible duplicate). */
+/** Headers the Worker sets on the upgrade it forwards to the DO (never read from the client: the route overwrites them). */
+export const WS_EXP_HEADER = 'x-socket-token-exp';
+export const WS_ROLE_HEADER = 'x-socket-role';
+/** Close code for a socket whose access token has expired: the client refreshes its token and reconnects. */
+export const WS_CLOSE_TOKEN_EXPIRED = 4401;
+type SocketAttachment = { exp: number; role: string };
 export const STALE_CLAIM_MS = 2 * 60 * 1000;
 /** failed sits between sent and delivered: it beats a late 'sent', but never undoes a delivery. */
 const STATUS_RANK = { sent: 1, failed: 2, delivered: 3, read: 4 } as const;
@@ -171,7 +177,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (!wait) return 'claimed';
       // Over a Meta limit: give the claim back, keep the message 'queued', and let the scheduler release it later.
       this.sql.exec("UPDATE messages SET status = 'queued', claim_attempts = max(0, claim_attempts - 1), updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
-      addTask(this.sql, 'send_release', wait.dueAt, { job, reason: wait.reason });
+      this.addReleaseOnce(job, wait.dueAt, wait.reason);
       deferred = true;
       return 'deferred';
     });
@@ -205,12 +211,27 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.emitConversationUpdated(conversationId);
         return 'claimed';
       }
+      if (existing.status === 'queued' || existing.status === 'retry') {
+        // A marketing template that waited (tier, throughput or Meta's frequency cap) must honour an opt-out given meanwhile.
+        if (this.marketingToOptedOut(job)) {
+          this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'opted_out', updated_at = ? WHERE id = ?", now, existing.id);
+          this.emitMessageStatus(existing.id);
+          return 'dropped';
+        }
+      }
       if (existing.status === 'queued' || existing.status === 'retry' || (existing.status === 'claimed' && now - existing.updated_at > STALE_CLAIM_MS && existing.claim_attempts < 2)) {
         this.sql.exec("UPDATE messages SET status = 'claimed', claim_attempts = claim_attempts + 1, updated_at = ? WHERE id = ?", now, existing.id);
         return 'claimed';
       }
       return existing.status === 'claimed' ? 'in_flight' : 'already_sent';
     }
+  }
+
+  private marketingToOptedOut(job: SendJob): boolean {
+    if (jobKind(job) !== 'template' || !job.template) return false;
+    const cat = this.sql.exec<{ category: string }>('SELECT category FROM templates WHERE name = ? AND language = ?', job.template.name, job.template.language).toArray()[0]?.category;
+    if (cat !== 'MARKETING') return false;
+    return this.sql.exec<{ opted_out_at: number | null }>('SELECT opted_out_at FROM contacts WHERE wa_id = ?', job.to).toArray()[0]?.opted_out_at != null;
   }
 
   private limitsFor(phoneNumberId: string): { tier: number; mps: number; tokens: number; tokens_at: number; alerted_at: number } {
@@ -270,6 +291,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     return null;
   }
 
+  /** One pending release per idempotency key: a duplicate queue delivery of a throttled job must not release (and so send) it twice. */
+  private addReleaseOnce(job: SendJob, dueAt: number, reason: string): void {
+    const pending = this.sql.exec("SELECT 1 FROM scheduled_tasks WHERE kind = 'send_release' AND json_extract(payload, '$.job.idempotencyKey') = ? LIMIT 1", job.idempotencyKey).toArray().length;
+    if (!pending) addTask(this.sql, 'send_release', dueAt, { job, reason });
+  }
+
   private waitingFor(phoneNumberId: string): number {
     return this.sql.exec<{ n: number }>(
       "SELECT count(*) AS n FROM scheduled_tasks WHERE kind = 'send_release' AND json_extract(payload, '$.reason') = 'tier' AND json_extract(payload, '$.job.phoneNumberId') = ?", phoneNumberId,
@@ -306,7 +333,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (row) this.emitMessageStatus(row.id);
     });
     if (status === 'failed') return 'failed';
-    addTask(this.sql, 'send_release', now + TIER_WINDOW_MS, { job: { ...job, deferrals: deferrals + 1 }, reason: 'frequency_cap' });
+    this.addReleaseOnce({ ...job, deferrals: deferrals + 1 }, now + TIER_WINDOW_MS, 'frequency_cap');
     await this.arm();
     return 'rescheduled';
   }
@@ -362,7 +389,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           if (t.category === 'MARKETING' && conv.opted_out_at !== null) return { ok: false, reason: 'opted_out' };
           const stored = componentsSchema.safeParse(JSON.parse(t.components));
           if (!stored.success) return { ok: false, reason: 'invalid_request', message: 'stored template is malformed' };
-          const rendered = renderTemplate(stored.data, req.params);
+          const rendered = renderTemplate(stored.data, req.params, t.category);
           if (!rendered.ok) return { ok: false, reason: 'invalid_request', message: rendered.message };
           type = 'template'; preview = rendered.text;
           col = { template_name: req.name, template_lang: req.language };
@@ -396,7 +423,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         const parts = comps.success ? comps.data : [];
         return {
           name: t.name, language: t.language, category: t.category as TemplateDto['category'], status: t.status as TemplateDto['status'],
-          bodyText: bodyTextOf(parts), paramCount: paramCount(parts), rejectedReason: t.rejected_reason,
+          bodyText: bodyTextOf(parts), paramCount: paramCount(parts, t.category), rejectedReason: t.rejected_reason,
         };
       });
   }
@@ -509,6 +536,9 @@ export class WorkspaceDO extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server);
+    // Survives hibernation: the token's expiry (epoch s) and the caller's role, so a long-lived socket is re-authorised on every push.
+    const exp = Number(request.headers.get(WS_EXP_HEADER));
+    server.serializeAttachment({ exp: Number.isFinite(exp) && exp > 0 ? exp : 0, role: request.headers.get(WS_ROLE_HEADER) ?? 'unknown' } satisfies SocketAttachment);
     return new Response(null, { status: 101, webSocket: client, headers: { 'sec-websocket-protocol': 'inbox.v1' } });
   }
 
@@ -541,7 +571,18 @@ export class WorkspaceDO extends DurableObject<Env> {
     const pending = this.sql.exec<{ seq: number; payload: string }>('SELECT seq, payload FROM events WHERE seq > ? ORDER BY seq', this.lastBroadcast).toArray();
     if (!pending.length) return;
     this.lastBroadcast = pending[pending.length - 1]!.seq;
-    const sockets = this.ctx.getWebSockets();
+    const nowS = Date.now() / 1000;
+    const sockets = this.ctx.getWebSockets().filter((ws) => {
+      const att = ws.deserializeAttachment() as SocketAttachment | null;
+      // No attachment or no expiry = not a socket we vetted: refuse it as well.
+      if (att && att.exp > nowS) return true;
+      try {
+        ws.close(WS_CLOSE_TOKEN_EXPIRED, 'token expired');
+      } catch {
+        // already closed
+      }
+      return false;
+    });
     if (!sockets.length) return;
     for (const e of pending) {
       const frame = JSON.stringify({ ...(JSON.parse(e.payload) as object), seq: e.seq });
@@ -701,10 +742,19 @@ export class WorkspaceDO extends DurableObject<Env> {
     return this.conversationById(conversationId, now);
   }
 
-  async assign(conversationId: number, userId: string | null, now = Date.now()): Promise<ConversationDto | null> {
+  /**
+   * Assigns (or clears) the owner of a conversation. Staff lists live in the Store, which this service cannot ask yet, so
+   * only a user the server can vouch for is accepted: null, the caller, or someone already assigned in this workspace.
+   */
+  async assign(conversationId: number, userId: string | null, callerUserId: string, now = Date.now()): Promise<{ ok: true; conversation: ConversationDto } | { ok: false; reason: 'not_found' | 'unknown_assignee' }> {
+    if (!this.sql.exec('SELECT 1 FROM conversations WHERE id = ?', conversationId).toArray().length) return { ok: false, reason: 'not_found' };
+    if (userId !== null && userId !== callerUserId && !this.sql.exec('SELECT 1 FROM conversations WHERE assignee_user_id = ? LIMIT 1', userId).toArray().length) {
+      return { ok: false, reason: 'unknown_assignee' };
+    }
     this.sql.exec('UPDATE conversations SET assignee_user_id = ? WHERE id = ?', userId, conversationId);
     this.emitConversationUpdated(conversationId);
-    return this.conversationById(conversationId, now);
+    const conversation = await this.conversationById(conversationId, now);
+    return conversation ? { ok: true, conversation } : { ok: false, reason: 'not_found' };
   }
 
   async setTags(conversationId: number, tags: string[], now = Date.now()): Promise<ConversationDto | null> {

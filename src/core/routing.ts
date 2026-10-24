@@ -10,13 +10,13 @@ export async function workspaceForPhoneNumber(db: D1Database, phoneNumberId: str
   return row?.workspace_id ?? null;
 }
 
-/** The workspace behind a WABA (template and tier webhooks name the WABA, not a number). Null if none of its numbers is active. */
-export async function workspaceForWaba(db: D1Database, wabaId: string): Promise<string | null> {
-  const row = await db
-    .prepare("SELECT workspace_id FROM phone_numbers WHERE waba_id = ? AND status = 'active' ORDER BY rowid LIMIT 1")
+/** Every workspace with an active number on a WABA (template webhooks name the WABA, not a number; a WABA can be shared). */
+export async function workspacesForWaba(db: D1Database, wabaId: string): Promise<string[]> {
+  const { results } = await db
+    .prepare("SELECT DISTINCT workspace_id FROM phone_numbers WHERE waba_id = ? AND status = 'active' ORDER BY workspace_id")
     .bind(wabaId)
-    .first<{ workspace_id: string }>();
-  return row?.workspace_id ?? null;
+    .all<{ workspace_id: string }>();
+  return results.map((r) => r.workspace_id);
 }
 
 /** The active number of a WABA whose display phone matches (digits only, so "+20 100 123 4567" equals "201001234567"). */

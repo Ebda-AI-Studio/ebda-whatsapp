@@ -4,6 +4,8 @@ export type Principal = {
   sessionId: string;
   stores: { id: string; role: 'owner' | 'staff' }[];
   superAdmin: boolean;
+  /** When the access token expires (epoch seconds). Long-lived connections must not outlive it. */
+  expiresAt: number;
 };
 
 export class IdentityError extends Error {

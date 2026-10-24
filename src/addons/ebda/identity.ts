@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, customFetch, jwtVerify } from 'jose';
+import { createRemoteJWKSet, customFetch, jwtVerify, type JWTPayload } from 'jose';
 import { z } from 'zod';
 import { IdentityError, type IdentityVerifier, type Principal } from '../../core/identity/verifier';
 
@@ -26,7 +26,7 @@ export function createEbdaAccountsVerifier(opts: { jwksUrl: string; issuer: stri
   });
   return {
     async verify(token: string): Promise<Principal> {
-      let payload: unknown;
+      let payload: JWTPayload;
       try {
         ({ payload } = await jwtVerify(token, jwks, {
           algorithms: ['ES256'],
@@ -42,7 +42,7 @@ export function createEbdaAccountsVerifier(opts: { jwksUrl: string; issuer: stri
       }
       const c = claimsSchema.safeParse(payload);
       if (!c.success) throw new IdentityError(401, 'invalid claims');
-      return { userId: c.data.sub, sessionId: c.data.sid, stores: c.data.stores, superAdmin: c.data.pa === 'super_admin' };
+      return { userId: c.data.sub, sessionId: c.data.sid, stores: c.data.stores, superAdmin: c.data.pa === 'super_admin', expiresAt: Number(payload.exp) };
     },
   };
 }

@@ -34,3 +34,6 @@ export async function apiFor(storeId: string, role: 'owner' | 'staff' = 'owner',
 
 /** Route tests need UUID store ids (identity contract v1). Distinct n per test keeps their DOs separate. */
 export const storeId = (n: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0')}`;
+
+/** A token for `storeId` that expires `expSeconds` from now (negative = already expired, still inside the verifier's skew tolerance). */
+export const tokenFor = (storeId: string, expSeconds: number, role: 'owner' | 'staff' = 'owner') => mint(key, { stores: [{ id: storeId, role }] }, { expSeconds });
