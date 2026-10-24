@@ -1,4 +1,4 @@
-/** Meta's two send limits plus its frequency cap, enforced per WhatsApp number inside the workspace's DO. */
+/** Meta's two send limits plus its frequency cap, applied per WhatsApp number inside the workspace's DO. */
 export const DEFAULT_TIER = 250;
 export const DEFAULT_MPS = 80;
 /** Unique business-initiated recipients are counted over a rolling 24 hours. */

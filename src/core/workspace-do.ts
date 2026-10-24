@@ -509,7 +509,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server);
-    return new Response(null, { status: 101, webSocket: client, headers: { 'sec-websocket-protocol': 'ebda.v1' } });
+    return new Response(null, { status: 101, webSocket: client, headers: { 'sec-websocket-protocol': 'inbox.v1' } });
   }
 
   override webSocketMessage(): void {

@@ -11,7 +11,7 @@ import { env } from 'cloudflare:test';
 
 useApiKey();
 
-async function connect(storeId: string, token: string, protocols = `ebda.v1, bearer.${token}`) {
+async function connect(storeId: string, token: string, protocols = `inbox.v1, bearer.${token}`) {
   const res = await SELF.fetch(`https://x/api/v1/stores/${storeId}/ws`, { headers: { upgrade: 'websocket', 'sec-websocket-protocol': protocols } });
   return res;
 }
@@ -26,12 +26,12 @@ async function listen(storeId: string, token: string) {
 }
 const waitFor = (fn: () => boolean) => vi.waitFor(() => expect(fn()).toBe(true), { timeout: 3000, interval: 10 });
 
-it('upgrades with the token in Sec-WebSocket-Protocol and answers ebda.v1; no token or wrong store is refused', async () => {
+it('upgrades with the token in Sec-WebSocket-Protocol and answers inbox.v1; no token or wrong store is refused', async () => {
   const api = await apiFor(W(300));
   const { res, ws } = await listen(W(300), api.token);
-  expect(res.headers.get('sec-websocket-protocol')).toBe('ebda.v1');
+  expect(res.headers.get('sec-websocket-protocol')).toBe('inbox.v1');
   ws.close();
-  expect((await connect(W(300), api.token, 'ebda.v1')).status).toBe(401);
+  expect((await connect(W(300), api.token, 'inbox.v1')).status).toBe(401);
   const other = await apiFor(W(301));
   expect((await connect(W(300), other.token)).status).toBe(403);
   expect((await SELF.fetch(`https://x/api/v1/stores/${W(300)}/ws`, { headers: { authorization: `Bearer ${api.token}` } })).status).toBe(426);

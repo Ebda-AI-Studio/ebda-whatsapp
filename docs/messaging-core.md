@@ -17,7 +17,7 @@ Everything is under `/api/v1/stores/:storeId/` behind `requireStoreAccess`; the 
 | `GET /events?after=<seq>` · `GET /ws` | realtime |
 
 ## Realtime protocol
-Open `GET /ws` with `Upgrade: websocket` and `Sec-WebSocket-Protocol: ebda.v1, bearer.<access token>`; the server answers `ebda.v1`. Frames are `RealtimeEvent` JSON, each with a growing `seq`. Send the text `ping` to get `pong` (answered without waking the DO). After every (re)connect call `GET /events?after=<last seq>`; if the first returned `seq` is greater than `after + 1` the gap was larger than the 1,000 retained events: reload the list. Upsert `message.created` by message id (it is sent again when an inbound file finishes downloading).
+Open `GET /ws` with `Upgrade: websocket` and `Sec-WebSocket-Protocol: inbox.v1, bearer.<access token>`; the server answers `inbox.v1`. Frames are `RealtimeEvent` JSON, each with a growing `seq`. Send the text `ping` to get `pong` (answered without waking the DO). After every (re)connect call `GET /events?after=<last seq>`; if the first returned `seq` is greater than `after + 1` the gap was larger than the 1,000 retained events: reload the list. Upsert `message.created` by message id (it is sent again when an inbound file finishes downloading).
 
 ## Meta limits
 Per number, inside the DO (`claimSend`): tier = unique business-initiated recipients (window closed) per rolling 24 h (default 250, updated from `phone_number_quality_update`), replies inside an open window never count; throughput = token bucket at MPS (default 80). A send over a limit goes back to `queued` and is released by the scheduler. Error 131049 reschedules +24 h (twice), never touches the contact.
