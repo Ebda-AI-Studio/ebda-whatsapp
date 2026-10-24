@@ -29,6 +29,8 @@ export type OutboundRow = {
   key: string;
   templateName?: string;
   templateLang?: string;
+  /** Who wrote it, for the inbox to mark: the AI agent, the ordering bot or a person. Absent = a system message. */
+  author?: 'agent' | 'bot' | 'staff';
 };
 
 export type JobSink = { jobs: SendJob[] };

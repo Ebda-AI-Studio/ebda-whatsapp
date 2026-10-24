@@ -171,6 +171,11 @@ export const DO_MIGRATIONS: readonly string[] = [
   `CREATE TABLE store_orders_after_erase (order_id TEXT PRIMARY KEY, buyer_key TEXT NOT NULL, created_at INTEGER NOT NULL, pushed_at INTEGER);`,
   // v17 (Phase 5, AI agent): the agent's settings and counters (key/value; the merchant's own model key is stored encrypted).
   `CREATE TABLE agent_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // v18 (Phase 5, agent turns): who wrote each outgoing message; the agent's finished turns (a replayed task does not call the model
+  // again); and the conversations handed to a person (the bot stays silent until `until_at`).
+  `ALTER TABLE messages ADD COLUMN author TEXT;
+   CREATE TABLE agent_turns (message_id INTEGER PRIMARY KEY, outcome TEXT NOT NULL, at INTEGER NOT NULL);
+   CREATE TABLE agent_handoffs (wa_id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, until_at INTEGER NOT NULL, reason TEXT NOT NULL);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

@@ -31,7 +31,9 @@ import { OTP_MASK } from './templates';
 import type { OtpResult } from './otp';
 import { queueTemplate } from './store-link/outbound';
 import { storeLink } from './store-link';
-import { botInputFrom, botInputSchema, orderingActive, runBotTurn } from './ordering/bot';
+import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
+import { agentActive } from './ai/agent';
+import { runTurn } from './ai/router';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
@@ -115,7 +117,8 @@ export class WorkspaceDO extends DurableObject<Env> {
     const workspaceId = this.workspaceId;
     // While the ordering bot is on it owns the conversation: the generic auto reply would talk over it.
     const ordering = orderingActive(this.host());
-    if (ordering) config = { ...config, autoReplyText: undefined };
+    const agent = agentActive(this.host());
+    if (ordering || agent) config = { ...config, autoReplyText: undefined };
     // Large bodies go to R2 first (outside the transaction); skipped for a wamid we already stored, so redelivery writes nothing.
     const bodies = new Map<string, string>();
     for (const m of batch.inbound) {
@@ -174,7 +177,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
         const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
         if (wasCodReply) linkWork = true;
-        else if (ordering && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image')) {
+        else if ((ordering || agent) && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image' || (agent && (m.type === 'audio' || m.type === 'video' || m.type === 'document')))) {
           addTask(this.sql, 'bot_turn', now, botInputFrom(m, inserted.id, batch.phoneNumberId));
           linkWork = true;
         }
@@ -431,8 +434,8 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
       }
       const id = this.sql.exec<{ id: number }>(
-        `INSERT INTO messages (conversation_id, direction, type, preview, body, status, idempotency_key, template_name, template_lang, media_mime, media_size, media_r2_key, created_at, updated_at)
-         VALUES (?, 'out', ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        `INSERT INTO messages (conversation_id, direction, type, preview, body, status, idempotency_key, template_name, template_lang, media_mime, media_size, media_r2_key, author, created_at, updated_at)
+         VALUES (?, 'out', ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, 'staff', ?, ?) RETURNING id`,
         conversationId, type, previewOf(preview), preview.length ? preview : null, key,
         col.template_name ?? null, col.template_lang ?? null, col.media_mime ?? null, col.media_size ?? null, col.media_r2_key ?? null, now, now,
       ).one().id;
@@ -615,9 +618,9 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   private insertOutbound(conversationId: number, row: OutboundRow, now: number): number {
     const id = this.sql.exec<{ id: number }>(
-      `INSERT INTO messages (conversation_id, direction, type, preview, body, status, idempotency_key, template_name, template_lang, created_at, updated_at)
-       VALUES (?, 'out', ?, ?, ?, 'queued', ?, ?, ?, ?, ?) RETURNING id`,
-      conversationId, row.type, row.preview, row.body, row.key, row.templateName ?? null, row.templateLang ?? null, now, now,
+      `INSERT INTO messages (conversation_id, direction, type, preview, body, status, idempotency_key, template_name, template_lang, author, created_at, updated_at)
+       VALUES (?, 'out', ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?) RETURNING id`,
+      conversationId, row.type, row.preview, row.body, row.key, row.templateName ?? null, row.templateLang ?? null, row.author ?? null, now, now,
     ).one().id;
     this.indexMessage(id, row.preview.length ? row.preview : null);
     this.sql.exec('UPDATE conversations SET last_message_at = max(coalesce(last_message_at, 0), ?) WHERE id = ?', Math.floor(now / 1000), conversationId);
@@ -1138,7 +1141,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           return undefined;
         }
         try {
-          await runBotTurn(this.host(), input.data, now);
+          await runTurn(this.host(), input.data, now);
         } catch (err) {
           // Give up quietly after a few tries: the customer can simply write again.
           if (attempts + 1 < BOT_TURN_MAX_ATTEMPTS) throw err;
@@ -1259,6 +1262,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', waId);
+      this.sql.exec('DELETE FROM agent_handoffs WHERE wa_id = ?', waId);
+      if (conv) this.sql.exec('DELETE FROM agent_turns WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
       this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       if (conv) {
         this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
