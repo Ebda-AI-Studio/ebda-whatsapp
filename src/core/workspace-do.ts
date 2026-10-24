@@ -187,6 +187,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (!existing) {
         // Only auto-reply jobs (no row yet) may create their row; a job created by the API always has one, so a missing row means it was erased.
         if (jobKind(job) !== 'text' || job.idempotencyKey.startsWith('ui:') || !job.text) return 'dropped';
+        if (this.sql.exec('SELECT 1 FROM erased_keys WHERE key = ?', job.idempotencyKey).toArray().length) return 'dropped';
         const contactId = this.sql.exec<{ id: number }>(
           'INSERT INTO contacts (wa_id) VALUES (?) ON CONFLICT(wa_id) DO UPDATE SET wa_id = wa_id RETURNING id', job.to,
         ).one().id;
@@ -925,11 +926,16 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (!contact) return { found: false, keys: 0, messages: 0, statusEvents: 0 };
       const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
       const msgs = conv
-        ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null; media_r2_key: string | null }>('SELECT wamid, body_r2_key, media_r2_key FROM messages WHERE conversation_id = ?', conv.id).toArray()
+        ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null; media_r2_key: string | null; idempotency_key: string | null; direction: string }>('SELECT wamid, body_r2_key, media_r2_key, idempotency_key, direction FROM messages WHERE conversation_id = ?', conv.id).toArray()
         : [];
       let statusEvents = 0;
       let keys = 0;
+      // Jobs already in the queue (or waiting in the scheduler) name this contact: cancel the waiting ones and remember the
+      // keys of the rest so claimSend drops them. The keys are opaque ids (wamid / client uuid), not personal data.
+      this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'send_release' AND json_extract(payload, '$.job.to') = ?", waId);
       for (const m of msgs) {
+        if (m.idempotency_key) this.sql.exec('INSERT OR IGNORE INTO erased_keys (key) VALUES (?)', m.idempotency_key);
+        if (m.direction === 'in' && m.wamid) this.sql.exec('INSERT OR IGNORE INTO erased_keys (key) VALUES (?)', `reply:${m.wamid}`);
         for (const k of [m.body_r2_key, m.media_r2_key]) {
           if (!k) continue;
           this.sql.exec('INSERT OR IGNORE INTO r2_pending_deletes (key) VALUES (?)', k);

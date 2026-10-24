@@ -124,6 +124,8 @@ export const DO_MIGRATIONS: readonly string[] = [
      seq INTEGER PRIMARY KEY AUTOINCREMENT,
      payload TEXT NOT NULL
    );`,
+  // v10 (Phase 2, erasure follow-up): idempotency keys of erased messages, so a send job still in the queue is dropped instead of re-creating the contact.
+  `CREATE TABLE erased_keys (key TEXT PRIMARY KEY);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
