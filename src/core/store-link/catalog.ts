@@ -1,11 +1,11 @@
 import { BACKUP_TIME_ZONE, nextLocalHour } from '../backup';
-import { itemsBatch, listRetailerIds, type CatalogRequest } from '../meta/catalog-api';
+import { itemsBatch, listRetailerIds, listWabaCatalogs, type CatalogRequest } from '../meta/catalog-api';
 import { plainAmount } from '../ordering/money';
 import { addTask } from '../scheduler';
 import type { CatalogRow } from '../store-bridge';
 import { bridgeFor } from '../store-link';
 import type { LinkHost } from './host';
-import { readSettings } from './settings';
+import { getState, readSettings } from './settings';
 
 /** Nightly full reconcile runs after the 02:00 backup. */
 export const RECONCILE_HOUR_LOCAL = 3;
@@ -35,9 +35,39 @@ export function toFeedItem(r: CatalogRow, preferArabic: boolean): CatalogRequest
 const chunk = <T>(xs: T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
 type Ready = { catalogId: string; token: string; graphVersion: string };
-function ready(host: LinkHost): Ready | null {
+
+/** Reconcile may archive at most this share of Meta's catalog (and more than MASS_DELETE_MIN items) in one automatic run. */
+export const MASS_DELETE_SHARE = 0.2;
+export const MASS_DELETE_MIN = 10;
+
+/**
+ * A catalog id is a capability on the platform's own token, so it is only ever used while it is provably THIS business's:
+ * the workspace must still own an active number on the WABA the id was verified against, and Meta must still list the
+ * catalog among that WABA's catalogs. Checked before every write run. Null = not usable (and nothing is written).
+ */
+export async function verifiedAuth(host: LinkHost): Promise<Ready | null> {
   const catalogId = readSettings(host).catalogId;
-  return catalogId ? { catalogId, token: host.env.META_SYSTEM_TOKEN, graphVersion: host.env.META_GRAPH_VERSION } : null;
+  if (!catalogId) return null;
+  const refuse = (why: string): null => {
+    console.error(JSON.stringify({ alert: 'catalog_not_linked', workspace: host.workspaceId, why }));
+    return null;
+  };
+  const wabaId = getState(host, 'catalog.waba');
+  if (!wabaId) return refuse('no_verified_waba');
+  const owns = await host.env.DB.prepare("SELECT 1 FROM phone_numbers WHERE workspace_id = ? AND waba_id = ? AND status = 'active'").bind(host.workspaceId, wabaId).first();
+  if (!owns) return refuse('waba_not_owned');
+  const auth = { token: host.env.META_SYSTEM_TOKEN, graphVersion: host.env.META_GRAPH_VERSION };
+  const listed = await listWabaCatalogs({ ...auth, wabaId });
+  if (!listed.ok) throw new Error(`catalog verification failed: ${listed.message}`); // an outage, not an answer: retry
+  if (!listed.value.includes(catalogId)) return refuse('not_in_waba');
+  return { catalogId, ...auth };
+}
+
+/** Is `catalogId` connected to this WABA? Used before a catalog id is saved. */
+export async function catalogBelongsToWaba(env: { META_SYSTEM_TOKEN: string; META_GRAPH_VERSION: string }, wabaId: string, catalogId: string): Promise<'yes' | 'no' | 'unavailable'> {
+  const listed = await listWabaCatalogs({ token: env.META_SYSTEM_TOKEN, graphVersion: env.META_GRAPH_VERSION, wabaId });
+  if (!listed.ok) return 'unavailable';
+  return listed.value.includes(catalogId) ? 'yes' : 'no';
 }
 
 async function send(auth: Ready, requests: CatalogRequest[]): Promise<void> {
@@ -59,9 +89,10 @@ export function ensureCatalogReconcile(host: LinkHost, now: number, soon = false
  * (more waiting, or a change landed during the run), or undefined when the table is empty.
  */
 export async function runCatalogSync(host: LinkHost, now: number): Promise<number | undefined> {
-  const auth = ready(host);
   const bridge = bridgeFor(host.env);
-  if (!auth || !bridge) return undefined; // off: the rows stay, and configuring the catalog schedules a full reconcile
+  if (!bridge || !readSettings(host).catalogId) return undefined;
+  const auth = await verifiedAuth(host);
+  if (!auth) return undefined; // off: the rows stay, and configuring the catalog schedules a full reconcile
   const dirty = host.sql.exec<{ product_id: string; variant_ids: string; deleted: number; updated_at: number }>('SELECT product_id, variant_ids, deleted, updated_at FROM catalog_dirty ORDER BY updated_at LIMIT ?', PRODUCTS_PER_RUN).toArray();
   if (!dirty.length) return undefined;
   const profile = await bridge.getStoreProfile(host.workspaceId);
@@ -91,10 +122,11 @@ export async function runCatalogSync(host: LinkHost, now: number): Promise<numbe
  * Safety net for missed events: re-sends the Store's whole catalog and archives what Meta has but the Store does not.
  * An empty Store answer never archives anything (an outage or a bug must not wipe a live catalog).
  */
-export async function runCatalogReconcile(host: LinkHost, now: number): Promise<number | undefined> {
-  const auth = ready(host);
+export async function runCatalogReconcile(host: LinkHost, now: number, opts: { allowMassDelete?: boolean } = {}): Promise<number | undefined> {
   const bridge = bridgeFor(host.env);
-  if (!auth || !bridge) return undefined;
+  if (!bridge || !readSettings(host).catalogId) return undefined;
+  const auth = await verifiedAuth(host);
+  if (!auth) return undefined;
   // What was waiting when this run began: covered by it, unless it changes again while we run.
   const covered = host.sql.exec<{ product_id: string; updated_at: number }>('SELECT product_id, updated_at FROM catalog_dirty').toArray();
   const profile = await bridge.getStoreProfile(host.workspaceId);
@@ -119,7 +151,12 @@ export async function runCatalogReconcile(host: LinkHost, now: number): Promise<
   const have = await listRetailerIds(auth);
   if (!have.ok) throw new Error(`catalog list from Meta failed: ${have.message}`);
   const wanted = new Set(rows.map((r) => r.retailerId));
-  const extras = rows.length ? have.value.filter((id) => !wanted.has(id)) : [];
+  let extras = rows.length ? have.value.filter((id) => !wanted.has(id)) : [];
+  // A wrong catalog, a half-read Store list or a bug must not be able to empty a live catalog in one automatic run.
+  if (!opts.allowMassDelete && extras.length > MASS_DELETE_MIN && extras.length > have.value.length * MASS_DELETE_SHARE) {
+    console.error(JSON.stringify({ alert: 'catalog_mass_delete_refused', workspace: host.workspaceId, extras: extras.length, inCatalog: have.value.length }));
+    extras = [];
+  }
   for (const id of extras) requests.push({ method: 'DELETE', data: { id } });
   await send(auth, requests);
   host.storage.transactionSync(() => {

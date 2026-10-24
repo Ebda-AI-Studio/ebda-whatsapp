@@ -57,3 +57,23 @@ export async function listRetailerIds(a: Auth): Promise<CatalogApiResult<string[
   if (url) return { ok: false, message: 'too many catalog pages', retryable: false };
   return { ok: true, value: out };
 }
+
+/** The catalogs connected to a WhatsApp Business Account. A catalog id is trusted only if it is in this list. */
+export async function listWabaCatalogs(a: { token: string; graphVersion: string; wabaId: string }): Promise<CatalogApiResult<string[]>> {
+  const out: string[] = [];
+  let url: string | null = `${GRAPH}${a.graphVersion}/${a.wabaId}/product_catalogs?fields=id&limit=100`;
+  for (let page = 0; url && page < 20; page++) {
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: { authorization: `Bearer ${a.token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    } catch (err) {
+      return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
+    }
+    const json = (await res.json().catch(() => null)) as { data?: { id?: string }[]; paging?: { next?: string }; error?: { message?: string } } | null;
+    if (!res.ok || !json?.data) return { ok: false, message: json?.error?.message ?? `http ${res.status}`, retryable: res.status >= 500 || res.status === 429 };
+    for (const c of json.data) if (c.id) out.push(c.id);
+    const next = json.paging?.next ?? null;
+    url = next && next.startsWith(GRAPH) ? next : null;
+  }
+  return { ok: true, value: out };
+}

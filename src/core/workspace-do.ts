@@ -21,7 +21,7 @@ import type { TemplateDto } from './api/contract';
 import type { StoreEvent } from './api/store-events';
 import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
-import { readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
+import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { handleCodReply, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
@@ -615,16 +615,28 @@ export class WorkspaceDO extends DurableObject<Env> {
     return readSettings(this.host());
   }
 
-  async setStoreLinkSettings(patch: Partial<StoreLinkSettings>): Promise<StoreLinkSettings> {
+  /**
+   * Saves settings. A catalog id is a capability on the platform token, so changing it needs the WABA it was verified
+   * against (`catalogWabaId`, checked by the caller against Meta); without it the change is refused.
+   */
+  async setStoreLinkSettings(patch: Partial<StoreLinkSettings>, opts: { catalogWabaId?: string } = {}): Promise<{ ok: true; settings: StoreLinkSettings } | { ok: false; reason: 'catalog_not_verified' }> {
     const before = readSettings(this.host()).catalogId;
-    const next = this.ctx.storage.transactionSync(() => {
+    if (patch.catalogId && patch.catalogId !== before && !opts.catalogWabaId) return { ok: false, reason: 'catalog_not_verified' };
+    const settings = this.ctx.storage.transactionSync(() => {
       const saved = writeSettings(this.host(), patch);
+      if (patch.catalogId && opts.catalogWabaId) putState(this.host(), 'catalog.waba', opts.catalogWabaId);
+      if (patch.catalogId === null) this.sql.exec("DELETE FROM store_state WHERE key = 'catalog.waba'");
       // A newly configured catalog gets a full reconcile soon, then nightly.
       if (saved.catalogId && saved.catalogId !== before) ensureCatalogReconcile(this.host(), Date.now(), true);
       return saved;
     });
     await this.arm();
-    return next;
+    return { ok: true, settings };
+  }
+
+  /** Operator action: a full reconcile now. `allowMassDelete` lifts the automatic safety limit on archiving. */
+  async reconcileCatalog(opts: { allowMassDelete?: boolean } = {}): Promise<void> {
+    await runCatalogReconcile(this.host(), Date.now(), opts);
   }
 
   // ---- realtime ---------------------------------------------------------------------------------------------------

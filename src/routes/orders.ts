@@ -4,7 +4,8 @@ import { buyerKey } from '../core/buyer-key';
 import { normaliseE164 } from '../core/phone';
 import type { BridgeOrderSummary } from '../core/store-bridge';
 import { bridgeFor, storeLink } from '../core/store-link';
-import { apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
+import { catalogBelongsToWaba } from '../core/store-link/catalog';
+import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
 
 export const ordersRoutes = new Hono<ApiEnv>();
 
@@ -69,5 +70,17 @@ ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
   const patch = storeLinkSettingsPatch.safeParse(await c.req.json().catch(() => null));
   if (!patch.success) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
-  return ws ? c.json(await ws.setStoreLinkSettings(patch.data)) : apiError(c, 404, 'not_found');
+  if (!ws) return apiError(c, 404, 'not_found');
+  let catalogWabaId: string | undefined;
+  if (patch.data.catalogId) {
+    // The platform token can write to any catalog it can see: only accept one that is connected to THIS workspace's WABA.
+    const number = await activeNumber(c);
+    if (!number) return apiError(c, 400, 'invalid_request', 'catalog_not_linked');
+    const belongs = await catalogBelongsToWaba(c.env, number.wabaId, patch.data.catalogId);
+    if (belongs === 'unavailable') return apiError(c, 503, 'rate_limited', 'meta_unavailable');
+    if (belongs === 'no') return apiError(c, 400, 'invalid_request', 'catalog_not_linked');
+    catalogWabaId = number.wabaId;
+  }
+  const res = await ws.setStoreLinkSettings(patch.data, catalogWabaId ? { catalogWabaId } : {});
+  return res.ok ? c.json(res.settings) : apiError(c, 400, 'invalid_request', 'catalog_not_linked');
 });

@@ -220,6 +220,7 @@ describe('store-link settings', () => {
     const staff = await apiFor(ws, 'staff');
     expect(await (await owner.call('GET', '/store-link/settings')).json()).toEqual({ orderConfirmations: true, orderingBot: true, otpViaWhatsApp: false, catalogId: null });
     expect((await staff.call('PATCH', '/store-link/settings', { orderingBot: false })).status).toBe(403);
+    graphStub((call) => (call.url.includes('/product_catalogs') ? { status: 200, json: { data: [{ id: '1234567890' }] } } : { status: 200, json: {} }));
     const res = await owner.call('PATCH', '/store-link/settings', { orderingBot: false, catalogId: '1234567890' });
     expect(await res.json()).toMatchObject({ orderingBot: false, catalogId: '1234567890' });
     expect((await owner.call('PATCH', '/store-link/settings', {})).status).toBe(400);
