@@ -29,6 +29,7 @@ async function boot(): Promise<void> {
       url: `${location.origin.replace(/^http/, 'ws')}/api/v1/stores/${storeId}/ws`,
       getToken: tokens.getToken,
       onEvent: api.emit,
+      onReload: api.reload,
       fetchEvents: api.fetchEvents,
     });
     source = api;

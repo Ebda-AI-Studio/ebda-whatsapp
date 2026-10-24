@@ -4,11 +4,13 @@ import type { ConversationDto, MessageDto, OrderSummaryDto, TemplateDto } from '
 import type { Lang, Strings } from '../i18n';
 import { clockTime, formatMoney, windowLeft } from '../lib/format';
 import { initials } from './ConversationList';
+import { MediaView } from './MediaView';
+import type { InboxSource } from '../data/source';
 
 type Props = {
   t: Strings; lang: Lang; now: number;
-  conversation: ConversationDto | null; userNames: Record<string, string>; currentOrder: OrderSummaryDto | null; messages: MessageDto[]; templates: TemplateDto[];
-  onSendText: (text: string) => void; onSendTemplate: (tpl: TemplateDto, params: string[]) => void; onRetry: (m: MessageDto) => void;
+  conversation: ConversationDto | null; source: InboxSource; userNames: Record<string, string>; currentOrder: OrderSummaryDto | null; messages: MessageDto[]; templates: TemplateDto[];
+  onSendText: (text: string) => void; onSendTemplate: (tpl: TemplateDto, params: string[]) => void; onSendMedia?: (file: File) => void; onRetry: (m: MessageDto) => void;
   onBack: () => void; onShowOrders: () => void;
 };
 
@@ -24,9 +26,11 @@ function dayKey(at: number): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo' }).format(at);
 }
 
-export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, messages, templates, onSendText, onSendTemplate, onRetry, onBack, onShowOrders }: Props) {
+export function ChatPane({ t, lang, now, conversation, source, userNames, currentOrder, messages, templates, onSendText, onSendTemplate, onSendMedia, onRetry, onBack, onShowOrders }: Props) {
   const [draft, setDraft] = useState('');
   const [picker, setPicker] = useState(false);
+  const [fullText, setFullText] = useState<Record<number, string>>({});
+  const fileInput = useRef<HTMLInputElement>(null);
   const [filling, setFilling] = useState<{ tpl: TemplateDto; params: string[] } | null>(null);
   const thread = useRef<HTMLDivElement>(null);
   useEffect(() => { thread.current?.scrollTo?.({ top: thread.current.scrollHeight }); }, [messages.length, conversation?.id]);
@@ -56,7 +60,7 @@ export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, 
       </header>
       {currentOrder && (
         <button type="button" className="order-strip" onClick={onShowOrders}>
-          <b>{currentOrder.orderNumber}</b>
+          <b><bdi>{currentOrder.orderNumber}</bdi></b>
           <span>{formatMoney(currentOrder.totalMinor, currentOrder.currency, lang)}</span>
           <span className="status" data-status={currentOrder.status}>{t.orderStatus[currentOrder.status]}</span>
           <span className="strip-cta">{t.viewOrder}<ChevronUp size={18} aria-hidden /></span>
@@ -70,7 +74,11 @@ export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, 
           lastDay = d;
           return [sep, (
             <div key={m.id} className={`bubble ${m.direction}`} data-client-id={m.clientId ?? undefined}>
-              <bdi dir="auto" className="text">{m.text}</bdi>
+              {m.media && <MediaView t={t} media={m.media} source={source} />}
+              {m.text && <bdi dir="auto" className="text">{fullText[m.id] ?? m.text}</bdi>}
+              {m.hasLongBody && fullText[m.id] === undefined && source.longBody && (
+                <button type="button" className="more" onClick={() => void source.longBody!(m.id).then((txt) => setFullText((f) => ({ ...f, [m.id]: txt })), () => undefined)}>{t.readMore}</button>
+              )}
               <div className="meta" data-status={m.status ?? undefined}>
                 <span>{clockTime(m.at, lang)}</span>
                 {m.direction === 'out' && <><StatusIcon status={m.status} /><span className="vh">{m.status ? t.status[m.status] : ''}</span></>}
@@ -108,7 +116,7 @@ export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, 
         {picker && (
           <div className="popover" role="menu" aria-label={t.pickTemplate}>
             {templates.filter((x) => x.status === 'APPROVED').map((tpl) => (
-              <button key={tpl.name} type="button" role="menuitem" onClick={() => { setPicker(false); if (tpl.paramCount > 0) setFilling({ tpl, params: Array.from({ length: tpl.paramCount }, () => '') }); else onSendTemplate(tpl, []); }}>
+              <button key={`${tpl.name}:${tpl.language}`} type="button" role="menuitem" onClick={() => { setPicker(false); if (tpl.paramCount > 0) setFilling({ tpl, params: Array.from({ length: tpl.paramCount }, () => '') }); else onSendTemplate(tpl, []); }}>
                 <b style={{ fontWeight: 500 }}>{t.templateNames[tpl.name] ?? tpl.name}</b>
                 <span className="muted" dir="auto">{tpl.bodyText}</span>
               </button>
@@ -118,7 +126,12 @@ export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, 
         {closed
           ? <button type="button" className="btn gold" aria-label={t.pickTemplate} aria-expanded={picker} onClick={() => setPicker((v) => !v)}><FileText size={18} aria-hidden /><span>{t.pickTemplate}</span></button>
           : <button type="button" className="icon-btn" aria-label={t.pickTemplate} aria-expanded={picker} onClick={() => setPicker((v) => !v)}><FileText size={18} aria-hidden /></button>}
-        <button type="button" className="icon-btn" aria-label={t.attach} disabled={closed}><Paperclip size={18} aria-hidden /></button>
+        {onSendMedia && source.upload && (
+          <>
+            <input ref={fileInput} type="file" hidden accept="image/jpeg,image/png,audio/ogg,video/mp4,application/pdf" onChange={(e) => { const f = e.target.files?.[0]; if (f) onSendMedia(f); e.target.value = ''; }} />
+            <button type="button" className="icon-btn" aria-label={t.attach} disabled={closed} onClick={() => fileInput.current?.click()}><Paperclip size={18} aria-hidden /></button>
+          </>
+        )}
         <label className="vh" htmlFor="composer">{t.typeMessage}</label>
         <textarea id="composer" rows={1} value={draft} disabled={closed} placeholder={`${t.typeMessage}…`} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} />
         <button type="button" className="btn primary" onClick={send} disabled={closed || !draft.trim()} aria-label={t.send}><Send size={17} aria-hidden style={{ transform: lang === 'ar' ? 'scaleX(-1)' : undefined }} /><span className="send-label">{t.send}</span></button>

@@ -2,9 +2,10 @@ import type { OrderSummaryDto } from '../../../src/core/api/contract';
 import { STRINGS, num, type Lang } from '../i18n';
 
 export function formatMoney(minor: number, currency: string, lang: Lang): string {
-  const major = Math.round(minor / 100);
-  if (currency === 'EGP') return lang === 'ar' ? `${num(major, 'ar')} ج.م` : `EGP ${num(major, 'en')}`;
-  return new Intl.NumberFormat(lang === 'ar' ? 'ar-EG' : 'en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(major);
+  const digits = minor % 100 === 0 ? 0 : 2; // whole pounds stay clean; piasters are never rounded away
+  const value = new Intl.NumberFormat(lang === 'ar' ? 'ar-EG' : 'en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: lang !== 'ar' || minor >= 1_000_000 }).format(minor / 100);
+  if (currency === 'EGP') return lang === 'ar' ? `${value} ج.م` : `EGP ${value}`;
+  return new Intl.NumberFormat(lang === 'ar' ? 'ar-EG' : 'en-US', { style: 'currency', currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(minor / 100);
 }
 
 export function relativeTime(at: number, now: number, lang: Lang): string {

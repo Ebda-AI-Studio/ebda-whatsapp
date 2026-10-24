@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 import {
   apiError, customerOrdersResponse, eventsResponse, getMessagesResponse, listConversationsResponse, listTemplatesResponse,
   messageDto, realtimeEvent, searchResponse, type RealtimeEvent, type SendMessageRequest,
@@ -17,14 +17,14 @@ type Opts = {
 };
 
 /** The live inbox source: every response is validated against the shared contract. */
-export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: number) => Promise<z.infer<typeof eventsResponse>>; emit: (e: RealtimeEvent) => void } {
+export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: number) => Promise<z.infer<typeof eventsResponse>>; emit: (e: RealtimeEvent) => void; reload: () => void } {
   const f = o.fetchImpl ?? fetch;
   const root = `${o.baseUrl}/api/v1/stores/${o.storeId}`;
 
   async function call<S extends z.ZodTypeAny>(path: string, schema: S, init: RequestInit = {}): Promise<z.infer<S>> {
     const headers = new Headers(init.headers);
     headers.set('authorization', `Bearer ${await o.getToken()}`);
-    if (init.body) headers.set('content-type', 'application/json');
+    if (init.body && !(init.body instanceof FormData)) headers.set('content-type', 'application/json');
     const res = await f(`${root}${path}`, { ...init, headers });
     const json = await res.json().catch(() => null);
     if (!res.ok) {
@@ -37,18 +37,28 @@ export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: n
   }
 
   const listeners = new Set<(e: RealtimeEvent) => void>();
+  const reloaders = new Set<() => void>();
 
   return {
     kind: 'live',
+    capabilities: { codOutcome: false }, // the store route lands in Phase 4; until then no Confirm/Refuse in live mode
     currentUserId: o.currentUserId,
     userNames: o.userNames,
     async listConversations(filter, q) {
       const query = q.trim();
       if (query) {
         const hits = await call(`/search?q=${encodeURIComponent(query)}&limit=50`, searchResponse);
-        const ids = new Set(hits.items.map((h) => h.conversationId));
-        const all = await call(`/conversations?filter=${filter}&limit=50`, listConversationsResponse);
-        return all.items.filter((c) => ids.has(c.id) || (c.contact.name ?? '').includes(query));
+        const wanted = new Set(hits.items.map((h) => h.conversationId));
+        // Page through the list until every hit is found (bounded), so older conversations are not lost.
+        const found: z.infer<typeof listConversationsResponse>['items'] = [];
+        let cursor: string | null = null;
+        for (let page = 0; page < 10; page++) {
+          const r: z.infer<typeof listConversationsResponse> = await call(`/conversations?filter=${filter}&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, listConversationsResponse);
+          for (const c of r.items) if (wanted.has(c.id) || (c.contact.name ?? '').includes(query)) found.push(c);
+          cursor = r.nextCursor;
+          if (!cursor || found.filter((c) => wanted.has(c.id)).length >= wanted.size) break;
+        }
+        return found;
       }
       return (await call(`/conversations?filter=${filter}&limit=50`, listConversationsResponse)).items;
     },
@@ -74,12 +84,32 @@ export function createApiSource(o: Opts): InboxSource & { fetchEvents: (after: n
       });
       if (!res.ok) throw new ApiError('invalid_request', res.status);
     },
+    async mediaUrl(path) {
+      const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });
+      if (!res.ok) throw new ApiError('not_found', res.status);
+      return URL.createObjectURL(await res.blob());
+    },
+    async longBody(messageId) {
+      const r = await call(`/messages/${messageId}/body`, z.object({ text: z.string() }));
+      return r.text;
+    },
+    async upload(file) {
+      const form = new FormData();
+      form.set('file', file);
+      const r = await call('/media', z.object({ uploadId: z.string() }).loose(), { method: 'POST', body: form });
+      return r.uploadId;
+    },
+    onReload(cb) {
+      reloaders.add(cb);
+      return () => reloaders.delete(cb);
+    },
     subscribe(onEvent) {
       listeners.add(onEvent);
       return () => listeners.delete(onEvent);
     },
     fetchEvents: (after) => call(`/events?after=${after}`, eventsResponse),
     emit: (e) => listeners.forEach((l) => l(e)),
+    reload: () => reloaders.forEach((r) => r()),
   };
 }
 
@@ -94,6 +124,8 @@ type RealtimeOpts = {
   url: string;
   getToken: () => Promise<string>;
   onEvent: (e: RealtimeEvent) => void;
+  /** Called when events may have been missed beyond repair (first connect, gap older than the server's buffer). */
+  onReload?: () => void;
   fetchEvents: (after: number) => Promise<{ items: RealtimeEvent[]; latestSeq: number }>;
   socketImpl?: new (url: string, protocols: string[]) => SocketLike;
   backoffMs?: (attempt: number) => number;
@@ -110,6 +142,7 @@ export function connectRealtime(o: RealtimeOpts): () => void {
   let stopped = false;
   let attempt = 0;
   let socket: SocketLike | null = null;
+  let connected = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let chain: Promise<void> = Promise.resolve();
 
@@ -120,37 +153,73 @@ export function connectRealtime(o: RealtimeOpts): () => void {
   };
   const resync = () =>
     o.fetchEvents(lastSeq).then((r) => {
-      for (const e of r.items.sort((a, b) => a.seq - b.seq)) deliver(e);
+      const items = r.items.sort((a, b) => a.seq - b.seq);
+      // The server keeps the last N events; a first item past lastSeq+1 means some are gone: reload instead.
+      if (lastSeq === 0 || (items[0] && items[0].seq > lastSeq + 1)) {
+        lastSeq = Math.max(lastSeq, r.latestSeq);
+        o.onReload?.();
+        return;
+      }
+      for (const e of items) deliver(e);
+      lastSeq = Math.max(lastSeq, r.latestSeq);
     }).catch(() => undefined);
+
+  const schedule = (delay: number) => {
+    if (stopped) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => void open(), delay);
+  };
 
   const open = async () => {
     if (stopped) return;
-    // The server echoes "inbox.v1"; the token rides alongside because browsers cannot set WebSocket headers.
-    const s = new Socket(o.url, ['inbox.v1', `bearer.${await o.getToken()}`]);
+    let s: SocketLike;
+    try {
+      // The server echoes "inbox.v1"; the token rides alongside because browsers cannot set WebSocket headers.
+      s = new Socket(o.url, ['inbox.v1', `bearer.${await o.getToken()}`]);
+    } catch {
+      schedule(backoff(attempt++)); // offline or token refresh failed: try again later, never give up
+      return;
+    }
     socket = s;
+    connected = false;
     s.onopen = () => {
-      const hadState = lastSeq > 0;
       attempt = 0;
-      if (hadState) chain = chain.then(resync);
+      connected = true;
+      chain = chain.then(resync); // first connect included: covers events between the list load and now
     };
     s.onmessage = (msg) => {
-      const parsed = realtimeEvent.safeParse(JSON.parse(msg.data));
+      let parsed;
+      try { parsed = realtimeEvent.safeParse(JSON.parse(msg.data)); } catch { return; }
       if (!parsed.success) return;
       const e = parsed.data;
       chain = chain.then(async () => {
-        if (lastSeq > 0 && e.seq > lastSeq + 1) await resync();
+        if (e.seq > lastSeq + 1) await resync();
         deliver(e);
       });
     };
     s.onclose = () => {
-      if (stopped) return;
-      timer = setTimeout(() => void open(), backoff(attempt++));
+      connected = false;
+      if (socket === s) schedule(backoff(attempt++));
     };
   };
+  // A phone waking up or a network coming back reconnects at once instead of waiting out the backoff.
+  const wake = () => {
+    if (stopped) return;
+    if (!connected) { attempt = 0; schedule(0); } else chain = chain.then(resync);
+  };
+  const onVisible = () => { if (typeof document !== 'undefined' && document.visibilityState === 'visible') wake(); };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', wake);
+    document.addEventListener('visibilitychange', onVisible);
+  }
   void open();
   return () => {
     stopped = true;
     if (timer) clearTimeout(timer);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', wake);
+      document.removeEventListener('visibilitychange', onVisible);
+    }
     socket?.close();
   };
 }

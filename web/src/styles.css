@@ -224,3 +224,8 @@ textarea { caret-color: var(--gold-ink); }
 .field { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
 .field input { min-height: 44px; border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; background: var(--cream); color: var(--ink); outline: 0; }
 .field input:focus { border-color: var(--gold); background: var(--paper); }
+
+.media-img { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; margin-bottom: 6px; }
+.media-loading { display: block; width: 220px; height: 160px; border-radius: 10px; background: var(--avatar); margin-bottom: 6px; }
+.media-file { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); cursor: pointer; margin-bottom: 6px; }
+.more { border: 0; background: none; color: var(--gold-ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 4px 0; font-size: 13px; }

@@ -67,6 +67,7 @@ export function createSampleSource(): InboxSource {
   let nextId = 1000;
   return {
     kind: 'sample',
+    capabilities: { codOutcome: true },
     currentUserId: 'u-me',
     userNames: { 'u-me': 'أنا', 'u-dina': 'دينا' },
     async listConversations(filter, q) {

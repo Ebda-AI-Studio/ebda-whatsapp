@@ -48,6 +48,31 @@ describe('createApiSource', () => {
     expect(calls[0]!.init?.keepalive).toBe(true);
   });
 
+  it('search finds a conversation beyond the first page', async () => {
+    const old = { ...conv, id: 99, contact: { ...conv.contact, name: 'قديم' } };
+    const { f } = fetchStub({
+      '/search?q=': () => ({ status: 200, body: { items: [{ conversationId: 99, messageId: 1, snippet: 'x', at: 1 }] } }),
+      'cursor=c2': () => ({ status: 200, body: { items: [old], nextCursor: null } }),
+      '/conversations?filter=all&limit=50': () => ({ status: 200, body: { items: [conv], nextCursor: 'c2' } }),
+    });
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    expect((await src.listConversations('all', 'كلمة')).map((c) => c.id)).toEqual([99]);
+  });
+
+  it('declares COD outcomes unavailable until the store route exists', () => {
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', userNames: {}, currentUserId: 'u' });
+    expect(src.capabilities).toEqual({ codOutcome: false });
+  });
+
+  it('fetches media with the bearer token and returns a blob URL', async () => {
+    const f = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/jpeg' } }));
+    const createObjectURL = vi.fn(() => 'blob:x');
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL }));
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    expect(await src.mediaUrl!('/api/v1/stores/s/media/9')).toBe('blob:x');
+    expect(new Headers((f.mock.calls[0] as unknown as [string, RequestInit])[1].headers).get('authorization')).toBe('Bearer tok');
+  });
+
   it('uses search for a non-empty query', async () => {
     const { f, calls } = fetchStub({ '/search?q=': () => ({ status: 200, body: { items: [] } }), '/conversations': () => ({ status: 200, body: { items: [conv], nextCursor: null } }) });
     const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
@@ -76,10 +101,39 @@ describe('connectRealtime', () => {
     FakeSocket.last.onopen?.();
     FakeSocket.last.onmessage?.({ data: JSON.stringify({ type: 'conversation.updated', seq: 1, conversation: conv }) });
     FakeSocket.last.onmessage?.({ data: JSON.stringify({ type: 'conversation.updated', seq: 3, conversation: conv }) });
-    await vi.waitFor(() => expect(got).toEqual([1, 2, 3]));
+    // first connect takes a baseline (reload) at seq 1; seq 3 then exposes a gap that is repaired with seq 2
+    await vi.waitFor(() => expect(got).toEqual([2, 3]));
+    expect(fetchEvents).toHaveBeenNthCalledWith(1, 0);
     expect(fetchEvents).toHaveBeenCalledWith(1);
     stop();
     expect(FakeSocket.last.closed).toBe(true);
+  });
+
+  it('a token failure while reconnecting schedules another attempt instead of dying', async () => {
+    let calls = 0;
+    const getToken = vi.fn(async () => { calls++; if (calls === 1) throw new Error('offline'); return 'tok'; });
+    connectRealtime({ url: 'wss://wa.test/ws', getToken, onEvent: () => undefined, fetchEvents: async (a) => ({ items: [], latestSeq: a }), socketImpl: FakeSocket as never, backoffMs: () => 0 });
+    await vi.waitFor(() => expect(getToken).toHaveBeenCalledTimes(2));
+  });
+
+  it('on first connect and on a gap older than the buffer it asks the app to reload', async () => {
+    const onReload = vi.fn();
+    const fetchEvents = vi.fn(async (after: number) => (after === 0 ? { items: [], latestSeq: 40 } : { items: [{ type: 'conversation.updated' as const, seq: 900, conversation: conv }], latestSeq: 900 }));
+    connectRealtime({ url: 'wss://wa.test/ws', getToken: async () => 'tok', onEvent: () => undefined, onReload, fetchEvents, socketImpl: FakeSocket as never, backoffMs: () => 0 });
+    await vi.waitFor(() => expect(FakeSocket.last).toBeTruthy());
+    FakeSocket.last.onopen?.();
+    await vi.waitFor(() => expect(onReload).toHaveBeenCalledTimes(1));
+    FakeSocket.last.onmessage?.({ data: JSON.stringify({ type: 'conversation.updated', seq: 950, conversation: conv }) });
+    await vi.waitFor(() => expect(onReload).toHaveBeenCalledTimes(2));
+  });
+
+  it('reconnects now when the page becomes visible or the network returns', async () => {
+    connectRealtime({ url: 'wss://wa.test/ws', getToken: async () => 'tok', onEvent: () => undefined, fetchEvents: async (a) => ({ items: [], latestSeq: a }), socketImpl: FakeSocket as never, backoffMs: () => 60_000 });
+    await vi.waitFor(() => expect(FakeSocket.last).toBeTruthy());
+    const first = FakeSocket.last;
+    first.onclose?.();
+    window.dispatchEvent(new Event('online'));
+    await vi.waitFor(() => expect(FakeSocket.last).not.toBe(first));
   });
 
   it('reconnects after the socket closes and resyncs from the last seq', async () => {

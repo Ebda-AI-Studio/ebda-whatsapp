@@ -16,6 +16,16 @@ export interface InboxSource {
   templates(): Promise<TemplateDto[]>;
   /** Confirm or refuse a pending COD order (the store stays the writer of order state). */
   recordCodOutcome(waId: string, orderNumber: string, outcome: 'confirmed' | 'refused'): Promise<void>;
+  /** What this source can do today (e.g. COD outcomes need the store route, Phase 4). */
+  capabilities: { codOutcome: boolean };
+  /** A displayable URL for a protected media path (fetch with the token → blob URL). */
+  mediaUrl?(path: string): Promise<string>;
+  /** Full text of a message longer than 1 KB. */
+  longBody?(messageId: number): Promise<string>;
+  /** Stages a file for sending; returns the uploadId for a media send. */
+  upload?(file: File): Promise<string>;
+  /** Called when events were missed beyond repair; the app reloads its list and open chat. */
+  onReload?(cb: () => void): () => void;
   /** Realtime events; returns an unsubscribe function. */
   subscribe(onEvent: (e: RealtimeEvent) => void): () => void;
 }

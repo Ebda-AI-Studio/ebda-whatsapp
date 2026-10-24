@@ -5,7 +5,7 @@ import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, orderStops } from '../lib/format';
 
 type Props = {
-  t: Strings; lang: Lang; orders: OrderSummaryDto[] | null; hasChat: boolean;
+  t: Strings; lang: Lang; orders: OrderSummaryDto[] | null; hasChat: boolean; canDecide: boolean;
   onConfirm: (o: OrderSummaryDto) => void; onRefuse: (o: OrderSummaryDto) => void; onClose: () => void;
 };
 
@@ -25,7 +25,7 @@ export function OrderRail({ t, status }: { t: Strings; status: OrderSummaryDto['
   );
 }
 
-export function OrderPane({ t, lang, orders, hasChat, onConfirm, onRefuse, onClose }: Props) {
+export function OrderPane({ t, lang, orders, hasChat, canDecide, onConfirm, onRefuse, onClose }: Props) {
   const [askingRefuse, setAskingRefuse] = useState(false);
   const [current, ...older] = orders ?? [];
   const delivered = (orders ?? []).filter((o) => o.status === 'delivered').length;
@@ -43,17 +43,17 @@ export function OrderPane({ t, lang, orders, hasChat, onConfirm, onRefuse, onClo
       {hasChat && orders && orders.length === 0 && <p className="muted">{t.noOrders}</p>}
       {current && (
         <article className="order-card" aria-label={current.orderNumber}>
-          <div className="order-top"><b>{current.orderNumber}</b><span className="order-total">{formatMoney(current.totalMinor, current.currency, lang)}</span></div>
+          <div className="order-top"><b><bdi>{current.orderNumber}</bdi></b><span className="order-total">{formatMoney(current.totalMinor, current.currency, lang)}</span></div>
           <div className="muted">{t.items(num(current.itemsCount, lang))} · {t[current.paymentMethod]}</div>
           <span className="status" data-status={current.status}>{t.orderStatus[current.status]}</span>
           <OrderRail t={t} status={current.status} />
-          {current.status === 'pending_confirmation' && !askingRefuse && (
+          {canDecide && current.status === 'pending_confirmation' && !askingRefuse && (
             <div className="order-actions">
               <button type="button" className="btn gold" onClick={() => onConfirm(current)}>{t.confirmOrder}</button>
               <button type="button" className="btn" onClick={() => setAskingRefuse(true)}>{t.refuseOrder}</button>
             </div>
           )}
-          {current.status === 'pending_confirmation' && askingRefuse && (
+          {canDecide && current.status === 'pending_confirmation' && askingRefuse && (
             <div className="refuse-ask" role="group" aria-label={t.refuseAsk}>
               <span>{t.refuseAsk}</span>
               <div className="order-actions">
@@ -66,7 +66,7 @@ export function OrderPane({ t, lang, orders, hasChat, onConfirm, onRefuse, onClo
       )}
       {older.map((o) => (
         <div key={o.orderNumber + o.at} className="order-row">
-          <span>{o.orderNumber} · <span className="status" data-status={o.status}>{t.orderStatus[o.status]}</span></span>
+          <span><bdi>{o.orderNumber}</bdi> · <span className="status" data-status={o.status}>{t.orderStatus[o.status]}</span></span>
           <span className="muted">{formatMoney(o.totalMinor, o.currency, lang)}</span>
         </div>
       ))}

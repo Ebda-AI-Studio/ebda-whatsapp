@@ -196,4 +196,58 @@ describe('inbox', () => {
     expect(log.queryByText('صورة')).toBeNull();
     expect(log.getByText('صورة المقاس')).toBeTruthy();
   });
+
+  it('a failing orders call never blocks the messages from showing', async () => {
+    const source = createSampleSource();
+    source.orders = async () => { throw new Error('404'); };
+    render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    expect(await within(screen.getByRole('log')).findByText('عايزة أأكد الأوردر بتاع امبارح')).toBeTruthy();
+  });
+
+  it('retry resends the original request with the same clientId', async () => {
+    const source = createSampleSource();
+    const seen: string[] = [];
+    let fail = true;
+    const real = source.send.bind(source);
+    source.send = async (id, req) => { seen.push(req.clientId); if (fail) { fail = false; throw new Error('net'); } return real(id, req); };
+    render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'اكتب رسالة' }), { target: { value: 'تجربة' } }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'إرسال' })));
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: 'حاول تاني' })));
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBe(seen[1]);
+  });
+
+  it('hides Confirm/Refuse when the source cannot record COD outcomes yet', async () => {
+    const source = createSampleSource();
+    source.capabilities = { codOutcome: false };
+    render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    const orders = screen.getByRole('complementary', { name: 'طلبات العميل' });
+    await within(orders).findByText('#1048');
+    expect(within(orders).queryByRole('button', { name: 'تأكيد الطلب' })).toBeNull();
+  });
+
+  it('a late send response never downgrades a newer status from a live event', async () => {
+    const source = createSampleSource();
+    let emit: (e: Parameters<Parameters<typeof source.subscribe>[0]>[0]) => void = () => undefined;
+    source.subscribe = (cb) => { emit = cb; return () => undefined; };
+    let release: (m: Awaited<ReturnType<typeof source.send>>) => void = () => undefined;
+    source.send = () => new Promise((r) => { release = r; });
+    render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'اكتب رسالة' }), { target: { value: 'حالة' } }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'إرسال' })));
+    const clientId = (screen.getByRole('log').lastElementChild as HTMLElement).dataset.clientId!;
+    const msg = { id: 55, clientId, wamid: 'w', direction: 'out' as const, type: 'text' as const, text: 'حالة', hasLongBody: false, media: null, template: null, errorCode: null, at: 1 };
+    await act(async () => emit({ type: 'message.created', seq: 1, conversationId: 1, message: { ...msg, status: 'delivered' } }));
+    await act(async () => release({ ...msg, status: 'queued' }));
+    expect(screen.getByRole('log').querySelector('[data-client-id="' + clientId + '"] [data-status]')?.getAttribute('data-status')).toBe('delivered');
+  });
 });

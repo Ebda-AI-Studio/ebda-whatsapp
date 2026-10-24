@@ -6,6 +6,10 @@ const NOW = Date.UTC(2026, 9, 24, 17, 0);
 describe('format (ar)', () => {
   it('formats EGP minor units with Arabic digits', () => expect(formatMoney(68000, 'EGP', 'ar')).toBe('٦٨٠ ج.م'));
   it('formats EGP in English', () => expect(formatMoney(68000, 'EGP', 'en')).toBe('EGP 680'));
+  it('keeps piasters when they are not zero', () => {
+    expect(formatMoney(74950, 'EGP', 'en')).toBe('EGP 749.50');
+    expect(formatMoney(74950, 'EGP', 'ar')).toBe('٧٤٩٫٥٠ ج.م');
+  });
   it('relative time: minutes, hours, yesterday', () => {
     expect(relativeTime(NOW - 2 * 60_000, NOW, 'ar')).toBe('٢ د');
     expect(relativeTime(NOW - 3 * 3600_000, NOW, 'ar')).toBe('٣ س');
