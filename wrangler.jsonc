@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ebda-wa",
+  "account_id": "69188202efc4df480140dd76545aa3ab",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-24",
   "compatibility_flags": ["nodejs_compat"],
@@ -9,7 +10,7 @@
   "vars": { "META_GRAPH_VERSION": "v23.0" },
   "durable_objects": { "bindings": [{ "name": "WORKSPACE_DO", "class_name": "WorkspaceDO" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],
-  "d1_databases": [{ "binding": "DB", "database_name": "ebda-wa-platform", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations/d1" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "ebda-wa-platform", "database_id": "80c011f6-b03c-4289-b20a-102aa3ca79ef", "migrations_dir": "migrations/d1" }],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "ebda-wa-media" }],
   "queues": {
     "producers": [{ "binding": "SEND_QUEUE", "queue": "ebda-wa-send" }],
