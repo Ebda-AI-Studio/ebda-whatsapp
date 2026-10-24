@@ -47,6 +47,7 @@ export type OrderingCopy = {
     codPlaced: (orderNumber: string, total: string | null, locale: Locale) => string;
     linkPlaced: (orderNumber: string, url: string, locale: Locale) => string;
     instapayPlaced: (orderNumber: string, ipa: string, amount: string, reference: string, locale: Locale) => string;
+    awaitingReceipt: Localised;
     proofReceived: Localised;
     proofAlready: Localised;
     proofExpired: Localised;

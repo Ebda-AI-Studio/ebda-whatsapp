@@ -15,6 +15,8 @@ export type Env = {
   STORE_EVENTS?: Queue;
   /** Signs the short-lived links the Store uses to fetch a customer's payment screenshot. */
   PROOF_URL_SECRET?: string;
+  /** Public origin of this Worker (no trailing slash), used in the signed links the Store fetches payment screenshots from. */
+  PUBLIC_BASE_URL?: string;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
   META_SYSTEM_TOKEN: string;

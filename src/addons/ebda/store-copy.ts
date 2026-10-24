@@ -73,6 +73,7 @@ export const EBDA_ORDERING_COPY: OrderingCopy = {
     instapayPlaced: (n, ipa, amount, ref, locale) => (locale === 'ar'
       ? `طلبك رقم ${n} اتسجّل ✅\nحوّل ${amount} على إنستاباي:\nالعنوان: ${ipa}\nالمرجع (اكتبه في الملاحظات): ${ref}\nبعد التحويل ابعتلي صورة الإيصال هنا، وهنأكد طلبك أول ما نتأكد من الدفع.`
       : `Your order ${n} is placed ✅\nPlease transfer ${amount} via InstaPay:\nAddress: ${ipa}\nReference (put it in the notes): ${ref}\nThen send me the receipt screenshot here and we will confirm your order once the payment is verified.`),
+    awaitingReceipt: L('لسه مستنيين صورة إيصال التحويل. ابعتها هنا، أو ابعت "طلب جديد" لو عايز تبدأ من الأول.', 'We are still waiting for your transfer receipt. Send it here, or send "new order" to start over.'),
     proofReceived: L('وصلنا إيصال التحويل ✅ هنراجعه ونأكد طلبك.', 'We got your transfer receipt ✅ We will check it and confirm your order.'),
     proofAlready: L('استلمنا الإيصال قبل كده وهو تحت المراجعة. هنبلغك أول ما يتأكد.', 'We already have your receipt and it is being checked. We will tell you as soon as it is confirmed.'),
     proofExpired: L('مدة إرسال الإيصال خلصت. ابعتلنا "طلب جديد" لو لسه عايز تكمّل.', 'The time to send the receipt has passed. Send "new order" if you still want to order.'),

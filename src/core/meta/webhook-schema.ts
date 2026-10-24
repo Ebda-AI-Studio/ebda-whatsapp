@@ -118,7 +118,7 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
           type,
           ...(m.text ? { text: m.text.body } : {}),
           ...(reply ? { text: reply.title, reply } : {}),
-          ...(order ? { order } : {}),
+          ...(order ? { order, text: `🛒 ${order.items.reduce((n, i) => n + i.quantity, 0)}` } : {}),
           ...(media?.success ? { media: { id: media.data.id, mime: media.data.mime_type ?? 'application/octet-stream', ...(media.data.filename ? { filename: media.data.filename } : {}) }, ...(media.data.caption ? { caption: media.data.caption } : {}) } : {}),
           ...(names.get(m.from) ? { profileName: names.get(m.from) } : {}),
         });

@@ -5,7 +5,7 @@ import { DO_MIGRATIONS, migrate } from './do-migrations';
 import type { SendResult } from './meta/client';
 import type { InboundMessage, StatusEvent } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
-import { jobKind } from './send-queue';
+import { jobKind, sendToMeta } from './send-queue';
 import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
@@ -23,6 +23,7 @@ import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
+import { botInputFrom, botInputSchema, orderingActive, runBotTurn } from './ordering/bot';
 import { handleCodReply, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
@@ -36,6 +37,7 @@ export const WS_ROLE_HEADER = 'x-socket-role';
 /** Close code for a socket whose access token has expired: the client refreshes its token and reconnects. */
 export const WS_CLOSE_TOKEN_EXPIRED = 4401;
 type SocketAttachment = { exp: number; role: string };
+export const BOT_TURN_MAX_ATTEMPTS = 6;
 export const STALE_CLAIM_MS = 2 * 60 * 1000;
 /** failed sits between sent and delivered: it beats a late 'sent', but never undoes a delivery. */
 const STATUS_RANK = { sent: 1, failed: 2, delivered: 3, read: 4 } as const;
@@ -46,7 +48,7 @@ export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[]
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
-export type TaskPayload = { job?: SendJob; reason?: 'tier' | 'throughput' | 'frequency_cap' | 'event'; n?: number; messageId?: number; mediaId?: string; orderId?: string };
+export type TaskPayload = { job?: SendJob; phoneNumberId?: string; reason?: 'tier' | 'throughput' | 'frequency_cap' | 'event'; n?: number; messageId?: number; mediaId?: string; orderId?: string };
 export type ClaimResult = 'claimed' | 'already_sent' | 'in_flight' | 'dropped' | 'deferred';
 export type ThrottleReport = { tier: number; mps: number; usedInWindow: number; waiting: number; nextSlotAt: number | null };
 
@@ -100,8 +102,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { preview: previewOf(text), body: r2Key ? null : text, key: r2Key ?? null };
   }
 
-  async ingest(batch: IngestBatch, config: WorkspaceConfig = {}): Promise<IngestResult> {
+  async ingest(batch: IngestBatch, initialConfig: WorkspaceConfig = {}): Promise<IngestResult> {
+    let config = initialConfig;
     const workspaceId = this.workspaceId;
+    // While the ordering bot is on it owns the conversation: the generic auto reply would talk over it.
+    const ordering = orderingActive(this.host());
+    if (ordering) config = { ...config, autoReplyText: undefined };
     // Large bodies go to R2 first (outside the transaction); skipped for a wamid we already stored, so redelivery writes nothing.
     const bodies = new Map<string, string>();
     for (const m of batch.inbound) {
@@ -158,7 +164,12 @@ export class WorkspaceDO extends DurableObject<Env> {
         } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
           this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId);
         }
-        if (m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now)) linkWork = true;
+        const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
+        if (wasCodReply) linkWork = true;
+        else if (ordering && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image')) {
+          addTask(this.sql, 'bot_turn', now, botInputFrom(m, inserted.id, batch.phoneNumberId));
+          linkWork = true;
+        }
         this.emitConversationUpdated(conversationId);
         if (!optOut && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
       }
@@ -539,8 +550,12 @@ export class WorkspaceDO extends DurableObject<Env> {
   // ---- Store link (Phase 4) ---------------------------------------------------------------------------------------
 
   private linkHost?: LinkHost;
+  /** Pause between two sends of one bot turn (WhatsApp keeps them in order). A field so tests can set it to 0. */
+  botSendGapMs = 150;
   /** The narrow view of this DO the Store-link code works against (see store-link/host.ts). */
   private host(): LinkHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
     return (this.linkHost ??= {
       sql: this.sql,
       storage: this.ctx.storage,
@@ -551,7 +566,25 @@ export class WorkspaceDO extends DurableObject<Env> {
       emitConversationUpdated: (id) => this.emitConversationUpdated(id),
       arm: () => this.arm(),
       eraseContact: (waId) => this.eraseContact(waId),
+      deliver: (job) => this.deliverNow(job),
+      get sendGapMs() { return self.botSendGapMs; },
     });
+  }
+
+  /**
+   * Sends a stored message right now, through the same claim/throttle/record steps as the queue consumer. Used where the
+   * order of messages matters (the ordering bot); a retryable Meta failure hands the job to the send queue, whose retry ladder takes over.
+   */
+  private async deliverNow(job: SendJob): Promise<void> {
+    const claim = await this.claimSend(job);
+    if (claim !== 'claimed') return; // deferred (the scheduler releases it), or already sent / in flight / dropped
+    const sent = await sendToMeta(this.env, sendJobSchema.parse(job));
+    if (!sent.ok && sent.code === 131049) {
+      await this.rescheduleFrequencyCap(job);
+      return;
+    }
+    await this.recordOutbound(job.idempotencyKey, sent);
+    if (!sent.ok && sent.retryable) await this.env.SEND_QUEUE.sendBatch([{ body: job }]);
   }
 
   /** Contact and conversation for a WhatsApp id, created when missing (a business-initiated message to a customer who never wrote). Inside a transaction. */
@@ -1012,6 +1045,21 @@ export class WorkspaceDO extends DurableObject<Env> {
         if (typeof orderId === 'string') await pushCodOutcome(this.host(), orderId, now);
         return undefined;
       }
+      case 'bot_turn': {
+        const input = botInputSchema.safeParse(JSON.parse(payload ?? 'null'));
+        if (!input.success) {
+          console.error(JSON.stringify({ alert: 'scheduled_task_invalid', kind, workspace: this.workspaceId }));
+          return undefined;
+        }
+        try {
+          await runBotTurn(this.host(), input.data, now);
+        } catch (err) {
+          // Give up quietly after a few tries: the customer can simply write again.
+          if (attempts + 1 < BOT_TURN_MAX_ATTEMPTS) throw err;
+          console.error(JSON.stringify({ alert: 'bot_turn_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: (err as Error).message }));
+        }
+        return undefined;
+      }
       case 'catalog_sync':
         return runCatalogSync(this.host(), now);
       case 'catalog_reconcile':
@@ -1124,6 +1172,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
+      this.sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', waId);
+      this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       if (conv) {
         this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
         this.sql.exec("DELETE FROM events WHERE json_extract(payload, '$.conversationId') = ? OR json_extract(payload, '$.conversation.id') = ?", conv.id, conv.id);

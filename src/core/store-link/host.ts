@@ -14,6 +14,10 @@ export interface LinkHost {
   emitConversationUpdated(conversationId: number): void;
   /** Re-points the single alarm at the earliest task. */
   arm(): Promise<void>;
+  /** Sends an already-stored message now (claim, throttle, Meta call, record); falls back to the send queue on a retryable failure. */
+  deliver(job: SendJob): Promise<void>;
+  /** Pause between two sends of one bot turn, so WhatsApp keeps their order. */
+  readonly sendGapMs: number;
   /** Erases one contact and everything about it (data-protection request). */
   eraseContact(waId: string): Promise<{ found: boolean }>;
 }

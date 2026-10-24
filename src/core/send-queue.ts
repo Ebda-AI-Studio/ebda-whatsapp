@@ -13,10 +13,17 @@ export const sendJobSchema = z.object({
   phoneNumberId: z.string().min(1),
   to: z.string().min(1),
   /** Absent = text (the Phase 1 reply jobs). */
-  kind: z.enum(['text', 'template', 'interactive', 'media']).optional(),
+  kind: z.enum(['text', 'template', 'interactive', 'media', 'list', 'image_link']).optional(),
   text: z.string().min(1).max(4096).optional(),
   template: z.object({ name: z.string().min(1), language: z.string().min(2), components: z.array(templateComponentSchema) }).optional(),
   interactive: z.object({ body: z.string().min(1).max(1024), buttons: z.array(z.object({ id: z.string().min(1), title: z.string().min(1) })).min(1).max(3) }).optional(),
+  list: z.object({
+    body: z.string().min(1).max(1024),
+    button: z.string().min(1).max(20),
+    rows: z.array(z.object({ id: z.string().min(1).max(200), title: z.string().min(1).max(24), description: z.string().max(72).optional() })).min(1).max(10),
+    footer: z.string().max(60).optional(),
+  }).optional(),
+  imageLink: z.object({ link: z.string().regex(/^https:\/\/[^\s]+$/).max(2000), caption: z.string().max(1024).optional() }).optional(),
   media: z.object({ kind: mediaKind, mediaId: z.string().min(1), caption: z.string().max(1024).optional(), filename: z.string().max(255).optional() }).optional(),
   idempotencyKey: z.string().min(1),
   inboundAt: z.number().optional(),
@@ -25,13 +32,13 @@ export const sendJobSchema = z.object({
   deferrals: z.number().int().nonnegative().optional(),
 }).superRefine((j, ctx) => {
   const kind = j.kind ?? 'text';
-  const have = { text: j.text, template: j.template, interactive: j.interactive, media: j.media }[kind];
+  const have = { text: j.text, template: j.template, interactive: j.interactive, media: j.media, list: j.list, image_link: j.imageLink }[kind];
   if (have === undefined) ctx.addIssue({ code: 'custom', message: `${kind} job is missing its ${kind} payload` });
 });
 export type SendJob = z.input<typeof sendJobSchema>;
 export const jobKind = (j: Pick<SendJob, 'kind'>) => j.kind ?? 'text';
 
-import { sendInteractive, sendMedia, sendTemplate, sendText, type SendResult } from './meta/client';
+import { sendImageLink, sendInteractive, sendList, sendMedia, sendTemplate, sendText, type SendResult } from './meta/client';
 import type { Env } from '../env';
 import { mark } from './timing';
 import { workspaceForPhoneNumber } from './routing';
@@ -46,6 +53,8 @@ export function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>): Promi
     case 'template': return sendTemplate({ ...base, ...job.template! });
     case 'interactive': return sendInteractive({ ...base, ...job.interactive! });
     case 'media': return sendMedia({ ...base, ...job.media! });
+    case 'list': return sendList({ ...base, ...job.list! });
+    case 'image_link': return sendImageLink({ ...base, ...job.imageLink! });
     default: return sendText({ ...base, text: job.text! });
   }
 }

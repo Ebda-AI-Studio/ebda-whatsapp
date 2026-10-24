@@ -18,11 +18,13 @@ export type StoreLinkConfig = {
   events: (env: Env) => StoreEventSink | null;
   /** Secret for the suite-wide customer key (same value in every product). */
   buyerSecret: (env: Env) => string | undefined;
+  /** Where payment screenshots are served from, and the key that signs those links; null = not configured. */
+  proof: (env: Env) => { secret: string; baseUrl: string } | null;
   /** Customer-facing copy and template names; supplied by the product addon. */
   copy: OrderingCopy | null;
 };
 
-let current: StoreLinkConfig = { bridge: () => null, events: () => null, buyerSecret: (env) => env.SUITE_BUYER_KEY_SECRET, copy: null };
+let current: StoreLinkConfig = { bridge: () => null, events: () => null, buyerSecret: (env) => env.SUITE_BUYER_KEY_SECRET, proof: (env) => (env.PROOF_URL_SECRET && env.PUBLIC_BASE_URL ? { secret: env.PROOF_URL_SECRET, baseUrl: env.PUBLIC_BASE_URL.replace(/\/$/, '') } : null), copy: null };
 
 export function configureStoreLink(next: Partial<StoreLinkConfig>): StoreLinkConfig {
   const previous = current;

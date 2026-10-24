@@ -28,6 +28,7 @@ import { consumeStoreEvents } from './core/store-events';
 import { createStoreEventSink } from './addons/ebda/store-events';
 import { bridgeFor } from './core/store-link';
 import { ordersRoutes } from './routes/orders';
+import { proofRoutes } from './routes/proof';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY });
@@ -70,6 +71,7 @@ api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
 api.route('/', templatesRoutes(EBDA_DEFAULT_TEMPLATES));
+api.route('/', proofRoutes);
 app.route('/api/v1', api);
 
 function sameString(a: string, b: string): boolean {

@@ -64,3 +64,22 @@ export function sendMedia(opts: Base & { kind: MediaKind; mediaId: string; capti
   if (opts.filename && opts.kind === 'document') media.filename = opts.filename;
   return postMessage(opts, { type: opts.kind, [opts.kind]: media });
 }
+
+export type ListRow = { id: string; title: string; description?: string };
+/** An interactive list (up to 10 rows). Row ids come back verbatim in the customer's reply. */
+export function sendList(opts: Base & { body: string; button: string; rows: ListRow[]; footer?: string }): Promise<SendResult> {
+  return postMessage(opts, {
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      body: { text: opts.body },
+      ...(opts.footer ? { footer: { text: opts.footer } } : {}),
+      action: { button: opts.button, sections: [{ rows: opts.rows.map((r) => ({ id: r.id, title: r.title, ...(r.description ? { description: r.description } : {}) })) }] },
+    },
+  });
+}
+
+/** An image Meta fetches from a public https link (product pictures), with an optional caption. */
+export function sendImageLink(opts: Base & { link: string; caption?: string }): Promise<SendResult> {
+  return postMessage(opts, { type: 'image', image: { link: opts.link, ...(opts.caption ? { caption: opts.caption } : {}) } });
+}

@@ -35,7 +35,7 @@ export function useStoreLink(make: () => FakeStore = () => new FakeStore('*')) {
   beforeEach(() => {
     ctx.fake = make();
     ctx.sink = new RecordingSink();
-    previous = configureStoreLink({ bridge: () => ctx.fake, events: () => ctx.sink, buyerSecret: () => BUYER_SECRET });
+    previous = configureStoreLink({ bridge: () => ctx.fake, events: () => ctx.sink, buyerSecret: () => BUYER_SECRET, proof: () => ({ secret: 'proof-test-secret', baseUrl: 'https://wa.test' }) });
   });
   afterEach(() => {
     if (previous) configureStoreLink(previous);
