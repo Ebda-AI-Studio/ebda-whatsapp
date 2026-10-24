@@ -34,7 +34,7 @@ export async function consumeStoreEvents(batch: MessageBatch<unknown>, env: Env)
       if (result.status === 'retry') msg.retry({ delaySeconds: retryDelay(msg.attempts) });
       else msg.ack();
     } catch (err) {
-      console.error(JSON.stringify({ alert: 'store_event_failed', type: event.type, storeId: event.storeId, attempts: msg.attempts, error: (err as Error).message }));
+      console.error(JSON.stringify({ alert: 'store_event_failed', type: event.type, storeId: event.storeId, attempts: msg.attempts, error: (err as Error).message.replace(/\d{6,}/g, '#') }));
       msg.retry({ delaySeconds: retryDelay(msg.attempts) });
     }
   }

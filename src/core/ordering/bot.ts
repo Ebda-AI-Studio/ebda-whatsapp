@@ -89,6 +89,32 @@ function toJob(host: LinkHost, to: string, pn: string, key: string, m: BotMsg): 
   }
 }
 
+// ---- aborting a turn ---------------------------------------------------------------------------------------------------
+
+class TurnAborted extends Error {}
+
+/** The customer was erased while this turn was running: the inbound message is gone or its tombstone exists. */
+function erasedOrGone(host: LinkHost, input: BotInput): boolean {
+  return !host.sql.exec('SELECT 1 FROM messages WHERE id = ?', input.messageId).toArray().length
+    || host.sql.exec('SELECT 1 FROM erased_keys WHERE key = ?', `reply:${input.wamid}`).toArray().length > 0;
+}
+
+/**
+ * The customer said stop AFTER sending the message this turn answers: the pending answer is cancelled. (A customer who opted
+ * out EARLIER and writes in again gets a plain service answer: Ruling in the ledger, 4.4 Final.)
+ */
+function optedOutSince(host: LinkHost, input: BotInput): boolean {
+  const r = host.sql.exec<{ opted_out_at: number | null; created_at: number }>(
+    'SELECT ct.opted_out_at, m.created_at FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id WHERE m.id = ?', input.messageId,
+  ).toArray()[0];
+  return !!r && r.opted_out_at !== null && r.opted_out_at >= r.created_at;
+}
+
+/** Called after every await that precedes a write: stops the turn without writing when the customer is gone or opted out. */
+function alive(t: Turn): void {
+  if (erasedOrGone(t.host, t.input) || optedOutSince(t.host, t.input)) throw new TurnAborted();
+}
+
 // ---- the turn ----------------------------------------------------------------------------------------------------------
 
 type Turn = {
@@ -141,13 +167,21 @@ export async function runBotTurn(host: LinkHost, input: BotInput, now: number): 
     const session = loadSession(host, input.from);
     if (session.data.lastMessageId >= input.messageId) return; // already applied (a replayed task)
     const t: Turn = { host, copy, bridge, ws: host.workspaceId, input, now, session, out: [] };
-    if (session.fresh) {
-      const p = await profile(t);
-      if (p) session.locale = p.locale;
+    try {
+      alive(t);
+      if (session.fresh) {
+        const p = await profile(t);
+        if (p) session.locale = p.locale;
+      }
+      await dispatch(t);
+      alive(t);
+      await flush(t);
+      alive(t);
+      saveSession(t);
+    } catch (err) {
+      if (!(err instanceof TurnAborted)) throw err;
+      // erased or opted out meanwhile: nothing is written, nothing more is sent
     }
-    await dispatch(t);
-    await flush(t);
-    saveSession(t);
   });
 }
 
@@ -178,6 +212,7 @@ async function flush(t: Turn): Promise<void> {
     const key = `bot:${t.input.messageId}:${i}`;
     const built = toJob(host, t.input.from, t.input.phoneNumberId, key, t.out[i]!);
     host.storage.transactionSync(() => {
+      alive(t); // never re-create a contact that was erased since the last send
       if (host.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', key).toArray().length) return;
       const { conversationId } = host.ensureConversation(t.input.from, t.now);
       host.insertOutbound(conversationId, { type: built.type, preview: built.preview, body: built.preview, key }, t.now);
@@ -483,6 +518,7 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
     say(t, loc(t, res.reason === 'unavailable' || res.reason === 'not_linked' ? t.copy.t.storeUnavailable : t.copy.t.orderFailed));
     return;
   }
+  alive(t); // the order exists at the Store; a customer erased meanwhile gets no local record of it
   const o = res.value;
   const total = o.totalMinor ?? subtotal(d.cart);
   const currency = o.currency ?? d.cart[0]!.currency;
@@ -545,6 +581,7 @@ async function receiveImage(t: Turn): Promise<void> {
     say(t, loc(t, t.copy.t.awaitingReceipt));
     return;
   }
+  alive(t);
   const claimed = host.sql.exec('UPDATE store_orders SET proof_wamid = ?, proof_at = ? WHERE order_id = ? AND proof_wamid IS NULL', i.wamid, t.now, order.order_id).rowsWritten > 0;
   if (!claimed) {
     say(t, loc(t, t.copy.t.proofAlready));

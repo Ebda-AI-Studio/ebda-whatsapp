@@ -169,7 +169,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
         const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
         if (wasCodReply) linkWork = true;
-        else if (ordering && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image')) {
+        else if (ordering && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image')) {
           addTask(this.sql, 'bot_turn', now, botInputFrom(m, inserted.id, batch.phoneNumberId));
           linkWork = true;
         }

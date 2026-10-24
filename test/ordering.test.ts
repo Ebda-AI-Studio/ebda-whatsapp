@@ -452,6 +452,85 @@ describe('switches, safety and replays', () => {
   });
 });
 
+describe('opt-out and erasure', () => {
+  it('a STOP message schedules no bot turn and gets no reply', async () => {
+    const { ws, pn } = await setup(50);
+    const g = stubGraph();
+    expect(await say(ws, pn, text('STOP'), g)).toEqual([]);
+    expect(await rows(ws, "SELECT 1 FROM scheduled_tasks WHERE kind = 'bot_turn'")).toEqual([]);
+    expect(await rows(ws, 'SELECT opted_out_at IS NOT NULL AS out FROM contacts')).toEqual([{ out: 1 }]);
+    expect(await rows(ws, 'SELECT 1 FROM bot_sessions')).toEqual([]);
+  });
+
+  it('a stop given after the question cancels the pending answer', async () => {
+    const { ws, pn } = await setup(51);
+    const g = stubGraph();
+    const ts = Math.floor(Date.now() / 1000);
+    // one batch: the question is stored (turn scheduled), then the stop, before any turn can run
+    await workspace(ws).ingest({ phoneNumberId: pn, receivedAt: Date.now(), statuses: [], inbound: [
+      { wamid: wamid(), from: WA_1, ts, type: 'text', text: 'hi' },
+      { wamid: wamid(), from: WA_1, ts: ts + 1, type: 'text', text: 'وقف' },
+    ] });
+    await workspace(ws).runDueTasks();
+    expect(sentOf(g)).toEqual([]);
+    expect(await rows(ws, 'SELECT 1 FROM bot_sessions')).toEqual([]);
+    expect(await rows(ws, "SELECT 1 FROM messages WHERE direction = 'out'")).toEqual([]);
+  });
+
+  it('Ruling check: a customer who opted out EARLIER and writes in again still gets a plain service answer', async () => {
+    const { ws, pn } = await setup(52);
+    const g = stubGraph();
+    await say(ws, pn, text('hi'), g);
+    await exec(ws, 'UPDATE contacts SET opted_out_at = 1000');
+    const out = await say(ws, pn, text('hello again'), g);
+    expect(out.at(-1)!.kind).toBe('list');
+  });
+
+  it('erasing a customer while a bot turn is waiting on the Store writes nothing back', async () => {
+    const { ws, pn } = await setup(53);
+    link.fake.latencyMs = 80;
+    const g = stubGraph();
+    await postWebhook(SELF, rawMessagePayload(pn, text('hi')));
+    const turn = workspace(ws).runDueTasks();
+    await new Promise((r) => setTimeout(r, 30)); // the turn is inside listCatalog
+    await workspace(ws).eraseContact(WA_1);
+    await turn;
+    for (const t of ['contacts', 'conversations', 'messages', 'bot_sessions', 'store_orders']) expect(await rows(ws, `SELECT 1 FROM ${t}`), t).toEqual([]);
+    expect(sentOf(g)).toEqual([]);
+  });
+
+  it('erasing a customer in the middle of a burst stops it: nothing is sent or stored after the erase', async () => {
+    const { ws, pn } = await setup(54);
+    const g = stubGraph(undefined, { delayMs: 40 });
+    await postWebhook(SELF, rawMessagePayload(pn, text('hi')));
+    const turn = workspace(ws).runDueTasks();
+    await new Promise((r) => setTimeout(r, 130));
+    await workspace(ws).eraseContact(WA_1);
+    const sentAtErase = sentOf(g).length;
+    await turn;
+    expect(sentAtErase).toBeGreaterThan(0);
+    expect(sentOf(g).length).toBeLessThanOrEqual(sentAtErase + 1); // at most the one call already in flight
+    for (const t of ['contacts', 'conversations', 'messages', 'bot_sessions']) expect(await rows(ws, `SELECT 1 FROM ${t}`), t).toEqual([]);
+    expect(await rows(ws, "SELECT 1 FROM scheduled_tasks WHERE kind IN ('bot_turn', 'send_release')")).toEqual([]);
+  });
+
+  it('an order that finishes after the customer was erased leaves no local order row', async () => {
+    const { ws, pn } = await setup(55);
+    const g = stubGraph();
+    await toCheckout(ws, pn, g);
+    await say(ws, pn, tapBtn('pay:cod'), g);
+    link.fake.latencyMs = 80;
+    await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
+    const turn = workspace(ws).runDueTasks();
+    await new Promise((r) => setTimeout(r, 30));
+    await workspace(ws).eraseContact(WA_1);
+    await turn;
+    expect(await rows(ws, 'SELECT 1 FROM store_orders')).toEqual([]);
+    expect(await rows(ws, 'SELECT 1 FROM bot_sessions')).toEqual([]);
+    expect(await rows(ws, 'SELECT 1 FROM contacts')).toEqual([]);
+  });
+});
+
 describe('copy limits', () => {
   it('every button is at most 20 characters and every list label at most 24', () => {
     const t = EBDA_ORDERING_COPY.t;
