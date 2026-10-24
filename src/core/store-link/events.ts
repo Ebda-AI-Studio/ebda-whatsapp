@@ -8,6 +8,7 @@ import { bridgeFor, storeLink } from '../store-link';
 import type { LinkHost } from './host';
 import { queueFreeText, queueTemplate, setTag, cleanParam, type QueueResult } from './outbound';
 import { isLinked, putState, readSettings } from './settings';
+import { locale, orderRow, schedulePendingPushes, upsertOrder } from './order-store';
 
 export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
 
@@ -17,25 +18,7 @@ export const COD_NO_REPLY_MS = 24 * 60 * 60 * 1000;
 export const CATALOG_DEBOUNCE_MS = 30_000;
 const KEEP_EVENTS_MS = 14 * 24 * 60 * 60 * 1000;
 
-const locale = (l: string | undefined): Locale => (l?.toLowerCase().startsWith('en') ? 'en' : 'ar');
 const warn = (host: LinkHost, what: string, extra: Record<string, unknown> = {}) => console.warn(JSON.stringify({ warn: what, workspace: host.workspaceId, ...extra }));
-
-type OrderRow = { order_id: string; order_number: string | null; wa_id: string | null; buyer_key: string | null; payment_method: string | null; status: string | null; total_minor: number | null; currency: string | null; cod_state: string | null };
-
-export function orderRow(host: LinkHost, orderId: string): OrderRow | undefined {
-  return host.sql.exec<OrderRow>('SELECT order_id, order_number, wa_id, buyer_key, payment_method, status, total_minor, currency, cod_state FROM store_orders WHERE order_id = ?', orderId).toArray()[0];
-}
-
-export function upsertOrder(host: LinkHost, o: { orderId: string; orderNumber?: string | null; waId?: string | null; buyerKey?: string | null; paymentMethod?: string | null; status?: string | null; totalMinor?: number | null; currency?: string | null; codState?: string | null; codRequestedAt?: number | null }, now: number): void {
-  host.sql.exec(
-    `INSERT INTO store_orders (order_id, order_number, wa_id, buyer_key, payment_method, status, total_minor, currency, cod_state, cod_requested_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(order_id) DO UPDATE SET
-       order_number = coalesce(excluded.order_number, order_number), wa_id = coalesce(excluded.wa_id, wa_id), buyer_key = coalesce(excluded.buyer_key, buyer_key),
-       payment_method = coalesce(excluded.payment_method, payment_method), status = coalesce(excluded.status, status), total_minor = coalesce(excluded.total_minor, total_minor),
-       currency = coalesce(excluded.currency, currency), cod_state = coalesce(excluded.cod_state, cod_state), cod_requested_at = coalesce(excluded.cod_requested_at, cod_requested_at), updated_at = excluded.updated_at`,
-    o.orderId, o.orderNumber ?? null, o.waId ?? null, o.buyerKey ?? null, o.paymentMethod ?? null, o.status ?? null, o.totalMinor ?? null, o.currency ?? null, o.codState ?? null, o.codRequestedAt ?? null, now,
-  );
-}
 
 /** Newest-wins: false when a newer version of this entity was already applied. Equal versions pass (different events, same instant). */
 function acceptVersion(host: LinkHost, entity: string, version: number): boolean {
@@ -113,15 +96,21 @@ export async function applyStoreEvent(host: LinkHost, event: StoreEvent, opts: {
     if (host.sql.exec('SELECT 1 FROM processed_events WHERE event_id = ?', event.id).toArray().length) return { status: 'duplicate' };
     const result = handle(host, event, { ...opts, now }, { codLookup });
     if (result.status === 'retry') return result;
+    // An erasure is recorded as done only after the contact is really gone (below), so a failure there is redelivered.
+    if (event.type === 'customer.erased') return result;
     host.sql.exec('INSERT INTO processed_events (event_id, type, at) VALUES (?, ?, ?)', event.id, event.type, now);
     host.sql.exec('DELETE FROM processed_events WHERE at < ?', now - KEEP_EVENTS_MS);
     return result;
   });
-  if (outcome.status === 'applied' && event.type === 'customer.erased' && erasedWaId) {
-    await host.eraseContact(erasedWaId);
+  if (event.type === 'customer.erased') {
+    if (erasedWaId) await host.eraseContact(erasedWaId); // throws on failure: no marker, the queue redelivers
+    host.storage.transactionSync(() => {
+      host.sql.exec('INSERT OR IGNORE INTO processed_events (event_id, type, at) VALUES (?, ?, ?)', event.id, event.type, now);
+    });
+    return erasedWaId ? { status: 'applied' } : { status: 'skipped', detail: 'unknown_customer' };
   }
   if (outcome.status === 'applied' || outcome.status === 'skipped') await host.arm();
-  return event.type === 'customer.erased' && !erasedWaId ? { status: 'skipped', detail: 'unknown_customer' } : outcome;
+  return outcome;
 }
 
 function sendOutcome(host: LinkHost, r: QueueResult, what: string): StoreEventOutcome {
@@ -144,6 +133,12 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
     case 'store.unlinked':
       if (!acceptVersion(host, 'store:link', at(event.occurredAt))) return { status: 'stale' };
       putState(host, 'linked', event.type === 'store.linked' ? '1' : '0');
+      if (event.type === 'store.linked') schedulePendingPushes(host, now);
+      return { status: 'applied' };
+    case 'customer.erased':
+      // Data protection is never gated by link state. Only what is keyed by the customer is dropped here; the contact is
+      // erased by the caller, which records this event as processed only once that has succeeded.
+      host.sql.exec('DELETE FROM store_orders WHERE buyer_key = ?', event.data.buyerKey);
       return { status: 'applied' };
     default:
   }
@@ -168,7 +163,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
     case 'order.created': {
       const d = event.data;
       const waId = d.phoneE164.slice(1);
-      upsertOrder(host, { orderId: d.orderId, orderNumber: d.orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: d.paymentMethod, status: 'created', totalMinor: d.totalMinor, currency: d.currency }, now);
+      upsertOrder(host, { orderId: d.orderId, orderNumber: d.orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: d.paymentMethod, status: 'created', totalMinor: d.totalMinor, currency: d.currency, locale: locale(d.locale) }, now);
       // COD orders are confirmed through the COD request; orders placed in this chat were already confirmed in the chat.
       if (d.paymentMethod === 'cod' || d.channel === 'whatsapp') return { status: 'applied' };
       if (!readSettings(host).orderConfirmations) return { status: 'skipped', detail: 'disabled' };
@@ -204,7 +199,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
         idempotencyKey: `cod:${d.orderId}`, extraComponents: [quick(0, 'y'), quick(1, 'n')], now,
       });
       if (!r.ok) return sendOutcome(host, r, 'cod_confirmation');
-      upsertOrder(host, { orderId: d.orderId, orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: 'cod', totalMinor, currency, codState: 'pending', codRequestedAt: now }, now);
+      upsertOrder(host, { orderId: d.orderId, orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: 'cod', totalMinor, currency, codState: 'pending', codRequestedAt: now, locale: loc }, now);
       rememberBuyerKey(host, waId, d.buyerKey);
       setTag(host, waId, 'cod_pending', true);
       addTask(host.sql, 'cod_no_reply', now + COD_NO_REPLY_MS, { orderId: d.orderId });
@@ -225,7 +220,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       }
       if (d.status === 'paid' && have.wa_id && have.order_number && copy && opts.phoneNumberId && (have.payment_method === 'instapay' || have.payment_method === 'link')) {
         // Free text only inside the 24 h window (the customer is usually still there after paying).
-        queueFreeText(host, { waId: have.wa_id, phoneNumberId: opts.phoneNumberId, text: copy.t.paymentConfirmed(have.order_number, 'ar'), idempotencyKey: `order:${d.orderId}:paid`, now });
+        queueFreeText(host, { waId: have.wa_id, phoneNumberId: opts.phoneNumberId, text: copy.t.paymentConfirmed(have.order_number, locale(have.locale ?? undefined)), idempotencyKey: `order:${d.orderId}:paid`, now });
       }
       return { status: 'applied' };
     }
@@ -266,11 +261,6 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       if (r.ok) rememberBuyerKey(host, waId, d.buyerKey);
       return sendOutcome(host, r, 'cart_recovery');
     }
-
-    case 'customer.erased':
-      // The contact is erased after this transaction (it awaits R2); here we only drop what is keyed by the customer.
-      host.sql.exec('DELETE FROM store_orders WHERE buyer_key = ?', event.data.buyerKey);
-      return { status: 'applied' };
 
     default:
       return { status: 'skipped', detail: 'unhandled' };

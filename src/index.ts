@@ -25,9 +25,12 @@ import { EBDA_ORDERING_COPY } from './addons/ebda/store-copy';
 import { createServiceBindingBridge } from './addons/ebda/store-bridge';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
+import { createStoreEventSink } from './addons/ebda/store-events';
+import { bridgeFor } from './core/store-link';
+import { ordersRoutes } from './routes/orders';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
-configureStoreLink({ bridge: createServiceBindingBridge, copy: EBDA_ORDERING_COPY });
+configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY });
 const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 
 export { WorkspaceDO } from './core/workspace-do';
@@ -43,7 +46,7 @@ const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
 api.get('/stores/:storeId/me', (c) => {
   const p = c.get('principal');
-  return c.json({ userId: p.userId, storeId: c.req.param('storeId'), role: c.get('storeRole') });
+  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null } });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   const role = c.get('storeRole');
@@ -65,6 +68,7 @@ api.route('/', messagesRoutes);
 api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
+api.route('/', ordersRoutes);
 api.route('/', templatesRoutes(EBDA_DEFAULT_TEMPLATES));
 app.route('/api/v1', api);
 

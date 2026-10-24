@@ -162,6 +162,8 @@ export const DO_MIGRATIONS: readonly string[] = [
    CREATE INDEX store_orders_wa ON store_orders (wa_id);
    CREATE INDEX store_orders_number ON store_orders (order_number);
    CREATE TABLE catalog_dirty (product_id TEXT PRIMARY KEY, variant_ids TEXT NOT NULL, deleted INTEGER NOT NULL, updated_at INTEGER NOT NULL);`,
+  // v14 (Phase 4, orders): the customer's language per order, so a reply or a payment notice speaks it.
+  `ALTER TABLE store_orders ADD COLUMN locale TEXT;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

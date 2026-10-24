@@ -22,6 +22,7 @@ import type { StoreEvent } from './api/store-events';
 import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
+import { handleCodReply, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
 export const EVENTS_KEPT = 1000;
@@ -112,6 +113,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     await this.ensureBackupAlarm();
     const result: IngestResult = { stored: 0, duplicates: 0, replies: [] };
     let scheduledMedia = false;
+    let linkWork = false;
     this.ctx.storage.transactionSync(() => {
       const now = Date.now();
       for (const m of batch.inbound) {
@@ -155,12 +157,13 @@ export class WorkspaceDO extends DurableObject<Env> {
         } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
           this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId);
         }
+        if (m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now)) linkWork = true;
         this.emitConversationUpdated(conversationId);
         if (!optOut && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
       }
       for (const st of batch.statuses) this.applyStatusSync(st);
     });
-    if (scheduledMedia) await this.arm();
+    if (scheduledMedia || linkWork) await this.arm();
     return result;
   }
 
@@ -583,6 +586,30 @@ export class WorkspaceDO extends DurableObject<Env> {
     return applyStoreEvent(this.host(), event, opts);
   }
 
+  /**
+   * The merchant answers a COD confirmation from the inbox. Expected refusals are data. The Store is told right away when it
+   * can be reached; otherwise a scheduled task keeps trying and `pushed` is false.
+   */
+  async merchantCodOutcome(a: MerchantCodArgs): Promise<{ ok: true; orderNumber: string; outcome: 'confirmed' | 'refused'; pushed: boolean } | { ok: false; reason: 'unknown_order' | 'conflict' | 'closed' }> {
+    const res = this.ctx.storage.transactionSync(() => merchantCod(this.host(), a, Date.now()));
+    if (!res.ok) return res;
+    await this.arm();
+    const pushed = await this.tryPushCod(res.orderId);
+    return { ok: true, orderNumber: res.orderNumber, outcome: a.outcome, pushed };
+  }
+
+  /** One attempt now; the scheduled task is the retry. */
+  private async tryPushCod(orderId: string): Promise<boolean> {
+    try {
+      const r = await pushCodOutcome(this.host(), orderId);
+      if (r.pushed) this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'cod_outcome_push' AND json_extract(payload, '$.orderId') = ? AND lease_until IS NULL", orderId);
+      return r.pushed || (r.reason === 'nothing_to_push');
+    } catch (err) {
+      console.error(JSON.stringify({ alert: 'cod_outcome_push_failed', workspace: this.workspaceId, error: (err as Error).message }));
+      return false;
+    }
+  }
+
   async getStoreLinkSettings(): Promise<StoreLinkSettings> {
     return readSettings(this.host());
   }
@@ -959,8 +986,13 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
         return undefined;
       }
+      case 'cod_outcome_push': {
+        const orderId = (JSON.parse(payload ?? 'null') as { orderId?: string } | null)?.orderId;
+        if (typeof orderId === 'string') await pushCodOutcome(this.host(), orderId, now);
+        return undefined;
+      }
       default:
-        return undefined; // campaign_step: Phase 6 placeholder
+        return undefined; // campaign_step: Phase 6 placeholder; catalog_*, cod_no_reply, bot_turn arrive with their tasks
     }
   }
 

@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import { FakeStore } from './helpers/fake-store';
 import { BUYER_KEY_1, PHONE_1, WA_1, deliver, flush, iso, sentJobs, storeEvent, storeWorkspace, useStoreLink } from './helpers/store-link';
@@ -237,6 +237,32 @@ describe('ordering, staleness and links', () => {
     const res = await deliver([storeEvent(ws, 'customer.erased', { buyerKey: BUYER_KEY_1 })]);
     expect(res.explicitAcks).toEqual(['e0']);
     expect(await rows(ws, 'SELECT wa_id FROM contacts')).toEqual([{ wa_id: '201112223334' }]);
+  });
+
+  it('customer.erased is honoured even when the store is unlinked', async () => {
+    const ws = W(26);
+    await storeWorkspace(ws);
+    await openChat(ws, WA_1);
+    await deliver([storeEvent(ws, 'store.unlinked', { ownerUserId: 'u' })]);
+    await deliver([storeEvent(ws, 'customer.erased', { buyerKey: BUYER_KEY_1 })]);
+    expect(await rows(ws, 'SELECT 1 FROM contacts')).toEqual([]);
+  });
+
+  it('a failed erasure is not recorded as done: the redelivery erases the contact', async () => {
+    const ws = W(27);
+    await storeWorkspace(ws);
+    await openChat(ws, WA_1);
+    const e = storeEvent(ws, 'customer.erased', { buyerKey: BUYER_KEY_1 });
+    await runInDurableObject(workspace(ws), async (instance) => {
+      vi.spyOn(instance, 'eraseContact').mockRejectedValueOnce(new Error('r2 down'));
+      await expect(instance.applyStoreEvent(e as never, { phoneNumberId: null })).rejects.toThrow('r2 down');
+    });
+    expect(await rows(ws, 'SELECT 1 FROM contacts')).toHaveLength(1);
+    expect(await rows(ws, 'SELECT 1 FROM processed_events WHERE event_id = ?', e.id)).toEqual([]);
+    const res = await deliver([e], 2);
+    expect(res.explicitAcks).toEqual(['e0']);
+    expect(await rows(ws, 'SELECT 1 FROM contacts')).toEqual([]);
+    expect(await rows(ws, 'SELECT 1 FROM processed_events WHERE event_id = ?', e.id)).toHaveLength(1);
   });
 
   it('customer.erased for a customer we do not know is acknowledged and changes nothing', async () => {
