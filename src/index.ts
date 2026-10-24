@@ -8,6 +8,7 @@ import { mark } from './core/timing';
 import { scrubEvent } from './core/observability';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
 import { EBDA_COPY } from './addons/ebda/copy';
+import { EBDA_OPT_IN_KEYWORDS } from './addons/ebda/consent';
 import { createEbdaAccountsVerifier } from './addons/ebda/identity';
 import { requireStoreAccess, type AuthVars } from './core/identity/middleware';
 import type { IdentityVerifier } from './core/identity/verifier';
@@ -101,7 +102,7 @@ app.post('/meta/webhook', async (c) => {
     }
     const stub = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId));
     // Awaited before the 200: if the DO write fails we answer 5xx and Meta redelivers (ingest is idempotent on wamid).
-    const res = await stub.ingest({ ...ev, receivedAt }, { autoReplyText: EBDA_COPY.spikeAutoReply });
+    const res = await stub.ingest({ ...ev, receivedAt }, { autoReplyText: EBDA_COPY.spikeAutoReply, optInKeywords: [...EBDA_OPT_IN_KEYWORDS] });
     const metaTs = Math.min(...ev.inbound.map((m) => m.ts * 1000));
     if (Number.isFinite(metaTs)) firstMetaTs ||= metaTs;
     mark(c.env, 'do_stored', Number.isFinite(metaTs) ? Date.now() - metaTs : 0, Date.now() - receivedAt, workspaceId);

@@ -9,6 +9,7 @@ import { jobKind } from './send-queue';
 import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
 import { outboundMediaFor } from './media';
+import { detectOptIn, detectOptOut } from './consent';
 import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
 import type { TemplateDto } from './api/contract';
 
@@ -21,7 +22,7 @@ const STATUS_RANK = { sent: 1, failed: 2, delivered: 3, read: 4 } as const;
 
 export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[]; receivedAt: number };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
-export type WorkspaceConfig = { autoReplyText?: string };
+export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 export type ClaimResult = 'claimed' | 'already_sent' | 'in_flight' | 'dropped';
@@ -95,6 +96,7 @@ export class WorkspaceDO extends DurableObject<Env> {
            RETURNING id`,
           contactId, m.ts,
         ).one().id;
+        const optOut = m.type === 'text' && !!m.text && detectOptOut(m.text);
         const cols = this.bodyColumns(m.text, bodies.get(m.wamid));
         const inserted = this.sql.exec(
           `INSERT INTO messages (wamid, conversation_id, direction, type, preview, body, body_r2_key, created_at, updated_at)
@@ -105,12 +107,18 @@ export class WorkspaceDO extends DurableObject<Env> {
           result.duplicates++;
           // Redelivery heals a lost enqueue: offer the reply again until its send is claimed (claimSend dedupes).
           const claimed = this.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', `reply:${m.wamid}`).toArray().length > 0;
-          if (!claimed && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
+          if (!claimed && !optOut && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
           continue;
         }
         result.stored++;
         this.sql.exec('UPDATE conversations SET unread = unread + 1 WHERE id = ?', conversationId);
-        if (m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
+        if (optOut) {
+          // A reply to STOP is optional under Meta's rules and we send none: the opt-out is silent and immediate.
+          this.sql.exec("UPDATE contacts SET opted_out_at = coalesce(opted_out_at, ?), consent_source = 'keyword_stop', consent_at = ? WHERE id = ?", m.ts * 1000, now, contactId);
+        } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
+          this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId);
+        }
+        if (!optOut && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
       }
       for (const st of batch.statuses) this.applyStatusSync(st);
     });
