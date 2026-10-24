@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
+import react from '@vitejs/plugin-react';
 
 const migrations = await readD1Migrations('./migrations/d1');
 
@@ -15,9 +16,10 @@ export default defineConfig({
             },
           }),
         ],
-        test: { name: 'workers', setupFiles: ['./test/setup.ts'], include: ['test/**/*.test.ts'], exclude: ['test/guards.test.ts'] },
+        test: { name: 'workers', setupFiles: ['./test/setup.ts'], include: ['test/**/*.test.ts'], exclude: ['test/guards.test.ts', 'test/assets-config.test.ts'] },
       },
-      { test: { name: 'node', environment: 'node', include: ['test/guards.test.ts'] } },
+      { test: { name: 'node', environment: 'node', include: ['test/guards.test.ts', 'test/assets-config.test.ts'] } },
+      { plugins: [react()], test: { name: 'web', environment: 'jsdom', include: ['web/src/**/*.test.{ts,tsx}'] } },
     ],
   },
 });
