@@ -13,5 +13,5 @@ it('pins the Store event contract file: change it only together with the Store r
   const { readFileSync } = await import('node:fs');
   const { createHash } = await import('node:crypto');
   const file = readFileSync(new URL('../src/core/api/store-events.ts', import.meta.url));
-  expect(createHash('sha256').update(file).digest('hex')).toBe('b90c924dd8093ccae7b42d1c7e5795ad44ea2bdaca787e25bd74351904a4f5a1');
+  expect(createHash('sha256').update(file).digest('hex')).toBe('91a7faffa1d1a1aae416f840d0006596ca1e4f226b35efa24c04771199582d0d');
 });

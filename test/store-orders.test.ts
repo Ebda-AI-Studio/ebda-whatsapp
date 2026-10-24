@@ -167,7 +167,7 @@ describe('customer taps Confirm / Refuse on the COD template', () => {
     const jobs = await flush(ws);
     expect(jobs.find((j) => j.idempotencyKey === `cod:${o.orderId}:reply:confirmed`)?.text).toContain('اتأكد');
     expect(link.fake.orders.get(o.orderId)).toMatchObject({ codOutcome: 'confirmed' });
-    expect(link.sink.sent.map((e) => e.data.outcome)).toEqual(['confirmed']);
+    expect(link.sink.sent.map((e) => (e.data as { outcome: string }).outcome)).toEqual(['confirmed']);
     expect(await tags(ws)).toEqual([]);
     // the same tap redelivered by Meta, and the customer tapping Refuse afterwards, change nothing
     await tap(pn, 'wamid.t1', `cod:y:${o.orderId}`);

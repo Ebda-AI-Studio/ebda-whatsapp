@@ -48,3 +48,21 @@ export function scrubEvent(event: ErrorEvent): ErrorEvent {
   }
   return event;
 }
+
+const EMAIL = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu;
+
+/**
+ * What may be logged about a caught value: its class (and a short machine code if it has one), never its text. Error
+ * messages routinely echo input (a phone number, an e-mail, a body), and `throw "string"` has no class at all.
+ */
+export function errClass(err: unknown): string {
+  const name = err instanceof Error ? (err.constructor?.name || err.name || 'Error') : err === null ? 'null' : typeof err;
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'number' || (typeof code === 'string' && /^[A-Za-z0-9_.-]{1,40}$/.test(code)) ? `${name}:${code}` : name;
+}
+
+/** An error's text for storage next to a task (operators read it): phones and e-mails masked, bounded. Never for logs. */
+export function safeMessage(err: unknown, max = 200): string {
+  const raw = String((err as { message?: unknown } | null)?.message ?? err);
+  return (maskPhones(raw) ?? '').replace(EMAIL, '[email]').slice(0, max);
+}

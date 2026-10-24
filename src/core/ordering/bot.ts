@@ -18,6 +18,7 @@ import type { Address, Buyer, CatalogRow, ChatPaymentMethod, OrderLine, StoreBri
 import { bridgeFor, storeLink } from '../store-link';
 import type { LinkHost } from '../store-link/host';
 import { upsertOrder } from '../store-link/order-store';
+import { recordOrderAfterErase } from '../store-link/orders';
 import { isLinked, readSettings } from '../store-link/settings';
 import { normaliseText } from '../text-normalise';
 import type { Locale, OrderingCopy } from './copy';
@@ -487,6 +488,7 @@ async function placeWithText(t: Turn, text: string): Promise<void> {
   const street = cut(parts.slice(1).join(', ') || area, 240);
   const buyer = await buyerOf(t);
   if (buyer) {
+    alive(t);
     const saved = await t.bridge.saveCustomerAddress(t.ws, buyer.buyerKey, { area, street });
     if (saved.ok) return placeOrder(t, { addressId: saved.value.address.id });
   }
@@ -501,6 +503,7 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
   const items: OrderLine[] = d.cart.map((l) => ({ variantId: l.variantId, quantity: l.quantity }));
   // One key per order attempt: a retry after a timeout reaches the same order instead of creating a second one.
   d.orderKey ??= crypto.randomUUID();
+  alive(t); // never ask the Store to create an order for a customer who was erased or has just said stop
   const res = await t.bridge.createOrderFromChat(t.ws, { items, buyer, ...where, paymentMethod: method, idempotencyKey: `bot:${t.ws}:${d.orderKey}` });
   if (!res.ok) {
     if ((res.reason === 'out_of_stock' || res.reason === 'not_found') && res.outOfStock?.length) {
@@ -518,8 +521,14 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
     say(t, loc(t, res.reason === 'unavailable' || res.reason === 'not_linked' ? t.copy.t.storeUnavailable : t.copy.t.orderFailed));
     return;
   }
-  alive(t); // the order exists at the Store; a customer erased meanwhile gets no local record of it
   const o = res.value;
+  if (erasedOrGone(t.host, t.input)) {
+    // The Store created an order for a customer erased while the call was in flight: keep only the order id and the hashed key
+    // so the Store can be told to erase or cancel it, and never drop it silently.
+    t.host.storage.transactionSync(() => recordOrderAfterErase(t.host, { orderId: o.orderId, buyerKey: buyer.buyerKey }, t.now));
+    await t.host.arm();
+    throw new TurnAborted();
+  }
   const total = o.totalMinor ?? subtotal(d.cart);
   const currency = o.currency ?? d.cart[0]!.currency;
   upsertOrder(t.host, { orderId: o.orderId, orderNumber: o.orderNumber, waId: t.input.from, buyerKey: buyer.buyerKey, paymentMethod: method, status: 'created', totalMinor: total, currency, locale: t.session.locale }, t.now);
@@ -595,6 +604,12 @@ async function receiveImage(t: Turn): Promise<void> {
     throw new Error('payment screenshot links are not configured');
   }
   const url = await signProofUrl({ baseUrl: proof.baseUrl, secret: proof.secret, workspaceId: t.ws, messageId: i.messageId, now: t.now });
+  try {
+    alive(t);
+  } catch (e) {
+    release();
+    throw e;
+  }
   const res = await t.bridge.attachPaymentProof(t.ws, order.order_id, url);
   if (!res.ok) {
     release();

@@ -52,7 +52,7 @@ describe('commerce_outcomes (CI-1)', () => {
     expect(ci).toHaveBeenCalledTimes(1);
     expect(ci.mock.calls[0]![0]!.blobs).toEqual([BUYER_KEY_1, ws, 'no_reply', o.orderId, 'whatsapp']);
     expect(link.fake.orders.get(o.orderId)!.codOutcome).toBe('no_reply');
-    expect(link.sink.sent.map((e) => e.data.outcome)).toEqual(['no_reply']);
+    expect(link.sink.sent.map((e) => (e.data as { outcome: string }).outcome)).toEqual(['no_reply']);
     expect(await rows(ws, 'SELECT tag FROM conversation_tags')).toEqual([]);
   });
 

@@ -155,3 +155,22 @@ export async function pushCodOutcome(host: LinkHost, orderId: string, now = Date
   host.sql.exec('UPDATE store_orders SET outcome_pushed_at = ? WHERE order_id = ?', now, orderId);
   return { pushed: true };
 }
+
+/** Keeps only an order id and the hashed customer key for an order created while its customer was erased, and schedules telling the Store. Call inside a transaction. */
+export function recordOrderAfterErase(host: LinkHost, o: { orderId: string; buyerKey: string }, now: number): void {
+  host.sql.exec('INSERT OR IGNORE INTO store_orders_after_erase (order_id, buyer_key, created_at) VALUES (?, ?, ?)', o.orderId, o.buyerKey, now);
+  addTask(host.sql, 'erased_order_notify', now);
+}
+
+/** Tells the Store about each such order (idempotent event id per order). Throws when the queue is down: the scheduler retries. */
+export async function pushErasedOrders(host: LinkHost, now: number): Promise<void> {
+  const sink = storeLink().events(host.env);
+  if (!sink) return; // re-scheduled when the store is linked
+  for (const r of host.sql.exec<{ order_id: string; buyer_key: string; created_at: number }>('SELECT order_id, buyer_key, created_at FROM store_orders_after_erase WHERE pushed_at IS NULL').toArray()) {
+    const event = outboundStoreEventSchema.parse({
+      id: await uuidFromKey(`erased:${r.order_id}`), type: 'whatsapp.order_after_erasure', v: 1, storeId: host.workspaceId, occurredAt: new Date(r.created_at).toISOString(), data: { orderId: r.order_id, buyerKey: r.buyer_key },
+    });
+    await sink.send(event);
+    host.sql.exec('UPDATE store_orders_after_erase SET pushed_at = ? WHERE order_id = ?', now, r.order_id);
+  }
+}

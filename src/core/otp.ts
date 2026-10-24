@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Env } from '../env';
 import { normaliseE164 } from './phone';
+import { errClass } from './observability';
 import { activeNumberFor } from './routing';
 import { storeLink } from './store-link';
 
@@ -31,7 +32,7 @@ export async function sendOtp(env: Env, input: unknown): Promise<OtpResult> {
     if (!number) return { ok: false, reason: 'no_number' };
     return await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(storeId)).queueOtp(e164.slice(1), number.phoneNumberId, code);
   } catch (err) {
-    console.error(JSON.stringify({ alert: 'otp_failed', storeId, error: (err as Error).message.replace(/\d{6,}/g, '#') }));
+    console.error(JSON.stringify({ alert: 'otp_failed', storeId, error: errClass(err) }));
     return { ok: false, reason: 'unavailable' };
   }
 }

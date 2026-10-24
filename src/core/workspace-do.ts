@@ -23,13 +23,14 @@ import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
+import { errClass, safeMessage } from './observability';
 import { OTP_RATE_WINDOW_MS } from './otp-policy';
 import { OTP_MASK } from './templates';
 import type { OtpResult } from './otp';
 import { queueTemplate } from './store-link/outbound';
 import { storeLink } from './store-link';
 import { botInputFrom, botInputSchema, orderingActive, runBotTurn } from './ordering/bot';
-import { closeUnanswered, handleCodReply, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
+import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
 export const EVENTS_KEPT = 1000;
@@ -165,7 +166,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.sql.exec('UPDATE conversations SET unread = unread + 1 WHERE id = ?', conversationId);
         if (optOut) {
           // A reply to STOP is optional under Meta's rules and we send none: the opt-out is silent and immediate.
-          this.sql.exec("UPDATE contacts SET opted_out_at = coalesce(opted_out_at, ?), consent_source = 'keyword_stop', consent_at = ? WHERE id = ?", m.ts * 1000, now, contactId);
+          this.sql.exec("UPDATE contacts SET opted_out_at = max(coalesce(opted_out_at, 0), ?), consent_source = 'keyword_stop', consent_at = ? WHERE id = ?", m.ts * 1000, now, contactId);
         } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
           this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId);
         }
@@ -650,7 +651,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (r.pushed) this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'cod_outcome_push' AND json_extract(payload, '$.orderId') = ? AND lease_until IS NULL", orderId);
       return r.pushed || (r.reason === 'nothing_to_push');
     } catch (err) {
-      console.error(JSON.stringify({ alert: 'cod_outcome_push_failed', workspace: this.workspaceId, error: (err as Error).message }));
+      console.error(JSON.stringify({ alert: 'cod_outcome_push_failed', workspace: this.workspaceId, error: errClass(err) }));
       return false;
     }
   }
@@ -1041,13 +1042,14 @@ export class WorkspaceDO extends DurableObject<Env> {
         ran++;
         try {
           const nextDue = await this.runTask(t.kind, t.payload, now, t.attempts);
-          if (nextDue === undefined) this.sql.exec('DELETE FROM scheduled_tasks WHERE id = ?', t.id);
-          else this.sql.exec('UPDATE scheduled_tasks SET due_at = ?, attempts = 0, last_error = NULL, lease_until = NULL WHERE id = ?', nextDue, t.id);
+          // The row may have been deleted while the task ran (erasure) and its id reused by a NEW task: only touch the leased row we claimed.
+          if (nextDue === undefined) this.sql.exec('DELETE FROM scheduled_tasks WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', t.id, t.kind);
+          else this.sql.exec('UPDATE scheduled_tasks SET due_at = ?, attempts = 0, last_error = NULL, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', nextDue, t.id, t.kind);
         } catch (err) {
           failed++;
           const attempts = t.attempts + 1;
-          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ?', attempts, now + backoffMs(attempts), String((err as Error).message).slice(0, 200), t.id);
-          console.error(JSON.stringify({ alert: `${t.kind}_failed`, workspace: this.workspaceId, attempts, error: (err as Error).message }));
+          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', attempts, now + backoffMs(attempts), safeMessage(err), t.id, t.kind);
+          console.error(JSON.stringify({ alert: `${t.kind}_failed`, workspace: this.workspaceId, attempts, error: errClass(err) }));
         }
       }
     }
@@ -1089,7 +1091,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         } catch (err) {
           if (attempts + 1 < MEDIA_FETCH_MAX_ATTEMPTS) throw err;
           // Meta media ids live 30 days and we retried for hours: stop, say so, keep the message (without its media).
-          console.error(JSON.stringify({ alert: 'media_fetch_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: (err as Error).message }));
+          console.error(JSON.stringify({ alert: 'media_fetch_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: errClass(err) }));
         }
         return undefined;
       }
@@ -1098,6 +1100,9 @@ export class WorkspaceDO extends DurableObject<Env> {
         if (typeof orderId === 'string') await pushCodOutcome(this.host(), orderId, now);
         return undefined;
       }
+      case 'erased_order_notify':
+        await pushErasedOrders(this.host(), now);
+        return undefined;
       case 'cod_no_reply': {
         const orderId = (JSON.parse(payload ?? 'null') as { orderId?: string } | null)?.orderId;
         if (typeof orderId === 'string') this.ctx.storage.transactionSync(() => closeUnanswered(this.host(), orderId, now));
@@ -1114,7 +1119,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         } catch (err) {
           // Give up quietly after a few tries: the customer can simply write again.
           if (attempts + 1 < BOT_TURN_MAX_ATTEMPTS) throw err;
-          console.error(JSON.stringify({ alert: 'bot_turn_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: (err as Error).message }));
+          console.error(JSON.stringify({ alert: 'bot_turn_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: errClass(err) }));
         }
         return undefined;
       }
@@ -1256,7 +1261,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       try {
         await this.env.MEDIA.delete(batch);
       } catch (err) {
-        console.error(JSON.stringify({ alert: 'r2_delete_failed', workspace: this.workspaceId, keys: batch.length, error: (err as Error).message }));
+        console.error(JSON.stringify({ alert: 'r2_delete_failed', workspace: this.workspaceId, keys: batch.length, error: errClass(err) }));
         return this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM r2_pending_deletes').one().n;
       }
       this.ctx.storage.transactionSync(() => {

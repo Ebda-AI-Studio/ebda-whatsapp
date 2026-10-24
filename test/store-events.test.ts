@@ -300,6 +300,21 @@ describe('queue consumer', () => {
     expect(res.explicitAcks).toEqual([]);
   });
 
+  it('logs the class of a failure, never its text: no phone number or e-mail from a thrown message survives', async () => {
+    const ws = W(34);
+    await storeWorkspace(ws);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const thrown of [new Error('failed for +20 100 123 4567 / ‎٠١٠٠١٢٣٤٥٦٧ and ahmad@example.com'), 'plain string with +201001234567', { message: 'x@y.org 01001234567' }, null]) {
+      vi.spyOn(env.DB, 'prepare').mockImplementationOnce(() => { throw thrown; });
+      const res = await deliver([storeEvent(ws, 'store.linked', { ownerUserId: 'u' })]);
+      expect(res.retryMessages?.map((m: { msgId: string }) => m.msgId)).toEqual(['e0']);
+    }
+    const lines = err.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(lines).toContain('store_event_failed');
+    for (const leak of ['4567', '123', 'ahmad', 'example.com', '٠١٠٠', '01001234567', 'x@y.org', 'plain string']) expect(lines, leak).not.toContain(leak);
+    expect(lines).toContain('"error":"Error"');
+  });
+
   it('skips a customer-facing event when the workspace has no active number (nothing to send from)', async () => {
     const ws = W(33);
     await storeWorkspace(ws);

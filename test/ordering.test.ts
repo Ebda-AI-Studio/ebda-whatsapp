@@ -486,6 +486,74 @@ describe('opt-out and erasure', () => {
     expect(out.at(-1)!.kind).toBe('list');
   });
 
+  it('STOP, then the customer writes, then STOP again: the second stop cancels the pending answer (latest stop wins)', async () => {
+    const { ws, pn } = await setup(56);
+    const g = stubGraph();
+    const ts = Math.floor(Date.now() / 1000);
+    await workspace(ws).ingest({ phoneNumberId: pn, receivedAt: Date.now(), statuses: [], inbound: [
+      { wamid: wamid(), from: WA_1, ts, type: 'text', text: 'stop' },
+      { wamid: wamid(), from: WA_1, ts: ts + 1, type: 'text', text: 'hi' },       // a service message after the first stop: answered normally
+      { wamid: wamid(), from: WA_1, ts: ts + 2, type: 'text', text: 'وقف' },     // but the second stop arrives before the turn runs
+    ] });
+    await workspace(ws).runDueTasks();
+    expect(sentOf(g)).toEqual([]);
+    expect(await rows(ws, 'SELECT opted_out_at FROM contacts')).toEqual([{ opted_out_at: (ts + 2) * 1000 }]);
+  });
+
+  it('STOP, START, STOP, with a question in between: nothing is sent', async () => {
+    const { ws, pn } = await setup(57);
+    const g = stubGraph();
+    const ts = Math.floor(Date.now() / 1000);
+    await workspace(ws).ingest({ phoneNumberId: pn, receivedAt: Date.now(), statuses: [], inbound: [
+      { wamid: wamid(), from: WA_1, ts, type: 'text', text: 'stop' },
+      { wamid: wamid(), from: WA_1, ts: ts + 1, type: 'text', text: 'start' },
+      { wamid: wamid(), from: WA_1, ts: ts + 2, type: 'text', text: 'hi' },
+      { wamid: wamid(), from: WA_1, ts: ts + 3, type: 'text', text: 'stop' },
+    ] });
+    await workspace(ws).runDueTasks();
+    expect(sentOf(g)).toEqual([]);
+  });
+
+  it('no Store write happens for a customer erased before it: no address saved, no order created', async () => {
+    const { ws, pn } = await setup(58);
+    const g = stubGraph();
+    await toCheckout(ws, pn, g);
+    await say(ws, pn, tapBtn('pay:cod'), g);
+    const real = link.fake.saveCustomerAddress.bind(link.fake);
+    vi.spyOn(link.fake, 'saveCustomerAddress').mockImplementation(async (...a) => { await new Promise((r) => setTimeout(r, 80)); return real(...a); });
+    await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
+    const turn = workspace(ws).runDueTasks();
+    await new Promise((r) => setTimeout(r, 30)); // inside saveCustomerAddress
+    await workspace(ws).eraseContact(WA_1);
+    await turn;
+    expect(link.fake.count('createOrderFromChat')).toBe(0);
+    expect(link.fake.orders.size).toBe(0);
+    expect(await rows(ws, 'SELECT 1 FROM store_orders_after_erase')).toEqual([]);
+  });
+
+  it('an order the Store created while the customer was being erased is not dropped silently: a minimal record and a follow-up event for the Store', async () => {
+    const { ws, pn } = await setup(59);
+    const g = stubGraph();
+    await toCheckout(ws, pn, g);
+    await say(ws, pn, tapBtn('pay:cod'), g);
+    const real = link.fake.createOrderFromChat.bind(link.fake);
+    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { await new Promise((r) => setTimeout(r, 80)); return real(...a); });
+    await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
+    const turn = workspace(ws).runDueTasks();
+    await new Promise((r) => setTimeout(r, 40)); // the Store call is in flight
+    await workspace(ws).eraseContact(WA_1);
+    await turn;
+    expect(link.fake.orders.size).toBe(1);
+    // no personal data stays: no contact, session, messages, order row with a phone
+    for (const t of ['contacts', 'messages', 'bot_sessions', 'store_orders']) expect(await rows(ws, `SELECT 1 FROM ${t}`), t).toEqual([]);
+    expect(await rows(ws, 'SELECT order_id, buyer_key FROM store_orders_after_erase')).toEqual([{ order_id: 'ord-1001', buyer_key: BUYER_KEY_1 }]);
+    await workspace(ws).runDueTasks();
+    expect(link.sink.sent).toHaveLength(1);
+    expect(link.sink.sent[0]).toMatchObject({ type: 'whatsapp.order_after_erasure', storeId: ws, data: { orderId: 'ord-1001', buyerKey: BUYER_KEY_1 } });
+    expect(JSON.stringify(link.sink.sent[0])).not.toContain(WA_1);
+    expect(await rows(ws, 'SELECT pushed_at IS NOT NULL AS pushed FROM store_orders_after_erase')).toEqual([{ pushed: 1 }]);
+  });
+
   it('erasing a customer while a bot turn is waiting on the Store writes nothing back', async () => {
     const { ws, pn } = await setup(53);
     link.fake.latencyMs = 80;

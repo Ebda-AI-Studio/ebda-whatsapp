@@ -57,13 +57,12 @@ export function parseStoreEvent(raw: unknown): ParsedStoreEvent {
   return full.success ? { ok: true, event: full.data } : { ok: false, reason: 'invalid' };
 }
 
-/** Events we send to the Store on the messaging-to-store queue (outcomes it records as the order writer). */
-export const outboundStoreEventSchema = z.object({
-  id: z.string().uuid(),
-  type: z.literal('whatsapp.cod_outcome'),
-  v: z.literal(1),
-  storeId: z.string().min(1),
-  occurredAt: iso,
-  data: z.object({ orderId: z.string(), outcome: z.enum(['confirmed', 'refused', 'no_reply']), source: z.literal('whatsapp') }),
-});
+/** Events we send to the Store on the messaging-to-store queue. */
+const out = <T extends string, D extends z.ZodType>(type: T, data: D) => z.object({ ...envelope, type: z.literal(type), data });
+export const outboundStoreEventSchema = z.discriminatedUnion('type', [
+  // A COD answer recorded here (the Store is the order writer and skips emitting its own outcome for `source: whatsapp`).
+  out('whatsapp.cod_outcome', z.object({ orderId: z.string(), outcome: z.enum(['confirmed', 'refused', 'no_reply']), source: z.literal('whatsapp') })),
+  // An order was created from chat for a customer who was erased at the same moment: the Store should erase or cancel it.
+  out('whatsapp.order_after_erasure', z.object({ orderId: z.string(), buyerKey: key })),
+]);
 export type OutboundStoreEvent = z.infer<typeof outboundStoreEventSchema>;
