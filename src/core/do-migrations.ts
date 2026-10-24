@@ -205,6 +205,34 @@ export const DO_MIGRATIONS: readonly string[] = [
   `CREATE TABLE kb_chunks (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, idx INTEGER NOT NULL, vec_id TEXT NOT NULL UNIQUE, text TEXT NOT NULL, indexed INTEGER NOT NULL DEFAULT 0);
    CREATE INDEX kb_chunks_version ON kb_chunks (version, indexed);
    CREATE TABLE catalog_vectors (retailer_id TEXT PRIMARY KEY, vec_id TEXT NOT NULL, hash TEXT NOT NULL);`,
+  // v21 (Phase 6.1, contacts + import): contact tags (the inbox keeps its own per-conversation tags; segments read both), one row per
+  // CSV import with its progress, and the rejected rows (line + reason only: a rejected row's phone is never stored). last_import_id
+  // marks the import that last touched a contact, which is how a number repeated inside one file is told from one that already existed.
+  `ALTER TABLE contacts ADD COLUMN last_import_id TEXT;
+   CREATE TABLE contact_tags (contact_id INTEGER NOT NULL, tag TEXT NOT NULL, PRIMARY KEY (contact_id, tag)) WITHOUT ROWID;
+   CREATE INDEX contact_tags_tag ON contact_tags (tag, contact_id);
+   CREATE TABLE imports (
+     id TEXT PRIMARY KEY,
+     filename TEXT NOT NULL,
+     r2_key TEXT NOT NULL,
+     size INTEGER NOT NULL,
+     consented INTEGER NOT NULL,
+     mapping TEXT,
+     status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed')),
+     next_offset INTEGER NOT NULL DEFAULT 0,
+     next_line INTEGER NOT NULL DEFAULT 1,
+     delimiter INTEGER,
+     cols TEXT,
+     total INTEGER NOT NULL DEFAULT 0,
+     created_count INTEGER NOT NULL DEFAULT 0,
+     updated_count INTEGER NOT NULL DEFAULT 0,
+     rejected_count INTEGER NOT NULL DEFAULT 0,
+     error TEXT,
+     created_by TEXT,
+     created_at INTEGER NOT NULL,
+     finished_at INTEGER
+   );
+   CREATE TABLE import_rejects (import_id TEXT NOT NULL, line INTEGER NOT NULL, reason TEXT NOT NULL, PRIMARY KEY (import_id, line)) WITHOUT ROWID;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

@@ -11,6 +11,11 @@ export const contactDto = z.object({
   waId: z.string(), // digits, no '+'
   name: z.string().nullable(),
   optedOut: z.boolean(),
+  /** Phase 6 (additive: the inbox's embedded contact omits them). Tags from the contact and from its conversation. */
+  tags: z.array(z.string()).optional(),
+  /** Where and when the contact agreed to receive marketing (`import:<file>`, `keyword_start`, ...); null = no consent on record, so no marketing. */
+  consent: z.object({ source: z.string(), at: z.number().int() }).nullable().optional(),
+  lastInboundAt: z.number().int().nullable().optional(),
 });
 
 export const messageDto = z.object({
@@ -167,6 +172,37 @@ export const agentSettingsUpdate = agentSettingsFields.extend({ apiKey: z.string
 export type AgentSettingsDto = z.infer<typeof agentSettingsDto>;
 export type AgentSettingsUpdate = z.infer<typeof agentSettingsUpdate>;
 
+/** Phase 6: contacts, imports. */
+export const tagName = z.string().trim().min(1).max(32);
+export const listContactsQuery = z.object({
+  tag: tagName.optional(),
+  optedOut: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+  q: z.string().trim().min(1).max(100).optional(),
+  cursor: z.string().regex(/^\d{1,15}$/).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+export const listContactsResponse = z.object({ items: z.array(contactDto), nextCursor: z.string().nullable() });
+export const setContactTagsRequest = z.object({ tags: z.array(tagName).max(10) });
+export const importMapping = z.object({ phone: z.string().min(1).max(100).optional(), name: z.string().min(1).max(100).optional(), tags: z.string().min(1).max(100).optional() });
+/** The multipart text fields next to the `file` part. `consented` must be the literal string "true" to grant marketing consent. */
+export const createImportFields = z.object({ consented: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'), mapping: z.string().max(1000).optional() });
+export const importDto = z.object({
+  id: z.string(),
+  filename: z.string(),
+  status: z.enum(['pending', 'running', 'done', 'failed']),
+  consented: z.boolean(),
+  total: z.number().int().nonnegative(),
+  created: z.number().int().nonnegative(),
+  updated: z.number().int().nonnegative(),
+  rejected: z.number().int().nonnegative(),
+  error: z.string().nullable(),
+  createdAt: z.number().int(),
+  finishedAt: z.number().int().nullable(),
+});
+export const listImportsResponse = z.object({ items: z.array(importDto) });
+export const importRejectsResponse = z.object({ items: z.array(z.object({ line: z.number().int(), reason: z.string() })) });
+export type ImportDto = z.infer<typeof importDto>;
+
 export const customerOrdersResponse = z.object({ items: z.array(orderSummaryDto), source: z.enum(['store', 'sample']) });
 
 export type ContactDto = z.infer<typeof contactDto>;
@@ -199,4 +235,9 @@ export const ROUTES = {
   me: 'GET /me',
   storeLinkSettings: 'GET|PATCH /store-link/settings',
   agent: 'GET|PUT /agent',
+  contacts: 'GET /contacts',
+  contactTags: 'PUT /contacts/:waId/tags',
+  imports: 'GET|POST /imports',
+  import: 'GET /imports/:importId',
+  importRejects: 'GET /imports/:importId/rejects',
 } as const;

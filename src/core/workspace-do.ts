@@ -24,6 +24,7 @@ import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { errClass, safeMessage } from './observability';
+import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
 import type { AgentSettingsDto } from './api/contract';
 import { creditBalance, creditsAvailable, expireGrant, grantCredits, postCredit, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
@@ -730,6 +731,57 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { ok: true, settings };
   }
 
+  // ---- Campaigns (Phase 6): contacts + imports -------------------------------------------------------------------
+
+  async createImport(a: { id: string; filename: string; r2Key: string; size: number; consented: boolean; mapping: ImportState['mapping']; actor: string }): Promise<{ ok: true } | { ok: false; reason: 'import_in_progress' }> {
+    return createImport(this.host(), { ...a, now: Date.now() });
+  }
+
+  async importState(id: string): Promise<ImportState | null> {
+    return importState(this.host(), id);
+  }
+
+  /** Row cap of one import; a field so a test can lower it. */
+  importMaxRows = MAX_IMPORT_ROWS;
+
+  async applyImportChunk(a: Omit<ApplyArgs, 'now' | 'maxRows'>): Promise<{ ok: true; done: boolean } | { ok: false; reason: 'unknown_import' | 'not_running' | 'offset_mismatch' }> {
+    const r = applyImportChunk(this.host(), { ...a, now: Date.now(), maxRows: this.importMaxRows });
+    if (!r.ok) return r;
+    if (r.keys.length) await this.settleR2();
+    return { ok: true, done: r.done };
+  }
+
+  /** Ends an import that cannot go on; its uploaded file (phone numbers) is deleted from R2. */
+  async failImport(id: string, reason: string): Promise<void> {
+    const r = failImport(this.host(), id, reason, Date.now());
+    if (r.keys.length) await this.settleR2();
+  }
+
+  async getImport(id: string) {
+    return importSummary(this.host(), id);
+  }
+
+  async listImports(limit: number) {
+    return listImports(this.host(), limit);
+  }
+
+  async importRejects(id: string) {
+    return listRejects(this.host(), id);
+  }
+
+  async listContacts(q: ContactQuery) {
+    return listContacts(this.host(), q);
+  }
+
+  async setContactTags(waId: string, tags: string[]) {
+    return setContactTags(this.host(), waId, tags);
+  }
+
+  /** Deletes the R2 objects owed so far; whatever R2 refuses stays owed and is retried within the hour. */
+  private async settleR2(): Promise<void> {
+    if ((await this.drainR2Deletes()) > 0) await this.schedule('r2_drain', Date.now() + 3_600_000);
+  }
+
   // ---- AI agent (Phase 5) ------------------------------------------------------------------------------------------
 
   /** The agent's settings as the owner sees them. The model key is never returned, only whether one is stored. */
@@ -1298,6 +1350,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.sql.exec('DELETE FROM message_status_events WHERE wamid = ?', m.wamid);
       }
       this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
+      this.sql.exec('DELETE FROM contact_tags WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM agent_handoffs WHERE wa_id = ?', waId);

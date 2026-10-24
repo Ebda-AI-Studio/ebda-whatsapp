@@ -27,6 +27,8 @@ export type Env = {
   AGENT_ALLOWED_HOSTS?: string;
   /** Overrides the default Workers AI model of the agent. */
   AGENT_MODEL?: string;
+  /** Phase 6: contact-import workflow (one instance per uploaded file). */
+  IMPORT_WORKFLOW: Workflow<{ workspaceId: string; importId: string }>;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
   META_SYSTEM_TOKEN: string;
