@@ -7,6 +7,7 @@ import { addTask } from '../scheduler';
 import { bridgeFor, storeLink } from '../store-link';
 import type { LinkHost } from './host';
 import { queueFreeText, queueTemplate, setTag, cleanParam, type QueueResult } from './outbound';
+import { ensureCatalogReconcile } from './catalog';
 import { isLinked, putState, readSettings } from './settings';
 import { locale, orderRow, schedulePendingPushes, upsertOrder } from './order-store';
 
@@ -133,7 +134,10 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
     case 'store.unlinked':
       if (!acceptVersion(host, 'store:link', at(event.occurredAt))) return { status: 'stale' };
       putState(host, 'linked', event.type === 'store.linked' ? '1' : '0');
-      if (event.type === 'store.linked') schedulePendingPushes(host, now);
+      if (event.type === 'store.linked') {
+        schedulePendingPushes(host, now);
+        ensureCatalogReconcile(host, now);
+      }
       return { status: 'applied' };
     case 'customer.erased':
       // Data protection is never gated by link state. Only what is keyed by the customer is dropped here; the contact is

@@ -22,6 +22,7 @@ import type { StoreEvent } from './api/store-events';
 import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
+import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { handleCodReply, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
@@ -615,7 +616,15 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   async setStoreLinkSettings(patch: Partial<StoreLinkSettings>): Promise<StoreLinkSettings> {
-    return this.ctx.storage.transactionSync(() => writeSettings(this.host(), patch));
+    const before = readSettings(this.host()).catalogId;
+    const next = this.ctx.storage.transactionSync(() => {
+      const saved = writeSettings(this.host(), patch);
+      // A newly configured catalog gets a full reconcile soon, then nightly.
+      if (saved.catalogId && saved.catalogId !== before) ensureCatalogReconcile(this.host(), Date.now(), true);
+      return saved;
+    });
+    await this.arm();
+    return next;
   }
 
   // ---- realtime ---------------------------------------------------------------------------------------------------
@@ -991,8 +1000,12 @@ export class WorkspaceDO extends DurableObject<Env> {
         if (typeof orderId === 'string') await pushCodOutcome(this.host(), orderId, now);
         return undefined;
       }
+      case 'catalog_sync':
+        return runCatalogSync(this.host(), now);
+      case 'catalog_reconcile':
+        return runCatalogReconcile(this.host(), now);
       default:
-        return undefined; // campaign_step: Phase 6 placeholder; catalog_*, cod_no_reply, bot_turn arrive with their tasks
+        return undefined; // campaign_step: Phase 6 placeholder; cod_no_reply, bot_turn arrive with their tasks
     }
   }
 
