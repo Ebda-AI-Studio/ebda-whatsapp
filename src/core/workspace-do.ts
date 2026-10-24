@@ -256,4 +256,34 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
     return manifest;
   }
+
+  /**
+   * Erases one contact (data-protection request): the contact, its conversation, every message in and out,
+   * their status events, and R2 bodies. Rows go in one transaction; R2 deletes follow (a repeat finds no rows).
+   */
+  async eraseContact(waId: string): Promise<{ messages: number; statusEvents: number; r2Objects: number }> {
+    const found = this.ctx.storage.transactionSync(() => {
+      const contact = this.sql.exec<{ id: number }>('SELECT id FROM contacts WHERE wa_id = ?', waId).toArray()[0];
+      if (!contact) return { keys: [] as string[], messages: 0, statusEvents: 0 };
+      const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
+      const msgs = conv
+        ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null }>('SELECT wamid, body_r2_key FROM messages WHERE conversation_id = ?', conv.id).toArray()
+        : [];
+      let statusEvents = 0;
+      for (const m of msgs) {
+        if (!m.wamid) continue;
+        // Count first: rowsWritten also counts index entries, so it is not a row count.
+        statusEvents += this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM message_status_events WHERE wamid = ?', m.wamid).one().n;
+        this.sql.exec('DELETE FROM message_status_events WHERE wamid = ?', m.wamid);
+      }
+      if (conv) {
+        this.sql.exec('DELETE FROM messages WHERE conversation_id = ?', conv.id);
+        this.sql.exec('DELETE FROM conversations WHERE id = ?', conv.id);
+      }
+      this.sql.exec('DELETE FROM contacts WHERE id = ?', contact.id);
+      return { keys: msgs.map((m) => m.body_r2_key).filter((k): k is string => !!k), messages: msgs.length, statusEvents };
+    });
+    if (found.keys.length) await this.env.MEDIA.delete(found.keys);
+    return { messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys.length };
+  }
 }

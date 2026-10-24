@@ -23,3 +23,7 @@ Install the daily 04:00 job only when Ahmad approves (it is not installed):
 ## Drill
 `test/backup.test.ts` runs export → import → equal counts and hashes, the tamper case and the non-empty-target case on every test run.
 A live drill on the real account is part of the launch checklist.
+
+## Erasure vs backups
+`DELETE /api/v1/stores/:storeId/contacts/:waId` (owner or super admin) erases the contact from the live workspace and its R2 bodies.
+Nightly backups taken before the request still hold the contact until they age out (R2 lifecycle on `ebda-wa-backups`: 30 days, to be set when the bucket is created; Mac copies: 30 days via `backup-pull.sh`). The privacy policy must state this 30-day backup window. A restore must re-apply erasures logged after the snapshot date (audit lines `contact_erased`).

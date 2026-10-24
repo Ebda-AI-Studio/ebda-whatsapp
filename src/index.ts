@@ -11,6 +11,8 @@ import { EBDA_COPY } from './addons/ebda/copy';
 import { createEbdaAccountsVerifier } from './addons/ebda/identity';
 import { requireStoreAccess, type AuthVars } from './core/identity/middleware';
 import type { IdentityVerifier } from './core/identity/verifier';
+import { normaliseE164 } from './core/phone';
+import { buyerKey } from './core/buyer-key';
 
 export { WorkspaceDO } from './core/workspace-do';
 
@@ -26,6 +28,18 @@ api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
 api.get('/stores/:storeId/me', (c) => {
   const p = c.get('principal');
   return c.json({ userId: p.userId, storeId: c.req.param('storeId'), role: c.get('storeRole') });
+});
+api.delete('/stores/:storeId/contacts/:waId', async (c) => {
+  const role = c.get('storeRole');
+  if (role !== 'owner' && role !== 'super_admin') return c.json({ error: 'forbidden' }, 403);
+  const e164 = normaliseE164(decodeURIComponent(c.req.param('waId')));
+  if (!e164) return c.json({ error: 'invalid phone number' }, 400);
+  const storeId = c.req.param('storeId');
+  // For Ebda stores the workspace id is the store id (Phase 1 ruling).
+  const result = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId)).eraseContact(e164.slice(1));
+  const who = c.env.SUITE_BUYER_KEY_SECRET ? await buyerKey(c.env.SUITE_BUYER_KEY_SECRET, e164) : `…${e164.slice(-4)}`;
+  console.log(JSON.stringify({ audit: 'contact_erased', storeId, by: c.get('principal').userId, buyer: who, ...result }));
+  return c.json(result);
 });
 app.route('/api/v1', api);
 
