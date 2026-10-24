@@ -1,4 +1,4 @@
-import { ArrowRight, Check, CheckCheck, ChevronUp, Clock, FileText, Paperclip, Send, TriangleAlert } from 'lucide-react';
+import { ArrowRight, Check, CheckCheck, ChevronUp, Clock, FileText, Paperclip, Send, Sparkles, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ConversationDto, MessageDto, OrderSummaryDto, TemplateDto } from '../../../src/core/api/contract';
 import type { Lang, Strings } from '../i18n';
@@ -11,7 +11,7 @@ type Props = {
   t: Strings; lang: Lang; now: number;
   conversation: ConversationDto | null; source: InboxSource; userNames: Record<string, string>; currentOrder: OrderSummaryDto | null; messages: MessageDto[]; templates: TemplateDto[];
   onSendText: (text: string) => void; onSendTemplate: (tpl: TemplateDto, params: string[]) => void; onSendMedia?: (file: File) => void; onRetry: (m: MessageDto) => void;
-  onBack: () => void; onShowOrders: () => void;
+  onBack: () => void; onShowOrders: () => void; onTakeOver?: () => void;
 };
 
 function StatusIcon({ status }: { status: MessageDto['status'] }) {
@@ -26,7 +26,7 @@ function dayKey(at: number): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo' }).format(at);
 }
 
-export function ChatPane({ t, lang, now, conversation, source, userNames, currentOrder, messages, templates, onSendText, onSendTemplate, onSendMedia, onRetry, onBack, onShowOrders }: Props) {
+export function ChatPane({ t, lang, now, conversation, source, userNames, currentOrder, messages, templates, onSendText, onSendTemplate, onSendMedia, onRetry, onBack, onShowOrders, onTakeOver }: Props) {
   const [draft, setDraft] = useState('');
   const [picker, setPicker] = useState(false);
   const [fullText, setFullText] = useState<Record<number, string>>({});
@@ -67,6 +67,12 @@ export function ChatPane({ t, lang, now, conversation, source, userNames, curren
         </button>
       )}
       {conversation.contact.optedOut && <p className="notice">{t.optedOut}</p>}
+      {conversation.tags.includes('needs_human') && (
+        <div className="human-banner" role="status">
+          <span>{t.needsHumanBanner}</span>
+          {onTakeOver && <button type="button" className="btn gold" onClick={onTakeOver}>{t.takeOver}</button>}
+        </div>
+      )}
       <div className="thread" ref={thread} role="log" aria-live="polite">
         {messages.map((m) => {
           const d = dayKey(m.at);
@@ -76,6 +82,7 @@ export function ChatPane({ t, lang, now, conversation, source, userNames, curren
             <div key={m.id} className={`bubble ${m.direction}`} data-client-id={m.clientId ?? undefined}>
               {m.media && <MediaView t={t} media={m.media} source={source} />}
               {m.text && <bdi dir="auto" className="text">{fullText[m.id] ?? m.text}</bdi>}
+              {m.author === 'agent' && <span className="ai-mark"><Sparkles size={12} aria-hidden />{t.agentReply}</span>}
               {m.hasLongBody && fullText[m.id] === undefined && source.longBody && (
                 <button type="button" className="more" onClick={() => void source.longBody!(m.id).then((txt) => setFullText((f) => ({ ...f, [m.id]: txt })), () => undefined)}>{t.readMore}</button>
               )}

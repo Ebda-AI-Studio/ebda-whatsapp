@@ -3,7 +3,8 @@ import type { ConversationDto, MessageDto, OrderSummaryDto, SendMessageRequest, 
 import { ChatPane } from './components/ChatPane';
 import { ConversationList } from './components/ConversationList';
 import { OrderPane } from './components/OrderPane';
-import { Rail } from './components/Rail';
+import { Rail, type View } from './components/Rail';
+import { AgentScreen } from './components/AgentScreen';
 import type { ConversationFilter, InboxSource } from './data/source';
 import { STRINGS, type Lang } from './i18n';
 
@@ -11,6 +12,7 @@ type Props = { source: InboxSource; now?: () => number; initialLang?: Lang };
 
 export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const [lang, setLang] = useState<Lang>(initialLang);
+  const [view, setView] = useState<View>('inbox');
   const t = STRINGS[lang];
   const [filter, setFilter] = useState<ConversationFilter>('all');
   const [query, setQuery] = useState('');
@@ -121,6 +123,11 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const sendText = (text: string) => sendOptimistic({ type: 'text', clientId: crypto.randomUUID(), text }, text);
   const sendTemplate = (tpl: TemplateDto, params: string[]) =>
     sendOptimistic({ type: 'template', clientId: crypto.randomUUID(), name: tpl.name, language: tpl.language, params }, tpl.bodyText.replace(/\{\{(\d+)\}\}/g, (_m, i) => params[Number(i) - 1] ?? ''));
+  const takeOver = async () => {
+    if (selectedId === null || !source.assign) return;
+    await source.assign(selectedId, source.currentUserId || null);
+    void refresh();
+  };
   const sendMedia = async (file: File) => {
     if (!source.upload) return;
     try {
@@ -178,15 +185,19 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   };
 
   return (
-    <div className="app" data-view={selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
-      <Rail t={t} />
+    <div className="app" data-view={view === 'agent' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
+      <Rail t={t} view={view} onNavigate={setView} showAgent={!!source.agentSettings} />
+      {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} /> : (
+        <>
       <ConversationList t={t} lang={lang} now={now()} items={items} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} onFilter={setFilter} onQuery={setQuery} onOpen={open} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} />
       <div className="center">
         {!online && <p className="notice offline" role="status">{t.offline}</p>}
         {error && <p className="notice offline" role="alert">{t.loadError} <button type="button" className="btn ghost" onClick={() => void refresh()}>{t.retry}</button></p>}
-        <ChatPane t={t} lang={lang} now={now()} conversation={selected} source={source} userNames={source.userNames} currentOrder={orders?.[0] ?? null} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onSendMedia={sendMedia} onRetry={retry} onBack={() => setSelectedId(null)} onShowOrders={() => setOrdersOpen(true)} />
+        <ChatPane t={t} lang={lang} now={now()} conversation={selected} source={source} userNames={source.userNames} currentOrder={orders?.[0] ?? null} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onSendMedia={sendMedia} onRetry={retry} onBack={() => setSelectedId(null)} onShowOrders={() => setOrdersOpen(true)} onTakeOver={source.assign ? () => void takeOver() : undefined} />
       </div>
       <OrderPane key={selectedId ?? 'none'} t={t} lang={lang} orders={selected ? orders : null} hasChat={!!selected} canDecide={source.capabilities.codOutcome} onConfirm={(o) => recordOutcome(o, 'confirmed')} onRefuse={(o) => recordOutcome(o, 'refused')} onClose={() => setOrdersOpen(false)} />
+        </>
+      )}
       {toast && (
         <div className="toast" role="status">
           {toast.kind === 'error' ? <span>{t.loadError}</span> : (

@@ -1,4 +1,4 @@
-import type { ConversationDto, MessageDto, OrderSummaryDto, RealtimeEvent, SendMessageRequest, TemplateDto } from '../../../src/core/api/contract';
+import type { AgentSettingsDto, AgentSettingsUpdate, ConversationDto, MessageDto, OrderSummaryDto, RealtimeEvent, SendMessageRequest, TemplateDto } from '../../../src/core/api/contract';
 
 export type ConversationFilter = 'all' | 'unread' | 'mine' | 'unassigned';
 
@@ -24,6 +24,11 @@ export interface InboxSource {
   longBody?(messageId: number): Promise<string>;
   /** Stages a file for sending; returns the uploadId for a media send. */
   upload?(file: File): Promise<string>;
+  /** AI agent settings (owner only); undefined when the source has no agent. */
+  agentSettings?(): Promise<AgentSettingsDto | null>;
+  saveAgentSettings?(update: AgentSettingsUpdate): Promise<AgentSettingsDto>;
+  /** Assign a conversation (null = unassign). */
+  assign?(conversationId: number, userId: string | null): Promise<void>;
   /** Called when events were missed beyond repair; the app reloads its list and open chat. */
   onReload?(cb: () => void): () => void;
   /** Realtime events; returns an unsubscribe function. */

@@ -51,6 +51,7 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
                 </span>
                 <span className="row-bottom">
                   <span className="row-preview" dir="auto">{c.lastMessage?.preview ?? ''}</span>
+                  {c.tags.includes('needs_human') && <span className="human-chip">{t.needsHuman}</span>}
                   {c.unread > 0 && <span className="pill">{num(c.unread, lang)}<span className="vh"> {t.unread}</span></span>}
                 </span>
               </span>

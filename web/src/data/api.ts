@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  apiError, customerOrdersResponse, eventsResponse, getMessagesResponse, listConversationsResponse, listTemplatesResponse,
+  agentSettingsDto, apiError, customerOrdersResponse, eventsResponse, getMessagesResponse, listConversationsResponse, listTemplatesResponse,
   messageDto, realtimeEvent, searchResponse, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import type { InboxSource } from './source';
@@ -86,6 +86,15 @@ export function createApiSource(o: Opts): LiveSource {
         method: 'POST', headers, keepalive: true, body: JSON.stringify({ outcome, idempotencyKey: crypto.randomUUID() }),
       });
       if (!res.ok) throw new ApiError('invalid_request', res.status);
+    },
+    async agentSettings() {
+      try { return await call('/agent', agentSettingsDto); } catch (e) { if (e instanceof ApiError && (e.status === 403 || e.status === 404)) return null; throw e; }
+    },
+    async saveAgentSettings(update) {
+      return call('/agent', agentSettingsDto, { method: 'PUT', body: JSON.stringify(update) });
+    },
+    async assign(id, userId) {
+      await call(`/conversations/${id}/assign`, z.unknown(), { method: 'POST', body: JSON.stringify({ userId }) });
     },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });

@@ -1,4 +1,4 @@
-import type { ConversationDto, MessageDto, OrderSummaryDto, RealtimeEvent, TemplateDto } from '../../../src/core/api/contract';
+import type { AgentSettingsDto, ConversationDto, MessageDto, OrderSummaryDto, RealtimeEvent, TemplateDto } from '../../../src/core/api/contract';
 import type { InboxSource } from './source';
 
 // Sample data for preview only (labelled in the UI). Names and orders are invented; no real customers.
@@ -9,7 +9,7 @@ const H = 60 * MIN;
 type Seed = { id: number; name: string; waId: string; preview: string; ago: number; unread: number; assignee: string | null; windowH: number | null; tags: string[] };
 const SEEDS: Seed[] = [
   { id: 1, name: 'منى عبد الرحمن', waId: '201001112233', preview: 'عايزة أأكد الأوردر بتاع امبارح', ago: 2 * MIN, unread: 2, assignee: 'u-dina', windowH: 22, tags: ['cod_pending'] },
-  { id: 2, name: 'كريم سمير', waId: '201002223344', preview: 'الشحنة اتأخرت يومين', ago: 12 * MIN, unread: 1, assignee: null, windowH: 23, tags: ['شحن'] },
+  { id: 2, name: 'كريم سمير', waId: '201002223344', preview: 'الشحنة اتأخرت يومين', ago: 12 * MIN, unread: 1, assignee: null, windowH: 23, tags: ['needs_human'] },
   { id: 3, name: 'هالة فؤاد', waId: '201003334455', preview: 'تمام شكرًا ليكي', ago: 35 * MIN, unread: 0, assignee: 'u-me', windowH: 23, tags: [] },
   { id: 4, name: 'أحمد ناصر', waId: '201004445566', preview: 'ممكن أغيّر المقاس؟', ago: 1 * H, unread: 1, assignee: 'u-me', windowH: 0.5, tags: ['استبدال'] },
   { id: 5, name: 'سارة محمود', waId: '201005556677', preview: 'الدفع عند الاستلام متاح؟', ago: 2 * H, unread: 0, assignee: null, windowH: 21, tags: [] },
@@ -29,7 +29,7 @@ const THREADS: Record<number, MessageDto[]> = {
   2: [msg(21, 'in', 'الشحنة اتأخرت يومين، هي فين؟', BASE - 12 * MIN)],
   3: [msg(31, 'out', 'وصلك الطلب يا هالة؟', BASE - 40 * MIN, 'read'), msg(32, 'in', 'تمام شكرًا ليكي', BASE - 35 * MIN)],
   4: [msg(41, 'in', 'ممكن أغيّر المقاس؟ طلبت M ومحتاج L', BASE - 1 * H)],
-  5: [msg(51, 'in', 'الدفع عند الاستلام متاح؟', BASE - 2 * H), msg(52, 'out', 'أيوه متاح في القاهرة والجيزة.', BASE - 2 * H + 5 * MIN, 'delivered')],
+  5: [msg(51, 'in', 'الدفع عند الاستلام متاح؟', BASE - 2 * H), { ...msg(52, 'out', 'أيوه متاح في القاهرة والجيزة.', BASE - 2 * H + 5 * MIN, 'delivered'), author: 'agent' }],
   6: [msg(61, 'out', 'طلبك #0996 اتسلّم. شكرًا إنك اشتريت مننا!', BASE - 31 * H, 'read'), msg(62, 'in', 'تم الاستلام، شكرًا', BASE - 30 * H)],
 };
 
@@ -62,6 +62,7 @@ export function createSampleSource(): InboxSource {
     tags: s.tags,
     windowOpenUntil: s.windowH === null ? null : BASE + s.windowH * H,
   }));
+  let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', provider: 'workers-ai', model: null, baseUrl: null, hasApiKey: false, credits: 500, knowledgeReady: false };
   const listeners = new Set<(e: RealtimeEvent) => void>();
   let seq = 0;
   let nextId = 1000;
@@ -105,6 +106,21 @@ export function createSampleSource(): InboxSource {
     async recordCodOutcome(waId, orderNumber, outcome) {
       const o = orders[waId]?.find((x) => x.orderNumber === orderNumber);
       if (o && o.status === 'pending_confirmation') o.status = outcome;
+    },
+    async agentSettings() {
+      return { ...agent };
+    },
+    async saveAgentSettings(update) {
+      const { apiKey, ...rest } = update;
+      agent = { ...agent, ...rest, hasApiKey: apiKey === undefined ? agent.hasApiKey : apiKey !== null };
+      return { ...agent };
+    },
+    async assign(id, userId) {
+      const c = convs.find((x) => x.id === id);
+      if (c) {
+        c.assigneeUserId = userId;
+        c.tags = c.tags.filter((t) => t !== 'needs_human');
+      }
     },
     subscribe(onEvent) {
       listeners.add(onEvent);
