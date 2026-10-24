@@ -43,6 +43,35 @@ export const DO_MIGRATIONS: readonly string[] = [
    CREATE UNIQUE INDEX status_events_unique ON message_status_events (wamid, status, ts);`,
   // v4: R2 objects owed a delete (erasure); rows leave only after R2 confirms.
   `CREATE TABLE r2_pending_deletes (key TEXT PRIMARY KEY);`,
+  // v5 (Phase 2, send API): what an outbound message carries, consent state, approved templates, files staged for sending.
+  `ALTER TABLE messages ADD COLUMN template_name TEXT;
+   ALTER TABLE messages ADD COLUMN template_lang TEXT;
+   ALTER TABLE messages ADD COLUMN media_mime TEXT;
+   ALTER TABLE messages ADD COLUMN media_size INTEGER;
+   ALTER TABLE messages ADD COLUMN media_r2_key TEXT;
+   ALTER TABLE contacts ADD COLUMN opted_out_at INTEGER;
+   ALTER TABLE contacts ADD COLUMN consent_source TEXT;
+   ALTER TABLE contacts ADD COLUMN consent_at INTEGER;
+   CREATE TABLE templates (
+     id INTEGER PRIMARY KEY,
+     name TEXT NOT NULL,
+     language TEXT NOT NULL,
+     category TEXT NOT NULL,
+     status TEXT NOT NULL,
+     components TEXT NOT NULL,
+     rejected_reason TEXT,
+     updated_at INTEGER NOT NULL,
+     UNIQUE (name, language)
+   );
+   CREATE TABLE uploads (
+     id TEXT PRIMARY KEY,
+     meta_media_id TEXT NOT NULL,
+     mime TEXT NOT NULL,
+     size INTEGER NOT NULL,
+     filename TEXT,
+     r2_key TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   );`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

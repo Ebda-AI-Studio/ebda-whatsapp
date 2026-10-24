@@ -13,6 +13,7 @@ import { requireStoreAccess, type AuthVars } from './core/identity/middleware';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { buyerKey } from './core/buyer-key';
+import { messagesRoutes } from './routes/messages';
 
 export { WorkspaceDO } from './core/workspace-do';
 
@@ -45,6 +46,7 @@ api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   console.log(JSON.stringify({ audit: 'contact_erased', storeId, by: c.get('principal').userId, buyer: who, ...result }));
   return c.json(result);
 });
+api.route('/', messagesRoutes);
 app.route('/api/v1', api);
 
 function sameString(a: string, b: string): boolean {

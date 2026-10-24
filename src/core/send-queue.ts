@@ -1,23 +1,54 @@
 import { z } from 'zod';
 
+const link = z.object({ link: z.string() });
+const templateComponentSchema = z.object({
+  type: z.enum(['header', 'body', 'button']),
+  sub_type: z.string().optional(),
+  index: z.string().optional(),
+  parameters: z.array(z.object({ type: z.string(), text: z.string().optional(), image: link.optional(), video: link.optional(), document: link.optional() })),
+});
+const mediaKind = z.enum(['image', 'audio', 'video', 'document']);
 export const sendJobSchema = z.object({
   workspaceId: z.string().min(1),
   phoneNumberId: z.string().min(1),
   to: z.string().min(1),
-  text: z.string().min(1).max(4096),
+  /** Absent = text (the Phase 1 reply jobs). */
+  kind: z.enum(['text', 'template', 'interactive', 'media']).optional(),
+  text: z.string().min(1).max(4096).optional(),
+  template: z.object({ name: z.string().min(1), language: z.string().min(2), components: z.array(templateComponentSchema) }).optional(),
+  interactive: z.object({ body: z.string().min(1).max(1024), buttons: z.array(z.object({ id: z.string().min(1), title: z.string().min(1) })).min(1).max(3) }).optional(),
+  media: z.object({ kind: mediaKind, mediaId: z.string().min(1), caption: z.string().max(1024).optional(), filename: z.string().max(255).optional() }).optional(),
   idempotencyKey: z.string().min(1),
   inboundAt: z.number().optional(),
   receivedAt: z.number().optional(),
+  /** How many times Meta's marketing frequency cap (131049) already pushed this job back 24 h. */
+  deferrals: z.number().int().nonnegative().optional(),
+}).superRefine((j, ctx) => {
+  const kind = j.kind ?? 'text';
+  const have = { text: j.text, template: j.template, interactive: j.interactive, media: j.media }[kind];
+  if (have === undefined) ctx.addIssue({ code: 'custom', message: `${kind} job is missing its ${kind} payload` });
 });
-export type SendJob = z.infer<typeof sendJobSchema>;
+export type SendJob = z.input<typeof sendJobSchema>;
+export const jobKind = (j: Pick<SendJob, 'kind'>) => j.kind ?? 'text';
 
-import { sendText } from './meta/client';
+import { sendInteractive, sendMedia, sendTemplate, sendText, type SendResult } from './meta/client';
 import type { Env } from '../env';
 import { mark } from './timing';
 import { workspaceForPhoneNumber } from './routing';
 import { STALE_CLAIM_MS } from './workspace-do';
 
 const MAX_RETRY_DELAY_S = 300;
+
+/** Sends one job to Meta in the shape its kind calls for. */
+export function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>): Promise<SendResult> {
+  const base = { token: env.META_SYSTEM_TOKEN, graphVersion: env.META_GRAPH_VERSION, phoneNumberId: job.phoneNumberId, to: job.to };
+  switch (jobKind(job)) {
+    case 'template': return sendTemplate({ ...base, ...job.template! });
+    case 'interactive': return sendInteractive({ ...base, ...job.interactive! });
+    case 'media': return sendMedia({ ...base, ...job.media! });
+    default: return sendText({ ...base, text: job.text! });
+  }
+}
 /** Must match max_retries in wrangler.jsonc: the last attempt marks the message failed instead of leaving it in 'retry'. */
 export const MAX_SEND_ATTEMPTS = 5;
 
@@ -39,7 +70,8 @@ export async function consumeSendBatch(batch: MessageBatch<unknown>, env: Env): 
     }
     const ws = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(job.workspaceId));
     const claim = await ws.claimSend(job);
-    if (claim === 'already_sent') {
+    if (claim === 'already_sent' || claim === 'dropped') {
+      if (claim === 'dropped') console.warn(JSON.stringify({ warn: 'send_job_dropped', workspace: job.workspaceId }));
       msg.ack();
       continue;
     }
@@ -48,7 +80,7 @@ export async function consumeSendBatch(batch: MessageBatch<unknown>, env: Env): 
       msg.retry({ delaySeconds: STALE_CLAIM_MS / 1000 + 10 });
       continue;
     }
-    const sent = await sendText({ token: env.META_SYSTEM_TOKEN, graphVersion: env.META_GRAPH_VERSION, phoneNumberId: job.phoneNumberId, to: job.to, text: job.text });
+    const sent = await sendToMeta(env, job);
     const lastAttempt = msg.attempts >= MAX_SEND_ATTEMPTS;
     const result = !sent.ok && sent.retryable && lastAttempt ? { ...sent, retryable: false } : sent;
     await ws.recordOutbound(job.idempotencyKey, result);

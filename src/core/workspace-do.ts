@@ -5,6 +5,11 @@ import { DO_MIGRATIONS, migrate } from './do-migrations';
 import type { SendResult } from './meta/client';
 import type { InboundMessage, StatusEvent } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
+import { jobKind } from './send-queue';
+import type { MessageDto, SendMessageRequest } from './api/contract';
+import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
+import { outboundMediaFor } from './media';
+import { componentsSchema, renderTemplate } from './templates';
 
 export const PREVIEW_CHARS = 280;
 export const INLINE_BODY_BYTES = 1024;
@@ -16,6 +21,9 @@ const STATUS_RANK = { sent: 1, failed: 2, delivered: 3, read: 4 } as const;
 export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[]; receivedAt: number };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string };
+export type OutboundRefusal = 'window_closed' | 'opted_out' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
+export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
+export type ClaimResult = 'claimed' | 'already_sent' | 'in_flight' | 'dropped';
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
@@ -112,14 +120,19 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { workspaceId, phoneNumberId: batch.phoneNumberId, to: m.from, text, idempotencyKey: `reply:${m.wamid}`, inboundAt: m.ts * 1000, receivedAt: batch.receivedAt };
   }
 
-  /** Claims the right to send `job` once. Only 'claimed' may call Meta. */
-  async claimSend(job: SendJob): Promise<'claimed' | 'already_sent' | 'in_flight'> {
-    return this.ctx.storage.transactionSync(() => {
+  /**
+   * Claims the right to send `job` once. Only 'claimed' may call Meta. 'dropped' = nothing left to send (the row was
+   * erased with its contact, or an API job lost its row): the consumer acks it without calling Meta.
+   */
+  async claimSend(job: SendJob): Promise<ClaimResult> {
+    return this.ctx.storage.transactionSync((): ClaimResult => {
       const now = Date.now();
       const existing = this.sql
         .exec<{ id: number; status: string; updated_at: number; claim_attempts: number }>('SELECT id, status, updated_at, claim_attempts FROM messages WHERE idempotency_key = ?', job.idempotencyKey)
         .toArray()[0];
       if (!existing) {
+        // Only auto-reply jobs (no row yet) may create their row; a job created by the API always has one, so a missing row means it was erased.
+        if (jobKind(job) !== 'text' || job.idempotencyKey.startsWith('ui:') || !job.text) return 'dropped';
         const contactId = this.sql.exec<{ id: number }>(
           'INSERT INTO contacts (wa_id) VALUES (?) ON CONFLICT(wa_id) DO UPDATE SET wa_id = wa_id RETURNING id', job.to,
         ).one().id;
@@ -134,12 +147,88 @@ export class WorkspaceDO extends DurableObject<Env> {
         );
         return 'claimed';
       }
-      if (existing.status === 'retry' || (existing.status === 'claimed' && now - existing.updated_at > STALE_CLAIM_MS && existing.claim_attempts < 2)) {
+      if (existing.status === 'queued' || existing.status === 'retry' || (existing.status === 'claimed' && now - existing.updated_at > STALE_CLAIM_MS && existing.claim_attempts < 2)) {
         this.sql.exec("UPDATE messages SET status = 'claimed', claim_attempts = claim_attempts + 1, updated_at = ? WHERE id = ?", now, existing.id);
         return 'claimed';
       }
       return existing.status === 'claimed' ? 'in_flight' : 'already_sent';
     });
+  }
+
+  /**
+   * The API send path: validates against the 24 h window, consent and the template set, stores a 'queued' message and
+   * returns the job to enqueue. Expected refusals come back as a result object (a throw would cross the RPC boundary).
+   * A repeated clientId returns the stored message and no job, so a retried POST sends once.
+   */
+  async queueOutbound(conversationId: number, phoneNumberId: string, req: SendMessageRequest, now = Date.now()): Promise<QueueOutboundResult> {
+    const workspaceId = this.workspaceId;
+    return this.ctx.storage.transactionSync((): QueueOutboundResult => {
+      const conv = this.sql
+        .exec<{ id: number; wa_id: string; last_inbound_at: number | null; opted_out_at: number | null }>(
+          'SELECT c.id, ct.wa_id, ct.last_inbound_at, ct.opted_out_at FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = ?', conversationId,
+        ).toArray()[0];
+      if (!conv) return { ok: false, reason: 'not_found' };
+      const key = `ui:${req.clientId}`;
+      const dup = this.sql.exec<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.idempotency_key = ?`, key).toArray()[0];
+      if (dup) return { ok: true, message: messageDto(dup, workspaceId), job: null };
+      const windowOpen = conv.last_inbound_at !== null && conv.last_inbound_at * 1000 + WINDOW_MS > now;
+      const base = { workspaceId, phoneNumberId, to: conv.wa_id, idempotencyKey: key };
+      let type: string;
+      let preview: string;
+      let col: { template_name?: string; template_lang?: string; media_mime?: string; media_size?: number; media_r2_key?: string } = {};
+      let job: SendJob;
+      switch (req.type) {
+        case 'text':
+          if (!windowOpen) return { ok: false, reason: 'window_closed' };
+          type = 'text'; preview = req.text;
+          job = { ...base, kind: 'text', text: req.text };
+          break;
+        case 'interactive':
+          if (!windowOpen) return { ok: false, reason: 'window_closed' };
+          type = 'interactive'; preview = req.body;
+          job = { ...base, kind: 'interactive', interactive: { body: req.body, buttons: req.buttons } };
+          break;
+        case 'media': {
+          if (!windowOpen) return { ok: false, reason: 'window_closed' };
+          const up = this.sql.exec<{ meta_media_id: string; mime: string; size: number; filename: string | null; r2_key: string }>('SELECT meta_media_id, mime, size, filename, r2_key FROM uploads WHERE id = ?', req.uploadId).toArray()[0];
+          if (!up) return { ok: false, reason: 'invalid_request', message: 'unknown uploadId' };
+          const allowed = outboundMediaFor(up.mime);
+          if (!allowed) return { ok: false, reason: 'unsupported_media' };
+          if (req.caption && allowed.kind === 'audio') return { ok: false, reason: 'invalid_request', message: 'audio cannot have a caption' };
+          type = allowed.kind; preview = req.caption ?? '';
+          col = { media_mime: up.mime, media_size: up.size, media_r2_key: up.r2_key };
+          job = { ...base, kind: 'media', media: { kind: allowed.kind, mediaId: up.meta_media_id, ...(req.caption ? { caption: req.caption } : {}), ...(up.filename ? { filename: up.filename } : {}) } };
+          break;
+        }
+        case 'template': {
+          const t = this.sql.exec<{ category: string; status: string; components: string }>('SELECT category, status, components FROM templates WHERE name = ? AND language = ?', req.name, req.language).toArray()[0];
+          if (!t || t.status !== 'APPROVED') return { ok: false, reason: 'template_not_approved' };
+          if (t.category === 'MARKETING' && conv.opted_out_at !== null) return { ok: false, reason: 'opted_out' };
+          const stored = componentsSchema.safeParse(JSON.parse(t.components));
+          if (!stored.success) return { ok: false, reason: 'invalid_request', message: 'stored template is malformed' };
+          const rendered = renderTemplate(stored.data, req.params);
+          if (!rendered.ok) return { ok: false, reason: 'invalid_request', message: rendered.message };
+          type = 'template'; preview = rendered.text;
+          col = { template_name: req.name, template_lang: req.language };
+          job = { ...base, kind: 'template', template: { name: req.name, language: req.language, components: rendered.components } };
+          break;
+        }
+      }
+      const id = this.sql.exec<{ id: number }>(
+        `INSERT INTO messages (conversation_id, direction, type, preview, body, status, idempotency_key, template_name, template_lang, media_mime, media_size, media_r2_key, created_at, updated_at)
+         VALUES (?, 'out', ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        conversationId, type, previewOf(preview), preview.length ? preview : null, key,
+        col.template_name ?? null, col.template_lang ?? null, col.media_mime ?? null, col.media_size ?? null, col.media_r2_key ?? null, now, now,
+      ).one().id;
+      this.sql.exec('UPDATE conversations SET last_message_at = max(coalesce(last_message_at, 0), ?) WHERE id = ?', Math.floor(now / 1000), conversationId);
+      const row = this.sql.exec<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?`, id).one();
+      return { ok: true, message: messageDto(row, workspaceId), job };
+    });
+  }
+
+  /** The enqueue after queueOutbound threw: the message will never be sent, so say so instead of leaving it 'queued'. */
+  async markEnqueueFailed(idempotencyKey: string): Promise<void> {
+    this.sql.exec("UPDATE messages SET status = 'failed', updated_at = ? WHERE idempotency_key = ? AND status = 'queued'", Date.now(), idempotencyKey);
   }
 
   async recordOutbound(idempotencyKey: string, result: SendResult): Promise<void> {
