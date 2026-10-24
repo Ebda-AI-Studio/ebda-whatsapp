@@ -42,8 +42,9 @@ conversationsRoutes.post('/stores/:storeId/conversations/:conversationId/assign'
   const body = assignRequest.safeParse(await c.req.json().catch(() => null));
   if (!id || !body.success) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
-  const conv = ws && (await ws.assign(id, body.data.userId));
-  return conv ? c.json(conv) : apiError(c, 404, 'not_found');
+  const res = ws && (await ws.assign(id, body.data.userId, c.get('principal').userId));
+  if (!res || (!res.ok && res.reason === 'not_found')) return apiError(c, 404, 'not_found');
+  return res.ok ? c.json(res.conversation) : apiError(c, 400, 'invalid_request', 'unknown_assignee');
 });
 
 conversationsRoutes.put('/stores/:storeId/conversations/:conversationId/tags', async (c) => {

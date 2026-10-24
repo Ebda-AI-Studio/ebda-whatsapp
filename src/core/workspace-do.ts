@@ -736,10 +736,19 @@ export class WorkspaceDO extends DurableObject<Env> {
     return this.conversationById(conversationId, now);
   }
 
-  async assign(conversationId: number, userId: string | null, now = Date.now()): Promise<ConversationDto | null> {
+  /**
+   * Assigns (or clears) the owner of a conversation. Staff lists live in the Store, which this service cannot ask yet, so
+   * only a user the server can vouch for is accepted: null, the caller, or someone already assigned in this workspace.
+   */
+  async assign(conversationId: number, userId: string | null, callerUserId: string, now = Date.now()): Promise<{ ok: true; conversation: ConversationDto } | { ok: false; reason: 'not_found' | 'unknown_assignee' }> {
+    if (!this.sql.exec('SELECT 1 FROM conversations WHERE id = ?', conversationId).toArray().length) return { ok: false, reason: 'not_found' };
+    if (userId !== null && userId !== callerUserId && !this.sql.exec('SELECT 1 FROM conversations WHERE assignee_user_id = ? LIMIT 1', userId).toArray().length) {
+      return { ok: false, reason: 'unknown_assignee' };
+    }
     this.sql.exec('UPDATE conversations SET assignee_user_id = ? WHERE id = ?', userId, conversationId);
     this.emitConversationUpdated(conversationId);
-    return this.conversationById(conversationId, now);
+    const conversation = await this.conversationById(conversationId, now);
+    return conversation ? { ok: true, conversation } : { ok: false, reason: 'not_found' };
   }
 
   async setTags(conversationId: number, tags: string[], now = Date.now()): Promise<ConversationDto | null> {

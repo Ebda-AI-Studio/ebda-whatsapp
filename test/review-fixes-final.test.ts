@@ -115,3 +115,21 @@ it('Final #5: media GET is never cached by the browser', async () => {
   expect(res.status).toBe(200);
   expect(res.headers.get('cache-control')).toBe('private, no-store');
 });
+
+it('Final #7: assign accepts null, the caller, or a user already assigned in this workspace; anyone else is refused', async () => {
+  const ws = W(505);
+  const api = await apiFor(ws);
+  const a = await openChat(ws, '201000000051');
+  const b = await openChat(ws, '201000000052');
+  const me = '6f1d2c1e-8a8f-4a3b-9f1e-1a2b3c4d5e6f';
+  const stranger = '11111111-2222-4333-8444-555555555555';
+  expect((await api.call('POST', `/conversations/${a}/assign`, { userId: stranger })).status).toBe(400);
+  expect(await rows(ws, 'SELECT assignee_user_id FROM conversations WHERE id = ?', a)).toEqual([{ assignee_user_id: null }]);
+  expect((await api.call('POST', `/conversations/${a}/assign`, { userId: me })).status).toBe(200);
+  expect((await api.call('POST', `/conversations/${b}/assign`, { userId: me })).status).toBe(200); // already an assignee here
+  expect((await api.call('POST', `/conversations/${a}/assign`, { userId: null })).status).toBe(200);
+  expect((await api.call('POST', '/conversations/99999/assign', { userId: null })).status).toBe(404);
+  // a user who is already an assignee in this workspace may be assigned by another staff member
+  await exec(ws, 'UPDATE conversations SET assignee_user_id = ? WHERE id = ?', stranger, b);
+  expect((await api.call('POST', `/conversations/${a}/assign`, { userId: stranger })).status).toBe(200);
+});

@@ -7,7 +7,7 @@ async function seedPhase2(ws: string) {
   const conv = await openChat(ws, '201001234567', { text: 'نص قابل للبحث' });
   await workspace(ws).addNote(conv, 'u1', 'ملاحظة داخلية');
   await workspace(ws).setTags(conv, ['vip', 'شحن']);
-  await workspace(ws).assign(conv, 'u1');
+  await workspace(ws).assign(conv, 'u1', 'u1');
   await exec(ws, "INSERT INTO templates (name, language, category, status, components, updated_at) VALUES ('t', 'ar', 'UTILITY', 'APPROVED', '[]', 1)");
   await exec(ws, "INSERT INTO uploads (id, meta_media_id, mime, size, filename, r2_key, created_at) VALUES ('u', 'm', 'image/png', 1, 'a.png', 'uploads/x/u', 1)");
   await exec(ws, "UPDATE contacts SET opted_out_at = 5, consent_source = 'keyword_stop'");
