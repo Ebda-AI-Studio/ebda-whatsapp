@@ -27,3 +27,15 @@ it('masks phone numbers in messages and exception values', () => {
 it('keeps the stack frames', () => {
   expect(scrubEvent(base()).exception?.values?.[0]?.stacktrace?.frames).toEqual([{ filename: 'index.ts', lineno: 3 }]);
 });
+
+it('drops the query string and masks phone numbers in the URL path', () => {
+  const e = base();
+  e.request!.url = 'https://x/api/v1/stores/s1/contacts/201001234567?hub.verify_token=secret&hub.challenge=1';
+  expect(scrubEvent(e).request?.url).toBe('https://x/api/v1/stores/s1/contacts/[phone]');
+});
+
+it('keeps only allowlisted headers (drops IP-carrying headers)', () => {
+  const e = base();
+  e.request!.headers = { 'cf-connecting-ip': '1.2.3.4', 'x-forwarded-for': '1.2.3.4', 'x-real-ip': '1.2.3.4', 'content-type': 'application/json', 'cf-ray': 'abc', 'user-agent': 'ua' };
+  expect(scrubEvent(e).request?.headers).toEqual({ 'content-type': 'application/json', 'cf-ray': 'abc', 'user-agent': 'ua' });
+});
