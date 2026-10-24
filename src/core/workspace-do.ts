@@ -18,6 +18,10 @@ import type { ConversationDto, NoteDto } from './api/contract';
 import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './throttle';
 import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
 import type { TemplateDto } from './api/contract';
+import type { StoreEvent } from './api/store-events';
+import type { LinkHost, OutboundRow } from './store-link/host';
+import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
+import { readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 
 /** How many realtime events a client can resync from. */
 export const EVENTS_KEPT = 1000;
@@ -40,7 +44,7 @@ export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[]
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
-export type TaskPayload = { job?: SendJob; reason?: 'tier' | 'throughput' | 'frequency_cap'; n?: number; messageId?: number; mediaId?: string };
+export type TaskPayload = { job?: SendJob; reason?: 'tier' | 'throughput' | 'frequency_cap' | 'event'; n?: number; messageId?: number; mediaId?: string; orderId?: string };
 export type ClaimResult = 'claimed' | 'already_sent' | 'in_flight' | 'dropped' | 'deferred';
 export type ThrottleReport = { tier: number; mps: number; usedInWindow: number; waiting: number; nextSlotAt: number | null };
 
@@ -528,6 +532,65 @@ export class WorkspaceDO extends DurableObject<Env> {
     return true;
   }
 
+  // ---- Store link (Phase 4) ---------------------------------------------------------------------------------------
+
+  private linkHost?: LinkHost;
+  /** The narrow view of this DO the Store-link code works against (see store-link/host.ts). */
+  private host(): LinkHost {
+    return (this.linkHost ??= {
+      sql: this.sql,
+      storage: this.ctx.storage,
+      env: this.env,
+      workspaceId: this.workspaceId,
+      ensureConversation: (waId, now, profileName) => this.ensureConversation(waId, now, profileName),
+      insertOutbound: (conversationId, row, now) => this.insertOutbound(conversationId, row, now),
+      emitConversationUpdated: (id) => this.emitConversationUpdated(id),
+      arm: () => this.arm(),
+      eraseContact: (waId) => this.eraseContact(waId),
+    });
+  }
+
+  /** Contact and conversation for a WhatsApp id, created when missing (a business-initiated message to a customer who never wrote). Inside a transaction. */
+  private ensureConversation(waId: string, now: number, profileName?: string | null): { contactId: number; conversationId: number } {
+    const contactId = this.sql.exec<{ id: number }>(
+      'INSERT INTO contacts (wa_id, profile_name) VALUES (?, ?) ON CONFLICT(wa_id) DO UPDATE SET profile_name = coalesce(profile_name, excluded.profile_name) RETURNING id', waId, profileName ?? null,
+    ).one().id;
+    const conversationId = this.sql.exec<{ id: number }>(
+      `INSERT INTO conversations (contact_id, last_message_at) VALUES (?, ?)
+       ON CONFLICT(contact_id) DO UPDATE SET last_message_at = max(coalesce(last_message_at, 0), excluded.last_message_at) RETURNING id`, contactId, Math.floor(now / 1000),
+    ).one().id;
+    return { contactId, conversationId };
+  }
+
+  private insertOutbound(conversationId: number, row: OutboundRow, now: number): number {
+    const id = this.sql.exec<{ id: number }>(
+      `INSERT INTO messages (conversation_id, direction, type, preview, body, status, idempotency_key, template_name, template_lang, created_at, updated_at)
+       VALUES (?, 'out', ?, ?, ?, 'queued', ?, ?, ?, ?, ?) RETURNING id`,
+      conversationId, row.type, row.preview, row.body, row.key, row.templateName ?? null, row.templateLang ?? null, now, now,
+    ).one().id;
+    this.indexMessage(id, row.preview.length ? row.preview : null);
+    this.sql.exec('UPDATE conversations SET last_message_at = max(coalesce(last_message_at, 0), ?) WHERE id = ?', Math.floor(now / 1000), conversationId);
+    this.emitMessageCreated(id);
+    this.emitConversationUpdated(conversationId);
+    return id;
+  }
+
+  /**
+   * One event from the Store queue. Expected outcomes (duplicate, stale, skipped) come back as data; a thrown error means
+   * "retry this message". `phoneNumberId` is the workspace's active sender, or null when it has none.
+   */
+  async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null }): Promise<StoreEventOutcome> {
+    return applyStoreEvent(this.host(), event, opts);
+  }
+
+  async getStoreLinkSettings(): Promise<StoreLinkSettings> {
+    return readSettings(this.host());
+  }
+
+  async setStoreLinkSettings(patch: Partial<StoreLinkSettings>): Promise<StoreLinkSettings> {
+    return this.ctx.storage.transactionSync(() => writeSettings(this.host(), patch));
+  }
+
   // ---- realtime ---------------------------------------------------------------------------------------------------
 
   /** Upgrade to a WebSocket (hibernation API: an idle socket costs nothing and the DO can be evicted). */
@@ -1003,6 +1066,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.sql.exec('DELETE FROM message_status_events WHERE wamid = ?', m.wamid);
       }
       this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
+      this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
       if (conv) {
         this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
         this.sql.exec("DELETE FROM events WHERE json_extract(payload, '$.conversationId') = ? OR json_extract(payload, '$.conversation.id') = ?", conv.id, conv.id);

@@ -8,7 +8,7 @@ export type SendResult = { ok: true; wamid: string } | { ok: false; code: number
 type Base = { token: string; graphVersion: string; phoneNumberId: string; to: string };
 export type MediaKind = 'image' | 'audio' | 'video' | 'document';
 type Link = { link: string };
-export type TemplateParameter = { type: string; text?: string; image?: Link; video?: Link; document?: Link };
+export type TemplateParameter = { type: string; text?: string; image?: Link; video?: Link; document?: Link; payload?: string };
 /** A Graph send-time template component. Concrete on purpose: Workers RPC rejects open-ended (`unknown`/`any`) shapes. */
 export type TemplateComponent = { type: 'header' | 'body' | 'button'; sub_type?: string; index?: string; parameters: TemplateParameter[] };
 

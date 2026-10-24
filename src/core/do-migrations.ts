@@ -130,6 +130,38 @@ export const DO_MIGRATIONS: readonly string[] = [
   `ALTER TABLE scheduled_tasks ADD COLUMN lease_until INTEGER;`,
   // v12 (final review): why a message failed when Meta never saw it (error_code is Meta's numbers only), e.g. 'opted_out'.
   `ALTER TABLE messages ADD COLUMN error_reason TEXT;`,
+  // v13 (Phase 4, Store link): events already applied, newest version seen per entity (a late older event is dropped),
+  // workspace settings, the customer key on contacts, the orders this workspace knows about (COD state, outcome, payment proof)
+  // and the catalog changes waiting to be pushed to Meta.
+  `CREATE TABLE processed_events (event_id TEXT PRIMARY KEY, type TEXT NOT NULL, at INTEGER NOT NULL);
+   CREATE INDEX processed_events_at ON processed_events (at);
+   CREATE TABLE entity_versions (entity TEXT PRIMARY KEY, version INTEGER NOT NULL);
+   CREATE TABLE store_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+   ALTER TABLE contacts ADD COLUMN buyer_key TEXT;
+   CREATE INDEX contacts_buyer_key ON contacts (buyer_key) WHERE buyer_key IS NOT NULL;
+   CREATE TABLE store_orders (
+     order_id TEXT PRIMARY KEY,
+     order_number TEXT,
+     wa_id TEXT,
+     buyer_key TEXT,
+     payment_method TEXT,
+     status TEXT,
+     total_minor INTEGER,
+     currency TEXT,
+     cod_state TEXT,
+     cod_requested_at INTEGER,
+     outcome TEXT,
+     outcome_at INTEGER,
+     outcome_idem TEXT,
+     outcome_pushed_at INTEGER,
+     proof_wamid TEXT,
+     proof_at INTEGER,
+     proof_deadline_at INTEGER,
+     updated_at INTEGER NOT NULL
+   );
+   CREATE INDEX store_orders_wa ON store_orders (wa_id);
+   CREATE INDEX store_orders_number ON store_orders (order_number);
+   CREATE TABLE catalog_dirty (product_id TEXT PRIMARY KEY, variant_ids TEXT NOT NULL, deleted INTEGER NOT NULL, updated_at INTEGER NOT NULL);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

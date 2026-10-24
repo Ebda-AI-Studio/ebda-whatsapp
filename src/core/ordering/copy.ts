@@ -9,7 +9,8 @@ export type OrderingCopy = {
   templates: {
     orderConfirmation: string;
     codConfirmation: string;
-    shippingUpdate: string;
+    shippingTracking: string;
+    shippingStatus: string;
     cartRecovery: string;
     otp: string;
   };

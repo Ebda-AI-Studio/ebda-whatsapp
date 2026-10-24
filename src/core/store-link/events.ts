@@ -1,0 +1,278 @@
+import type { StoreEvent } from '../api/store-events';
+import type { Locale } from '../ordering/copy';
+import { plainAmount } from '../ordering/money';
+import { buyerKey } from '../buyer-key';
+import { isE164 } from '../phone';
+import { addTask } from '../scheduler';
+import { bridgeFor, storeLink } from '../store-link';
+import type { LinkHost } from './host';
+import { queueFreeText, queueTemplate, setTag, cleanParam, type QueueResult } from './outbound';
+import { isLinked, putState, readSettings } from './settings';
+
+export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
+
+/** A COD request that nobody answers within this long is recorded as `no_reply`. */
+export const COD_NO_REPLY_MS = 24 * 60 * 60 * 1000;
+/** Catalog changes are coalesced: one sync per 30 s of quiet-ish time. */
+export const CATALOG_DEBOUNCE_MS = 30_000;
+const KEEP_EVENTS_MS = 14 * 24 * 60 * 60 * 1000;
+
+const locale = (l: string | undefined): Locale => (l?.toLowerCase().startsWith('en') ? 'en' : 'ar');
+const warn = (host: LinkHost, what: string, extra: Record<string, unknown> = {}) => console.warn(JSON.stringify({ warn: what, workspace: host.workspaceId, ...extra }));
+
+type OrderRow = { order_id: string; order_number: string | null; wa_id: string | null; buyer_key: string | null; payment_method: string | null; status: string | null; total_minor: number | null; currency: string | null; cod_state: string | null };
+
+export function orderRow(host: LinkHost, orderId: string): OrderRow | undefined {
+  return host.sql.exec<OrderRow>('SELECT order_id, order_number, wa_id, buyer_key, payment_method, status, total_minor, currency, cod_state FROM store_orders WHERE order_id = ?', orderId).toArray()[0];
+}
+
+export function upsertOrder(host: LinkHost, o: { orderId: string; orderNumber?: string | null; waId?: string | null; buyerKey?: string | null; paymentMethod?: string | null; status?: string | null; totalMinor?: number | null; currency?: string | null; codState?: string | null; codRequestedAt?: number | null }, now: number): void {
+  host.sql.exec(
+    `INSERT INTO store_orders (order_id, order_number, wa_id, buyer_key, payment_method, status, total_minor, currency, cod_state, cod_requested_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(order_id) DO UPDATE SET
+       order_number = coalesce(excluded.order_number, order_number), wa_id = coalesce(excluded.wa_id, wa_id), buyer_key = coalesce(excluded.buyer_key, buyer_key),
+       payment_method = coalesce(excluded.payment_method, payment_method), status = coalesce(excluded.status, status), total_minor = coalesce(excluded.total_minor, total_minor),
+       currency = coalesce(excluded.currency, currency), cod_state = coalesce(excluded.cod_state, cod_state), cod_requested_at = coalesce(excluded.cod_requested_at, cod_requested_at), updated_at = excluded.updated_at`,
+    o.orderId, o.orderNumber ?? null, o.waId ?? null, o.buyerKey ?? null, o.paymentMethod ?? null, o.status ?? null, o.totalMinor ?? null, o.currency ?? null, o.codState ?? null, o.codRequestedAt ?? null, now,
+  );
+}
+
+/** Newest-wins: false when a newer version of this entity was already applied. Equal versions pass (different events, same instant). */
+function acceptVersion(host: LinkHost, entity: string, version: number): boolean {
+  const have = host.sql.exec<{ version: number }>('SELECT version FROM entity_versions WHERE entity = ?', entity).toArray()[0];
+  if (have && version < have.version) return false;
+  host.sql.exec('INSERT INTO entity_versions (entity, version) VALUES (?, ?) ON CONFLICT(entity) DO UPDATE SET version = max(version, excluded.version)', entity, version);
+  return true;
+}
+
+function displayName(host: LinkHost, waId: string, loc: Locale): string {
+  const copy = storeLink().copy!;
+  const row = host.sql.exec<{ profile_name: string | null }>('SELECT profile_name FROM contacts WHERE wa_id = ?', waId).toArray()[0];
+  return cleanParam(row?.profile_name, copy.customerName[loc]);
+}
+
+function rememberBuyerKey(host: LinkHost, waId: string, key: string): void {
+  host.sql.exec('UPDATE contacts SET buyer_key = ? WHERE wa_id = ? AND (buyer_key IS NULL OR buyer_key != ?)', key, waId, key);
+}
+
+/** The order a COD request is about, when neither the event nor an earlier event named its number and total. */
+type LookedUp = { orderNumber: string; totalMinor: number; currency: string };
+async function lookupOrder(host: LinkHost, buyerKeyHex: string, orderId: string): Promise<LookedUp | 'retry' | null> {
+  const bridge = bridgeFor(host.env);
+  if (!bridge) return null;
+  const res = await bridge.listCustomerOrders(host.workspaceId, buyerKeyHex, 20);
+  if (!res.ok) return res.reason === 'unavailable' ? 'retry' : null;
+  const hit = res.value.items.find((o) => o.orderId === orderId);
+  return hit ? { orderNumber: hit.orderNumber, totalMinor: hit.totalMinor, currency: hit.currency } : null;
+}
+
+/** Wa id of the contact a customer key belongs to. Hashes unkeyed contacts lazily (and remembers the result). */
+async function findWaId(host: LinkHost, key: string): Promise<string | null> {
+  const known = host.sql.exec<{ wa_id: string }>('SELECT wa_id FROM contacts WHERE buyer_key = ?', key).toArray()[0]
+    ?? host.sql.exec<{ wa_id: string }>('SELECT wa_id FROM store_orders WHERE buyer_key = ? AND wa_id IS NOT NULL LIMIT 1', key).toArray()[0];
+  if (known) return known.wa_id;
+  const secret = storeLink().buyerSecret(host.env);
+  if (!secret) return null;
+  const pending = host.sql.exec<{ id: number; wa_id: string }>('SELECT id, wa_id FROM contacts WHERE buyer_key IS NULL ORDER BY id LIMIT 5000').toArray();
+  let found: string | null = null;
+  for (const c of pending) {
+    if (!isE164(`+${c.wa_id}`)) continue;
+    const k = await buyerKey(secret, `+${c.wa_id}`);
+    host.sql.exec('UPDATE contacts SET buyer_key = ? WHERE id = ?', k, c.id);
+    if (k === key) found = c.wa_id;
+  }
+  return found;
+}
+
+/**
+ * Applies one Store event to this workspace. Dedupes on the envelope id, drops a stale version of an entity, and does
+ * every write (state, message row, the task that hands the message to the send queue, the dedupe marker) in ONE
+ * transaction, so a redelivered event can neither double-send nor lose a message.
+ */
+export async function applyStoreEvent(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string | null; now?: number }): Promise<StoreEventOutcome> {
+  const now = opts.now ?? Date.now();
+  if (event.storeId !== host.workspaceId) return { status: 'skipped', detail: 'wrong_workspace' };
+  if (host.sql.exec('SELECT 1 FROM processed_events WHERE event_id = ?', event.id).toArray().length) return { status: 'duplicate' };
+
+  // Async lookups happen before the transaction (a transaction cannot await).
+  let codLookup: LookedUp | 'retry' | null = null;
+  let erasedWaId: string | null = null;
+  if (event.type === 'order.cod_confirmation_requested') {
+    const d = event.data;
+    const have = orderRow(host, d.orderId);
+    if (!d.orderNumber && !have?.order_number) {
+      codLookup = await lookupOrder(host, d.buyerKey, d.orderId);
+      if (codLookup === 'retry') return { status: 'retry', detail: 'store_unavailable' };
+    }
+  } else if (event.type === 'customer.erased') {
+    erasedWaId = await findWaId(host, event.data.buyerKey);
+  }
+
+  const outcome = host.storage.transactionSync((): StoreEventOutcome => {
+    // Re-check inside the transaction: a concurrent delivery of the same event may have finished during the awaits above.
+    if (host.sql.exec('SELECT 1 FROM processed_events WHERE event_id = ?', event.id).toArray().length) return { status: 'duplicate' };
+    const result = handle(host, event, { ...opts, now }, { codLookup });
+    if (result.status === 'retry') return result;
+    host.sql.exec('INSERT INTO processed_events (event_id, type, at) VALUES (?, ?, ?)', event.id, event.type, now);
+    host.sql.exec('DELETE FROM processed_events WHERE at < ?', now - KEEP_EVENTS_MS);
+    return result;
+  });
+  if (outcome.status === 'applied' && event.type === 'customer.erased' && erasedWaId) {
+    await host.eraseContact(erasedWaId);
+  }
+  if (outcome.status === 'applied' || outcome.status === 'skipped') await host.arm();
+  return event.type === 'customer.erased' && !erasedWaId ? { status: 'skipped', detail: 'unknown_customer' } : outcome;
+}
+
+function sendOutcome(host: LinkHost, r: QueueResult, what: string): StoreEventOutcome {
+  if (r.ok) return { status: 'applied' };
+  warn(host, 'store_event_not_sent', { what, reason: r.reason });
+  return { status: 'skipped', detail: r.reason };
+}
+
+function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string | null; now: number }, pre: { codLookup: LookedUp | null }): StoreEventOutcome {
+  const { now } = opts;
+  const copy = storeLink().copy;
+  const at = (iso: string) => Date.parse(iso);
+
+  switch (event.type) {
+    case 'store.plan_changed':
+      if (!acceptVersion(host, 'store:plan', at(event.occurredAt))) return { status: 'stale' };
+      putState(host, 'plan', JSON.stringify({ planCode: event.data.planCode, includesWhatsApp: event.data.includesWhatsApp, effectiveAt: event.data.effectiveAt }));
+      return { status: 'applied' };
+    case 'store.linked':
+    case 'store.unlinked':
+      if (!acceptVersion(host, 'store:link', at(event.occurredAt))) return { status: 'stale' };
+      putState(host, 'linked', event.type === 'store.linked' ? '1' : '0');
+      return { status: 'applied' };
+    default:
+  }
+
+  // Everything below talks to customers or touches commerce data: not while the store is unlinked.
+  if (!isLinked(host)) return { status: 'skipped', detail: 'unlinked' };
+
+  switch (event.type) {
+    case 'catalog.product_upserted':
+    case 'catalog.product_deleted': {
+      if (!acceptVersion(host, `product:${event.data.productId}`, at(event.data.updatedAt))) return { status: 'stale' };
+      host.sql.exec(
+        `INSERT INTO catalog_dirty (product_id, variant_ids, deleted, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(product_id) DO UPDATE SET variant_ids = excluded.variant_ids, deleted = excluded.deleted, updated_at = excluded.updated_at`,
+        event.data.productId, JSON.stringify(event.data.variantIds), event.type === 'catalog.product_deleted' ? 1 : 0, at(event.data.updatedAt),
+      );
+      // One pending sync at most; scheduling again keeps the earlier due time, which is the debounce.
+      addTask(host.sql, 'catalog_sync', now + CATALOG_DEBOUNCE_MS);
+      return { status: 'applied' };
+    }
+
+    case 'order.created': {
+      const d = event.data;
+      const waId = d.phoneE164.slice(1);
+      upsertOrder(host, { orderId: d.orderId, orderNumber: d.orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: d.paymentMethod, status: 'created', totalMinor: d.totalMinor, currency: d.currency }, now);
+      // COD orders are confirmed through the COD request; orders placed in this chat were already confirmed in the chat.
+      if (d.paymentMethod === 'cod' || d.channel === 'whatsapp') return { status: 'applied' };
+      if (!readSettings(host).orderConfirmations) return { status: 'skipped', detail: 'disabled' };
+      if (!copy || !opts.phoneNumberId) return { status: 'skipped', detail: copy ? 'no_number' : 'no_copy' };
+      const loc = locale(d.locale);
+      const r = queueTemplate(host, {
+        waId, phoneNumberId: opts.phoneNumberId, name: copy.templates.orderConfirmation, language: loc, fallbackLanguage: 'ar',
+        params: [displayName(host, waId, loc), cleanParam(d.orderNumber, d.orderNumber, 40)], idempotencyKey: `order:${d.orderId}:created`, now,
+      });
+      rememberBuyerKey(host, waId, d.buyerKey);
+      return sendOutcome(host, r, 'order_confirmation');
+    }
+
+    case 'order.cod_confirmation_requested': {
+      const d = event.data;
+      const waId = d.phoneE164.slice(1);
+      const have = orderRow(host, d.orderId);
+      // One request per order, however many events (or redeliveries with another id) arrive.
+      if (have?.cod_state) return { status: 'skipped', detail: 'already_requested' };
+      const orderNumber = d.orderNumber ?? have?.order_number ?? pre.codLookup?.orderNumber;
+      const totalMinor = d.totalMinor ?? have?.total_minor ?? pre.codLookup?.totalMinor;
+      const currency = d.currency ?? have?.currency ?? pre.codLookup?.currency ?? 'EGP';
+      if (!orderNumber || totalMinor === undefined || totalMinor === null) {
+        console.error(JSON.stringify({ alert: 'cod_request_details_missing', workspace: host.workspaceId }));
+        return { status: 'skipped', detail: 'details_missing' };
+      }
+      if (!copy || !opts.phoneNumberId) return { status: 'skipped', detail: copy ? 'no_number' : 'no_copy' };
+      const loc = locale(d.locale);
+      const quick = (index: number, answer: 'y' | 'n') => ({ type: 'button' as const, sub_type: 'quick_reply', index: String(index), parameters: [{ type: 'payload', payload: `cod:${answer}:${d.orderId}` }] });
+      const r = queueTemplate(host, {
+        waId, phoneNumberId: opts.phoneNumberId, name: copy.templates.codConfirmation, language: loc, fallbackLanguage: 'ar',
+        params: [displayName(host, waId, loc), cleanParam(orderNumber, orderNumber, 40), plainAmount(totalMinor)],
+        idempotencyKey: `cod:${d.orderId}`, extraComponents: [quick(0, 'y'), quick(1, 'n')], now,
+      });
+      if (!r.ok) return sendOutcome(host, r, 'cod_confirmation');
+      upsertOrder(host, { orderId: d.orderId, orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: 'cod', totalMinor, currency, codState: 'pending', codRequestedAt: now }, now);
+      rememberBuyerKey(host, waId, d.buyerKey);
+      setTag(host, waId, 'cod_pending', true);
+      addTask(host.sql, 'cod_no_reply', now + COD_NO_REPLY_MS, { orderId: d.orderId });
+      return { status: 'applied' };
+    }
+
+    case 'order.status_changed': {
+      const d = event.data;
+      if (!acceptVersion(host, `order:${d.orderId}:status`, at(d.updatedAt))) return { status: 'stale' };
+      const have = orderRow(host, d.orderId);
+      upsertOrder(host, { orderId: d.orderId, status: d.status }, now);
+      if (!have) return { status: 'applied' };
+      const closing = d.status === 'cancelled' || d.status === 'refunded';
+      if (closing && have.cod_state === 'pending') {
+        // The Store cancelled it first: the question is moot, and no outcome is recorded for it.
+        host.sql.exec("UPDATE store_orders SET cod_state = 'closed', updated_at = ? WHERE order_id = ?", now, d.orderId);
+        if (have.wa_id) setTag(host, have.wa_id, 'cod_pending', false);
+      }
+      if (d.status === 'paid' && have.wa_id && have.order_number && copy && opts.phoneNumberId && (have.payment_method === 'instapay' || have.payment_method === 'link')) {
+        // Free text only inside the 24 h window (the customer is usually still there after paying).
+        queueFreeText(host, { waId: have.wa_id, phoneNumberId: opts.phoneNumberId, text: copy.t.paymentConfirmed(have.order_number, 'ar'), idempotencyKey: `order:${d.orderId}:paid`, now });
+      }
+      return { status: 'applied' };
+    }
+
+    case 'shipment.updated': {
+      const d = event.data;
+      if (!acceptVersion(host, `shipment:${d.shipmentId}`, at(d.updatedAt))) return { status: 'stale' };
+      const have = orderRow(host, d.orderId);
+      const waId = d.phoneE164?.slice(1) ?? have?.wa_id;
+      const orderNumber = d.orderNumber ?? have?.order_number;
+      if (!waId || !orderNumber) {
+        warn(host, 'shipment_event_unknown_order');
+        return { status: 'skipped', detail: 'unknown_order' };
+      }
+      if (!copy || !opts.phoneNumberId) return { status: 'skipped', detail: copy ? 'no_number' : 'no_copy' };
+      const loc = locale(d.locale);
+      const phrase = copy.shipmentPhrase(d.status, loc);
+      if (!phrase) return { status: 'skipped', detail: 'status_not_announced' };
+      const name = displayName(host, waId, loc);
+      const r = queueTemplate(host, {
+        waId, phoneNumberId: opts.phoneNumberId, name: d.trackingUrl ? copy.templates.shippingTracking : copy.templates.shippingStatus, language: loc, fallbackLanguage: 'ar',
+        params: d.trackingUrl ? [name, cleanParam(orderNumber, orderNumber, 40), phrase, d.trackingUrl] : [name, cleanParam(orderNumber, orderNumber, 40), phrase],
+        idempotencyKey: `ship:${d.shipmentId}:${d.status}`, now,
+      });
+      return sendOutcome(host, r, 'shipping');
+    }
+
+    case 'cart.abandoned': {
+      const d = event.data;
+      if (!copy || !opts.phoneNumberId) return { status: 'skipped', detail: copy ? 'no_number' : 'no_copy' };
+      const waId = d.phoneE164.slice(1);
+      const loc = locale(d.locale);
+      // Marketing: needs a recorded opt-in and no opt-out. (Phase 7 adds the wallet check here: fail closed at zero.)
+      const r = queueTemplate(host, {
+        waId, phoneNumberId: opts.phoneNumberId, name: copy.templates.cartRecovery, language: loc, fallbackLanguage: 'ar', requireConsent: true,
+        params: [displayName(host, waId, loc), d.recoveryUrl], idempotencyKey: `cart:${d.cartId}`, now,
+      });
+      if (r.ok) rememberBuyerKey(host, waId, d.buyerKey);
+      return sendOutcome(host, r, 'cart_recovery');
+    }
+
+    case 'customer.erased':
+      // The contact is erased after this transaction (it awaits R2); here we only drop what is keyed by the customer.
+      host.sql.exec('DELETE FROM store_orders WHERE buyer_key = ?', event.data.buyerKey);
+      return { status: 'applied' };
+
+    default:
+      return { status: 'skipped', detail: 'unhandled' };
+  }
+}

@@ -21,6 +21,14 @@ import { mediaRoutes } from './routes/media';
 import { realtimeRoutes } from './routes/ws';
 import { templatesRoutes } from './routes/templates';
 import { EBDA_DEFAULT_TEMPLATES } from './addons/ebda/templates';
+import { EBDA_ORDERING_COPY } from './addons/ebda/store-copy';
+import { createServiceBindingBridge } from './addons/ebda/store-bridge';
+import { configureStoreLink } from './core/store-link';
+import { consumeStoreEvents } from './core/store-events';
+
+// The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
+configureStoreLink({ bridge: createServiceBindingBridge, copy: EBDA_ORDERING_COPY });
+const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 
 export { WorkspaceDO } from './core/workspace-do';
 
@@ -140,6 +148,7 @@ export default Sentry.withSentry((env: Env) => {
 }, {
   fetch: app.fetch,
   async queue(batch: MessageBatch<unknown>, env: Env, _ctx: ExecutionContext): Promise<void> {
-    await consumeSendBatch(batch, env);
+    if (batch.queue === STORE_EVENTS_QUEUE) await consumeStoreEvents(batch, env);
+    else await consumeSendBatch(batch, env);
   },
 } satisfies ExportedHandler<Env>);

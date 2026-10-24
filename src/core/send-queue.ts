@@ -5,7 +5,7 @@ const templateComponentSchema = z.object({
   type: z.enum(['header', 'body', 'button']),
   sub_type: z.string().optional(),
   index: z.string().optional(),
-  parameters: z.array(z.object({ type: z.string(), text: z.string().optional(), image: link.optional(), video: link.optional(), document: link.optional() })),
+  parameters: z.array(z.object({ type: z.string(), text: z.string().optional(), image: link.optional(), video: link.optional(), document: link.optional(), payload: z.string().max(256).optional() })),
 });
 const mediaKind = z.enum(['image', 'audio', 'video', 'document']);
 export const sendJobSchema = z.object({

@@ -36,7 +36,8 @@ export class FakeStore implements StoreBridge {
   latencyMs = 0;
   private seq = 1000;
 
-  constructor(readonly storeId = FAKE_STORE_ID, opts: FakeStoreOptions = {}) {
+  /** `storeId` '*' accepts any store id (tests that use one fake across many workspaces). */
+  constructor(readonly storeId: string = FAKE_STORE_ID, opts: FakeStoreOptions = {}) {
     this.linked = opts.linked ?? true;
     this.paymentMethods = opts.paymentMethods ?? ['cod', 'link', 'instapay'];
     this.catalog = opts.catalog ?? Array.from({ length: 23 }, (_, i) => row(`v${i + 1}`, `p${i + 1}`, `Item ${i + 1}`, 10_000 + i * 500));
@@ -58,7 +59,7 @@ export class FakeStore implements StoreBridge {
       this.failNext.delete(method);
       return { ok: false, reason: injected };
     }
-    if (storeId !== this.storeId || !this.linked) return { ok: false, reason: 'not_linked' };
+    if ((this.storeId !== '*' && storeId !== this.storeId) || !this.linked) return { ok: false, reason: 'not_linked' };
     return run();
   }
 
