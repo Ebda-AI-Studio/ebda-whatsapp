@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-24T00:00:00Z",
+  "title": "Design System: Ebda WhatsApp",
+  "extensions": {
+    "colorMeta": {
+      "gold": { "role": "primary", "displayName": "Brass Gold", "canonical": "#b08d57", "tonalRamp": ["#2a2112", "#3f3119", "#5a4624", "#7a6030", "#b08d57", "#cba873", "#e0c9a0", "#f1e8d8"] },
+      "gold-ink": { "role": "primary", "displayName": "Gold Ink", "canonical": "#6f5530", "tonalRamp": ["#1c150b", "#2d2212", "#47351d", "#6f5530", "#8f7143", "#b08d57", "#cba873", "#e6d5b6"] },
+      "gold-lift": { "role": "primary", "displayName": "Lift Gold", "canonical": "#cba873", "tonalRamp": ["#3a2f1c", "#5a4929", "#7d663a", "#a58848", "#cba873", "#d9bd90", "#e8d5b5", "#f4ead8"] },
+      "night": { "role": "neutral", "displayName": "Night", "canonical": "#0a0b0c", "tonalRamp": ["#0a0b0c", "#121211", "#1a1916", "#2c2a26", "#47433b", "#6b665b", "#a9a396", "#efe9dd"] },
+      "cream": { "role": "neutral", "displayName": "Cream", "canonical": "#faf8f3", "tonalRamp": ["#5f5a51", "#8a8478", "#b5ae9f", "#d6cdbb", "#e6e0d4", "#f1e8d8", "#f6f0e4", "#faf8f3"] },
+      "sand": { "role": "neutral", "displayName": "Warm Sand", "canonical": "#f1e8d8", "tonalRamp": ["#6b5f48", "#8f8168", "#b3a589", "#cfc3a8", "#e0d6c0", "#f1e8d8", "#f6f0e4", "#faf6ee"] },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#1b1a17", "tonalRamp": ["#1b1a17", "#34322d", "#4c4941", "#5f5a51", "#8a8478", "#b5ae9f", "#d6cdbb", "#efe9dd"] },
+      "bad-brick": { "role": "status", "displayName": "Brick", "canonical": "#9a3328", "tonalRamp": ["#2b0f0b", "#4a1a14", "#6e271e", "#9a3328", "#b85a4f", "#d18a82", "#e8bcb6", "#f8ece9"] },
+      "ok-green": { "role": "status", "displayName": "Delivered Green", "canonical": "#2f6b4a", "tonalRamp": ["#0e2217", "#17382a", "#224f38", "#2f6b4a", "#5a8f72", "#88b399", "#b8d4c3", "#e3efe8"] },
+      "warn-umber": { "role": "status", "displayName": "Window Umber", "canonical": "#8a4d12", "tonalRamp": ["#2a1604", "#472709", "#68390d", "#8a4d12", "#ad7440", "#cc9d73", "#e4c5a8", "#f5e8da"] }
+    },
+    "typographyMeta": {
+      "body": { "displayName": "Body", "purpose": "Messages, rows, buttons. Tabular numerals on." },
+      "title": { "displayName": "Title", "purpose": "Pane titles." },
+      "total": { "displayName": "Total", "purpose": "Order total." },
+      "label": { "displayName": "Label", "purpose": "Previews, field labels, chips." },
+      "caption": { "displayName": "Caption", "purpose": "Timestamps, status, rail-stop labels, window time." }
+    },
+    "shadows": [
+      { "name": "popover", "value": "0 18px 44px rgba(10,11,12,0.14)", "purpose": "Quick-reply and template popovers." },
+      { "name": "toast", "value": "0 16px 40px rgba(10,11,12,0.24)", "purpose": "Night toast with undo." },
+      { "name": "drawer", "value": "0 0 48px rgba(10,11,12,0.18)", "purpose": "Tablet orders drawer." }
+    ],
+    "motion": [
+      { "name": "ease-out-expo", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "All transitions: row hover 160ms, bubble rise 220ms, drawer 280ms, rail fill 600ms." },
+      { "name": "reduced-motion", "value": "animation: none; transition: none", "purpose": "Applied globally under prefers-reduced-motion." }
+    ],
+    "breakpoints": [
+      { "name": "phone", "value": "819px" },
+      { "name": "tablet", "value": "1199px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Gold Action Button",
+      "kind": "button",
+      "refersTo": "button-gold",
+      "description": "The one action that needs doing (Confirm order).",
+      "html": "<button class=\"ds-btn-gold\">Confirm order</button>",
+      "css": ".ds-btn-gold{min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #b08d57;background:#b08d57;color:#0a0b0c;font:500 15px 'Readex Pro Variable',system-ui,sans-serif;cursor:pointer;transition:background-color 160ms cubic-bezier(.16,1,.3,1)}.ds-btn-gold:hover{background:#bb9862}.ds-btn-gold:focus-visible{outline:2px solid #b08d57;outline-offset:2px}"
+    },
+    {
+      "name": "Night Send Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Send in the composer.",
+      "html": "<button class=\"ds-btn-night\">Send</button>",
+      "css": ".ds-btn-night{min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #0a0b0c;background:#0a0b0c;color:#efe9dd;font:500 15px 'Readex Pro Variable',system-ui,sans-serif;cursor:pointer}.ds-btn-night:focus-visible{outline:2px solid #b08d57;outline-offset:2px}.ds-btn-night:disabled{opacity:.5;cursor:not-allowed}"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Secondary action (Refuse).",
+      "html": "<button class=\"ds-btn-outline\">Refuse</button>",
+      "css": ".ds-btn-outline{min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #e6e0d4;background:#fff;color:#1b1a17;font:500 15px 'Readex Pro Variable',system-ui,sans-serif;cursor:pointer}.ds-btn-outline:hover{border-color:#d8cfbe}.ds-btn-outline:focus-visible{outline:2px solid #b08d57;outline-offset:2px}"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "List filter; selected state is night.",
+      "html": "<button class=\"ds-chip\">All</button> <button class=\"ds-chip\" aria-pressed=\"true\">Unread</button>",
+      "css": ".ds-chip{min-height:34px;padding:0 12px;border-radius:999px;border:1px solid #e6e0d4;background:#fff;color:#1b1a17;font:400 13px 'Readex Pro Variable',system-ui,sans-serif;cursor:pointer}.ds-chip[aria-pressed='true']{background:#0a0b0c;border-color:#0a0b0c;color:#efe9dd}.ds-chip:focus-visible{outline:2px solid #b08d57;outline-offset:2px}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "input-composer",
+      "description": "List search; border goes gold on focus.",
+      "html": "<label class=\"ds-search\"><input placeholder=\"Search\"></label>",
+      "css": ".ds-search{display:flex;align-items:center;border:1px solid #e6e0d4;border-radius:10px;padding:0 12px;min-height:42px;background:#fff}.ds-search input{border:0;outline:0;flex:1;min-height:40px;background:none;font:400 15px 'Readex Pro Variable',system-ui,sans-serif;color:#1b1a17}.ds-search:focus-within{border-color:#b08d57}"
+    },
+    {
+      "name": "Conversation Row",
+      "kind": "custom",
+      "refersTo": "row-selected",
+      "description": "Avatar, name, preview, time, gold unread pill. Selected = sand tint + gold avatar ring.",
+      "html": "<div class=\"ds-row\"><span class=\"ds-avatar\">M</span><span class=\"ds-body\"><b>Mona</b><span class=\"ds-prev\">Is it still available?</span></span><span class=\"ds-pill\">2</span></div>",
+      "css": ".ds-row{display:flex;gap:12px;align-items:center;padding:10px;border-radius:10px;background:#f6f0e4;font:400 15px 'Readex Pro Variable',system-ui,sans-serif;color:#1b1a17;max-width:320px}.ds-avatar{width:42px;height:42px;border-radius:50%;background:#ece5d7;color:#6f5530;display:grid;place-items:center;font-weight:500;box-shadow:0 0 0 2px #fff,0 0 0 4px #b08d57;flex:none}.ds-body{flex:1;min-width:0;display:grid}.ds-body b{font-weight:500}.ds-prev{color:#5f5a51;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ds-pill{background:#b08d57;color:#0a0b0c;border-radius:999px;font-size:12px;min-width:22px;height:22px;padding:0 7px;display:inline-grid;place-items:center;font-weight:500}"
+    },
+    {
+      "name": "Message Bubbles",
+      "kind": "custom",
+      "refersTo": "bubble-out",
+      "description": "Incoming white with hairline; outgoing warm sand.",
+      "html": "<div class=\"ds-thread\"><div class=\"ds-in\">Hello, where is my order?</div><div class=\"ds-out\">On its way today.</div></div>",
+      "css": ".ds-thread{display:flex;flex-direction:column;gap:6px;font:400 15px 'Readex Pro Variable',system-ui,sans-serif;color:#1b1a17;background:#faf8f3;padding:16px}.ds-in,.ds-out{max-width:76%;padding:9px 14px 6px;border-radius:16px}.ds-in{background:#fff;border:1px solid #e6e0d4;border-start-start-radius:4px;align-self:flex-start}.ds-out{background:#f1e8d8;border-start-end-radius:4px;align-self:flex-end}"
+    },
+    {
+      "name": "Order Card with Brass Rail",
+      "kind": "card",
+      "refersTo": "order-card",
+      "description": "Signature: order state drawn as four stops filling gold.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-top\"><b>#1042</b><span class=\"ds-total\">EGP 1,250</span></div><ol class=\"ds-stops\"><li data-done=\"true\"><i></i>Placed</li><li data-done=\"true\"><i></i>Confirmed</li><li><i></i>Shipped</li><li><i></i>Delivered</li></ol></div>",
+      "css": ".ds-card{background:#fff;border:1px solid #e6e0d4;border-radius:14px;padding:16px;display:grid;gap:10px;font:400 15px 'Readex Pro Variable',system-ui,sans-serif;color:#1b1a17;max-width:300px}.ds-top{display:flex;justify-content:space-between;align-items:baseline}.ds-top b{font-weight:500}.ds-total{font-size:17px;font-weight:600}.ds-stops{list-style:none;margin:6px 4px 2px;padding:0;display:grid;grid-template-columns:repeat(4,1fr);position:relative}.ds-stops::before{content:'';position:absolute;inset-block-start:8px;inset-inline:12.5%;height:2px;background:#e6e0d4}.ds-stops::after{content:'';position:absolute;inset-block-start:8px;inset-inline-start:12.5%;height:2px;background:#b08d57;width:25%}.ds-stops li{display:grid;justify-items:center;gap:6px;position:relative;font-size:12px;color:#5f5a51}.ds-stops i{width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid #e6e0d4}.ds-stops li[data-done='true']{color:#1b1a17}.ds-stops li[data-done='true'] i{border-color:#b08d57;background:#b08d57;box-shadow:inset 0 0 0 3px #fff}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Counter With the Ledger Open",
+    "overview": "A shop counter where the customer is talking and their order slip lies open beside you. The screen is a warm cream working ground, white panes divided by warm hairlines, and a night rail at the inline-start edge carrying the gold doorway mark. Everything is quiet so that one thing can be loud: brass-gold marks the single thing that needs doing now.\n\nIt is Arabic-first and right-to-left: layout uses logical properties, mirrors directional motion, and customer text sets its own direction. Readex Pro carries Arabic and Latin in one voice with tabular numerals. Density is operator-grade: 44px targets, 10-14px radii, no decoration that does not carry status.\n\nThe signature is the brass rail of order stops that fills gold as the order advances.",
+    "keyCharacteristics": [
+      "Cream ground, white panes, night rail; one brass-gold accent used sparingly.",
+      "Flat: hairlines and tonal sand/cream steps carry depth; shadow only on floating layers.",
+      "Order progress drawn as structure, not a badge.",
+      "Status (sent, read, failed, window closing) always visible in colour plus text.",
+      "Colour never carries meaning alone; Arabic and English both complete."
+    ],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "Gold marks only what needs action or attention now. A screen with gold on decoration has spent its voice.", "section": "colors" },
+      { "name": "The No Orange Rule", "body": "No orange anywhere in Ebda's own UI; the gold is brass, not amber.", "section": "colors" },
+      { "name": "The Gold Is Not Text Rule", "body": "Gold on light grounds is a fill or ring; text in that role uses Gold Ink.", "section": "colors" },
+      { "name": "The Tabular Rule", "body": "Numerals are tabular everywhere.", "section": "typography" },
+      { "name": "The Own-Direction Rule", "body": "Customer-authored text uses dir=auto / unicode-bidi: plaintext and text-align: start; never force the UI direction onto it.", "section": "typography" },
+      { "name": "The No Letter Motion Rule", "body": "No per-letter animation (breaks Arabic joining).", "section": "typography" },
+      { "name": "The Floating-Only Rule", "body": "If it is not floating above the page, it has no shadow.", "section": "elevation" },
+      { "name": "The No Gradient Rule", "body": "No gradients, no glass. The single exception is the mask fade at the quick-reply strip's scroll edge.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do spend gold only on the one needed action, unread count, unseen-COD dot, selection ring and the rail fill.",
+      "Do keep every target 44px on touch and every status as colour plus word.",
+      "Do use logical properties and mirror directional motion in RTL.",
+      "Do mark sample data visibly (the sample badge) until live data lands.",
+      "Do respect prefers-reduced-motion (all animation and transitions are cut)."
+    ],
+    "donts": [
+      "Don't add orange, gradients (beyond the quick-reply fade mask), glass or resting shadows.",
+      "Don't put a coloured stripe or border-inline-start accent on rows; selection is tint plus avatar ring.",
+      "Don't use gold as text colour on light grounds; use Gold Ink.",
+      "Don't animate text per letter or force UI direction onto customer content.",
+      "Don't hard-code \"Ebda\" in the brand-neutral core; white-label copies reuse it."
+    ]
+  }
+}
