@@ -24,7 +24,7 @@ import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { botInputFrom, botInputSchema, orderingActive, runBotTurn } from './ordering/bot';
-import { handleCodReply, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
+import { closeUnanswered, handleCodReply, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
 export const EVENTS_KEPT = 1000;
@@ -1044,6 +1044,11 @@ export class WorkspaceDO extends DurableObject<Env> {
         const orderId = (JSON.parse(payload ?? 'null') as { orderId?: string } | null)?.orderId;
         if (typeof orderId === 'string') await pushCodOutcome(this.host(), orderId, now);
         return undefined;
+      }
+      case 'cod_no_reply': {
+        const orderId = (JSON.parse(payload ?? 'null') as { orderId?: string } | null)?.orderId;
+        if (typeof orderId === 'string') this.ctx.storage.transactionSync(() => closeUnanswered(this.host(), orderId, now));
+        return undefined; // the push it schedules runs in this same pass
       }
       case 'bot_turn': {
         const input = botInputSchema.safeParse(JSON.parse(payload ?? 'null'));

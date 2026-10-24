@@ -13,9 +13,9 @@ export type CodResolution = 'resolved' | 'already' | 'conflict' | 'closed' | 'no
 /** An order in one of these Store statuses can no longer be confirmed or refused. */
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['cancelled', 'refunded', 'delivered', 'returned']);
 
-type CodRow = { order_id: string; order_number: string | null; wa_id: string | null; cod_state: string | null; outcome: string | null; locale: string | null; payment_method: string | null; status: string | null };
+type CodRow = { order_id: string; order_number: string | null; wa_id: string | null; buyer_key: string | null; cod_state: string | null; outcome: string | null; locale: string | null; payment_method: string | null; status: string | null };
 const codRow = (host: LinkHost, where: string, ...params: SqlStorageValue[]) =>
-  host.sql.exec<CodRow>(`SELECT order_id, order_number, wa_id, cod_state, outcome, locale, payment_method, status FROM store_orders WHERE ${where}`, ...params).toArray()[0];
+  host.sql.exec<CodRow>(`SELECT order_id, order_number, wa_id, buyer_key, cod_state, outcome, locale, payment_method, status FROM store_orders WHERE ${where}`, ...params).toArray()[0];
 
 /**
  * Records the answer to a COD confirmation, once. A first answer wins; the same answer again is a no-op; a different one
@@ -37,7 +37,31 @@ export function resolveCod(host: LinkHost, orderId: string, outcome: CodOutcome,
   );
   if (row.wa_id) setTag(host, row.wa_id, 'cod_pending', false);
   addTask(host.sql, 'cod_outcome_push', now, { orderId });
+  recordCiOutcome(host, { buyerKey: row.buyer_key, orderId, outcome, at: now });
   return 'resolved';
+}
+
+/**
+ * Customer Intelligence (CI-1): one data point per recorded COD outcome, keyed by the suite-wide hashed customer key, never a
+ * phone number. Written when the outcome is recorded (once per transition), best effort: analytics must not block an order.
+ */
+export function recordCiOutcome(host: LinkHost, o: { buyerKey: string | null; orderId: string; outcome: CodOutcome; at: number }): void {
+  if (!o.buyerKey) {
+    console.warn(JSON.stringify({ warn: 'ci_outcome_without_buyer_key', workspace: host.workspaceId }));
+    return;
+  }
+  try {
+    host.env.CI_OUTCOMES?.writeDataPoint({ indexes: [host.workspaceId], blobs: [o.buyerKey, host.workspaceId, o.outcome, o.orderId, 'whatsapp'], doubles: [o.at] });
+  } catch {
+    // best effort
+  }
+}
+
+/** 24 h after a COD request nobody answered: record `no_reply` (a later real answer still replaces it). Call inside a transaction. */
+export function closeUnanswered(host: LinkHost, orderId: string, now: number): CodResolution | 'not_pending' {
+  const row = codRow(host, 'order_id = ?', orderId);
+  if (!row || row.cod_state !== 'pending') return 'not_pending';
+  return resolveCod(host, orderId, 'no_reply', now);
 }
 
 /** A customer's tap on the COD template: its payload names the order; a button without one is matched by title to their latest open request. */
