@@ -19,6 +19,8 @@ import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './thr
 import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
 import type { TemplateDto } from './api/contract';
 
+/** How many realtime events a client can resync from. */
+export const EVENTS_KEPT = 1000;
 export const PREVIEW_CHARS = 280;
 export const INLINE_BODY_BYTES = 1024;
 /** A claim older than this is presumed crashed and may be re-claimed once (duplicate risk vs drop risk: we accept one possible duplicate). */
@@ -58,13 +60,19 @@ export type EraseResult = { found: boolean; messages: number; statusEvents: numb
 /** One tenant's data: a SQLite-backed Durable Object per workspace. */
 export class WorkspaceDO extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  /** Highest event seq already pushed to connected sockets (earlier events are history for a fresh connection). */
+  private lastBroadcast = 0;
+  private flushScheduled = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    // 'ping' from a hibernated client is answered without waking the DO.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     ctx.blockConcurrencyWhile(async () => {
       migrate(ctx.storage);
       this.reindexIfEmpty();
+      this.lastBroadcast = this.sql.exec<{ s: number | null }>('SELECT max(seq) AS s FROM events').one().s ?? 0;
     });
   }
 
@@ -124,6 +132,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
         result.stored++;
         this.indexMessage(inserted.id, cols.preview);
+        this.emitMessageCreated(inserted.id);
         this.sql.exec('UPDATE conversations SET unread = unread + 1 WHERE id = ?', conversationId);
         if (optOut) {
           // A reply to STOP is optional under Meta's rules and we send none: the opt-out is silent and immediate.
@@ -131,6 +140,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
           this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId);
         }
+        this.emitConversationUpdated(conversationId);
         if (!optOut && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
       }
       for (const st of batch.statuses) this.applyStatusSync(st);
@@ -184,6 +194,8 @@ export class WorkspaceDO extends DurableObject<Env> {
           conversationId, previewOf(job.text), job.text, job.idempotencyKey, now, now,
         ).one().id;
         this.indexMessage(replyId, previewOf(job.text));
+        this.emitMessageCreated(replyId);
+        this.emitConversationUpdated(conversationId);
         return 'claimed';
       }
       if (existing.status === 'queued' || existing.status === 'retry' || (existing.status === 'claimed' && now - existing.updated_at > STALE_CLAIM_MS && existing.claim_attempts < 2)) {
@@ -281,11 +293,12 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   async rescheduleFrequencyCap(job: SendJob, now = Date.now()): Promise<'rescheduled' | 'failed'> {
     const deferrals = job.deferrals ?? 0;
-    if (deferrals >= 2) {
-      this.sql.exec("UPDATE messages SET status = 'failed', error_code = 131049, updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
-      return 'failed';
-    }
-    this.sql.exec("UPDATE messages SET status = 'queued', error_code = 131049, updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
+    const status = deferrals >= 2 ? 'failed' : 'queued';
+    this.ctx.storage.transactionSync(() => {
+      const row = this.sql.exec<{ id: number }>('UPDATE messages SET status = ?, error_code = 131049, updated_at = ? WHERE idempotency_key = ? RETURNING id', status, now, job.idempotencyKey).toArray()[0];
+      if (row) this.emitMessageStatus(row.id);
+    });
+    if (status === 'failed') return 'failed';
     addTask(this.sql, 'send_release', now + TIER_WINDOW_MS, { job: { ...job, deferrals: deferrals + 1 }, reason: 'frequency_cap' });
     await this.arm();
     return 'rescheduled';
@@ -359,6 +372,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.indexMessage(id, preview.length ? previewOf(preview) : null);
       this.sql.exec('UPDATE conversations SET last_message_at = max(coalesce(last_message_at, 0), ?) WHERE id = ?', Math.floor(now / 1000), conversationId);
       const row = this.sql.exec<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?`, id).one();
+      this.emitMessageCreated(id);
+      this.emitConversationUpdated(conversationId);
       return { ok: true, message: messageDto(row, workspaceId), job };
     });
   }
@@ -423,14 +438,18 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** The enqueue after queueOutbound threw: the message will never be sent, so say so instead of leaving it 'queued'. */
   async markEnqueueFailed(idempotencyKey: string): Promise<void> {
-    this.sql.exec("UPDATE messages SET status = 'failed', updated_at = ? WHERE idempotency_key = ? AND status = 'queued'", Date.now(), idempotencyKey);
+    this.ctx.storage.transactionSync(() => {
+      const row = this.sql.exec<{ id: number }>("UPDATE messages SET status = 'failed', updated_at = ? WHERE idempotency_key = ? AND status = 'queued' RETURNING id", Date.now(), idempotencyKey).toArray()[0];
+      if (row) this.emitMessageStatus(row.id);
+    });
   }
 
   async recordOutbound(idempotencyKey: string, result: SendResult): Promise<void> {
     this.ctx.storage.transactionSync(() => {
       const now = Date.now();
       if (result.ok) {
-        this.sql.exec("UPDATE messages SET wamid = ?, status = 'accepted', updated_at = ? WHERE idempotency_key = ?", result.wamid, now, idempotencyKey);
+        const accepted = this.sql.exec<{ id: number }>("UPDATE messages SET wamid = ?, status = 'accepted', updated_at = ? WHERE idempotency_key = ? RETURNING id", result.wamid, now, idempotencyKey).toArray()[0];
+        if (accepted) this.emitMessageStatus(accepted.id);
         // Meta often sends 'sent'/'failed' before we store the wamid: replay what arrived early, oldest first.
         const early = this.sql
           .exec<{ id: number; status: StatusEvent['status']; ts: number; error_code: number | null }>(
@@ -443,7 +462,8 @@ export class WorkspaceDO extends DurableObject<Env> {
           }
         }
       } else {
-        this.sql.exec('UPDATE messages SET status = ?, error_code = ?, updated_at = ? WHERE idempotency_key = ?', result.retryable ? 'retry' : 'failed', result.code, now, idempotencyKey);
+        const failed = this.sql.exec<{ id: number }>('UPDATE messages SET status = ?, error_code = ?, updated_at = ? WHERE idempotency_key = ? RETURNING id', result.retryable ? 'retry' : 'failed', result.code, now, idempotencyKey).toArray()[0];
+        if (failed) this.emitMessageStatus(failed.id);
       }
     });
   }
@@ -470,7 +490,88 @@ export class WorkspaceDO extends DurableObject<Env> {
     const rank = STATUS_RANK[e.status];
     if (rank <= msg.status_rank || (e.status === 'failed' && msg.status_rank >= STATUS_RANK.delivered)) return false;
     this.sql.exec('UPDATE messages SET status = ?, status_rank = ?, error_code = coalesce(?, error_code), updated_at = ? WHERE id = ?', e.status, rank, e.errorCode ?? null, Date.now(), msg.id);
+    this.emitMessageStatus(msg.id);
     return true;
+  }
+
+  // ---- realtime ---------------------------------------------------------------------------------------------------
+
+  /** Upgrade to a WebSocket (hibernation API: an idle socket costs nothing and the DO can be evicted). */
+  override async fetch(request: Request): Promise<Response> {
+    if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('expected a websocket upgrade', { status: 426 });
+    const pair = new WebSocketPair();
+    const [client, server] = [pair[0], pair[1]];
+    this.ctx.acceptWebSocket(server);
+    return new Response(null, { status: 101, webSocket: client, headers: { 'sec-websocket-protocol': 'ebda.v1' } });
+  }
+
+  override webSocketMessage(): void {
+    // Clients only listen. 'ping' is auto-answered; anything else is ignored.
+  }
+
+  override webSocketClose(ws: WebSocket, code: number): void {
+    try {
+      ws.close(code === 1005 || code === 1006 ? 1000 : code);
+    } catch {
+      // already closed
+    }
+  }
+
+  /** Appends an event (inside the caller's transaction) and schedules a push to open sockets once it has committed. */
+  private recordEvent(payload: Record<string, unknown>): void {
+    const seq = this.sql.exec<{ seq: number }>('INSERT INTO events (payload) VALUES (?) RETURNING seq', JSON.stringify(payload)).one().seq;
+    if (seq > EVENTS_KEPT) this.sql.exec('DELETE FROM events WHERE seq <= ?', seq - EVENTS_KEPT);
+    if (this.flushScheduled) return;
+    this.flushScheduled = true;
+    // After the (synchronous) transaction returns; rows of a rolled-back transaction are simply not there to send.
+    queueMicrotask(() => {
+      this.flushScheduled = false;
+      this.broadcast();
+    });
+  }
+
+  private broadcast(): void {
+    const pending = this.sql.exec<{ seq: number; payload: string }>('SELECT seq, payload FROM events WHERE seq > ? ORDER BY seq', this.lastBroadcast).toArray();
+    if (!pending.length) return;
+    this.lastBroadcast = pending[pending.length - 1]!.seq;
+    const sockets = this.ctx.getWebSockets();
+    if (!sockets.length) return;
+    for (const e of pending) {
+      const frame = JSON.stringify({ ...(JSON.parse(e.payload) as object), seq: e.seq });
+      for (const ws of sockets) {
+        try {
+          ws.send(frame);
+        } catch {
+          // a dead socket is closed by the runtime; the client resyncs by seq
+        }
+      }
+    }
+  }
+
+  /** Events after `after`, oldest first (at most the 1,000 kept). A first item whose seq is not after+1 means the gap is too old: reload the list. */
+  async eventsAfter(after: number): Promise<{ items: unknown[]; latestSeq: number }> {
+    const items = this.sql
+      .exec<{ seq: number; payload: string }>('SELECT seq, payload FROM events WHERE seq > ? ORDER BY seq LIMIT ?', after, EVENTS_KEPT)
+      .toArray()
+      .map((e) => ({ ...(JSON.parse(e.payload) as object), seq: e.seq }));
+    const latestSeq = this.sql.exec<{ s: number | null }>('SELECT max(seq) AS s FROM events').one().s ?? after;
+    return { items, latestSeq: Math.max(latestSeq, 0) };
+  }
+
+  private emitMessageCreated(messageId: number): void {
+    const row = this.sql.exec<MessageRow & { conversation_id: number }>(`SELECT ${MESSAGE_COLUMNS}, m.conversation_id FROM messages m WHERE m.id = ?`, messageId).toArray()[0];
+    if (row) this.recordEvent({ type: 'message.created', conversationId: row.conversation_id, message: messageDto(row, this.workspaceId) });
+  }
+
+  private emitMessageStatus(messageId: number): void {
+    const m = this.sql.exec<{ conversation_id: number; status: string | null; error_code: number | null }>('SELECT conversation_id, status, error_code FROM messages WHERE id = ?', messageId).toArray()[0];
+    if (m?.status) this.recordEvent({ type: 'message.status', conversationId: m.conversation_id, messageId, status: m.status, errorCode: m.error_code });
+  }
+
+  /** Public only so tests can fill the log; callers inside the DO use it after changing a conversation. */
+  emitConversationUpdated(conversationId: number): void {
+    const conversation = this.conversationById(conversationId, Date.now());
+    if (conversation) this.recordEvent({ type: 'conversation.updated', conversation });
   }
 
   // ---- search index ----------------------------------------------------------------------------------------------
@@ -561,11 +662,13 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   async markRead(conversationId: number, now = Date.now()): Promise<ConversationDto | null> {
     this.sql.exec('UPDATE conversations SET unread = 0 WHERE id = ?', conversationId);
+    this.emitConversationUpdated(conversationId);
     return this.conversationById(conversationId, now);
   }
 
   async assign(conversationId: number, userId: string | null, now = Date.now()): Promise<ConversationDto | null> {
     this.sql.exec('UPDATE conversations SET assignee_user_id = ? WHERE id = ?', userId, conversationId);
+    this.emitConversationUpdated(conversationId);
     return this.conversationById(conversationId, now);
   }
 
@@ -575,6 +678,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.sql.exec('DELETE FROM conversation_tags WHERE conversation_id = ?', conversationId);
       for (const t of clean) this.sql.exec('INSERT INTO conversation_tags (conversation_id, tag) VALUES (?, ?)', conversationId, t);
+      this.emitConversationUpdated(conversationId);
     });
     return this.conversationById(conversationId, now);
   }
@@ -792,6 +896,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
       if (conv) {
         this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
+        this.sql.exec("DELETE FROM events WHERE json_extract(payload, '$.conversationId') = ? OR json_extract(payload, '$.conversation.id') = ?", conv.id, conv.id);
         this.sql.exec('DELETE FROM notes WHERE conversation_id = ?', conv.id);
         this.sql.exec('DELETE FROM conversation_tags WHERE conversation_id = ?', conv.id);
         this.sql.exec('DELETE FROM messages WHERE conversation_id = ?', conv.id);

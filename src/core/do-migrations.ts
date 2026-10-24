@@ -119,6 +119,11 @@ export const DO_MIGRATIONS: readonly string[] = [
    CREATE INDEX conversations_assignee ON conversations (assignee_user_id, last_message_at DESC, id DESC);
    CREATE INDEX messages_conversation_id ON messages (conversation_id, id);
    CREATE VIRTUAL TABLE messages_fts USING fts5(text);`,
+  // v9 (Phase 2, realtime): the last events, so a client that missed some can resync by seq. AUTOINCREMENT keeps seq monotonic after trims.
+  `CREATE TABLE events (
+     seq INTEGER PRIMARY KEY AUTOINCREMENT,
+     payload TEXT NOT NULL
+   );`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

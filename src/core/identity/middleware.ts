@@ -8,7 +8,12 @@ export type AuthVars = { principal: Principal; storeRole: 'owner' | 'staff' | 's
 export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier): MiddlewareHandler<{ Bindings: Env; Variables: AuthVars }> {
   return async (c, next) => {
     const header = c.req.header('authorization') ?? '';
-    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    let token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    // Browsers cannot set headers on a WebSocket, so the token may ride in Sec-WebSocket-Protocol as "bearer.<token>".
+    if (!token && c.req.header('upgrade')?.toLowerCase() === 'websocket') {
+      const offered = (c.req.header('sec-websocket-protocol') ?? '').split(',').map((p) => p.trim());
+      token = offered.find((p) => p.startsWith('bearer.'))?.slice(7) ?? '';
+    }
     if (!token) return c.json({ error: 'unauthorized' }, 401);
     let principal: Principal;
     try {
