@@ -34,7 +34,7 @@ it('refuses a wrong signature, another message, another workspace, an expired li
   const ws = W(2);
   const id = await withScreenshot(ws);
   const url = await signed(ws, id);
-  expect((await get(url.replace(/sig=[0-9a-f]/, 'sig=0'))).status).toBe(404);
+  expect((await get(url.replace(/sig=([0-9a-f])/, (_m, c: string) => `sig=${c === '0' ? '1' : '0'}`))).status).toBe(404);
   expect((await get(url.replace(`/${id}?`, `/${id + 1}?`))).status).toBe(404);
   expect((await get(url.replace(ws, W(3)))).status).toBe(404);
   expect((await get(await signed(ws, id, Date.now() - PROOF_URL_TTL_MS - 120_000))).status).toBe(404);
