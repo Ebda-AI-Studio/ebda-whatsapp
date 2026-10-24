@@ -10,6 +10,8 @@ export default defineConfig({
       {
         plugins: [
           cloudflareTest({
+            // The AI binding is remote-only; tests use a scripted fake provider and must never open a remote session.
+            remoteBindings: false,
             wrangler: { configPath: './wrangler.jsonc' },
             miniflare: {
               bindings: { META_APP_SECRET: 'test-secret', META_VERIFY_TOKEN: 'VT', META_SYSTEM_TOKEN: 'test-token', TEST_MIGRATIONS: migrations, BENCH: process.env.BENCH ?? '0' },

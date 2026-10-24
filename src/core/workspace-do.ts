@@ -24,6 +24,8 @@ import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { errClass, safeMessage } from './observability';
+import type { AgentSettingsDto } from './api/contract';
+import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
 import { OTP_RATE_WINDOW_MS } from './otp-policy';
 import { OTP_MASK } from './templates';
 import type { OtpResult } from './otp';
@@ -719,6 +721,27 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
     await this.arm();
     return { ok: true, settings };
+  }
+
+  // ---- AI agent (Phase 5) ------------------------------------------------------------------------------------------
+
+  /** The agent's settings as the owner sees them. The model key is never returned, only whether one is stored. */
+  async getAgentSettings(): Promise<AgentSettingsDto> {
+    return this.agentDto();
+  }
+
+  private agentDto(): AgentSettingsDto {
+    return { ...readAgentSettings(this.sql), hasApiKey: hasApiKey(this.sql), credits: 0, knowledgeReady: false };
+  }
+
+  /** Saves (merges) the agent's settings; a refusal comes back as data and nothing is written. */
+  async setAgentSettings(patch: AgentSettingsUpdate): Promise<{ ok: true; settings: AgentSettingsDto } | { ok: false; reason: SettingsRefusal }> {
+    const plan = await planAgentUpdate(this.env, this.workspaceId, this.sql, patch);
+    if (!plan.ok) return plan;
+    this.ctx.storage.transactionSync(() => {
+      writeAgentSettings(this.sql, plan.settings, plan.secret);
+    });
+    return { ok: true, settings: this.agentDto() };
   }
 
   /** Operator action: a full reconcile now. `allowMassDelete` lifts the automatic safety limit on archiving. */
