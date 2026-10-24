@@ -7,7 +7,12 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "observability": { "enabled": true },
-  "vars": { "META_GRAPH_VERSION": "v25.0" },
+  "vars": {
+    "META_GRAPH_VERSION": "v25.0",
+    "IDENTITY_ISSUER": "https://accounts.ebda.app",
+    "IDENTITY_JWKS_URL": "https://accounts.ebda.app/.well-known/jwks.json",
+    "IDENTITY_AUDIENCE": "whatsapp"
+  },
   "durable_objects": { "bindings": [{ "name": "WORKSPACE_DO", "class_name": "WorkspaceDO" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],
   "d1_databases": [{ "binding": "DB", "database_name": "ebda-wa-platform", "database_id": "80c011f6-b03c-4289-b20a-102aa3ca79ef", "migrations_dir": "migrations/d1" }],

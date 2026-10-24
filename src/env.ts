@@ -11,4 +11,9 @@ export type Env = {
   META_SYSTEM_TOKEN: string;
   META_GRAPH_VERSION: string;
   COMMIT_SHA?: string;
+  IDENTITY_ISSUER: string;
+  IDENTITY_JWKS_URL: string;
+  IDENTITY_AUDIENCE: string;
+  SUITE_BUYER_KEY_SECRET?: string;
+  SENTRY_DSN?: string;
 };
