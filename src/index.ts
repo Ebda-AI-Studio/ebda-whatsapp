@@ -2,17 +2,25 @@ import * as Sentry from '@sentry/cloudflare';
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { verifyMetaSignature } from './core/meta/signature';
-import { extractEvents } from './core/meta/webhook-schema';
-import { workspaceForPhoneNumber } from './core/routing';
+import { extractEvents, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
+import { numberForDisplayPhone, workspaceForPhoneNumber, workspaceForWaba } from './core/routing';
 import { mark } from './core/timing';
 import { scrubEvent } from './core/observability';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
 import { EBDA_COPY } from './addons/ebda/copy';
+import { EBDA_OPT_IN_KEYWORDS } from './addons/ebda/consent';
 import { createEbdaAccountsVerifier } from './addons/ebda/identity';
 import { requireStoreAccess, type AuthVars } from './core/identity/middleware';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
+import { TIER_LIMITS } from './core/throttle';
 import { buyerKey } from './core/buyer-key';
+import { messagesRoutes } from './routes/messages';
+import { conversationsRoutes } from './routes/conversations';
+import { mediaRoutes } from './routes/media';
+import { realtimeRoutes } from './routes/ws';
+import { templatesRoutes } from './routes/templates';
+import { EBDA_DEFAULT_TEMPLATES } from './addons/ebda/templates';
 
 export { WorkspaceDO } from './core/workspace-do';
 
@@ -45,6 +53,11 @@ api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   console.log(JSON.stringify({ audit: 'contact_erased', storeId, by: c.get('principal').userId, buyer: who, ...result }));
   return c.json(result);
 });
+api.route('/', messagesRoutes);
+api.route('/', conversationsRoutes);
+api.route('/', realtimeRoutes);
+api.route('/', mediaRoutes);
+api.route('/', templatesRoutes(EBDA_DEFAULT_TEMPLATES));
 app.route('/api/v1', api);
 
 function sameString(a: string, b: string): boolean {
@@ -75,6 +88,15 @@ app.post('/meta/webhook', async (c) => {
     console.warn('meta webhook: body is not JSON');
     return c.text('ok'); // a 5xx would make Meta retry a body that can never parse
   }
+  for (const t of extractTemplateStatuses(payload)) {
+    const workspaceId = await workspaceForWaba(c.env.DB, t.wabaId);
+    if (workspaceId) await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
+  }
+  for (const u of extractTierUpdates(payload)) {
+    const tier = TIER_LIMITS[u.currentLimit];
+    const number = tier === undefined ? null : await numberForDisplayPhone(c.env.DB, u.wabaId, u.displayPhone);
+    if (number && tier !== undefined) await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(number.workspaceId)).setNumberLimits(number.phoneNumberId, { tier });
+  }
   const events = extractEvents(payload);
   if (!events) {
     console.warn('meta webhook: unrecognised payload');
@@ -92,7 +114,7 @@ app.post('/meta/webhook', async (c) => {
     }
     const stub = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId));
     // Awaited before the 200: if the DO write fails we answer 5xx and Meta redelivers (ingest is idempotent on wamid).
-    const res = await stub.ingest({ ...ev, receivedAt }, { autoReplyText: EBDA_COPY.spikeAutoReply });
+    const res = await stub.ingest({ ...ev, receivedAt }, { autoReplyText: EBDA_COPY.spikeAutoReply, optInKeywords: [...EBDA_OPT_IN_KEYWORDS] });
     const metaTs = Math.min(...ev.inbound.map((m) => m.ts * 1000));
     if (Number.isFinite(metaTs)) firstMetaTs ||= metaTs;
     mark(c.env, 'do_stored', Number.isFinite(metaTs) ? Date.now() - metaTs : 0, Date.now() - receivedAt, workspaceId);

@@ -43,6 +43,91 @@ export const DO_MIGRATIONS: readonly string[] = [
    CREATE UNIQUE INDEX status_events_unique ON message_status_events (wamid, status, ts);`,
   // v4: R2 objects owed a delete (erasure); rows leave only after R2 confirms.
   `CREATE TABLE r2_pending_deletes (key TEXT PRIMARY KEY);`,
+  // v5 (Phase 2, send API): what an outbound message carries, consent state, approved templates, files staged for sending.
+  `ALTER TABLE messages ADD COLUMN template_name TEXT;
+   ALTER TABLE messages ADD COLUMN template_lang TEXT;
+   ALTER TABLE messages ADD COLUMN media_mime TEXT;
+   ALTER TABLE messages ADD COLUMN media_size INTEGER;
+   ALTER TABLE messages ADD COLUMN media_r2_key TEXT;
+   ALTER TABLE contacts ADD COLUMN opted_out_at INTEGER;
+   ALTER TABLE contacts ADD COLUMN consent_source TEXT;
+   ALTER TABLE contacts ADD COLUMN consent_at INTEGER;
+   CREATE TABLE templates (
+     id INTEGER PRIMARY KEY,
+     name TEXT NOT NULL,
+     language TEXT NOT NULL,
+     category TEXT NOT NULL,
+     status TEXT NOT NULL,
+     components TEXT NOT NULL,
+     rejected_reason TEXT,
+     updated_at INTEGER NOT NULL,
+     UNIQUE (name, language)
+   );
+   CREATE TABLE uploads (
+     id TEXT PRIMARY KEY,
+     meta_media_id TEXT NOT NULL,
+     mime TEXT NOT NULL,
+     size INTEGER NOT NULL,
+     filename TEXT,
+     r2_key TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   );`,
+  // v6 (Phase 2, scheduler): every deferred piece of work, so the single DO alarm can serve backup, R2 drain, throttled sends and more.
+  `CREATE TABLE scheduled_tasks (
+     id INTEGER PRIMARY KEY,
+     kind TEXT NOT NULL,
+     due_at INTEGER NOT NULL,
+     payload TEXT,
+     attempts INTEGER NOT NULL DEFAULT 0,
+     last_error TEXT
+   );
+   CREATE INDEX scheduled_tasks_due ON scheduled_tasks (due_at);`,
+  // v7 (Phase 2, Meta limits): per-number tier / throughput settings and the unique business-initiated recipients of the rolling 24 h.
+  `CREATE TABLE number_limits (
+     phone_number_id TEXT PRIMARY KEY,
+     tier INTEGER NOT NULL,
+     mps INTEGER NOT NULL,
+     tokens REAL NOT NULL,
+     tokens_at INTEGER NOT NULL,
+     alerted_at INTEGER NOT NULL DEFAULT 0
+   );
+   CREATE TABLE tier_slots (
+     phone_number_id TEXT NOT NULL,
+     contact_id INTEGER NOT NULL,
+     started_at INTEGER NOT NULL,
+     PRIMARY KEY (phone_number_id, contact_id)
+   ) WITHOUT ROWID;
+   CREATE INDEX tier_slots_started ON tier_slots (phone_number_id, started_at);`,
+  // v8 (Phase 2, inbox): assignment, notes, tags, list/sort indexes and full-text search over message previews.
+  `ALTER TABLE conversations ADD COLUMN assignee_user_id TEXT;
+   CREATE TABLE notes (
+     id INTEGER PRIMARY KEY,
+     conversation_id INTEGER NOT NULL,
+     author_user_id TEXT NOT NULL,
+     text TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   );
+   CREATE INDEX notes_conversation ON notes (conversation_id, id);
+   CREATE TABLE conversation_tags (
+     conversation_id INTEGER NOT NULL,
+     tag TEXT NOT NULL,
+     PRIMARY KEY (conversation_id, tag)
+   ) WITHOUT ROWID;
+   CREATE INDEX conversations_recent ON conversations (last_message_at DESC, id DESC);
+   CREATE INDEX conversations_unread ON conversations (last_message_at DESC, id DESC) WHERE unread > 0;
+   CREATE INDEX conversations_unassigned ON conversations (last_message_at DESC, id DESC) WHERE assignee_user_id IS NULL;
+   CREATE INDEX conversations_assignee ON conversations (assignee_user_id, last_message_at DESC, id DESC);
+   CREATE INDEX messages_conversation_id ON messages (conversation_id, id);
+   CREATE VIRTUAL TABLE messages_fts USING fts5(text);`,
+  // v9 (Phase 2, realtime): the last events, so a client that missed some can resync by seq. AUTOINCREMENT keeps seq monotonic after trims.
+  `CREATE TABLE events (
+     seq INTEGER PRIMARY KEY AUTOINCREMENT,
+     payload TEXT NOT NULL
+   );`,
+  // v10 (Phase 2, erasure follow-up): idempotency keys of erased messages, so a send job still in the queue is dropped instead of re-creating the contact.
+  `CREATE TABLE erased_keys (key TEXT PRIMARY KEY);`,
+  // Lease: a task being run is claimed until lease_until, so overlapping runners (alarm + direct calls) never run it twice.
+  `ALTER TABLE scheduled_tasks ADD COLUMN lease_until INTEGER;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

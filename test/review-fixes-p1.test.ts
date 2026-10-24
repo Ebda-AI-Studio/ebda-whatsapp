@@ -4,7 +4,7 @@ import { beforeAll, expect, it, vi } from 'vitest';
 import { createEbdaAccountsVerifier } from '../src/addons/ebda/identity';
 import { IdentityError } from '../src/core/identity/verifier';
 import { ISSUER, JWKS_URL, jwksServer, mint, newKey, type TestKey } from './helpers/issuer';
-import { rows, workspace } from './helpers/workspace';
+import { exec, rows, workspace } from './helpers/workspace';
 
 let k: TestKey;
 beforeAll(async () => {
@@ -82,14 +82,16 @@ it('route: a literal % in the phone is 400, not 500', async () => {
 });
 
 // I5
-it('a failing backup alarm re-arms itself before rethrowing', async () => {
+it('a failing backup alarm re-arms itself with backoff instead of ending the schedule', async () => {
   await seedBig('ws-r5');
+  await exec('ws-r5', 'UPDATE scheduled_tasks SET due_at = 1');
   vi.spyOn(env.BACKUPS, 'put').mockRejectedValue(new Error('bucket missing'));
   const before = await runInDurableObject(workspace('ws-r5'), (_i, s) => s.storage.getAlarm());
-  await runDurableObjectAlarm(workspace('ws-r5')).catch(() => {}); // the alarm rethrows by design
+  await runDurableObjectAlarm(workspace('ws-r5')).catch(() => {});
   const after = await runInDurableObject(workspace('ws-r5'), (_i, s) => s.storage.getAlarm());
   expect(before).toBeTypeOf('number');
-  expect(after).toBeTypeOf('number');
+  expect(after).toBeGreaterThan(Date.now());
+  expect(await rows('ws-r5', "SELECT attempts FROM scheduled_tasks WHERE kind = 'backup'")).toEqual([{ attempts: 1 }]);
 });
 
 it('restore arms the backup alarm', async () => {
@@ -132,6 +134,7 @@ it('ignores an unknown pa value instead of failing the login', async () => {
 it('the nightly alarm drains owed R2 deletes even when the backup export fails', async () => {
   await seedBig('ws-r8');
   await runInDurableObject(workspace('ws-r8'), (_i, s) => s.storage.sql.exec("INSERT INTO r2_pending_deletes (key) VALUES ('bodies/ws-r8/old')"));
+  await exec('ws-r8', 'UPDATE scheduled_tasks SET due_at = 1'); // due now, as it is when the alarm really fires
   vi.spyOn(env.BACKUPS, 'put').mockRejectedValue(new Error('bucket missing'));
   await runDurableObjectAlarm(workspace('ws-r8')).catch(() => {});
   expect(await rows('ws-r8', 'SELECT key FROM r2_pending_deletes')).toEqual([]);

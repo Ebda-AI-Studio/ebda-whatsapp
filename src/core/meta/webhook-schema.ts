@@ -3,7 +3,10 @@ import { z } from 'zod';
 export const MESSAGE_TYPES = ['text', 'interactive', 'image', 'audio', 'video', 'document', 'sticker', 'location', 'order'] as const;
 export type MessageType = (typeof MESSAGE_TYPES)[number] | 'unsupported';
 
-export type InboundMessage = { wamid: string; from: string; ts: number; type: MessageType; text?: string; profileName?: string };
+export type InboundMedia = { id: string; mime: string; filename?: string };
+export type InboundMessage = { wamid: string; from: string; ts: number; type: MessageType; text?: string; caption?: string; media?: InboundMedia; profileName?: string };
+export const MEDIA_MESSAGE_TYPES = ['image', 'audio', 'video', 'document', 'sticker'] as const;
+const mediaBodySchema = z.object({ id: z.string().min(1), mime_type: z.string().optional(), caption: z.string().optional(), filename: z.string().optional() }).loose();
 export type StatusEvent = { wamid: string; status: 'sent' | 'delivered' | 'read' | 'failed'; ts: number; errorCode?: number };
 export type WebhookEvents = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[] };
 
@@ -67,12 +70,15 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
           continue;
         }
         const m = parsedMsg.data;
+        const type = toType(m.type);
+        const media = (MEDIA_MESSAGE_TYPES as readonly string[]).includes(type) ? mediaBodySchema.safeParse((m as Record<string, unknown>)[m.type]) : null;
         ev.inbound.push({
           wamid: m.id,
           from: m.from,
           ts: Number(m.timestamp),
-          type: toType(m.type),
+          type,
           ...(m.text ? { text: m.text.body } : {}),
+          ...(media?.success ? { media: { id: media.data.id, mime: media.data.mime_type ?? 'application/octet-stream', ...(media.data.filename ? { filename: media.data.filename } : {}) }, ...(media.data.caption ? { caption: media.data.caption } : {}) } : {}),
           ...(names.get(m.from) ? { profileName: names.get(m.from) } : {}),
         });
       }
@@ -90,4 +96,49 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
     }
   }
   return [...byNumber.values()];
+}
+
+export type TemplateStatusEvent = { wabaId: string; name: string; language: string; status: 'APPROVED' | 'REJECTED' | 'PENDING' | 'PAUSED' | 'DISABLED'; reason: string | null };
+const TEMPLATE_STATUS: Record<string, TemplateStatusEvent['status']> = { APPROVED: 'APPROVED', REJECTED: 'REJECTED', PENDING: 'PENDING', IN_APPEAL: 'PENDING', PAUSED: 'PAUSED', DISABLED: 'DISABLED' };
+
+const templateChangeSchema = z.object({
+  field: z.literal('message_template_status_update'),
+  value: z.object({ event: z.string(), message_template_name: z.string(), message_template_language: z.string(), reason: z.string().nullish() }).loose(),
+}).loose();
+
+/** `message_template_status_update` changes, per WABA. Events we do not model (FLAGGED, …) are skipped. */
+export function extractTemplateStatuses(payload: unknown): TemplateStatusEvent[] {
+  const parsed = payloadSchema.extend({ entry: z.array(z.object({ id: z.string(), changes: z.array(z.unknown()) }).loose()) }).safeParse(payload);
+  if (!parsed.success) return [];
+  const out: TemplateStatusEvent[] = [];
+  for (const entry of parsed.data.entry) {
+    for (const ch of entry.changes) {
+      const c = templateChangeSchema.safeParse(ch);
+      const status = c.success ? TEMPLATE_STATUS[c.data.value.event] : undefined;
+      if (!c.success || !status) continue;
+      const reason = c.data.value.reason && c.data.value.reason !== 'NONE' ? c.data.value.reason : null;
+      out.push({ wabaId: entry.id, name: c.data.value.message_template_name, language: c.data.value.message_template_language, status, reason });
+    }
+  }
+  return out;
+}
+
+export type TierUpdateEvent = { wabaId: string; displayPhone: string; currentLimit: string };
+const tierChangeSchema = z.object({
+  field: z.literal('phone_number_quality_update'),
+  value: z.object({ display_phone_number: z.string(), current_limit: z.string() }).loose(),
+}).loose();
+
+/** `phone_number_quality_update` changes: Meta moved a number to another messaging tier. */
+export function extractTierUpdates(payload: unknown): TierUpdateEvent[] {
+  const parsed = payloadSchema.extend({ entry: z.array(z.object({ id: z.string(), changes: z.array(z.unknown()) }).loose()) }).safeParse(payload);
+  if (!parsed.success) return [];
+  const out: TierUpdateEvent[] = [];
+  for (const entry of parsed.data.entry) {
+    for (const ch of entry.changes) {
+      const c = tierChangeSchema.safeParse(ch);
+      if (c.success) out.push({ wabaId: entry.id, displayPhone: c.data.value.display_phone_number, currentLimit: c.data.value.current_limit });
+    }
+  }
+  return out;
 }
