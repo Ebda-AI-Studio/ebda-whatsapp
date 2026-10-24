@@ -46,12 +46,16 @@ export type SettingsRefusal = 'invalid_base_url' | 'model_required' | 'api_key_r
 /** Validates `patch` against what is stored and returns the new settings plus the encrypted key to write; nothing is written here. */
 export async function planAgentUpdate(env: Env, workspaceId: string, sql: Sql, patch: AgentSettingsUpdate): Promise<{ ok: true; settings: AgentSettings; secret: { set: string } | { clear: true } | null } | { ok: false; reason: SettingsRefusal }> {
   const { apiKey, ...rest } = patch;
-  const next: AgentSettings = { ...readAgentSettings(sql), ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)) };
+  const before = readAgentSettings(sql);
+  const next: AgentSettings = { ...before, ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)) };
   if (next.baseUrl !== null) {
-    const clean = validBaseUrl(next.baseUrl);
+    const clean = validBaseUrl(next.baseUrl, agentConfig().allowedHosts(env));
     if (!clean) return { ok: false, reason: 'invalid_base_url' };
     next.baseUrl = clean;
   }
+  // The stored key may only ever go to the host it was saved for: a different origin needs a fresh key in the same request (or an explicit removal).
+  const originOf = (u: string | null) => (u ? new URL(u).origin : null);
+  if (apiKey === undefined && next.baseUrl !== null && originOf(next.baseUrl) !== originOf(before.baseUrl) && hasApiKey(sql)) return { ok: false, reason: 'api_key_required' };
   let secret: { set: string } | { clear: true } | null = null;
   if (apiKey !== undefined && apiKey !== null) {
     const key = agentConfig().secretsKey(env);

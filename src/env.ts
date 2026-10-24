@@ -23,6 +23,8 @@ export type Env = {
   VECTORIZE?: Vectorize;
   /** Base64 of 32 random bytes: encrypts merchants' own model keys (AES-GCM). Unset = bring-your-own-key is unavailable. */
   AGENT_SECRETS_KEY?: string;
+  /** Comma-separated extra hosts merchants may use as their own model endpoint (white-label); the built-in provider list always applies. */
+  AGENT_ALLOWED_HOSTS?: string;
   /** Overrides the default Workers AI model of the agent. */
   AGENT_MODEL?: string;
   META_APP_SECRET: string;

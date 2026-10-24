@@ -84,13 +84,25 @@ describe('OpenAiCompatibleProvider', () => {
 });
 
 describe('validBaseUrl', () => {
-  it('accepts a public https host and trims the trailing slash', () => {
+  it('accepts allowlisted public provider hosts and trims the trailing slash', () => {
     expect(validBaseUrl('https://api.openai.com/v1/')).toBe('https://api.openai.com/v1');
     expect(validBaseUrl('https://openrouter.ai/api/v1')).toBe('https://openrouter.ai/api/v1');
+    expect(validBaseUrl('https://API.OpenAI.com:443/v1')).toBe('https://api.openai.com/v1');
+    expect(validBaseUrl('https://generativelanguage.googleapis.com/v1beta/openai')).not.toBeNull();
+  });
+  it('an operator can allow more hosts, and the other checks still apply to them', () => {
+    expect(validBaseUrl('https://llm.my-provider.com/v1')).toBeNull();
+    expect(validBaseUrl('https://llm.my-provider.com/v1', ['llm.my-provider.com'])).toBe('https://llm.my-provider.com/v1');
+    expect(validBaseUrl('https://127.0.0.1/v1', ['127.0.0.1'])).toBeNull();
+    expect(validBaseUrl('https://localhost./v1', ['localhost'])).toBeNull();
   });
   it.each([
-    'http://api.openai.com/v1', 'https://localhost/v1', 'https://127.0.0.1/v1', 'https://[::1]/v1', 'https://10.0.0.5/v1', 'https://user:pw@api.x.com/v1',
-    'https://api.x.com:8443/v1', 'https://intranet/v1', 'https://svc.internal/v1', 'https://x.local/v1', 'https://api.x.com/v1?key=1', 'ftp://x.com', 'not a url', 'https://2130706433/v1',
+    'http://api.openai.com/v1', 'https://localhost/v1', 'https://localhost./v1', 'https://api.internal./v1', 'https://svc.internal/v1', 'https://x.local/v1',
+    'https://127.0.0.1/v1', 'https://10.0.0.5/v1', 'https://169.254.169.254/latest', 'https://100.64.0.1/v1', 'https://192.168.1.1/v1', 'https://172.16.0.1/v1',
+    'https://[::1]/v1', 'https://[::ffff:127.0.0.1]/v1', 'https://[::ffff:7f00:1]/v1', 'https://[fc00::1]/v1', 'https://[fe80::1]/v1', 'https://[2001:db8::1]/v1',
+    'https://2130706433/v1', 'https://0x7f000001/v1', 'https://0177.0.0.1/v1', 'https://127.1/v1', 'https://0/v1',
+    'https://good@evil.com/v1', 'https://api.openai.com@evil.com/v1', 'https://api.openai.com:pw@evil.com/v1', 'https://evil.com#@api.openai.com/v1',
+    'https://api.openai.com:8443/v1', 'https://api.openai.com/v1?key=1', 'https://api.openai.com.evil.com/v1', 'https://evilapi.openai.com.attacker.io/v1', 'ftp://x.com', 'not a url',
   ])('refuses %s', (u) => expect(validBaseUrl(u)).toBeNull());
 });
 

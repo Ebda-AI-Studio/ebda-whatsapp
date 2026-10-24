@@ -30,6 +30,8 @@ export type AgentConfig = {
   provider: (env: Env, ws: { settings: { provider: 'workers-ai' | 'openai-compatible'; model: string | null; baseUrl: string | null }; apiKey: string | null }) => LlmProvider | null;
   /** Base64 of the 32-byte key that encrypts merchants' own model keys. */
   secretsKey: (env: Env) => string | undefined;
+  /** Extra hosts (beyond the built-in provider list) a merchant may use as a model endpoint; set by the operator. */
+  allowedHosts: (env: Env) => string[];
   /** An answer expected to take longer than this gets a quick acknowledgement first. */
   slowMs: number;
   /** Workers AI model used for the platform-funded agent. */
@@ -48,6 +50,7 @@ let current: AgentConfig = {
     return env.AI ? new WorkersAiProvider(env.AI, current.defaultModel(env)) : null;
   },
   secretsKey: (env) => env.AGENT_SECRETS_KEY,
+  allowedHosts: (env) => (env.AGENT_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim()).filter(Boolean),
   slowMs: 2000,
   defaultModel: (env) => env.AGENT_MODEL || DEFAULT_WORKERS_AI_MODEL,
 };

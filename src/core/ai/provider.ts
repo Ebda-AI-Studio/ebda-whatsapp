@@ -136,12 +136,17 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   }
 }
 
+/** Hosts a merchant may point the agent at without an operator decision (exact names, https only). */
+export const DEFAULT_PROVIDER_HOSTS: readonly string[] = ['api.openai.com', 'generativelanguage.googleapis.com', 'api.anthropic.com', 'openrouter.ai', 'api.groq.com', 'api.together.xyz', 'api.mistral.ai', 'api.deepseek.com', 'api.x.ai'];
+
 /**
- * A merchant-supplied base URL is fetched from our network, so it must be a public HTTPS host: no credentials, no IP
- * literal, no single-label or internal-looking name. (DNS rebinding to a private address cannot be excluded from inside a
- * Worker; Workers cannot reach private networks, and the redirect is never followed.)
+ * A merchant-supplied base URL is fetched from our network with their key, so it must be a known provider host (the default
+ * list plus the operator's `extraHosts`) AND pass the generic checks: https on 443, no credentials/query/fragment, the host
+ * normalised first (lower case, trailing dots stripped), no IP literal in any notation (the URL parser has already turned
+ * decimal/hex/octal and IPv4-mapped forms into dotted/bracketed ones, all refused here), no internal-looking name.
+ * Returns the cleaned URL or null.
  */
-export function validBaseUrl(raw: string): string | null {
+export function validBaseUrl(raw: string, extraHosts: readonly string[] = []): string | null {
   let u: URL;
   try {
     u = new URL(raw);
@@ -150,8 +155,10 @@ export function validBaseUrl(raw: string): string | null {
   }
   if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) return null;
   if (u.port && u.port !== '443') return null;
-  const host = u.hostname.toLowerCase();
-  if (!host.includes('.') || /^[\d.]+$/.test(host) || host.includes(':') || host.startsWith('[')) return null;
-  if (/(^|\.)(localhost|local|internal|lan|home|corp|intranet|test|invalid|example)$/.test(host)) return null;
-  return `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+  const host = u.hostname.toLowerCase().replace(/\.+$/, '');
+  if (!host || !host.includes('.') || host.includes(':') || host.startsWith('[') || /^[\d.x]+$/i.test(host) || /^\d/.test(host.split('.').pop() ?? '')) return null;
+  if (/(^|\.)(localhost|local|internal|lan|home|corp|intranet|test|invalid|example|localdomain)$/.test(host)) return null;
+  const allowed = new Set([...DEFAULT_PROVIDER_HOSTS, ...extraHosts.map((h) => h.trim().toLowerCase().replace(/\.+$/, ''))]);
+  if (!allowed.has(host)) return null;
+  return `https://${host}${u.pathname.replace(/\/+$/, '')}`;
 }

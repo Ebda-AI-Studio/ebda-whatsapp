@@ -74,6 +74,27 @@ describe('GET/PUT /agent', () => {
     expect(await (await call('PUT', '/agent', { enabled: false, apiKey: null })).json()).toMatchObject({ hasApiKey: false, enabled: false });
   });
 
+  it('changing the endpoint to another origin without a new key is refused: the stored key never follows to a new host', async () => {
+    const s = storeId(5111);
+    const { call } = await apiFor(s);
+    const base = { provider: 'openai-compatible', model: 'm', baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-live-1234567890' };
+    expect((await call('PUT', '/agent', base)).status).toBe(200);
+    const before = (await rows<{ value: string }>(s, "SELECT value FROM agent_state WHERE key = 'secret.apiKey'"))[0]!.value;
+    // an attacker host: refused even if it were allowlisted by shape; and an allowlisted different host still needs a fresh key
+    const evil = await call('PUT', '/agent', { baseUrl: 'https://evil.example.com/v1' });
+    expect(evil.status).toBe(400);
+    const other = await call('PUT', '/agent', { baseUrl: 'https://openrouter.ai/api/v1' });
+    expect(await other.json()).toMatchObject({ message: 'api_key_required' });
+    expect(await (await call('GET', '/agent')).json()).toMatchObject({ baseUrl: 'https://api.openai.com/v1', hasApiKey: true });
+    expect((await rows<{ value: string }>(s, "SELECT value FROM agent_state WHERE key = 'secret.apiKey'"))[0]!.value).toBe(before);
+    // same origin, different path: fine, key kept
+    expect((await call('PUT', '/agent', { baseUrl: 'https://api.openai.com/v2' })).status).toBe(200);
+    // new origin WITH a new key: fine, key replaced
+    expect((await call('PUT', '/agent', { baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk-or-new-1234567' })).status).toBe(200);
+    const after = (await rows<{ value: string }>(s, "SELECT value FROM agent_state WHERE key = 'secret.apiKey'"))[0]!.value;
+    expect(await decryptSecret(after, TEST_SECRETS_KEY, s)).toBe('sk-or-new-1234567');
+  });
+
   it('workers-ai: the platform picks the model, so a model is refused; switching back clears nothing else', async () => {
     const s = storeId(5107);
     const { call } = await apiFor(s);
