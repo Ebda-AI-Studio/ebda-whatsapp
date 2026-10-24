@@ -79,3 +79,39 @@ it('Final #6: a socket whose token has expired is closed with 4401 at the next b
   await vi.waitFor(() => expect(dead.closeCode).toBe(4401), { timeout: 3000, interval: 10 });
   expect(dead.frames).toBe(0);
 });
+
+it('Final #9: an upload without Content-Length is 411 and one claiming more than the cap is 413, both before the body is read or Meta is called', async () => {
+  const ws = W(503);
+  const api = await apiFor(ws, 'owner', 'pn-up');
+  const g = graphStub();
+  const chunked = await SELF.fetch(`https://x/api/v1/stores/${ws}/media`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${await tokenFor(ws, 900)}`, 'content-type': 'multipart/form-data; boundary=x' },
+    body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('--x--')); c.close(); } }),
+    // @ts-expect-error workerd streaming request bodies need duplex
+    duplex: 'half',
+  });
+  expect(chunked.status).toBe(411);
+  const claim = await api.call('POST', '/media', new Uint8Array(8), { 'content-length': String(60 * 1024 * 1024), 'content-type': 'application/pdf' });
+  expect(claim.status).toBe(413);
+  expect(await claim.json()).toEqual({ error: 'invalid_request', message: 'file_too_large' });
+  expect(g.calls).toHaveLength(0);
+});
+
+it('Final #9b: documents are capped at 50 MB', async () => {
+  const { OUTBOUND_MEDIA } = await import('../src/core/media');
+  expect(OUTBOUND_MEDIA['application/pdf']!.maxBytes).toBe(50 * 1024 * 1024);
+  expect(OUTBOUND_MEDIA['image/jpeg']!.maxBytes).toBe(5 * 1024 * 1024);
+});
+
+it('Final #5: media GET is never cached by the browser', async () => {
+  const ws = W(504);
+  const api = await apiFor(ws, 'owner', 'pn-nc');
+  await openChat(ws);
+  const [m] = await rows<{ id: number }>(ws, 'SELECT id FROM messages LIMIT 1');
+  await exec(ws, "UPDATE messages SET media_r2_key = 'uploads/nc/x', media_mime = 'image/jpeg', media_size = 1 WHERE id = ?", m!.id);
+  await env.MEDIA.put('uploads/nc/x', new Uint8Array([1]));
+  const res = await api.call('GET', `/media/${m!.id}`);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('private, no-store');
+});

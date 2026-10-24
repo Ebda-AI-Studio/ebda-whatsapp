@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
-import { canonicalMime, outboundMediaFor, safeFilename } from '../core/media';
+import { MAX_DOCUMENT_BYTES, UPLOAD_OVERHEAD_BYTES, canonicalMime, outboundMediaFor, safeFilename } from '../core/media';
 import { activeNumber, apiError, intParam, workspaceStub, type ApiEnv } from './shared';
 
 export const mediaRoutes = new Hono<ApiEnv>();
 
 /** The largest allowed file plus multipart overhead; anything bigger is refused before it is read. */
-const MAX_UPLOAD_BYTES = 101 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = MAX_DOCUMENT_BYTES + UPLOAD_OVERHEAD_BYTES;
 const UPLOAD_TIMEOUT_MS = 60_000;
 const INLINE_TYPES = /^(image\/(jpeg|png)|audio\/|video\/mp4|application\/pdf)/;
 
@@ -21,7 +21,8 @@ mediaRoutes.get('/stores/:storeId/media/:messageId', async (c) => {
   const headers = new Headers({
     'content-type': media.mime,
     'accept-ranges': 'bytes',
-    'cache-control': 'private, max-age=3600',
+    // no-store: erasing a contact deletes the R2 object, and a browser must not keep serving it afterwards.
+    'cache-control': 'private, no-store',
     'x-content-type-options': 'nosniff',
     // The bytes come from a customer: they may be shown but never run or framed with any privileges.
     'content-security-policy': "default-src 'none'; sandbox",
@@ -41,7 +42,10 @@ mediaRoutes.get('/stores/:storeId/media/:messageId', async (c) => {
 
 /** Stages a file for sending: validates type and size, uploads it to Meta, keeps a copy in R2, returns an uploadId. */
 mediaRoutes.post('/stores/:storeId/media', async (c) => {
-  if (Number(c.req.header('content-length') ?? 0) > MAX_UPLOAD_BYTES) return apiError(c, 400, 'invalid_request', 'file_too_large');
+  // Refuse on the declared size before a single body byte is read; without a length the cap cannot be enforced.
+  const declared = c.req.header('content-length');
+  if (declared === undefined || !/^\d+$/.test(declared)) return apiError(c, 411, 'invalid_request', 'length_required');
+  if (Number(declared) > MAX_UPLOAD_BYTES) return apiError(c, 413, 'invalid_request', 'file_too_large');
   let file: unknown;
   try {
     file = (await c.req.formData()).get('file');
@@ -52,18 +56,17 @@ mediaRoutes.post('/stores/:storeId/media', async (c) => {
   const allowed = outboundMediaFor(file.type);
   if (!allowed) return apiError(c, 415, 'unsupported_media');
   if (file.size === 0) return apiError(c, 400, 'invalid_request');
-  if (file.size > allowed.maxBytes) return c.json({ error: 'invalid_request', message: 'file_too_large' }, 413);
+  if (file.size > allowed.maxBytes) return apiError(c, 413, 'invalid_request', 'file_too_large');
   const ws = await workspaceStub(c);
   const number = await activeNumber(c);
   if (!ws || !number) return apiError(c, 404, 'not_found');
   const mime = canonicalMime(file.type);
   const filename = safeFilename(file.name);
-  const bytes = await file.arrayBuffer();
 
   const form = new FormData();
   form.set('messaging_product', 'whatsapp');
   form.set('type', mime);
-  form.set('file', new File([bytes], filename, { type: mime }));
+  form.set('file', file.slice(0, file.size, mime), filename); // a view on the one copy the request parser made
   let metaRes: Response;
   try {
     metaRes = await fetch(`https://graph.facebook.com/${c.env.META_GRAPH_VERSION}/${number.phoneNumberId}/media`, {
@@ -81,7 +84,9 @@ mediaRoutes.post('/stores/:storeId/media', async (c) => {
   }
   const uploadId = crypto.randomUUID();
   const r2Key = `uploads/${c.req.param('storeId')}/${uploadId}`;
-  await c.env.MEDIA.put(r2Key, bytes, { httpMetadata: { contentType: mime } });
-  await ws.recordUpload({ id: uploadId, metaMediaId: json.id, mime, size: bytes.byteLength, filename, r2Key });
-  return c.json({ uploadId, mime, size: bytes.byteLength, filename }, 201);
+  const fixed = new FixedLengthStream(file.size);
+  void file.stream().pipeTo(fixed.writable);
+  await c.env.MEDIA.put(r2Key, fixed.readable, { httpMetadata: { contentType: mime } });
+  await ws.recordUpload({ id: uploadId, metaMediaId: json.id, mime, size: file.size, filename, r2Key });
+  return c.json({ uploadId, mime, size: file.size, filename }, 201);
 });

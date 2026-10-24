@@ -1,10 +1,15 @@
+/** Documents are held in Worker memory while they are forwarded to Meta (128 MB isolate), so the cap stays well under Meta's 100 MB. */
+export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+/** Multipart framing and field overhead allowed on top of the largest file. */
+export const UPLOAD_OVERHEAD_BYTES = 1024 * 1024;
+
 /** Outbound media the WhatsApp Cloud API accepts and we allow (Phase 2 plan, A8). Everything else is refused as unsupported_media. */
 export const OUTBOUND_MEDIA: Readonly<Record<string, { kind: 'image' | 'audio' | 'video' | 'document'; maxBytes: number }>> = {
   'image/jpeg': { kind: 'image', maxBytes: 5 * 1024 * 1024 },
   'image/png': { kind: 'image', maxBytes: 5 * 1024 * 1024 },
   'audio/ogg;codecs=opus': { kind: 'audio', maxBytes: 16 * 1024 * 1024 },
   'video/mp4': { kind: 'video', maxBytes: 16 * 1024 * 1024 },
-  'application/pdf': { kind: 'document', maxBytes: 100 * 1024 * 1024 },
+  'application/pdf': { kind: 'document', maxBytes: MAX_DOCUMENT_BYTES },
 };
 
 /** Lower-cases and removes spaces so `audio/ogg; codecs=opus` and `Audio/OGG;codecs=opus` compare equal. */
