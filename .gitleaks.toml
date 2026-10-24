@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test-only values (fixtures and the pinned suite test vector)"
+paths = ['''test/fixtures/.*''']
+regexes = ['''ebda-suite-buyer-key-test-v1''', '''test-secret''', '''test-token''']
