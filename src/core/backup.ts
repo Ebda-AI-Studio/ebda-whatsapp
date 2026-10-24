@@ -1,13 +1,23 @@
 import { z } from 'zod';
 
-export const BACKUP_TABLES = ['contacts', 'conversations', 'messages', 'message_status_events'] as const;
+/** Phase 1 tables first; the rest were added in Phase 2 and are optional in a manifest so older backups still restore. */
+export const BACKUP_TABLES = ['contacts', 'conversations', 'messages', 'message_status_events', 'notes', 'conversation_tags', 'templates', 'uploads'] as const;
 export type BackupTable = (typeof BACKUP_TABLES)[number];
+/** Stable row order per table for the NDJSON files (two tables have no integer id). */
+export const BACKUP_ORDER: Record<BackupTable, string> = {
+  contacts: 'id', conversations: 'id', messages: 'id', message_status_events: 'id', notes: 'id', templates: 'id',
+  conversation_tags: 'conversation_id, tag', uploads: 'id',
+};
+// Not backed up, by design: derived or transient state (messages_fts is rebuilt on restore; scheduled_tasks/events/tier_slots/number_limits/erased_keys/r2_pending_deletes are operational) and R2 objects (bodies, media, uploads).
 const tableEntry = z.object({ rows: z.number().int().nonnegative(), sha256: z.string().regex(/^[0-9a-f]{64}$/) });
 export const backupManifestSchema = z.object({
   workspaceId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   schemaVersion: z.number().int().positive(),
-  tables: z.object({ contacts: tableEntry, conversations: tableEntry, messages: tableEntry, message_status_events: tableEntry }),
+  tables: z.object({
+    contacts: tableEntry, conversations: tableEntry, messages: tableEntry, message_status_events: tableEntry,
+    notes: tableEntry.optional(), conversation_tags: tableEntry.optional(), templates: tableEntry.optional(), uploads: tableEntry.optional(),
+  }),
 });
 export type BackupManifest = z.infer<typeof backupManifestSchema>;
 

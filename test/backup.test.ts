@@ -16,7 +16,7 @@ it('export writes one file per table and a manifest with counts and hashes', asy
   expect(Object.keys(m.tables)).toEqual([...BACKUP_TABLES]);
   expect(m.tables.messages.rows).toBe(5);
   expect(m.tables.messages.sha256).toMatch(/^[0-9a-f]{64}$/);
-  for (const t of BACKUP_TABLES) expect(await lines(`backups/ws-b1/2026-10-24/${t}.ndjson`)).toBe(m.tables[t].rows);
+  for (const t of BACKUP_TABLES) expect(await lines(`backups/ws-b1/2026-10-24/${t}.ndjson`)).toBe(m.tables[t]!.rows);
   expect(JSON.parse((await (await env.BACKUPS.get('backups/ws-b1/2026-10-24/manifest.json'))!.text())).workspaceId).toBe('ws-b1');
 });
 
@@ -69,7 +69,7 @@ it('alarm exports and re-arms about 24 h later', async () => {
 it('snapshot is consistent while ingest runs', async () => {
   await seed('ws-b7', 20);
   const [m] = await Promise.all([workspace('ws-b7').exportSnapshot('2026-10-25'), seed('ws-b7', 20, 100)]);
-  for (const t of BACKUP_TABLES) expect(await lines(`backups/ws-b7/2026-10-25/${t}.ndjson`)).toBe(m.tables[t].rows);
+  for (const t of BACKUP_TABLES) expect(await lines(`backups/ws-b7/2026-10-25/${t}.ndjson`)).toBe(m.tables[t]!.rows);
 });
 
 it('nextLocalHour finds the next 02:00 in Cairo', () => {

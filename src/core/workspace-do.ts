@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
-import { BACKUP_HOUR_LOCAL, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, toNdjson, type BackupManifest } from './backup';
+import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, toNdjson, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
 import type { SendResult } from './meta/client';
 import type { InboundMessage, StatusEvent } from './meta/webhook-schema';
@@ -859,7 +859,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   async exportSnapshot(date: string): Promise<BackupManifest> {
     const workspaceId = this.workspaceId;
     const dumps = this.ctx.storage.transactionSync(() =>
-      BACKUP_TABLES.map((t) => ({ t, rows: this.sql.exec(`SELECT * FROM ${t} ORDER BY id`).toArray() as Record<string, unknown>[] })),
+      BACKUP_TABLES.map((t) => ({ t, rows: this.sql.exec(`SELECT * FROM ${t} ORDER BY ${BACKUP_ORDER[t]}`).toArray() as Record<string, unknown>[] })),
     );
     const manifest: BackupManifest = { workspaceId, date, schemaVersion: DO_MIGRATIONS.length, tables: {} as BackupManifest['tables'] };
     const prefix = backupPrefix(workspaceId, date);
@@ -892,10 +892,15 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (manifest.schemaVersion > DO_MIGRATIONS.length) throw new Error('backup is newer than this schema');
     const files: { t: (typeof BACKUP_TABLES)[number]; rows: Record<string, unknown>[] }[] = [];
     for (const t of BACKUP_TABLES) {
+      const entry = manifest.tables[t];
+      if (!entry) {
+        files.push({ t, rows: [] }); // a Phase 1 backup has no entry for the Phase 2 tables
+        continue;
+      }
       const body = (await (await this.env.BACKUPS.get(`${prefix}${t}.ndjson`))?.text()) ?? '';
-      if ((await sha256Hex(body)) !== manifest.tables[t].sha256) throw new Error(`backup checksum mismatch: ${t}`);
+      if ((await sha256Hex(body)) !== entry.sha256) throw new Error(`backup checksum mismatch: ${t}`);
       const rows = body.split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
-      if (rows.length !== manifest.tables[t].rows) throw new Error(`backup row count mismatch: ${t}`);
+      if (rows.length !== entry.rows) throw new Error(`backup row count mismatch: ${t}`);
       files.push({ t, rows });
     }
     this.ctx.storage.transactionSync(() => {
