@@ -130,3 +130,40 @@ AI: hold 1 credit before the LLM call, settle after (concurrent messages cannot 
 
 ## Finish
 Per phase: touched tests per task, full suite once at the end of the phase, `tsc` 0, audit 0, gitleaks clean, pushed (no CI/merge/deploy). Opus design review of Phase 7 before building it; one Opus whole-branch review at the end of Phase 7; one fix pass.
+
+---
+
+## Phase 8 — Onboarding, own numbers, shared number, operator console, launch kit (Ahmad 2026-10-25: "all phases ready; only legal remains")
+Everything ships behind switches so it can be built and tested now and turned on when Meta/legal steps complete.
+
+### 8.1 Embedded Signup (own number, Tech Provider) — switch `EMBEDDED_SIGNUP_ENABLED`
+Frontend launches Meta's Embedded Signup (JS SDK `FB.login` with `config_id`, `response_type: 'code'`, `override_default_response_type`, extras `{ setup: {}, featureType: '', sessionInfoVersion: '3' }`) and listens for the `WA_EMBEDDED_SIGNUP` message event (WABA id + phone number id). Backend `POST /api/v1/stores/:storeId/numbers/connect { code, wabaId, phoneNumberId }` (owner): exchange code → business token (`GET /oauth/access_token`), store it AES-GCM encrypted per WABA, `POST /{waba-id}/subscribed_apps`, `POST /{phone-number-id}/register { messaging_product, pin }` (6-digit PIN generated + stored encrypted), D1 `phone_numbers` row (`funding: merchant_card`, WA-FUND-1), pull tier/quality/display name. Disconnect: deregister, unsubscribe, mark `disconnected`. Tests against documented Graph shapes (stubs). Meta-side prerequisites in the launch kit.
+
+### 8.2 Shared Ebda WhatsApp number — switch `SHARED_NUMBER_ENABLED` (WA-SHARED-1, WA-FUND-1 `ebda_line`, WA-SHARED-FREE-1)
+One platform number in D1 `shared_numbers`; workspaces opt in (paid add-on via packages). Outbound: templates carry "on behalf of <store>" (approved template variants), sent through the shared number with the workspace's wallet. Inbound routing: a `shared_routes(customer_wa_id, workspace_id, last_at, order_ref)` table — reply goes to the workspace that last messaged that customer; ambiguity (several workspaces within 24 h) → an interactive list "which store?" to the customer; no route → polite generic reply. Month-close free-tier true-up task (7 rules). Tests: routing, ambiguity, isolation (a workspace never sees another's conversation).
+
+### 8.3 Operator console (super admin) — API `/api/v1/operator/*` behind `requireSuperAdmin`
+Workspaces list (package, numbers, funding, wallet, health), number management, package assignment (sales-led for white-label), pricing settings (WA-MARGIN-1 effective-dated + audited), per-workspace overrides, refund queue (WA-REFUND-1), rate cards/FX versions, audit log of every operator action (actor, reason, before/after).
+
+### 8.4 Self-serve onboarding UI
+After sign-in: choose package (or "included with Ebda Store Business") → connect own number (Embedded Signup) or switch on the shared number → checklist (templates approved, catalog linked, agent configured, wallet funded for shared number) with links to the help guides.
+
+### 8.5 Help guides (content for help.ebda.app; published by the Store session's apps/help)
+`docs/help/{ar,en}/`: verify your business on Meta (documents accepted in Egypt: commercial register + tax card), connect your own number, use the shared number, templates and the 24 h window, COD confirmations, InstaPay in WhatsApp, the AI agent, campaigns + opt-out, wallet + refunds (WA-REFUND-1). Egyptian Arabic first, full sentences; no provider names.
+
+### 8.6 Launch kit (`docs/launch/`)
+Ordered checklist with owners: entity registration → Meta Business verification (Ebda AI Studio portfolio) → display name → app review (whatsapp_business_management, whatsapp_business_messaging, business_management) → Tech Provider → Embedded Signup config id → Kashier account → secrets (`META_APP_SECRET`, `META_SYSTEM_TOKEN`, `TOKEN_ENC_KEY`, `SUITE_BUYER_KEY_SECRET`, `KASHIER_*`, `PROOF_URL_SECRET`) → Cloudflare resources (backups bucket + lifecycle, queues, Vectorize, Logpush) → CI re-enable + Umbra runner → merge order → deploy → production verification script (`scripts/verify-prod.mjs`: /health commit, webhook GET verify, a signed test webhook, a send to the owner's number) → legal pages (privacy, terms incl. refund terms, data deletion URL for Meta).
+
+**UI (controller):** onboarding flow, numbers screen, Operator console screens.
+
+## Phase 9 — White-label kit (first client: Khawarz, Kuwait)
+### 9.1 Brand packs
+`src/addons/<brand>/` (copy, templates, persona, defaults) + `web/brands/<brand>/` (tokens, logo, fonts, strings overrides); build-time `BRAND` selects one; the guard test proves `src/core` and the shared UI carry no brand. A second sample brand (`demo`) proves the seam.
+### 9.2 Identity for non-Ebda tenants
+Generic OIDC verifier (configurable issuer, JWKS URL, audience, claims mapping to `Principal`) so a white-label client plugs its own IdP; Ebda stays on accounts.ebda.app.
+### 9.3 Connectors (agent tools to the client's systems)
+`interface Connector { id; tools: ToolDef[]; call(tool, args, ctx) }`: **generic webhook connector** (HTTPS POST to the client's endpoint, HMAC-signed, allowlisted host, timeouts, idempotency key) and **Odoo connector** (JSON-RPC: find/create partner, create sale order, read stock, create calendar booking). Secrets encrypted per workspace; SSRF rules from Phase 5 apply. The agent loads tools from enabled connectors.
+### 9.4 Sales-led tenancy
+Operator creates the tenant, assigns a package, no self-serve checkout (`SELF_SERVE=false`).
+### 9.5 Deploy kit
+`deploy/white-label/README.md` + `wrangler.template.jsonc` for the client's own Cloudflare account (their account id, their resources), a bootstrap script that creates D1/R2/Queues/DO bindings, and the per-brand build.
