@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
-import { migrate } from './do-migrations';
+import { BACKUP_HOUR_LOCAL, BACKUP_TABLES, BACKUP_TIME_ZONE, backupPrefix, nextLocalHour, sha256Hex, toNdjson, type BackupManifest } from './backup';
+import { DO_MIGRATIONS, migrate } from './do-migrations';
 import type { SendResult } from './meta/client';
 import type { InboundMessage, StatusEvent } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
@@ -64,6 +65,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       await this.env.MEDIA.put(key, m.text);
       bodies.set(m.wamid, key);
     }
+    await this.ensureBackupAlarm();
     const result: IngestResult = { stored: 0, duplicates: 0, replies: [] };
     this.ctx.storage.transactionSync(() => {
       const now = Date.now();
@@ -181,5 +183,77 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (rank <= msg.status_rank || (e.status === 'failed' && msg.status_rank >= STATUS_RANK.delivered)) return false;
     this.sql.exec('UPDATE messages SET status = ?, status_rank = ?, error_code = coalesce(?, error_code), updated_at = ? WHERE id = ?', e.status, rank, e.errorCode ?? null, Date.now(), msg.id);
     return true;
+  }
+
+  /** Arms the nightly backup alarm once; alarm() re-arms it. */
+  private async ensureBackupAlarm(): Promise<void> {
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(nextLocalHour(Date.now(), BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE));
+    }
+  }
+
+  async alarm(): Promise<void> {
+    const date = new Intl.DateTimeFormat('en-CA', { timeZone: BACKUP_TIME_ZONE }).format(Date.now());
+    await this.exportSnapshot(date);
+    await this.ctx.storage.setAlarm(nextLocalHour(Date.now() + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE));
+  }
+
+  /**
+   * Writes every table as NDJSON plus a manifest (row count + sha256 per table) to R2.
+   * All tables are read inside ONE transaction, so the snapshot is consistent; the whole workspace is held in memory
+   * (fine for the spike's metadata-only rows; streaming export is a Phase 3 follow-up).
+   */
+  async exportSnapshot(date: string): Promise<BackupManifest> {
+    const workspaceId = this.workspaceId;
+    const dumps = this.ctx.storage.transactionSync(() =>
+      BACKUP_TABLES.map((t) => ({ t, rows: this.sql.exec(`SELECT * FROM ${t} ORDER BY id`).toArray() as Record<string, unknown>[] })),
+    );
+    const manifest: BackupManifest = { workspaceId, date, schemaVersion: DO_MIGRATIONS.length, tables: {} as BackupManifest['tables'] };
+    const prefix = backupPrefix(workspaceId, date);
+    for (const { t, rows } of dumps) {
+      const body = toNdjson(rows);
+      manifest.tables[t] = { rows: rows.length, sha256: await sha256Hex(body) };
+      await this.env.BACKUPS.put(`${prefix}${t}.ndjson`, body);
+    }
+    await this.env.BACKUPS.put(`${prefix}manifest.json`, JSON.stringify(manifest));
+    return manifest;
+  }
+
+  /** Restores a snapshot into THIS workspace, which must be empty. Verifies counts and hashes before writing anything. */
+  async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest } | { ok: false; reason: string }> {
+    try {
+      return { ok: true, manifest: await this.importSnapshotOrThrow(prefix) };
+    } catch (e) {
+      return { ok: false, reason: (e as Error).message };
+    }
+  }
+
+  private async importSnapshotOrThrow(prefix: string): Promise<BackupManifest> {
+    const manifestObj = await this.env.BACKUPS.get(`${prefix}manifest.json`);
+    if (!manifestObj) throw new Error('backup manifest not found');
+    const manifest = (await manifestObj.json()) as BackupManifest;
+    if (manifest.schemaVersion > DO_MIGRATIONS.length) throw new Error('backup is newer than this schema');
+    const files: { t: (typeof BACKUP_TABLES)[number]; rows: Record<string, unknown>[] }[] = [];
+    for (const t of BACKUP_TABLES) {
+      const body = (await (await this.env.BACKUPS.get(`${prefix}${t}.ndjson`))?.text()) ?? '';
+      if ((await sha256Hex(body)) !== manifest.tables[t].sha256) throw new Error(`backup checksum mismatch: ${t}`);
+      const rows = body.split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+      if (rows.length !== manifest.tables[t].rows) throw new Error(`backup row count mismatch: ${t}`);
+      files.push({ t, rows });
+    }
+    this.ctx.storage.transactionSync(() => {
+      for (const t of BACKUP_TABLES) {
+        if (this.sql.exec(`SELECT 1 FROM ${t} LIMIT 1`).toArray().length) throw new Error('restore target workspace is not empty');
+      }
+      for (const { t, rows } of files) {
+        const allowed = new Set(this.sql.exec<{ name: string }>(`SELECT name FROM pragma_table_info('${t}')`).toArray().map((c) => c.name));
+        for (const row of rows) {
+          const cols = Object.keys(row);
+          if (cols.some((c) => !allowed.has(c))) throw new Error(`backup has an unknown column in ${t}`);
+          this.sql.exec(`INSERT INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, ...cols.map((c) => row[c] as SqlStorageValue));
+        }
+      }
+    });
+    return manifest;
   }
 }

@@ -16,7 +16,10 @@
   "durable_objects": { "bindings": [{ "name": "WORKSPACE_DO", "class_name": "WorkspaceDO" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],
   "d1_databases": [{ "binding": "DB", "database_name": "ebda-wa-platform", "database_id": "80c011f6-b03c-4289-b20a-102aa3ca79ef", "migrations_dir": "migrations/d1" }],
-  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "ebda-wa-media" }],
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "ebda-wa-media" },
+    { "binding": "BACKUPS", "bucket_name": "ebda-wa-backups" }
+  ],
   "queues": {
     "producers": [{ "binding": "SEND_QUEUE", "queue": "ebda-wa-send" }],
     "consumers": [{ "queue": "ebda-wa-send", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-send-dlq" }]

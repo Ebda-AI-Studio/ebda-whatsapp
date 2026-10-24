@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- NOT installed yet (Ahmad 2026-10-24: no extra Mac load before launch). Install: see docs/runbooks/backup-restore.md -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.ebda.wa-backup-pull</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>$HOME/Desktop/projects/Ebda-AI-Studio/internal-projects/ebda-whatsapp/scripts/backup-pull.sh</string>
+  </array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>/tmp/com.ebda.wa-backup-pull.log</string>
+  <key>StandardErrorPath</key><string>/tmp/com.ebda.wa-backup-pull.log</string>
+  <key>LowPriorityIO</key><true/>
+  <key>Nice</key><integer>10</integer>
+</dict>
+</plist>
