@@ -50,3 +50,18 @@ export function statusPayload(phoneNumberId: string, statuses: Status[]): string
     }],
   });
 }
+
+export function templateStatusPayload(wabaId: string, u: { event: string; name: string; language: string; reason?: string }): string {
+  return JSON.stringify({
+    object: 'whatsapp_business_account',
+    entry: [{ id: wabaId, time: BASE_TS, changes: [{ field: 'message_template_status_update', value: { event: u.event, message_template_id: 1, message_template_name: u.name, message_template_language: u.language, reason: u.reason ?? 'NONE' } }] }],
+  });
+}
+
+/** phone_number_quality_update: Meta's tier / quality change for one number. */
+export function tierPayload(wabaId: string, displayPhone: string, event: string, currentLimit: string): string {
+  return JSON.stringify({
+    object: 'whatsapp_business_account',
+    entry: [{ id: wabaId, time: BASE_TS, changes: [{ field: 'phone_number_quality_update', value: { display_phone_number: displayPhone, event, current_limit: currentLimit } }] }],
+  });
+}

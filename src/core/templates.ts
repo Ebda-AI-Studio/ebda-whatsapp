@@ -24,8 +24,14 @@ export function placeholderCount(text: string | undefined): number {
 
 const find = (components: StoredComponent[], type: string) => components.find((c) => c.type.toUpperCase() === type);
 
+/** Authentication templates carry Meta's fixed text and an OTP button; a send supplies just the code. */
+const isOtp = (components: StoredComponent[]) => (find(components, 'BUTTONS')?.buttons ?? []).some((b) => b.type.toUpperCase() === 'OTP');
+/** What the inbox shows for an OTP send: the code must never be stored or displayed. */
+export const OTP_MASK = '••••••';
+
 /** Total parameters a send must supply, in order: header, body, then each URL button that has a placeholder. */
 export function paramCount(components: StoredComponent[]): number {
+  if (isOtp(components)) return 1;
   const header = find(components, 'HEADER');
   let n = 0;
   if (header) {
@@ -49,6 +55,18 @@ const badText = (s: string) => s.length === 0 || s.length > MAX_PARAM_CHARS || /
 export function renderTemplate(stored: StoredComponent[], params: string[]): RenderResult {
   const expected = paramCount(stored);
   if (params.length !== expected) return { ok: false, message: `template needs ${expected} parameters, got ${params.length}` };
+  if (isOtp(stored)) {
+    const code = params[0]!;
+    if (!/^[A-Za-z0-9]{1,15}$/.test(code)) return { ok: false, message: 'an OTP code is 1 to 15 letters or digits' };
+    return {
+      ok: true,
+      text: OTP_MASK,
+      components: [
+        { type: 'body', parameters: [{ type: 'text', text: code }] },
+        { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: code }] },
+      ],
+    };
+  }
   const header = find(stored, 'HEADER');
   const headerFormat = (header?.format ?? 'TEXT').toUpperCase();
   if (header && headerFormat !== 'TEXT' && !(MEDIA_HEADERS as readonly string[]).includes(headerFormat)) {

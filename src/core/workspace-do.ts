@@ -9,7 +9,8 @@ import { jobKind } from './send-queue';
 import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
 import { outboundMediaFor } from './media';
-import { componentsSchema, renderTemplate } from './templates';
+import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
+import type { TemplateDto } from './api/contract';
 
 export const PREVIEW_CHARS = 280;
 export const INLINE_BODY_BYTES = 1024;
@@ -224,6 +225,64 @@ export class WorkspaceDO extends DurableObject<Env> {
       const row = this.sql.exec<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?`, id).one();
       return { ok: true, message: messageDto(row, workspaceId), job };
     });
+  }
+
+  async listTemplates(): Promise<TemplateDto[]> {
+    return this.sql
+      .exec<{ name: string; language: string; category: string; status: string; components: string; rejected_reason: string | null }>(
+        'SELECT name, language, category, status, components, rejected_reason FROM templates ORDER BY name, language',
+      )
+      .toArray()
+      .map((t) => {
+        const comps = componentsSchema.safeParse(JSON.parse(t.components));
+        const parts = comps.success ? comps.data : [];
+        return {
+          name: t.name, language: t.language, category: t.category as TemplateDto['category'], status: t.status as TemplateDto['status'],
+          bodyText: bodyTextOf(parts), paramCount: paramCount(parts), rejectedReason: t.rejected_reason,
+        };
+      });
+  }
+
+  /** Replaces the template set with what Meta returned (the caller fetched every page, so absence means deleted at Meta). */
+  async syncTemplates(items: { name: string; language: string; category: string; status: string; components: unknown[]; rejectedReason: string | null }[]): Promise<{ upserted: number; removed: number }> {
+    return this.ctx.storage.transactionSync(() => {
+      const now = Date.now();
+      const keep = new Set<string>();
+      for (const t of items) {
+        keep.add(`${t.name}\u0000${t.language}`);
+        this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), t.rejectedReason, now);
+      }
+      let removed = 0;
+      for (const t of this.sql.exec<{ id: number; name: string; language: string }>('SELECT id, name, language FROM templates').toArray()) {
+        if (keep.has(`${t.name}\u0000${t.language}`)) continue;
+        this.sql.exec('DELETE FROM templates WHERE id = ?', t.id);
+        removed++;
+      }
+      return { upserted: items.length, removed };
+    });
+  }
+
+  /** A template we just submitted to Meta. */
+  async saveSubmittedTemplate(t: { name: string; language: string; category: string; status: string; components: unknown[] }): Promise<void> {
+    this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), null, Date.now());
+  }
+
+  async hasTemplate(name: string, language: string): Promise<boolean> {
+    return this.sql.exec('SELECT 1 FROM templates WHERE name = ? AND language = ?', name, language).toArray().length > 0;
+  }
+
+  /** Meta's template-status webhook. Unknown templates are ignored (they will arrive with the next sync). */
+  async applyTemplateStatus(name: string, language: string, status: string, reason: string | null): Promise<{ applied: boolean }> {
+    const r = this.sql.exec('UPDATE templates SET status = ?, rejected_reason = ?, updated_at = ? WHERE name = ? AND language = ?', status, reason, Date.now(), name, language);
+    return { applied: r.rowsWritten > 0 };
+  }
+
+  private upsertTemplate(name: string, language: string, category: string, status: string, components: string, rejectedReason: string | null, now: number): void {
+    this.sql.exec(
+      `INSERT INTO templates (name, language, category, status, components, rejected_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(name, language) DO UPDATE SET category = excluded.category, status = excluded.status, components = excluded.components, rejected_reason = excluded.rejected_reason, updated_at = excluded.updated_at`,
+      name, language, category, status, components, rejectedReason, now,
+    );
   }
 
   /** The enqueue after queueOutbound threw: the message will never be sent, so say so instead of leaving it 'queued'. */

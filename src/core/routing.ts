@@ -9,3 +9,12 @@ export async function workspaceForPhoneNumber(db: D1Database, phoneNumberId: str
     .first<{ workspace_id: string }>();
   return row?.workspace_id ?? null;
 }
+
+/** The workspace behind a WABA (template and tier webhooks name the WABA, not a number). Null if none of its numbers is active. */
+export async function workspaceForWaba(db: D1Database, wabaId: string): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT workspace_id FROM phone_numbers WHERE waba_id = ? AND status = 'active' ORDER BY rowid LIMIT 1")
+    .bind(wabaId)
+    .first<{ workspace_id: string }>();
+  return row?.workspace_id ?? null;
+}

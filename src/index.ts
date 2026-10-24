@@ -2,8 +2,8 @@ import * as Sentry from '@sentry/cloudflare';
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { verifyMetaSignature } from './core/meta/signature';
-import { extractEvents } from './core/meta/webhook-schema';
-import { workspaceForPhoneNumber } from './core/routing';
+import { extractEvents, extractTemplateStatuses } from './core/meta/webhook-schema';
+import { workspaceForPhoneNumber, workspaceForWaba } from './core/routing';
 import { mark } from './core/timing';
 import { scrubEvent } from './core/observability';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
@@ -14,6 +14,8 @@ import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { buyerKey } from './core/buyer-key';
 import { messagesRoutes } from './routes/messages';
+import { templatesRoutes } from './routes/templates';
+import { EBDA_DEFAULT_TEMPLATES } from './addons/ebda/templates';
 
 export { WorkspaceDO } from './core/workspace-do';
 
@@ -47,6 +49,7 @@ api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   return c.json(result);
 });
 api.route('/', messagesRoutes);
+api.route('/', templatesRoutes(EBDA_DEFAULT_TEMPLATES));
 app.route('/api/v1', api);
 
 function sameString(a: string, b: string): boolean {
@@ -76,6 +79,10 @@ app.post('/meta/webhook', async (c) => {
   } catch {
     console.warn('meta webhook: body is not JSON');
     return c.text('ok'); // a 5xx would make Meta retry a body that can never parse
+  }
+  for (const t of extractTemplateStatuses(payload)) {
+    const workspaceId = await workspaceForWaba(c.env.DB, t.wabaId);
+    if (workspaceId) await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
   }
   const events = extractEvents(payload);
   if (!events) {
