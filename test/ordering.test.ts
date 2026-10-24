@@ -531,6 +531,30 @@ describe('opt-out and erasure', () => {
     expect(await rows(ws, 'SELECT 1 FROM store_orders_after_erase')).toEqual([]);
   });
 
+  it('if the follow-up cannot be pushed the record stays and is retried; the backup never contains it', async () => {
+    const { ws, pn } = await setup(60);
+    const g = stubGraph();
+    await toCheckout(ws, pn, g);
+    await say(ws, pn, tapBtn('pay:cod'), g);
+    const real = link.fake.createOrderFromChat.bind(link.fake);
+    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { await new Promise((r) => setTimeout(r, 80)); return real(...a); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    link.sink.failNext = 1;
+    await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
+    const turn = workspace(ws).runDueTasks();
+    await new Promise((r) => setTimeout(r, 40));
+    await workspace(ws).eraseContact(WA_1);
+    await turn;
+    expect(link.sink.sent).toEqual([]);
+    expect(await rows(ws, 'SELECT order_id FROM store_orders_after_erase')).toEqual([{ order_id: 'ord-1001' }]); // kept while pending
+    const manifest = await workspace(ws).exportSnapshot('2026-10-25');
+    expect(Object.keys(manifest.tables)).not.toContain('store_orders_after_erase');
+    expect(JSON.stringify(await env.BACKUPS.list({ prefix: `backups/${ws}/2026-10-25/` }))).not.toContain('after_erase');
+    await workspace(ws).runDueTasks(Date.now() + 3_600_000);
+    expect(link.sink.sent.map((e) => e.type)).toEqual(['whatsapp.order_after_erasure']);
+    expect(await rows(ws, 'SELECT 1 FROM store_orders_after_erase')).toEqual([]);
+  });
+
   it('an order the Store created while the customer was being erased is not dropped silently: a minimal record and a follow-up event for the Store', async () => {
     const { ws, pn } = await setup(59);
     const g = stubGraph();
@@ -546,12 +570,11 @@ describe('opt-out and erasure', () => {
     expect(link.fake.orders.size).toBe(1);
     // no personal data stays: no contact, session, messages, order row with a phone
     for (const t of ['contacts', 'messages', 'bot_sessions', 'store_orders']) expect(await rows(ws, `SELECT 1 FROM ${t}`), t).toEqual([]);
-    expect(await rows(ws, 'SELECT order_id, buyer_key FROM store_orders_after_erase')).toEqual([{ order_id: 'ord-1001', buyer_key: BUYER_KEY_1 }]);
-    await workspace(ws).runDueTasks();
+    // the follow-up task ran in the same pass: the Store was told, and the minimal record is already gone
     expect(link.sink.sent).toHaveLength(1);
     expect(link.sink.sent[0]).toMatchObject({ type: 'whatsapp.order_after_erasure', storeId: ws, data: { orderId: 'ord-1001', buyerKey: BUYER_KEY_1 } });
     expect(JSON.stringify(link.sink.sent[0])).not.toContain(WA_1);
-    expect(await rows(ws, 'SELECT pushed_at IS NOT NULL AS pushed FROM store_orders_after_erase')).toEqual([{ pushed: 1 }]);
+    expect(await rows(ws, 'SELECT 1 FROM store_orders_after_erase')).toEqual([]); // told: nothing stays
   });
 
   it('erasing a customer while a bot turn is waiting on the Store writes nothing back', async () => {

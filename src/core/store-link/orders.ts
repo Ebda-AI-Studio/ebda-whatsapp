@@ -162,15 +162,18 @@ export function recordOrderAfterErase(host: LinkHost, o: { orderId: string; buye
   addTask(host.sql, 'erased_order_notify', now);
 }
 
-/** Tells the Store about each such order (idempotent event id per order). Throws when the queue is down: the scheduler retries. */
-export async function pushErasedOrders(host: LinkHost, now: number): Promise<void> {
+/**
+ * Tells the Store about each such order, then deletes the row: it exists only while the push is pending or retrying. The event id
+ * is deterministic per order, so a retry after a lost acknowledgement stays idempotent. Throws when the queue is down.
+ */
+export async function pushErasedOrders(host: LinkHost): Promise<void> {
   const sink = storeLink().events(host.env);
   if (!sink) return; // re-scheduled when the store is linked
-  for (const r of host.sql.exec<{ order_id: string; buyer_key: string; created_at: number }>('SELECT order_id, buyer_key, created_at FROM store_orders_after_erase WHERE pushed_at IS NULL').toArray()) {
+  for (const r of host.sql.exec<{ order_id: string; buyer_key: string; created_at: number }>('SELECT order_id, buyer_key, created_at FROM store_orders_after_erase').toArray()) {
     const event = outboundStoreEventSchema.parse({
       id: await uuidFromKey(`erased:${r.order_id}`), type: 'whatsapp.order_after_erasure', v: 1, storeId: host.workspaceId, occurredAt: new Date(r.created_at).toISOString(), data: { orderId: r.order_id, buyerKey: r.buyer_key },
     });
     await sink.send(event);
-    host.sql.exec('UPDATE store_orders_after_erase SET pushed_at = ? WHERE order_id = ?', now, r.order_id);
+    host.sql.exec('DELETE FROM store_orders_after_erase WHERE order_id = ?', r.order_id);
   }
 }

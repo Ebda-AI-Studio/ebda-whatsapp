@@ -26,5 +26,5 @@ export function schedulePendingPushes(host: LinkHost, now: number): void {
   for (const r of host.sql.exec<{ order_id: string }>('SELECT order_id FROM store_orders WHERE outcome IS NOT NULL AND outcome_pushed_at IS NULL').toArray()) {
     addTask(host.sql, 'cod_outcome_push', now, { orderId: r.order_id });
   }
-  if (host.sql.exec('SELECT 1 FROM store_orders_after_erase WHERE pushed_at IS NULL LIMIT 1').toArray().length) addTask(host.sql, 'erased_order_notify', now);
+  if (host.sql.exec('SELECT 1 FROM store_orders_after_erase LIMIT 1').toArray().length) addTask(host.sql, 'erased_order_notify', now);
 }

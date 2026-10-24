@@ -167,7 +167,7 @@ export const DO_MIGRATIONS: readonly string[] = [
   // v15 (Phase 4, ordering in chat): where each customer is in the ordering conversation. Transient; not backed up.
   `CREATE TABLE bot_sessions (wa_id TEXT PRIMARY KEY, state TEXT NOT NULL, locale TEXT NOT NULL, data TEXT NOT NULL, updated_at INTEGER NOT NULL);`,
   // v16 (Phase 4, erasure race): an order the Store created for a customer who was erased while the order call was in flight.
-  // Only the order id and the hashed customer key stay, until the Store has been told (so it can erase or cancel it).
+  // Only the order id and the hashed customer key stay, until the Store has been told (so it can erase or cancel it); then the row is deleted. Not backed up.
   `CREATE TABLE store_orders_after_erase (order_id TEXT PRIMARY KEY, buyer_key TEXT NOT NULL, created_at INTEGER NOT NULL, pushed_at INTEGER);`,
 ];
 

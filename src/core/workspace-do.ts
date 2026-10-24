@@ -1101,7 +1101,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         return undefined;
       }
       case 'erased_order_notify':
-        await pushErasedOrders(this.host(), now);
+        await pushErasedOrders(this.host());
         return undefined;
       case 'cod_no_reply': {
         const orderId = (JSON.parse(payload ?? 'null') as { orderId?: string } | null)?.orderId;
