@@ -1,9 +1,9 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 
-export async function seedNumber(phoneNumberId: string, workspaceId: string, status: 'active' | 'disconnected' = 'active', wabaId = 'waba-1'): Promise<void> {
+export async function seedNumber(phoneNumberId: string, workspaceId: string, status: 'active' | 'disconnected' = 'active', wabaId = 'waba-1', displayPhone: string | null = null): Promise<void> {
   await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(workspaceId, workspaceId, Date.now()),
-    env.DB.prepare('INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status) VALUES (?, ?, ?, ?)').bind(phoneNumberId, wabaId, workspaceId, status),
+    env.DB.prepare('INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status, display_phone) VALUES (?, ?, ?, ?, ?)').bind(phoneNumberId, wabaId, workspaceId, status, displayPhone),
   ]);
 }
 

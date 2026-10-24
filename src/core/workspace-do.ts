@@ -12,6 +12,7 @@ import { outboundMediaFor } from './media';
 import { detectOptIn, detectOptOut } from './consent';
 import { DAILY_KINDS, addTask, backoffMs, dueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
+import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './throttle';
 import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
 import type { TemplateDto } from './api/contract';
 
@@ -29,7 +30,8 @@ export type OutboundRefusal = 'window_closed' | 'opted_out' | 'template_not_appr
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
 export type TaskPayload = { job?: SendJob; reason?: 'tier' | 'throughput' | 'frequency_cap'; n?: number };
-export type ClaimResult = 'claimed' | 'already_sent' | 'in_flight' | 'dropped';
+export type ClaimResult = 'claimed' | 'already_sent' | 'in_flight' | 'dropped' | 'deferred';
+export type ThrottleReport = { tier: number; mps: number; usedInWindow: number; waiting: number; nextSlotAt: number | null };
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
@@ -137,9 +139,25 @@ export class WorkspaceDO extends DurableObject<Env> {
    * Claims the right to send `job` once. Only 'claimed' may call Meta. 'dropped' = nothing left to send (the row was
    * erased with its contact, or an API job lost its row): the consumer acks it without calling Meta.
    */
-  async claimSend(job: SendJob): Promise<ClaimResult> {
-    return this.ctx.storage.transactionSync((): ClaimResult => {
-      const now = Date.now();
+  async claimSend(job: SendJob, now = Date.now()): Promise<ClaimResult> {
+    let deferred = false;
+    const result = this.ctx.storage.transactionSync((): ClaimResult => {
+      const claim = this.claimRow(job, now);
+      if (claim !== 'claimed') return claim;
+      const wait = this.throttle(job, now);
+      if (!wait) return 'claimed';
+      // Over a Meta limit: give the claim back, keep the message 'queued', and let the scheduler release it later.
+      this.sql.exec("UPDATE messages SET status = 'queued', claim_attempts = max(0, claim_attempts - 1), updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
+      addTask(this.sql, 'send_release', wait.dueAt, { job, reason: wait.reason });
+      deferred = true;
+      return 'deferred';
+    });
+    if (deferred) await this.arm();
+    return result;
+  }
+
+  private claimRow(job: SendJob, now: number): ClaimResult {
+    {
       const existing = this.sql
         .exec<{ id: number; status: string; updated_at: number; claim_attempts: number }>('SELECT id, status, updated_at, claim_attempts FROM messages WHERE idempotency_key = ?', job.idempotencyKey)
         .toArray()[0];
@@ -165,7 +183,104 @@ export class WorkspaceDO extends DurableObject<Env> {
         return 'claimed';
       }
       return existing.status === 'claimed' ? 'in_flight' : 'already_sent';
-    });
+    }
+  }
+
+  private limitsFor(phoneNumberId: string): { tier: number; mps: number; tokens: number; tokens_at: number; alerted_at: number } {
+    return (
+      this.sql.exec<{ tier: number; mps: number; tokens: number; tokens_at: number; alerted_at: number }>('SELECT tier, mps, tokens, tokens_at, alerted_at FROM number_limits WHERE phone_number_id = ?', phoneNumberId).toArray()[0]
+      ?? { tier: DEFAULT_TIER, mps: DEFAULT_MPS, tokens: DEFAULT_MPS, tokens_at: 0, alerted_at: 0 }
+    );
+  }
+
+  /**
+   * The two Meta limits, checked in one transaction with the claim. Returns null to go ahead (and records the slot and
+   * the token), or when and why to retry. (1) tier: a recipient whose 24 h window is closed is business-initiated and
+   * takes a slot among the number's unique recipients of the rolling 24 h; replies inside an open window never do.
+   * (2) throughput: one token per message from a bucket refilled at the number's MPS.
+   */
+  private throttle(job: SendJob, now: number): { dueAt: number; reason: 'tier' | 'throughput' } | null {
+    const pn = job.phoneNumberId;
+    const lim = this.limitsFor(pn);
+    const contact = this.sql.exec<{ id: number; last_inbound_at: number | null }>('SELECT id, last_inbound_at FROM contacts WHERE wa_id = ?', job.to).toArray()[0];
+    const initiated = !(contact?.last_inbound_at && contact.last_inbound_at * 1000 + WINDOW_MS > now);
+    const since = now - TIER_WINDOW_MS;
+    let needsSlot = false;
+    if (initiated && contact) {
+      const slot = this.sql.exec<{ started_at: number }>('SELECT started_at FROM tier_slots WHERE phone_number_id = ? AND contact_id = ?', pn, contact.id).toArray()[0];
+      needsSlot = !slot || slot.started_at <= since;
+      if (needsSlot) {
+        const used = this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM tier_slots WHERE phone_number_id = ? AND started_at > ?', pn, since).one().n;
+        if (used >= lim.tier) {
+          const waiting = this.waitingFor(pn);
+          // Spread the waiters over the slots as they expire (k-th waiter takes the k-th expiry; beyond one lap, the next day).
+          const idx = waiting % used;
+          const lap = Math.floor(waiting / used) + 1;
+          const nth = this.sql.exec<{ started_at: number }>('SELECT started_at FROM tier_slots WHERE phone_number_id = ? AND started_at > ? ORDER BY started_at LIMIT 1 OFFSET ?', pn, since, idx).one().started_at;
+          if (now - lim.alerted_at > 600_000) {
+            this.sql.exec(
+              `INSERT INTO number_limits (phone_number_id, tier, mps, tokens, tokens_at, alerted_at) VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(phone_number_id) DO UPDATE SET alerted_at = excluded.alerted_at`, pn, lim.tier, lim.mps, lim.tokens, lim.tokens_at, now,
+            );
+            console.warn(JSON.stringify({ alert: 'send_tier_exhausted', workspace: this.workspaceId, phoneNumberId: pn, tier: lim.tier, waiting: waiting + 1 }));
+          }
+          return { dueAt: nth + lap * TIER_WINDOW_MS + 1000, reason: 'tier' };
+        }
+      }
+    }
+    const bucket = bucketDecision(lim.tokens_at === 0 ? lim.mps : lim.tokens, lim.mps, now, lim.tokens_at === 0 ? now : lim.tokens_at);
+    if (!bucket.ok) return { dueAt: now + bucket.delayMs, reason: 'throughput' };
+    this.sql.exec(
+      `INSERT INTO number_limits (phone_number_id, tier, mps, tokens, tokens_at, alerted_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(phone_number_id) DO UPDATE SET tokens = excluded.tokens, tokens_at = excluded.tokens_at`, pn, lim.tier, lim.mps, bucket.tokens, now, lim.alerted_at,
+    );
+    if (needsSlot && contact) {
+      this.sql.exec(
+        `INSERT INTO tier_slots (phone_number_id, contact_id, started_at) VALUES (?, ?, ?)
+         ON CONFLICT(phone_number_id, contact_id) DO UPDATE SET started_at = excluded.started_at`, pn, contact.id, now,
+      );
+    }
+    return null;
+  }
+
+  private waitingFor(phoneNumberId: string): number {
+    return this.sql.exec<{ n: number }>(
+      "SELECT count(*) AS n FROM scheduled_tasks WHERE kind = 'send_release' AND json_extract(payload, '$.reason') = 'tier' AND json_extract(payload, '$.job.phoneNumberId') = ?", phoneNumberId,
+    ).one().n;
+  }
+
+  /** Meta's tier (from quality/tier webhooks) and throughput for one number. */
+  async setNumberLimits(phoneNumberId: string, limits: { tier?: number; mps?: number }): Promise<void> {
+    const cur = this.limitsFor(phoneNumberId);
+    const mps = limits.mps ?? cur.mps;
+    this.sql.exec(
+      `INSERT INTO number_limits (phone_number_id, tier, mps, tokens, tokens_at, alerted_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(phone_number_id) DO UPDATE SET tier = excluded.tier, mps = excluded.mps, tokens = min(tokens, excluded.mps)`,
+      phoneNumberId, limits.tier ?? cur.tier, mps, Math.min(cur.tokens, mps), cur.tokens_at, cur.alerted_at,
+    );
+  }
+
+  async throttleReport(phoneNumberId: string, now = Date.now()): Promise<ThrottleReport> {
+    const lim = this.limitsFor(phoneNumberId);
+    const since = now - TIER_WINDOW_MS;
+    const used = this.sql.exec<{ n: number; first: number | null }>('SELECT count(*) AS n, min(started_at) AS first FROM tier_slots WHERE phone_number_id = ? AND started_at > ?', phoneNumberId, since).one();
+    return { tier: lim.tier, mps: lim.mps, usedInWindow: used.n, waiting: this.waitingFor(phoneNumberId), nextSlotAt: used.n >= lim.tier && used.first !== null ? used.first + TIER_WINDOW_MS : null };
+  }
+
+  /**
+   * Error 131049 (Meta's marketing frequency cap) is not a ban and not the contact's fault: put the message back to
+   * 'queued' and try again in 24 h; after two deferrals give up and fail it. The contact is never touched.
+   */
+  async rescheduleFrequencyCap(job: SendJob, now = Date.now()): Promise<'rescheduled' | 'failed'> {
+    const deferrals = job.deferrals ?? 0;
+    if (deferrals >= 2) {
+      this.sql.exec("UPDATE messages SET status = 'failed', error_code = 131049, updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
+      return 'failed';
+    }
+    this.sql.exec("UPDATE messages SET status = 'queued', error_code = 131049, updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
+    addTask(this.sql, 'send_release', now + TIER_WINDOW_MS, { job: { ...job, deferrals: deferrals + 1 }, reason: 'frequency_cap' });
+    await this.arm();
+    return 'rescheduled';
   }
 
   /**
@@ -529,6 +644,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         statusEvents += this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM message_status_events WHERE wamid = ?', m.wamid).one().n;
         this.sql.exec('DELETE FROM message_status_events WHERE wamid = ?', m.wamid);
       }
+      this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
       if (conv) {
         this.sql.exec('DELETE FROM messages WHERE conversation_id = ?', conv.id);
         this.sql.exec('DELETE FROM conversations WHERE id = ?', conv.id);

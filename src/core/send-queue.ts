@@ -70,7 +70,7 @@ export async function consumeSendBatch(batch: MessageBatch<unknown>, env: Env): 
     }
     const ws = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(job.workspaceId));
     const claim = await ws.claimSend(job);
-    if (claim === 'already_sent' || claim === 'dropped') {
+    if (claim === 'already_sent' || claim === 'dropped' || claim === 'deferred') {
       if (claim === 'dropped') console.warn(JSON.stringify({ warn: 'send_job_dropped', workspace: job.workspaceId }));
       msg.ack();
       continue;
@@ -81,6 +81,12 @@ export async function consumeSendBatch(batch: MessageBatch<unknown>, env: Env): 
       continue;
     }
     const sent = await sendToMeta(env, job);
+    if (!sent.ok && sent.code === 131049) {
+      // Meta's marketing frequency cap: retry that recipient in 24 h, never treat it as a failure of the contact.
+      await ws.rescheduleFrequencyCap(job);
+      msg.ack();
+      continue;
+    }
     const lastAttempt = msg.attempts >= MAX_SEND_ATTEMPTS;
     const result = !sent.ok && sent.retryable && lastAttempt ? { ...sent, retryable: false } : sent;
     await ws.recordOutbound(job.idempotencyKey, result);

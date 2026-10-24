@@ -33,3 +33,11 @@ messagesRoutes.post('/stores/:storeId/conversations/:conversationId/messages', a
   }
   return c.json(r.message, 202);
 });
+
+/** How much of the number's Meta tier is used and how many sends are waiting for a slot. */
+messagesRoutes.get('/stores/:storeId/throttle', async (c) => {
+  const ws = await workspaceStub(c);
+  const number = await activeNumber(c);
+  if (!ws || !number) return apiError(c, 404, 'not_found');
+  return c.json(await ws.throttleReport(number.phoneNumberId));
+});

@@ -2,8 +2,8 @@ import * as Sentry from '@sentry/cloudflare';
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { verifyMetaSignature } from './core/meta/signature';
-import { extractEvents, extractTemplateStatuses } from './core/meta/webhook-schema';
-import { workspaceForPhoneNumber, workspaceForWaba } from './core/routing';
+import { extractEvents, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
+import { numberForDisplayPhone, workspaceForPhoneNumber, workspaceForWaba } from './core/routing';
 import { mark } from './core/timing';
 import { scrubEvent } from './core/observability';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
@@ -13,6 +13,7 @@ import { createEbdaAccountsVerifier } from './addons/ebda/identity';
 import { requireStoreAccess, type AuthVars } from './core/identity/middleware';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
+import { TIER_LIMITS } from './core/throttle';
 import { buyerKey } from './core/buyer-key';
 import { messagesRoutes } from './routes/messages';
 import { templatesRoutes } from './routes/templates';
@@ -84,6 +85,11 @@ app.post('/meta/webhook', async (c) => {
   for (const t of extractTemplateStatuses(payload)) {
     const workspaceId = await workspaceForWaba(c.env.DB, t.wabaId);
     if (workspaceId) await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
+  }
+  for (const u of extractTierUpdates(payload)) {
+    const tier = TIER_LIMITS[u.currentLimit];
+    const number = tier === undefined ? null : await numberForDisplayPhone(c.env.DB, u.wabaId, u.displayPhone);
+    if (number && tier !== undefined) await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(number.workspaceId)).setNumberLimits(number.phoneNumberId, { tier });
   }
   const events = extractEvents(payload);
   if (!events) {

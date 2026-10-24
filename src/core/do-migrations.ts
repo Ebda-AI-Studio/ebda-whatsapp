@@ -82,6 +82,22 @@ export const DO_MIGRATIONS: readonly string[] = [
      last_error TEXT
    );
    CREATE INDEX scheduled_tasks_due ON scheduled_tasks (due_at);`,
+  // v7 (Phase 2, Meta limits): per-number tier / throughput settings and the unique business-initiated recipients of the rolling 24 h.
+  `CREATE TABLE number_limits (
+     phone_number_id TEXT PRIMARY KEY,
+     tier INTEGER NOT NULL,
+     mps INTEGER NOT NULL,
+     tokens REAL NOT NULL,
+     tokens_at INTEGER NOT NULL,
+     alerted_at INTEGER NOT NULL DEFAULT 0
+   );
+   CREATE TABLE tier_slots (
+     phone_number_id TEXT NOT NULL,
+     contact_id INTEGER NOT NULL,
+     started_at INTEGER NOT NULL,
+     PRIMARY KEY (phone_number_id, contact_id)
+   ) WITHOUT ROWID;
+   CREATE INDEX tier_slots_started ON tier_slots (phone_number_id, started_at);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

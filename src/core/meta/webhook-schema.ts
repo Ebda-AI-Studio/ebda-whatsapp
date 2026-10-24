@@ -116,3 +116,23 @@ export function extractTemplateStatuses(payload: unknown): TemplateStatusEvent[]
   }
   return out;
 }
+
+export type TierUpdateEvent = { wabaId: string; displayPhone: string; currentLimit: string };
+const tierChangeSchema = z.object({
+  field: z.literal('phone_number_quality_update'),
+  value: z.object({ display_phone_number: z.string(), current_limit: z.string() }).loose(),
+}).loose();
+
+/** `phone_number_quality_update` changes: Meta moved a number to another messaging tier. */
+export function extractTierUpdates(payload: unknown): TierUpdateEvent[] {
+  const parsed = payloadSchema.extend({ entry: z.array(z.object({ id: z.string(), changes: z.array(z.unknown()) }).loose()) }).safeParse(payload);
+  if (!parsed.success) return [];
+  const out: TierUpdateEvent[] = [];
+  for (const entry of parsed.data.entry) {
+    for (const ch of entry.changes) {
+      const c = tierChangeSchema.safeParse(ch);
+      if (c.success) out.push({ wabaId: entry.id, displayPhone: c.data.value.display_phone_number, currentLimit: c.data.value.current_limit });
+    }
+  }
+  return out;
+}
