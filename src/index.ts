@@ -3,6 +3,7 @@ import type { Env } from './env';
 import { verifyMetaSignature } from './core/meta/signature';
 import { extractEvents } from './core/meta/webhook-schema';
 import { workspaceForPhoneNumber } from './core/routing';
+import { mark } from './core/timing';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
 import { EBDA_COPY } from './addons/ebda/copy';
 
@@ -39,18 +40,27 @@ app.post('/meta/webhook', async (c) => {
   }
   const receivedAt = Date.now();
   const replies: SendJob[] = [];
+  let firstMetaTs = 0;
   for (const ev of events) {
     const workspaceId = await workspaceForPhoneNumber(c.env.DB, ev.phoneNumberId);
     if (!workspaceId) {
       console.warn('meta webhook: unrouted phone_number_id');
+      mark(c.env, 'unrouted', 0, Date.now() - receivedAt);
       continue;
     }
     const stub = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId));
     // Awaited before the 200: if the DO write fails we answer 5xx and Meta redelivers (ingest is idempotent on wamid).
     const res = await stub.ingest({ ...ev, receivedAt }, { autoReplyText: EBDA_COPY.spikeAutoReply });
+    const metaTs = Math.min(...ev.inbound.map((m) => m.ts * 1000));
+    if (Number.isFinite(metaTs)) firstMetaTs ||= metaTs;
+    mark(c.env, 'do_stored', Number.isFinite(metaTs) ? Date.now() - metaTs : 0, Date.now() - receivedAt, workspaceId);
     replies.push(...res.replies);
   }
-  if (replies.length) await c.env.SEND_QUEUE.sendBatch(replies.map((body) => ({ body })));
+  if (replies.length) {
+    await c.env.SEND_QUEUE.sendBatch(replies.map((body) => ({ body })));
+    mark(c.env, 'enqueued', firstMetaTs ? Date.now() - firstMetaTs : 0, Date.now() - receivedAt, replies[0]!.workspaceId);
+  }
+  mark(c.env, 'webhook_ack', firstMetaTs ? Date.now() - firstMetaTs : 0, Date.now() - receivedAt);
   return c.text('ok');
 });
 

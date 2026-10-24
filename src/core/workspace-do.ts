@@ -64,13 +64,13 @@ export class WorkspaceDO extends DurableObject<Env> {
           result.duplicates++;
           // Redelivery heals a lost enqueue: offer the reply again until its send is claimed (claimSend dedupes).
           const claimed = this.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', `reply:${m.wamid}`).toArray().length > 0;
-          if (!claimed && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(batch.phoneNumberId, m, config.autoReplyText));
+          if (!claimed && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(batch, m, config.autoReplyText));
           continue;
         }
         result.stored++;
         this.sql.exec('UPDATE conversations SET unread = unread + 1 WHERE id = ?', conversationId);
         if (m.type === 'text' && config.autoReplyText) {
-          result.replies.push(this.replyJob(batch.phoneNumberId, m, config.autoReplyText));
+          result.replies.push(this.replyJob(batch, m, config.autoReplyText));
         }
       }
       for (const st of batch.statuses) this.applyStatusSync(st);
@@ -78,8 +78,8 @@ export class WorkspaceDO extends DurableObject<Env> {
     return result;
   }
 
-  private replyJob(phoneNumberId: string, m: InboundMessage, text: string): SendJob {
-    return { workspaceId: this.workspaceId, phoneNumberId, to: m.from, text, idempotencyKey: `reply:${m.wamid}`, inboundAt: m.ts * 1000 };
+  private replyJob(batch: IngestBatch, m: InboundMessage, text: string): SendJob {
+    return { workspaceId: this.workspaceId, phoneNumberId: batch.phoneNumberId, to: m.from, text, idempotencyKey: `reply:${m.wamid}`, inboundAt: m.ts * 1000, receivedAt: batch.receivedAt };
   }
 
   /** Claims the right to send `job` once. Only 'claimed' may call Meta. */
