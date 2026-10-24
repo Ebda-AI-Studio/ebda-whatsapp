@@ -111,6 +111,10 @@ export const orderSummaryDto = z.object({
   itemsCount: z.number().int().positive(),
   at: z.number().int(),
 });
+/** The merchant confirms or refuses a COD order from the inbox; the Worker forwards it to the store (recordCodOutcome). */
+export const codOutcomeRequest = z.object({ outcome: z.enum(['confirmed', 'refused']), idempotencyKey: z.string().uuid() });
+export type CodOutcomeRequest = z.infer<typeof codOutcomeRequest>;
+
 export const customerOrdersResponse = z.object({ items: z.array(orderSummaryDto), source: z.enum(['store', 'sample']) });
 
 export type ContactDto = z.infer<typeof contactDto>;
@@ -139,5 +143,6 @@ export const ROUTES = {
   events: 'GET /events',
   ws: 'GET /ws',
   orders: 'GET /contacts/:waId/orders',
+  codOutcome: 'POST /contacts/:waId/orders/:orderNumber/cod-outcome',
   me: 'GET /me',
 } as const;

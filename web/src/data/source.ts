@@ -14,6 +14,8 @@ export interface InboxSource {
   markRead(conversationId: number): Promise<void>;
   orders(waId: string): Promise<{ items: OrderSummaryDto[]; source: 'store' | 'sample' }>;
   templates(): Promise<TemplateDto[]>;
+  /** Confirm or refuse a pending COD order (the store stays the writer of order state). */
+  recordCodOutcome(waId: string, orderNumber: string, outcome: 'confirmed' | 'refused'): Promise<void>;
   /** Realtime events; returns an unsubscribe function. */
   subscribe(onEvent: (e: RealtimeEvent) => void): () => void;
 }

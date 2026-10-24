@@ -1,11 +1,11 @@
 import { X } from 'lucide-react';
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import type { OrderSummaryDto } from '../../../src/core/api/contract';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, orderStops } from '../lib/format';
 
 type Props = {
-  t: Strings; lang: Lang; orders: OrderSummaryDto[] | null;
+  t: Strings; lang: Lang; orders: OrderSummaryDto[] | null; hasChat: boolean;
   onConfirm: (o: OrderSummaryDto) => void; onRefuse: (o: OrderSummaryDto) => void; onClose: () => void;
 };
 
@@ -15,9 +15,8 @@ export function OrderRail({ t, status }: { t: Strings; status: OrderSummaryDto['
   const style = { '--fill': `${(Math.max(reached, 0) / 3) * 75}%` } as CSSProperties;
   return (
     <ol className="rail-stops" style={style} aria-label={t.orderStatus[status]}>
-      <span className="fill" aria-hidden />
-      {stops.map((s) => (
-        <li key={s.key} data-done={s.done} data-halted={s.halted ?? false} aria-current={s.done && stops.indexOf(s) === reached ? 'step' : undefined}>
+      {stops.map((s, i) => (
+        <li key={s.key} data-done={s.done} data-halted={s.halted ?? false} aria-current={s.done && i === reached ? 'step' : undefined}>
           <span className="dot" aria-hidden />
           {s.halted ? t.orderStatus[status] : t.stops[s.key]}
         </li>
@@ -26,30 +25,41 @@ export function OrderRail({ t, status }: { t: Strings; status: OrderSummaryDto['
   );
 }
 
-export function OrderPane({ t, lang, orders, onConfirm, onRefuse, onClose }: Props) {
+export function OrderPane({ t, lang, orders, hasChat, onConfirm, onRefuse, onClose }: Props) {
+  const [askingRefuse, setAskingRefuse] = useState(false);
   const [current, ...older] = orders ?? [];
   const delivered = (orders ?? []).filter((o) => o.status === 'delivered').length;
   const finished = (orders ?? []).filter((o) => ['delivered', 'refused', 'returned', 'cancelled'].includes(o.status)).length;
   return (
     <aside className="orders" aria-label={t.customerOrders}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div className="orders-head">
         <div>
           <h2>{t.customerOrders}</h2>
           {orders && orders.length > 0 && <div className="muted">{t.ordersCount(num(orders.length, lang))} · {t.delivered(num(delivered, lang), num(finished, lang))}</div>}
         </div>
         <button type="button" className="icon-btn orders-toggle" onClick={onClose} aria-label={t.close}><X size={18} aria-hidden /></button>
       </div>
-      {orders && orders.length === 0 && <p className="muted">{t.noOrders}</p>}
+      {!hasChat && <p className="muted">{t.noChatOrders}</p>}
+      {hasChat && orders && orders.length === 0 && <p className="muted">{t.noOrders}</p>}
       {current && (
         <article className="order-card" aria-label={current.orderNumber}>
           <div className="order-top"><b>{current.orderNumber}</b><span className="order-total">{formatMoney(current.totalMinor, current.currency, lang)}</span></div>
           <div className="muted">{t.items(num(current.itemsCount, lang))} · {t[current.paymentMethod]}</div>
           <span className="status" data-status={current.status}>{t.orderStatus[current.status]}</span>
           <OrderRail t={t} status={current.status} />
-          {current.status === 'pending_confirmation' && (
+          {current.status === 'pending_confirmation' && !askingRefuse && (
             <div className="order-actions">
               <button type="button" className="btn gold" onClick={() => onConfirm(current)}>{t.confirmOrder}</button>
-              <button type="button" className="btn" onClick={() => onRefuse(current)}>{t.refuseOrder}</button>
+              <button type="button" className="btn" onClick={() => setAskingRefuse(true)}>{t.refuseOrder}</button>
+            </div>
+          )}
+          {current.status === 'pending_confirmation' && askingRefuse && (
+            <div className="refuse-ask" role="group" aria-label={t.refuseAsk}>
+              <span>{t.refuseAsk}</span>
+              <div className="order-actions">
+                <button type="button" className="btn danger" onClick={() => { setAskingRefuse(false); onRefuse(current); }}>{t.refuseConfirm}</button>
+                <button type="button" className="btn" onClick={() => setAskingRefuse(false)}>{t.refuseCancel}</button>
+              </div>
             </div>
           )}
         </article>

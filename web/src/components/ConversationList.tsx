@@ -7,7 +7,7 @@ import { relativeTime } from '../lib/format';
 type Props = {
   t: Strings; lang: Lang; now: number;
   items: ConversationDto[]; selectedId: number | null; filter: ConversationFilter; query: string; totalUnread: number;
-  onFilter: (f: ConversationFilter) => void; onQuery: (q: string) => void; onOpen: (id: number) => void;
+  onFilter: (f: ConversationFilter) => void; onQuery: (q: string) => void; onOpen: (id: number) => void; onToggleLang: () => void;
 };
 
 const FILTERS: ConversationFilter[] = ['all', 'unread', 'mine', 'unassigned'];
@@ -16,13 +16,16 @@ export function initials(name: string | null): string {
   return (name ?? '؟').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('');
 }
 
-export function ConversationList({ t, lang, now, items, selectedId, filter, query, totalUnread, onFilter, onQuery, onOpen }: Props) {
+export function ConversationList({ t, lang, now, items, selectedId, filter, query, totalUnread, onFilter, onQuery, onOpen, onToggleLang }: Props) {
   return (
     <section className="list-pane" aria-labelledby="list-title">
       <div className="list-head">
         <div className="list-title">
           <h1 id="list-title">{t.conversations}</h1>
-          {totalUnread > 0 && <span className="muted">{t.unreadCount(num(totalUnread, lang))}</span>}
+          <span className="list-meta">
+            {totalUnread > 0 && <span className="muted">{t.unreadCount(num(totalUnread, lang))}</span>}
+            <button type="button" className="lang-btn" onClick={onToggleLang} lang={lang === 'ar' ? 'en' : 'ar'}>{t.language}</button>
+          </span>
         </div>
         <div className="chips" role="group" aria-label={t.conversations}>
           {FILTERS.map((f) => (
@@ -40,7 +43,7 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
         {items.map((c) => (
           <li key={c.id}>
             <button type="button" className="row" aria-current={c.id === selectedId} onClick={() => onOpen(c.id)}>
-              <span className="avatar" aria-hidden>{initials(c.contact.name)}</span>
+              <span className="avatar" data-selected={c.id === selectedId} aria-hidden>{initials(c.contact.name)}{c.unread > 0 && c.id !== selectedId && <span className="lit" />}</span>
               <span className="row-body">
                 <span className="row-top">
                   <span className="row-name" dir="auto">{c.contact.name ?? `+${c.contact.waId}`}</span>

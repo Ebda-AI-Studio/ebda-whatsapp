@@ -1,4 +1,4 @@
-import { ArrowRight, Check, CheckCheck, ChevronLeft, Clock, FileText, Paperclip, Send, TriangleAlert } from 'lucide-react';
+import { ArrowRight, Check, CheckCheck, ChevronUp, Clock, FileText, Paperclip, Send, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ConversationDto, MessageDto, OrderSummaryDto, TemplateDto } from '../../../src/core/api/contract';
 import type { Lang, Strings } from '../i18n';
@@ -54,11 +54,11 @@ export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, 
         </div>
       </header>
       {currentOrder && (
-        <button type="button" className="order-strip" onClick={onShowOrders} aria-label={`${t.showOrders}: ${currentOrder.orderNumber}`}>
+        <button type="button" className="order-strip" onClick={onShowOrders}>
           <b>{currentOrder.orderNumber}</b>
           <span>{formatMoney(currentOrder.totalMinor, currentOrder.currency, lang)}</span>
           <span className="status" data-status={currentOrder.status}>{t.orderStatus[currentOrder.status]}</span>
-          <ChevronLeft size={18} aria-hidden style={{ marginInlineStart: 'auto', transform: lang === 'en' ? 'scaleX(-1)' : undefined }} />
+          <span className="strip-cta">{t.viewOrder}<ChevronUp size={18} aria-hidden /></span>
         </button>
       )}
       {conversation.contact.optedOut && <p className="notice">{t.optedOut}</p>}
@@ -80,18 +80,27 @@ export function ChatPane({ t, lang, now, conversation, userNames, currentOrder, 
         })}
       </div>
       {closed && <p className="closed-note" role="status">{t.windowClosedHelp}</p>}
-      <div className="composer">
+      {!closed && (
+        <div className="quick" role="group" aria-label={t.quickReplies}>
+          {t.quickReplyTexts.map((q) => (
+            <button key={q} type="button" className="chip" onClick={() => setDraft(q)}>{q}</button>
+          ))}
+        </div>
+      )}
+      <div className="composer" data-closed={closed}>
         {picker && (
           <div className="popover" role="menu" aria-label={t.pickTemplate}>
             {templates.filter((x) => x.status === 'APPROVED').map((tpl) => (
               <button key={tpl.name} type="button" role="menuitem" onClick={() => { onSendTemplate(tpl); setPicker(false); }}>
-                <b style={{ fontWeight: 500 }}>{tpl.name}</b>
+                <b style={{ fontWeight: 500 }}>{t.templateNames[tpl.name] ?? tpl.name}</b>
                 <span className="muted" dir="auto">{tpl.bodyText}</span>
               </button>
             ))}
           </div>
         )}
-        <button type="button" className="icon-btn" aria-label={t.pickTemplate} aria-expanded={picker} onClick={() => setPicker((v) => !v)}><FileText size={18} aria-hidden /></button>
+        {closed
+          ? <button type="button" className="btn gold" aria-label={t.pickTemplate} aria-expanded={picker} onClick={() => setPicker((v) => !v)}><FileText size={18} aria-hidden /><span>{t.pickTemplate}</span></button>
+          : <button type="button" className="icon-btn" aria-label={t.pickTemplate} aria-expanded={picker} onClick={() => setPicker((v) => !v)}><FileText size={18} aria-hidden /></button>}
         <button type="button" className="icon-btn" aria-label={t.attach} disabled={closed}><Paperclip size={18} aria-hidden /></button>
         <label className="vh" htmlFor="composer">{t.typeMessage}</label>
         <textarea id="composer" rows={1} value={draft} disabled={closed} placeholder={`${t.typeMessage}…`} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} />

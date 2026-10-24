@@ -52,6 +52,7 @@ const TEMPLATES: TemplateDto[] = [
 
 export function createSampleSource(): InboxSource {
   const threads = structuredClone(THREADS);
+  const orders = structuredClone(ORDERS);
   const convs: ConversationDto[] = SEEDS.map((s) => ({
     id: s.id,
     contact: { waId: s.waId, name: s.name, optedOut: false },
@@ -92,10 +93,14 @@ export function createSampleSource(): InboxSource {
       if (c) c.unread = 0;
     },
     async orders(waId) {
-      return { items: ORDERS[waId] ?? [], source: 'sample' };
+      return { items: (orders[waId] ?? []).map((o) => ({ ...o })), source: 'sample' };
     },
     async templates() {
       return TEMPLATES;
+    },
+    async recordCodOutcome(waId, orderNumber, outcome) {
+      const o = orders[waId]?.find((x) => x.orderNumber === orderNumber);
+      if (o && o.status === 'pending_confirmation') o.status = outcome;
     },
     subscribe(onEvent) {
       listeners.add(onEvent);

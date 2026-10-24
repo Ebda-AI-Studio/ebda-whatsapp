@@ -51,7 +51,7 @@ describe('inbox', () => {
     const target = await screen.findByRole('button', { name: /يوسف علي/ });
     await act(async () => fireEvent.click(target));
     expect(within(screen.getByRole('banner')).getByText('النافذة مقفولة · ابعت قالب')).toBeTruthy();
-    expect((screen.getByRole('textbox', { name: 'اكتب رسالة' }) as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByLabelText('اكتب رسالة') as HTMLTextAreaElement).disabled).toBe(true);
     expect(screen.getByRole('button', { name: 'اختيار قالب' })).toBeTruthy();
   });
 
@@ -69,5 +69,59 @@ describe('inbox', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'English' })));
     expect(document.documentElement.dir).toBe('ltr');
     expect(screen.getByRole('list', { name: 'Conversations' })).toBeTruthy();
+  });
+
+  it('confirms a pending COD order in one action: the rail advances and an undo is offered', async () => {
+    setup();
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    const orders = screen.getByRole('complementary', { name: 'طلبات العميل' });
+    await act(async () => fireEvent.click(await within(orders).findByRole('button', { name: 'تأكيد الطلب' })));
+    expect(within(orders).getAllByText('متأكد').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'تراجع' })).toBeTruthy();
+  });
+
+  it('asks once before refusing an order', async () => {
+    setup();
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    const orders = screen.getByRole('complementary', { name: 'طلبات العميل' });
+    await act(async () => fireEvent.click(await within(orders).findByRole('button', { name: 'رفض' })));
+    expect(within(orders).queryByText('مرفوض')).toBeNull();
+    await act(async () => fireEvent.click(within(orders).getByRole('button', { name: 'أيوه، ارفض الطلب' })));
+    expect(within(orders).getAllByText('مرفوض').length).toBeGreaterThan(0);
+  });
+
+  it('offers quick replies that fill the composer', async () => {
+    setup();
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    const group = screen.getByRole('group', { name: 'ردود سريعة' });
+    const first = within(group).getAllByRole('button')[0]!;
+    await act(async () => fireEvent.click(first));
+    expect((screen.getByRole('textbox', { name: 'اكتب رسالة' }) as HTMLTextAreaElement).value).toBe(first.textContent);
+  });
+
+  it('shows a sent message immediately in the queued state, before the server answers', async () => {
+    let release: () => void = () => undefined;
+    const source = createSampleSource();
+    const slowSend = source.send.bind(source);
+    source.send = (id, req) => new Promise((r) => { release = () => r(slowSend(id, req)); });
+    render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
+    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    await act(async () => fireEvent.click(target));
+    await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'اكتب رسالة' }), { target: { value: 'رسالة سريعة' } }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'إرسال' })));
+    expect(within(screen.getByRole('log')).getByText('رسالة سريعة')).toBeTruthy();
+    await act(async () => release());
+    expect(within(screen.getByRole('log')).getAllByText('رسالة سريعة')).toHaveLength(1);
+  });
+
+  it('in a closed window the template button is the primary action', async () => {
+    setup();
+    const target = await screen.findByRole('button', { name: /يوسف علي/ });
+    await act(async () => fireEvent.click(target));
+    const tpl = screen.getByRole('button', { name: 'اختيار قالب' });
+    expect(tpl.className).toContain('gold');
   });
 });
