@@ -47,11 +47,24 @@ typography:
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.55
+  strip:
+    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.55
+  pane-heading:
+    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
+    fontSize: "16px"
+    fontWeight: 500
+    lineHeight: 1.55
 rounded:
+  focus: "6px"
   sm: "8px"
+  field: "10px"
   md: "12px"
   lg: "14px"
   bubble: "16px"
+  sheet: "18px"
   pill: "999px"
 spacing:
   xs: "6px"
