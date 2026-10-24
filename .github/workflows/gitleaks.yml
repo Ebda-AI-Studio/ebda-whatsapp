@@ -16,6 +16,8 @@ concurrency:
 jobs:
   scan:
     name: Scan for leaked secrets
+    # Never run code from a fork's PR on a self-hosted runner.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 10
     steps:
