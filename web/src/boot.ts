@@ -17,3 +17,9 @@ export function pickStore(stores: { id: string; role: 'owner' | 'staff' }[], sea
   if (wanted && stores.some((s) => s.id === wanted)) return wanted;
   return stores[0]?.id ?? null;
 }
+
+/** Which sign-in this build uses. A brand names exactly one: the suite's accounts service, or its own OpenID Connect provider. */
+export function signInMode(accountsUrl: string | null, oidc: { issuer: string; clientId: string } | null | undefined): 'accounts' | 'oidc' | 'none' {
+  if (accountsUrl && oidc) throw new Error('a brand has one sign-in: accounts service or its own OIDC provider, not both');
+  return accountsUrl ? 'accounts' : oidc ? 'oidc' : 'none';
+}

@@ -24,7 +24,7 @@ describe('white-label deploy', () => {
   it('the web build stamps dist/brand.json with the brand it was built for', () => {
     const out = join(tmp, 'dist-demo');
     execFileSync('npx', ['vite', 'build', 'web', '--outDir', out], { cwd: root, env: { ...process.env, BRAND: 'demo' }, stdio: 'pipe' });
-    expect(JSON.parse(readFileSync(join(out, 'brand.json'), 'utf8'))).toEqual({ brand: 'demo' });
+    expect(JSON.parse(readFileSync(join(out, 'brand.json'), 'utf8'))).toEqual({ brand: 'demo', oidcIssuer: 'https://login.demo-company.example/realms/main' });
   }, 120_000);
 
   it('refuses a dist built for another brand, an unstamped dist, or a missing one', () => {
@@ -36,6 +36,24 @@ describe('white-label deploy', () => {
     expect(checkDistBrand(dir, 'demo')).toMatchObject({ ok: false });
     writeFileSync(join(dir, 'brand.json'), JSON.stringify({ brand: 'demo' }));
     expect(checkDistBrand(dir, 'demo')).toMatchObject({ ok: true });
+  });
+
+  it('a dist whose brand has its own OIDC provider must carry the issuer in its CSP, and match the issuer the operator expects', () => {
+    const dir = join(tmp, 'dist-oidc');
+    mkdirSync(dir, { recursive: true });
+    const iss = 'https://login.client.example/realms/main';
+    const csp = (connect: string, form: string) => `/*\n  Content-Security-Policy: default-src 'self'; connect-src 'self' ${connect}; form-action 'self' ${form}; frame-ancestors 'none'\n`;
+    writeFileSync(join(dir, 'brand.json'), JSON.stringify({ brand: 'demo', oidcIssuer: iss }));
+    writeFileSync(join(dir, '_headers'), csp('https://login.client.example', 'https://login.client.example'));
+    expect(checkDistBrand(dir, 'demo')).toMatchObject({ ok: true });
+    expect(checkDistBrand(dir, 'demo', { expectIssuer: iss })).toMatchObject({ ok: true });
+    expect(checkDistBrand(dir, 'demo', { expectIssuer: 'https://login.other.example/realms/main' })).toMatchObject({ ok: false });
+    writeFileSync(join(dir, '_headers'), csp('https://login.client.example', ''));
+    expect(checkDistBrand(dir, 'demo')).toMatchObject({ ok: false }); // form-action lacks the issuer
+    writeFileSync(join(dir, '_headers'), csp('', 'https://login.client.example'));
+    expect(checkDistBrand(dir, 'demo')).toMatchObject({ ok: false }); // connect-src lacks the issuer
+    writeFileSync(join(dir, '_headers'), csp('https://login.client.example https://login.client.example.evil.example', 'https://login.client.example'));
+    expect(checkDistBrand(dir, 'demo')).toMatchObject({ ok: false }); // a second host next to the issuer
   });
 
   it('the deploy script reads the brand from the rendered config and stops on a mismatch before deploying anything', () => {

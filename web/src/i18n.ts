@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { billingCategory, campaignPauseReason, CampaignDto, ImportDto, NumberDto, WalletDto } from '../../src/core/api/contract';
 import type { RefundRequest } from './data/billing';
+import type { SignInErrorCode } from './data/oidc';
 
 export type Lang = 'ar' | 'en';
 
@@ -14,6 +15,7 @@ type HistorySync = NonNullable<NumberDto['historySync']>;
 type ContactsSync = NonNullable<NumberDto['contactsSync']>;
 type PlanStatus = NonNullable<WalletDto['plan']>['status'];
 type RefundState = RefundRequest['state'];
+type SignInErr = SignInErrorCode;
 type NumberStateKey = 'active' | 'pending' | 'failed' | 'locked' | 'disconnected';
 
 
@@ -82,7 +84,11 @@ const ar = {
   failedLine: (f: string, s: string) => `${f} ما وصلتش · ${s} اتشالوا`, scheduledFor: (d: string) => `هتبدأ ${d}`, startedAt: (d: string) => `بدأت ${d}`, finishedAt: (d: string) => `خلصت ${d}`,
   pause: 'وقّف', resume: 'كمّل', cancelCampaign: 'إلغاء الحملة', cancelAsk: 'متأكد؟ الرسايل اللي لسه ما اتبعتتش مش هتتبعت.', cancelYes: 'أيوه، الغي', cancelNo: 'لا، رجوع', deleteDraft: 'امسح المسودة',
   stepAudience: 'مين هيستقبل الحملة؟', stepMessage: 'الرسالة', stepTiming: 'إمتى؟', stepReview: 'راجع وابعت',
-  campaignName: 'اسم الحملة (ليك إنت بس)', audienceSegment: 'شريحة محفوظة', audienceTags: 'العملاء اللي عندهم وسم', audienceEveryone: 'كل العملاء اللي وافقوا', audienceUnknown: 'مقدرناش نحسب عدد اللي هيوصلهم دلوقتي.', signInNotConfigured: 'تسجيل الدخول مش متظبّط في النسخة دي. افتح الصفحة من البوابة بتاعتكم، أو كلّم اللي سلّمك التطبيق.',
+  campaignName: 'اسم الحملة (ليك إنت بس)', audienceSegment: 'شريحة محفوظة', audienceTags: 'العملاء اللي عندهم وسم', audienceEveryone: 'كل العملاء اللي وافقوا', audienceUnknown: 'مقدرناش نحسب عدد اللي هيوصلهم دلوقتي.', signInNotConfigured: 'تسجيل الدخول مش متظبّط في النسخة دي. افتح الصفحة من البوابة بتاعتكم، أو كلّم اللي سلّمك التطبيق.', signInFailed: 'مقدرناش نسجّلك دخول', signInTryAgain: 'جرّب تسجيل الدخول تاني',
+  signInErrors: copy<SignInErr>({
+    denied: 'مزوّد تسجيل الدخول رفض الطلب أو اتلغى.', state: 'طلب تسجيل الدخول مش مظبوط أو اتستخدم قبل كده. ابدأ من جديد.', nonce: 'ردّ تسجيل الدخول مش متطابق مع الطلب. ابدأ من جديد.',
+    token: 'مزوّد تسجيل الدخول مرجّعش تصريح دخول صالح.', discovery: 'مقدرناش نوصل لإعدادات مزوّد تسجيل الدخول أو إعداداته مش مطابقة.', missing_id_token: 'مزوّد تسجيل الدخول مرجّعش إثبات الهوية المطلوب.', claims: 'إثبات الهوية اللي رجع مش صالح لتطبيقنا.',
+  }),
   tagLabel: 'الوسم', paramKind: (n: string) => `نوع المتغير ${n}`, paramValue: 'النص', tagsPlaceholder: 'مثال: vip', audienceCount: (n: string) => `هتوصل لـ ${n} عميل`, audienceCounting: 'بنحسب...',
   excludedLine: (o: string, c: string) => `مش هتوصل لـ ${o} عشان طلبوا يوقفوا الرسايل، ولا لـ ${c} عشان مفيش موافقة مسجلة منهم.`,
   consentRule: 'الحملات بتوصل بس للعملاء اللي وافقوا يستقبلوا عروض ومطلبوش يوقفوها. ده شرط من واتساب ومش بيتقفل.',
@@ -268,7 +274,11 @@ const en: typeof ar = {
   failedLine: (f: string, s: string) => `${f} failed · ${s} skipped`, scheduledFor: (d: string) => `Starts ${d}`, startedAt: (d: string) => `Started ${d}`, finishedAt: (d: string) => `Finished ${d}`,
   pause: 'Pause', resume: 'Resume', cancelCampaign: 'Cancel campaign', cancelAsk: 'Are you sure? Messages not sent yet will not be sent.', cancelYes: 'Yes, cancel', cancelNo: 'No, go back', deleteDraft: 'Delete draft',
   stepAudience: 'Who receives it?', stepMessage: 'Message', stepTiming: 'When?', stepReview: 'Review and send',
-  campaignName: 'Campaign name (only you see it)', audienceSegment: 'Saved segment', audienceTags: 'Customers with a tag', audienceEveryone: 'Everyone who agreed', audienceUnknown: 'We could not count who this would reach right now.', signInNotConfigured: 'Sign-in is not configured in this build. Open the page from your own portal, or ask whoever set the app up for you.',
+  campaignName: 'Campaign name (only you see it)', audienceSegment: 'Saved segment', audienceTags: 'Customers with a tag', audienceEveryone: 'Everyone who agreed', audienceUnknown: 'We could not count who this would reach right now.', signInNotConfigured: 'Sign-in is not configured in this build. Open the page from your own portal, or ask whoever set the app up for you.', signInFailed: 'We could not sign you in', signInTryAgain: 'Try signing in again',
+  signInErrors: copy<SignInErr>({
+    denied: 'The sign-in provider refused the request, or it was cancelled.', state: 'This sign-in request is not valid or was already used. Start again.', nonce: 'The sign-in answer does not match the request. Start again.',
+    token: 'The sign-in provider did not return a valid access token.', discovery: 'We could not reach the sign-in provider\'s settings, or they do not match this app.', missing_id_token: 'The sign-in provider did not return the identity proof that is required.', claims: 'The identity proof that came back is not valid for this app.',
+  }),
   tagLabel: 'Tag', paramKind: (n: string) => `Variable ${n} type`, paramValue: 'Text', tagsPlaceholder: 'e.g. vip', audienceCount: (n: string) => `Reaches ${n} customers`, audienceCounting: 'Counting…',
   excludedLine: (o: string, c: string) => `Not reaching ${o} who asked to stop messages, or ${c} with no consent on record.`,
   consentRule: 'Campaigns only reach customers who agreed to receive offers and have not opted out. WhatsApp requires it and it cannot be switched off.',

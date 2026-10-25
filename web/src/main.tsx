@@ -1,16 +1,18 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { accountsUrlFor, chooseMode, pickStore } from './boot';
+import { accountsUrlFor, chooseMode, pickStore, signInMode } from './boot';
+import { SignInError } from './components/SignInError';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
 import { connectRealtime, createApiSource } from './data/api';
 import { createTokenProvider, decodeStores, decodeSub } from './data/auth';
+import { CALLBACK_PATH, OidcSignInError, createOidcSession } from './data/oidc';
 import type { InboxSource } from './data/source';
 import { BRAND } from '@brand';
 import './styles.css';
 import '@brand-tokens';
 
-// A brand on its own identity provider has no accounts service here (accountsUrl null): its portal signs users in.
+// A brand on its own identity provider has no accounts service here (accountsUrl null): it signs in on that provider (Authorization Code + PKCE).
 const ACCOUNTS_URL = accountsUrlFor(import.meta.env.VITE_ACCOUNTS_URL as string | undefined, BRAND.accountsUrl);
 const root = createRoot(document.getElementById('root')!);
 
@@ -24,8 +26,25 @@ async function boot(): Promise<void> {
     const role = new URLSearchParams(location.search).get('role');
     if (role === 'super_admin' || role === 'staff' || role === 'owner') source.role = role;
   } else {
-    if (!ACCOUNTS_URL) { root.render(<SignInNotConfigured />); return; }
-    const tokens = createTokenProvider({ accountsUrl: ACCOUNTS_URL });
+    const mode = signInMode(ACCOUNTS_URL, BRAND.oidc);
+    if (mode === 'none') { root.render(<SignInNotConfigured />); return; }
+    let tokens: { getToken: () => Promise<string> };
+    if (mode === 'oidc') {
+      const session = createOidcSession({ oidc: BRAND.oidc!, origin: location.origin });
+      if (location.pathname === CALLBACK_PATH) {
+        try {
+          await session.handleCallback(location.search);
+        } catch (e) {
+          // Show why, with one explicit retry: a refused answer never bounces back to the provider by itself.
+          const code = e instanceof OidcSignInError ? e.code : 'token';
+          root.render(<SignInError code={code} onRetry={() => { void session.startSignIn('/'); }} />);
+          return;
+        }
+      }
+      tokens = session;
+    } else {
+      tokens = createTokenProvider({ accountsUrl: ACCOUNTS_URL! });
+    }
     const token = await tokens.getToken(); // redirects to sign-in when signed out
     const storeId = pickStore(decodeStores(token), location.search);
     if (!storeId) {
