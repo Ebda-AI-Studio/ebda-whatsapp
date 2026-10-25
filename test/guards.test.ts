@@ -30,7 +30,7 @@ const BARE_EN = /(?<!X-)\bEbda\b(?!-Webhooks)(?! (?:Store|AI Studio|WhatsApp|CRM
 // The Arabic brand spellings with hamza under alef; the plain ابدأ is the everyday verb "start" and stays allowed in copy.
 const BARE_AR = /(?:إبدأ|إبدا)(?!\s*(?:ستور|استوديو|واتساب|WhatsApp|CRM|ERP|Store)(?![ء-يٱ-ۓ]))/;
 it('user-facing copy never says a bare "Ebda": always Ebda AI Studio or Ebda <Product>', () => {
-  const scopes = ['src', 'web', 'docs/help', 'docs/site'];
+  const scopes = ['src', 'web', 'docs/help', 'docs/legal', 'docs/site'];
   const hits = scopes.flatMap((s) => [...findMatches(BARE_EN, s), ...findMatches(BARE_AR, s)]).filter((m) => !/\.test\.tsx?:/.test(m));
   expect(hits).toEqual([]);
 });
