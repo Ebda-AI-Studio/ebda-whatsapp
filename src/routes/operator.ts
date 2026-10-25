@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import {
-  fxPublish, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
+  fxPublish, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -11,6 +11,7 @@ import {
 } from '../core/billing/operator';
 import { setSubscription } from '../core/billing/subscriptions';
 import { registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
+import { linkDashboardRefund } from '../core/billing/card-refunds';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -85,6 +86,13 @@ operatorRoutes.post('/refund-requests/:id/decision', async (c) => {
   if (!b.success) return bad(c);
   const r = await decideRefund(c.env, { id: c.req.param('id'), decision: b.data.decision, actor: actor(c), ...(b.data.note ? { note: b.data.note } : {}) });
   if (r.ok) return c.json(r.request);
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
+});
+operatorRoutes.post('/refund-requests/:id/link-dashboard-refund', async (c) => {
+  const b = refundDashboardLink.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c);
+  const r = await linkDashboardRefund(c.env, { requestId: c.req.param('id'), actor: actor(c), ...b.data });
+  if (r.ok) return c.json({ ok: true });
   return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
 });
 operatorRoutes.post('/refund-requests/:id/manual-paid', async (c) => ((await markManualPaid(c.env, c.req.param('id'), actor(c))) ? c.json({ ok: true }) : c.json({ error: 'invalid_request', message: 'not_manual_payout' }, 409)));

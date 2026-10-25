@@ -19,7 +19,7 @@ export const detailsFetch = async (url: string): Promise<Response> => {
   const tx = decodeURIComponent(url.split('/').pop() ?? '');
   const g = kashierLedger.get(tx);
   if (!g) return new Response('not found', { status: 404 });
-  return Response.json({ body: { transactionId: tx, trxType: g.operation, status: g.status, ...(g.orderId ? { merchantOrderId: g.orderId } : {}) } });
+  return Response.json({ body: { transactionId: tx, trxType: g.operation, status: g.status, ...(g.orderId ? { merchantOrderId: g.orderId } : {}), order: { orderId: `KO-${tx}` } } });
 };
-export const testKashier = (fetchImpl: (url: string) => Promise<Response> = detailsFetch) =>
-  new KashierProvider('MID-1', KEY, undefined, { secretKey: 'sk-test', fetch: (url) => fetchImpl(url) });
+export const testKashier = (fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = detailsFetch) =>
+  new KashierProvider('MID-1', KEY, undefined, { secretKey: 'sk-test', fetch: (url, init) => fetchImpl(url, init) });

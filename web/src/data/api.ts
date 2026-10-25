@@ -195,6 +195,7 @@ export function createApiSource(o: Opts): LiveSource {
       setFunding: async (phoneNumberId, funding, reason) => { await op(`/numbers/${encodeURIComponent(phoneNumberId)}/funding`, done, { method: 'PUT', body: JSON.stringify({ funding, reason }) }); },
       refundQueue: async () => (await op('/refund-requests', items(refundRequestDto))).items,
       decideRefund: (id, decision, note) => op(`/refund-requests/${encodeURIComponent(id)}/decision`, refundRequestDto, post({ decision, ...(note.trim() ? { note: note.trim() } : {}) })),
+      linkDashboardRefund: async (id, kashierRefundId, amountMinor) => { await op(`/refund-requests/${encodeURIComponent(id)}/link-dashboard-refund`, done, { method: 'POST', body: JSON.stringify({ kashierRefundId, amountMinor }) }); },
       markRefundPaid: async (id) => { await op(`/refund-requests/${encodeURIComponent(id)}/manual-paid`, done, { method: 'POST' }); },
       adjustments: async () => (await op('/adjustments', items(adjustmentDto))).items,
       createAdjustment: (workspaceId, amountMinor, reason) => op(`/workspaces/${encodeURIComponent(workspaceId)}/adjustments`, adjustmentDto, post({ amountMinor, reason })),

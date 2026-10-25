@@ -167,6 +167,7 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       record(`refund_${decision}`, r.workspaceId, { state: 'pending' }, { state: r.state }, note.trim() || '—');
       return { ...r };
     },
+    async linkDashboardRefund(id, _refundId, amountMinor) { const r = find(refunds, id); Object.assign(r, { cardRefundedMinor: r.cardRefundedMinor + amountMinor, manualMinor: Math.max(0, r.manualMinor - amountMinor), state: r.manualMinor - amountMinor > 0 ? 'manual_payout' : 'paid' }); },
     async markRefundPaid(id) { Object.assign(find(refunds, id), { state: 'paid' }); },
     adjustments: async () => structuredClone(adjustments),
     async createAdjustment(workspaceId, amountMinor, reason) {

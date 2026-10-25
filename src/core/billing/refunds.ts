@@ -5,14 +5,17 @@
  * 50 EGP. Money records are never deleted on cancellation or erasure.
  *
  * Flow: the owner files a request (D1 queue); a super admin approves or rejects. Approval debits the wallet FIRST (`refund` rows, reversible
- * by an adjustment), then asks the provider to refund the card top-ups oldest first; whatever the provider cannot return (unsupported,
- * rejected, unreachable, or beyond the card top-ups) becomes a manual bank/InstaPay payout after an identity check. The wallet is debited
- * in every case, so the money is always owed to the merchant by exactly one path.
+ * by an adjustment), then, only with KASHIER_REFUNDS_ENABLED, asks the provider to refund the card top-ups oldest first; whatever the
+ * provider cannot return (unsupported, rejected, or beyond the card top-ups) becomes a manual bank/InstaPay payout after an identity check.
+ * The wallet is debited in every case, once: the provider's own refund webhook is matched to the `card_refunds` row recorded before the
+ * call (card-refunds.ts) and never debits again. An answer we cannot read leaves the row `uncertain` and the request `processing` until a
+ * webhook or the daily reconcile settles it; the provider is never asked twice for one row.
  */
 import type { Env } from '../../env';
 import type { z } from 'zod';
 import type { refundRequestDto } from '../api/contract';
-import { paymentProvider } from './payments';
+import { openCardRefund, refreshRequest, settleCardRefund } from './card-refunds';
+import { paymentProvider, refundsEnabled } from './payments';
 
 export type RefundRequestDto = z.infer<typeof refundRequestDto>;
 export const MIN_REFUND_MINOR = 5000;
@@ -75,37 +78,44 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
   // Claim the request before any money moves, so two approvers cannot both run it.
   const claimed = await env.DB.prepare("UPDATE refund_requests SET state = 'processing', decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND state = 'pending'").bind(a.actor, now, a.note ?? null, a.id).run();
   if (!claimed.meta.changes) return { ok: false, reason: 'not_pending' };
-  // The card top-ups, oldest first, minus what was already returned.
-  const { results: topups } = await env.DB.prepare("SELECT order_id, transaction_id, amount_minor, refunded_minor FROM topups WHERE workspace_id = ? AND state = 'paid' AND transaction_id IS NOT NULL ORDER BY paid_at, order_id").bind(req.workspace_id).all<{ order_id: string; transaction_id: string; amount_minor: number; refunded_minor: number }>();
-  const provider = paymentProvider(env);
+  // The card top-ups, oldest first, minus what was already returned and what an open card refund has reserved.
+  const { results: topups } = await env.DB.prepare(
+    `SELECT t.order_id, t.transaction_id, t.amount_minor, t.refunded_minor,
+            coalesce((SELECT sum(c.amount_minor) FROM card_refunds c WHERE c.order_id = t.order_id AND c.state IN ('sending', 'pending', 'uncertain')), 0) AS reserved
+       FROM topups t WHERE t.workspace_id = ? AND t.state = 'paid' AND t.transaction_id IS NOT NULL ORDER BY t.paid_at, t.order_id`,
+  ).bind(req.workspace_id).all<{ order_id: string; transaction_id: string; amount_minor: number; refunded_minor: number; reserved: number }>();
+  // Off (default): no provider call at all, every card chunk is a manual payout, exactly as before the card API existed.
+  const provider = refundsEnabled(env) ? paymentProvider(env) : null;
   let left = req.amount_minor;
-  let card = 0;
-  let manual = 0;
   let n = 0;
   for (const t of topups) {
     if (left <= 0) break;
-    const chunk = Math.min(left, t.amount_minor - t.refunded_minor);
+    const chunk = Math.min(left, t.amount_minor - t.refunded_minor - t.reserved);
     if (chunk <= 0) continue;
     n++;
     const posted = await stub.postWallet({ kind: 'refund', netMinor: -chunk, ref: `refund:${a.id}:${n}`, actor: a.actor, note: `refund of top-up ${t.order_id}` }, now);
     if (!posted.ok && posted.reason !== 'duplicate') return { ok: false, reason: 'insufficient_balance' };
-    const r = provider ? await provider.refund({ transactionId: t.transaction_id, amountMinor: chunk }).catch(() => ({ ok: false as const, reason: 'unavailable' as const })) : { ok: false as const, reason: 'unsupported' as const };
-    if (r.ok) {
-      card += chunk;
-      await env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ?').bind(chunk, t.order_id).run();
-    } else {
-      manual += chunk;
-    }
     left -= chunk;
+    if (!provider) continue;
+    // The row is written BEFORE the provider is asked: a refund webhook that arrives mid-call (or an answer we never see) is then matched to
+    // this refund instead of being booked as a second debit. Kashier documents no idempotency key, so the call is made once per row.
+    const row = await openCardRefund(env, { id: `cr:${a.id}:${n}`, requestId: a.id, orderId: t.order_id, workspaceId: req.workspace_id, amountMinor: chunk }, now);
+    if (row.state !== 'sending') continue; // a re-run found the row already decided: never ask the provider twice
+    const r = await provider.refund({ transactionId: t.transaction_id, amountMinor: chunk, reason: `refund-request:${a.id}:${n}` }).catch(() => ({ ok: false as const, reason: 'uncertain' as const }));
+    // Kashier took it: if the id cannot be stored (already used by another row) the refund still happened, so settle it without the id.
+    if (r.ok) await settleCardRefund(env, row.id, r.status === 'PENDING' ? { to: 'pending', refundId: r.refundId } : { to: 'succeeded', refundId: r.refundId }, now).catch(() => settleCardRefund(env, row.id, r.status === 'PENDING' ? { to: 'uncertain' } : { to: 'succeeded' }, now));
+    else await settleCardRefund(env, row.id, r.reason === 'uncertain' ? { to: 'uncertain' } : { to: 'failed' }, now);
   }
   if (left > 0) {
     n++;
     const posted = await stub.postWallet({ kind: 'refund', netMinor: -left, ref: `refund:${a.id}:${n}`, actor: a.actor, note: 'refund beyond card top-ups (bank/InstaPay)' }, now);
     if (!posted.ok && posted.reason !== 'duplicate') return { ok: false, reason: 'insufficient_balance' };
-    manual += left;
   }
-  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_approved', ?, ?, ?, ?)").bind(now, a.actor, req.workspace_id, JSON.stringify({ state: 'pending', amountMinor: req.amount_minor }), JSON.stringify({ cardMinor: card, manualMinor: manual }), a.note ?? null).run();
-  return done(manual > 0 ? 'manual_payout' : 'paid', card, manual);
+  // The split is derived from the card_refunds rows: card = confirmed, open = waiting for the provider (state stays `processing`), manual = the rest.
+  await refreshRequest(env, a.id);
+  const out = (await env.DB.prepare(`SELECT ${COLS} FROM refund_requests WHERE id = ?`).bind(a.id).first<Row>())!;
+  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_approved', ?, ?, ?, ?)").bind(now, a.actor, req.workspace_id, JSON.stringify({ state: 'pending', amountMinor: req.amount_minor }), JSON.stringify({ cardMinor: out.card_refunded_minor, manualMinor: out.manual_minor, state: out.state }), a.note ?? null).run();
+  return { ok: true, request: dto(out) };
 }
 
 /** The operator confirms a manual (bank/InstaPay) payout was made after the identity check. */

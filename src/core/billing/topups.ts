@@ -10,6 +10,7 @@
  */
 import type { Env } from '../../env';
 import { sessionState } from '../identity/session';
+import { applyProviderRefund } from './card-refunds';
 import { roundHalfEvenDiv } from './money';
 import { RefundContention, applyPackageWebhook, auditOnce, findPackageOrder } from './package-orders';
 import { packagesEnabled, paymentProvider, topupsEnabled, type ParsedWebhook, type PaymentProvider } from './payments';
@@ -131,20 +132,18 @@ async function applyTopupWebhook(env: Env, t: TopupRow, ev: ParsedWebhook, now: 
     // Another path (the webhook or a repair) already credited this transaction: nothing was credited now, so nothing follows from it.
     return c === 'duplicate' ? 'duplicate' : 'credited';
   }
-  if (ev.event === 'refund' && ev.status === 'SUCCESS') {
+  if (ev.event === 'refund') {
+    if (ev.status === 'PENDING') return 'ignored';
     // A refund is a DIFFERENT transaction from the payment it returns.
-    if (t.transaction_id === ev.transactionId) {
+    if (ev.status === 'SUCCESS' && t.transaction_id === ev.transactionId) {
       alert('refund_refused', { kind: 'topup', workspace: t.workspace_id, eventKey: ev.eventKey });
       return 'refund_refused';
     }
     // The payment is not credited (yet): the refund is held and applied once it is, whichever path credits it.
-    if (t.state !== 'paid' || !t.transaction_id) return 'payment_pending';
-    const r = await stubOf(env, t.workspace_id).postWallet({ kind: 'chargeback', netMinor: -ev.amountMinor, ref: `chargeback:${ev.transactionId}`, note: `provider refund of ${t.order_id}: operator review` }, now);
-    if (r.ok) {
-      await env.DB.prepare('UPDATE topups SET refunded_minor = min(total_minor, refunded_minor + ?) WHERE order_id = ?').bind(ev.amountMinor, t.order_id).run();
-      alert('topup_refunded_by_provider', { workspace: t.workspace_id, orderId: t.order_id });
-    }
-    return 'refunded';
+    if (ev.status === 'SUCCESS' && (t.state !== 'paid' || !t.transaction_id)) return 'payment_pending';
+    // Ours (an API refund or one linked from the provider's dashboard) is reconciled without touching the wallet again; only a refund or
+    // chargeback we did not start debits it, once and capped (card-refunds.ts).
+    return applyProviderRefund(env, t, ev, now);
   }
   return 'ignored';
 }

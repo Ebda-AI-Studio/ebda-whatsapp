@@ -213,9 +213,10 @@ describe('crediting', () => {
     const { body, sig } = await signed({ merchantOrderId: 'ord-919', transactionId: 'TX-R1', amount: '20.00' }, 'refund');
     await handleProviderWebhook(env, body, sig, kashier);
     await handleProviderWebhook(env, body, sig, kashier);
-    expect((await ledger(ws)).map((r) => [r.kind, r.amount_minor, r.balance_after])).toEqual([['topup', 1000, 1000], ['chargeback', -2000, -1000]]);
+    // A refund we did not start debits once, capped at what this top-up credited the wallet (10.00), whatever Kashier says it refunded.
+    expect((await ledger(ws)).map((r) => [r.kind, r.amount_minor, r.balance_after])).toEqual([['topup', 1000, 1000], ['chargeback', -1000, 0]]);
     expect(spy.mock.calls.some((c) => String(c[0]).includes('topup_refunded_by_provider'))).toBe(true);
-    expect((await workspace(ws).walletView()).debtMinor).toBe(1000);
+    expect((await workspace(ws).walletView()).debtMinor).toBe(0);
   });
 });
 

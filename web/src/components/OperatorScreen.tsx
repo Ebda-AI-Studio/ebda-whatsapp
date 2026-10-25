@@ -324,6 +324,7 @@ function QueuesPanel({ t, lang, api, source, run }: PanelProps) {
   const signed = (m: number) => formatSigned(m, lang);
   const [asking, setAsking] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [links, setLinks] = useState<Record<string, string>>({});
   const [local, setLocal] = useState<Record<string, RefundRequest | Adjustment>>({});
   const merged = useMemo(() => ({ r: (r: RefundRequest) => (local[r.id] as RefundRequest | undefined) ?? r, a: (a: Adjustment) => (local[a.id] as Adjustment | undefined) ?? a }), [local]);
 
@@ -368,6 +369,14 @@ function QueuesPanel({ t, lang, api, source, run }: PanelProps) {
                       </div>
                     </div>
                   )
+                )}
+                {r.state === 'manual_payout' && (
+                  <div className="op-actions">
+                    <label className="field"><span>{t.opLinkLabel}</span><input dir="ltr" maxLength={64} value={links[r.id] ?? ''} onChange={(e) => setLinks({ ...links, [r.id]: e.target.value })} /></label>
+                    <div className="campaign-actions">
+                      <button type="button" className="btn" disabled={!/^[A-Za-z0-9_-]{1,64}$/.test(links[r.id] ?? '')} onClick={() => void run(async () => { await api.linkDashboardRefund(r.id, links[r.id]!, r.manualMinor); refunds.reload(); setLocal((l) => { const { [r.id]: _gone, ...rest } = l; return rest; }); })}>{t.opLinkButton}</button>
+                    </div>
+                  </div>
                 )}
                 {r.state === 'manual_payout' && <div className="campaign-actions"><button type="button" className="btn" onClick={() => void run(async () => { await api.markRefundPaid(r.id); refunds.reload(); setLocal((l) => { const { [r.id]: _gone, ...rest } = l; return rest; }); })}>{t.opManualPaid}</button></div>}
               </li>

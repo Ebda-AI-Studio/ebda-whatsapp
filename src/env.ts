@@ -44,6 +44,8 @@ export type Env = {
   KASHIER_SECRET_KEY?: string;
   /** Kashier API origin for that call; default https://api.kashier.io (test: https://test-api.kashier.io). */
   KASHIER_API_URL?: string;
+  /** 'true' sends the card-refundable part of an approved refund to the provider's refund API. Default off: every refund is a manual payout. */
+  KASHIER_REFUNDS_ENABLED?: string;
   /** Hosted checkout origin; default https://checkout.kashier.io. */
   KASHIER_CHECKOUT_URL?: string;
   /** The card fee the merchant pays ON TOP of a top-up (WA-TOPUP-FEE-1): basis points of the amount, plus a fixed part in piasters. Set both before enabling. */

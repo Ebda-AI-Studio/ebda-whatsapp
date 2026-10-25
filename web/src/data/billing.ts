@@ -63,6 +63,8 @@ export interface OperatorApi {
   refundQueue(): Promise<RefundRequest[]>;
   decideRefund(id: string, decision: 'approve' | 'reject', note: string): Promise<RefundRequest>;
   markRefundPaid(id: string): Promise<void>;
+  /** The card was refunded in the provider's dashboard to pay this manual payout: links that refund so its webhook never debits again. */
+  linkDashboardRefund(id: string, kashierRefundId: string, amountMinor: number): Promise<void>;
   adjustments(): Promise<Adjustment[]>;
   createAdjustment(workspaceId: string, amountMinor: number, reason: string): Promise<Adjustment>;
   decideAdjustment(id: string, decision: 'approve' | 'reject'): Promise<Adjustment>;
