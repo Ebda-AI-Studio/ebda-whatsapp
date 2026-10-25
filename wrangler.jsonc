@@ -44,6 +44,10 @@
     { "name": "ebda-wa-import", "binding": "IMPORT_WORKFLOW", "class_name": "ImportWorkflow" },
     { "name": "ebda-wa-campaign", "binding": "CAMPAIGN_WORKFLOW", "class_name": "CampaignWorkflow" }
   ]
+  // ---- Billing (Phase 7). Switches and secrets (see docs/billing.md). TOPUPS_ENABLED stays off until Kashier is configured:
+  //   vars: TOPUPS_ENABLED ("true"), KASHIER_MERCHANT_ID, KASHIER_FEE_BPS, KASHIER_FEE_FIXED_MINOR, ADJUSTMENT_APPROVAL_MINOR
+  //   secret: KASHIER_API_KEY (`wrangler secret put`); service binding ACCOUNTS (entrypoint with isRevoked(sessionId)) is required for top-ups.
+  // Before a platform-paid number sends: publish a rate card + FX through /api/v1/operator and set the number's funding.
   // ---- AI agent (Phase 5). The knowledge base and the catalog search use a Vectorize index; it does not exist yet, so the binding
   // stays commented out (a binding to a missing index fails the deploy) and the agent answers without a knowledge base meanwhile.
   // Create it, then uncomment: `npx wrangler vectorize create ebda-wa-kb --dimensions=1024 --metric=cosine`

@@ -1,0 +1,60 @@
+# Billing (Phase 7)
+
+Backend only. The UI (wallet, operator console) is built separately against the DTOs in `src/core/api/contract.ts` ("Billing (Phase 7)" block). Amounts are integer piasters (EGP x 100); the currency is always EGP.
+
+## Who pays Meta (WA-FUND-1)
+`number_funding(phone_number_id, funding)` in D1, copied into each workspace.
+- `merchant_card`: Meta bills the merchant's card. The wallet is NEVER debited for these numbers; the message's Meta cost is recorded (`billable_sends.cost_usd_micros`) and shown on the statement (`cardCosts`).
+- `platform_line` (the plan calls it the Ebda line; `src/core/**` may not name the brand): the wallet pays. Used for the shared number.
+- **Funding must be KNOWN.** A number with no row is `unknown` and cannot send (`funding_unknown`: API 409, queued message failed with that reason, campaign paused `funding_unknown`, alert). Nothing stamps a default: the code path that creates a number writes it (`recordNumberFunding` / `fundingStatement` in `src/core/billing/funding.ts`): own-number connect (Phase 8.1) writes `merchant_card` in the same batch as the `phone_numbers` insert; the shared-number setup (8.2) writes `platform_line`; the operator can change it (`PUT /api/v1/operator/numbers/:id/funding`, audited). A miss triggers an eager re-pull (at most every 10 s) before refusing.
+- The wallet also pays for AI credits (separate ledger, below).
+
+## Money flow for a platform_line message
+1. **Price inputs** (D1, immutable effective-dated versions): `rate_cards(ver, effective_from, country, category, usd_micros)`, `fx_rates`, `pricing_settings` (margin, overdraft, FX buffer, VAT), `workspace_pricing_overrides` (margin per workspace). Each workspace copies them lazily (<= 30 min old; a workspace that never pulled decides nothing: claims defer 60 s, the API refuses). Rate cards/FX are published >= 24 h ahead, settings/overrides >= 1 h ahead, so the copy always has a version before it applies.
+2. **Pre-send** (at the API/Store-event queue for a refusal that writes nothing; at claim for everything): estimate = price by RECIPIENT market (calling code; unknown -> `ROW`) and category (a template's own category, everything else `service`) at the version in effect now. No price in effect -> refused `rate_unavailable` (never held at 0).
+   - marketing: needs `available >= estimate` and no debt, else `wallet_empty` (a campaign pauses `wallet_empty`).
+   - utility / service: may go down to `-credit_limit_minor` (default 50 EGP, WA-OVERDRAFT-1); beyond that they WAIT (<= 48 h, <= the 24 h window for free text): `wallet_wait` row, released FIFO when funds arrive, failed `wallet_empty_expired` at the deadline (fixed at the first wait).
+   - authentication that cannot be paid fails at once (`wallet_empty`) so the Store falls back to e-mail.
+   - `plan_blocked` (past_due / cancelled / expired) blocks marketing only.
+3. **Hold** `msg:<idempotencyKey>` (`wallet_holds`). `available = balance - held`. A campaign page reserves ONE parent hold `camp:<id>:p<n>`; its messages draw from it (no double reservation); the parent closes only when no message of the page is waiting.
+4. **Meta statuses** carry `pricing {billable, pricing_model, category, type}`. `sent` + pricing re-estimates the hold to Meta's category. The FIRST `delivered`/`read` with a billable flag charges (`meta_charge`, ref `meta:<wamid>`, unique) at the rate/FX/settings version in effect at DELIVERY time. Not billable -> hold released. `failed` -> released. Non-PMP model -> `unpriced` alert, no charge. A later status naming another category posts the difference as `meta_adjust` (`adj:<wamid>:<category>`). No status within 31 days -> hold `expired` by the sweep; a late billable event still charges (the charge never needs a hold).
+   - **No rate found at delivery** -> `pending_rate`: the hold STAYS; priced by the version in effect at delivery, else the earliest version after it, as soon as one arrives; after 7 days the held estimate is charged (alert). Never free.
+   - WA-SHARED-FREE-1: service replies on a platform number are charged at the service rate whatever Meta's billable flag says; the `shared_number_trueup` task rebates the difference (below).
+5. **Price**: `piasters = roundHalfEven(usd_micros x fx_micros x (10000 + margin_bps) x (10000 + fx_buffer_bps) / 10^18)` in BigInt, ONCE per row (the FX buffer adds to the plan's `/10^14` formula; with a zero buffer it is exactly that). VAT per row (`vat_bps`, 0 until Q5 is decided): `vat_minor = roundHalfEven(net x vat_bps / 10000)`. Statements sum stored rows; nothing is recomputed.
+
+## Tables (workspace Durable Object unless noted)
+| Table | Notes |
+|---|---|
+| `wallet_ledger` | append-only (UPDATE/DELETE refused by triggers); `kind` topup, meta_charge, meta_adjust, ai_charge, refund, chargeback, adjustment, grant, expire; `net_minor + vat_minor = amount_minor`; `balance_after` in the same synchronous transaction; `ref` UNIQUE; no phone numbers or names. |
+| `wallet_holds` | never deleted; state held/charged/released/expired; `parent_ref`; `closing`. |
+| `billable_sends` | one row per Meta message id; never deleted, never touched by erasure; `funding`, `delivered_at`, `charged_ref`, `pending_rate`, `unpriced`, `cost_usd_micros`. |
+| `ledger_outbox` -> D1 `ledger_mirror` | written in the same transaction as each ledger row (wallet AND AI credit), drained by the `ledger_drain` task; `mirrorCheck()` compares DO sums with D1 sums (alert `ledger_mirror_mismatch`). |
+| `credit_ledger` / `credit_holds` | AI credits (Phase 5 design: hold before the model, settle after; BYO-key never debited; grants, upgrade difference, `expire:<period>`, purchased credits roll over). |
+| `entitlements` | versioned copy of the subscription; older versions ignored; `subscription_expire` task at period end. |
+| `pricing_*`, `number_funding`, `wallet_waits` | copies / wait deadlines (not backed up). |
+| D1 | packages, workspace_subscriptions, number_funding, rate_cards, fx_rates, pricing_settings, workspace_pricing_overrides, ledger_mirror, billing_audit, topups, refund_requests, wallet_adjustments, shared_number_usage, shared_trueups. Version tables, audit and mirror are immutable (triggers). |
+Backup set adds `wallet_ledger, wallet_holds, billable_sends, ledger_outbox`; restore INSERTs into verified-empty tables, so the append-only triggers need no bypass. Erasing a contact releases its holds and deletes messages but never touches a money table.
+
+## Invariants (each has a test)
+append-only ledger; `balance_after` chain; one charge per wamid under duplicate/out-of-order webhooks (incl. statuses before the accept); concurrent holds cannot exceed available; every terminal message path settles its hold (enqueue failure, opted-out drop, plan lapse, cancelled campaign, non-retryable failure, 131049 failure, rate-limited code, erasure, webhook failed, wait expiry, sweep); D1 mirror sum = DO sum after a drain; erasure leaves money intact; merchant_card numbers never debit; unknown funding / empty copy / missing rate never mean "free".
+
+## Packages and entitlements (7.1)
+`workspace_subscriptions(version)` in D1 -> `applyEntitlement` event (versions only move forward). Daily cron (`17 1 * * *`, the only cron) re-sends every subscription and repairs lost top-up webhooks. A new period grants `grant:<period_start>:<package>` AI credits and expires the last period's unused grant; an upgrade grants the difference. The Store's pinned `store.plan_changed` is unchanged.
+
+## Top-ups (7.4), `TOPUPS_ENABLED=true`
+`POST /wallet/topups {amountMinor}` (owner, session not revoked via the `ACCOUNTS` binding `isRevoked(sid)`; unbound -> 503) writes a pending D1 `topups` row and returns the hosted checkout URL. The merchant pays the card fee ON TOP (`KASHIER_FEE_BPS`, `KASHIER_FEE_FIXED_MINOR`); the wallet is credited the exact amount (WA-TOPUP-FEE-1). `POST /kashier/webhook`: HMAC-SHA256 (hex, constant-time) over the documented fields (https://developers.kashier.io/docs/webhooks); SUCCESS + order id + amount + currency must match OUR row; the workspace comes from the row; credit ref `kashier:<transactionId>`; debt is settled first by arithmetic. The browser return (`GET /wallet/topups/:orderId`) only reads. Provider refund/chargeback -> negative `chargeback` row + alert. Secrets: `KASHIER_API_KEY` (secret), `KASHIER_MERCHANT_ID`. NOT verified live: checkout link, inquiry, refund (inquiry/refund are `unsupported` behind the `PaymentProvider` interface).
+
+## Merchant API (under `/api/v1/stores/:storeId`)
+`GET /wallet`, `GET /wallet/statement?month=YYYY-MM[&format=csv]` (owner/operator), `GET /wallet/estimate?category=&count=&country=`, `POST /wallet/topups`, `GET /wallet/topups/:orderId`, `GET|POST /wallet/refund-requests` (owner; WA-REFUND-1 rules: plan period over, <= 12 months, >= 50 EGP, <= the positive available balance, debt first).
+
+## Operator API (`/api/v1/operator/*`, super admin only)
+Pricing settings (`GET|POST /pricing-settings`; new version >= 1 h ahead, reason required, audited old -> new), `GET|POST /pricing-overrides/:workspaceId`, `GET|POST /rate-cards` and `/fx-rates` (>= 24 h ahead), `PUT /numbers/:phoneNumberId/funding`, `GET /refund-requests`, `POST /refund-requests/:id/decision` (approve debits the wallet, refunds the card FIFO through the provider, the rest is a manual bank/InstaPay payout) and `/manual-paid`, `POST /workspaces/:id/adjustments` + `POST /adjustments/:id/decision` (above `ADJUSTMENT_APPROVAL_MINOR` a DIFFERENT super admin approves), `POST /trueups`, `GET /workspaces/:id/wallet`, `GET /change-log`.
+
+## Month close (WA-SHARED-FREE-1)
+Each workspace's `shared_number_trueup` task reports its service charges per platform number to `shared_number_usage`; the operator enters what Meta actually billed (`POST /trueups`, once per month+number); the task then credits the workspace its pro-rata share of `max(0, charged - actual)` as one `meta_adjust` `trueup:<yyyy-mm>:<workspace>`. Meta's own pricing analytics are not pulled automatically (operator-fed).
+
+## Switches and secrets
+`TOPUPS_ENABLED` (default off), `KASHIER_MERCHANT_ID`, `KASHIER_API_KEY`, `KASHIER_CHECKOUT_URL`, `KASHIER_FEE_BPS`, `KASHIER_FEE_FIXED_MINOR`, `ACCOUNTS` (service binding), `ADJUSTMENT_APPROVAL_MINOR`. Launch defaults in D1: margin 0%, overdraft 50 EGP, VAT 0 (Q5 open), no rate cards and no FX (publish both before a platform number sends).
+
+## Alerts (structured logs)
+`funding_unknown`, `rate_unavailable`, `rate_missing_pending`, `rate_missing_estimate_charged`, `pricing_copy_missing`, `pricing_pull_failed`, `billing_unpriced_model`, `wallet_low_balance`, `wallet_wait_expired`, `ledger_mirror_mismatch`, `shared_trueup_not_published`, `topup_*`.
