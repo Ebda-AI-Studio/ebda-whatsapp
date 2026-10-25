@@ -225,7 +225,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
 
   return (
     <div className="app" data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
-      <Rail t={t} view={view} onNavigate={setView} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, operator: source.role === 'super_admin' && !!source.operator }} />
+      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, operator: source.role === 'super_admin' && !!source.operator }} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
         : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} />

@@ -61,6 +61,8 @@ textarea { caret-color: var(--gold-ink); }
 .rail a { width: 56px; min-height: 56px; display: grid; place-items: center; gap: 2px; border-radius: 12px; color: var(--on-night-2); text-decoration: none; font-size: 12px; padding: 6px 0; }
 .rail a[aria-current='page'] { background: var(--night-2); color: var(--lift); }
 .rail a:hover { color: var(--on-night); }
+.rail-signout { margin-top: auto; width: 56px; min-height: 56px; display: grid; place-items: center; gap: 2px; border: 0; background: none; border-radius: 12px; color: var(--on-night-2); font: inherit; font-size: 12px; padding: 6px 0; cursor: pointer; }
+.rail-signout:hover { color: var(--on-night); }
 .list-meta { display: inline-flex; align-items: center; gap: 10px; }
 .lang-btn { border: 1px solid var(--line); background: var(--paper); border-radius: 999px; min-height: 32px; padding: 0 12px; font-size: 13px; cursor: pointer; }
 

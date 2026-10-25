@@ -276,3 +276,95 @@ describe('signed out', () => {
     expect(new OidcSignInError('state').code).toBe('state');
   });
 });
+
+// ---- review fixes: azp, transaction age, RFC 9207 iss, sign-out ------------------------------------------------------------------
+describe('callback hardening', () => {
+  const END = `${ISS}/protocol/openid-connect/logout`;
+  /** A full sign-in through the callback; `idClaims` extend the ID token, `search` rewrites the callback query. */
+  async function signedIn(o: { idClaims?: (nonce: string) => object; search?: (state: string) => string; discovery?: object; cfg?: Partial<{ refresh: boolean }> } = {}) {
+    const tokenFn = { current: (_b: URLSearchParams, _n: number): object => ({}) };
+    const h = setup({ cfg: o.cfg ?? {}, prov: provider({ discovery: o.discovery ?? DISCOVERY, token: (b, n) => tokenFn.current(b, n) }) });
+    const start = await signInStart(h);
+    tokenFn.current = () => ({ access_token: 'AT-1', expires_in: 600, id_token: idToken({ nonce: start.nonce, ...(o.idClaims ? o.idClaims(start.nonce) : {}) }), refresh_token: 'RT-1' });
+    const run = () => h.s.handleCallback(o.search ? o.search(start.state) : `?code=C&state=${start.state}`);
+    return { h, run, start };
+  }
+
+  it('an ID token with several audiences needs azp equal to our client id (OIDC Core 3.1.3.7)', async () => {
+    for (const claims of [{ aud: [CLIENT, 'other'] }, { aud: [CLIENT, 'other'], azp: 'other' }]) {
+      const { run } = await signedIn({ idClaims: () => claims });
+      await expect(run(), JSON.stringify(claims)).rejects.toMatchObject({ code: 'claims' });
+    }
+    const ok = await signedIn({ idClaims: () => ({ aud: [CLIENT, 'other'], azp: CLIENT }) });
+    await expect(ok.run()).resolves.toEqual({ returnTo: '/inbox' });
+  });
+  it('a transaction older than 10 minutes is refused, and a stale one is cleared when the session is created', async () => {
+    const { h, run } = await signedIn();
+    h.t.now += 10 * 60_000 + 1;
+    await expect(run()).rejects.toMatchObject({ code: 'state' });
+    expect(h.prov.calls.some((c) => c.url === DISCOVERY.token_endpoint)).toBe(false);
+    // a leftover from an abandoned sign-in
+    const store = memoryStorage();
+    store.api.setItem('oidc:txn', JSON.stringify({ state: 's', nonce: 'n', verifier: 'v', returnTo: '/', at: 1 }));
+    createOidcSession({ oidc: { issuer: ISS, clientId: CLIENT }, origin: ORIGIN, fetchImpl: provider().fetchImpl, now: () => 1 + 11 * 60_000, session: store.api, redirect: () => {}, replaceUrl: () => {} });
+    expect(store.m.size).toBe(0);
+  });
+  it('a transaction with no creation time (written by something else) is refused', async () => {
+    const h = setup();
+    const start = await signInStart(h);
+    const txn = JSON.parse(h.session.m.get('oidc:txn')!) as Record<string, unknown>;
+    delete txn.at;
+    h.session.m.set('oidc:txn', JSON.stringify(txn));
+    await expect(h.s.handleCallback(`?code=C&state=${start.state}`)).rejects.toMatchObject({ code: 'state' });
+  });
+  it('RFC 9207: an iss callback parameter must equal the pinned issuer (mix-up defence); absent is fine', async () => {
+    const bad = await signedIn({ search: (s) => `?code=C&state=${s}&iss=${encodeURIComponent('https://evil.example')}` });
+    await expect(bad.run()).rejects.toMatchObject({ code: 'state' });
+    expect(bad.h.prov.calls.some((c) => c.url === DISCOVERY.token_endpoint)).toBe(false);
+    const good = await signedIn({ search: (s) => `?code=C&state=${s}&iss=${encodeURIComponent(ISS)}` });
+    await expect(good.run()).resolves.toBeTruthy();
+  });
+
+  describe('sign-out', () => {
+    it('clears the tokens and the transaction, then goes to the discovered end_session_endpoint with the hint, client id and the app origin', async () => {
+      const { h, run } = await signedIn({ discovery: { ...DISCOVERY, end_session_endpoint: END } });
+      await run();
+      expect(await h.s.getToken()).toBe('AT-1');
+      const before = h.redirects.length;
+      expect(await h.s.signOut()).toBe('redirected');
+      const url = new URL(h.redirects[before]!);
+      expect(`${url.origin}${url.pathname}`).toBe(END);
+      expect(url.searchParams.get('id_token_hint')).toMatch(/^[\w-]+\.[\w-]+\.sig$/);
+      expect(url.searchParams.get('post_logout_redirect_uri')).toBe(`${ORIGIN}/`);
+      expect(url.searchParams.get('client_id')).toBe(CLIENT);
+      expect(h.session.m.size).toBe(0);
+      // nothing left in memory: asking for a token now means signing in again (not the old token)
+      await expect(h.s.getToken()).rejects.toThrow('signed out');
+    });
+    it('the ID token is kept only for this: never written to storage, and gone after sign-out', async () => {
+      const { h, run } = await signedIn({ discovery: { ...DISCOVERY, end_session_endpoint: END } });
+      await run();
+      await h.s.signOut();
+      expect(h.session.writes.join('|')).not.toMatch(/\.sig/);
+      expect(await h.s.signOut()).toBe('local'); // a second sign-out has no hint to send
+    });
+    it('a cross-origin end_session_endpoint is never followed: it signs out locally and says so', async () => {
+      const { h, run } = await signedIn({ discovery: { ...DISCOVERY, end_session_endpoint: 'https://evil.example/logout' } });
+      await run();
+      const before = h.redirects.length;
+      expect(await h.s.signOut()).toBe('local');
+      expect(h.redirects.length).toBe(before);
+      await expect(h.s.getToken()).rejects.toThrow('signed out');
+      expect(h.redirects.length).toBe(before); // a signed-out page never bounces to the provider by itself (its session would sign the next person in)
+    });
+    it('a provider without end_session_endpoint signs out locally, and the refresh token is dropped too', async () => {
+      const { h, run } = await signedIn({ cfg: { refresh: true } });
+      await run();
+      expect(await h.s.signOut()).toBe('local');
+      expect(h.prov.calls.filter((c) => c.body?.get('grant_type') === 'refresh_token')).toHaveLength(0);
+      await expect(h.s.getToken()).rejects.toThrow('signed out');
+      // getToken after a local sign-out starts a NEW sign-in (it must not silently reuse a refresh token)
+      expect(h.prov.calls.filter((c) => c.body?.get('grant_type') === 'refresh_token')).toHaveLength(0);
+    });
+  });
+});

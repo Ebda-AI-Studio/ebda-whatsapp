@@ -11,6 +11,8 @@ export const CALLBACK_PATH = '/auth/callback';
 const TXN_KEY = 'oidc:txn';
 const REFRESH_EARLY_MS = 60_000;
 const CLOCK_SKEW_MS = 60_000;
+/** A sign-in that has not come back within this long is abandoned: its transaction is refused and cleared. */
+const TXN_MAX_AGE_MS = 10 * 60_000;
 
 export type SignInErrorCode = 'denied' | 'state' | 'nonce' | 'token' | 'discovery' | 'missing_id_token' | 'claims';
 export class OidcSignInError extends Error {
@@ -42,6 +44,7 @@ const discoveryDoc = z.object({
   issuer: z.string(),
   authorization_endpoint: https,
   token_endpoint: https,
+  end_session_endpoint: z.string().optional(),
   code_challenge_methods_supported: z.array(z.string()).optional(),
 }).loose();
 const tokenResponse = z.object({
@@ -62,7 +65,7 @@ function claimsOf(jwt: string): Record<string, unknown> | null {
 }
 
 type SessionStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
-type Txn = { state: string; nonce: string; verifier: string; returnTo: string };
+type Txn = { state: string; nonce: string; verifier: string; returnTo: string; at: number };
 type Opts = {
   oidc: OidcWebConfig;
   /** This page's origin (the redirect uri is `<origin>/auth/callback`). */
@@ -85,11 +88,13 @@ export function createOidcSession(o: Opts) {
 
   let access: { token: string; expiresAt: number } | null = null;
   let refreshToken: string | null = null;
-  let endpoints: Promise<{ authorize: string; token: string }> | null = null;
+  let idTokenHint: string | null = null; // memory only, kept for RP-initiated logout (id_token_hint) and nothing else
+  let signedOut = false;
+  let endpoints: Promise<{ authorize: string; token: string; endSession: string | null }> | null = null;
   let inflight: Promise<string> | null = null;
 
   /** Discovery, pinned: same issuer string, https, and both endpoints on the issuer's origin (so the CSP needs that one origin). */
-  function discover(): Promise<{ authorize: string; token: string }> {
+  function discover(): Promise<{ authorize: string; token: string; endSession: string | null }> {
     endpoints ??= (async () => {
       try {
         const res = await f(`${o.oidc.issuer.replace(/\/$/, '')}/.well-known/openid-configuration`);
@@ -97,7 +102,10 @@ export function createOidcSession(o: Opts) {
         const sameOrigin = (u: string) => new URL(u).origin === issuerOrigin;
         const s256 = !doc.code_challenge_methods_supported || doc.code_challenge_methods_supported.includes('S256');
         if (!res.ok || doc.issuer !== o.oidc.issuer || !sameOrigin(doc.authorization_endpoint) || !sameOrigin(doc.token_endpoint) || !s256) throw new Error('rejected');
-        return { authorize: doc.authorization_endpoint, token: doc.token_endpoint };
+        // The logout endpoint is followed only if it is https and on the pinned issuer's origin; anything else is treated as absent.
+        let endSession: string | null = null;
+        try { if (doc.end_session_endpoint && doc.end_session_endpoint.startsWith('https://') && sameOrigin(doc.end_session_endpoint)) endSession = doc.end_session_endpoint; } catch { endSession = null; }
+        return { authorize: doc.authorization_endpoint, token: doc.token_endpoint, endSession };
       } catch {
         endpoints = null;
         throw new OidcSignInError('discovery');
@@ -109,7 +117,8 @@ export function createOidcSession(o: Opts) {
   async function startSignIn(returnTo: string): Promise<void> {
     const ep = await discover();
     const { verifier, challenge } = await pkcePair();
-    const txn: Txn = { state: randomToken(16), nonce: randomToken(16), verifier, returnTo: safeReturnPath(returnTo) };
+    const txn: Txn = { state: randomToken(16), nonce: randomToken(16), verifier, returnTo: safeReturnPath(returnTo), at: now() };
+    signedOut = false;
     store.setItem(TXN_KEY, JSON.stringify(txn));
     const url = new URL(ep.authorize);
     const q = url.searchParams;
@@ -146,7 +155,9 @@ export function createOidcSession(o: Opts) {
     let txn: Txn | null = null;
     try { txn = raw ? (JSON.parse(raw) as Txn) : null; } catch { txn = null; }
     const state = params.get('state');
-    if (!txn || !state || state !== txn.state) throw new OidcSignInError('state');
+    if (!txn || !state || state !== txn.state || typeof txn.at !== 'number' || now() - txn.at > TXN_MAX_AGE_MS || txn.at > now() + CLOCK_SKEW_MS) throw new OidcSignInError('state');
+    // RFC 9207 (mix-up defence): when the provider names its issuer in the answer, it must be the one we started with.
+    if (params.has('iss') && params.get('iss') !== o.oidc.issuer) throw new OidcSignInError('state');
     if (params.get('error')) throw new OidcSignInError('denied');
     const code = params.get('code');
     if (!code) throw new OidcSignInError('token');
@@ -157,8 +168,12 @@ export function createOidcSession(o: Opts) {
     if (!c) throw new OidcSignInError('claims');
     if (c.nonce !== txn.nonce) throw new OidcSignInError('nonce');
     const aud = Array.isArray(c.aud) ? c.aud : [c.aud];
+    // Several audiences: the authorised party (azp) must be us (OIDC Core 3.1.3.7 step 5).
+    if (aud.length > 1 && c.azp !== o.oidc.clientId) throw new OidcSignInError('claims');
     if (c.iss !== o.oidc.issuer || !aud.includes(o.oidc.clientId) || typeof c.exp !== 'number' || c.exp * 1000 + CLOCK_SKEW_MS <= now()) throw new OidcSignInError('claims');
-    keep(t); // the ID token goes no further than this function
+    keep(t);
+    idTokenHint = t.id_token; // memory only; used for nothing but id_token_hint at sign-out
+    signedOut = false;
     replaceUrl(txn.returnTo);
     return { returnTo: txn.returnTo };
   }
@@ -174,13 +189,42 @@ export function createOidcSession(o: Opts) {
         refreshToken = null; // fall through to signing in again
       }
     }
+    if (signedOut) throw new Error('signed out'); // signed out here: only an explicit sign-in starts another one
     access = null;
     await startSignIn(`${location.pathname}${location.search}`);
     throw new Error('signed out');
   }
 
+  /**
+   * Signs out of this page AND, when the provider supports it, of the provider's own session (otherwise the next person on a shared PC is
+   * signed straight back in as the previous one). Tokens, refresh token, ID token and any pending transaction are cleared first.
+   * Returns 'redirected' (going to the provider's end_session_endpoint) or 'local' (nothing more we can do: tell the person to sign out at the provider).
+   */
+  async function signOut(): Promise<'redirected' | 'local'> {
+    const hint = idTokenHint;
+    access = null; refreshToken = null; idTokenHint = null; inflight = null; signedOut = true;
+    store.removeItem(TXN_KEY);
+    let endSession: string | null = null;
+    try { endSession = (await discover()).endSession; } catch { endSession = null; }
+    if (!endSession || !hint) return 'local';
+    const url = new URL(endSession);
+    url.searchParams.set('id_token_hint', hint);
+    url.searchParams.set('post_logout_redirect_uri', `${o.origin}/`);
+    url.searchParams.set('client_id', o.oidc.clientId);
+    redirect(url.toString());
+    return 'redirected';
+  }
+
+  // An abandoned sign-in leaves its transaction behind; drop it rather than keep a verifier around.
+  try {
+    const raw = store.getItem(TXN_KEY);
+    const at = raw ? (JSON.parse(raw) as Partial<Txn>).at : undefined;
+    if (raw && (typeof at !== 'number' || now() - at > TXN_MAX_AGE_MS)) store.removeItem(TXN_KEY);
+  } catch { store.removeItem(TXN_KEY); }
+
   return {
     startSignIn,
+    signOut,
     handleCallback,
     async getToken(): Promise<string> {
       if (access && now() < access.expiresAt - REFRESH_EARLY_MS) return access.token;

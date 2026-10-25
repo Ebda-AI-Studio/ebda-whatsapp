@@ -1,4 +1,4 @@
-import { Megaphone, MessagesSquare, Bot, Phone, ShieldCheck, Sparkles, Users, Wallet } from 'lucide-react';
+import { LogOut, Megaphone, MessagesSquare, Bot, Phone, ShieldCheck, Sparkles, Users, Wallet } from 'lucide-react';
 import { BRAND } from '@brand';
 import type { ReactNode } from 'react';
 import type { Strings } from '../i18n';
@@ -6,7 +6,7 @@ import type { Strings } from '../i18n';
 // Only sections that exist are listed: templates and settings join the rail when their screens ship.
 export type View = 'inbox' | 'campaigns' | 'contacts' | 'agent' | 'bot' | 'numbers' | 'wallet' | 'operator';
 
-export function Rail({ t, view, onNavigate, show }: { t: Strings; view: View; onNavigate: (v: View) => void; show: Record<Exclude<View, 'inbox'>, boolean> }) {
+export function Rail({ t, view, onNavigate, show, onSignOut }: { t: Strings; view: View; onNavigate: (v: View) => void; show: Record<Exclude<View, 'inbox'>, boolean>; onSignOut?: (() => void) | undefined }) {
   const item = (v: View, icon: ReactNode, label: string) => (
     <a href={`#${v}`} aria-current={view === v ? 'page' : undefined} onClick={(e) => { e.preventDefault(); onNavigate(v); }}>{icon}<span>{label}</span></a>
   );
@@ -21,6 +21,7 @@ export function Rail({ t, view, onNavigate, show }: { t: Strings; view: View; on
       {show.numbers && item('numbers', <Phone size={20} aria-hidden />, t.numbersNav)}
       {show.wallet && item('wallet', <Wallet size={20} aria-hidden />, t.walletNav)}
       {show.operator && item('operator', <ShieldCheck size={20} aria-hidden />, t.opNav)}
+      {onSignOut && <button type="button" className="rail-signout" onClick={onSignOut}><LogOut size={20} aria-hidden /><span>{t.signOut}</span></button>}
     </nav>
   );
 }

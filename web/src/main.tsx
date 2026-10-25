@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { accountsUrlFor, chooseMode, pickStore, signInMode } from './boot';
 import { SignInError } from './components/SignInError';
+import { SignedOutLocally } from './components/SignedOutLocally';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
 import { connectRealtime, createApiSource } from './data/api';
 import { createTokenProvider, decodeStores, decodeSub } from './data/auth';
@@ -29,6 +30,7 @@ async function boot(): Promise<void> {
     const mode = signInMode(ACCOUNTS_URL, BRAND.oidc);
     if (mode === 'none') { root.render(<SignInNotConfigured />); return; }
     let tokens: { getToken: () => Promise<string> };
+    let oidcSession: ReturnType<typeof createOidcSession> | null = null;
     if (mode === 'oidc') {
       const session = createOidcSession({ oidc: BRAND.oidc!, origin: location.origin });
       if (location.pathname === CALLBACK_PATH) {
@@ -42,6 +44,7 @@ async function boot(): Promise<void> {
         }
       }
       tokens = session;
+      oidcSession = session;
     } else {
       tokens = createTokenProvider({ accountsUrl: ACCOUNTS_URL! });
     }
@@ -60,6 +63,15 @@ async function boot(): Promise<void> {
       fetchEvents: api.fetchEvents,
     });
     await api.loadCapabilities();
+    if (oidcSession) {
+      const session = oidcSession;
+      api.signOut = () => {
+        void session.signOut().then((r) => {
+          // 'redirected' = on its way to the provider's logout page. 'local' = the provider gave no way to end its own session.
+          if (r === 'local') root.render(<SignedOutLocally onSignIn={() => { void session.startSignIn('/'); }} />);
+        });
+      };
+    }
     source = api;
   }
   root.render(
