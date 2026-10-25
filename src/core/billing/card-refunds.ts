@@ -458,8 +458,8 @@ export async function reverseUnreversedChunks(env: Env, requestId: string, works
  * (`swept_at`), reverses what is eligible and marks each one it finished (clean or blocked-and-alerted) once it is past the grace window, so a backlog is worked off across
  * passes and older requests never starve behind newer ones.
  */
-export async function sweepAbandonedRefunds(env: Env, now = Date.now()): Promise<{ checked: number; reversed: number }> {
-  const { results } = await env.DB.prepare("SELECT id, workspace_id FROM refund_requests WHERE state = 'abandoned' AND swept_at IS NULL ORDER BY abandoned_at ASC, id ASC LIMIT 200").all<{ id: string; workspace_id: string }>();
+export async function sweepAbandonedRefunds(env: Env, now = Date.now(), batch = 200): Promise<{ checked: number; reversed: number }> {
+  const { results } = await env.DB.prepare("SELECT id, workspace_id FROM refund_requests WHERE state = 'abandoned' AND swept_at IS NULL ORDER BY abandoned_at ASC, id ASC LIMIT ?").bind(batch).all<{ id: string; workspace_id: string }>();
   let reversed = 0;
   for (const r of results) {
     try {
