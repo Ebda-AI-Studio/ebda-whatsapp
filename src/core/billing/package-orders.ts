@@ -14,7 +14,7 @@
  */
 import type { Env } from '../../env';
 import { sessionState } from '../identity/session';
-import { packagesEnabled, paymentProvider, type ParsedWebhook } from './payments';
+import { packagesEnabled, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { MONTH_SQL, announceSubscription, fallbackToStorePlan, setSubscription } from './subscriptions';
 
 const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
@@ -276,12 +276,34 @@ async function finishRefund(env: Env, orderId: string, refundRef: string, now: n
   }
 }
 
+/** A pending order is asked about after this long (the webhook normally arrives within seconds); an unpaid one is asked about for a week. */
+export const REPAIR_AFTER_MS = 15 * 60_000;
+export const INQUIRE_UNTIL_MS = 7 * 86_400_000;
+
 /**
- * Daily: a `paid` order that was never granted (no batch ran) is granted now and reported; pending orders older than 24 h expire
- * (a payment that still arrives is granted, see `grantOrder`).
+ * Daily: (1) a pending or expired order whose webhook never came is looked up with Kashier by our order id; a confirmed payment goes through
+ * `applyPackageWebhook`, the webhook's own claim/grant path (so a repair racing the webhook grants once); an unreachable Kashier changes
+ * nothing and the order is asked again tomorrow. (2) A `paid` order that was never granted (no batch ran) is granted now and reported.
+ * (3) Pending orders older than 24 h expire (a payment that still arrives is granted, see `grantOrder`).
  */
-export async function repairPackageOrders(env: Env, now = Date.now()): Promise<{ granted: number; expired: number }> {
+export async function repairPackageOrders(env: Env, now = Date.now(), provider: PaymentProvider | null = paymentProvider(env)): Promise<{ granted: number; expired: number; confirmed: number }> {
   let granted = 0;
+  let confirmed = 0;
+  if (packagesEnabled(env) && provider) {
+    const { results: stuck } = await env.DB.prepare(`SELECT ${COLS} FROM package_orders WHERE status IN ('pending', 'expired') AND created_at < ? AND created_at > ? ORDER BY created_at LIMIT 200`)
+      .bind(now - REPAIR_AFTER_MS, now - INQUIRE_UNTIL_MS).all<PackageOrderRow>();
+    for (const row of stuck) {
+      try {
+        const q = await provider.inquire(row.order_id);
+        if (q === 'unsupported' || q === 'unavailable' || q.status === 'PENDING') continue;
+        if (q.status === 'SUCCESS' && !q.transactionId) continue;
+        const ev: ParsedWebhook = { event: 'pay', status: q.status, orderId: row.order_id, transactionId: q.transactionId ?? `none:${row.order_id}`, amountMinor: q.amountMinor ?? -1, currency: q.currency ?? '', eventKey: `kashier:${q.transactionId ?? row.order_id}:${q.status}` };
+        if ((await applyPackageWebhook(env, row, ev, now)) === 'granted') confirmed++;
+      } catch (err) {
+        alert('package_repair_failed', { orderId: row.order_id, error: errName(err) });
+      }
+    }
+  }
   const { results } = await env.DB.prepare(`SELECT ${COLS} FROM package_orders WHERE status = 'paid' AND granted_at IS NULL AND provider_ref IS NOT NULL ORDER BY created_at LIMIT 200`).all<PackageOrderRow>();
   for (const row of results) {
     alert('package_paid_not_granted', { workspace: row.workspace_id, orderId: row.order_id });
@@ -292,5 +314,5 @@ export async function repairPackageOrders(env: Env, now = Date.now()): Promise<{
     }
   }
   const exp = await env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE status = 'pending' AND created_at < ?").bind(now - PENDING_EXPIRES_AFTER_MS).run();
-  return { granted, expired: exp.meta.changes };
+  return { granted, expired: exp.meta.changes, confirmed };
 }

@@ -247,17 +247,14 @@ export async function repairTopups(env: Env, provider: PaymentProvider | null = 
     }
     const q = await provider.inquire(row.order_id);
     if (q === 'unsupported') { unsupported = true; continue; }
-    if (q === 'unavailable') continue;
-    if (q.status === 'FAILURE') {
-      await env.DB.prepare("UPDATE topups SET state = 'failed' WHERE order_id = ? AND state = 'pending'").bind(row.order_id).run();
-    } else if (q.status === 'SUCCESS' && q.transactionId && q.amountMinor === row.total_minor && q.currency === row.currency) {
-      try {
-        const c = await credit(env, row, q.transactionId, now);
-        if (c === 'credited') { credited++; await rerunHeldRefunds(env, row.order_id, provider, now); }
-        else if (c === 'conflict') alert('duplicate_success', { kind: 'topup', workspace: row.workspace_id });
-      } catch (err) {
-        alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' });
-      }
+    if (q === 'unavailable' || q.status === 'PENDING') continue;
+    if (q.status === 'SUCCESS' && !q.transactionId) continue;
+    // The webhook's own apply path (claim on the transaction id, amount/currency check with its alert), so there is no second way to credit.
+    const ev: ParsedWebhook = { event: 'pay', status: q.status, orderId: row.order_id, transactionId: q.transactionId ?? `none:${row.order_id}`, amountMinor: q.amountMinor ?? -1, currency: q.currency ?? '', eventKey: `kashier:${q.transactionId ?? row.order_id}:${q.status}` };
+    try {
+      if ((await applyTopupWebhook(env, row, ev, now)) === 'credited') { credited++; await rerunHeldRefunds(env, row.order_id, provider, now); }
+    } catch (err) {
+      alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' });
     }
   }
   if (unsupported) alert('topup_inquiry_unsupported');

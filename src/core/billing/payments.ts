@@ -7,11 +7,13 @@
  * hex digest, compared case-insensitively; `data.status` (not `event`) says success; `data.hash` is ignored.
  *
  * NOT VERIFIED against a live account: the hosted checkout link (`createSession`), the inquiry and the refund calls. They are behind
- * the interface; `KashierProvider` implements the checkout link from Kashier's published payment-hash scheme and reports inquiry and
- * refund as unsupported until they are confirmed with real credentials (callers then keep the item for a person: see Ruling in the ledger).
+ * the interface; `KashierProvider` implements the checkout link from Kashier's published payment-hash scheme. Inquiry is built on the
+ * documented transaction list (`GET /v2/aggregator/transactions?search=<our order id>&type=payment`, https://developers.kashier.io/openapi.yaml,
+ * `listTransactions`) and then confirmed with the transaction-details call the webhook path uses. The refund call is added behind
+ * `KASHIER_REFUNDS_ENABLED` (see `refund` below).
  */
 import type { Env } from '../../env';
-import { KashierUnconfirmedError, classifyKashierTransaction, kashierTransactionDetailsPath } from './kashier-confirm';
+import { KashierUnconfirmedError, TRANSACTION_ID, classifyKashierTransaction, kashierTransactionDetailsPath } from './kashier-confirm';
 
 export type ProviderEvent = 'pay' | 'refund' | 'other';
 export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string; /** A chargeback (Kashier's `reversal` operation). Only ever set by `confirm`, from Kashier's own record. */ chargeback?: true; /** `kashier:<transactionId>:<status>`: built from SIGNED values only, never from the unsigned `event` label. */ eventKey?: string };
@@ -122,8 +124,48 @@ export class KashierProvider implements PaymentProvider {
     return { event: ev, status, orderId: data.merchantOrderId, transactionId: data.transactionId, amountMinor, currency: data.currency, eventKey: `kashier:${data.transactionId}:${data.status}` };
   }
 
-  async inquire(): Promise<'unsupported'> {
-    return 'unsupported';
+  /**
+   * Our order id is the `merchantOrderId` Kashier knows. The documented list call has a `search` filter ("keyword for trxId or merchant
+   * orderId"); only rows whose `merchantOrderId` equals our id exactly are candidates, and EVERY candidate is then confirmed with the
+   * transaction-details call the webhook path uses (status, kind and order come from that record, never from the list). The amount and
+   * currency come from the list row (details carry no amount in the documented example); a wrong guess there only ever fails closed
+   * (the caller sees a mismatch). Anything unclear is `unavailable`, retried on the next pass; several successful payments for one
+   * order are not guessed between (alert). NOT VERIFIED live: the list row's amount field (`amount` or `totalAuthorizedAmount`).
+   */
+  async inquire(orderId: string): Promise<Inquiry | 'unsupported' | 'unavailable'> {
+    if (!this.secretKey || !/^https:\/\//i.test(this.apiBase) || !TRANSACTION_ID.test(orderId)) return 'unavailable';
+    const get = async (url: string): Promise<unknown> => {
+      const res = await this.fetchImpl(url, { method: 'GET', headers: { Authorization: this.secretKey!, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new KashierUnconfirmedError(`answered ${res.status}`);
+      return res.json();
+    };
+    try {
+      const listed = await get(`${this.apiBase}/v2/aggregator/transactions?search=${encodeURIComponent(orderId)}&type=payment&limit=20`);
+      const rows = listed && typeof listed === 'object' ? (listed as { body?: unknown }).body : undefined;
+      if (!Array.isArray(rows)) return 'unavailable';
+      const candidates = new Map<string, { amountMinor: number | null; currency: string | null }>();
+      for (const r of rows) {
+        if (!r || typeof r !== 'object') continue;
+        const row = r as Record<string, unknown>;
+        if (row.merchantOrderId !== orderId || typeof row.transactionId !== 'string' || (typeof row.type === 'string' && row.type.toUpperCase() !== 'PAYMENT')) continue;
+        if (!candidates.has(row.transactionId)) candidates.set(row.transactionId, { amountMinor: egpToMinor(row.amount ?? row.totalAuthorizedAmount), currency: typeof row.currency === 'string' ? row.currency : null });
+      }
+      const confirmed: { transactionId: string; status: Inquiry['status']; amountMinor: number | null; currency: string | null }[] = [];
+      for (const [transactionId, listedRow] of candidates) {
+        const txn = classifyKashierTransaction(await get(`${this.apiBase}${kashierTransactionDetailsPath(transactionId)}`), { transactionId, merchantOrderId: orderId });
+        if (txn.kind === 'payment') confirmed.push({ transactionId, status: txn.status, ...listedRow });
+      }
+      const paid = confirmed.filter((c) => c.status === 'SUCCESS');
+      if (paid.length > 1) {
+        console.error(JSON.stringify({ alert: 'inquiry_multiple_success', orderId, count: paid.length }));
+        return 'unavailable';
+      }
+      if (paid.length === 1) return { status: 'SUCCESS', transactionId: paid[0]!.transactionId, amountMinor: paid[0]!.amountMinor, currency: paid[0]!.currency };
+      if (confirmed.length > 0 && confirmed.every((c) => c.status === 'FAILURE')) return { status: 'FAILURE', transactionId: null, amountMinor: null, currency: null };
+      return { status: 'PENDING', transactionId: null, amountMinor: null, currency: null };
+    } catch {
+      return 'unavailable';
+    }
   }
 
   async refund(): Promise<RefundResult> {
