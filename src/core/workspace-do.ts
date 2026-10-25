@@ -1684,15 +1684,35 @@ export class WorkspaceDO extends DurableObject<Env> {
     await this.arm();
   }
 
+  /** The alarm's run while it is in flight: a direct caller of runDueTasks waits for it (see there). */
+  private alarmRun: Promise<unknown> | null = null;
+
   async alarm(): Promise<void> {
-    await this.runDueTasks(Date.now());
+    const run = this.drainDueTasks(Date.now());
+    this.alarmRun = run;
+    try {
+      await run;
+    } finally {
+      if (this.alarmRun === run) this.alarmRun = null;
+    }
+  }
+
+  /**
+   * Runs every due task, then waits for an alarm run that was already in flight. A task the alarm had claimed (leased) is skipped by
+   * our own pass, so without the wait a caller could return while that task's work (e.g. a hand-over to the send queue) was still
+   * underway, and see a state that is about to change.
+   */
+  async runDueTasks(now = Date.now()): Promise<{ ran: number; failed: number }> {
+    const r = await this.drainDueTasks(now);
+    if (this.alarmRun) await this.alarmRun.catch(() => undefined);
+    return r;
   }
 
   /**
    * Runs every due task, each in isolation: a failure is recorded with exponential backoff and never stops the others.
    * A handler may return the next due time (daily tasks reschedule themselves) or nothing (the task is done).
    */
-  async runDueTasks(now = Date.now()): Promise<{ ran: number; failed: number }> {
+  private async drainDueTasks(now: number): Promise<{ ran: number; failed: number }> {
     let ran = 0;
     let failed = 0;
     for (;;) {
