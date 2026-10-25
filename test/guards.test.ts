@@ -58,3 +58,9 @@ it('legal pages are pinned: a change needs a new pin AND a message to the Store 
   expect(files.sort()).toEqual(Object.keys(LEGAL_PINS).sort());
   for (const f of files) expect(createHash('sha256').update(readFileSync(new URL(f, root))).digest('hex'), f).toBe(LEGAL_PINS[f]);
 });
+
+// Role checks are positive allow-lists. A negative check (`storeRole !== 'staff'`) would grant owner powers to any role added later
+// (e.g. an integration principal), so routes ask "is this an owner or a super admin?" through managesStore() instead.
+it('routes never decide owner powers with a negative role check', () => {
+  expect(findMatches(/!==?\s*'staff'|'staff'\s*!==?/, 'src')).toEqual([]);
+});

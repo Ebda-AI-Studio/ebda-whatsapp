@@ -59,3 +59,10 @@ export async function bizToken(c: ApiContext, ref: { wabaId: string } | { phoneN
     throw err;
   }
 }
+
+/** Owner powers on a store: its owner or a platform super admin. A positive allow-list on purpose: a role added later (an integration
+ * principal, say) gets nothing here unless it is named. Never write it as "anything but staff". */
+export const managesStore = (c: ApiContext): boolean => {
+  const r = c.get('storeRole');
+  return r === 'owner' || r === 'super_admin';
+};

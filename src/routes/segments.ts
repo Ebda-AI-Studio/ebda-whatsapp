@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import { createSegmentRequest, segmentPreviewRequest, updateSegmentRequest } from '../core/api/contract';
-import { apiError, intParam, workspaceStub, type ApiContext, type ApiEnv } from './shared';
+import { apiError, intParam, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 
 export const segmentsRoutes = new Hono<ApiEnv>();
-const ownerOnly = (c: ApiContext) => c.get('storeRole') !== 'staff';
+const ownerOnly = managesStore;
 
 segmentsRoutes.get('/stores/:storeId/segments', async (c) => {
   const ws = await workspaceStub(c);
