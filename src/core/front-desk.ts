@@ -5,11 +5,12 @@
  *
  * A turn is replayable: sends have deterministic idempotency keys (`front:<message>:<n>`), so a re-run sends nothing twice.
  */
+import { isOpen, nextOpenAt } from './front-desk-hours';
 import { markHandoff } from './ai/handoff';
 import type { Locale } from './ordering/copy';
 import { orderingActive, orderingEngaged, runBotTurnLocked, toJob, turnGone, type BotInput, type BotMsg } from './ordering/bot';
 import type { LinkHost } from './store-link/host';
-import { readSettings } from './store-link/settings';
+import { getState, putState, readSettings } from './store-link/settings';
 import { storeLink } from './store-link';
 import { normaliseText } from './text-normalise';
 
@@ -28,7 +29,14 @@ export function menuActive(host: Pick<LinkHost, 'sql'>): boolean {
 
 /** Any front-desk feature is on: the inbound message needs a turn even when neither the ordering bot nor the agent is. */
 export function frontDeskActive(host: Pick<LinkHost, 'sql'>): boolean {
-  return menuActive(host);
+  return menuActive(host) || (storeLink().copy !== null && readSettings(host).hours.enabled);
+}
+
+/** The front desk answers every message itself right now (a menu is on, or the shop is closed): the generic auto reply would double it. */
+export function frontDeskOwnsReplies(host: Pick<LinkHost, 'sql'>, now: number): boolean {
+  if (menuActive(host)) return true;
+  const hours = readSettings(host).hours;
+  return storeLink().copy !== null && hours.enabled && !isOpen(hours, now);
 }
 
 function midOrder(host: Pick<LinkHost, 'sql'>, from: string, now: number): boolean {
@@ -44,9 +52,9 @@ function localeOfText(host: Pick<LinkHost, 'sql'>, input: BotInput): Locale {
 }
 
 /** Stores and sends the messages of this turn, in order. Mirrors the ordering bot's flush (same erasure and opt-out guards). */
-async function send(host: LinkHost, input: BotInput, now: number, out: BotMsg[]): Promise<void> {
+async function send(host: LinkHost, input: BotInput, now: number, out: BotMsg[], prefix = 'front'): Promise<void> {
   for (let i = 0; i < out.length; i++) {
-    const key = `front:${input.messageId}:${i}`;
+    const key = `${prefix}:${input.messageId}:${i}`;
     const built = toJob(host, input.from, input.phoneNumberId, key, out[i]!);
     const gone = host.storage.transactionSync(() => {
       if (turnGone(host, input)) return true;
@@ -71,6 +79,26 @@ function menuList(host: LinkHost, locale: Locale): BotMsg {
   const room = MAX_ROWS - rows.length - tail.length;
   for (const item of settings.menu.items.slice(0, room)) rows.push({ id: `menu:${locale}:faq:${item.id}`, title: item.title[locale] });
   return { kind: 'list', body: copy.body[locale], button: copy.button[locale], rows: [...rows, ...tail] };
+}
+
+/**
+ * Business hours. While the shop is closed, the first message of the closed period gets the merchant's away message (once per
+ * customer per period: the period is named by the moment the shop next opens). 'stop' = the away message replaces the bot and agent.
+ */
+export async function runHoursGate(host: LinkHost, input: BotInput, now: number): Promise<'continue' | 'stop'> {
+  const hours = readSettings(host).hours;
+  if (!storeLink().copy || isOpen(hours, now)) return 'continue';
+  const period = String(nextOpenAt(hours, now) ?? 'never');
+  const stateKey = `away:${input.from}`;
+  const mine = host.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', `away:${input.messageId}:0`).toArray().length > 0;
+  if (getState(host, stateKey) !== period || mine) {
+    if (turnGone(host, input)) return 'stop';
+    await send(host, input, now, [{ kind: 'text', text: hours.awayMessage[localeOfText(host, input)] }], 'away');
+    putState(host, stateKey, period);
+  } else if (!hours.ordersWhileClosed) {
+    return 'stop'; // already told this period: stay quiet instead of repeating it
+  }
+  return hours.ordersWhileClosed ? 'continue' : 'stop';
 }
 
 /**

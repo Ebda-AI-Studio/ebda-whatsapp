@@ -46,7 +46,7 @@ import { storeLink } from './store-link';
 import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
 import { agentActive } from './ai/agent';
 import { runTurn } from './ai/router';
-import { frontDeskActive } from './front-desk';
+import { frontDeskActive, frontDeskOwnsReplies } from './front-desk';
 import { testConnector } from './connectors/registry';
 import { connectorDto, deleteConnector, listConnectors, planConnectorPut, writeConnector, type PutRefusal } from './connectors/store';
 import type { ConnectorDto, ConnectorPut } from './api/contract';
@@ -196,7 +196,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     const ordering = orderingActive(this.host());
     const agent = agentActive(this.host());
     const front = frontDeskActive(this.host());
-    if (ordering || agent || front) config = { ...config, autoReplyText: undefined };
+    if (ordering || agent || frontDeskOwnsReplies(this.host(), Date.now())) config = { ...config, autoReplyText: undefined };
     // Large bodies go to R2 first (outside the transaction); skipped for a wamid we already stored, so redelivery writes nothing.
     const bodies = new Map<string, string>();
     for (const m of batch.inbound) {
@@ -1939,6 +1939,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM agent_handoffs WHERE wa_id = ?', waId);
+      this.sql.exec('DELETE FROM store_state WHERE key = ?', `away:${waId}`);
       if (conv) this.sql.exec('DELETE FROM agent_turns WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
       this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       if (conv) {

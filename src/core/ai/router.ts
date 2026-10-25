@@ -4,7 +4,7 @@
  */
 import type { LinkHost } from '../store-link/host';
 import { orderingActive, orderingEngaged, runBotTurnLocked, serialisedTurn, turnGone, type BotInput } from '../ordering/bot';
-import { frontDeskActive, runFrontDesk } from '../front-desk';
+import { frontDeskActive, runFrontDesk, runHoursGate } from '../front-desk';
 import { agentConfig } from './config';
 import { agentActive, handoff, isHumanRequest, runAgentTurn } from './agent';
 import { handoffActive } from './handoff';
@@ -19,6 +19,7 @@ export async function runTurn(host: LinkHost, input: BotInput, now: number): Pro
     const orderingOn = orderingActive(host);
     if (!agentOn && !orderingOn && !frontDeskActive(host)) return;
     if (handoffActive(host, input.from, now)) return; // a person has the conversation: the bot is silent
+    if (await runHoursGate(host, input, now) === 'stop') return;
     if (await runFrontDesk(host, input, now, { agentOn }) === 'handled') return;
     if (!agentOn && !orderingOn) return;
     if (agentOn && input.type === 'text' && input.text && !turnGone(host, input) && isHumanRequest(input.text)) {

@@ -218,7 +218,7 @@ describe('store-link settings', () => {
     const ws = S(31);
     const owner = await apiFor(ws);
     const staff = await apiFor(ws, 'staff');
-    expect(await (await owner.call('GET', '/store-link/settings')).json()).toEqual({ orderConfirmations: true, orderingBot: true, otpViaWhatsApp: false, catalogId: null, menu: { enabled: false, items: [] } });
+    expect(await (await owner.call('GET', '/store-link/settings')).json()).toMatchObject({ orderConfirmations: true, orderingBot: true, otpViaWhatsApp: false, catalogId: null, menu: { enabled: false, items: [] }, hours: { enabled: false, ordersWhileClosed: true } });
     expect((await staff.call('PATCH', '/store-link/settings', { orderingBot: false })).status).toBe(403);
     graphStub((call) => (call.url.includes('/product_catalogs') ? { status: 200, json: { data: [{ id: '1234567890' }] } } : { status: 200, json: {} }));
     const res = await owner.call('PATCH', '/store-link/settings', { orderingBot: false, catalogId: '1234567890' });
