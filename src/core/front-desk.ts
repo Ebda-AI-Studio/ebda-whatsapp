@@ -5,6 +5,7 @@
  *
  * A turn is replayable: sends have deterministic idempotency keys (`front:<message>:<n>`), so a re-run sends nothing twice.
  */
+import { recordFunnel } from './bot-funnel';
 import { isOpen, nextOpenAt } from './front-desk-hours';
 import { markHandoff } from './ai/handoff';
 import type { Locale } from './ordering/copy';
@@ -130,11 +131,15 @@ export async function runFrontDesk(host: LinkHost, input: BotInput, now: number,
   if (!copy || (!menuOn && !hasLocation)) return 'pass';
   if (turnGone(host, input)) return 'handled';
 
+  /** One menu list to the customer; counted as the `menu` step when it really went out. */
+  const sendMenu = async (locale: Locale): Promise<void> => {
+    if (await send(host, input, now, [menuList(host, locale)])) await recordFunnel(host, { step: 'menu', waId: input.from, now, skip: () => turnGone(host, input) });
+  };
   const tap = menuOn && input.reply?.kind === 'list' ? ROW.exec(input.reply.id) : null;
   if (tap) {
     const locale = tap[1] as Locale;
     if (tap[2] === 'order') {
-      if (!orderingActive(host)) { await send(host, input, now, [menuList(host, locale)]); return 'handled'; }
+      if (!orderingActive(host)) { await sendMenu(locale); return 'handled'; }
       await runBotTurnLocked(host, input, now, { restart: true });
       return 'handled';
     }
@@ -144,21 +149,24 @@ export async function runFrontDesk(host: LinkHost, input: BotInput, now: number,
         markHandoff(host, input.from, 'asked', now);
         return true;
       });
-      if (ok) await send(host, input, now, [{ kind: 'text', text: copy.menu.handedOff[locale] }]);
+      if (ok) {
+        await recordFunnel(host, { step: 'handoff', waId: input.from, now, skip: () => turnGone(host, input) });
+        await send(host, input, now, [{ kind: 'text', text: copy.menu.handedOff[locale] }]);
+      }
       return 'handled';
     }
     if (tap[2] === 'loc') {
-      await send(host, input, now, hasLocation ? locationMessages(host) : [menuList(host, locale)]);
+      if (hasLocation) await send(host, input, now, locationMessages(host)); else await sendMenu(locale);
       return 'handled';
     }
     const item = tap[3] ? readSettings(host).menu.items.find((i) => i.id === tap[3]) : undefined;
-    await send(host, input, now, [item ? { kind: 'text', text: item.answer[locale] } : menuList(host, locale)]);
+    if (item) await send(host, input, now, [{ kind: 'text', text: item.answer[locale] }]); else await sendMenu(locale);
     return 'handled';
   }
 
   if (input.type !== 'text' || !input.text || input.reply || input.order) return 'pass';
   const word = normaliseText(input.text);
-  const open = (): Promise<'handled'> => send(host, input, now, [menuList(host, localeOfText(host, input))]).then(() => 'handled' as const);
+  const open = (): Promise<'handled'> => sendMenu(localeOfText(host, input)).then(() => 'handled' as const);
   if (menuOn && normIn(copy.menu.menuWords).has(word)) return open();
   if (hasLocation && !awaitingAddress(host, input.from, now) && normIn(copy.menu.locationWords).has(word)) { await send(host, input, now, locationMessages(host)); return 'handled'; }
   if (!menuOn || midOrder(host, input.from, now)) return 'pass';

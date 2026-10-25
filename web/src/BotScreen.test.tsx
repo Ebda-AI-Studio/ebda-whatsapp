@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { createSampleSource } from './data/sample';
@@ -171,5 +171,80 @@ describe('WhatsApp catalog on the Bot screen', () => {
     const ar = Object.keys(STRINGS.ar).filter((k) => k.startsWith('cat'));
     expect(ar.length).toBeGreaterThan(8);
     expect(Object.keys(STRINGS.en).filter((k) => k.startsWith('cat')).sort()).toEqual(ar.sort());
+  });
+});
+
+describe('Bot results (funnel)', () => {
+  const zero = { from: '2026-10-18', to: '2026-10-24', days: [], steps: ['conversation', 'browse', 'cart', 'checkout', 'order', 'menu', 'handoff'].map((step) => ({ step, total: 0, series: [] })) } as never;
+  const row = (name: string) => screen.getByRole('listitem', { name: new RegExp(name) });
+
+  it('shows the five steps with counts and the share that went on from the step before', async () => {
+    await open();
+    const list = await screen.findByRole('list', { name: 'خطوات الطلب' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(5);
+    expect(row('بدأوا محادثة').textContent).toContain('١٢٠');
+    expect(row('شافوا المنتجات').textContent).toMatch(/٩٦.*٨٠٪/);
+    expect(row('ضافوا للسلة').textContent).toMatch(/٥٤.*٥٦٪/);
+    expect(row('دخلوا الدفع').textContent).toMatch(/٣١.*٥٧٪/);
+    expect(row('كملوا الطلب').textContent).toMatch(/٢٢.*٧١٪/);
+    expect(row('بدأوا محادثة').textContent).not.toContain('٪'); // the first step has nothing before it
+    expect(screen.getByText(/فتحوا القايمة/).textContent).toContain('٤٠');
+  });
+
+  it('7 days by default; the 30 and 90 day switches load again', async () => {
+    const source = createSampleSource();
+    const spy = vi.spyOn(source, 'botFunnel' as never);
+    await open(source);
+    await screen.findByRole('list', { name: 'خطوات الطلب' });
+    expect(spy).toHaveBeenLastCalledWith(7);
+    expect(screen.getByRole('button', { name: 'آخر ٧ يوم' }).getAttribute('aria-pressed')).toBe('true');
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'آخر ٣٠ يوم' })));
+    expect(spy).toHaveBeenLastCalledWith(30);
+    expect(screen.getByRole('button', { name: 'آخر ٣٠ يوم' }).getAttribute('aria-pressed')).toBe('true');
+    expect(row('بدأوا محادثة').textContent).toContain('٥٢٠');
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'آخر ٩٠ يوم' })));
+    expect(spy).toHaveBeenLastCalledWith(90);
+  });
+
+  it('says it is loading, then says nothing yet when no customer came', async () => {
+    const source = createSampleSource();
+    let release!: () => void;
+    (source as { botFunnel: unknown }).botFunnel = () => new Promise((r) => { release = () => r(zero); });
+    await open(source);
+    expect(screen.getByRole('status', { name: 'نتايج البوت بتحمّل' })).toBeTruthy();
+    await act(async () => release());
+    expect(screen.getByText(/لسه مفيش محادثات في الفترة دي/)).toBeTruthy();
+    expect(screen.queryByRole('list', { name: 'خطوات الطلب' })).toBeNull();
+  });
+
+  it('a failed load says so in words with a retry that works (never the empty copy)', async () => {
+    const source = createSampleSource();
+    const real = source.botFunnel!.bind(source);
+    let n = 0;
+    (source as { botFunnel: unknown }).botFunnel = (d: 7 | 30 | 90) => (++n === 1 ? Promise.reject(new Error('down')) : real(d));
+    await open(source);
+    const alert = await screen.findByText(/مقدرناش نحمّل/);
+    expect(screen.queryByText(/لسه مفيش محادثات/)).toBeNull();
+    await act(async () => fireEvent.click(within(alert.closest('[role=alert]') as HTMLElement).getByRole('button', { name: 'حاول تاني' })));
+    expect(await screen.findByRole('list', { name: 'خطوات الطلب' })).toBeTruthy();
+  });
+
+  it('staff can read it; a source without it shows no panel', async () => {
+    const staff = createSampleSource();
+    staff.role = 'staff';
+    await open(staff);
+    expect(await screen.findByRole('list', { name: 'خطوات الطلب' })).toBeTruthy();
+    cleanup();
+    const none = createSampleSource();
+    delete (none as { botFunnel?: unknown }).botFunnel;
+    await open(none);
+    expect(screen.queryByRole('heading', { name: 'نتايج البوت' })).toBeNull();
+  });
+
+  it('English strings exist for every state', async () => {
+    const { STRINGS } = await import('./i18n');
+    const ar = Object.keys(STRINGS.ar).filter((k) => k.startsWith('fn'));
+    expect(ar.length).toBeGreaterThan(8);
+    expect(Object.keys(STRINGS.en).filter((k) => k.startsWith('fn')).sort()).toEqual(ar.sort());
   });
 });

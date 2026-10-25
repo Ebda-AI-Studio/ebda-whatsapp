@@ -28,7 +28,8 @@ export default defineConfig({
         ],
         // Integration tests run real workerd work with no timers to fake; the CI runner (shared ARM VM) is 7-12x slower than a laptop
         // (ordering 402 ms -> 5.0 s), so 5 s was a laptop budget. 20 s keeps 4x headroom over the slowest CI test (COD flow, 4.8 s).
-        test: { name: 'workers', testTimeout: 20_000, setupFiles: ['./test/setup.ts'], include: ['test/**/*.test.ts'], exclude: ['test/guards.test.ts', 'test/assets-config.test.ts', 'test/verify-prod.test.ts', 'test/white-label.test.ts', 'test/ci-test-runner.test.ts'] },
+        // CI (the shared VM, which can stall under host memory pressure) passes VITEST_TEST_TIMEOUT=60000; locally 20 s, so real slowness still shows here.
+        test: { name: 'workers', testTimeout: Number(process.env.VITEST_TEST_TIMEOUT ?? 20_000), setupFiles: ['./test/setup.ts'], include: ['test/**/*.test.ts'], exclude: ['test/guards.test.ts', 'test/assets-config.test.ts', 'test/verify-prod.test.ts', 'test/white-label.test.ts', 'test/ci-test-runner.test.ts'] },
       },
       { test: { name: 'node', environment: 'node', include: ['test/guards.test.ts', 'test/assets-config.test.ts', 'test/verify-prod.test.ts', 'test/white-label.test.ts', 'test/ci-test-runner.test.ts'] } },
       { plugins: [react()], resolve: { alias: { '@brand': new URL('./web/brands/ebda/brand.ts', import.meta.url).pathname, '@brand-tokens': new URL('./web/brands/ebda/tokens.css', import.meta.url).pathname } }, test: { name: 'web', environment: 'jsdom', setupFiles: ['./web/src/test-setup.ts'], include: ['web/src/**/*.test.{ts,tsx}'] } },

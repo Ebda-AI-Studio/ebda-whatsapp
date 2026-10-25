@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, BotSettingsDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+  AgentSettingsDto, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
 import type { InboxSource } from './source';
@@ -207,6 +207,12 @@ export function createSampleSource(): InboxSource {
     async saveBotSettings(update) {
       bot = structuredClone(update);
       return structuredClone(bot);
+    },
+    async botFunnel(days) {
+      const totals = { 7: [120, 96, 54, 31, 22, 40, 9], 30: [520, 410, 236, 140, 101, 170, 38], 90: [1480, 1150, 650, 390, 281, 470, 104] }[days];
+      const steps = ['conversation', 'browse', 'cart', 'checkout', 'order', 'menu', 'handoff'] as const;
+      const list = Array.from({ length: days }, (_, i) => new Date(Date.UTC(2026, 9, 24) - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10));
+      return { from: list[0]!, to: list[days - 1]!, days: list, steps: steps.map((step, k) => ({ step, total: totals[k]!, series: list.map((_, i) => (i === days - 1 ? totals[k]! : 0)) })) } satisfies BotFunnelDto;
     },
     catalog: {
       async status() {

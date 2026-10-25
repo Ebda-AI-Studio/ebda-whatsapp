@@ -13,6 +13,7 @@ import type { LinkHost } from '../store-link/host';
 import { normaliseText } from '../text-normalise';
 import { loadConnectors, runConnectorTool } from '../connectors/registry';
 import { agentConfig } from './config';
+import { recordFunnel } from '../bot-funnel';
 import { markHandoff, type HandoffReason } from './handoff';
 import { retrieveKnowledge } from './knowledge';
 import { heartbeatHold, holdCredits, releaseHold, settleHold } from './credits';
@@ -99,7 +100,10 @@ export async function handoff(host: LinkHost, input: BotInput, reason: HandoffRe
     recordTurn(host, input, `handoff:${reason}`, now);
     return true;
   });
-  if (done) await deliverStored(host, input);
+  if (done) {
+    await recordFunnel(host, { step: 'handoff', waId: input.from, now, skip: () => turnGone(host, input) });
+    await deliverStored(host, input);
+  }
 }
 
 // ---- the model ----------------------------------------------------------------------------------------------------------

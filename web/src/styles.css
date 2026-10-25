@@ -282,6 +282,15 @@ textarea { caret-color: var(--gold-ink); }
 .meter-sent { background: var(--sand); }
 .meter-delivered { background: var(--lift); }
 .meter-read { background: var(--gold); }
+.funnel { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.funnel li { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 4px; align-items: baseline; }
+.funnel-n { font-size: 20px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.funnel-share { grid-column: 1 / -1; order: 3; font-size: 12px; }
+.funnel-track { grid-column: 1 / -1; order: 4; display: block; height: 8px; border-radius: 999px; background: var(--cream); border: 1px solid var(--line); overflow: hidden; }
+.funnel-track span { display: block; height: 100%; background: var(--gold); border-radius: 999px; transition: width 600ms var(--ease); }
+.funnel-side { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 14px; }
+.funnel-side b { font-weight: 500; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .funnel-track span { transition: none; } }
 .campaign-stats { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0; font-size: 13px; }
 .campaign-stats div { display: flex; gap: 6px; align-items: baseline; }
 .campaign-stats dt { color: var(--ink-2); }

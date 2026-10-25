@@ -41,6 +41,13 @@ If you do not have a catalog on Meta yet, the **WhatsApp catalog** box at the to
 - If it says Meta is not answering, wait a little and press the button again. It never creates a second catalog.
 - If you already have a catalog on Meta connected to this number, you do not need the button.
 
+## Bot results
+At the top of the Bot screen, **Bot results** shows how many customers reached each step of ordering on WhatsApp: **started a chat, saw the products, added to cart, went to checkout, placed the order**. Next to each step you see the share of customers who went on from the step before, so you can see where people drop off. Pick the last 7, 30 or 90 days. Below the steps, **opened the menu** and **asked for a person** are counted on their own.
+- Each customer is counted **once per step per day**, however many messages they send. A customer who comes back on another day counts on each day.
+- The numbers are counts only. We do not keep anyone's phone number, name or messages for this, and a customer cannot be traced from them. If a customer asks to be erased, their entry for the current day is deleted too.
+- Today's numbers are live; earlier days are final. Nobody can edit these numbers; owner and staff can read them.
+- "No conversations yet" means no customer talked to the bot in that period. If you see a loading error instead, press **Try again**.
+
 ## Important notes
 - The bot replies only inside the 24-hour window ([guide 4](04-templates-and-the-24-hour-window.md)). All of this is a reply to a message the customer just sent, never marketing.
 - The text you write is checked against WhatsApp's length limits when you save. Fields marked in red must be fixed first.

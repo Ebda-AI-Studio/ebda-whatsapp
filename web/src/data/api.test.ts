@@ -53,6 +53,22 @@ describe('createApiSource catalog', () => {
   });
 });
 
+describe('createApiSource bot results', () => {
+  it('asks for the last N Cairo days, today included, and validates the answer', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-24T22:30:00Z')); // already the 25th in Cairo
+    const body = { from: '2026-10-19', to: '2026-10-25', days: [], steps: [{ step: 'conversation', total: 3, series: [] }] };
+    const { f, calls } = fetchStub({ '/bot/funnel': () => ({ status: 200, body }) });
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    expect(await src.botFunnel!(7)).toEqual(body);
+    expect(calls[0]!.url).toBe(`https://wa.test/api/v1/stores/${STORE}/bot/funnel?from=2026-10-19&to=2026-10-25`);
+    vi.useRealTimers();
+    const bad = fetchStub({ '/bot/funnel': () => ({ status: 200, body: { nope: 1 } }) });
+    const src2 = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: bad.f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    await expect(src2.botFunnel!(30)).rejects.toThrow(/contract/);
+  });
+});
+
 describe('createApiSource', () => {
   it('lists conversations with the bearer token and validates the response', async () => {
     const { f, calls } = fetchStub({ '/conversations?filter=unread': () => ({ status: 200, body: { items: [conv], nextCursor: null } }) });

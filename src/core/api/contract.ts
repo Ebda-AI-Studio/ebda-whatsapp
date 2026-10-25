@@ -459,6 +459,17 @@ export const operatorDecision = z.object({ decision: z.enum(['approve', 'reject'
 export const trueupPublish = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), phoneNumberId: z.string().min(1), actualMinor: z.number().int().min(0) });
 export const changeLogItemDto = z.object({ id: z.number().int(), at: z.number().int(), actor: z.string(), action: z.string(), workspaceId: z.string().nullable(), before: z.unknown(), after: z.unknown(), reason: z.string().nullable() });
 
+/** Bot results (funnel): steps in the order of the flow, then the side steps. */
+export const FUNNEL_STEPS = ['conversation', 'browse', 'cart', 'checkout', 'order', 'menu', 'handoff'] as const;
+export const funnelStep = z.enum(FUNNEL_STEPS);
+export const FUNNEL_MAX_DAYS = 92;
+const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((s) => { const t = Date.parse(`${s}T00:00:00Z`); return !Number.isNaN(t) && new Date(t).toISOString().startsWith(s); }, 'not a calendar date');
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+export const botFunnelQuery = z.object({ from: ymd, to: ymd }).strict().refine((q) => q.from <= q.to && daysBetween(q.from, q.to) < FUNNEL_MAX_DAYS, 'range must be 1 to 92 days');
+/** Counts only: `series[i]` belongs to `days[i]` (Cairo calendar days). `total` is customer-days: a customer who comes on two days counts on both. */
+export const botFunnelDto = z.object({ from: ymd, to: ymd, days: z.array(z.string()), steps: z.array(z.object({ step: funnelStep, total: z.number().int(), series: z.array(z.number().int()) })) });
+export type BotFunnelDto = z.infer<typeof botFunnelDto>;
+
 export const ROUTES = {
   conversations: 'GET /conversations',
   messages: 'GET /conversations/:conversationId/messages',
@@ -481,6 +492,7 @@ export const ROUTES = {
   storeLinkSettings: 'GET|PATCH /store-link/settings',
   storeLinkCatalog: 'GET /store-link/catalog',
   provisionCatalog: 'POST /store-link/catalog/provision',
+  botFunnel: 'GET /bot/funnel',
   agent: 'GET|PUT /agent',
   connectors: 'GET /connectors',
   connector: 'PUT|DELETE /connectors/:connectorId',

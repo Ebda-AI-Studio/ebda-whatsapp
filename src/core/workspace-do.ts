@@ -34,7 +34,7 @@ import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, canc
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
 import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
-import type { AgentSettingsDto, CatalogStatusDto } from './api/contract';
+import type { AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
 import { creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, postCredit, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
@@ -45,6 +45,7 @@ import type { OtpResult } from './otp';
 import { queueTemplate } from './store-link/outbound';
 import { forgetBuyer, noteOptOutChange, pushOptOut } from './store-link/consent';
 import { storeLink } from './store-link';
+import { eraseFunnelMarkers, funnelRollup, readFunnel } from './bot-funnel';
 import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
 import { agentActive } from './ai/agent';
 import { runTurn } from './ai/router';
@@ -1038,6 +1039,11 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { ok: true, settings };
   }
 
+  /** Bot results for a range of Cairo days (validated at the route). Counts only. */
+  async getBotFunnel(from: string, to: string): Promise<BotFunnelDto> {
+    return readFunnel(this.sql, from, to);
+  }
+
   async getCatalogStatus(): Promise<CatalogStatusDto> {
     const last = getState(this.host(), LAST_SYNC_KEY);
     return { catalogId: readSettings(this.host()).catalogId, lastSyncAt: last ? Number(last) : null };
@@ -1861,6 +1867,8 @@ export class WorkspaceDO extends DurableObject<Env> {
         const again = await runTrueup(this.env, this.sql, this.billing, (f) => this.ctx.storage.transactionSync(f), this.workspaceId, month, now);
         return again ?? undefined;
       }
+      case 'funnel_rollup':
+        return funnelRollup(this.sql, now);
       case 'subscription_expire': {
         // A paid early renewal queued behind this period starts now instead of the plan expiring (the control plane owns the queue).
         try {
@@ -2009,6 +2017,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec('DELETE FROM contacts WHERE id = ?', contact.id);
       return { found: true, keys, messages: msgs.length, statusEvents };
     });
+    // After the delete (a turn recording a step checks the message still exists, so nothing new can land): their unrolled analytics markers go too.
+    await eraseFunnelMarkers(this.sql, waId);
     // The shared platform number keeps (in D1) which store wrote to this customer: that is this store's record too, so it goes with the contact.
     await eraseSharedFor(this.env, this.workspaceId, waId);
     const r2Pending = await this.drainR2Deletes();

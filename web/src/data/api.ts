@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
   packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, searchResponse, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
@@ -110,6 +110,11 @@ export function createApiSource(o: Opts): LiveSource {
     },
     async saveBotSettings(update) {
       return call('/store-link/settings', botSettingsDto, { method: 'PATCH', body: JSON.stringify(update) });
+    },
+    async botFunnel(days) {
+      const day = (ms: number) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(ms).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
+      const now = Date.now();
+      return call(`/bot/funnel?from=${day(now - (days - 1) * 86_400_000)}&to=${day(now)}`, botFunnelDto);
     },
     catalog: {
       status: () => call('/store-link/catalog', catalogStatusDto),

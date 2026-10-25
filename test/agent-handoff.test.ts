@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { SELF, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it, vi } from 'vitest';
 import { LlmError } from '../src/core/ai/provider';
 import { EBDA_AGENT_COPY } from '../src/addons/ebda/agent-copy';
 import { ScriptedProvider, useAgent } from './helpers/agent';
@@ -7,6 +8,8 @@ import { apiFor, storeId, useApiKey } from './helpers/api';
 import { stubGraph } from './helpers/graph';
 import { graphStub } from './helpers/api';
 import { WA_1, useStoreLink } from './helpers/store-link';
+import { postWebhook } from './helpers/meta';
+import { rawMessagePayload } from './helpers/payload';
 import { exec, rows, workspace } from './helpers/workspace';
 
 useApiKey();
@@ -278,5 +281,41 @@ describe('AI credits', () => {
     const api = await apiFor(ws);
     await grant(ws, 7);
     expect(await (await api.call('GET', '/agent')).json()).toMatchObject({ credits: 7 });
+  });
+});
+
+describe('handoff counts in the bot results', () => {
+  it('a customer sent to a person is counted once as a handoff', async () => {
+    const ws = W(70);
+    const pn = await agentWorkspace(ws, { language: 'auto' });
+    await grant(ws);
+    model([]);
+    const g = stubGraph();
+    await say(ws, pn, text('I want to talk to a human'), g);
+    await say(ws, pn, text('real person?'), g);
+    expect(await rows(ws, "SELECT step, count(*) AS n FROM bot_funnel_markers GROUP BY step ORDER BY step")).toEqual([{ step: 'conversation', n: 1 }, { step: 'handoff', n: 1 }]);
+  });
+});
+
+describe('handoff vs erasure in the bot results', () => {
+  it('a customer erased while the handoff turn runs leaves no marker behind', async () => {
+    const ws = W(71);
+    const pn = await agentWorkspace(ws, { language: 'auto' });
+    await grant(ws);
+    model([]);
+    stubGraph();
+    expect((await postWebhook(SELF, rawMessagePayload(pn, text('I want to talk to a human')))).status).toBe(200);
+    const real = crypto.subtle.sign.bind(crypto.subtle);
+    let calls = 0;
+    // Run the due turn inside the DO. 1st token = the conversation step, 2nd = the handoff step: the customer is erased while it is computed.
+    await runInDurableObject(workspace(ws), async (inst, state) => {
+      const spy = vi.spyOn(crypto.subtle, 'sign').mockImplementation(async (...a: Parameters<typeof real>) => {
+        if (++calls === 2) state.storage.sql.exec('DELETE FROM messages');
+        return real(...a);
+      });
+      try { await (inst as unknown as { runDueTasks(): Promise<unknown> }).runDueTasks(); } finally { spy.mockRestore(); }
+    });
+    expect(calls).toBe(2);
+    expect(await rows(ws, 'SELECT step FROM bot_funnel_markers ORDER BY step')).toEqual([{ step: 'conversation' }]);
   });
 });

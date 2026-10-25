@@ -423,6 +423,11 @@ export const DO_MIGRATIONS: readonly string[] = [
      updated_at INTEGER NOT NULL,
      updated_by TEXT
    ) WITHOUT ROWID;`,
+  // v30 (bot analytics funnel): NO personal data. A marker is (Cairo day, step, per-day salted token); the token is HMAC(day's random salt, wa id)
+  // and cannot be joined across days. Salt and markers of a day are deleted when that day is rolled up into counts (bot_funnel_daily).
+  `CREATE TABLE bot_funnel_salt (day TEXT PRIMARY KEY, salt TEXT NOT NULL) WITHOUT ROWID;
+   CREATE TABLE bot_funnel_markers (day TEXT NOT NULL, step TEXT NOT NULL, token TEXT NOT NULL, PRIMARY KEY (day, step, token)) WITHOUT ROWID;
+   CREATE TABLE bot_funnel_daily (day TEXT NOT NULL, step TEXT NOT NULL, customers INTEGER NOT NULL, PRIMARY KEY (day, step)) WITHOUT ROWID;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
