@@ -33,7 +33,7 @@ for b in ebda-wa-media ebda-wa-backups; do
   have "$b" "$r2" && echo "ok: R2 $b" || run "R2 bucket $b" $W r2 bucket create "$b"
 done
 if have ebda-wa-backups "$r2" && $W r2 bucket lifecycle list ebda-wa-backups 2>/dev/null | grep -q expire-30d; then echo "ok: R2 ebda-wa-backups lifecycle expire-30d"
-else run "R2 lifecycle expire-30d on ebda-wa-backups" $W r2 bucket lifecycle add ebda-wa-backups expire-30d --expire-days 30 --force; fi
+else run "R2 lifecycle expire-30d on ebda-wa-backups" $W r2 bucket lifecycle add ebda-wa-backups expire-30d --expire-days 30 -y; fi
 
 # ---- Queues: sends (live now) and the Store link pair (bound once the Store side exists).
 qs=$($W queues list 2>/dev/null | grep -oE 'ebda-[a-z-]+' | sort -u || true)
