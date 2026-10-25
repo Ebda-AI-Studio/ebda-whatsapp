@@ -26,7 +26,7 @@ Authentication templates are recognised by Meta's category `AUTHENTICATION` (Met
 Per number, inside the DO (`claimSend`): tier = unique business-initiated recipients (window closed) per rolling 24 h (default 250, updated from `phone_number_quality_update`), replies inside an open window never count; throughput = token bucket at MPS (default 80). A send over a limit goes back to `queued` and is released by the scheduler. Error 131049 reschedules +24 h (twice), never touches the contact.
 
 ## Scheduler
-One DO alarm = earliest row of `scheduled_tasks`: `backup`, `r2_drain` (singletons, nightly 02:00 Africa/Cairo), `send_release`, `media_fetch`, `campaign_step` (Phase 6 placeholder), and the Phase 4 kinds `catalog_sync`, `catalog_reconcile`, `cod_no_reply`, `cod_outcome_push`, `bot_turn` (see store-link.md). A failing task backs off 30 s → 1 h and never blocks the others.
+One DO alarm = earliest row of `scheduled_tasks`: `backup`, `r2_drain` (singletons, nightly 02:00 Africa/Cairo), `send_release`, `media_fetch`, `campaign_step` (the Phase 6 campaign sweep, `docs/campaigns.md`), and the Phase 4 kinds `catalog_sync`, `catalog_reconcile`, `cod_no_reply`, `cod_outcome_push`, `bot_turn` (see store-link.md). A failing task backs off 30 s → 1 h and never blocks the others.
 
 ## DO migrations added
 v5 outbound foundation (message template/media columns, contact consent, `templates`, `uploads`) · v6 `scheduled_tasks` · v7 `number_limits`, `tier_slots` · v8 inbox (assignee, `notes`, `conversation_tags`, list indexes, `messages_fts`) · v9 `events` · v10 `erased_keys` · v11 task `lease_until` · v12 `messages.error_reason` · v13-v15 Store link tables (see `docs/store-link.md`).
