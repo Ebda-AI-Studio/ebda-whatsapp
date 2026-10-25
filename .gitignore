@@ -11,3 +11,7 @@ coverage/
 .impeccable/mocks/
 .impeccable/review/
 web/dist/
+
+# White-label rendered configs (client account ids); only the template is versioned
+deploy/white-label/wrangler.*.jsonc
+!deploy/white-label/wrangler.template.jsonc
