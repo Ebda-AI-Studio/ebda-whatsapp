@@ -56,10 +56,23 @@ export async function refreshRequest(env: Env, requestId: string): Promise<void>
   ).bind(requestId).run();
 }
 
-/** The guarded flip that lets exactly one run send a row to the provider: true only for the run whose UPDATE changed the row. */
-export async function claimForCall(env: Env, id: string, now: number): Promise<boolean> {
-  const r = await env.DB.prepare("UPDATE card_refunds SET state = 'calling', updated_at = ? WHERE id = ? AND state = 'sending'").bind(now, id).run();
-  return r.meta.changes === 1;
+/**
+ * The guarded flip that lets exactly one run send a row to the provider, and only while the top-up still has room for it: the top-up's
+ * refundable amount (`amount_minor - refunded_minor`) minus the OTHER open rows that count ahead of this one (anything already `calling`,
+ * `pending` or `uncertain`, and `sending` rows planned earlier) must cover this row. `claimed` = this run sends it; `busy` = another run owns it;
+ * `over` = no room (the caller turns the row into a manual payout and a P1 is raised).
+ */
+export async function claimForCall(env: Env, id: string, now: number): Promise<'claimed' | 'busy' | 'over'> {
+  const r = await env.DB.prepare(
+    `UPDATE card_refunds SET state = 'calling', updated_at = ?1 WHERE id = ?2 AND state = 'sending'
+       AND coalesce((SELECT t.amount_minor - t.refunded_minor FROM topups t WHERE t.order_id = card_refunds.order_id), 0)
+           - coalesce((SELECT sum(c.amount_minor) FROM card_refunds c WHERE c.order_id = card_refunds.order_id AND c.id != card_refunds.id
+                         AND (c.state IN ('calling', 'pending', 'uncertain') OR (c.state = 'sending' AND (c.created_at < card_refunds.created_at OR (c.created_at = card_refunds.created_at AND c.id < card_refunds.id))))), 0)
+           >= card_refunds.amount_minor`,
+  ).bind(now, id).run();
+  if (r.meta.changes === 1) return 'claimed';
+  const cur = await getCardRefund(env, id);
+  return cur?.state === 'sending' ? 'over' : 'busy';
 }
 
 /** Marks the approval's debit phase finished (every wallet chunk posted and every card refund row written). */

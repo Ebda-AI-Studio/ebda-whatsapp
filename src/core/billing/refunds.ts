@@ -116,7 +116,11 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
       plan.push({ n, kind: provider && !t.transaction_id.startsWith('instapay:') ? 'card' : 'manual', order_id: t.order_id, transaction_id: t.transaction_id, amount_minor: chunk }); // an InstaPay top-up has no card to refund
     }
     if (left > 0) plan.push({ n: n + 1, kind: 'manual', order_id: null, transaction_id: null, amount_minor: left }); // beyond the card top-ups (bank/InstaPay)
-    await env.DB.batch(plan.map((c) => env.DB.prepare('INSERT OR IGNORE INTO refund_chunks (request_id, n, kind, order_id, transaction_id, amount_minor) VALUES (?, ?, ?, ?, ?, ?)').bind(a.id, c.n, c.kind, c.order_id, c.transaction_id, c.amount_minor)));
+    // The card refund rows of the whole plan are written in the SAME batch as the plan, so another approval's planning sees them as reservations at once.
+    await env.DB.batch(plan.flatMap((c) => [
+      env.DB.prepare('INSERT OR IGNORE INTO refund_chunks (request_id, n, kind, order_id, transaction_id, amount_minor) VALUES (?, ?, ?, ?, ?, ?)').bind(a.id, c.n, c.kind, c.order_id, c.transaction_id, c.amount_minor),
+      ...(c.kind === 'card' ? [env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'api', 'sending', ?, ?)").bind(`cr:${a.id}:${c.n}`, a.id, c.order_id, req.workspace_id, c.amount_minor, now, now)] : []),
+    ]));
     chunks = (await env.DB.prepare('SELECT n, kind, order_id, transaction_id, amount_minor FROM refund_chunks WHERE request_id = ? ORDER BY n').bind(a.id).all<Chunk>()).results;
   }
 
@@ -143,7 +147,14 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     const c = chunks.find((x) => x.n === n);
     if (!c || !c.transaction_id) continue;
     if (!provider) { await settleCardRefund(env, row.id, { to: 'failed' }, now); continue; } // the switch went off since the plan: nothing was sent, a manual payout
-    if (!(await claimForCall(env, row.id, now))) continue; // another run owns this row
+    const claim = await claimForCall(env, row.id, now);
+    if (claim === 'busy') continue; // another run owns this row
+    if (claim === 'over') {
+      // The top-up no longer has room for this refund (another approval's refunds came first): nothing is sent, it becomes a manual payout.
+      console.error(JSON.stringify({ alert: 'card_refund_over_refundable', severity: 'P1', requestId: a.id, workspace: req.workspace_id, cardRefundId: row.id, amountMinor: row.amount_minor }));
+      await settleCardRefund(env, row.id, { to: 'failed' }, now);
+      continue;
+    }
     const r = await provider.refund({ transactionId: c.transaction_id, amountMinor: row.amount_minor, reason: `refund-request:${a.id}:${n}` }).catch(() => ({ ok: false as const, reason: 'uncertain' as const }));
     if (r.ok) {
       // Kashier took it. If the id cannot be stored it belongs to another row (a recorded webhook debit, a held refund): the refund still happened,

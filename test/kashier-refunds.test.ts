@@ -711,12 +711,65 @@ describe('round 5: an approval is run by exactly one run at a time, and a resume
   it('MEDIUM: totals that changed between the first attempt and the resume change nothing: the recorded plan decides every amount, ref and provider call', async () => {
     const a = await aborted(75);
     answerByCall();
-    await env.DB.prepare('UPDATE topups SET refunded_minor = 7000 WHERE workspace_id = ?').bind(a.ws).run(); // totals moved under it
+    await env.DB.prepare('UPDATE topups SET fee_minor = 999, paid_at = 99 WHERE workspace_id = ?').bind(a.ws).run(); // totals and order moved under it
     await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, transaction_id, paid_at) VALUES ('o-new75', ?, 99999, 0, 99999, 'EGP', 'paid', 'u', 1, 'TX-NEW75', 1)").bind(a.ws).run();
     expect(await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 })).toMatchObject({ ok: true });
     expect(await kinds(a.ws)).toEqual([['topup', 20000], ['topup', 10000], ['refund', -20000], ['refund', -5000]]);
     expect(a.byAmount(puts())).toEqual([200, 50]);
     expect(await env.DB.prepare('SELECT order_id, amount_minor FROM card_refunds WHERE request_id = ? ORDER BY id').bind(a.id).all().then((x) => x.results)).toEqual([{ order_id: `o-kr75`, amount_minor: 20000 }, { order_id: `o-kr75b`, amount_minor: 5000 }]);
+  });
+
+  it('two concurrent approvals on one top-up that together exceed it: what is sent to Kashier never exceeds the refundable amount, the rest is a manual payout', async () => {
+    const a = await setup(80, 15000);
+    await fund(a.ws, 20000, 'kashier:extra-80'); // the wallet could pay both requests; the top-up's card cannot be refunded twice
+    const second = await createRefundRequest(env, { workspaceId: a.ws, userId: 'u1', amountMinor: 15000 });
+    if (!second.ok) throw new Error(second.reason);
+    refundAnswer = async () => refundOk(`TX-RF80-${puts().length}`, puts().length === 1 ? 15000 : 5000);
+    const [x, y] = await Promise.all([decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 }), decideRefund(env, { id: second.request.id, decision: 'approve', actor: OP2 })]);
+    expect(x.ok && y.ok).toBe(true);
+    const sent = puts().map((c) => Math.round((c.body as { transaction: { amount: number } }).transaction.amount * 100));
+    expect(sent.reduce((n, v) => n + v, 0)).toBeLessThanOrEqual(20000);
+    expect(await refunded(a.order)).toBeLessThanOrEqual(20000);
+    const total = [await req(a.id), await req(second.request.id)].reduce((n, r) => n + r!.card_refunded_minor + r!.manual_minor, 0);
+    expect(total).toBe(30000); // every piaster is either refunded to the card or owed as a manual payout
+  });
+
+  it('at the moment of the call the room is checked again: a row that no longer fits goes to a manual payout with a P1, and nothing is sent', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const a = await setup(82, 15000);
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    let posts = 0;
+    const dies = { ...env, WORKSPACE_DO: { idFromName: (x: string) => env.WORKSPACE_DO.idFromName(x), get: () => ({
+      walletView: (n?: number) => real.walletView(n),
+      postWallet: async (x: Parameters<typeof real.postWallet>[0], n?: number) => { if (++posts === 1) throw new Error('wallet down'); return real.postWallet(x, n); },
+    }) } } as unknown as typeof env;
+    await expect(decideRefund(dies, { id: a.id, decision: 'approve', actor: OP1 })).rejects.toThrow();
+    // while it was down, another run took most of the top-up's room
+    await env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at) VALUES ('cr:other:1', NULL, ?, ?, 10000, 'api', 'calling', 'TX-OTHER82', 1, 1)").bind(a.order, a.ws).run();
+    await env.DB.prepare('UPDATE refund_requests SET lease_until = 1 WHERE id = ?').bind(a.id).run();
+    expect(await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 })).toMatchObject({ ok: true, request: { state: 'manual_payout', manualMinor: 15000 } });
+    expect(puts()).toEqual([]);
+    expect(alertsOf(spy, 'card_refund_over_refundable')).toHaveLength(1);
+    expect(String(alertsOf(spy, 'card_refund_over_refundable')[0]![0])).toContain('"severity":"P1"');
+  });
+
+  it('a plan is visible as reservations the moment it is recorded: its card refund rows exist before any wallet debit, and a later link cannot take the room', async () => {
+    const a = await setup(81, 15000);
+    await env.DB.prepare('UPDATE refund_requests SET amount_minor = 20000 WHERE id = ?').bind(a.id).run();
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    const dies = { ...env, WORKSPACE_DO: { idFromName: (x: string) => env.WORKSPACE_DO.idFromName(x), get: () => ({
+      walletView: (n?: number) => real.walletView(n),
+      postWallet: async () => { throw new Error('wallet down'); },
+    }) } } as unknown as typeof env;
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await expect(decideRefund(dies, { id: a.id, decision: 'approve', actor: OP1 })).rejects.toThrow();
+    expect(await env.DB.prepare("SELECT state, amount_minor FROM card_refunds WHERE request_id = ?").bind(a.id).all().then((x) => x.results)).toEqual([{ state: 'sending', amount_minor: 20000 }]);
+    await fund(a.ws, 20000, 'kashier:extra-81');
+    const other = await createRefundRequest(env, { workspaceId: a.ws, userId: 'u1', amountMinor: 5000 });
+    if (!other.ok) throw new Error(other.reason);
+    refundAnswer = async () => refundOk('TX-RF81', 5000);
+    expect(await decideRefund(env, { id: other.request.id, decision: 'approve', actor: OP2 })).toMatchObject({ ok: true, request: { state: 'manual_payout', manualMinor: 5000 } });
+    expect(puts()).toEqual([]); // the planned 20000 already reserves the whole top-up: the other request has no card room
   });
 });
 
