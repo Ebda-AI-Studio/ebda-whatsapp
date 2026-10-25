@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { accountsUrlFor, chooseMode, pickStore, signInMode } from './boot';
 import { SignInError } from './components/SignInError';
+import { makeSignOut } from './signout';
 import { SignedOutLocally } from './components/SignedOutLocally';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
 import { connectRealtime, createApiSource } from './data/api';
@@ -55,7 +56,7 @@ async function boot(): Promise<void> {
       return;
     }
     const api = createApiSource({ baseUrl: location.origin, storeId, getToken: tokens.getToken, userNames: {}, currentUserId: decodeSub(token) ?? '' });
-    connectRealtime({
+    const stopRealtime = connectRealtime({
       url: `${location.origin.replace(/^http/, 'ws')}/api/v1/stores/${storeId}/ws`,
       getToken: tokens.getToken,
       onEvent: api.emit,
@@ -65,12 +66,7 @@ async function boot(): Promise<void> {
     await api.loadCapabilities();
     if (oidcSession) {
       const session = oidcSession;
-      api.signOut = () => {
-        void session.signOut().then((r) => {
-          // 'redirected' = on its way to the provider's logout page. 'local' = the provider gave no way to end its own session.
-          if (r === 'local') root.render(<SignedOutLocally onSignIn={() => { void session.startSignIn('/'); }} />);
-        });
-      };
+      api.signOut = makeSignOut({ stopRealtime, session, onLocal: () => root.render(<SignedOutLocally onSignIn={() => { void session.startSignIn('/'); }} />) });
     }
     source = api;
   }

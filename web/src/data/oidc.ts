@@ -90,6 +90,8 @@ export function createOidcSession(o: Opts) {
   let refreshToken: string | null = null;
   let idTokenHint: string | null = null; // memory only, kept for RP-initiated logout (id_token_hint) and nothing else
   let signedOut = false;
+  /** Bumped by signOut(): an exchange or refresh that began before it must not store its result (it would sign the person back in). */
+  let generation = 0;
   let endpoints: Promise<{ authorize: string; token: string; endSession: string | null }> | null = null;
   let inflight: Promise<string> | null = null;
 
@@ -149,6 +151,7 @@ export function createOidcSession(o: Opts) {
 
   /** Reads the provider's answer. Throws OidcSignInError (the page shows an error, it never loops back to the provider by itself). */
   async function handleCallback(search: string): Promise<{ returnTo: string }> {
+    const g = generation;
     const params = new URLSearchParams(search);
     const raw = store.getItem(TXN_KEY);
     store.removeItem(TXN_KEY); // single use, whatever happens next
@@ -163,6 +166,7 @@ export function createOidcSession(o: Opts) {
     if (!code) throw new OidcSignInError('token');
     const ep = await discover();
     const t = await tokenCall(ep.token, { grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: o.oidc.clientId, code_verifier: txn.verifier });
+    if (g !== generation) throw new OidcSignInError('state'); // signed out while the code was being exchanged
     if (!t.id_token) throw new OidcSignInError('missing_id_token');
     const c = claimsOf(t.id_token);
     if (!c) throw new OidcSignInError('claims');
@@ -179,17 +183,19 @@ export function createOidcSession(o: Opts) {
   }
 
   async function renew(): Promise<string> {
+    const g = generation;
     if (o.oidc.refresh && refreshToken) {
       try {
         const ep = await discover();
         const t = await tokenCall(ep.token, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: o.oidc.clientId });
+        if (g !== generation) throw new Error('signed out'); // signOut() ran meanwhile: keep nothing
         keep(t);
         return t.access_token;
       } catch {
-        refreshToken = null; // fall through to signing in again
+        if (g === generation) refreshToken = null; // fall through to signing in again
       }
     }
-    if (signedOut) throw new Error('signed out'); // signed out here: only an explicit sign-in starts another one
+    if (g !== generation || signedOut) throw new Error('signed out'); // signed out here: only an explicit sign-in starts another one
     access = null;
     await startSignIn(`${location.pathname}${location.search}`);
     throw new Error('signed out');
@@ -202,6 +208,7 @@ export function createOidcSession(o: Opts) {
    */
   async function signOut(): Promise<'redirected' | 'local'> {
     const hint = idTokenHint;
+    generation++;
     access = null; refreshToken = null; idTokenHint = null; inflight = null; signedOut = true;
     store.removeItem(TXN_KEY);
     let endSession: string | null = null;

@@ -297,7 +297,7 @@ export function connectRealtime(o: RealtimeOpts): () => void {
   let chain: Promise<void> = Promise.resolve();
 
   const deliver = (e: RealtimeEvent) => {
-    if (e.seq <= lastSeq) return;
+    if (stopped || e.seq <= lastSeq) return; // after stop() (sign-out) nothing more reaches the app
     lastSeq = e.seq;
     o.onEvent(e);
   };
@@ -325,7 +325,9 @@ export function connectRealtime(o: RealtimeOpts): () => void {
     let s: SocketLike;
     try {
       // The server echoes "inbox.v1"; the token rides alongside because browsers cannot set WebSocket headers.
-      s = new Socket(o.url, ['inbox.v1', `bearer.${await o.getToken()}`]);
+      const token = await o.getToken();
+      if (stopped) return; // stopped while the token was being fetched: do not open a socket for a signed-out page
+      s = new Socket(o.url, ['inbox.v1', `bearer.${token}`]);
     } catch {
       schedule(backoff(attempt++)); // offline or token refresh failed: try again later, never give up
       return;

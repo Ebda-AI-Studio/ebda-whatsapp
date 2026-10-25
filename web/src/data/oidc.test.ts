@@ -368,3 +368,66 @@ describe('callback hardening', () => {
     });
   });
 });
+
+describe('sign-out while a request is in flight', () => {
+  /** A provider whose token endpoint can hold one grant type until released, so a test can sign out in the middle of it. */
+  function held(holdGrant: string) {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let reach!: () => void;
+    const reached = new Promise<void>((r) => { reach = r; });
+    let nonce = '';
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `${ISS}/.well-known/openid-configuration`) return new Response(JSON.stringify(DISCOVERY));
+      const body = new URLSearchParams(String(init?.body));
+      if (body.get('grant_type') === holdGrant) { reach(); await gate; }
+      return new Response(JSON.stringify(body.get('grant_type') === 'refresh_token'
+        ? { access_token: 'AT-2', expires_in: 600 }
+        : { access_token: 'AT-1', expires_in: 600, id_token: idToken({ nonce }), refresh_token: 'RT-1' }));
+    }) as unknown as typeof fetch;
+    return { fetchImpl, release, reached, setNonce: (n: string) => { nonce = n; } };
+  }
+  function build(h: ReturnType<typeof held>, cfg: Partial<{ refresh: boolean }> = {}) {
+    const store = memoryStorage();
+    const redirects: string[] = [];
+    const t = { now: 1_000_000_000_000 };
+    const s = createOidcSession({ oidc: { issuer: ISS, clientId: CLIENT, ...cfg }, origin: ORIGIN, fetchImpl: h.fetchImpl, now: () => t.now, session: store.api, redirect: (u) => { redirects.push(u); }, replaceUrl: () => {} });
+    return { s, redirects, t };
+  }
+  async function begin(x: ReturnType<typeof build>, h: ReturnType<typeof held>) {
+    await x.s.startSignIn('/inbox');
+    const url = new URL(x.redirects.at(-1)!);
+    h.setNonce(url.searchParams.get('nonce')!);
+    return `?code=C&state=${url.searchParams.get('state')}`;
+  }
+
+  it('a refresh that resolves after sign-out keeps nothing and does not start another sign-in', async () => {
+    const h = held('refresh_token');
+    const x = build(h, { refresh: true });
+    await x.s.handleCallback(await begin(x, h));
+    expect(await x.s.getToken()).toBe('AT-1');
+    x.t.now += 600_000;
+    const refreshing = x.s.getToken();
+    await h.reached;
+    const redirectsBefore = x.redirects.length;
+    await x.s.signOut();
+    h.release();
+    await expect(refreshing).rejects.toThrow('signed out');
+    await expect(x.s.getToken()).rejects.toThrow('signed out');
+    expect(x.redirects.length).toBe(redirectsBefore); // no new sign-in was started behind the sign-out
+  });
+  it('a callback whose token call resolves after sign-out keeps nothing', async () => {
+    const h = held('authorization_code');
+    const x = build(h);
+    const query = await begin(x, h);
+    const exchanging = x.s.handleCallback(query);
+    await h.reached;
+    const redirectsBefore = x.redirects.length;
+    await x.s.signOut();
+    h.release();
+    await expect(exchanging).rejects.toMatchObject({ code: 'state' });
+    await expect(x.s.getToken()).rejects.toThrow('signed out');
+    expect(x.redirects.length).toBe(redirectsBefore);
+  });
+});
