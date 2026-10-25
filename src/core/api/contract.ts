@@ -75,7 +75,7 @@ export type SendMessageRequest = z.infer<typeof sendMessageRequest>;
 export const apiError = z.object({
   error: z.enum([
     'unauthorized', 'forbidden', 'not_found', 'invalid_request',
-    'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited', 'plan_blocked',
+    'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited', 'plan_blocked', 'funding_unknown', 'rate_unavailable',
   ]),
   message: z.string().optional(),
 });
@@ -244,7 +244,7 @@ export const campaignParam = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('link_code') }),
 ]);
 export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled']);
-export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked']);
+export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable']);
 export const campaignCreate = z.object({
   name: z.string().trim().min(1).max(80),
   template: z.object({ name: z.string().min(1).max(512), language: z.string().min(2).max(10) }),
@@ -306,6 +306,81 @@ export type OrderSummaryDto = z.infer<typeof orderSummaryDto>;
 export type ApiError = z.infer<typeof apiError>;
 
 /** Route table (paths relative to /api/v1/stores/:storeId). */
+// ---- Billing (Phase 7). Additive. Amounts are integer piasters (EGP x 100); the currency is always EGP. ----
+export const fundingKind = z.enum(['merchant_card', 'platform_line']);
+export const billingCategory = z.enum(['marketing', 'utility', 'authentication', 'service']);
+export const walletDto = z.object({
+  balanceMinor: z.number().int(),
+  heldMinor: z.number().int(),
+  /** balance - held; can be negative inside the overdraft. */
+  availableMinor: z.number().int(),
+  debtMinor: z.number().int().nonnegative(),
+  creditLimitMinor: z.number().int().nonnegative(),
+  currency: z.literal('EGP'),
+  /** Who pays Meta, per connected number: merchant_card = Meta bills the merchant's card (the UI shows the notice), platform_line = this wallet. */
+  funding: z.array(z.object({ phoneNumberId: z.string(), displayPhone: z.string().nullable(), funding: fundingKind })),
+  topupsEnabled: z.boolean(),
+  lowBalance: z.boolean(),
+  aiCredits: z.object({ balance: z.number().int(), available: z.number().int() }),
+  plan: z.object({ packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable() }).nullable(),
+});
+export type WalletDto = z.infer<typeof walletDto>;
+
+export const walletMoney = z.object({ count: z.number().int(), netMinor: z.number().int(), vatMinor: z.number().int(), amountMinor: z.number().int() });
+export const statementRowDto = z.object({
+  at: z.number().int(), kind: z.string(), netMinor: z.number().int(), vatMinor: z.number().int(), amountMinor: z.number().int(), balanceAfterMinor: z.number().int(),
+  ref: z.string(), wamid: z.string().nullable(), category: z.string().nullable(), note: z.string().nullable(),
+});
+export const statementDto = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/), from: z.number().int(), to: z.number().int(), openingMinor: z.number().int(), closingMinor: z.number().int(),
+  rows: z.array(statementRowDto), truncated: z.boolean(),
+  totalsByKind: z.record(z.string(), walletMoney), totalsByCategory: z.record(z.string(), walletMoney),
+  cardCosts: z.array(z.object({ category: z.string(), count: z.number().int(), usdMicros: z.number().int() })),
+});
+export type StatementDto = z.infer<typeof statementDto>;
+export const statementQuery = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), format: z.enum(['json', 'csv']).default('json') });
+
+/** What a send would cost before it is made. perMessageMinor is what THIS WALLET pays (0 when Meta bills the merchant's card). */
+export const costEstimateQuery = z.object({ category: billingCategory, count: z.coerce.number().int().min(1).max(1_000_000).default(1), country: z.string().regex(/^[A-Z]{2,3}$/).optional() });
+export const costEstimateDto = z.object({
+  funding: fundingKind, paidBy: z.enum(['wallet', 'merchant_card']), perMessageMinor: z.number().int().nonnegative(), totalMinor: z.number().int().nonnegative(), priced: z.boolean(), currency: z.literal('EGP'),
+});
+
+export const topupRequest = z.object({ amountMinor: z.number().int().min(1000).max(5_000_000) });
+export const topupDto = z.object({
+  orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired']), amountMinor: z.number().int(), feeMinor: z.number().int(), totalMinor: z.number().int(),
+  checkoutUrl: z.string().url().optional(),
+});
+export const refundRequestCreate = z.object({ amountMinor: z.number().int().min(5000), note: z.string().trim().max(500).optional() });
+export const refundRequestDto = z.object({
+  id: z.string(), workspaceId: z.string(), amountMinor: z.number().int(), note: z.string().nullable(), state: z.enum(['pending', 'rejected', 'processing', 'paid', 'manual_payout', 'failed']),
+  requestedBy: z.string(), createdAt: z.number().int(), decidedBy: z.string().nullable(), decidedAt: z.number().int().nullable(), decisionNote: z.string().nullable(),
+  cardRefundedMinor: z.number().int(), manualMinor: z.number().int(),
+});
+
+// Operator (super admin) — /api/v1/operator/*
+export const pricingSettingsDto = z.object({
+  ver: z.number().int(), effectiveFrom: z.number().int(), marginBps: z.number().int(), creditLimitMinor: z.number().int(), fxBufferBps: z.number().int(), vatBps: z.number().int(), actor: z.string(), reason: z.string(),
+});
+/** `effectiveFrom` must be at least 1 h ahead (absent = in 1 h). A reason is mandatory and is audited with old -> new. */
+export const pricingSettingsPublish = z.object({
+  effectiveFrom: z.number().int().positive().optional(), marginBps: z.number().int().min(0).max(100_000), creditLimitMinor: z.number().int().min(0).max(10_000_000),
+  fxBufferBps: z.number().int().min(0).max(10_000), vatBps: z.number().int().min(0).max(10_000), reason: z.string().trim().min(5).max(500),
+});
+export const pricingOverridePublish = z.object({ effectiveFrom: z.number().int().positive().optional(), marginBps: z.number().int().min(0).max(100_000), reason: z.string().trim().min(5).max(500) });
+export const rateCardPublish = z.object({
+  /** At least 24 h ahead. */
+  effectiveFrom: z.number().int().positive(),
+  rates: z.array(z.object({ country: z.string().regex(/^[A-Z]{2,3}$/), category: z.string().regex(/^[a-z_]{3,32}$/), usdMicros: z.number().int().min(0).max(1_000_000_000) })).min(1).max(2000),
+  reason: z.string().trim().min(5).max(500),
+});
+export const fxPublish = z.object({ effectiveFrom: z.number().int().positive(), egpPerUsdMicros: z.number().int().min(1).max(1_000_000_000_000), bufferBps: z.number().int().min(0).max(10_000).default(0), reason: z.string().trim().min(5).max(500) });
+export const operatorFundingSet = z.object({ funding: z.enum(['merchant_card', 'platform_line']), reason: z.string().trim().min(5).max(500) });
+export const operatorAdjustmentCreate = z.object({ amountMinor: z.number().int().refine((n) => n !== 0), reason: z.string().trim().min(5).max(500) });
+export const operatorDecision = z.object({ decision: z.enum(['approve', 'reject']), note: z.string().trim().max(500).optional() });
+export const trueupPublish = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), phoneNumberId: z.string().min(1), actualMinor: z.number().int().min(0) });
+export const changeLogItemDto = z.object({ id: z.number().int(), at: z.number().int(), actor: z.string(), action: z.string(), workspaceId: z.string().nullable(), before: z.unknown(), after: z.unknown(), reason: z.string().nullable() });
+
 export const ROUTES = {
   conversations: 'GET /conversations',
   messages: 'GET /conversations/:conversationId/messages',
@@ -342,4 +417,11 @@ export const ROUTES = {
   campaignPause: 'POST /campaigns/:campaignId/pause',
   campaignResume: 'POST /campaigns/:campaignId/resume',
   campaignCancel: 'POST /campaigns/:campaignId/cancel',
+  wallet: 'GET /wallet',
+  walletStatement: 'GET /wallet/statement?month=YYYY-MM[&format=csv]',
+  walletEstimate: 'GET /wallet/estimate?category=&count=&country=',
+  walletTopups: 'POST /wallet/topups',
+  walletTopup: 'GET /wallet/topups/:orderId',
+  walletRefundRequests: 'GET|POST /wallet/refund-requests',
+  operator: 'GET|POST /api/v1/operator/{pricing-settings,pricing-overrides/:workspaceId,rate-cards,fx-rates,numbers/:phoneNumberId/funding,refund-requests,adjustments,trueups,change-log}',
 } as const;

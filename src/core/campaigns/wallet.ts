@@ -9,7 +9,7 @@ import { DEFAULT_COUNTRY } from '../billing/money';
 import { countryToDigits } from '../billing/country';
 import { fundingOf } from '../billing/pricing';
 
-export type WalletReserveResult = { ok: true } | { ok: false; reason: 'wallet_empty' };
+export type WalletReserveResult = { ok: true } | { ok: false; reason: 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' };
 export type WalletSettleOutcome = {
   /** How many messages the page queued. */
   recipients: number;
@@ -18,7 +18,7 @@ export type WalletSettleOutcome = {
 };
 
 /** What the real wallet needs from the workspace: its ledger, the sending number (who pays Meta) and the recipients' markets. */
-export type WalletCtx = { billing: Billing; storage: DurableObjectStorage; phoneNumberId: string; countries?: string[]; now: number };
+export type WalletCtx = { billing: Billing; storage: DurableObjectStorage; phoneNumberId: string; countries?: string[]; now: number; /** Set by walletEstimate when the page cannot be priced; walletReserve then refuses. */ refusal?: 'funding_unknown' | 'rate_unavailable' };
 
 export interface CampaignWallet {
   /** Estimated cost of ONE message of this template category, in piasters. 0 = nothing is charged. */
@@ -42,13 +42,22 @@ export const NO_WALLET: CampaignWallet = {
  */
 export const LEDGER_WALLET: CampaignWallet = {
   walletEstimate: (_ws, category, ctx) => {
-    if (!ctx || fundingOf(ctx.storage.sql, ctx.phoneNumberId) !== 'platform_line') return 0;
+    if (!ctx) return 0;
+    const funding = fundingOf(ctx.storage.sql, ctx.phoneNumberId);
+    if (funding === 'unknown') { ctx.refusal = 'funding_unknown'; return 0; }
+    if (funding !== 'platform_line') return 0;
     const countries = ctx.countries?.length ? ctx.countries : [DEFAULT_COUNTRY];
     // One number for the whole page: the dearest market in it, so the reservation is never short.
-    return Math.max(...countries.map((c) => ctx.billing.estimateMinor(c === 'ROW' ? '000' : countryToDigits(c), category, ctx.now).minor));
+    const ests = countries.map((c) => ctx.billing.estimateMinor(c === 'ROW' ? '000' : countryToDigits(c), category, ctx.now));
+    if (ests.some((e) => !e.priced)) { ctx.refusal = 'rate_unavailable'; return 0; }
+    return Math.max(...ests.map((e) => e.minor));
   },
   walletReserve: async (_ws, ref, minor, ctx) => {
-    if (!ctx || fundingOf(ctx.storage.sql, ctx.phoneNumberId) !== 'platform_line') return { ok: true };
+    if (!ctx) return { ok: true };
+    const funding = fundingOf(ctx.storage.sql, ctx.phoneNumberId);
+    if (funding === 'unknown') return { ok: false, reason: 'funding_unknown' };
+    if (ctx.refusal) return { ok: false, reason: ctx.refusal };
+    if (funding !== 'platform_line') return { ok: true };
     return ctx.storage.transactionSync(() => ctx.billing.reserveParent(ref, minor, ctx.now));
   },
   walletSettle: async (_ws, ref, outcome, ctx) => {

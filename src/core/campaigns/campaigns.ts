@@ -10,6 +10,7 @@ import { campaignLinks, newCode, validateTrackedUrl, withUtm } from './links';
 import { audiencePage, getSegment, previewAudience } from './segments';
 import { marketingBlocked } from '../billing/entitlements';
 import { countryOf } from '../billing/country';
+import { pricingReady } from '../billing/pricing';
 import { campaignWallet, type WalletCtx } from './wallet';
 
 /** Recipients queued per workflow step. */
@@ -356,6 +357,8 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
   const wallet = campaignWallet();
   let reservedMinor = 0;
   if (rows.length) {
+    await host.ensurePricing();
+    if (!pricingReady(host.sql)) return { state: 'retry', reason: 'pricing_unavailable' }; // an empty copy decides nothing
     let res: Awaited<ReturnType<typeof wallet.walletReserve>>;
     try {
       const ctx = walletCtx(host, c.phone_number_id, rows.map((r) => countryOf(r.waId)));
@@ -366,8 +369,8 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
       return { state: 'retry', reason: 'wallet_unavailable' };
     }
     if (!res.ok) {
-      host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'wallet_empty', updated_at = ? WHERE id = ? AND status = 'running' AND attempt = ?", now, id, attempt);
-      return stop('wallet_empty');
+      host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = ?, updated_at = ? WHERE id = ? AND status = 'running' AND attempt = ?", res.reason, now, id, attempt);
+      return stop(res.reason);
     }
     // The reservation was an await: another call for this very page may have queued it meanwhile (then its answer is ours, and the
     // reservation, which has the same ref, is theirs to keep), or the merchant may have paused or cancelled (then give it back).

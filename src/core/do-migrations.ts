@@ -410,6 +410,9 @@ export const DO_MIGRATIONS: readonly string[] = [
    CREATE TABLE pricing_settings (src_id INTEGER PRIMARY KEY, ver INTEGER NOT NULL, effective_from INTEGER NOT NULL, margin_bps INTEGER NOT NULL, credit_limit_minor INTEGER NOT NULL, fx_buffer_bps INTEGER NOT NULL, vat_bps INTEGER NOT NULL);
    CREATE TABLE pricing_overrides (src_id INTEGER PRIMARY KEY, ver INTEGER NOT NULL, effective_from INTEGER NOT NULL, margin_bps INTEGER NOT NULL);
    CREATE TABLE number_funding (phone_number_id TEXT PRIMARY KEY, funding TEXT NOT NULL CHECK (funding IN ('merchant_card', 'platform_line')));`,
+  // v28 (fail-closed money): a billable delivery whose rate cannot be found is kept as pending_rate and charged when the rate appears.
+  `ALTER TABLE billable_sends ADD COLUMN pending_rate INTEGER NOT NULL DEFAULT 0;
+   CREATE INDEX billable_sends_pending ON billable_sends (wamid) WHERE pending_rate = 1;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

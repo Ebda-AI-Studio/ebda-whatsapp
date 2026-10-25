@@ -14,7 +14,7 @@ import type { StatusPricing } from '../meta/webhook-schema';
 import { addTask } from '../scheduler';
 import { countryOf } from './country';
 import { ensureTrueupTask } from './trueup';
-import { DEFAULT_SETTINGS, fundingOf, normaliseCategory, priceAt, settingsAt, type Funding } from './pricing';
+import { DEFAULT_SETTINGS, fundingOf, normaliseCategory, priceAt, pricingReady, settingsAt, type Funding } from './pricing';
 
 type Sql = DurableObjectStorage['sql'];
 
@@ -36,7 +36,12 @@ export type PostArgs = {
 };
 export type WalletPosted = { ok: true; balance: number; amountMinor: number } | { ok: false; reason: 'duplicate' | 'invalid' };
 
-export type ClaimBill = { kind: 'ok' } | { kind: 'empty'; reason: 'wallet_empty' | 'wallet_empty_expired' } | { kind: 'wait'; waitUntil: number };
+export type ClaimBill =
+  | { kind: 'ok' }
+  | { kind: 'empty'; reason: 'wallet_empty' | 'wallet_empty_expired' | 'funding_unknown' | 'rate_unavailable' }
+  | { kind: 'wait'; waitUntil: number }
+  /** The price inputs were never pulled: nothing may be decided on an empty copy. Try again soon. */
+  | { kind: 'defer' };
 
 export type BillingStatus = { wamid: string; status: 'sent' | 'delivered' | 'read' | 'failed'; ts: number; pricing?: StatusPricing };
 
@@ -135,7 +140,7 @@ export class Billing {
     const country = countryOf(to);
     const p = priceAt(this.sql, { country, category, t: now });
     if (!p) {
-      alert('rate_missing', { workspace: this.workspaceId, country, category: normaliseCategory(category) });
+      alert('rate_unavailable', { workspace: this.workspaceId, country, category: normaliseCategory(category) });
       return { minor: 0, priced: false, country };
     }
     return { minor: p.amountMinor, priced: true, country };
@@ -165,11 +170,18 @@ export class Billing {
     const ref = `msg:${job.idempotencyKey}`;
     const have = this.hold(ref);
     if (have && (have.state === 'held' || have.state === 'charged')) return { kind: 'ok' };
+    if (!pricingReady(this.sql)) return { kind: 'defer' };
     const funding = fundingOf(this.sql, job.phoneNumberId);
+    if (funding === 'unknown') {
+      alert('funding_unknown', { workspace: this.workspaceId });
+      return { kind: 'empty', reason: 'funding_unknown' };
+    }
     const category = this.jobCategory(job);
     const country = countryOf(job.to);
     // The rate card matters only for a number the wallet pays for; a merchant-card number never looks a price up here.
     const est = funding === 'platform_line' ? this.estimateMinor(job.to, category, a.now) : { minor: 0, priced: true, country };
+    // A platform-paid send with no price in effect is refused, never held at 0 (it would go out and be delivered for free).
+    if (!est.priced) return { kind: 'empty', reason: 'rate_unavailable' };
     const ttl = category === 'authentication' ? AUTH_HOLD_TTL_MS : HOLD_TTL_MS;
     const write = (amount: number, parent: string | null) => {
       this.sql.exec(
@@ -281,9 +293,12 @@ export class Billing {
   sweep(now: number): number | null {
     for (const h of this.sql.exec<{ ref: string }>("SELECT ref FROM wallet_holds WHERE state = 'held' AND expires_at <= ? ORDER BY parent_ref IS NULL, ref", now).toArray()) this.close(h.ref, 'expired', 'ttl', now);
     for (const h of this.sql.exec<{ ref: string }>("SELECT ref FROM wallet_holds WHERE state = 'held' AND closing = 1").toArray()) this.tryClosePage(h.ref, now);
+    const stillPending = this.retryPendingRates(now);
     const next = this.sql.exec<{ n: number | null }>("SELECT min(expires_at) AS n FROM wallet_holds WHERE state = 'held'").one().n;
     const closing = this.sql.exec<{ n: number }>("SELECT count(*) AS n FROM wallet_holds WHERE state = 'held' AND closing = 1").one().n;
-    return closing ? Math.min(next ?? Number.MAX_SAFE_INTEGER, now + 6 * HOUR) : next;
+    const retry = stillPending ? now + HOUR : Number.MAX_SAFE_INTEGER;
+    const both = Math.min(closing ? now + 6 * HOUR : Number.MAX_SAFE_INTEGER, retry, next ?? Number.MAX_SAFE_INTEGER);
+    return both === Number.MAX_SAFE_INTEGER ? null : both;
   }
 
   // ---- after the send -----------------------------------------------------------------------------------------------
@@ -362,9 +377,17 @@ export class Billing {
     }
     const price = priceAt(this.sql, { country: bs.country ?? 'ROW', category, t: bs.delivered_at });
     if (!price) {
-      this.sql.exec('UPDATE billable_sends SET unpriced = 1 WHERE wamid = ?', wamid);
-      releaseHold('unpriced');
-      if (bs.funding === 'platform_line') alert('rate_missing', { workspace: this.workspaceId, country: bs.country, category });
+      if (bs.funding === 'platform_line') {
+        // Meta billed us and we cannot price it yet: never free. Kept as pending_rate and charged when a rate appears (retryPendingRates).
+        this.sql.exec('UPDATE billable_sends SET pending_rate = 1 WHERE wamid = ?', wamid);
+        releaseHold('pending_rate');
+        alert('rate_missing_pending', { workspace: this.workspaceId, country: bs.country, category });
+        addTask(this.sql, 'wallet_sweep', now + HOUR);
+        this.touch();
+      } else {
+        this.sql.exec('UPDATE billable_sends SET unpriced = 1 WHERE wamid = ?', wamid);
+        releaseHold('unpriced');
+      }
       return;
     }
     if (bs.funding !== 'platform_line') {
@@ -385,6 +408,15 @@ export class Billing {
       this.touch();
     }
     spent();
+  }
+
+  /** A rate (or FX) version arrived: every billable delivery that waited for one is priced now. Idempotent (the charge ref is meta:<wamid>). Returns how many are still waiting. */
+  retryPendingRates(now: number): number {
+    for (const r of this.sql.exec<{ wamid: string }>('SELECT wamid FROM billable_sends WHERE pending_rate = 1 ORDER BY delivered_at').toArray()) {
+      this.sql.exec('UPDATE billable_sends SET pending_rate = 0 WHERE wamid = ?', r.wamid);
+      this.settleDelivered(r.wamid, now); // puts it back to pending_rate if the rate is still missing
+    }
+    return this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM billable_sends WHERE pending_rate = 1').one().n;
   }
 
   /** Meta's billed category wins: a later status that names another category than the one we charged posts the difference as meta_adjust. */

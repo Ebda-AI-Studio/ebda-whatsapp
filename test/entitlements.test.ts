@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { reconcileEntitlements, pushEntitlement } from '../src/core/billing/subscriptions';
-import { openChat, rows, seedNumber, workspace } from './helpers/workspace';
+import { openChat, own, rows, seedNumber, workspace } from './helpers/workspace';
 import { seedTemplate } from './helpers/campaigns';
 
 const W = (n: number) => `00000000-0000-4000-8000-0000000071${String(n).padStart(2, '0')}`;
@@ -69,6 +69,7 @@ describe('entitlements: past_due blocks marketing only', () => {
     const ws = W(10 + ['past_due', 'cancelled', 'expired'].indexOf(status));
     await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
     await seedTemplate(ws, { name: 'upd', category: 'UTILITY', components: JSON.stringify([{ type: 'BODY', text: 'hi' }]) });
+    await own(ws);
     const conv = await openChat(ws);
     await workspace(ws).applyEntitlement(ev({ status }));
     const tmpl = (name: string, n: number) => ({ type: 'template' as const, clientId: `00000000-0000-4000-8000-00000000a0${n}`, name, language: 'ar', params: name === 'promo' ? ['a', 'b'] : [] });
@@ -80,6 +81,7 @@ describe('entitlements: past_due blocks marketing only', () => {
   it('a marketing message queued before the plan lapsed fails at claim with plan_blocked', async () => {
     const ws = W(20);
     await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
+    await own(ws);
     const conv = await openChat(ws);
     const q = await workspace(ws).queueOutbound(conv, 'pn-x', { type: 'template', clientId: '00000000-0000-4000-8000-00000000b001', name: 'promo', language: 'ar', params: ['a', 'b'] });
     expect(q.ok).toBe(true);
@@ -91,6 +93,7 @@ describe('entitlements: past_due blocks marketing only', () => {
   it('no entitlement on record blocks nothing', async () => {
     const ws = W(21);
     await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
+    await own(ws);
     const conv = await openChat(ws);
     expect(await workspace(ws).queueOutbound(conv, 'pn-x', { type: 'template', clientId: '00000000-0000-4000-8000-00000000b002', name: 'promo', language: 'ar', params: ['a', 'b'] })).toMatchObject({ ok: true });
   });

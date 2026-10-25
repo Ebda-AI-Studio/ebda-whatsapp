@@ -17,7 +17,7 @@ export function cleanParam(value: string | null | undefined, fallback: string, m
 export type QueueResult =
   | { ok: true; duplicate: false; messageId: number; job: SendJob }
   | { ok: true; duplicate: true }
-  | { ok: false; reason: 'template_not_approved' | 'wrong_category' | 'opted_out' | 'no_consent' | 'plan_blocked' | 'wallet_empty' | 'invalid_request'; message?: string };
+  | { ok: false; reason: 'template_not_approved' | 'wrong_category' | 'opted_out' | 'no_consent' | 'plan_blocked' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'invalid_request'; message?: string };
 
 export type TemplateSend = {
   waId: string;
@@ -74,7 +74,11 @@ export function queueTemplate(host: LinkHost, a: TemplateSend): QueueResult {
     template: { name: a.name, language: t.language, components: [...rendered.components, ...(a.extraComponents ?? [])] },
   };
   // The wallet speaks first (a campaign message draws from its page's reservation at claim instead). A refusal writes nothing.
-  if (!a.idempotencyKey.startsWith('camp:') && host.billing.onClaim(job, { now, createdAt: now, windowEndsAt: null, atQueue: true }).kind === 'empty') return { ok: false, reason: 'wallet_empty' };
+  if (!a.idempotencyKey.startsWith('camp:')) {
+    const bill = host.billing.onClaim(job, { now, createdAt: now, windowEndsAt: null, atQueue: true });
+    if (bill.kind === 'defer') return { ok: false, reason: 'funding_unknown' };
+    if (bill.kind === 'empty') return { ok: false, reason: bill.reason === 'wallet_empty_expired' ? 'wallet_empty' : bill.reason };
+  }
   const { conversationId } = host.ensureConversation(a.waId, now, a.profileName);
   const messageId = host.insertOutbound(conversationId, { type: 'template', preview: shown, body: shown.length ? shown : null, key: a.idempotencyKey, templateName: a.name, templateLang: t.language }, now);
   if (a.scheduleRelease !== false) addTask(host.sql, 'send_release', now, { job, reason: 'event' });

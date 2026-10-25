@@ -194,21 +194,6 @@ describe('hold, charge, release', () => {
     await status(ws, wamidOf(12), 'delivered', nowS(), { billable: false, pricingModel: 'PMP', category: 'service', type: 'free_customer_service' });
     expect((await ledger(ws)).at(-1)).toMatchObject({ kind: 'meta_charge', amount_minor: -PIASTERS.service, category: 'service' });
   });
-
-  it('a market with no rate card is never guessed: estimate 0, an alert, and no charge', async () => {
-    const spy = alerts();
-    const ws = W(13);
-    await setupBilling(ws);
-    await fund(ws, 1000);
-    const conv = await openChat(ws, '4915112345678'); // Germany: not on the test card
-    await seedTemplate(ws, { name: 'tpl-m', category: 'MARKETING' });
-    const job = jobOf(await workspace(ws).queueOutbound(conv, pn(ws), { type: 'template', clientId: '00000000-0000-4000-8000-000000000131', name: 'tpl-m', language: 'ar', params: ['a', 'b'] }));
-    expect(await holdOf(ws, job)).toMatchObject({ amount_minor: 0 });
-    await sendOut(ws, job, wamidOf(13));
-    await status(ws, wamidOf(13), 'delivered', nowS(), pricing('marketing'));
-    expect(alertNames(spy)).toContain('rate_missing');
-    expect((await ledger(ws)).map((r) => r.kind)).toEqual(['topup']);
-  });
 });
 
 describe('pre-send rules by category (WA-OVERDRAFT-1)', () => {
@@ -224,7 +209,7 @@ describe('pre-send rules by category (WA-OVERDRAFT-1)', () => {
     expect(await holds(ws)).toEqual([]);
   });
 
-  it('marketing at claim: fails wallet_empty when funds went elsewhere; with debt it is refused even if the market has no rate', async () => {
+  it('marketing at claim: fails wallet_empty when funds went elsewhere; with debt it is refused', async () => {
     const ws = W(21);
     await setupBilling(ws);
     await fund(ws, 300);
@@ -237,8 +222,7 @@ describe('pre-send rules by category (WA-OVERDRAFT-1)', () => {
     const ws2 = W(22);
     await setupBilling(ws2);
     await debt(ws2, 10);
-    const conv2 = await openChat(ws2, '4915112345678');
-    await seedTemplate(ws2, { name: 'tpl-m', category: 'MARKETING' });
+    const conv2 = await chat(ws2);
     expect(await workspace(ws2).queueOutbound(conv2, pn(ws2), { type: 'template', clientId: '00000000-0000-4000-8000-000000000221', name: 'tpl-m', language: 'ar', params: ['a', 'b'] })).toMatchObject({ ok: false, reason: 'wallet_empty' });
   });
 

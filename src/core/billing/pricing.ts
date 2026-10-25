@@ -30,10 +30,18 @@ export function normaliseCategory(c: string | null | undefined): string {
   return v || 'service';
 }
 
-export function fundingOf(sql: Sql, phoneNumberId: string | null | undefined): Funding {
-  if (!phoneNumberId) return 'merchant_card';
+export type FundingState = Funding | 'unknown';
+
+/** Who pays Meta for this number. A number with no row is 'unknown' and cannot send: a miss must never read as "free". */
+export function fundingOf(sql: Sql, phoneNumberId: string | null | undefined): FundingState {
+  if (!phoneNumberId) return 'unknown';
   const r = sql.exec<{ funding: Funding }>('SELECT funding FROM number_funding WHERE phone_number_id = ?', phoneNumberId).toArray()[0];
-  return r?.funding ?? 'merchant_card';
+  return r?.funding ?? 'unknown';
+}
+
+/** True once a pull of the price inputs has succeeded at least once: before that the copy is empty and no wallet decision may be taken on it. */
+export function pricingReady(sql: Sql): boolean {
+  return sql.exec("SELECT 1 FROM store_state WHERE key = 'pricing.pulled_at'").toArray().length > 0;
 }
 
 export function settingsAt(sql: Sql, t: number): Settings {
@@ -85,7 +93,7 @@ export type PricingSnapshot = {
   fx: { id: number; ver: number; effective_from: number; egp_per_usd_micros: number; buffer_bps: number }[];
   settings: { id: number; ver: number; effective_from: number; margin_bps: number; credit_limit_minor: number; fx_buffer_bps: number; vat_bps: number }[];
   overrides: { id: number; ver: number; effective_from: number; margin_bps: number }[];
-  funding: { phone_number_id: string; funding: Funding }[];
+  funding: { phone_number_id: string; funding: Funding | null }[];
 };
 
 export const copyCursor = (sql: Sql) => ({
@@ -102,7 +110,7 @@ export async function pullPricing(env: Env, workspaceId: string, cur: ReturnType
     env.DB.prepare('SELECT id, ver, effective_from, egp_per_usd_micros, buffer_bps FROM fx_rates WHERE id > ? ORDER BY id').bind(cur.fx),
     env.DB.prepare('SELECT id, ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps FROM pricing_settings WHERE id > ? ORDER BY id').bind(cur.settings),
     env.DB.prepare('SELECT id, ver, effective_from, margin_bps FROM workspace_pricing_overrides WHERE workspace_id = ? AND id > ? ORDER BY id').bind(workspaceId, cur.overrides),
-    env.DB.prepare('SELECT nf.phone_number_id, nf.funding FROM number_funding nf JOIN phone_numbers pn ON pn.phone_number_id = nf.phone_number_id WHERE pn.workspace_id = ?').bind(workspaceId),
+    env.DB.prepare('SELECT pn.phone_number_id AS phone_number_id, nf.funding AS funding FROM phone_numbers pn LEFT JOIN number_funding nf ON nf.phone_number_id = pn.phone_number_id WHERE pn.workspace_id = ?').bind(workspaceId),
   ]);
   return {
     rates: rates!.results as PricingSnapshot['rates'], fx: fx!.results as PricingSnapshot['fx'], settings: settings!.results as PricingSnapshot['settings'],
@@ -117,5 +125,6 @@ export function applyPricing(sql: Sql, s: PricingSnapshot): void {
   for (const r of s.settings) sql.exec('INSERT OR IGNORE INTO pricing_settings (src_id, ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps) VALUES (?, ?, ?, ?, ?, ?, ?)', r.id, r.ver, r.effective_from, r.margin_bps, r.credit_limit_minor, r.fx_buffer_bps, r.vat_bps);
   for (const r of s.overrides) sql.exec('INSERT OR IGNORE INTO pricing_overrides (src_id, ver, effective_from, margin_bps) VALUES (?, ?, ?, ?)', r.id, r.ver, r.effective_from, r.margin_bps);
   sql.exec('DELETE FROM number_funding');
-  for (const f of s.funding) sql.exec('INSERT INTO number_funding (phone_number_id, funding) VALUES (?, ?)', f.phone_number_id, f.funding);
+  for (const f of s.funding) if (f.funding) sql.exec('INSERT INTO number_funding (phone_number_id, funding) VALUES (?, ?)', f.phone_number_id, f.funding); // a number without a row stays unknown
+  sql.exec("INSERT INTO store_state (key, value) VALUES ('pricing.pulled_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(Date.now()));
 }

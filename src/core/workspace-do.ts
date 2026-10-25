@@ -73,7 +73,7 @@ const STATUS_RANK = { sent: 1, failed: 2, delivered: 3, read: 4 } as const;
 export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[]; receivedAt: number };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
-export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'wallet_empty' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
+export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
 export type TaskPayload = { job?: SendJob; phoneNumberId?: string; reason?: 'tier' | 'throughput' | 'frequency_cap' | 'event'; n?: number; messageId?: number; mediaId?: string; orderId?: string };
@@ -134,7 +134,11 @@ export class WorkspaceDO extends DurableObject<Env> {
     this.pricingPull = (async () => {
       try {
         const snap = await pullPricing(this.env, this.workspaceId, copyCursor(this.sql));
-        this.ctx.storage.transactionSync(() => applyPricing(this.sql, snap));
+        this.ctx.storage.transactionSync(() => {
+          applyPricing(this.sql, snap);
+          if (snap.rates.length || snap.fx.length || snap.settings.length) this.billing.retryPendingRates(now); // a new version may be the one a delivery waited for
+        });
+        await this.flushArm();
         this.pricingPulledAt = now;
       } catch (err) {
         this.pricingPulledAt = now - PRICING_MAX_AGE_MS + 60_000;
@@ -144,6 +148,14 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
     })();
     return this.pricingPull;
+  }
+
+  private lastEagerPull = 0;
+  /** A number the copy does not know may have been connected after the last pull: look again at once (at most every 10 s), then decide. */
+  private async repullIfUnknown(phoneNumberId: string, now: number): Promise<void> {
+    if (fundingOf(this.sql, phoneNumberId) !== 'unknown' || now - this.lastEagerPull < 10_000) return;
+    this.lastEagerPull = now;
+    await this.ensurePricing(now, true);
   }
 
   async refreshPricing(): Promise<void> {
@@ -260,6 +272,7 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   async claimSend(job: SendJob, now = Date.now(), opts: { noDefer?: boolean } = {}): Promise<ClaimResult> {
     await this.ensurePricing(now);
+    await this.repullIfUnknown(job.phoneNumberId, now);
     let deferred = false;
     const result = this.ctx.storage.transactionSync((): ClaimResult => {
       const claim = this.claimRow(job, now);
@@ -301,12 +314,20 @@ export class WorkspaceDO extends DurableObject<Env> {
       now, createdAt: msg?.created_at ?? now, windowEndsAt: last ? last * 1000 + WINDOW_MS : null, parentRef: parentHoldRef(this.host(), job.idempotencyKey),
     });
     if (bill.kind === 'ok') return 'ok';
+    if (bill.kind === 'defer') {
+      // The price inputs have never been pulled (D1 unreachable): no wallet decision may run on an empty copy. Give the claim back and try again soon.
+      this.sql.exec("UPDATE messages SET status = 'queued', claim_attempts = max(0, claim_attempts - 1), updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
+      this.addReleaseOnce(job, now + 60_000, 'pricing_unavailable');
+      this.armPending = true;
+      console.error(JSON.stringify({ alert: 'pricing_copy_missing', workspace: this.workspaceId }));
+      return 'deferred';
+    }
     if (bill.kind === 'empty') {
       this.sql.exec("UPDATE messages SET status = 'failed', error_reason = ?, updated_at = ? WHERE idempotency_key = ?", bill.reason, now, job.idempotencyKey);
       if (msg) this.emitMessageStatus(msg.id);
       if (job.idempotencyKey.startsWith('camp:')) {
         const cid = job.idempotencyKey.split(':')[1];
-        this.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'wallet_empty', updated_at = ? WHERE id = ? AND status = 'running'", now, cid);
+        this.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = ?, updated_at = ? WHERE id = ? AND status = 'running'", bill.reason === 'wallet_empty_expired' ? 'wallet_empty' : bill.reason, now, cid);
       }
       if (bill.reason === 'wallet_empty_expired') console.error(JSON.stringify({ alert: 'wallet_wait_expired', workspace: this.workspaceId }));
       return 'dropped';
@@ -509,6 +530,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   async queueOutbound(conversationId: number, phoneNumberId: string, req: SendMessageRequest, now = Date.now()): Promise<QueueOutboundResult> {
     const workspaceId = this.workspaceId;
     await this.ensurePricing(now);
+    await this.repullIfUnknown(phoneNumberId, now);
     const out = this.ctx.storage.transactionSync((): QueueOutboundResult => {
       const conv = this.sql
         .exec<{ id: number; wa_id: string; last_inbound_at: number | null; opted_out_at: number | null }>(
@@ -564,7 +586,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       // The wallet's answer comes first, so a refusal leaves no half-written message behind.
       const bill = this.billing.onClaim(job, { now, createdAt: now, windowEndsAt: req.type === 'template' ? null : (conv.last_inbound_at ?? 0) * 1000 + WINDOW_MS, atQueue: true });
-      if (bill.kind === 'empty') return { ok: false, reason: 'wallet_empty' };
+      if (bill.kind === 'defer') return { ok: false, reason: 'funding_unknown' };
+      if (bill.kind === 'empty') return { ok: false, reason: bill.reason === 'wallet_empty_expired' ? 'wallet_empty' : bill.reason };
       const id = this.sql.exec<{ id: number }>(
         `INSERT INTO messages (conversation_id, direction, type, preview, body, status, idempotency_key, template_name, template_lang, media_mime, media_size, media_r2_key, author, created_at, updated_at)
          VALUES (?, 'out', ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, 'staff', ?, ?) RETURNING id`,
@@ -671,7 +694,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         if (!h || h.state !== 'held' || h.funding !== 'platform_line' || !h.number_id) continue; // not held against the wallet: the claim decides
         this.billing.settleHold(m.key, 'dropped', now);
         const bill = this.billing.onClaim({ workspaceId: this.workspaceId, phoneNumberId: h.number_id, to: m.wa_id, idempotencyKey: m.key, kind: 'template', template: { name, language, components: [] } }, { now, createdAt: now, windowEndsAt: null, atQueue: true });
-        if (bill.kind === 'empty') fail('wallet_empty');
+        if (bill.kind === 'empty') fail(bill.reason === 'wallet_empty_expired' ? 'wallet_empty' : bill.reason);
       }
       return { rechecked, failed };
     });
@@ -830,6 +853,8 @@ export class WorkspaceDO extends DurableObject<Env> {
    * "retry this message". `phoneNumberId` is the workspace's active sender, or null when it has none.
    */
   async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null }): Promise<StoreEventOutcome> {
+    await this.ensurePricing();
+    if (opts.phoneNumberId) await this.repullIfUnknown(opts.phoneNumberId, Date.now());
     return applyStoreEvent(this.host(), event, opts);
   }
 
@@ -869,6 +894,8 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (!readSettings(this.host()).otpViaWhatsApp) return { ok: false, reason: 'disabled' };
     const policy = storeLink().otp;
     const now = Date.now();
+    await this.ensurePricing(now);
+    await this.repullIfUnknown(phoneNumberId, now);
     const key = `otp:${crypto.randomUUID()}`;
     const queued = this.ctx.storage.transactionSync((): OtpResult | { job: SendJob } => {
       const since = now - OTP_RATE_WINDOW_MS;
@@ -881,7 +908,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         waId, phoneNumberId, name: copy.templates.otp, language: 'ar', fallbackLanguage: 'en', params: [code], idempotencyKey: key,
         requireCategory: 'AUTHENTICATION', maskText: OTP_MASK, scheduleRelease: false, now,
       });
-      if (!r.ok) return { ok: false, reason: r.reason === 'template_not_approved' || r.reason === 'wrong_category' ? 'template_unavailable' : r.reason === 'wallet_empty' ? 'wallet_empty' : 'invalid' };
+      if (!r.ok) return { ok: false, reason: r.reason === 'template_not_approved' || r.reason === 'wrong_category' ? 'template_unavailable' : r.reason === 'wallet_empty' ? 'wallet_empty' : r.reason === 'funding_unknown' || r.reason === 'rate_unavailable' ? 'unavailable' : 'invalid' };
       return r.duplicate ? { ok: true } : { job: r.job };
     });
     if (!('job' in queued)) return queued;
@@ -1169,6 +1196,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   async estimateCost(a: { phoneNumberId: string; category: string; country?: string; count: number }, now = Date.now()) {
     await this.ensurePricing(now);
     const funding = fundingOf(this.sql, a.phoneNumberId);
+    if (funding === 'unknown') return { funding: 'merchant_card' as const, perMessageMinor: 0, totalMinor: 0, priced: false, paidBy: 'merchant_card' as const };
     if (funding !== 'platform_line') return { funding, perMessageMinor: 0, totalMinor: 0, priced: true, paidBy: 'merchant_card' as const };
     const e = this.billing.estimateMinor(a.country ? countryToDigits(a.country) : '20', a.category, now);
     return { funding, perMessageMinor: e.minor, totalMinor: e.minor * a.count, priced: e.priced, paidBy: 'wallet' as const };

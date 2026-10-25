@@ -5,7 +5,7 @@ import { apiFor, graphStub, storeId as W, useApiKey } from './helpers/api';
 import { postWebhook } from './helpers/meta';
 import { inboundPayload } from './helpers/payload';
 import { consume } from './helpers/queue';
-import { openChat, rows, seedNumber, workspace } from './helpers/workspace';
+import { openChat, rows, seedNumber, workspace, own } from './helpers/workspace';
 
 useApiKey();
 const queuedJobs = () => vi.mocked(env.SEND_QUEUE.sendBatch).mock.calls.flatMap((c) => (c[0] as { body: SendJob }[]).map((m) => m.body));
@@ -41,6 +41,7 @@ it('an API send queued before the contact was erased is dropped too', async () =
 it('sends delayed by the throttle are cancelled with the contact they were for', async () => {
   const store = W(502);
   const ws = workspace(store);
+  await own(store);
   await ws.setNumberLimits('pn-x', { mps: 1 });
   await openChat(store);
   const job = (key: string): SendJob => ({ workspaceId: store, phoneNumberId: 'pn-x', to: '201001234567', text: 'سري', idempotencyKey: key });

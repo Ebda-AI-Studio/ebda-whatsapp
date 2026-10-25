@@ -7,7 +7,7 @@ import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import {
   PN, campaignMessages, fakeStep, holdAlarm, installWallet, makeCampaign, resetWallet, seedContacts, seedTemplate, setPageSize, setTier, stepsOf,
 } from './helpers/campaigns';
-import { exec, openChat, rows, workspace } from './helpers/workspace';
+import { exec, openChat, rows, workspace, own } from './helpers/workspace';
 
 useApiKey();
 afterEach(() => resetWallet());
@@ -317,6 +317,7 @@ it('pause parks unsent messages (even one already in the queue), resume releases
   const ws = W(645);
   const api = await apiFor(ws);
   const staff = await apiFor(ws, 'staff');
+  await own(ws);
   await holdAlarm(ws);
   await seedTemplate(ws);
   await seedContacts(ws, 3);

@@ -5,7 +5,7 @@ import { apiFor, graphStub, storeId as W, tokenFor, useApiKey } from './helpers/
 import { consume } from './helpers/queue';
 import { postWebhook } from './helpers/meta';
 import { templateStatusPayload } from './helpers/payload';
-import { exec, openChat, rows, seedNumber, workspace } from './helpers/workspace';
+import { exec, openChat, rows, seedNumber, workspace, own } from './helpers/workspace';
 
 useApiKey();
 const cid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -147,6 +147,7 @@ it('Final #8: a template-status webhook reaches every workspace that shares the 
 it('Final #10: a duplicate queue delivery of a throttled job creates one send_release task', async () => {
   const ws = 'ws-dup-release';
   const stub = workspace(ws);
+  await own(ws, 'pn-d');
   await stub.setNumberLimits('pn-d', { mps: 1 });
   await openChat(ws);
   const job = (key: string): SendJob => ({ workspaceId: ws, phoneNumberId: 'pn-d', to: '201001234567', text: 'x', idempotencyKey: key });

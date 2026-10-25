@@ -34,3 +34,17 @@ export async function openChat(workspaceId: string, waId = '201001234567', opts:
   const r = await rows<{ id: number }>(workspaceId, 'SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.wa_id = ?', waId);
   return r[0]!.id;
 }
+
+/**
+ * Makes `phoneNumberId` this workspace's registered number (moving it from whichever test used it before) with merchant-card funding,
+ * the way connecting a number does. Sends from a number the control plane has not registered are refused (funding must be known).
+ */
+export async function own(workspaceId: string, phoneNumberId = 'pn-x', funding: 'merchant_card' | 'platform_line' = 'merchant_card'): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(workspaceId, workspaceId, Date.now()),
+    env.DB.prepare('DELETE FROM phone_numbers WHERE phone_number_id = ?').bind(phoneNumberId),
+    env.DB.prepare("INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status) VALUES (?, 'waba-own', ?, 'active')").bind(phoneNumberId, workspaceId),
+    env.DB.prepare('INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, ?, 0)').bind(phoneNumberId, funding),
+  ]);
+  await workspace(workspaceId).refreshPricing();
+}
