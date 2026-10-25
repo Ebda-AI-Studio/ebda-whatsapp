@@ -1,7 +1,7 @@
 import { Bot } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { BRAND } from '@brand';
-import type { BotSettingsDto } from '../../../src/core/api/contract';
+import type { BotSettingsDto, CatalogStatusDto } from '../../../src/core/api/contract';
 import { hoursSchema, locationSchema, MENU_ANSWER_MAX, MENU_MAX_ITEMS, MENU_TITLE_MAX, menuSchema, HOURS_AWAY_MAX } from '../../../src/core/store-link/bot-settings';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
@@ -22,6 +22,60 @@ function toLocation(l: LocDraft): BotSettingsDto['location'] | undefined {
   if (locEmpty(l)) return null;
   const parsed = locationSchema.safeParse({ name: l.name.trim(), address: l.address.trim(), latitude: l.latitude.trim() === '' ? undefined : Number(l.latitude), longitude: l.longitude.trim() === '' ? undefined : Number(l.longitude) });
   return parsed.success ? parsed.data : undefined;
+}
+
+/** The WhatsApp catalog: create one when there is none, else show its id and the last sync. Separate from the settings form (its own action, not part of Save). */
+function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang; source: InboxSource; readOnly: boolean }) {
+  const api = source.catalog!;
+  const [cat, setCat] = useState<CatalogStatusDto | undefined | 'error'>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState(false);
+  const load = useCallback(() => { setCat(undefined); void api.status().then(setCat, () => setCat('error')); }, [api]);
+  useEffect(load, [load]);
+
+  const create = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { catalogId } = await api.provision();
+      setCat({ catalogId, lastSyncAt: null });
+      setCreated(true);
+    } catch (e) {
+      const detail = (e as { detail?: string }).detail;
+      if (detail === 'catalog_already_set') load();
+      else setError(detail === 'missing_permission' ? t.catErrPermission : detail === 'no_business' || detail === 'business_mismatch' ? t.catErrReconnect : detail === 'meta_error' ? t.catErrMeta : t.catErrGeneric);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const when = (ms: number) => new Date(ms).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
+  return (
+    <section className="settings" aria-labelledby="bot-catalog-title">
+      <h2 id="bot-catalog-title">{t.catTitle}</h2>
+      {cat === undefined && <p className="muted">…</p>}
+      {cat === 'error' && <LoadError t={t} onRetry={load} />}
+      {cat && cat !== 'error' && (cat.catalogId
+        ? (
+          <>
+            <p dir="auto">{t.catId(cat.catalogId)}</p>
+            <p className="muted">{cat.lastSyncAt ? t.catLastSync(when(cat.lastSyncAt)) : t.catNoSync}</p>
+          </>
+        )
+        : (
+          <>
+            <p className="muted">{t.catNone}</p>
+            {readOnly
+              ? <p className="notice" role="note">{t.catOwnerOnly}</p>
+              : <div className="settings-actions"><button type="button" className="btn primary" disabled={busy} onClick={() => void create()}>{t.catCreate}</button></div>}
+          </>
+        ))}
+      {busy && <p role="status" className="muted">{t.catCreating}</p>}
+      {created && !busy && <p role="status" className="muted">{t.catCreated}</p>}
+      {error && <p role="alert" className="error-text">{error}</p>}
+    </section>
+  );
 }
 
 export function BotScreen({ t, lang, source }: { t: Strings; lang: Lang; source: InboxSource }) {
@@ -98,6 +152,7 @@ export function BotScreen({ t, lang, source }: { t: Strings; lang: Lang; source:
         <h1 id="bot-title">{t.botTitle}</h1>
         {guide && <a className="muted" href={guide} target="_blank" rel="noopener">{t.botGuide}</a>}
       </header>
+      {source.catalog && <CatalogSection t={t} lang={lang} source={source} readOnly={readOnly} />}
       <form className="settings" onSubmit={(e) => { e.preventDefault(); void save(); }}>
         <p className="muted">{t.botIntro}</p>
         {readOnly && <p className="notice" role="note">{t.botReadOnly}</p>}

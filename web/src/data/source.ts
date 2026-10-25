@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotSettingsDto, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
   RealtimeEvent, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, TemplateDto,
 } from '../../../src/core/api/contract';
 
@@ -78,6 +78,8 @@ export interface InboxSource {
   /** Service menu, business hours and store location. Everyone may read; only the owner may save (the server decides). */
   botSettings?(): Promise<BotSettingsDto>;
   saveBotSettings?(update: BotSettingsDto): Promise<BotSettingsDto>;
+  /** The merchant's Meta catalog. `provision` rejects with an error carrying `detail` = missing_permission | no_business | business_mismatch | catalog_already_set | meta_error. */
+  catalog?: { status(): Promise<CatalogStatusDto>; provision(name?: string): Promise<{ catalogId: string }> };
   /** Assign a conversation (null = unassign). */
   assign?(conversationId: number, userId: string | null): Promise<void>;
   campaigns?: CampaignsApi;

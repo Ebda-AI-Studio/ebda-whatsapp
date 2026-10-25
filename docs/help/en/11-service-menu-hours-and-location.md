@@ -35,6 +35,12 @@ When a customer writes while you are closed, they get the away message **once** 
 
 The customer gets your location on WhatsApp, followed by a map link, when they pick **Our location** or write "address", "location" or "فين". If you leave the location empty, those words are treated like any other message. **Clear the location** removes it.
 
+## Your WhatsApp catalog
+If you do not have a catalog on Meta yet, the **WhatsApp catalog** box at the top of the Bot screen has a **Create my WhatsApp catalog** button (store owner only). It creates the catalog in your Meta business, connects it to your WhatsApp number and starts filling it with your store products within a few minutes. Afterwards the box shows the catalog ID and the time of the last sync.
+- If it says Meta needs catalog access, or that your business could not be identified, open **WhatsApp number**, connect your number again and approve every permission Meta asks for, including the catalog one. Then press the button again.
+- If it says Meta is not answering, wait a little and press the button again. It never creates a second catalog.
+- If you already have a catalog on Meta connected to this number, you do not need the button.
+
 ## Important notes
 - The bot replies only inside the 24-hour window ([guide 4](04-templates-and-the-24-hour-window.md)). All of this is a reply to a message the customer just sent, never marketing.
 - The text you write is checked against WhatsApp's length limits when you save. Fields marked in red must be fixed first.

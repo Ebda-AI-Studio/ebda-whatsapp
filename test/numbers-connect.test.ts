@@ -1,5 +1,5 @@
 import { createExecutionContext, env } from 'cloudflare:test';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 import { decryptSecret } from '../src/core/ai/secrets';
 import { listNumbersResponse, numberDto } from '../src/core/api/contract';
@@ -298,4 +298,42 @@ it('a connected own number is funded merchant_card (Meta bills the merchant) and
   expect((await connect(api, '9532', '8532')).status).toBe(200);
   expect(await env.DB.prepare('SELECT funding FROM number_funding WHERE phone_number_id = ?').bind('8532').first('funding')).toBe('merchant_card');
   expect(await rows(W(532), "SELECT funding FROM number_funding WHERE phone_number_id = '8532'")).toEqual([{ funding: 'merchant_card' }]);
+});
+
+const bizOf = (waba: string) => env.DB.prepare('SELECT business_id FROM waba_credentials WHERE waba_id = ?').bind(waba).first<{ business_id: string | null }>();
+const withBiz = (api: Awaited<ReturnType<typeof apiFor>>, waba: string, pn: string, businessId = '7190') =>
+  api.call('POST', '/numbers/connect', { code: 'code-1', event: 'FINISH', wabaId: waba, phoneNumberId: pn, businessId });
+
+it('stores the business id only when Meta says that business owns the WABA; a reconnect without one keeps it', async () => {
+  const api = await apiFor(W(590));
+  graph = graphStub(meta('9190', '8190', { 'GET 7190/owned_whatsapp_business_accounts': () => ({ status: 200, json: { data: [{ id: '9190' }] } }) }));
+  expect((await withBiz(api, '9190', '8190')).status).toBe(200);
+  expect(graph.calls.find((c) => c.url.includes('7190/owned_whatsapp_business_accounts'))!.headers.authorization).toBe('Bearer biz-token-new');
+  expect(await bizOf('9190')).toEqual({ business_id: '7190' });
+  expect((await connect(api, '9190', '8190')).status).toBe(200);
+  expect(await bizOf('9190')).toEqual({ business_id: '7190' });
+});
+
+it('a business id that does not own the WABA is not stored (NULL, logged without any phone number) and the connect succeeds', async () => {
+  const api = await apiFor(W(591));
+  const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+  graph = graphStub(meta('9191', '8191', { 'GET 7191/owned_whatsapp_business_accounts': () => ({ status: 200, json: { data: [{ id: '5555' }] } }) }));
+  expect((await withBiz(api, '9191', '8191', '7191')).status).toBe(200);
+  expect(await bizOf('9191')).toEqual({ business_id: null });
+  const logged = err.mock.calls.map((c) => String(c[0])).find((l) => l.includes('business_id_unverified'))!;
+  expect(logged).toBeTruthy();
+  expect(logged).not.toMatch(/8191|\+20|2010/); // neither the phone number id nor a phone number
+  err.mockRestore();
+});
+
+it('a Graph error while checking the business id stores NULL and the connect still succeeds', async () => {
+  const api = await apiFor(W(592));
+  const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+  graph = graphStub(meta('9192', '8192', { 'GET 7192/owned_whatsapp_business_accounts': () => ({ status: 500, json: { error: { code: 1, message: 'down' } } }) }));
+  const res = await withBiz(api, '9192', '8192', '7192');
+  expect(res.status).toBe(200);
+  expect(numberDto.parse(((await res.json()) as { number: unknown }).number)).toMatchObject({ status: 'active' });
+  expect(await bizOf('9192')).toEqual({ business_id: null });
+  expect(err.mock.calls.some((c) => String(c[0]).includes('business_id_unverified'))).toBe(true);
+  err.mockRestore();
 });

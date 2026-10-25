@@ -2,6 +2,7 @@ import type { Env } from '../../env';
 import type { ConnectNumberRequest, NumberDto } from '../api/contract';
 import { decryptSecret, encryptSecret } from '../ai/secrets';
 import { recordNumberFunding } from '../billing/funding';
+import { listOwnedWabas } from '../meta/catalog-api';
 import { TIER_LIMITS } from '../throttle';
 import { HISTORY_DECLINED_CODE, REGISTRATION_LOCKED_CODE, deregisterNumber, exchangeCode, fetchPhone, fetchWabaNumbers, registerNumber, requestSync, subscribeApp, unsubscribeApp, type GraphFail, type PhoneStatus } from './graph';
 import { graphTokenFor, invalidateNumber, invalidateWaba, TokenUnavailable } from './token';
@@ -136,6 +137,14 @@ async function conflicts(env: Env, workspaceId: string, wabaId: string, phoneNum
   return [num, cred, waba].some((r) => (r!.results as unknown[]).length > 0);
 }
 
+/** The business id when Meta confirms it owns the WABA, else null (logged as `business_id_unverified`, no phone numbers, never throws). */
+async function verifiedBusinessId(env: Env, workspaceId: string, token: string, businessId: string, wabaId: string): Promise<string | null> {
+  const owned = await listOwnedWabas({ token, graphVersion: env.META_GRAPH_VERSION, businessId });
+  if (owned.ok && owned.value.includes(wabaId)) return businessId;
+  console.error(JSON.stringify({ alert: 'business_id_unverified', workspace: workspaceId, why: owned.ok ? 'not_owner' : 'graph_error' }));
+  return null;
+}
+
 /**
  * Embedded Signup finished in the browser: turn its one-time code into a working number.
  * Order matters. The code lives 30 seconds, so it is exchanged first (only fast D1 reads precede it). Nothing is stored
@@ -157,6 +166,9 @@ export async function connectNumber(env: Env, workspaceId: string, req: ConnectN
   const phone = listed.value.data.find((p) => p.id === phoneNumberId);
   if (!phone) return fail(400, 'signup_failed', 'number_not_in_waba');
 
+  // The business id is browser-supplied: keep it only when Meta, asked with the merchant's own token, lists this WABA among that business's. Never fails the connect.
+  const businessId = req.businessId ? await verifiedBusinessId(env, workspaceId, token, req.businessId, wabaId) : null;
+
   const existing = await env.DB.prepare(`SELECT ${NUMBER_COLUMNS} FROM phone_numbers WHERE phone_number_id = ?`).bind(phoneNumberId).first<NumberRow>();
   const mine = existing?.workspace_id === workspaceId;
   const cloud = req.event === 'FINISH';
@@ -167,9 +179,10 @@ export async function connectNumber(env: Env, workspaceId: string, req: ConnectN
   const registration: NumberRow['registration'] = cloud ? (mine && existing.registration === 'registered' ? 'registered' : 'pending') : 'not_needed';
 
   const cred = await env.DB.prepare(
-    `INSERT INTO waba_credentials (waba_id, workspace_id, token_enc, kind, created_at, updated_at) VALUES (?, ?, ?, 'own', ?, ?)
-     ON CONFLICT(waba_id) DO UPDATE SET token_enc = excluded.token_enc, updated_at = excluded.updated_at WHERE waba_credentials.workspace_id = excluded.workspace_id`,
-  ).bind(wabaId, workspaceId, tokenEnc, now, now).run();
+    `INSERT INTO waba_credentials (waba_id, workspace_id, token_enc, kind, created_at, updated_at, business_id) VALUES (?, ?, ?, 'own', ?, ?, ?)
+     ON CONFLICT(waba_id) DO UPDATE SET token_enc = excluded.token_enc, updated_at = excluded.updated_at, business_id = coalesce(excluded.business_id, waba_credentials.business_id)
+     WHERE waba_credentials.workspace_id = excluded.workspace_id`,
+  ).bind(wabaId, workspaceId, tokenEnc, now, now, businessId).run();
   if (!cred.meta.changes) return fail(409, 'number_conflict', 'number_belongs_to_another_workspace');
   // Reconnecting keeps what was already learned; a number released by another workspace starts clean. The WHERE is the race guard.
   const up = await env.DB.prepare(

@@ -5,6 +5,7 @@ import { normaliseE164 } from '../core/phone';
 import type { BridgeOrderSummary } from '../core/store-bridge';
 import { bridgeFor, storeLink } from '../core/store-link';
 import { catalogBelongsToWaba } from '../core/store-link/catalog';
+import { provisionRequest } from '../core/store-link/catalog-provision';
 import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
 
 export const ordersRoutes = new Hono<ApiEnv>();
@@ -65,6 +66,11 @@ ordersRoutes.get('/stores/:storeId/store-link/settings', async (c) => {
   return ws ? c.json(await ws.getStoreLinkSettings()) : apiError(c, 404, 'not_found');
 });
 
+ordersRoutes.get('/stores/:storeId/store-link/catalog', async (c) => {
+  const ws = await workspaceStub(c);
+  return ws ? c.json(await ws.getCatalogStatus()) : apiError(c, 404, 'not_found');
+});
+
 ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
   if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
   const patch = storeLinkSettingsPatch.safeParse(await c.req.json().catch(() => null));
@@ -83,4 +89,29 @@ ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
   }
   const res = await ws.setStoreLinkSettings(patch.data, catalogWabaId ? { catalogWabaId } : {});
   return res.ok ? c.json(res.settings) : apiError(c, 400, 'invalid_request', 'catalog_not_linked');
+});
+
+/** Creates a Meta catalog for a merchant who has none and connects it to their WhatsApp Business Account (owner only). */
+ordersRoutes.post('/stores/:storeId/store-link/catalog/provision', async (c) => {
+  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  const body = provisionRequest.safeParse(await c.req.json().catch(() => ({})));
+  if (!body.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const number = await activeNumber(c);
+  // The business id lives on the merchant's own Embedded Signup credential; a shared-number or older connection has none.
+  const cred = number
+    ? await c.env.DB.prepare('SELECT business_id FROM waba_credentials WHERE waba_id = ? AND workspace_id = ?').bind(number.wabaId, c.req.param('storeId')!).first<{ business_id: string | null }>()
+    : null;
+  if (!number || !cred?.business_id) return apiError(c, 409, 'invalid_request', 'no_business');
+  const res = await ws.provisionCatalog({ ...(body.data.name ? { name: body.data.name } : {}), wabaId: number.wabaId, businessId: cred.business_id });
+  if (res.ok) return c.json({ catalogId: res.catalogId });
+  switch (res.code) {
+    case 'missing_permission': return apiError(c, 403, 'forbidden', 'missing_permission');
+    case 'already_set': return apiError(c, 409, 'invalid_request', 'catalog_already_set');
+    case 'no_name': return apiError(c, 400, 'invalid_request', 'name_required');
+    case 'no_business': return apiError(c, 409, 'invalid_request', 'no_business');
+    case 'business_mismatch': return apiError(c, 409, 'invalid_request', 'business_mismatch');
+    case 'meta_error': return c.json({ error: res.retryable ? 'rate_limited' : 'invalid_request', message: 'meta_error', retryable: res.retryable }, res.retryable ? 503 : 400);
+  }
 });
