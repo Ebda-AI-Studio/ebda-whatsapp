@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chooseMode, pickStore } from './boot';
+import { accountsUrlFor, chooseMode, pickStore } from './boot';
 
 describe('boot', () => {
   it('a production build always runs live, even with ?sample=1', () => {
@@ -15,5 +15,14 @@ describe('boot', () => {
     expect(pickStore(stores, '?store=b')).toBe('b');
     expect(pickStore(stores, '?store=zzz')).toBe('a');
     expect(pickStore([], '')).toBeNull();
+  });
+});
+
+describe('sign-in address', () => {
+  it('the build-time override wins, then the brand\'s own; none at all is null (the page then says sign-in is not configured, not a blank screen)', () => {
+    expect(accountsUrlFor('https://login.example', 'https://brand.example')).toBe('https://login.example');
+    expect(accountsUrlFor(undefined, 'https://brand.example')).toBe('https://brand.example');
+    expect(accountsUrlFor('', null)).toBeNull();
+    expect(accountsUrlFor(undefined, null)).toBeNull();
   });
 });

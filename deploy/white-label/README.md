@@ -24,9 +24,15 @@ there is no self-serve checkout.
    deploy/white-label/bootstrap.sh --account <id> --prefix client-wa --brand <brand> --identity oidc --url https://wa.client.example
    ```
    It creates D1 `<prefix>-platform`, R2 `<prefix>-media` and `<prefix>-backups` (30-day lifecycle), queues `<prefix>-send` and `-dlq`,
-   renders `deploy/white-label/wrangler.<prefix>.jsonc` (git-ignored) and applies the D1 migrations.
+   renders `deploy/white-label/wrangler.<prefix>.jsonc` (git-ignored) and applies the D1 migrations. The suite identity endpoints (`IDENTITY_ISSUER`, `IDENTITY_JWKS_URL`, `IDENTITY_AUDIENCE`) are written only with `--identity ebda`; an `oidc` tenant's config carries none of them.
 3. Secrets: the script prints the list; set each with `npx wrangler secret put <NAME> -c deploy/white-label/wrangler.<prefix>.jsonc`. Keys are generated fresh per tenant, never copied from another deployment.
-4. Build and deploy, then verify with `scripts/verify-prod.mjs` (all printed by the script). Then the manual checks in `docs/launch/README.md` § 13.
+4. Build the brand, deploy, verify (all printed by the script):
+   ```
+   BRAND=<brand> npm run build:web
+   deploy/white-label/deploy.sh wrangler.<prefix>.jsonc
+   node scripts/verify-prod.mjs --base https://<host> --expect "$(git rev-parse --short HEAD)" --brand <brand>
+   ```
+   The web build stamps `web/dist/brand.json` with its brand. `deploy.sh` reads the brand from the rendered config and **refuses** (before any `wrangler deploy`) when `web/dist` was built for another brand or not stamped, because `web/dist` is shared by every tenant and a stale build of the suite brand would otherwise be served under the client's name. `verify-prod.mjs --brand` repeats the proof from outside: the live `/brand.json` must name the brand and, for a white-label brand, the page's CSP must contain no `ebda.app` host. `/health` reports the brand pack's service name. Then the manual checks in `docs/launch/README.md` § 13.
 5. Route the hostname to the Worker (Cloudflare dashboard → Workers → the Worker → Domains & Routes) and point the client's Meta webhook to `https://<host>/meta/webhook`.
 
 ## Adding a client brand

@@ -141,8 +141,7 @@ textarea { caret-color: var(--gold-ink); }
 .quick { mask-image: linear-gradient(to var(--fade-end, left), #000 85%, transparent); display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 8px 20px 0; background: var(--cream); }
 .quick .chip { background: var(--paper); }
 .strip-cta { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 4px; color: var(--gold-ink); }
-.toast { position: fixed; bottom: 104px; left: 50%; transform: translateX(-50%); background: var(--night); color: var(--on-night); border-radius: 12px; padding: 6px 8px 6px 16px; display: flex; align-items: center; gap: 12px; box-shadow: 0 16px 40px rgba(10,11,12,.24); z-index: 20; animation: rise 220ms var(--ease) both; }
-[dir='rtl'] .toast { padding: 6px 16px 6px 8px; }
+.toast { position: fixed; bottom: 104px; inset-inline: 0; margin-inline: auto; width: max-content; max-width: calc(100% - 32px); background: var(--night); color: var(--on-night); border-radius: 12px; padding-block: 6px; padding-inline: 16px 8px; display: flex; align-items: center; gap: 12px; box-shadow: 0 16px 40px rgba(10,11,12,.24); z-index: 20; animation: rise 220ms var(--ease) both; }
 .toast .btn.ghost { color: var(--lift); border-color: var(--night-line); min-height: 40px; }
 .order-card { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 10px; }
 .order-top { display: flex; justify-content: space-between; align-items: baseline; }

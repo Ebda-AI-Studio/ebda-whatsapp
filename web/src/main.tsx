@@ -1,7 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { chooseMode, pickStore } from './boot';
+import { accountsUrlFor, chooseMode, pickStore } from './boot';
+import { SignInNotConfigured } from './components/SignInNotConfigured';
 import { connectRealtime, createApiSource } from './data/api';
 import { createTokenProvider, decodeStores, decodeSub } from './data/auth';
 import type { InboxSource } from './data/source';
@@ -10,7 +11,7 @@ import './styles.css';
 import '@brand-tokens';
 
 // A brand on its own identity provider has no accounts service here (accountsUrl null): its portal signs users in.
-const ACCOUNTS_URL = (import.meta.env.VITE_ACCOUNTS_URL as string | undefined) ?? BRAND.accountsUrl ?? '';
+const ACCOUNTS_URL = accountsUrlFor(import.meta.env.VITE_ACCOUNTS_URL as string | undefined, BRAND.accountsUrl);
 const root = createRoot(document.getElementById('root')!);
 
 async function boot(): Promise<void> {
@@ -23,6 +24,7 @@ async function boot(): Promise<void> {
     const role = new URLSearchParams(location.search).get('role');
     if (role === 'super_admin' || role === 'staff' || role === 'owner') source.role = role;
   } else {
+    if (!ACCOUNTS_URL) { root.render(<SignInNotConfigured />); return; }
     const tokens = createTokenProvider({ accountsUrl: ACCOUNTS_URL });
     const token = await tokens.getToken(); // redirects to sign-in when signed out
     const storeId = pickStore(decodeStores(token), location.search);

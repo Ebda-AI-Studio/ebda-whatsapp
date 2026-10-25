@@ -7,6 +7,6 @@ export const BRAND: WebBrand = {
   appleTouchIcon: '/brand/apple-touch-icon.png',
   accountsUrl: 'https://accounts.ebda.app',
   // Guides are published on help.ebda.app from docs/help by the Store session; one slug per guide file.
-  helpBase: 'https://help.ebda.app/whatsapp',
+  helpBase: 'https://help.ebda.app',
   storeName: 'Ebda Store',
 };

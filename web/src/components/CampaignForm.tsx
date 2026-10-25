@@ -1,10 +1,12 @@
 import { ArrowRight } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CampaignDto, CampaignParam, SegmentCriteria, SegmentDto, SegmentPreviewDto, TemplateDto } from '../../../src/core/api/contract';
+import type { WalletDto } from '../data/billing';
 import { ApiError } from '../data/api';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney } from '../lib/format';
+import { LoadError } from './LoadError';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number; onClose: () => void };
 type AudienceMode = 'segment' | 'tags' | 'everyone';
@@ -31,22 +33,27 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
   const [segmentId, setSegmentId] = useState<number | null>(null);
   const [tag, setTag] = useState('');
   const [templates, setTemplates] = useState<TemplateDto[]>([]);
+  const [templatesFailed, setTemplatesFailed] = useState(false);
   const [tplKey, setTplKey] = useState('');
   const [params, setParams] = useState<ParamDraft[]>([]);
   const [linkUrl, setLinkUrl] = useState('');
   const [timing, setTiming] = useState<'now' | 'later'>('now');
   const [at, setAt] = useState('');
   const [dailyLimit, setDailyLimit] = useState('');
-  const [preview, setPreview] = useState<SegmentPreviewDto | null | 'loading'>(null);
+  const [preview, setPreview] = useState<SegmentPreviewDto | null | 'loading' | 'error'>(null);
   const [draft, setDraft] = useState<CampaignDto | null>(null);
   const [phase, setPhase] = useState<'edit' | 'creating' | 'sending'>('edit');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void api.segments().then((s) => { setSegments(s); if (s[0]) setSegmentId(s[0].id); else setMode('tags'); }, () => setMode('tags'));
-    // Campaigns are marketing: only approved marketing templates (utility messages go out per order, not as broadcasts).
-    void source.templates().then((all) => setTemplates(all.filter((x) => x.status === 'APPROVED' && x.category === 'MARKETING')), () => setTemplates([]));
-  }, [api, source]);
+  }, [api]);
+  // Campaigns are marketing: only approved marketing templates (utility messages go out per order, not as broadcasts).
+  const loadTemplates = useCallback(() => {
+    setTemplatesFailed(false);
+    void source.templates().then((all) => setTemplates(all.filter((x) => x.status === 'APPROVED' && x.category === 'MARKETING')), () => setTemplatesFailed(true));
+  }, [source]);
+  useEffect(loadTemplates, [loadTemplates]);
 
   const criteria: SegmentCriteria | null = useMemo(() => {
     if (mode === 'everyone') return { everyone: true };
@@ -59,7 +66,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
     if (!criteria) { setPreview(null); return; }
     let stale = false;
     setPreview('loading');
-    const id = setTimeout(() => void api.preview(criteria).then((p) => { if (!stale) setPreview(p); }, () => { if (!stale) setPreview(null); }), 250);
+    const id = setTimeout(() => void api.preview(criteria).then((p) => { if (!stale) setPreview(p); }, () => { if (!stale) setPreview('error'); }), 250);
     return () => { stale = true; clearTimeout(id); };
   }, [api, criteria]);
 
@@ -79,7 +86,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
     && (timing === 'now' || (scheduledAt !== undefined && Number.isFinite(scheduledAt) && scheduledAt > now()))
     && (dailyLimit === '' || Number(dailyLimit) >= 1);
 
-  const [funding, setFunding] = useState<{ funding: 'merchant_card' | 'platform_line' }[] | null>(null);
+  const [funding, setFunding] = useState<{ funding: WalletDto['funding'][number]['funding'] }[] | null>(null);
   useEffect(() => {
     void source.wallet?.wallet().then((w) => setFunding(w.funding), () => undefined);
   }, [source]);
@@ -169,6 +176,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
           <label className="radio"><input type="radio" name="aud" checked={mode === 'everyone'} onChange={() => setMode('everyone')} />{t.audienceEveryone}</label>
           <div className="audience-count" aria-live="polite">
             {preview === 'loading' ? <span className="muted">{t.audienceCounting}</span>
+              : preview === 'error' ? <span className="error-text">{t.audienceUnknown}</span>
               : preview && (
                 <>
                   <b>{t.audienceCount(n(preview.count))}</b>
@@ -181,7 +189,8 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
 
         <fieldset className="step">
           <legend>{t.stepMessage}</legend>
-          {templates.length === 0 ? <p className="muted">{t.noTemplates}</p> : (
+          {templatesFailed ? <LoadError t={t} onRetry={loadTemplates} />
+            : templates.length === 0 ? <p className="muted">{t.noTemplates}</p> : (
             <label className="field">
               <span>{t.pickApproved}</span>
               <select value={tplKey} onChange={(e) => pickTemplate(e.target.value)}>
@@ -241,7 +250,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
         {draft && (
           <section className="estimate" aria-labelledby="estimate-title">
             <h2 id="estimate-title">{t.stepReview}</h2>
-            <p><b>{t.audienceCount(n(est?.audience ?? 0))}</b></p>
+            <p><b>{est ? t.audienceCount(n(est.audience)) : t.audienceUnknown}</b></p>
             {est && est.perMessageMinor > 0 ? (
               <>
                 <p className="estimate-total">{t.costLine(formatMoney(est.totalMinor, 'EGP', lang))}</p>

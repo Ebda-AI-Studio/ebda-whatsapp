@@ -4,6 +4,7 @@ import type { ContactDto, ImportDto } from '../../../src/core/api/contract';
 import type { ContactsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { relativeTime } from '../lib/format';
+import { LoadError } from './LoadError';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: ContactsApi; now: () => number };
 
@@ -11,18 +12,21 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
   const [q, setQ] = useState('');
   const [optedOut, setOptedOut] = useState(false);
   const [items, setItems] = useState<ContactDto[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [imports, setImports] = useState<ImportDto[]>([]);
   const owner = source.role !== 'staff';
 
   useEffect(() => {
     let stale = false;
-    const run = () => void api.list({ q, ...(optedOut ? { optedOut: true } : {}) }).then((r) => { if (!stale) setItems(r.items); }, () => { if (!stale) setItems([]); });
+    const run = () => void api.list({ q, ...(optedOut ? { optedOut: true } : {}) }).then((r) => { if (!stale) { setItems(r.items); setFailed(false); } }, () => { if (!stale) setFailed(true); });
     // Typing is debounced; a filter tap fetches at once.
     const id = q ? setTimeout(run, 250) : (run(), undefined);
     return () => { stale = true; clearTimeout(id); };
-  }, [api, q, optedOut]);
+  }, [api, q, optedOut, attempt]);
 
-  const loadImports = useCallback(() => api.imports().then(setImports, () => undefined), [api]);
+  const [importsFailed, setImportsFailed] = useState(false);
+  const loadImports = useCallback(() => api.imports().then((x) => { setImports(x); setImportsFailed(false); }, () => setImportsFailed(true)), [api]);
   useEffect(() => { void loadImports(); }, [loadImports]);
   // An import runs in the background: poll until none is pending or running.
   useEffect(() => {
@@ -47,7 +51,8 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
             <button type="button" className="chip" aria-pressed={!optedOut} onClick={() => setOptedOut(false)}>{t.filterAllContacts}</button>
             <button type="button" className="chip" aria-pressed={optedOut} onClick={() => setOptedOut(true)}>{t.filterOptedOut}</button>
           </div>
-          {items === null ? <div className="placeholder">…</div>
+          {failed ? <LoadError t={t} onRetry={() => { setFailed(false); setAttempt((a) => a + 1); }} />
+            : items === null ? <div className="placeholder">…</div>
             : items.length === 0 ? <p className="empty-note">{t.contactsEmpty}</p>
             : (
               <ul className="contact-list" aria-label={t.contactsTitle}>
@@ -68,19 +73,19 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
               </ul>
             )}
         </section>
-        {owner && <ImportPanel t={t} lang={lang} api={api} imports={imports} onStarted={() => void loadImports()} />}
+        {owner && <ImportPanel t={t} lang={lang} api={api} imports={imports} failed={importsFailed} onRetry={() => void loadImports()} onStarted={() => void loadImports()} />}
       </div>
     </main>
   );
 }
 
-function ImportPanel({ t, lang, api, imports, onStarted }: { t: Strings; lang: Lang; api: ContactsApi; imports: ImportDto[]; onStarted: () => void }) {
+function ImportPanel({ t, lang, api, imports, failed, onRetry, onStarted }: { t: Strings; lang: Lang; api: ContactsApi; imports: ImportDto[]; failed: boolean; onRetry: () => void; onStarted: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [consented, setConsented] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
-  const [rejects, setRejects] = useState<{ line: number; reason: string }[]>([]);
+  const [rejects, setRejects] = useState<{ line: number; reason: string }[] | null>([]);
   const n = (v: number) => num(v, lang);
 
   const start = async () => {
@@ -98,10 +103,13 @@ function ImportPanel({ t, lang, api, imports, onStarted }: { t: Strings; lang: L
       setBusy(false);
     }
   };
+  const loadRejects = async (id: string) => {
+    setRejects(await api.rejects(id).catch(() => null)); // null = could not load, not "no rejected rows"
+    setOpen(id);
+  };
   const toggleRejects = async (id: string) => {
     if (open === id) { setOpen(null); return; }
-    setRejects(await api.rejects(id).catch(() => []));
-    setOpen(id);
+    await loadRejects(id);
   };
 
   return (
@@ -123,6 +131,7 @@ function ImportPanel({ t, lang, api, imports, onStarted }: { t: Strings; lang: L
         {busy && <span className="muted" role="status">{t.importing}</span>}
       </div>
       {error && <p role="alert" className="error-text">{t.importFailed}</p>}
+      {failed && <LoadError t={t} onRetry={onRetry} />}
 
       {imports.length > 0 && (
         <>
@@ -138,7 +147,7 @@ function ImportPanel({ t, lang, api, imports, onStarted }: { t: Strings; lang: L
                   <button type="button" className="link-btn" aria-expanded={open === i.id} onClick={() => void toggleRejects(i.id)}>{t.showRejects}</button>
                 )}
                 {open === i.id && (
-                  <ul className="reject-list">
+                  rejects === null ? <LoadError t={t} onRetry={() => void loadRejects(i.id)} /> : <ul className="reject-list">
                     {rejects.map((r) => <li key={r.line}><span className="muted">{t.rejectLine(n(r.line))}</span> {t.rejectReasons[r.reason] ?? r.reason}</li>)}
                   </ul>
                 )}

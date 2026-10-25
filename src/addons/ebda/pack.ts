@@ -11,6 +11,7 @@ import { EBDA_DEFAULT_TEMPLATES } from './templates';
 /** Ebda WhatsApp under Ebda AI Studio: Egyptian Arabic first, linked to Ebda Store. */
 export const EBDA_PACK: BrandPack = {
   id: 'ebda',
+  service: 'ebda-wa',
   autoReply: EBDA_COPY.spikeAutoReply,
   optInKeywords: EBDA_OPT_IN_KEYWORDS,
   templates: EBDA_DEFAULT_TEMPLATES,

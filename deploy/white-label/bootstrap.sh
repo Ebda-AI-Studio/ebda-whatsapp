@@ -25,6 +25,12 @@ fail() { echo "error: $*" >&2; exit 2; }
 [[ "$IDENTITY" == "ebda" || "$IDENTITY" == "oidc" ]] || fail "--identity must be ebda or oidc"
 [[ "$URL" =~ ^https://[a-z0-9.-]+$ ]] || fail "--url must be the tenant's https origin (no path)"
 DATASET="${PREFIX//-/_}"
+# The suite identity service's endpoints belong only in a tenant that signs in through it; an oidc tenant gets empty values.
+if [ "$IDENTITY" = ebda ]; then
+  ID_ISSUER="https://accounts.ebda.app" ID_JWKS="https://accounts.ebda.app/.well-known/jwks.json" ID_AUD="whatsapp"
+else
+  ID_ISSUER="" ID_JWKS="" ID_AUD=""
+fi
 OUT="wrangler.${PREFIX}.jsonc"
 
 run() { if [ "$DRY" = 1 ]; then echo "DRY: $*"; else echo "+ $*"; "$@"; fi; }
@@ -51,7 +57,8 @@ else
 fi
 
 sed -e "s/__ACCOUNT_ID__/${ACCOUNT}/g" -e "s/__PREFIX__/${PREFIX}/g" -e "s/__D1_ID__/${D1_ID}/g" -e "s/__BRAND__/${BRAND}/g" \
-    -e "s/__IDENTITY_MODE__/${IDENTITY}/g" -e "s#__PUBLIC_BASE_URL__#${URL}#g" -e "s/__DATASET__/${DATASET}/g" wrangler.template.jsonc > "$OUT"
+    -e "s/__IDENTITY_MODE__/${IDENTITY}/g" -e "s#__PUBLIC_BASE_URL__#${URL}#g" -e "s/__DATASET__/${DATASET}/g" \
+    -e "s#__IDENTITY_ISSUER__#${ID_ISSUER}#g" -e "s#__IDENTITY_JWKS_URL__#${ID_JWKS}#g" -e "s#__IDENTITY_AUDIENCE__#${ID_AUD}#g" wrangler.template.jsonc > "$OUT"
 grep -q "__[A-Z_]*__" "$OUT" && fail "unrendered placeholder left in $OUT"
 echo "rendered $OUT"
 
@@ -63,6 +70,6 @@ Next (see deploy/white-label/README.md):
   1. Secrets, each with: npx wrangler secret put <NAME> -c deploy/white-label/${OUT}
      META_APP_SECRET META_VERIFY_TOKEN META_SYSTEM_TOKEN TOKEN_ENC_KEY AGENT_SECRETS_KEY SENTRY_DSN$( [ "$IDENTITY" = oidc ] && echo " IDENTITY_OIDC_CONFIG" )
   2. Build the brand: BRAND=${BRAND} npm run build:web
-  3. Deploy: npx wrangler deploy -c deploy/white-label/${OUT} --var COMMIT_SHA:\$(git rev-parse --short HEAD)
-  4. Verify: node scripts/verify-prod.mjs --base ${URL} --expect \$(git rev-parse --short HEAD)
+  3. Deploy (refuses unless web/dist was built for ${BRAND}): deploy/white-label/deploy.sh ${OUT}
+  4. Verify: node scripts/verify-prod.mjs --base ${URL} --expect \$(git rev-parse --short HEAD) --brand ${BRAND}
 NEXT

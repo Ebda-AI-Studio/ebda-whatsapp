@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { createSampleSource } from './data/sample';
@@ -43,6 +43,35 @@ describe('numbers', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('من غير رقم');
   });
 
+  it('loads the signup config and the Meta SDK when the screen opens, so the click opens the popup at once', async () => {
+    const source = createSampleSource();
+    const cfg = { appId: 'app-1', configId: 'cfg-1', graphVersion: 'v25.0' };
+    source.numbers!.signupConfig = vi.fn().mockResolvedValue(cfg);
+    source.numbers!.prepare = vi.fn().mockResolvedValue(undefined);
+    const launch = vi.fn().mockReturnValue(new Promise(() => undefined));
+    source.numbers!.launch = launch;
+    await open(source);
+    await waitFor(() => expect(source.numbers!.prepare).toHaveBeenCalledWith(cfg));
+    const btn = screen.getByRole('button', { name: 'اربط رقم واتساب' });
+    act(() => { fireEvent.click(btn); }); // nothing awaited between the click and FB.login: a browser drops a popup opened later
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch).toHaveBeenCalledWith(cfg);
+    expect(source.numbers!.signupConfig).toHaveBeenCalledTimes(1); // not fetched again on the click
+  });
+
+  it('a click before the config has arrived still connects (it waits for it)', async () => {
+    const source = createSampleSource();
+    let release!: (c: { appId: string; configId: string; graphVersion: string }) => void;
+    source.numbers!.signupConfig = vi.fn().mockReturnValue(new Promise((r) => { release = r; }));
+    const launch = vi.fn().mockReturnValue(new Promise(() => undefined));
+    source.numbers!.launch = launch;
+    await open(source);
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'اربط رقم واتساب' })); });
+    expect(launch).not.toHaveBeenCalled();
+    await act(async () => release({ appId: 'a', configId: 'c', graphVersion: 'v25.0' }));
+    await waitFor(() => expect(launch).toHaveBeenCalledTimes(1));
+  });
+
   it('retries a failed registration, and disconnecting asks first', async () => {
     const source = createSampleSource();
     const register = vi.spyOn(source.numbers!, 'register');
@@ -72,7 +101,16 @@ describe('numbers', () => {
     expect(number.getAttribute('data-done')).toBe('true');
     const agent = within(list).getByText('شغّل المساعد الذكي (اختياري)').closest('li')!;
     expect(agent.getAttribute('data-done')).toBe('false');
-    expect(within(list).getAllByRole('link').every((a) => a.getAttribute('href')!.startsWith('https://help.ebda.app/'))).toBe(true);
+    // One published shape: <help host>/<ar|en>/<slug> (docs/help/README.md); test/assets-config.test.ts checks each slug has a guide file.
+    const hrefs = within(list).getAllByRole('link').map((a) => a.getAttribute('href')!);
+    expect(hrefs.every((h) => /^https:\/\/help\.ebda\.app\/ar\/[a-z0-9-]+$/.test(h))).toBe(true);
+  });
+
+  it('the guide links follow the interface language', async () => {
+    render(<App source={createSampleSource()} now={now} initialLang="en" />);
+    await act(async () => fireEvent.click(screen.getByRole('link', { name: 'WhatsApp number' })));
+    const list = await screen.findByRole('list', { name: 'Getting started' });
+    expect(within(list).getAllByRole('link').every((a) => /^https:\/\/help\.ebda\.app\/en\/[a-z0-9-]+$/.test(a.getAttribute('href')!))).toBe(true);
   });
 
   it('the rail offers the screen only when the server says connecting numbers is open', async () => {

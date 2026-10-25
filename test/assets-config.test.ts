@@ -41,3 +41,21 @@ it('every brand ships its own _headers with the same base policy, and only the s
     if (b !== 'ebda') expect(h, b).not.toMatch(/ebda/i);
   }
 });
+
+it('every guide the inbox links to exists in docs/help in both languages (the help site publishes <host>/<lang>/<slug>)', () => {
+  const src = readFileSync(join(import.meta.dirname, '..', 'web', 'src', 'components', 'NumbersScreen.tsx'), 'utf8');
+  const slugs = [...src.matchAll(/guide: '([a-z0-9-]+)'/g)].map((m) => m[1]);
+  expect(slugs.length).toBeGreaterThan(0);
+  for (const lang of ['ar', 'en']) {
+    const files = readdirSync(join(import.meta.dirname, '..', 'docs', 'help', lang)).map((f) => f.replace(/^\d+-/, '').replace(/\.md$/, ''));
+    for (const slug of slugs) expect(files, `${lang}: ${slug}`).toContain(slug);
+  }
+});
+
+it('the toast is placed with logical properties, so it is centred and padded right in both directions', () => {
+  const css = readFileSync(join(import.meta.dirname, '..', 'web', 'src', 'styles.css'), 'utf8');
+  const rules = css.split('\n').filter((l) => /(^|[\s,])\.toast\s*[{,]|\.toast\s*\{/.test(l) && !/\.toast \.btn/.test(l)).join('\n');
+  expect(rules).toContain('.toast');
+  expect(rules).not.toMatch(/\b(left|right)\s*:|translateX|padding\s*:\s*[^;]*\d+px\s+\d+px\s+\d+px\s+\d+px|\[dir=/);
+  expect(rules).toMatch(/inset-inline/);
+});

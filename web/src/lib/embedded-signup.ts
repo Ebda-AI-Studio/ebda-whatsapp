@@ -28,12 +28,18 @@ export function isMetaOrigin(origin: string): boolean {
   }
 }
 
+const SDK_LOAD_MS = 15_000;
+/** Meta's code lives 30 seconds: if the session message has not followed the code by now, the attempt is lost. */
+const SESSION_AFTER_CODE_MS = 25_000;
+
 let sdk: Promise<Fb> | null = null;
-/** Loads Meta's SDK once (CSP allows connect.facebook.net and *.facebook.com frames, see web/brands/<brand>/public/_headers). */
+/** Loads Meta's SDK once (CSP allows connect.facebook.net and *.facebook.com frames, see web/brands/<brand>/public/_headers). A load that neither succeeds nor fails in 15 seconds is sdk_unavailable and can be tried again. */
 export function loadSdk(appId: string, graphVersion: string): Promise<Fb> {
   if (window.FB) return Promise.resolve(window.FB);
   sdk ??= new Promise<Fb>((resolve, reject) => {
+    const timer = setTimeout(() => { sdk = null; reject(new SignupStopped('sdk_unavailable')); }, SDK_LOAD_MS);
     window.fbAsyncInit = () => {
+      clearTimeout(timer);
       window.FB!.init({ appId, autoLogAppEvents: true, xfbml: false, version: graphVersion });
       resolve(window.FB!);
     };
@@ -41,19 +47,29 @@ export function loadSdk(appId: string, graphVersion: string): Promise<Fb> {
     s.src = 'https://connect.facebook.net/en_US/sdk.js';
     s.async = true;
     s.crossOrigin = 'anonymous';
-    s.onerror = () => { sdk = null; reject(new SignupStopped('sdk_unavailable')); };
+    s.onerror = () => { clearTimeout(timer); sdk = null; reject(new SignupStopped('sdk_unavailable')); };
     document.head.appendChild(s);
   });
   return sdk;
 }
 
-export async function launchEmbeddedSignup(cfg: { appId: string; configId: string; graphVersion: string }): Promise<SignupResult> {
-  const fb = await loadSdk(cfg.appId, cfg.graphVersion);
+/** Loads the SDK ahead of the click, so the click itself can call FB.login without waiting for anything. */
+export async function prepareEmbeddedSignup(cfg: { appId: string; graphVersion: string }): Promise<void> {
+  await loadSdk(cfg.appId, cfg.graphVersion);
+}
+
+/** With the SDK already loaded this calls FB.login synchronously: a browser lets a popup open only inside the user's click. */
+export function launchEmbeddedSignup(cfg: { appId: string; configId: string; graphVersion: string }): Promise<SignupResult> {
+  return window.FB ? start(window.FB, cfg) : loadSdk(cfg.appId, cfg.graphVersion).then((fb) => start(fb, cfg));
+}
+
+function start(fb: Fb, cfg: { configId: string }): Promise<SignupResult> {
   return new Promise<SignupResult>((resolve, reject) => {
     let code: string | null = null;
     let session: { event: SignupEvent; wabaId: string; phoneNumberId: string; businessId?: string } | null = null;
     let done = false;
-    const finish = (fn: () => void) => { if (done) return; done = true; window.removeEventListener('message', onMessage); fn(); };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (fn: () => void) => { if (done) return; done = true; clearTimeout(timer); window.removeEventListener('message', onMessage); fn(); };
     const settle = () => { if (code && session) { const s = session; const c = code; finish(() => resolve({ code: c, ...s })); } };
 
     function onMessage(e: MessageEvent) {
@@ -74,9 +90,16 @@ export async function launchEmbeddedSignup(cfg: { appId: string; configId: strin
     }
     window.addEventListener('message', onMessage);
     fb.login((r) => {
-      if (r.authResponse?.code) { code = r.authResponse.code; settle(); return; }
-      // No code and no session yet = the popup was closed; give a late CANCEL message a moment to name the step.
-      setTimeout(() => finish(() => reject(new SignupStopped('cancelled'))), 300);
+      if (r.authResponse?.code) {
+        code = r.authResponse.code;
+        settle();
+        // The session message normally follows within a moment; if it never does the code is about to expire, so say so instead of hanging.
+        if (!done) timer = setTimeout(() => finish(() => reject(new SignupStopped('error'))), SESSION_AFTER_CODE_MS);
+        return;
+      }
+      // No code: the popup was closed. After a FINISH that is a failure (the number was set up but we got no code); otherwise a cancel,
+      // given a moment for a late CANCEL message to name the step.
+      timer = setTimeout(() => finish(() => reject(new SignupStopped(session ? 'error' : 'cancelled'))), 300);
     }, { config_id: cfg.configId, response_type: 'code', override_default_response_type: true, extras: { setup: {} } });
   });
 }

@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { STRINGS } from './i18n';
 import { App } from './App';
 import { createSampleSource } from './data/sample';
 
@@ -47,5 +48,23 @@ describe('AI agent', () => {
     const row = await screen.findByRole('button', { name: /سارة محمود/ });
     await act(async () => fireEvent.click(row));
     expect(within(screen.getByRole('log')).getByText('رد المساعد الذكي')).toBeTruthy();
+  });
+
+  it('a failed load is an error with Retry, not "owner only"; a real 403 (null) still says owner only', async () => {
+    const source = createSampleSource();
+    const real = source.agentSettings!;
+    source.agentSettings = vi.fn(real).mockRejectedValueOnce(new Error('network'));
+    render(<App source={source} now={now} />);
+    await act(async () => fireEvent.click(screen.getByRole('link', { name: 'المساعد الذكي' })));
+    const alert = await screen.findByRole('alert');
+    expect(screen.queryByText(STRINGS.ar.ownerOnly)).toBeNull();
+    await act(async () => fireEvent.click(within(alert).getByRole('button', { name: STRINGS.ar.retry })));
+    expect(await screen.findByRole('switch', { name: 'شغّل المساعد الذكي' })).toBeTruthy();
+    cleanup();
+    const staff = createSampleSource();
+    staff.agentSettings = async () => null;
+    render(<App source={staff} now={now} />);
+    await act(async () => fireEvent.click(screen.getByRole('link', { name: 'المساعد الذكي' })));
+    expect(await screen.findByText(STRINGS.ar.ownerOnly)).toBeTruthy();
   });
 });

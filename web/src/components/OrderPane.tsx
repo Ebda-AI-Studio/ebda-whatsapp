@@ -3,9 +3,11 @@ import { useState, type CSSProperties } from 'react';
 import type { OrderSummaryDto } from '../../../src/core/api/contract';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, orderStops } from '../lib/format';
+import { LoadError } from './LoadError';
 
 type Props = {
   t: Strings; lang: Lang; orders: OrderSummaryDto[] | null; hasChat: boolean; canDecide: boolean;
+  failed?: boolean; onRetry?: () => void;
   onConfirm: (o: OrderSummaryDto) => void; onRefuse: (o: OrderSummaryDto) => void; onClose: () => void;
 };
 
@@ -25,7 +27,7 @@ export function OrderRail({ t, status }: { t: Strings; status: OrderSummaryDto['
   );
 }
 
-export function OrderPane({ t, lang, orders, hasChat, canDecide, onConfirm, onRefuse, onClose }: Props) {
+export function OrderPane({ t, lang, orders, failed = false, onRetry, hasChat, canDecide, onConfirm, onRefuse, onClose }: Props) {
   const [askingRefuse, setAskingRefuse] = useState(false);
   const [current, ...older] = orders ?? [];
   const delivered = (orders ?? []).filter((o) => o.status === 'delivered').length;
@@ -40,6 +42,7 @@ export function OrderPane({ t, lang, orders, hasChat, canDecide, onConfirm, onRe
         <button type="button" className="icon-btn orders-toggle" onClick={onClose} aria-label={t.close}><X size={18} aria-hidden /></button>
       </div>
       {!hasChat && <p className="muted">{t.noChatOrders}</p>}
+      {hasChat && failed && <LoadError t={t} onRetry={() => onRetry?.()} />}
       {hasChat && orders && orders.length === 0 && <p className="muted">{t.noOrders}</p>}
       {current && (
         <article className="order-card" aria-label={current.orderNumber}>

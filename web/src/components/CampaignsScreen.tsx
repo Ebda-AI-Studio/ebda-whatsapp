@@ -3,7 +3,10 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CampaignDto } from '../../../src/core/api/contract';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { useFocusOn } from '../lib/useFocusOn';
+import { useLoad } from '../lib/useLoad';
 import { CampaignForm } from './CampaignForm';
+import { LoadError } from './LoadError';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number };
 
@@ -12,21 +15,19 @@ export function dateTime(at: number, lang: Lang): string {
 }
 
 export function CampaignsScreen({ t, lang, source, api, now }: Props) {
-  const [items, setItems] = useState<CampaignDto[] | null>(null);
+  const list = useCallback(() => api.list(), [api]);
+  const { data: items, setData: setItems, error: loadFailed, reload: load } = useLoad<CampaignDto[]>(list);
   const [mode, setMode] = useState<'list' | 'new'>('list');
   const owner = source.role !== 'staff';
-  const load = useCallback(() => api.list().then(setItems, () => setItems([])), [api]);
-
-  useEffect(() => { void load(); }, [load]);
   // Running campaigns move on their own: refresh while one is in flight.
   useEffect(() => {
     if (!items?.some((c) => c.status === 'running' || c.status === 'scheduled')) return;
-    const id = setInterval(() => void load(), 15_000);
+    const id = setInterval(load, 15_000);
     return () => clearInterval(id);
   }, [items, load]);
 
   if (mode === 'new') {
-    return <CampaignForm t={t} lang={lang} source={source} api={api} now={now} onClose={() => { setMode('list'); void load(); }} />;
+    return <CampaignForm t={t} lang={lang} source={source} api={api} now={now} onClose={() => { setMode('list'); load(); }} />;
   }
 
   const replace = (c: CampaignDto) => setItems((xs) => xs?.map((x) => (x.id === c.id ? c : x)) ?? null);
@@ -39,9 +40,10 @@ export function CampaignsScreen({ t, lang, source, api, now }: Props) {
         {owner && <button type="button" className="btn primary head-action" onClick={() => setMode('new')}><Plus size={18} aria-hidden />{t.newCampaign}</button>}
       </header>
       <div className="settings wide">
-        {items === null ? <div className="placeholder">…</div>
+        {loadFailed ? <LoadError t={t} onRetry={load} />
+          : items === null ? <div className="placeholder">…</div>
           : items.length === 0 ? <p className="empty-note">{t.campaignsEmpty}</p>
-          : items.map((c) => <CampaignRow key={c.id} c={c} t={t} lang={lang} owner={owner} api={api} onChange={replace} onRemoved={() => void load()} />)}
+          : items.map((c) => <CampaignRow key={c.id} c={c} t={t} lang={lang} owner={owner} api={api} onChange={replace} onRemoved={load} />)}
       </div>
     </main>
   );
@@ -50,13 +52,15 @@ export function CampaignsScreen({ t, lang, source, api, now }: Props) {
 function CampaignRow({ c, t, lang, owner, api, onChange, onRemoved }: { c: CampaignDto; t: Strings; lang: Lang; owner: boolean; api: CampaignsApi; onChange: (c: CampaignDto) => void; onRemoved: () => void }) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [acted, setActed] = useState(0);
+  const ref = useFocusOn<HTMLElement>(acted);
   const titleId = `camp-${c.id}`;
   const n = (v: number) => num(v, lang);
   const total = c.totals.recipients;
   const pct = (v: number) => (total > 0 ? `${Math.min(100, (v / total) * 100)}%` : '0%');
   const act = (fn: () => Promise<CampaignDto>) => async () => {
     setBusy(true);
-    try { onChange(await fn()); } catch { /* the list refresh shows the true state */ } finally { setBusy(false); setAsking(false); }
+    try { onChange(await fn()); setActed((k) => k + 1); } catch { /* the list refresh shows the true state */ } finally { setBusy(false); setAsking(false); }
   };
   const live = c.status === 'running' || c.status === 'scheduled' || c.status === 'paused';
   const when = c.status === 'scheduled' && c.scheduledAt ? t.scheduledFor(dateTime(c.scheduledAt, lang))
@@ -64,7 +68,7 @@ function CampaignRow({ c, t, lang, owner, api, onChange, onRemoved }: { c: Campa
     : c.startedAt ? t.startedAt(dateTime(c.startedAt, lang)) : null;
 
   return (
-    <article className="campaign" aria-labelledby={titleId} data-status={c.status}>
+    <article ref={ref} tabIndex={-1} className="campaign" aria-labelledby={titleId} data-status={c.status}>
       <div className="campaign-top">
         <h2 id={titleId}>{c.name}</h2>
         <span className="status-chip" data-status={c.status}>{t.campaignStatus[c.status]}</span>
@@ -72,7 +76,7 @@ function CampaignRow({ c, t, lang, owner, api, onChange, onRemoved }: { c: Campa
       <p className="muted campaign-meta">
         <bdi>{t.templateNames[c.template.name] ?? c.template.name}</bdi>{when && <> · {when}</>}
       </p>
-      {c.status === 'paused' && c.pauseReason && <p className="campaign-reason" data-reason={c.pauseReason}>{t.pauseReasons[c.pauseReason]}</p>}
+      {c.status === 'paused' && c.pauseReason && <p className="campaign-reason" data-reason={c.pauseReason}>{t.pauseReasons[c.pauseReason] ?? t.pauseUnknown}</p>}
       {c.status === 'scheduled' && total > 0 && <p className="audience-line">{t.audienceCount(n(total))}</p>}
       {total > 0 && c.status !== 'scheduled' && (
         <>

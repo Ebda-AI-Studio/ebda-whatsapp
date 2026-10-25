@@ -6,7 +6,10 @@ import type { RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/bill
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
+import { useFocusOn } from '../lib/useFocusOn';
+import { useLoad } from '../lib/useLoad';
 import { dateTime } from './CampaignsScreen';
+import { LoadError } from './LoadError';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: WalletApi; now: () => number; go?: (url: string) => void };
 
@@ -60,25 +63,24 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
 
-  const load = useCallback(async () => {
-    try { setWallet(await api.wallet()); } catch { setWallet((w) => w ?? 'error'); }
-  }, [api]);
-
-  // One check settles a waiting top-up: the order is `paid` (the server credits before it marks paid) or the balance itself grew by the amount.
+  // One check settles a waiting top-up. The order's own state decides (`paid`: the server credits before it marks paid; `failed`/`expired`: nothing taken).
+  // Only when the order cannot be asked does the balance growing by the amount stand in for it: other credits (a refund, an adjustment) also move it.
   const check = useCallback(async () => {
     let w: WalletDto;
-    try { w = await api.wallet(); setWallet(w); } catch { return; }
+    // A failed first load is an error with Retry; a failed later poll keeps the wallet already on screen.
+    try { w = await api.wallet(); setWallet(w); } catch { setWallet((cur) => cur ?? 'error'); return; }
     const p = pendingRef.current;
     if (!p) return;
-    let verdict: 'arrived' | 'failed' | null = w.balanceMinor >= p.before + p.amountMinor ? 'arrived' : null;
-    if (!verdict) {
-      try {
-        const s = await api.topupState(p.orderId);
-        if (s.state === 'paid') { verdict = 'arrived'; setWallet(await api.wallet()); }
-        else if (s.state === 'failed' || s.state === 'expired') verdict = 'failed';
-      } catch { /* still waiting */ }
+    let verdict: 'arrived' | 'failed' | null = null;
+    try {
+      const s = await api.topupState(p.orderId);
+      if (s.state === 'paid') verdict = 'arrived';
+      else if (s.state === 'failed' || s.state === 'expired') verdict = 'failed';
+    } catch {
+      if (w.balanceMinor >= p.before + p.amountMinor) verdict = 'arrived';
     }
     if (verdict) { writePending(null); setPending(null); setTopupNote(verdict); }
+    if (verdict === 'arrived') void api.wallet().then(setWallet, () => undefined); // show the credited balance
   }, [api]);
 
   useEffect(() => { void check(); }, [check]);
@@ -92,7 +94,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
   }, [pending, check]);
 
   if (wallet === null) return <main className="screen"><div className="placeholder">…</div></main>;
-  if (wallet === 'error') return <main className="screen"><div className="placeholder"><p role="alert">{t.walletLoadError} <button type="button" className="btn ghost" onClick={() => void load()}>{t.retry}</button></p></div></main>;
+  if (wallet === 'error') return <main className="screen"><div className="placeholder"><p role="alert">{t.walletLoadError} <button type="button" className="btn ghost" onClick={() => void check()}>{t.retry}</button></p></div></main>;
 
   const cardOnly = wallet.funding.length > 0 && wallet.funding.every((f) => f.funding === 'merchant_card');
   const walletPays = wallet.funding.some((f) => f.funding === 'platform_line');
@@ -128,8 +130,8 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
                 {wallet.funding.map((f) => (
                   <li key={f.phoneNumberId}>
                     <b><bdi dir="ltr">{f.displayPhone ?? f.phoneNumberId}</bdi></b>
-                    <span className="flag" data-ok={f.funding === 'merchant_card'}>{f.funding === 'merchant_card' ? t.opFundingCard : t.opFundingWallet}</span>
-                    <p className="muted">{f.funding === 'merchant_card' ? t.wFundingCard : t.wFundingWallet}</p>
+                    <span className="flag" data-ok={f.funding === 'merchant_card'}>{f.funding === 'merchant_card' ? t.opFundingCard : f.funding === 'unknown' ? t.opFundingUnknown : t.opFundingWallet}</span>
+                    <p className="muted">{f.funding === 'merchant_card' ? t.wFundingCard : f.funding === 'unknown' ? t.wFundingUnknown : t.wFundingWallet}</p>
                   </li>
                 ))}
               </ul>
@@ -306,15 +308,15 @@ function StatementCard({ t, lang, api, now }: { t: Strings; lang: Lang; api: Wal
 }
 
 function RefundCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }) {
-  const [items, setItems] = useState<RefundRequest[] | null>(null);
+  const list = useCallback(() => api.refundRequests(), [api]);
+  const { data: items, setData: setItems, error: loadFailed, reload } = useLoad<RefundRequest[]>(list);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [msg, setMsg] = useState<{ kind: 'alert' | 'status'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const msgRef = useFocusOn<HTMLParagraphElement>(msg);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
   const signed = (m: number) => formatSigned(m, lang);
-
-  useEffect(() => { void api.refundRequests().then(setItems, () => setItems([])); }, [api]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -341,9 +343,10 @@ function RefundCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }
         <label className="field"><span>{t.wRefundNote}</span><textarea dir="auto" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
         <div className="settings-actions"><button type="submit" className="btn primary" disabled={busy}>{t.wRefundSend}</button></div>
       </form>
-      {msg && <p role={msg.kind} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
+      {msg && <p ref={msgRef} tabIndex={-1} role={msg.kind} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
       <h3 className="pane-sub">{t.wRefundPast}</h3>
-      {items === null ? <p className="muted">…</p> : items.length === 0 ? <p className="muted">{t.wRefundEmpty}</p> : (
+      {loadFailed ? <LoadError t={t} onRetry={reload} />
+        : items === null ? <p className="muted">…</p> : items.length === 0 ? <p className="muted">{t.wRefundEmpty}</p> : (
         <ul className="wallet-rows" aria-label={t.wRefundPast}>
           {items.map((r) => (
             <li key={r.id}>

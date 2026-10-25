@@ -29,6 +29,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [messages, setMessages] = useState<MessageDto[]>([]);
   const [orders, setOrders] = useState<OrderSummaryDto[] | null>(null);
+  const [ordersFailed, setOrdersFailed] = useState(false);
   const [templates, setTemplates] = useState<TemplateDto[]>([]);
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
@@ -66,7 +67,9 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   }, [source, filter, query]);
 
   useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => { void source.templates().then(setTemplates); }, [source]);
+  const [templatesFailed, setTemplatesFailed] = useState(false);
+  const loadTemplates = useCallback(() => { void source.templates().then((ts) => { setTemplates(ts); setTemplatesFailed(false); }, () => setTemplatesFailed(true)); }, [source]);
+  useEffect(loadTemplates, [loadTemplates]);
 
   // The low-balance banner reads the wallet whenever the inbox is on screen (coming back from the wallet screen refreshes it).
   const [walletDto, setWalletDto] = useState<WalletDto | null>(null);
@@ -91,13 +94,14 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const open = useCallback(async (id: number) => {
     setSelectedId(id);
     setOrders(null);
+    setOrdersFailed(false);
     setMessages([]);
     const conv = items.find((c) => c.id === id);
     // Messages, read receipt and orders load in parallel: nothing waits on anything else.
     [...pending.current.keys()].forEach((k) => flushRef.current(k)); // a decision on the previous chat is sent, never lost
     // Messages, read receipt and orders load in parallel and independently: one failing never blanks the others.
     void source.markRead(id).catch(() => undefined);
-    if (conv) void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrders([]));
+    if (conv) void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrdersFailed(true));
     try {
       setMessages([...(await source.getMessages(id))]);
     } catch {
@@ -224,9 +228,10 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
       <div className="center">
         {!online && <p className="notice offline" role="status">{t.offline}</p>}
         {error && <p className="notice offline" role="alert">{t.loadError} <button type="button" className="btn ghost" onClick={() => void refresh()}>{t.retry}</button></p>}
+        {templatesFailed && <p className="notice offline" role="alert">{t.dataLoadError} <button type="button" className="btn ghost" onClick={loadTemplates}>{t.retry}</button></p>}
         <ChatPane t={t} lang={lang} now={now()} conversation={selected} source={source} userNames={source.userNames} currentOrder={orders?.[0] ?? null} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onSendMedia={sendMedia} onRetry={retry} onBack={() => setSelectedId(null)} onShowOrders={() => setOrdersOpen(true)} onTakeOver={source.assign ? () => void takeOver() : undefined} />
       </div>
-      <OrderPane key={selectedId ?? 'none'} t={t} lang={lang} orders={selected ? orders : null} hasChat={!!selected} canDecide={source.capabilities.codOutcome} onConfirm={(o) => recordOutcome(o, 'confirmed')} onRefuse={(o) => recordOutcome(o, 'refused')} onClose={() => setOrdersOpen(false)} />
+      <OrderPane key={selectedId ?? 'none'} t={t} lang={lang} orders={selected ? orders : null} failed={ordersFailed} onRetry={() => { const conv = items.find((c) => c.id === selectedId); if (!conv) return; setOrdersFailed(false); void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrdersFailed(true)); }} hasChat={!!selected} canDecide={source.capabilities.codOutcome} onConfirm={(o) => recordOutcome(o, 'confirmed')} onRefuse={(o) => recordOutcome(o, 'refused')} onClose={() => setOrdersOpen(false)} />
         </>
       )}
       {toast && (

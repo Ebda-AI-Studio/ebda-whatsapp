@@ -73,4 +73,15 @@ describe('markets and months', () => {
     expect(lines[2]).toContain('"\'=HYPERLINK(""x""),y"');
     expect(lines[0]).toBe('date_utc,kind,category,net_egp,vat_egp,amount_egp,balance_after_egp,ref,wamid,note');
   });
+  it('a negative amount stays a number (a charge must not become text), while free text starting with - is still defused', () => {
+    const st: Statement = {
+      month: '2026-01', from: 0, to: 1, openingMinor: -80, closingMinor: -80, truncated: false, totalsByKind: {}, totalsByCategory: {}, cardCosts: [],
+      rows: [{ at: 0, kind: 'meta_charge', netMinor: -80, vatMinor: -11, amountMinor: -91, balanceAfterMinor: -91, ref: '-cmd', wamid: null, category: 'marketing', note: '-=cmd|calc' }],
+    };
+    const lines = statementCsv(st).trim().split('\n');
+    expect(lines[2]!.split(',').slice(3, 7)).toEqual(['-0.80', '-0.11', '-0.91', '-0.91']);
+    expect(lines[1]).toContain(',-0.80,'); // opening balance
+    expect(lines[2]).toContain(",'-cmd,");
+    expect(lines[2]).toContain("'-=cmd|calc");
+  });
 });

@@ -9,7 +9,7 @@ export type WebBrand = {
   appleTouchIcon: string | null;
   /** Where the access token comes from (identity contract v1); null for a tenant on its own identity provider (sign-in handled by its portal). */
   accountsUrl: string | null;
-  /** Help guides base URL (`<base>/<guide-slug>`); null hides the "How?" links. */
+  /** Help site origin; guides are at `<base>/<ar|en>/<guide-slug>` (the interface language picks the folder). Null hides the "How?" links. */
   helpBase: string | null;
   /** The linked store product, when the brand has one; null hides the store step everywhere. */
   storeName: string | null;

@@ -364,6 +364,8 @@ export type ApiError = z.infer<typeof apiError>;
 /** Route table (paths relative to /api/v1/stores/:storeId). */
 // ---- Billing (Phase 7). Additive. Amounts are integer piasters (EGP x 100); the currency is always EGP. ----
 export const fundingKind = z.enum(['merchant_card', 'platform_line']);
+/** The payer shown per number: `unknown` = no funding row yet (the server refuses sends for it as funding_unknown), never a guess. */
+export const walletFundingKind = z.enum(['merchant_card', 'platform_line', 'unknown']);
 export const billingCategory = z.enum(['marketing', 'utility', 'authentication', 'service']);
 export const walletDto = z.object({
   balanceMinor: z.number().int(),
@@ -373,8 +375,8 @@ export const walletDto = z.object({
   debtMinor: z.number().int().nonnegative(),
   creditLimitMinor: z.number().int().nonnegative(),
   currency: z.literal('EGP'),
-  /** Who pays Meta, per connected number: merchant_card = Meta bills the merchant's card (the UI shows the notice), platform_line = this wallet. */
-  funding: z.array(z.object({ phoneNumberId: z.string(), displayPhone: z.string().nullable(), funding: fundingKind })),
+  /** Who pays Meta, per connected number: merchant_card = Meta bills the merchant's card (the UI shows the notice), platform_line = this wallet, unknown = not set up yet. */
+  funding: z.array(z.object({ phoneNumberId: z.string(), displayPhone: z.string().nullable(), funding: walletFundingKind })),
   topupsEnabled: z.boolean(),
   lowBalance: z.boolean(),
   aiCredits: z.object({ balance: z.number().int(), available: z.number().int() }),

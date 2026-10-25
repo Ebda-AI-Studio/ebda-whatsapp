@@ -153,7 +153,7 @@ app.post('/kashier/webhook', async (c) => {
   return c.text(out.body, out.status);
 });
 
-app.get('/health', (c) => c.json({ ok: true, service: 'ebda-wa', commit: c.env.COMMIT_SHA ?? 'dev' }));
+app.get('/health', (c) => c.json({ ok: true, service: PACK.service, commit: c.env.COMMIT_SHA || 'dev' }));
 
 app.get('/meta/webhook', (c) => {
   const mode = c.req.query('hub.mode');

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { ApiError } from './data/api';
 import { createSampleSource } from './data/sample';
+import { STRINGS } from './i18n';
 
 afterEach(cleanup);
 const now = () => Date.UTC(2026, 9, 24, 17, 0);
@@ -52,7 +53,7 @@ describe('campaigns', () => {
     expect(created.audience.criteria).toEqual({ tags: { any: ['vip'] } });
   });
 
-  async function reviewWithZeroCost(funding: 'merchant_card' | 'platform_line') {
+  async function reviewWithZeroCost(funding: 'merchant_card' | 'platform_line' | 'unknown') {
     const source = createSampleSource();
     const create = source.campaigns!.create;
     source.campaigns!.create = async (req) => ({ ...(await create(req)), estimate: { audience: 500, perMessageMinor: 0, totalMinor: 0 } });
@@ -77,6 +78,47 @@ describe('campaigns', () => {
   it('a zero cost on a wallet-paid number still says the price is not ready', async () => {
     await reviewWithZeroCost('platform_line');
     expect(screen.getByText('التكلفة هتظهر هنا لما المحفظة تتفعّل.')).toBeTruthy();
+  });
+
+  it('a zero cost on a number whose payer is unknown is not claimed as card billing', async () => {
+    await reviewWithZeroCost('unknown');
+    expect(screen.getByText('التكلفة هتظهر هنا لما المحفظة تتفعّل.')).toBeTruthy();
+    expect(screen.queryByText('واتساب بيحاسب كارتك مباشرة على الرسايل دي، ومفيش حاجة هتتخصم من المحفظة.')).toBeNull();
+  });
+
+  it('every pause reason the server can send has words, and an unknown one still says something', async () => {
+    const source = createSampleSource();
+    const list = source.campaigns!.list;
+    const reasons = ['plan_blocked', 'funding_unknown', 'rate_unavailable', 'brand_new_code'];
+    source.campaigns!.list = async () => {
+      const base = (await list())[0]!;
+      return reasons.map((r, i) => ({ ...base, id: `p${i}`, name: `حملة ${i}`, status: 'paused' as const, pauseReason: r as never }));
+    };
+    await openCampaigns(source);
+    const texts = reasons.map((_r, i) => (within(screen.getByRole('article', { name: `حملة ${i}` })).getByText((_c, el) => el?.className === 'campaign-reason')).textContent);
+    expect(texts.every((x) => !!x && x.length > 8)).toBe(true);
+    expect(new Set(texts).size).toBe(4);
+    expect(texts[3]).toBe(STRINGS.ar.pauseUnknown);
+  });
+
+  it('an audience count that could not be computed says so, never "0 recipients"', async () => {
+    const source = createSampleSource();
+    source.campaigns!.preview = vi.fn().mockRejectedValue(new Error('network'));
+    const create = source.campaigns!.create;
+    source.campaigns!.create = async (req) => ({ ...(await create(req)), estimate: undefined });
+    await openCampaigns(source);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حملة جديدة' })));
+    await act(async () => fireEvent.click(screen.getByLabelText('كل العملاء اللي وافقوا')));
+    expect((await screen.findByText(STRINGS.ar.audienceUnknown))).toBeTruthy();
+    expect(screen.queryByText(/^هتوصل لـ/)).toBeNull();
+    fireEvent.change(screen.getByLabelText('اسم الحملة (ليك إنت بس)'), { target: { value: 'x' } });
+    await act(async () => fireEvent.change(screen.getByLabelText('اختار قالب معتمد'), { target: { value: 'back_in_stock|ar' } }));
+    fireEvent.change(screen.getByLabelText('نوع المتغير ١'), { target: { value: 'text' } });
+    fireEvent.change(screen.getByLabelText('النص'), { target: { value: 'أهلًا' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'راجع التكلفة' })));
+    const review = (await screen.findByRole('heading', { name: 'راجع وابعت' })).closest('section')!;
+    expect(within(review).getByText(STRINGS.ar.audienceUnknown)).toBeTruthy();
+    expect(within(review).queryByText(/^هتوصل لـ/)).toBeNull();
   });
 
   it('refuses to review a tracked link that is not https', async () => {
