@@ -35,7 +35,10 @@ there is no self-serve checkout.
 3. Guards keep the seam honest: shared web code and `src/core` name no brand, `src/index.ts` reaches brand code only through `src/brand.ts`, every brand's `_headers` keeps the base policy, and the demo build contains no suite name.
 
 ## Status (2026-10-25)
-- Built and checked: brand packs (server registry + web build per brand; the demo build carries no suite name), the template, the bootstrap script in `--dry-run` (renders valid config with no leftover placeholders; refuses bad input), the generic OIDC verifier (tested).
-- In progress: connectors to the client's systems (webhook, Odoo), Phase 9.3.
+- Built and checked: brand packs (server registry + web build per brand; the demo build carries no suite name), connectors to the client's systems (signed webhook + Odoo; tested against fakes, see below and `docs/connectors.md`), the template, the bootstrap script in `--dry-run` (renders valid config with no leftover placeholders; refuses bad input), the generic OIDC verifier (tested).
+- Not yet run against a real client system: connectors (no real Odoo or client endpoint yet; Odoo field names marked NOT VERIFIED in `docs/connectors.md`).
 - Not built: sign-in for a brand on its own identity provider is verified on the API side (OIDC), but the page has no login screen for it yet; such a tenant's portal must hand the page a token (to design with the first client).
 - Not yet run for real: the resource creation and the D1-id lookup (`wrangler d1 info --json`) have only run in dry-run; the first real tenant setup verifies them.
+
+## Connecting the client's own systems (connectors)
+The agent can call the client's webhook or Odoo (draft quotations, stock, calendar bookings). The owner sets this up in the product after deploy (`PUT /connectors/:id`, secrets are encrypted per workspace); deploy-time you only need `AGENT_SECRETS_KEY` (already in the secrets list) and, if you want connectors limited to named hosts, `AGENT_ALLOWED_HOSTS`. Contract, signature verification, Odoo setup and limits: `docs/connectors.md`.

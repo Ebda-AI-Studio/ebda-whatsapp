@@ -11,6 +11,7 @@ import type { SendJob } from '../send-queue';
 import { bridgeFor } from '../store-link';
 import type { LinkHost } from '../store-link/host';
 import { normaliseText } from '../text-normalise';
+import { loadConnectors, runConnectorTool } from '../connectors/registry';
 import { agentConfig } from './config';
 import { markHandoff, type HandoffReason } from './handoff';
 import { retrieveKnowledge } from './knowledge';
@@ -150,7 +151,10 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   const copy = agentConfig().copy!;
   const bridge = bridgeFor(host.env);
   const availability = { catalog: bridge !== null, orders: bridge !== null, ordering: orderingActive(host) };
-  const tools = toolDefs(availability);
+  // Tools of the workspace's enabled connectors (the agent is on, or this turn would not be running); names are `<connector>__<tool>`.
+  const connectors = loadConnectors(host);
+  const tools = [...toolDefs(availability), ...(connectors?.tools ?? [])];
+  let connectorCalls = 0;
   const system = copy.systemPrompt({ persona: settings.persona.trim() || copy.defaultPersona[locale], language: settings.language, storeName: null, knowledge, tools: tools.map((t) => t.name) });
   const ctx: ToolContext = { host, from: input.from, bridge, availability };
   const messages = historyOf(host, input);
@@ -177,6 +181,14 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
     if (!acked && Date.now() - started >= agentConfig().slowMs) await ack();
     messages.push({ role: 'assistant', content: res.text ?? '', toolCalls: calls });
     for (const call of calls) {
+      if (connectors?.owns(call.name)) {
+        // The customer may have been erased or said stop while the previous await ran: then nothing goes to the client's system.
+        if (turnGone(host, input)) throw new Aborted();
+        const content = await runConnectorTool(host, connectors, input.from, call.name, call.arguments, `conn:${input.messageId}:${connectorCalls++}`);
+        if (turnGone(host, input)) throw new Aborted();
+        messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content });
+        continue;
+      }
       const out = await runTool(ctx, call);
       if ('handoff' in out) return { kind: 'handoff', reason: 'model' };
       if ('startOrder' in out) return { kind: 'order' };

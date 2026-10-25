@@ -173,6 +173,61 @@ export const agentSettingsUpdate = agentSettingsFields.extend({ apiKey: z.string
 export type AgentSettingsDto = z.infer<typeof agentSettingsDto>;
 export type AgentSettingsUpdate = z.infer<typeof agentSettingsUpdate>;
 
+// ---- Phase 9.3: connectors (the agent's tools into a client's own systems; owner only) ---------------------------------
+export const connectorId = z.string().regex(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/).max(16);
+const toolName = z.string().regex(/^[a-z][a-z0-9]*(_[a-z0-9]+)*$/).max(40);
+/** One argument of a webhook tool: the model supplies only strings, numbers, booleans or one of a fixed list of words. */
+export const webhookParam = z.object({
+  name: z.string().regex(/^[a-z][a-zA-Z0-9]{0,29}$/),
+  type: z.enum(['string', 'number', 'boolean', 'enum']),
+  description: z.string().max(200).optional(),
+  required: z.boolean().optional(),
+  /** Strings only (default 200). */
+  maxLength: z.number().int().min(1).max(500).optional(),
+  /** Enums only. */
+  values: z.array(z.string().min(1).max(60)).min(1).max(20).optional(),
+  /** Numbers only. */
+  min: z.number().optional(),
+  max: z.number().optional(),
+}).refine((p) => (p.type === 'enum') === (p.values !== undefined), 'values belong to enums only');
+export const webhookTool = z.object({
+  name: toolName,
+  description: z.string().min(1).max(300),
+  params: z.array(webhookParam).max(10),
+}).refine((t) => new Set(t.params.map((p) => p.name)).size === t.params.length, 'duplicate parameter');
+export const webhookConfig = z.object({
+  url: z.string().max(300),
+  tools: z.array(webhookTool).min(1).max(10),
+}).refine((c) => new Set(c.tools.map((t) => t.name)).size === c.tools.length, 'duplicate tool');
+export const odooConfig = z.object({
+  url: z.string().max(300),
+  database: z.string().regex(/^[\w.-]{1,63}$/),
+  login: z.string().min(1).max(100),
+});
+/** Full replace of the connector's settings. `secret` (webhook signing secret / Odoo API key): a string sets it, absent keeps it; never returned. */
+export const connectorPut = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('webhook'), enabled: z.boolean(), config: webhookConfig, secret: z.string().min(16).max(400).optional() }),
+  z.object({ kind: z.literal('odoo'), enabled: z.boolean(), config: odooConfig, secret: z.string().min(8).max(400).optional() }),
+]);
+export const connectorDto = z.object({
+  id: connectorId,
+  kind: z.enum(['webhook', 'odoo']),
+  enabled: z.boolean(),
+  hasSecret: z.boolean(),
+  config: z.union([webhookConfig, odooConfig]),
+  /** The names the model sees (`<id>__<tool>`). */
+  tools: z.array(z.string()),
+  updatedAt: z.number().int(),
+  updatedBy: z.string().nullable(),
+});
+export const connectorTestResult = z.object({ ok: z.boolean(), error: z.string().optional(), detail: z.string().optional() });
+export type ConnectorDto = z.infer<typeof connectorDto>;
+export type ConnectorPut = z.infer<typeof connectorPut>;
+export type WebhookConfig = z.infer<typeof webhookConfig>;
+export type WebhookTool = z.infer<typeof webhookTool>;
+export type WebhookParam = z.infer<typeof webhookParam>;
+export type OdooConfig = z.infer<typeof odooConfig>;
+
 /** Phase 6: contacts, imports. */
 export const tagName = z.string().trim().min(1).max(32);
 export const listContactsQuery = z.object({
@@ -328,6 +383,9 @@ export const ROUTES = {
   me: 'GET /me',
   storeLinkSettings: 'GET|PATCH /store-link/settings',
   agent: 'GET|PUT /agent',
+  connectors: 'GET /connectors',
+  connector: 'PUT|DELETE /connectors/:connectorId',
+  connectorTest: 'POST /connectors/:connectorId/test',
   contacts: 'GET /contacts',
   contactTags: 'PUT /contacts/:waId/tags',
   imports: 'GET|POST /imports',

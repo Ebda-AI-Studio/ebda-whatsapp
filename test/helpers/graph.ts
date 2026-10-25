@@ -13,12 +13,14 @@ const MEDIA_HOST = 'https://lookaside.fbsbx.com/';
 export function stubGraph(
   responder: (call: GraphCall, n: number) => GraphReply = (_c, n) => ({ status: 200, json: { messages: [{ id: `wamid.out${n}` }] } }),
   /** `before` runs (and is awaited) after a call is recorded and before it answers: a test can hold a call open at a known point. */
-  opts: { jwks?: JWK[]; delayMs?: number; before?: (call: GraphCall) => Promise<void> | void } = {},
+  opts: { jwks?: JWK[]; delayMs?: number; before?: (call: GraphCall) => Promise<void> | void; other?: (url: string, init: RequestInit | undefined) => Promise<Response> | Response | undefined } = {},
 ) {
   const calls: GraphCall[] = [];
   const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (opts.jwks && url === JWKS_URL) return new Response(JSON.stringify({ keys: opts.jwks }), { headers: { 'content-type': 'application/json' } });
+    const alt = opts.other?.(url, init);
+    if (alt) return alt;
     if (!url.startsWith('https://graph.facebook.com/') && !url.startsWith(MEDIA_HOST)) throw new Error(`unexpected outbound fetch: ${url}`);
     const raw = init?.body;
     const call: GraphCall = {

@@ -20,6 +20,8 @@ Same rules as the ordering bot: the customer must still be there (not erased, no
 - At most 3 tool rounds (3 calls per round); the 4th model call is offered no tools. Still asking for tools, empty output, leaked JSON/tool markup, `<think>` only, or a model error (one retry for retryable errors) means a handoff, never silence and never raw model output.
 - Tools: `search_catalog` (semantic candidates from the vector index, then price/stock/link read from the Store now; fallback: read up to 500 variants and rank by matching words), `order_status` (Store `getOrderStatus` / `listCustomerOrders`; the customer key is derived from the conversation, the model never supplies a phone or key), `start_order` (opens the ordering menu: runs the ordering turn with a restart), `handoff_to_human`. Tool arguments are validated with Zod; errors go back to the model as `{"error": "..."}`.
 
+Connectors (Phase 9.3, `docs/connectors.md`) add the tools of the workspace's enabled webhook/Odoo connectors, named `<connector>__<tool>`; they count in the same 3x3 call cap and are never called for a customer who is gone.
+
 ## Handoff
 `handoff_to_human`, a words match, no credits, no usable model, model failure or unusable output: the customer gets `copy.t.handoffAck`, the conversation is tagged `needs_human` (inbox lights up through the usual `conversation.updated` event, which carries the tags) and the bot is silent for `handoffMinutes` (default 120). A staff reply through the API clears the tag and restarts the silence for a fresh window counted from that reply. After the window the bot resumes and the tag is cleared on the next message. The reason is stored as a code (`asked | model | no_credits | misconfigured | provider_error | bad_output | no_answer`), never free text.
 
@@ -38,10 +40,10 @@ FAQ text (`faqText`, up to 20,000 chars) is chunked (paragraphs, then sentences,
 `GET /stores/:storeId/agent` -> `agentSettingsDto`; `PUT /stores/:storeId/agent` (partial merge, `agentSettingsUpdate`): `enabled, persona (<=1000), language, handoffMinutes (5-1440), faqText, provider, model, baseUrl, apiKey` (string = set, `null` = remove, absent = keep; never returned). Answers add `hasApiKey`, `credits` (available) and `knowledgeReady`. Refusals are fixed codes: `invalid_base_url, model_required, api_key_required, model_not_allowed` (400), `secrets_unavailable` (503). Messages gain an optional `author: 'agent' | 'bot' | 'staff'` (set only when known).
 
 ## DO migrations added
-v17 `agent_state` · v18 `messages.author`, `agent_turns`, `agent_handoffs` · v19 `credit_ledger`, `credit_holds` (+ triggers) · v20 `kb_chunks`, `catalog_vectors`. Scheduler kinds: `kb_index`, `catalog_embed`.
+v17 `agent_state` · v18 `messages.author`, `agent_turns`, `agent_handoffs` · v19 `credit_ledger`, `credit_holds` (+ triggers) · v20 `kb_chunks`, `catalog_vectors` · v25 `connectors` (Phase 9.3). Scheduler kinds: `kb_index`, `catalog_embed`.
 
 ## Eval
 `test/ai-eval.test.ts` ports the old product's intent eval: its intents become the tool an utterance must lead to, and its output-shape checks (valid intent, required field, confident answer has a reply, no leaked JSON) become guards. 30 cases (12 golden tool/reply paths, 8 handoff phrasings, a model handoff, 9 malformed-output cases) against a scripted fake model: **pass rate 30/30 (100%)**. This measures the harness (routing, validation, guards, handoff, credits), not a live model's judgement; a live golden run was not done.
 
 ## Secrets and settings to set before use
-`AGENT_SECRETS_KEY` (secret, only for bring-your-own-key), optional `AGENT_MODEL`, `AGENT_ALLOWED_HOSTS`; the Vectorize index above. Customer message text is sent to the configured model (Workers AI on this account, or the merchant's own provider).
+`AGENT_SECRETS_KEY` (secret, only for bring-your-own-key), optional `AGENT_MODEL`, `AGENT_ALLOWED_HOSTS` (also the allowlist for connector hosts once set); the Vectorize index above. Customer message text is sent to the configured model (Workers AI on this account, or the merchant's own provider).
