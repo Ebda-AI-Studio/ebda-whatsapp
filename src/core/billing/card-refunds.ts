@@ -21,6 +21,8 @@ import { ensureAdjustmentApplied, requestAdjustment } from './operator';
 import { auditOnce } from './package-orders';
 import { isCardRefundOperation, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 
+/** Rows that count against a top-up's room: the open ones, the planned ones (reserved, not debited yet) and held refunds (real refunds awaiting a match). */
+export const RESERVING = "('planned', 'sending', 'calling', 'pending', 'uncertain', 'held')";
 export const OPEN = "('sending', 'calling', 'pending', 'uncertain')";
 const STUCK_AFTER_MS = 3 * 86_400_000;
 const RECONCILE_AFTER_MS = 15 * 60_000;
@@ -29,7 +31,7 @@ const stubOf = (env: Env, workspaceId: string) => env.WORKSPACE_DO.get(env.WORKS
 
 export type CardRefundRow = {
   id: string; request_id: string | null; order_id: string; workspace_id: string; amount_minor: number; source: 'api' | 'dashboard' | 'webhook' | 'held';
-  state: 'sending' | 'calling' | 'pending' | 'uncertain' | 'succeeded' | 'failed' | 'linked' | 'held' | 'matched'; kashier_refund_id: string | null; created_at: number; updated_at: number; confirmed_at: number | null; candidate_id: string | null; note: string | null;
+  state: 'planned' | 'sending' | 'calling' | 'pending' | 'uncertain' | 'succeeded' | 'failed' | 'linked' | 'held' | 'matched'; kashier_refund_id: string | null; created_at: number; updated_at: number; confirmed_at: number | null; candidate_id: string | null; note: string | null;
 };
 const COLS = 'id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, confirmed_at, candidate_id, note';
 export const getCardRefund = (env: Env, id: string) => env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE id = ?`).bind(id).first<CardRefundRow>();
@@ -56,23 +58,25 @@ export async function refreshRequest(env: Env, requestId: string): Promise<void>
   ).bind(requestId).run();
 }
 
+/** What the top-up still has room for beyond the OTHER rows that count ahead of this one (already calling / pending / uncertain / held, and sending or planned rows ordered before it). */
+const ROOM = `coalesce((SELECT t.amount_minor - t.refunded_minor FROM topups t WHERE t.order_id = card_refunds.order_id), 0)
+  - coalesce((SELECT sum(c.amount_minor) FROM card_refunds c WHERE c.order_id = card_refunds.order_id AND c.id != card_refunds.id
+      AND (c.state IN ('calling', 'pending', 'uncertain', 'held') OR (c.state IN ('sending', 'planned') AND (c.created_at < card_refunds.created_at OR (c.created_at = card_refunds.created_at AND c.id < card_refunds.id))))), 0)`;
+
 /**
- * The guarded flip that lets exactly one run send a row to the provider, and only while the top-up still has room for it: the top-up's
- * refundable amount (`amount_minor - refunded_minor`) minus the OTHER open rows that count ahead of this one (anything already `calling`,
- * `pending` or `uncertain`, and `sending` rows planned earlier) must cover this row. `claimed` = this run sends it; `busy` = another run owns it;
- * `over` = no room (the caller turns the row into a manual payout and a P1 is raised).
+ * The guarded flip that lets exactly one run send a row to the provider, and only while the top-up still has room for it. `claimed` = this run
+ * sends it; `over` = no room: the row was failed by ONE atomic statement that re-checks it is still `sending` and still has no room (so a row a
+ * concurrent run just moved to `calling` is never failed); `busy` = another run owns it (or the room changed under us: nothing is sent, nothing
+ * is failed, and the row stays open for a person).
  */
 export async function claimForCall(env: Env, id: string, now: number): Promise<'claimed' | 'busy' | 'over'> {
-  const r = await env.DB.prepare(
-    `UPDATE card_refunds SET state = 'calling', updated_at = ?1 WHERE id = ?2 AND state = 'sending'
-       AND coalesce((SELECT t.amount_minor - t.refunded_minor FROM topups t WHERE t.order_id = card_refunds.order_id), 0)
-           - coalesce((SELECT sum(c.amount_minor) FROM card_refunds c WHERE c.order_id = card_refunds.order_id AND c.id != card_refunds.id
-                         AND (c.state IN ('calling', 'pending', 'uncertain') OR (c.state = 'sending' AND (c.created_at < card_refunds.created_at OR (c.created_at = card_refunds.created_at AND c.id < card_refunds.id))))), 0)
-           >= card_refunds.amount_minor`,
-  ).bind(now, id).run();
-  if (r.meta.changes === 1) return 'claimed';
-  const cur = await getCardRefund(env, id);
-  return cur?.state === 'sending' ? 'over' : 'busy';
+  const claimed = await env.DB.prepare(`UPDATE card_refunds SET state = 'calling', updated_at = ?1 WHERE id = ?2 AND state = 'sending' AND ${ROOM} >= card_refunds.amount_minor`).bind(now, id).run();
+  if (claimed.meta.changes === 1) return 'claimed';
+  const over = await env.DB.prepare(`UPDATE card_refunds SET state = 'failed', updated_at = ?1 WHERE id = ?2 AND state = 'sending' AND ${ROOM} < card_refunds.amount_minor`).bind(now, id).run();
+  if (over.meta.changes !== 1) return 'busy';
+  const row = await getCardRefund(env, id);
+  if (row?.request_id) await refreshRequest(env, row.request_id);
+  return 'over';
 }
 
 /** Marks the approval's debit phase finished (every wallet chunk posted and every card refund row written). */
@@ -82,10 +86,14 @@ export async function completeDebitPhase(env: Env, requestId: string): Promise<v
 
 const markConfirmed = (env: Env, id: string, now: number) => env.DB.prepare('UPDATE card_refunds SET confirmed_at = ? WHERE id = ? AND confirmed_at IS NULL').bind(now, id).run();
 
-/** Records the row BEFORE the provider is asked. A re-run of the same approval finds the same id and never inserts a second row. */
+/**
+ * The row of one card chunk, made visible to the matchers only AFTER its wallet chunk was posted: a plan writes it as `planned` (a reservation),
+ * and this flips it to `sending` with a guarded UPDATE. A re-run finds it already `sending` or later and changes nothing.
+ */
 export async function openCardRefund(env: Env, r: { id: string; requestId: string; orderId: string; workspaceId: string; amountMinor: number }, now: number): Promise<CardRefundRow> {
-  await env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'api', 'sending', ?, ?)")
+  await env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'api', 'planned', ?, ?)")
     .bind(r.id, r.requestId, r.orderId, r.workspaceId, r.amountMinor, now, now).run();
+  await env.DB.prepare("UPDATE card_refunds SET state = 'sending', updated_at = ? WHERE id = ? AND state = 'planned'").bind(now, r.id).run();
   return (await getCardRefund(env, r.id))!;
 }
 
@@ -248,7 +256,7 @@ export async function linkDashboardRefund(env: Env, a: { requestId: string; kash
   }
   if (!topup) return { ok: false, reason: a.orderId ? 'invalid_order' : 'exceeds_order' };
   if (!existing) {
-    const reserved = await env.DB.prepare(`SELECT coalesce(sum(amount_minor), 0) AS n FROM card_refunds WHERE order_id = ? AND state IN ${OPEN}`).bind(topup.order_id).first<{ n: number }>();
+    const reserved = await env.DB.prepare(`SELECT coalesce(sum(amount_minor), 0) AS n FROM card_refunds WHERE order_id = ? AND state IN ${RESERVING}`).bind(topup.order_id).first<{ n: number }>();
     if (a.amountMinor > topup.amount_minor - topup.refunded_minor - (reserved?.n ?? 0)) return { ok: false, reason: 'exceeds_order' };
   }
   // Ask Kashier before anything is written.

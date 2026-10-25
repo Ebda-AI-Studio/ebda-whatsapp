@@ -6,6 +6,8 @@
 --   source 'webhook' a refund/chargeback we did not start (state succeeded); amount_minor is what the wallet was debited
 --   source 'held'    a refund webhook whose id differs from an unconfirmed refund of ours for the same top-up and amount: NO wallet movement
 --                    until an operator matches it to that refund (state held -> matched)
+-- `planned` = a row written with its approval's plan BEFORE the wallet chunk was posted: it only RESERVES room (counted by the room sums) and is
+-- invisible to every matcher (webhooks, reconcile, mark-failed) until the chunk is debited and it flips to `sending`.
 -- `calling` = one run won the guarded sending -> calling flip and is (or was) asking the provider: no other run may send the row.
 -- sending / calling / pending / uncertain are OPEN: they reserve the top-up's refundable amount and keep the request in `processing`.
 CREATE TABLE card_refunds (
@@ -15,7 +17,7 @@ CREATE TABLE card_refunds (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),
   amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
   source TEXT NOT NULL CHECK (source IN ('api', 'dashboard', 'webhook', 'held')),
-  state TEXT NOT NULL CHECK (state IN ('sending', 'calling', 'pending', 'uncertain', 'succeeded', 'failed', 'linked', 'held', 'matched')),
+  state TEXT NOT NULL CHECK (state IN ('planned', 'sending', 'calling', 'pending', 'uncertain', 'succeeded', 'failed', 'linked', 'held', 'matched')),
   kashier_refund_id TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,

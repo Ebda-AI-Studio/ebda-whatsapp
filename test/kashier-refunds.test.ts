@@ -763,13 +763,66 @@ describe('round 5: an approval is run by exactly one run at a time, and a resume
     }) } } as unknown as typeof env;
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     await expect(decideRefund(dies, { id: a.id, decision: 'approve', actor: OP1 })).rejects.toThrow();
-    expect(await env.DB.prepare("SELECT state, amount_minor FROM card_refunds WHERE request_id = ?").bind(a.id).all().then((x) => x.results)).toEqual([{ state: 'sending', amount_minor: 20000 }]);
+    expect(await env.DB.prepare("SELECT state, amount_minor FROM card_refunds WHERE request_id = ?").bind(a.id).all().then((x) => x.results)).toEqual([{ state: 'planned', amount_minor: 20000 }]);
     await fund(a.ws, 20000, 'kashier:extra-81');
     const other = await createRefundRequest(env, { workspaceId: a.ws, userId: 'u1', amountMinor: 5000 });
     if (!other.ok) throw new Error(other.reason);
     refundAnswer = async () => refundOk('TX-RF81', 5000);
     expect(await decideRefund(env, { id: other.request.id, decision: 'approve', actor: OP2 })).toMatchObject({ ok: true, request: { state: 'manual_payout', manualMinor: 5000 } });
     expect(puts()).toEqual([]); // the planned 20000 already reserves the whole top-up: the other request has no card room
+  });
+
+  it('a plan-time row is only a reservation: a refund webhook between the plan and the debit does not reconcile it, and the approval still posts its own chunk afterwards', async () => {
+    const a = await setup(83, 15000);
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    const dies = { ...env, WORKSPACE_DO: { idFromName: (x: string) => env.WORKSPACE_DO.idFromName(x), get: () => ({
+      walletView: (n?: number) => real.walletView(n),
+      postWallet: async () => { throw new Error('wallet down'); },
+    }) } } as unknown as typeof env;
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await expect(decideRefund(dies, { id: a.id, decision: 'approve', actor: OP1 })).rejects.toThrow();
+    expect(await rowsOf(a.id)).toEqual([{ state: 'planned', source: 'api', amount_minor: 15000, kashier_refund_id: null }]);
+    await hookRefund(a.order, 'TX-EARLY83', '150.00'); // same amount, a real card refund, but our refund was never sent: this is somebody else's
+    expect((await rowsOf(a.id))[0]).toMatchObject({ state: 'planned', kashier_refund_id: null }); // not reconciled to the planned row
+    await env.DB.prepare('UPDATE refund_requests SET lease_until = 1 WHERE id = ?').bind(a.id).run();
+    refundAnswer = async () => refundOk('TX-RF83', 15000);
+    await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 });
+    expect((await kinds(a.ws)).filter((k) => k[0] === 'refund')).toEqual([['refund', -15000]]); // the approval's chunk was posted, not skipped
+    // the early refund took the top-up's room (it is a real, separate refund): our row finds no room, is failed atomically and becomes a manual payout
+    expect((await kinds(a.ws)).filter((k) => k[0] === 'chargeback')).toEqual([['chargeback', -15000]]);
+    expect((await rowsOf(a.id))[0]).toMatchObject({ state: 'failed', kashier_refund_id: null });
+    expect(puts()).toEqual([]);
+    expect(await req(a.id)).toMatchObject({ state: 'manual_payout', manual_minor: 15000 });
+  });
+
+  it('the over-room transition is one atomic statement: a row a concurrent run just moved to calling is never failed (one provider call OR manual, never both)', async () => {
+    const a = await setup(84, 15000);
+    await env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, created_at, updated_at) VALUES ('cr:x84:1', ?, ?, ?, 15000, 'api', 'sending', 5, 5)").bind(a.id, a.order, a.ws).run();
+    await env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at) VALUES ('cr:y84:1', NULL, ?, ?, 10000, 'api', 'calling', 'TX-Y84', 1, 1)").bind(a.order, a.ws).run();
+    let flipped = false;
+    const racing = { ...env, DB: new Proxy(env.DB, { get(t, p) {
+      if (p === 'prepare') return (sql: string) => {
+        if (!flipped && sql.includes("SET state = 'failed'") && sql.includes('card_refunds')) { flipped = true; return { bind: (...b: unknown[]) => ({ run: async () => { await t.prepare("UPDATE card_refunds SET state = 'calling' WHERE id = 'cr:x84:1'").run(); return t.prepare(sql).bind(...b).run(); } }) } as never; }
+        return t.prepare(sql);
+      };
+      const v = Reflect.get(t, p) as unknown; return typeof v === 'function' ? v.bind(t) : v;
+    } }) } as typeof env;
+    const { claimForCall } = await import('../src/core/billing/card-refunds');
+    expect(await claimForCall(racing, 'cr:x84:1', Date.now())).toBe('busy');
+    expect(await env.DB.prepare("SELECT state FROM card_refunds WHERE id = 'cr:x84:1'").first()).toEqual({ state: 'calling' }); // not failed under the run that is calling Kashier
+  });
+
+  it('held and planned rows count as reservations when the room is sized', async () => {
+    const a = await setup(85, 15000);
+    await env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at) VALUES ('held:H85', NULL, ?, ?, 10000, 'held', 'held', 'H85', 1, 1)").bind(a.order, a.ws).run();
+    await env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, created_at, updated_at) VALUES ('cr:p85:1', NULL, ?, ?, 5000, 'api', 'planned', 1, 1)").bind(a.order, a.ws).run();
+    await fund(a.ws, 20000, 'kashier:extra-85');
+    refundAnswer = async () => refundOk('TX-RF85', 5000);
+    const r = await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 });
+    expect(r).toMatchObject({ ok: true, request: { state: 'manual_payout', cardRefundedMinor: 5000, manualMinor: 10000 } }); // 20000 - 10000 held - 5000 planned = 5000 room: only that much goes to the card
+    expect(puts().length).toBeLessThanOrEqual(1);
+    const sent = puts().map((c) => Math.round((c.body as { transaction: { amount: number } }).transaction.amount * 100));
+    expect(sent.reduce((n, v) => n + v, 0)).toBeLessThanOrEqual(5000);
   });
 });
 
