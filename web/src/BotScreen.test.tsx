@@ -105,3 +105,71 @@ describe('Bot settings screen', () => {
     expect(screen.getByRole('status').textContent).toContain('مقدرناش نحفظ');
   });
 });
+
+describe('WhatsApp catalog on the Bot screen', () => {
+  const fail = (detail: string, status = 409) => Object.assign(new Error(detail), { status, detail });
+  const create = () => act(async () => fireEvent.click(screen.getByRole('button', { name: 'اعمل كتالوج واتساب' })));
+
+  it('with no catalog offers to create one; after creating it shows the catalog id and that no sync ran yet', async () => {
+    const source = await open();
+    expect(screen.getByText(/مفيش كتالوج متوصّل/)).toBeTruthy();
+    await create();
+    expect(screen.getByRole('status').textContent).toContain('الكتالوج اتعمل');
+    expect(screen.getByText(/رقم الكتالوج/).textContent).toContain('1234567890123');
+    expect(screen.getByText(/لسه مفيش مزامنة/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'اعمل كتالوج واتساب' })).toBeNull();
+    expect((await source.catalog!.status()).catalogId).toBe('1234567890123');
+  });
+
+  it('with a catalog set shows its id and the last sync, and no create button', async () => {
+    const source = createSampleSource();
+    source.catalog!.status = async () => ({ catalogId: '5550001111', lastSyncAt: Date.UTC(2026, 9, 24, 16, 0) });
+    await open(source);
+    expect(screen.getByText(/رقم الكتالوج/).textContent).toContain('5550001111');
+    expect(screen.getByText(/آخر مزامنة/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'اعمل كتالوج واتساب' })).toBeNull();
+  });
+
+  it.each([
+    ['missing_permission', /صلاحية الكتالوج/],
+    ['no_business', /اربط الرقم من جديد/],
+    ['business_mismatch', /اربط الرقم من جديد/],
+    ['meta_error', /ميتا مش بترد/],
+  ])('%s is explained in words and the button stays so the merchant can retry', async (detail, text) => {
+    const source = createSampleSource();
+    source.catalog!.provision = vi.fn().mockRejectedValue(fail(detail, detail === 'meta_error' ? 503 : 403));
+    await open(source);
+    await create();
+    expect(screen.getByRole('alert').textContent).toMatch(text);
+    expect(screen.getByRole('button', { name: 'اعمل كتالوج واتساب' })).toBeTruthy();
+  });
+
+  it('shows progress while Meta works and blocks a second click', async () => {
+    const source = createSampleSource();
+    let release!: () => void;
+    const slow = new Promise<{ catalogId: string }>((r) => { release = () => r({ catalogId: '777000777' }); });
+    source.catalog!.provision = vi.fn().mockReturnValue(slow);
+    await open(source);
+    await create();
+    expect(screen.getByRole('status').textContent).toContain('بنعمل الكتالوج');
+    expect((screen.getByRole('button', { name: 'اعمل كتالوج واتساب' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => release());
+    expect(screen.getByText(/رقم الكتالوج/).textContent).toContain('777000777');
+    expect(source.catalog!.provision).toHaveBeenCalledTimes(1);
+  });
+
+  it('staff can see the state but not create', async () => {
+    const source = createSampleSource();
+    source.role = 'staff';
+    await open(source);
+    expect(screen.getByText(/مفيش كتالوج متوصّل/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'اعمل كتالوج واتساب' })).toBeNull();
+  });
+
+  it('English strings exist for every state', async () => {
+    const { STRINGS } = await import('./i18n');
+    const ar = Object.keys(STRINGS.ar).filter((k) => k.startsWith('cat'));
+    expect(ar.length).toBeGreaterThan(8);
+    expect(Object.keys(STRINGS.en).filter((k) => k.startsWith('cat')).sort()).toEqual(ar.sort());
+  });
+});

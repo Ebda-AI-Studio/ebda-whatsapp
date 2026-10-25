@@ -35,6 +35,24 @@ describe('createApiSource bot settings', () => {
   });
 });
 
+describe('createApiSource catalog', () => {
+  const mk = (routes: Parameters<typeof fetchStub>[0]) => {
+    const { f, calls } = fetchStub(routes);
+    return { calls, src: createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' }) };
+  };
+  it('reads the status and provisions with POST (name optional)', async () => {
+    const { src, calls } = mk({ '/store-link/catalog/provision': () => ({ status: 200, body: { catalogId: '123456789' } }), '/store-link/catalog': () => ({ status: 200, body: { catalogId: null, lastSyncAt: null } }) });
+    expect(await src.catalog!.status()).toEqual({ catalogId: null, lastSyncAt: null });
+    expect(await src.catalog!.provision()).toEqual({ catalogId: '123456789' });
+    expect(calls[1]!.init?.method).toBe('POST');
+    expect(JSON.parse(String(calls[1]!.init?.body))).toEqual({});
+  });
+  it('a refusal carries the server reason', async () => {
+    const { src } = mk({ '/store-link/catalog/provision': () => ({ status: 403, body: { error: 'forbidden', message: 'missing_permission' } }) });
+    await expect(src.catalog!.provision()).rejects.toMatchObject({ status: 403, detail: 'missing_permission' });
+  });
+});
+
 describe('createApiSource', () => {
   it('lists conversations with the bearer token and validates the response', async () => {
     const { f, calls } = fetchStub({ '/conversations?filter=unread': () => ({ status: 200, body: { items: [conv], nextCursor: null } }) });

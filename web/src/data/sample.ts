@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, BotSettingsDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+  AgentSettingsDto, BotSettingsDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
 import type { InboxSource } from './source';
@@ -123,6 +123,7 @@ export function createSampleSource(): InboxSource {
     hours: { enabled: false, timezone: 'Africa/Cairo', week: { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }, awayMessage: { ar: 'احنا مقفولين دلوقتي، هنرد عليك أول ما نفتح.', en: 'We are closed right now; we will reply as soon as we open.' }, ordersWhileClosed: true },
     location: null,
   };
+  let catalog: CatalogStatusDto = { catalogId: null, lastSyncAt: null };
   const contacts: ContactDto[] = [
     ...SEEDS.map((x): ContactDto => ({ waId: x.waId, name: x.name, optedOut: false, tags: x.tags.filter((t) => t !== 'needs_human' && t !== 'cod_pending'), consent: x.id % 2 ? { source: 'keyword_start', at: BASE - 10 * D } : null, lastInboundAt: BASE - x.ago })),
     ...structuredClone(MORE_CONTACTS),
@@ -206,6 +207,15 @@ export function createSampleSource(): InboxSource {
     async saveBotSettings(update) {
       bot = structuredClone(update);
       return structuredClone(bot);
+    },
+    catalog: {
+      async status() {
+        return { ...catalog };
+      },
+      async provision() {
+        catalog = { catalogId: '1234567890123', lastSyncAt: null };
+        return { catalogId: '1234567890123' };
+      },
     },
     async assign(id, userId) {
       const c = convs.find((x) => x.id === id);
