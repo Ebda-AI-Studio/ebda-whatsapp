@@ -35,8 +35,13 @@ connectorRoutes.delete('/stores/:storeId/connectors/:connectorId', async (c) => 
   return (await ws.deleteConnector(id.data)) ? c.json({ ok: true }) : apiError(c, 404, 'not_found');
 });
 
-// POST /stores/:storeId/connectors/:connectorId/test is added with the connectors themselves (below the staff check too).
 connectorRoutes.post('/stores/:storeId/connectors/:connectorId/test', async (c) => {
   if (ownerOnly(c.get('storeRole'))) return apiError(c, 403, 'forbidden');
-  return apiError(c, 404, 'not_found');
+  const id = connectorId.safeParse(c.req.param('connectorId'));
+  if (!id.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const res = await ws.testConnector(id.data);
+  if (!res) return apiError(c, 404, 'not_found');
+  return res.error === 'rate_limited' ? apiError(c, 429, 'rate_limited') : c.json(res);
 });

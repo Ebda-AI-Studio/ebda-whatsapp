@@ -44,6 +44,7 @@ import { storeLink } from './store-link';
 import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
 import { agentActive } from './ai/agent';
 import { runTurn } from './ai/router';
+import { testConnector } from './connectors/registry';
 import { connectorDto, deleteConnector, listConnectors, planConnectorPut, writeConnector, type PutRefusal } from './connectors/store';
 import type { ConnectorDto, ConnectorPut } from './api/contract';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
@@ -1013,6 +1014,15 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (!plan.ok) return plan;
     this.ctx.storage.transactionSync(() => writeConnector(this.sql, plan.row, plan.secretEnc));
     return { ok: true, connector: connectorDto(plan.row) };
+  }
+
+  private connectorTestAt = new Map<string, number>();
+  /** A harmless call to the client's system (webhook ping / Odoo version + login). One per connector every 5 s; null = no such connector. */
+  async testConnector(id: string): Promise<{ ok: boolean; error?: string; detail?: string } | null> {
+    const last = this.connectorTestAt.get(id) ?? 0;
+    if (Date.now() - last < 5_000) return { ok: false, error: 'rate_limited' };
+    this.connectorTestAt.set(id, Date.now());
+    return testConnector(this.host(), id);
   }
 
   async deleteConnector(id: string): Promise<boolean> {
