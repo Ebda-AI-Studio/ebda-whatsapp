@@ -41,6 +41,10 @@ export type Env = {
   IDENTITY_ISSUER: string;
   IDENTITY_JWKS_URL: string;
   IDENTITY_AUDIENCE: string;
+  /** `ebda` (default) or `oidc` for a white-label tenant's own identity provider. */
+  IDENTITY_MODE?: string;
+  /** JSON, see src/core/identity/oidc.ts; required when IDENTITY_MODE=oidc. */
+  IDENTITY_OIDC_CONFIG?: string;
   SUITE_BUYER_KEY_SECRET?: string;
   SENTRY_DSN?: string;
 };

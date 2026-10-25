@@ -9,7 +9,7 @@ const COMMIT = 'abc1234';
 
 /** A fake deployment that behaves like the real Worker: health, webhook handshake, signature check, security headers. */
 function fakeDeploy(over: { commit?: string; noHsts?: boolean; acceptUnsigned?: boolean } = {}) {
-  const sec = over.noHsts ? {} : { 'strict-transport-security': 'max-age=63072000', 'x-content-type-options': 'nosniff' };
+  const sec: Record<string, string> = over.noHsts ? {} : { 'strict-transport-security': 'max-age=63072000', 'x-content-type-options': 'nosniff' };
   return async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
     if (u.pathname === '/health') return new Response(JSON.stringify({ ok: true, service: 'ebda-wa', commit: over.commit ?? COMMIT }), { headers: sec });

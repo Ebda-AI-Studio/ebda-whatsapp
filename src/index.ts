@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/cloudflare';
 import { Hono } from 'hono';
 import type { Env } from './env';
+import { selectVerifier } from './identity-select';
 import { verifyMetaSignature } from './core/meta/signature';
 import { extractEvents, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
@@ -9,7 +10,6 @@ import { scrubEvent } from './core/observability';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
 import { EBDA_COPY } from './addons/ebda/copy';
 import { EBDA_OPT_IN_KEYWORDS } from './addons/ebda/consent';
-import { createEbdaAccountsVerifier } from './addons/ebda/identity';
 import { requireStoreAccess, type AuthVars } from './core/identity/middleware';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
@@ -85,8 +85,7 @@ app.use('*', async (c, next) => {
 
 // One verifier per isolate so the JWKS cache survives across requests.
 let verifier: IdentityVerifier | undefined;
-const getVerifier = (env: Env): IdentityVerifier =>
-  (verifier ??= createEbdaAccountsVerifier({ jwksUrl: env.IDENTITY_JWKS_URL, issuer: env.IDENTITY_ISSUER, audience: env.IDENTITY_AUDIENCE }));
+const getVerifier = (env: Env): IdentityVerifier => (verifier ??= selectVerifier(env).verifier);
 
 const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));

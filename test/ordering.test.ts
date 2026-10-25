@@ -1,5 +1,6 @@
 import { SELF, env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
+import { holdPoint } from './helpers/hold';
 import { configureStoreLink } from '../src/core/store-link';
 import { EBDA_ORDERING_COPY } from '../src/addons/ebda/store-copy';
 import { FakeStore } from './helpers/fake-store';
@@ -520,11 +521,13 @@ describe('opt-out and erasure', () => {
     await toCheckout(ws, pn, g);
     await say(ws, pn, tapBtn('pay:cod'), g);
     const real = link.fake.saveCustomerAddress.bind(link.fake);
-    vi.spyOn(link.fake, 'saveCustomerAddress').mockImplementation(async (...a) => { await new Promise((r) => setTimeout(r, 80)); return real(...a); });
+    const hp = holdPoint();
+    vi.spyOn(link.fake, 'saveCustomerAddress').mockImplementation(async (...a) => { await hp.hold(); return real(...a); });
     await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 30)); // inside saveCustomerAddress
+    await hp.reached(); // inside saveCustomerAddress
     await workspace(ws).eraseContact(WA_1);
+    hp.release();
     await turn;
     expect(link.fake.count('createOrderFromChat')).toBe(0);
     expect(link.fake.orders.size).toBe(0);
@@ -537,13 +540,15 @@ describe('opt-out and erasure', () => {
     await toCheckout(ws, pn, g);
     await say(ws, pn, tapBtn('pay:cod'), g);
     const real = link.fake.createOrderFromChat.bind(link.fake);
-    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { await new Promise((r) => setTimeout(r, 80)); return real(...a); });
+    const hp = holdPoint();
+    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { await hp.hold(); return real(...a); });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     link.sink.failNext = 1;
     await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 40));
+    await hp.reached();
     await workspace(ws).eraseContact(WA_1);
+    hp.release();
     await turn;
     expect(link.sink.sent).toEqual([]);
     expect(await rows(ws, 'SELECT order_id FROM store_orders_after_erase')).toEqual([{ order_id: 'ord-1001' }]); // kept while pending
@@ -561,11 +566,13 @@ describe('opt-out and erasure', () => {
     await toCheckout(ws, pn, g);
     await say(ws, pn, tapBtn('pay:cod'), g);
     const real = link.fake.createOrderFromChat.bind(link.fake);
-    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { await new Promise((r) => setTimeout(r, 80)); return real(...a); });
+    const hp = holdPoint();
+    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { await hp.hold(); return real(...a); });
     await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 40)); // the Store call is in flight
+    await hp.reached(); // the Store call is in flight
     await workspace(ws).eraseContact(WA_1);
+    hp.release();
     await turn;
     expect(link.fake.orders.size).toBe(1);
     // no personal data stays: no contact, session, messages, order row with a phone
@@ -579,12 +586,15 @@ describe('opt-out and erasure', () => {
 
   it('erasing a customer while a bot turn is waiting on the Store writes nothing back', async () => {
     const { ws, pn } = await setup(53);
-    link.fake.latencyMs = 80;
+    const hp = holdPoint();
+    const realList = link.fake.listCatalog.bind(link.fake);
+    vi.spyOn(link.fake, 'listCatalog').mockImplementation(async (...a) => { await hp.hold(); return realList(...a); });
     const g = stubGraph();
     await postWebhook(SELF, rawMessagePayload(pn, text('hi')));
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 30)); // the turn is inside listCatalog
+    await hp.reached(); // the turn is inside listCatalog
     await workspace(ws).eraseContact(WA_1);
+    hp.release();
     await turn;
     for (const t of ['contacts', 'conversations', 'messages', 'bot_sessions', 'store_orders']) expect(await rows(ws, `SELECT 1 FROM ${t}`), t).toEqual([]);
     expect(sentOf(g)).toEqual([]);
@@ -592,12 +602,16 @@ describe('opt-out and erasure', () => {
 
   it('erasing a customer in the middle of a burst stops it: nothing is sent or stored after the erase', async () => {
     const { ws, pn } = await setup(54);
-    const g = stubGraph(undefined, { delayMs: 40 });
+    // Hold the burst's second send open, erase, then let it finish: at most that one in-flight call may complete.
+    const hp = holdPoint();
+    let sends = 0;
+    const g = stubGraph(undefined, { before: async (c) => { if (c.method === 'POST' && c.url.endsWith('/messages') && ++sends === 2) await hp.hold(); } });
     await postWebhook(SELF, rawMessagePayload(pn, text('hi')));
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 130));
+    await hp.reached();
     await workspace(ws).eraseContact(WA_1);
     const sentAtErase = sentOf(g).length;
+    hp.release();
     await turn;
     expect(sentAtErase).toBeGreaterThan(0);
     expect(sentOf(g).length).toBeLessThanOrEqual(sentAtErase + 1); // at most the one call already in flight
@@ -610,11 +624,14 @@ describe('opt-out and erasure', () => {
     const g = stubGraph();
     await toCheckout(ws, pn, g);
     await say(ws, pn, tapBtn('pay:cod'), g);
-    link.fake.latencyMs = 80;
+    const hp = holdPoint();
+    const realCreate = link.fake.createOrderFromChat.bind(link.fake);
+    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { await hp.hold(); return realCreate(...a); });
     await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 30));
+    await hp.reached();
     await workspace(ws).eraseContact(WA_1);
+    hp.release();
     await turn;
     expect(await rows(ws, 'SELECT 1 FROM store_orders')).toEqual([]);
     expect(await rows(ws, 'SELECT 1 FROM bot_sessions')).toEqual([]);

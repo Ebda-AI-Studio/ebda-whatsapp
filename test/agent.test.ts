@@ -206,11 +206,14 @@ describe('rules shared with the ordering bot', () => {
   it('a stop sent while the model is thinking cancels the answer', async () => {
     const ws = W(15);
     const pn = await agentWs(ws);
-    model([{ text: 'رد', delayMs: 80 }]);
+    let thinking = false;
+    let released = false;
+    model([{ text: 'رد', onStart: () => { thinking = true; }, holdUntil: () => released }]);
     const g = stubGraph();
     const turn = say(ws, pn, text('hi'), g);
-    await new Promise((r) => setTimeout(r, 30));
+    await vi.waitFor(() => expect(thinking).toBe(true));
     await exec(ws, 'UPDATE contacts SET opted_out_at = ?', Date.now() + 1000);
+    released = true;
     await turn;
     expect(sendCount(g)).toBe(0);
   });
