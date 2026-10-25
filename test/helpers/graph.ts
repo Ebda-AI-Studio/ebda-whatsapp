@@ -10,8 +10,19 @@ const MEDIA_HOST = 'https://lookaside.fbsbx.com/';
  * Stubs outbound Graph API calls. `responder` decides each response; every call is recorded.
  * `opts.jwks` also answers the identity JWKS fetch so route tests can sign in while Graph is stubbed.
  */
+/**
+ * The default reply: a send gets a wamid, and an inbound media file (test media ids are `media-*`) resolves and downloads, so the download a
+ * test's inbound picture schedules finishes inside that test instead of failing, retrying and firing during a later, unstubbed test.
+ */
+export const defaultGraphReply = (call: GraphCall, n: number): GraphReply => {
+  if (call.url.startsWith(MEDIA_HOST)) return { status: 200, body: new Uint8Array([1]), headers: { 'content-type': 'image/jpeg' } };
+  const media = /^https:\/\/graph\.facebook\.com\/v[\d.]+\/(media-[^/?]+)$/.exec(call.url);
+  if (call.method === 'GET' && media) return { status: 200, json: { url: `${MEDIA_HOST}test/${media[1]}`, mime_type: 'image/jpeg', file_size: 1 } };
+  return { status: 200, json: { messages: [{ id: `wamid.out${n}` }] } };
+};
+
 export function stubGraph(
-  responder: (call: GraphCall, n: number) => GraphReply = (_c, n) => ({ status: 200, json: { messages: [{ id: `wamid.out${n}` }] } }),
+  responder: (call: GraphCall, n: number) => GraphReply = defaultGraphReply,
   /** `before` runs (and is awaited) after a call is recorded and before it answers: a test can hold a call open at a known point. */
   opts: { jwks?: JWK[]; delayMs?: number; before?: (call: GraphCall) => Promise<void> | void; other?: (url: string, init: RequestInit | undefined) => Promise<Response> | Response | undefined } = {},
 ) {

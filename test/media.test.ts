@@ -83,9 +83,11 @@ it('retries a failed download with backoff and gives up after 8 tries without lo
 it('does not download media for a duplicate delivery', async () => {
   const store = W(403);
   await apiFor(store, 'owner', 'pn-m4');
+  const g = graphStub();
   await inboundImage(store, 'pn-m4', 'wamid.m4', 'media-m4');
   await inboundImage(store, 'pn-m4', 'wamid.m4', 'media-m4');
-  expect(await rows(store, "SELECT 1 FROM scheduled_tasks WHERE kind = 'media_fetch'")).toHaveLength(1);
+  await workspace(store).runDueTasks();
+  expect(g.calls.filter((c) => c.url.startsWith('https://graph.facebook.com/') && c.url.endsWith('/media-m4'))).toHaveLength(1); // one lookup for two deliveries
 });
 
 function upload(name: string, type: string, bytes: Uint8Array) {
