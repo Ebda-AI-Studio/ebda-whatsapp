@@ -10,7 +10,8 @@ import type { LinkHost } from './host';
 import { queueFreeText, queueTemplate, setTag, cleanParam, type QueueResult } from './outbound';
 import { ensureCatalogReconcile } from './catalog';
 import { isLinked, putState, readSettings } from './settings';
-import { locale, orderRow, schedulePendingPushes, upsertOrder } from './order-store';
+import { acceptVersion, locale, orderRow, rememberBuyerKey, schedulePendingPushes, upsertOrder } from './order-store';
+import { applyConsentChanged, forgetBuyer, recordCheckoutConsent } from './consent';
 
 export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
 
@@ -22,22 +23,10 @@ const KEEP_EVENTS_MS = 14 * 24 * 60 * 60 * 1000;
 
 const warn = (host: LinkHost, what: string, extra: Record<string, unknown> = {}) => console.warn(JSON.stringify({ warn: what, workspace: host.workspaceId, ...extra }));
 
-/** Newest-wins: false when a newer version of this entity was already applied. Equal versions pass (different events, same instant). */
-function acceptVersion(host: LinkHost, entity: string, version: number): boolean {
-  const have = host.sql.exec<{ version: number }>('SELECT version FROM entity_versions WHERE entity = ?', entity).toArray()[0];
-  if (have && version < have.version) return false;
-  host.sql.exec('INSERT INTO entity_versions (entity, version) VALUES (?, ?) ON CONFLICT(entity) DO UPDATE SET version = max(version, excluded.version)', entity, version);
-  return true;
-}
-
 function displayName(host: LinkHost, waId: string, loc: Locale): string {
   const copy = storeLink().copy!;
   const row = host.sql.exec<{ profile_name: string | null }>('SELECT profile_name FROM contacts WHERE wa_id = ?', waId).toArray()[0];
   return cleanParam(row?.profile_name, copy.customerName[loc]);
-}
-
-function rememberBuyerKey(host: LinkHost, waId: string, key: string): void {
-  host.sql.exec('UPDATE contacts SET buyer_key = ? WHERE wa_id = ? AND (buyer_key IS NULL OR buyer_key != ?)', key, waId, key);
 }
 
 /** The order a COD request is about, when neither the event nor an earlier event named its number and total. */
@@ -82,6 +71,7 @@ export async function applyStoreEvent(host: LinkHost, event: StoreEvent, opts: {
   // Async lookups happen before the transaction (a transaction cannot await).
   let codLookup: LookedUp | 'retry' | null = null;
   let erasedWaId: string | null = null;
+  let consentWaId: string | null = null;
   if (event.type === 'order.cod_confirmation_requested') {
     const d = event.data;
     const have = orderRow(host, d.orderId);
@@ -91,12 +81,14 @@ export async function applyStoreEvent(host: LinkHost, event: StoreEvent, opts: {
     }
   } else if (event.type === 'customer.erased') {
     erasedWaId = await findWaId(host, event.data.buyerKey);
+  } else if (event.type === 'customer.consent_changed') {
+    consentWaId = await findWaId(host, event.data.buyerKey);
   }
 
   const outcome = host.storage.transactionSync((): StoreEventOutcome => {
     // Re-check inside the transaction: a concurrent delivery of the same event may have finished during the awaits above.
     if (host.sql.exec('SELECT 1 FROM processed_events WHERE event_id = ?', event.id).toArray().length) return { status: 'duplicate' };
-    const result = handle(host, event, { ...opts, now }, { codLookup });
+    const result = handle(host, event, { ...opts, now }, { codLookup, consentWaId });
     if (result.status === 'retry') return result;
     // An erasure is recorded as done only after the contact is really gone (below), so a failure there is redelivered.
     if (event.type === 'customer.erased') return result;
@@ -121,7 +113,7 @@ function sendOutcome(host: LinkHost, r: QueueResult, what: string): StoreEventOu
   return { status: 'skipped', detail: r.reason };
 }
 
-function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string | null; shared?: boolean; now: number }, pre: { codLookup: LookedUp | null }): StoreEventOutcome {
+function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string | null; shared?: boolean; now: number }, pre: { codLookup: LookedUp | null; consentWaId: string | null }): StoreEventOutcome {
   const { now } = opts;
   const copy = storeLink().copy;
   const at = (iso: string) => Date.parse(iso);
@@ -144,7 +136,14 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       // Data protection is never gated by link state. Only what is keyed by the customer is dropped here; the contact is
       // erased by the caller, which records this event as processed only once that has succeeded.
       host.sql.exec('DELETE FROM store_orders WHERE buyer_key = ?', event.data.buyerKey);
+      forgetBuyer(host, event.data.buyerKey);
       return { status: 'applied' };
+    case 'customer.consent_changed': {
+      // Withdrawing marketing consent is never gated by link state; granting it needs a linked store (campaigns follow consent_at).
+      if (event.data.marketingOptIn && !isLinked(host)) return { status: 'skipped', detail: 'unlinked' };
+      if (!pre.consentWaId) return { status: 'skipped', detail: 'unknown_buyer' }; // the attestation comes with a later event
+      return applyConsentChanged(host, pre.consentWaId, event.data.buyerKey, event.data.marketingOptIn, at(event.data.at));
+    }
     default:
   }
 
@@ -256,16 +255,18 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
 
     case 'cart.abandoned': {
       const d = event.data;
+      const waId = d.phoneE164.slice(1);
+      // WA-CONSENT-1: the Store sends this event only for a buyer who ticked the WhatsApp marketing opt-in at checkout, so it attests the
+      // consent. Our opt-out always wins (the contact is left alone when opted out).
+      recordCheckoutConsent(host, waId, d.buyerKey, at(event.occurredAt));
       if (!copy || !opts.phoneNumberId) return { status: 'skipped', detail: copy ? 'no_number' : 'no_copy' };
       if (opts.shared) return { status: 'skipped', detail: 'shared_number_no_marketing' }; // WA-SHARED-NOCAMP-1
-      const waId = d.phoneE164.slice(1);
       const loc = locale(d.locale);
       // Marketing: needs a recorded opt-in and no opt-out. (Phase 7 adds the wallet check here: fail closed at zero.)
       const r = queueTemplate(host, {
         waId, phoneNumberId: opts.phoneNumberId, name: copy.templates.cartRecovery, language: loc, fallbackLanguage: 'ar', requireConsent: true,
         params: [displayName(host, waId, loc), d.recoveryUrl], idempotencyKey: `cart:${d.cartId}`, now,
       });
-      if (r.ok) rememberBuyerKey(host, waId, d.buyerKey);
       return sendOutcome(host, r, 'cart_recovery');
     }
 

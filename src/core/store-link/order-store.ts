@@ -28,3 +28,15 @@ export function schedulePendingPushes(host: LinkHost, now: number): void {
   }
   if (host.sql.exec('SELECT 1 FROM store_orders_after_erase LIMIT 1').toArray().length) addTask(host.sql, 'erased_order_notify', now);
 }
+
+/** Newest-wins: false when a newer version of this entity was already applied. Equal versions pass (different events, same instant). */
+export function acceptVersion(host: LinkHost, entity: string, version: number): boolean {
+  const have = host.sql.exec<{ version: number }>('SELECT version FROM entity_versions WHERE entity = ?', entity).toArray()[0];
+  if (have && version < have.version) return false;
+  host.sql.exec('INSERT INTO entity_versions (entity, version) VALUES (?, ?) ON CONFLICT(entity) DO UPDATE SET version = max(version, excluded.version)', entity, version);
+  return true;
+}
+
+export function rememberBuyerKey(host: LinkHost, waId: string, key: string): void {
+  host.sql.exec('UPDATE contacts SET buyer_key = ? WHERE wa_id = ? AND (buyer_key IS NULL OR buyer_key != ?)', key, waId, key);
+}

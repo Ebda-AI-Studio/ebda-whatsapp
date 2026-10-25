@@ -42,6 +42,7 @@ import { OTP_RATE_WINDOW_MS } from './otp-policy';
 import { OTP_MASK } from './templates';
 import type { OtpResult } from './otp';
 import { queueTemplate } from './store-link/outbound';
+import { forgetBuyer, noteOptOutChange, pushOptOut } from './store-link/consent';
 import { storeLink } from './store-link';
 import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
 import { agentActive } from './ai/agent';
@@ -250,9 +251,12 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.sql.exec('UPDATE conversations SET unread = unread + 1 WHERE id = ?', conversationId);
         if (optOut) {
           // A reply to STOP is optional under Meta's rules and we send none: the opt-out is silent and immediate.
+          const wasOptedOut = this.sql.exec<{ o: number | null }>('SELECT opted_out_at AS o FROM contacts WHERE id = ?', contactId).one().o != null;
           this.sql.exec("UPDATE contacts SET opted_out_at = max(coalesce(opted_out_at, 0), ?), consent_source = 'keyword_stop', consent_at = ? WHERE id = ?", m.ts * 1000, now, contactId);
+          if (!wasOptedOut && noteOptOutChange(this.host(), m.from, true, m.ts * 1000, now)) linkWork = true;
         } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
-          this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId);
+          const cleared = this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId).rowsWritten > 0;
+          if (cleared && noteOptOutChange(this.host(), m.from, false, now, now)) linkWork = true;
         }
         const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
         if (wasCodReply) linkWork = true;
@@ -1756,6 +1760,9 @@ export class WorkspaceDO extends DurableObject<Env> {
         if (typeof orderId === 'string') await pushCodOutcome(this.host(), orderId, now);
         return undefined;
       }
+      case 'opt_out_push':
+        await pushOptOut(this.host(), payload);
+        return undefined;
       case 'erased_order_notify':
         await pushErasedOrders(this.host());
         return undefined;
@@ -1904,8 +1911,9 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   async eraseContact(waId: string): Promise<EraseResult> {
     const found = this.ctx.storage.transactionSync(() => {
-      const contact = this.sql.exec<{ id: number }>('SELECT id FROM contacts WHERE wa_id = ?', waId).toArray()[0];
+      const contact = this.sql.exec<{ id: number; buyer_key: string | null }>('SELECT id, buyer_key FROM contacts WHERE wa_id = ?', waId).toArray()[0];
       if (!contact) return { found: false, keys: 0, messages: 0, statusEvents: 0 };
+      forgetBuyer(this.host(), contact.buyer_key);
       const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
       const msgs = conv
         ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null; media_r2_key: string | null; idempotency_key: string | null; direction: string }>('SELECT wamid, body_r2_key, media_r2_key, idempotency_key, direction FROM messages WHERE conversation_id = ?', conv.id).toArray()

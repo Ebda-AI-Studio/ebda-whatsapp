@@ -144,20 +144,16 @@ describe('other Store events', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('shipment_event_unknown_order'));
   });
 
-  it('cart.abandoned is marketing: needs a recorded opt-in and no opt-out', async () => {
+  it('cart.abandoned is marketing: the event attests the checkout opt-in, an opt-out still blocks it', async () => {
     const ws = W(14);
     await storeWorkspace(ws);
     const abandoned = (cartId: string) => storeEvent(ws, 'cart.abandoned', { cartId, buyerKey: BUYER_KEY_1, phoneE164: PHONE_1, locale: 'ar', recoveryUrl: 'https://shop.example/cart/x' });
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await deliver([abandoned('c1')]); // never opted in
-    expect(await flush(ws)).toEqual([]);
-    await openChat(ws, WA_1);
-    await exec(ws, "UPDATE contacts SET consent_source = 'checkout', consent_at = 1 WHERE wa_id = ?", WA_1);
-    await deliver([abandoned('c2')]);
-    expect((await flush(ws)).map((j) => j.idempotencyKey)).toEqual(['cart:c2']);
+    await deliver([abandoned('c1')]); // WA-CONSENT-1: the Store sends it only for a buyer who ticked the opt-in
+    expect((await flush(ws)).map((j) => j.idempotencyKey)).toEqual(['cart:c1']);
     await exec(ws, 'UPDATE contacts SET opted_out_at = 5 WHERE wa_id = ?', WA_1);
     await deliver([abandoned('c3')]);
-    expect((await flush(ws)).map((j) => j.idempotencyKey)).toEqual(['cart:c2']);
+    expect((await flush(ws)).map((j) => j.idempotencyKey)).toEqual(['cart:c1']);
   });
 
   it('order.status_changed: cancelling a pending COD closes the request without an outcome; paid tells a customer inside the window', async () => {
