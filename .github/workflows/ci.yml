@@ -36,5 +36,6 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       # CI-only: 2 workers (the shared 4.9 GB VM ran out of memory and time with the default pool); local runs keep the default.
-      - run: npm test -- --maxWorkers=2
+      # scripts/ci-test.mjs: vitest's own verdict, plus a guard for a pool that never exits AFTER printing its summary (PR #7 run 40190537795).
+      - run: npm run test:ci -- --maxWorkers=2
       - run: npm audit --audit-level=low

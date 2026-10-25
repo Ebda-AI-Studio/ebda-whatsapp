@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "test": "vitest run",
+    "test:ci": "node scripts/ci-test.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "deploy": "wrangler deploy",
     "build:web": "vite build web"
