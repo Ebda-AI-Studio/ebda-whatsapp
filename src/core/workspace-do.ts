@@ -783,11 +783,21 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** The enqueue after queueOutbound threw: the message will never be sent, so say so instead of leaving it 'queued'. */
   async markEnqueueFailed(idempotencyKey: string): Promise<void> {
+    this.failUnsent(idempotencyKey, 'enqueue_failed');
+  }
+
+  /** The queue consumer found the sender number gone: the message can never leave, so fail it and give the wallet hold back. */
+  async failUnsendable(idempotencyKey: string, reason: 'sender_unavailable'): Promise<void> {
+    this.failUnsent(idempotencyKey, reason);
+  }
+
+  private failUnsent(idempotencyKey: string, reason: 'enqueue_failed' | 'sender_unavailable'): void {
     this.ctx.storage.transactionSync(() => {
-      const row = this.sql.exec<{ id: number }>("UPDATE messages SET status = 'failed', updated_at = ? WHERE idempotency_key = ? AND status = 'queued' RETURNING id", Date.now(), idempotencyKey).toArray()[0];
+      const now = Date.now();
+      const row = this.sql.exec<{ id: number }>("UPDATE messages SET status = 'failed', error_reason = ?, updated_at = ? WHERE idempotency_key = ? AND status IN ('queued', 'retry') RETURNING id", reason, now, idempotencyKey).toArray()[0];
       if (row) {
         this.emitMessageStatus(row.id);
-        this.billing.settleHold(idempotencyKey, 'enqueue_failed', Date.now());
+        this.billing.settleHold(idempotencyKey, reason, now);
       }
     });
   }
