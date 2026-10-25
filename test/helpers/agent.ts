@@ -5,7 +5,16 @@ import { EBDA_AGENT_COPY } from '../../src/addons/ebda/agent-copy';
 
 export const TEST_SECRETS_KEY = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
 
-export type Step = { text?: string; tools?: { name: string; arguments?: unknown }[]; delayMs?: number; fail?: LlmError | Error; usage?: { inputTokens: number; outputTokens: number } };
+export type Step = {
+  text?: string; tools?: { name: string; arguments?: unknown }[]; delayMs?: number; fail?: LlmError | Error; usage?: { inputTokens: number; outputTokens: number };
+  /** Called when the model receives this call; with `holdUntil`, lets a test act at a known point mid-call instead of guessing with a sleep. */
+  onStart?: () => void;
+  /**
+   * The call does not answer until this returns true. Polled on the model's own timer: a promise resolved from the test would carry the
+   * test's I/O context into the Durable Object (and back), which workerd refuses.
+   */
+  holdUntil?: () => boolean;
+};
 
 /** A model that plays back a script, one step per call, and records every request. Tests never call a real model. */
 export class ScriptedProvider implements LlmProvider {
@@ -19,6 +28,8 @@ export class ScriptedProvider implements LlmProvider {
     this.calls.push(structuredClone(req));
     const step = this.steps[this.n++];
     if (!step) throw new Error('scripted provider: no step left');
+    step.onStart?.();
+    while (step.holdUntil && !step.holdUntil()) await new Promise((r) => setTimeout(r, 5));
     if (step.delayMs) await new Promise((r) => setTimeout(r, step.delayMs));
     if (step.fail) throw step.fail;
     this.emitted.push(...(step.tools ?? []).map((t) => t.name));

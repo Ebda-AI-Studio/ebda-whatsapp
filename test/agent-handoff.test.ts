@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LlmError } from '../src/core/ai/provider';
 import { EBDA_AGENT_COPY } from '../src/addons/ebda/agent-copy';
 import { ScriptedProvider, useAgent } from './helpers/agent';
-import { agentWorkspace, say, sendCount, text } from './helpers/agent-chat';
+import { agentWorkspace, say, sendCount, sentOf, text } from './helpers/agent-chat';
 import { apiFor, storeId, useApiKey } from './helpers/api';
 import { stubGraph } from './helpers/graph';
 import { graphStub } from './helpers/api';
@@ -199,8 +199,9 @@ describe('AI credits', () => {
     await grant(ws, 1);
     const m = model([{ text: 'أنا الأول', delayMs: 60 }, { text: 'أنا التاني', delayMs: 60 }]);
     const g = stubGraph();
-    const [a, b] = await Promise.all([say(ws, pn, text('hi', '201001111111'), g), say(ws, pn, text('hi', '201002222222'), g)]);
-    const all = [...a, ...b].map((s) => s.text);
+    await Promise.all([say(ws, pn, text('hi', '201001111111'), g), say(ws, pn, text('hi', '201002222222'), g)]);
+    // Count from the shared stub once: each say() returns every send since it started, so overlapping calls would count the other's reply twice.
+    const all = sentOf(g).filter((s) => ['201001111111', '201002222222'].includes(s.body.to)).map((s) => s.text);
     expect(m.callCount).toBe(1);
     expect(all.filter((t) => t === EBDA_AGENT_COPY.t.handoffAck.ar).length).toBe(1);
     expect(all.filter((t) => t?.startsWith('أنا'))).toHaveLength(1);

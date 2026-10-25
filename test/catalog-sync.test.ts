@@ -14,13 +14,13 @@ const link = useStoreLink();
 /** Which catalogs Meta says are connected to each WABA (default: this test's catalog on the workspace's WABA). */
 let catalogsByWaba: Record<string, string[]> = {};
 /** Stubs Graph: answers /{waba}/product_catalogs from catalogsByWaba, everything else from `responder`. */
-function stubGraph(responder?: (call: GraphCall, n: number) => GraphReply, opts: { delayMs?: number } = {}) {
+function stubGraph(responder?: (call: GraphCall, n: number) => GraphReply, opts: { delayMs?: number; before?: (call: GraphCall) => Promise<void> | void } = {}) {
   let n = 0;
   return graphStub((call) => {
     const m = /\/(waba-[^/]+)\/product_catalogs/.exec(call.url);
     if (m) return { status: 200, json: { data: (catalogsByWaba[m[1]!] ?? [CAT]).map((id) => ({ id })) } };
     return responder ? responder(call, ++n) : { status: 200, json: { messages: [{ id: `wamid.out${++n}` }] } };
-  }, opts.delayMs);
+  }, opts.delayMs, opts.before);
 }
 beforeEach(() => { catalogsByWaba = {}; });
 const batches = (calls: GraphCall[]) => calls.filter((c) => c.url.endsWith('/items_batch')).map((c) => c.body as { item_type: string; allow_upsert: boolean; requests: { method: string; data: Record<string, unknown> }[] });
@@ -86,12 +86,23 @@ describe('catalog sync (events)', () => {
   it('a change that lands while a sync is in flight is not lost', async () => {
     const ws = W(4);
     await configured(ws);
-    const g = stubGraph(undefined, { delayMs: 40 });
+    // Hold the first items_batch call open and deliver p2 while it is in flight: a sleep cannot promise that under load.
+    // Plain flags, each side polling on its own timer: no promise crosses between the test and the Durable Object.
+    let inBatch = false;
+    let released = false;
+    const g = stubGraph(undefined, {
+      before: async (c: GraphCall) => {
+        if (!c.url.endsWith('/items_batch') || released) return;
+        inBatch = true;
+        while (!released) await new Promise((r) => setTimeout(r, 5));
+      },
+    });
     await deliver([up(ws, 'p1', ['v1'], Date.now())]);
     const stub = workspace(ws);
     const running = stub.runDueTasks(later());
-    await new Promise((r) => setTimeout(r, 60)); // past the 40 ms verification call, inside the items_batch call
+    await vi.waitFor(() => expect(inBatch).toBe(true));
     await deliver([up(ws, 'p2', ['v2'], Date.now() + 1)]); // arrives mid-run
+    released = true;
     await running;
     // the run saw p1 only; p2 must still be pending and have a task
     expect(await rows(ws, 'SELECT product_id FROM catalog_dirty')).toEqual([{ product_id: 'p2' }]);

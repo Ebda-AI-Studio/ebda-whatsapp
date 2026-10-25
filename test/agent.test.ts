@@ -1,5 +1,5 @@
 import { runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LlmError } from '../src/core/ai/provider';
 import { EBDA_AGENT_COPY } from '../src/addons/ebda/agent-copy';
 import { configureStoreLink } from '../src/core/store-link';
@@ -187,11 +187,16 @@ describe('rules shared with the ordering bot', () => {
   it('a customer erased while the model is thinking gets nothing and leaves nothing', async () => {
     const ws = W(14);
     const pn = await agentWs(ws);
-    model([{ text: 'رد', delayMs: 80 }]);
+    // Erase exactly while the model is answering: a sleep cannot promise that under load.
+    // Plain flags, each side polling on its own timer: no promise crosses between the test and the Durable Object.
+    let thinking = false;
+    let released = false;
+    model([{ text: 'رد', onStart: () => { thinking = true; }, holdUntil: () => released }]);
     const g = stubGraph();
     const turn = say(ws, pn, text('hi'), g);
-    await new Promise((r) => setTimeout(r, 30));
+    await vi.waitFor(() => expect(thinking).toBe(true));
     await workspace(ws).eraseContact(WA_1);
+    released = true;
     await turn;
     expect(sendCount(g)).toBe(0);
     expect(await rows(ws, 'SELECT 1 FROM contacts')).toEqual([]);

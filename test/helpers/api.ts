@@ -16,7 +16,8 @@ export function useApiKey() {
   });
 }
 /** Re-stubs Graph with a custom responder while keeping the JWKS answer. */
-export const graphStub = (responder?: (call: GraphCall, n: number) => GraphReply, delayMs?: number) => stubGraph(responder, { jwks: [key.jwk], ...(delayMs ? { delayMs } : {}) });
+export const graphStub = (responder?: (call: GraphCall, n: number) => GraphReply, delayMs?: number, before?: (call: GraphCall) => Promise<void> | void) =>
+  stubGraph(responder, { jwks: [key.jwk], ...(delayMs ? { delayMs } : {}), ...(before ? { before } : {}) });
 export const jwks = () => [key.jwk];
 
 /** A registered workspace with an active number, and a fetcher for its /api/v1/stores/:id routes. */
