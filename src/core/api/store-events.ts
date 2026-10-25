@@ -41,6 +41,9 @@ export const storeEventSchema = z.discriminatedUnion('type', [
   })),
   ev('cart.abandoned', z.object({ cartId: z.string().min(1), buyerKey: key, phoneE164: phone, locale, recoveryUrl: z.string().url() })),
   ev('customer.erased', z.object({ buyerKey: key })),
+  // v1.1 (additive): the buyer changed their marketing choice at the Store (account settings or a new checkout tick). Marketing to
+  // them follows it; a STOP sent on WhatsApp still wins over a later opt-in here.
+  ev('customer.consent_changed', z.object({ buyerKey: key, marketingOptIn: z.boolean(), at: iso })),
 ]);
 export type StoreEvent = z.infer<typeof storeEventSchema>;
 export type StoreEventType = StoreEvent['type'];
@@ -69,6 +72,9 @@ export const outboundStoreEventSchema = z.discriminatedUnion('type', [
   out('whatsapp.order_after_erasure', z.object({ orderId: z.string(), buyerKey: key })),
   // The store's messaging package changed (bought here, included by its Store plan, or assigned by an operator). `version` only goes
   // up; the Store ignores an event whose version is not newer than the last it applied. `automation` = the Store may run WhatsApp automation.
+  // v1.1 (additive): the buyer stopped (STOP) or restarted (START) WhatsApp messages. `version` only goes up per buyer; the Store
+  // ignores an older one. A START here does not re-opt-in the buyer at the Store without a new checkout tick.
+  out('whatsapp.opt_out_changed', z.object({ buyerKey: key, optedOut: z.boolean(), at: iso, version: z.number().int().positive() })),
   out('whatsapp.entitlement_changed', z.object({ packageId: z.string().min(1).max(64), automation: z.boolean(), status: planStatus, validUntil: iso, version: z.number().int().positive() })),
 ]);
 export type OutboundStoreEvent = z.infer<typeof outboundStoreEventSchema>;
