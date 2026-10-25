@@ -2,7 +2,7 @@ import * as Sentry from '@sentry/cloudflare';
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { verifyMetaSignature } from './core/meta/signature';
-import { extractEvents, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
+import { extractEvents, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
 import { scrubEvent } from './core/observability';
@@ -133,6 +133,11 @@ app.post('/meta/webhook', async (c) => {
   for (const t of extractTemplateStatuses(payload)) {
     for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
       await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
+    }
+  }
+  for (const t of extractTemplateCategoryUpdates(payload)) {
+    for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
+      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateCategory(t.name, t.language, t.newCategory);
     }
   }
   for (const u of extractTierUpdates(payload)) {

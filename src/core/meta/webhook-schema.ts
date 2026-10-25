@@ -22,7 +22,9 @@ const orderSchema = z.object({
   product_items: z.array(z.object({ product_retailer_id: z.string().min(1), quantity: z.union([z.number(), z.string()]), item_price: z.union([z.number(), z.string()]), currency: z.string() }).loose()).default([]),
 }).loose();
 const mediaBodySchema = z.object({ id: z.string().min(1), mime_type: z.string().optional(), caption: z.string().optional(), filename: z.string().optional() }).loose();
-export type StatusEvent = { wamid: string; status: 'sent' | 'delivered' | 'read' | 'failed'; ts: number; errorCode?: number };
+/** Meta's `pricing` object on a status: whether the message is billable, under which model and category. Absent fields stay null. */
+export type StatusPricing = { billable: boolean | null; pricingModel: string | null; category: string | null; type: string | null };
+export type StatusEvent = { wamid: string; status: 'sent' | 'delivered' | 'read' | 'failed'; ts: number; errorCode?: number; pricing?: StatusPricing };
 export type WebhookEvents = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[] };
 
 // Permissive on purpose: Meta adds fields often, and an unknown field must never drop a message.
@@ -41,6 +43,7 @@ const statusSchema = z.object({
   status: z.enum(['sent', 'delivered', 'read', 'failed']),
   timestamp: unixSeconds,
   errors: z.array(z.object({ code: z.number() }).loose()).optional(),
+  pricing: z.object({ billable: z.boolean().optional(), pricing_model: z.string().optional(), category: z.string().optional(), type: z.string().optional() }).loose().optional(),
 }).loose();
 
 const valueSchema = z.object({
@@ -131,7 +134,11 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
         }
         const s = parsedStatus.data;
         const code = s.errors?.[0]?.code;
-        ev.statuses.push({ wamid: s.id, status: s.status, ts: Number(s.timestamp), ...(code !== undefined ? { errorCode: code } : {}) });
+        const pr = s.pricing;
+        ev.statuses.push({
+          wamid: s.id, status: s.status, ts: Number(s.timestamp), ...(code !== undefined ? { errorCode: code } : {}),
+          ...(pr ? { pricing: { billable: pr.billable ?? null, pricingModel: pr.pricing_model ?? null, category: pr.category ?? null, type: pr.type ?? null } } : {}),
+        });
       }
       byNumber.set(pn, ev);
     }
@@ -179,6 +186,35 @@ export function extractTierUpdates(payload: unknown): TierUpdateEvent[] {
     for (const ch of entry.changes) {
       const c = tierChangeSchema.safeParse(ch);
       if (c.success) out.push({ wabaId: entry.id, displayPhone: c.data.value.display_phone_number, currentLimit: c.data.value.current_limit });
+    }
+  }
+  return out;
+}
+
+export type TemplateCategoryEvent = { wabaId: string; name: string; language: string; newCategory: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION' };
+const categoryChangeSchema = z.object({
+  field: z.literal('template_category_update'),
+  value: z.object({
+    message_template_name: z.string().optional(), message_template_element: z.string().optional(), message_template_language: z.string(),
+    new_category: z.string().optional(), correct_category: z.string().optional(),
+  }).loose(),
+}).loose();
+
+/**
+ * `template_category_update`: Meta re-categorised a template (typically utility -> marketing), which changes what its sends cost.
+ * Field names follow Meta's documented payload (name, language, new_category); NOT yet seen against live traffic.
+ */
+export function extractTemplateCategoryUpdates(payload: unknown): TemplateCategoryEvent[] {
+  const parsed = payloadSchema.extend({ entry: z.array(z.object({ id: z.string(), changes: z.array(z.unknown()) }).loose()) }).safeParse(payload);
+  if (!parsed.success) return [];
+  const out: TemplateCategoryEvent[] = [];
+  for (const entry of parsed.data.entry) {
+    for (const ch of entry.changes) {
+      const c = categoryChangeSchema.safeParse(ch);
+      if (!c.success) continue;
+      const name = c.data.value.message_template_name ?? c.data.value.message_template_element;
+      const cat = (c.data.value.new_category ?? c.data.value.correct_category ?? '').toUpperCase();
+      if (name && (cat === 'MARKETING' || cat === 'UTILITY' || cat === 'AUTHENTICATION')) out.push({ wabaId: entry.id, name, language: c.data.value.message_template_language, newCategory: cat });
     }
   }
   return out;

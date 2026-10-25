@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /** Phase 1 tables first; the rest were added in Phase 2 and are optional in a manifest so older backups still restore. */
-export const BACKUP_TABLES = ['contacts', 'conversations', 'messages', 'message_status_events', 'notes', 'conversation_tags', 'templates', 'uploads', 'store_orders', 'store_state', 'agent_state', 'credit_ledger', 'contact_tags', 'imports', 'import_rejects', 'segments', 'campaigns', 'campaign_pages', 'campaign_recipients', 'campaign_links'] as const;
+export const BACKUP_TABLES = ['contacts', 'conversations', 'messages', 'message_status_events', 'notes', 'conversation_tags', 'templates', 'uploads', 'store_orders', 'store_state', 'agent_state', 'credit_ledger', 'contact_tags', 'imports', 'import_rejects', 'segments', 'campaigns', 'campaign_pages', 'campaign_recipients', 'campaign_links', 'wallet_ledger', 'wallet_holds', 'billable_sends', 'ledger_outbox'] as const;
 export type BackupTable = (typeof BACKUP_TABLES)[number];
 /** Stable row order per table for the NDJSON files (two tables have no integer id). */
 export const BACKUP_ORDER: Record<BackupTable, string> = {
@@ -9,6 +9,7 @@ export const BACKUP_ORDER: Record<BackupTable, string> = {
   conversation_tags: 'conversation_id, tag', uploads: 'id', store_orders: 'order_id', store_state: 'key', agent_state: 'key', credit_ledger: 'id',
   contact_tags: 'contact_id, tag', imports: 'id', import_rejects: 'import_id, line', segments: 'id',
   campaigns: 'id', campaign_pages: 'campaign_id, page', campaign_recipients: 'campaign_id, contact_id', campaign_links: 'code',
+  wallet_ledger: 'id', wallet_holds: 'ref', billable_sends: 'wamid', ledger_outbox: 'ledger, ref',
 };
 // Not backed up, by design: derived or transient state (messages_fts is rebuilt on restore; scheduled_tasks/events/tier_slots/number_limits/erased_keys/r2_pending_deletes are operational) and R2 objects (bodies, media, uploads).
 const tableEntry = z.object({ rows: z.number().int().nonnegative(), sha256: z.string().regex(/^[0-9a-f]{64}$/) });
@@ -22,6 +23,7 @@ export const backupManifestSchema = z.object({
     store_orders: tableEntry.optional(), store_state: tableEntry.optional(), agent_state: tableEntry.optional(), credit_ledger: tableEntry.optional(),
     contact_tags: tableEntry.optional(), imports: tableEntry.optional(), import_rejects: tableEntry.optional(), segments: tableEntry.optional(),
     campaigns: tableEntry.optional(), campaign_pages: tableEntry.optional(), campaign_recipients: tableEntry.optional(), campaign_links: tableEntry.optional(),
+    wallet_ledger: tableEntry.optional(), wallet_holds: tableEntry.optional(), billable_sends: tableEntry.optional(), ledger_outbox: tableEntry.optional(),
   }),
 });
 export type BackupManifest = z.infer<typeof backupManifestSchema>;
