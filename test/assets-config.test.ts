@@ -51,3 +51,11 @@ it('every guide the inbox links to exists in docs/help in both languages (the he
     for (const slug of slugs) expect(files, `${lang}: ${slug}`).toContain(slug);
   }
 });
+
+it('the toast is placed with logical properties, so it is centred and padded right in both directions', () => {
+  const css = readFileSync(join(import.meta.dirname, '..', 'web', 'src', 'styles.css'), 'utf8');
+  const rules = css.split('\n').filter((l) => /(^|[\s,])\.toast\s*[{,]|\.toast\s*\{/.test(l) && !/\.toast \.btn/.test(l)).join('\n');
+  expect(rules).toContain('.toast');
+  expect(rules).not.toMatch(/\b(left|right)\s*:|translateX|padding\s*:\s*[^;]*\d+px\s+\d+px\s+\d+px\s+\d+px|\[dir=/);
+  expect(rules).toMatch(/inset-inline/);
+});

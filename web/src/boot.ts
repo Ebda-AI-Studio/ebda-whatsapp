@@ -6,6 +6,11 @@ export function chooseMode(env: { dev: boolean }, search: string): Mode {
   return new URLSearchParams(search).get('live') === '1' ? 'live' : 'sample';
 }
 
+/** Where sign-in lives: the build-time override, else the brand's own host; null when neither exists. */
+export function accountsUrlFor(envUrl: string | undefined, brandUrl: string | null): string | null {
+  return envUrl || brandUrl || null;
+}
+
 /** ?store= wins only when the token actually lists that store (the server checks it again). */
 export function pickStore(stores: { id: string; role: 'owner' | 'staff' }[], search: string): string | null {
   const wanted = new URLSearchParams(search).get('store');
