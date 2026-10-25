@@ -48,6 +48,7 @@ import { workspaceForPhoneNumber } from './routing';
 import { graphTokenFor, TokenUnavailable } from './numbers/token';
 import { STALE_CLAIM_MS } from './workspace-do';
 import { afterSharedSend, beforeSharedSend, isActiveMember, sharedEnabled } from './shared/shared-number';
+import { sharedTemplateSendable } from './shared/shared-templates';
 
 const MAX_RETRY_DELAY_S = 300;
 
@@ -69,6 +70,11 @@ export async function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>):
     if (gate === 'refused') return { ok: false, code: 0, retryable: false, message: 'shared_number_unavailable' };
     if (gate === 'lapsed') return { ok: false, code: 0, retryable: false, message: 'package_required' };
     shared = gate === 'shared';
+    // WA-SHARED-NOCAMP-1: from the shared number only an APPROVED UTILITY/AUTHENTICATION template of the PLATFORM catalog may go out.
+    // The one chokepoint: the inbox, store events and every other caller end here. A store's own copy of a template decides nothing.
+    if (shared && jobKind(job) === 'template' && !(await sharedTemplateSendable(env, job.phoneNumberId, job.template!.name, job.template!.language))) {
+      return { ok: false, code: 0, retryable: false, message: 'shared_template_not_allowed' };
+    }
   }
   const base = { token, graphVersion: env.META_GRAPH_VERSION, phoneNumberId: job.phoneNumberId, to: job.to };
   const sent = await (() => {

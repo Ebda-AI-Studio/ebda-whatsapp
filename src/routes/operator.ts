@@ -10,7 +10,9 @@ import {
   requestAdjustment, setFunding,
 } from '../core/billing/operator';
 import { setSubscription } from '../core/billing/subscriptions';
-import { registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
+import { currentSharedNumber, registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
+import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type SharedTemplateFailure } from '../core/shared/shared-templates';
+import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
@@ -81,6 +83,34 @@ operatorRoutes.post('/shared-numbers', async (c) => {
   if (!b.success) return bad(c, b.error.issues[0]?.message);
   const r = await registerPlatformNumber(c.env, { ...b.data, actor: actor(c) });
   return r === 'ok' ? c.json({ phoneNumberId: b.data.phoneNumberId, funding: 'platform_line' }, 201) : c.json({ error: 'number_conflict', message: 'number_belongs_to_a_workspace' }, 409);
+});
+
+// Item e: the platform WABA's templates (platform token only). Off, or no platform number registered = 404. Writes also passed the session re-check above.
+const sharedTemplateFailure = (c: { json(b: unknown, s: 404 | 502 | 503 | 400): Response }, f: SharedTemplateFailure) =>
+  f.reason === 'no_number' ? c.json({ error: 'not_found' }, 404)
+    : f.reason === 'meta_rejected' ? c.json({ error: 'invalid_request', ...(f.message ? { message: f.message } : {}) }, 400)
+      : c.json({ error: 'rate_limited', message: f.reason === 'token_unavailable' ? 'token_unavailable' : (f.message ?? 'meta_unavailable') }, 503);
+operatorRoutes.get('/shared-templates', async (c) => {
+  if (!sharedEnabled(c.env)) return c.json({ error: 'not_found' }, 404);
+  const number = await currentSharedNumber(c.env);
+  return number ? c.json({ items: await listSharedTemplates(c.env, number) }) : c.json({ error: 'not_found' }, 404);
+});
+operatorRoutes.post('/shared-templates/sync', async (c) => {
+  if (!sharedEnabled(c.env)) return c.json({ error: 'not_found' }, 404);
+  const r = await syncSharedTemplates(c.env);
+  if (!r.ok) return sharedTemplateFailure(c, r);
+  console.log(JSON.stringify({ audit: 'shared_templates_synced', actor: actor(c), upserted: r.upserted, removed: r.removed }));
+  return c.json({ upserted: r.upserted, removed: r.removed });
+});
+operatorRoutes.post('/shared-templates', async (c) => {
+  if (!sharedEnabled(c.env)) return c.json({ error: 'not_found' }, 404);
+  // Marketing is refused here, not only at send time: a marketing template on the shared WABA could never be used (WA-SHARED-NOCAMP-1).
+  const b = submitTemplateRequest.extend({ category: submitTemplateRequest.shape.category.exclude(['MARKETING']) }).safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, b.error.issues[0]?.message);
+  const r = await submitSharedTemplate(c.env, b.data as Parameters<typeof submitSharedTemplate>[1]);
+  if (!r.ok) return sharedTemplateFailure(c, r);
+  console.log(JSON.stringify({ audit: 'shared_template_submitted', actor: actor(c), name: b.data.name, language: b.data.language, category: b.data.category }));
+  return c.json({ name: b.data.name, language: b.data.language, status: r.status }, 201);
 });
 
 operatorRoutes.get('/refund-requests', async (c) => c.json({ items: await listRefundRequests(c.env, { ...(c.req.query('state') ? { state: c.req.query('state')! } : {}) }) }));
