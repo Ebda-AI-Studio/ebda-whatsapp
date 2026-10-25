@@ -126,13 +126,18 @@ export async function requestAdjustment(env: Env, a: { actor: string; workspaceI
   const known = await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(a.workspaceId).first();
   if (!known) return { ok: false as const, reason: 'not_found' as const };
   const id = crypto.randomUUID();
-  // The threshold is cumulative per actor (absolute values, all workspaces, rolling 24 h, this request included): splitting a large
-  // adjustment into small ones never avoids the second approver. Only what the actor approved for themselves counts.
-  const used = (await env.DB.prepare("SELECT coalesce(sum(abs(amount_minor)), 0) AS total, count(*) AS n FROM wallet_adjustments WHERE requested_by = ? AND approved_by = ? AND state = 'approved' AND created_at > ?")
-    .bind(a.actor, a.actor, now - SELF_APPROVE_WINDOW_MS).first<{ total: number; n: number }>()) ?? { total: 0, n: 0 };
-  const small = used.total + Math.abs(a.amountMinor) <= adjustmentThreshold(env) && used.n < adjustmentDailyCap(env);
-  await env.DB.prepare('INSERT INTO wallet_adjustments (id, workspace_id, amount_minor, reason, requested_by, state, approved_by, created_at, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, a.workspaceId, a.amountMinor, a.reason, a.actor, small ? 'approved' : 'pending', small ? a.actor : null, now, small ? now : null).run();
+  // Every adjustment starts PENDING. The promotion to self-approved is ONE conditional UPDATE that recomputes, inside the same statement, what
+  // this actor already approved for themselves in the last 24 h (absolute values, all workspaces, this request included) and how many: D1 runs a
+  // statement atomically, so N parallel requests cannot all read the old total. Only a promotion that changed exactly one row is applied.
+  await env.DB.prepare('INSERT INTO wallet_adjustments (id, workspace_id, amount_minor, reason, requested_by, state, approved_by, created_at, decided_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)')
+    .bind(id, a.workspaceId, a.amountMinor, a.reason, a.actor, 'pending', now).run();
+  const promoted = await env.DB.prepare(
+    `UPDATE wallet_adjustments SET state = 'approved', approved_by = requested_by, decided_at = ?1
+      WHERE id = ?2 AND state = 'pending'
+        AND (SELECT coalesce(sum(abs(w.amount_minor)), 0) FROM wallet_adjustments w WHERE w.requested_by = ?3 AND w.approved_by = w.requested_by AND w.state = 'approved' AND w.created_at > ?4) + abs(?5) <= ?6
+        AND (SELECT count(*) FROM wallet_adjustments w WHERE w.requested_by = ?3 AND w.approved_by = w.requested_by AND w.state = 'approved' AND w.created_at > ?4) < ?7`,
+  ).bind(now, id, a.actor, now - SELF_APPROVE_WINDOW_MS, a.amountMinor, adjustmentThreshold(env), adjustmentDailyCap(env)).run();
+  const small = promoted.meta.changes === 1;
   const row = (await env.DB.prepare(`SELECT ${ADJ_COLS} FROM wallet_adjustments WHERE id = ?`).bind(id).first<Adj>())!;
   await audit(env, { actor: a.actor, action: small ? 'adjustment_applied' : 'adjustment_requested', workspaceId: a.workspaceId, after: adjDto(row), reason: a.reason }, now);
   if (small) await applyAdjustment(env, row, now);

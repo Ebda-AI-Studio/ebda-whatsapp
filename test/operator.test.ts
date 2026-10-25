@@ -229,6 +229,20 @@ describe('adjustments: the threshold is cumulative per actor (no splitting)', ()
     expect(next.state).toBe('approved');
   });
 
+  it('8 parallel requests, each under the threshold: the self-approved total never passes it (atomic), the rest wait', async () => {
+    const ws = W(1063);
+    await seedNumber('pn-op1063', ws);
+    const OPV = '77777777-7777-4777-8777-777777777777';
+    const results = await Promise.all(Array.from({ length: 8 }, (_, i) => operatorCall(OPV, 'POST', `/workspaces/${ws}/adjustments`, { amountMinor: i % 2 ? -40_000 : 40_000, reason: `parallel ${i} just under` }).then(json)));
+    const approved = results.filter((r) => r.state === 'approved');
+    expect(approved).toHaveLength(2); // 40k + 40k = 80k; a third would make 120k > 100k
+    expect(results.filter((r) => r.state === 'pending')).toHaveLength(6);
+    const total = (await ledger(ws)).reduce((n, r) => n + Math.abs(r.amount_minor), 0);
+    expect(total).toBeLessThanOrEqual(100_000);
+    expect((await ledger(ws)).length).toBe(2);
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM wallet_adjustments WHERE requested_by = ? AND state = 'pending'").bind(OPV).first<{ n: number }>())!.n).toBe(6);
+  });
+
   it('the total spans workspaces, and a day-count cap stops many small ones', async () => {
     const a = W(1061);
     const b = W(1062);
