@@ -281,7 +281,7 @@ export class Billing {
    * Settles a message's hold when the message reached a terminal state without a charge (failed, dropped, erased, opted out, cancelled,
    * not billable). Idempotent; a charged hold is left alone. Also forgets a wait.
    */
-  settleHold(key: string, outcome: 'failed' | 'dropped' | 'erased' | 'opted_out' | 'cancelled' | 'not_billable' | 'enqueue_failed' | 'rate_limited', now: number): void {
+  settleHold(key: string, outcome: 'failed' | 'dropped' | 'erased' | 'opted_out' | 'cancelled' | 'not_billable' | 'enqueue_failed' | 'rate_limited' | 'sender_unavailable', now: number): void {
     this.close(`msg:${key}`, 'released', outcome, now);
     this.sql.exec('DELETE FROM wallet_waits WHERE key = ?', key);
   }

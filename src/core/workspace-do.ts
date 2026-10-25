@@ -783,11 +783,21 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** The enqueue after queueOutbound threw: the message will never be sent, so say so instead of leaving it 'queued'. */
   async markEnqueueFailed(idempotencyKey: string): Promise<void> {
+    this.failUnsent(idempotencyKey, 'enqueue_failed');
+  }
+
+  /** The queue consumer found the sender number gone: the message can never leave, so fail it and give the wallet hold back. */
+  async failUnsendable(idempotencyKey: string, reason: 'sender_unavailable'): Promise<void> {
+    this.failUnsent(idempotencyKey, reason);
+  }
+
+  private failUnsent(idempotencyKey: string, reason: 'enqueue_failed' | 'sender_unavailable'): void {
     this.ctx.storage.transactionSync(() => {
-      const row = this.sql.exec<{ id: number }>("UPDATE messages SET status = 'failed', updated_at = ? WHERE idempotency_key = ? AND status = 'queued' RETURNING id", Date.now(), idempotencyKey).toArray()[0];
+      const now = Date.now();
+      const row = this.sql.exec<{ id: number }>("UPDATE messages SET status = 'failed', error_reason = ?, updated_at = ? WHERE idempotency_key = ? AND status IN ('queued', 'retry') RETURNING id", reason, now, idempotencyKey).toArray()[0];
       if (row) {
         this.emitMessageStatus(row.id);
-        this.billing.settleHold(idempotencyKey, 'enqueue_failed', Date.now());
+        this.billing.settleHold(idempotencyKey, reason, now);
       }
     });
   }
@@ -921,9 +931,9 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /**
    * One event from the Store queue. Expected outcomes (duplicate, stale, skipped) come back as data; a thrown error means
-   * "retry this message". `phoneNumberId` is the workspace's active sender, or null when it has none.
+   * "retry this message". `phoneNumberId` is the workspace's sender (its own active number, else the shared platform number with `shared` set), or null when it has none.
    */
-  async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null }): Promise<StoreEventOutcome> {
+  async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null; shared?: boolean }): Promise<StoreEventOutcome> {
     await this.ensurePricing();
     if (opts.phoneNumberId) await this.repullIfUnknown(opts.phoneNumberId, Date.now());
     return applyStoreEvent(this.host(), event, opts);
@@ -1583,7 +1593,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (userId !== null && userId !== callerUserId && !this.sql.exec('SELECT 1 FROM conversations WHERE assignee_user_id = ? LIMIT 1', userId).toArray().length) {
       return { ok: false, reason: 'unknown_assignee' };
     }
-    this.sql.exec('UPDATE conversations SET assignee_user_id = ? WHERE id = ?', userId, conversationId);
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec('UPDATE conversations SET assignee_user_id = ? WHERE id = ?', userId, conversationId);
+      // A person owns the chat now: the agent stays out of it for the handoff window.
+      const wa = userId === null ? undefined : this.sql.exec<{ wa_id: string }>('SELECT ct.wa_id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = ?', conversationId).toArray()[0]?.wa_id;
+      if (wa) staffReplied(this.host(), wa, now);
+    });
     this.emitConversationUpdated(conversationId);
     const conversation = await this.conversationById(conversationId, now);
     return conversation ? { ok: true, conversation } : { ok: false, reason: 'not_found' };

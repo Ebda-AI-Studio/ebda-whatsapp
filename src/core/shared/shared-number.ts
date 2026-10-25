@@ -181,19 +181,25 @@ export async function beforeSharedSend(env: Env, job: Pick<SendJob, 'workspaceId
  * nothing), and Meta's statuses for `wamid` can reach that store. A failure is an alert, never a retry of an accepted send.
  */
 export async function afterSharedSend(env: Env, job: Pick<SendJob, 'workspaceId' | 'phoneNumberId' | 'to' | 'orderRef'>, wamid: string, now = Date.now()): Promise<void> {
-  try {
-    const key = await customerKey(env, job.to);
-    await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO shared_routes (phone_number_id, customer_key, workspace_id, last_at, order_ref) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(phone_number_id, customer_key, workspace_id) DO UPDATE SET last_at = max(last_at, excluded.last_at), order_ref = coalesce(excluded.order_ref, order_ref)`,
-      ).bind(job.phoneNumberId, key, job.workspaceId, now, job.orderRef ?? null),
-      env.DB.prepare('INSERT OR IGNORE INTO shared_sent (wamid, workspace_id, customer_key, at) VALUES (?, ?, ?, ?)').bind(wamid, job.workspaceId, key, now),
-    ]);
-  } catch (err) {
-    console.error(JSON.stringify({ alert: 'shared_sent_not_recorded', workspace: job.workspaceId, error: err instanceof Error ? err.name : 'error' }));
+  // The send is accepted and must never be repeated, so the record is retried (a few immediate attempts) before it is given up as an alert.
+  for (let attempt = 1; attempt <= AFTER_SEND_ATTEMPTS; attempt++) {
+    try {
+      const key = await customerKey(env, job.to);
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO shared_routes (phone_number_id, customer_key, workspace_id, last_at, order_ref) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(phone_number_id, customer_key, workspace_id) DO UPDATE SET last_at = max(last_at, excluded.last_at), order_ref = coalesce(excluded.order_ref, order_ref)`,
+        ).bind(job.phoneNumberId, key, job.workspaceId, now, job.orderRef ?? null),
+        env.DB.prepare('INSERT OR IGNORE INTO shared_sent (wamid, workspace_id, customer_key, at) VALUES (?, ?, ?, ?)').bind(wamid, job.workspaceId, key, now),
+      ]);
+      return;
+    } catch (err) {
+      if (attempt < AFTER_SEND_ATTEMPTS) continue;
+      console.error(JSON.stringify({ alert: 'shared_sent_not_recorded', workspace: job.workspaceId, attempts: attempt, error: err instanceof Error ? err.name : 'error' }));
+    }
   }
 }
+const AFTER_SEND_ATTEMPTS = 3;
 
 /** Erasure of one contact in one store: its routes and sent-message map go (other stores' rows stay). */
 export async function eraseSharedFor(env: Env, workspaceId: string, waId: string): Promise<void> {

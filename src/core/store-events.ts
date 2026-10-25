@@ -1,7 +1,7 @@
 import type { Env } from '../env';
 import { parseStoreEvent } from './api/store-events';
 import { errClass } from './observability';
-import { activeNumberFor } from './routing';
+import { senderNumberFor } from './shared/shared-number';
 
 const MAX_RETRY_DELAY_S = 300;
 const retryDelay = (attempts: number) => Math.min(MAX_RETRY_DELAY_S, 5 * 2 ** Math.max(0, attempts - 1));
@@ -29,8 +29,9 @@ export async function consumeStoreEvents(batch: MessageBatch<unknown>, env: Env)
         msg.retry({ delaySeconds: retryDelay(msg.attempts) });
         continue;
       }
-      const number = await activeNumberFor(env.DB, event.storeId);
-      const result = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(event.storeId)).applyStoreEvent(event, { phoneNumberId: number?.phoneNumberId ?? null });
+      // Own number, else the shared platform number for a member (transactional events carry their order ref there).
+      const number = await senderNumberFor(env, event.storeId);
+      const result = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(event.storeId)).applyStoreEvent(event, { phoneNumberId: number?.phoneNumberId ?? null, shared: number?.shared ?? false });
       console.log(JSON.stringify({ audit: 'store_event', type: event.type, storeId: event.storeId, status: result.status, ...(result.detail ? { detail: result.detail } : {}) }));
       if (result.status === 'retry') msg.retry({ delaySeconds: retryDelay(msg.attempts) });
       else msg.ack();

@@ -96,16 +96,39 @@ describe('handoff', () => {
     expect(m.callCount).toBe(0);
   });
 
-  it('a staff reply with no open handoff changes nothing', async () => {
+  it('a staff reply with no open handoff silences the bot for the handoff window: the customer answers and gets no AI reply', async () => {
     const ws = storeId(5402);
     const api = await apiFor(ws);
-    await agentWorkspace(ws);
+    await agentWorkspace(ws, { handoffMinutes: 30 });
     await grant(ws);
-    model([{ text: 'أهلاً' }]);
-    await say(ws, api.phoneNumberId, text('hi'), graphStub());
+    const m = model([{ text: 'أهلاً' }, { text: 'لا يجب أن يُرسل' }]);
+    const g = graphStub();
+    await say(ws, api.phoneNumberId, text('hi'), g);
+    expect(m.callCount).toBe(1);
     const convId = (await rows<{ id: number }>(ws, 'SELECT id FROM conversations'))[0]!.id;
-    await api.call('POST', `/conversations/${convId}/messages`, { type: 'text', clientId: crypto.randomUUID(), text: 'x' });
-    expect(await rows(ws, 'SELECT 1 FROM agent_handoffs')).toEqual([]);
+    await api.call('POST', `/conversations/${convId}/messages`, { type: 'text', clientId: crypto.randomUUID(), text: 'أنا معاك' });
+    const h = (await rows<{ until_at: number; reason: string }>(ws, 'SELECT until_at, reason FROM agent_handoffs'))[0]!;
+    expect(h.until_at).toBeGreaterThan(Date.now() + 29 * 60_000);
+    expect(h.reason).toBe('staff');
+    expect(await tags(ws)).toEqual([]); // someone is already on it: no badge
+    expect(await say(ws, api.phoneNumberId, text('تمام شكراً'), g)).toEqual([]);
+    expect(m.callCount).toBe(1);
+  });
+
+  it('assigning a conversation to a person silences the bot too', async () => {
+    const ws = storeId(5403);
+    const api = await apiFor(ws);
+    await agentWorkspace(ws, { handoffMinutes: 30 });
+    await grant(ws);
+    const m = model([{ text: 'أهلاً' }, { text: 'لا يجب أن يُرسل' }]);
+    const g = graphStub();
+    await say(ws, api.phoneNumberId, text('hi'), g);
+    const convId = (await rows<{ id: number }>(ws, 'SELECT id FROM conversations'))[0]!.id;
+    expect((await workspace(ws).assign(convId, 'u-1', 'u-1')).ok).toBe(true);
+    expect(await say(ws, api.phoneNumberId, text('حد هنا؟'), g)).toEqual([]);
+    expect(m.callCount).toBe(1);
+    // clearing the assignee does not open a window by itself
+    expect((await workspace(ws).assign(convId, null, 'u-1')).ok).toBe(true);
   });
 
   it('tells open inboxes: the realtime log carries a conversation.updated with the tag', async () => {

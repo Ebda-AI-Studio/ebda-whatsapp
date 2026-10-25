@@ -8,7 +8,7 @@ import { readAgentSettings } from './settings';
 
 export const NEEDS_HUMAN_TAG = 'needs_human';
 /** Why a conversation was handed over; stored as a code, never as free text from the customer or the model. */
-export type HandoffReason = 'asked' | 'model' | 'no_credits' | 'misconfigured' | 'provider_error' | 'bad_output' | 'no_answer';
+export type HandoffReason = 'asked' | 'model' | 'no_credits' | 'misconfigured' | 'provider_error' | 'bad_output' | 'no_answer' | 'staff';
 
 /** True while the bot must stay silent for this customer. An elapsed window is cleared on the way (row and tag). */
 export function handoffActive(host: LinkHost, waId: string, now: number): boolean {
@@ -34,11 +34,14 @@ export function markHandoff(host: LinkHost, waId: string, reason: HandoffReason,
 
 /**
  * A person wrote to the customer: the tag goes (someone is on it) and the bot stays silent for a fresh handoff window counted
- * from this reply, so it never talks over the human. Call inside a transaction. No-op when there is no open handoff.
+ * from this reply, so it never talks over the human. With no open handoff one is opened (reason `staff`, no badge: a person is
+ * already on it), so the agent stays silent "until staff replies" and then for the window. Call inside a transaction.
  */
 export function staffReplied(host: LinkHost, waId: string, now: number): void {
-  if (!host.sql.exec('SELECT 1 FROM agent_handoffs WHERE wa_id = ?', waId).toArray().length) return;
   const minutes = readAgentSettings(host.sql).handoffMinutes;
-  host.sql.exec('UPDATE agent_handoffs SET until_at = max(until_at, ?) WHERE wa_id = ?', now + minutes * 60_000, waId);
+  host.sql.exec(
+    "INSERT INTO agent_handoffs (wa_id, started_at, until_at, reason) VALUES (?, ?, ?, 'staff') ON CONFLICT(wa_id) DO UPDATE SET until_at = max(until_at, excluded.until_at)",
+    waId, now, now + minutes * 60_000,
+  );
   setTag(host, waId, NEEDS_HUMAN_TAG, false);
 }
