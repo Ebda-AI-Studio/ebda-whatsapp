@@ -45,3 +45,23 @@ export function businessMsBetween(from: number, to: number): number {
   }
   return total;
 }
+
+/** The instant at which `ms` of business time has passed since `from` (the review deadline): the opposite of `businessMsBetween`. */
+export function addBusinessMs(from: number, ms: number): number {
+  const a = cairoParts(from);
+  let day = Date.UTC(a.y, a.mo - 1, a.d);
+  let left = ms;
+  for (let i = 0; i < 60; i++, day += DAY_MS) {
+    const dow = new Date(day).getUTCDay();
+    if (dow === 5 || dow === 6) continue;
+    const d = new Date(day);
+    const open = cairoWallToUtc(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), OPEN_HOUR);
+    const close = cairoWallToUtc(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), CLOSE_HOUR);
+    const start = Math.max(from, open);
+    const avail = close - start;
+    if (avail <= 0) continue;
+    if (left <= avail) return start + left;
+    left -= avail;
+  }
+  return from + ms; // unreachable for sane inputs (60 days of weekends); never schedule in the past
+}

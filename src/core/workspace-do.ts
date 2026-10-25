@@ -62,6 +62,7 @@ import type { WalletPosted } from './billing/engine';
 import { PRICING_MAX_AGE_MS, applyPricing, copyCursor, fundingOf, pullPricing } from './billing/pricing';
 import { parentHoldRef } from './campaigns/campaigns';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
+import { overdueOne } from './billing/instapay';
 import { applyEntitlement, expireSubscription, marketingBlocked, readEntitlement, type EntitlementEvent } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
@@ -1379,6 +1380,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     return readEntitlement(this.sql);
   }
 
+  /** One-shot check at an InstaPay proof's review deadline (the SLA): the control plane alerts once if the request is still under review. */
+  async scheduleInstapayOverdue(requestId: string, dueAt: number): Promise<void> {
+    this.ctx.storage.transactionSync(() => addTask(this.sql, 'instapay_overdue', dueAt, { instapayRequestId: requestId }));
+    await this.arm();
+  }
+
   /**
    * A message that waited for funds. Funds arrived (or its deadline did): fail it at the deadline, re-check the 24 h window for free
    * text, otherwise hand it back to the queue, where the claim takes the wallet's decision again (it may wait again, with the SAME deadline).
@@ -1824,6 +1831,11 @@ export class WorkspaceDO extends DurableObject<Env> {
         const orderId = (JSON.parse(payload ?? 'null') as { orderId?: string } | null)?.orderId;
         if (typeof orderId === 'string') this.ctx.storage.transactionSync(() => closeUnanswered(this.host(), orderId, now));
         return undefined; // the push it schedules runs in this same pass
+      }
+      case 'instapay_overdue': {
+        const id = (JSON.parse(payload ?? 'null') as { instapayRequestId?: string } | null)?.instapayRequestId;
+        if (typeof id === 'string') await overdueOne(this.env, id, now);
+        return undefined;
       }
       case 'bot_turn': {
         const input = botInputSchema.safeParse(JSON.parse(payload ?? 'null'));

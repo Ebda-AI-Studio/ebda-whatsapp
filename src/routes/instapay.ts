@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { instapayCreate } from '../core/api/contract';
-import { MAX_PROOF_BYTES, createInstapayRequest, instapayEnabled, listForWorkspace, readProof, storeProof } from '../core/billing/instapay';
+import { MAX_PROOF_BYTES, createInstapayRequest, instapayEnabled, listForWorkspace, markRejectionsSeen, readProof, storeProof } from '../core/billing/instapay';
 import type { InstapayPayee } from '../core/billing/instapay';
 import { brandPack } from '../brand';
 import type { Env } from '../env';
@@ -15,7 +15,9 @@ const owner = (c: ApiContext) => c.get('storeRole') === 'owner';
 instapayRoutes.get('/stores/:storeId/wallet/instapay', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
   if (!instapayEnabled(c.env)) return apiError(c, 404, 'not_found');
-  return c.json({ enabled: true, payee: payeeFor(c.env), items: await listForWorkspace(c.env, c.req.param('storeId')!) });
+  const items = await listForWorkspace(c.env, c.req.param('storeId')!);
+  await markRejectionsSeen(c.env, c.req.param('storeId')!); // opening the card is seeing the reason: the inbox notice clears
+  return c.json({ enabled: true, payee: payeeFor(c.env), items });
 });
 
 instapayRoutes.post('/stores/:storeId/wallet/instapay', async (c) => {
@@ -80,5 +82,5 @@ export const instapayProofRoutes = new Hono<{ Bindings: Env }>();
 instapayProofRoutes.get('/instapay-proof/:token', async (c) => {
   const proof = await readProof(c.env, c.req.param('token'));
   if (!proof) return c.json({ error: 'not_found' }, 404);
-  return new Response(proof.body, { headers: { 'content-type': proof.mime, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', 'content-disposition': 'inline', 'content-security-policy': "default-src 'none'; sandbox" } });
+  return new Response(proof.body, { headers: { 'content-type': proof.mime, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', 'content-disposition': proof.mime === 'application/pdf' ? 'attachment; filename="transfer-proof.pdf"' : 'inline', 'content-security-policy': "default-src 'none'; sandbox" } });
 });

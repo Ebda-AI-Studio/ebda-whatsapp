@@ -303,6 +303,12 @@ describe('wallet: low balance banner in the inbox', () => {
     expect(await screen.findByRole('heading', { name: 'المحفظة', level: 1 })).toBeTruthy();
   });
 
+  it('a rejected InstaPay payment shows a notice with the reason, in the inbox banner', async () => {
+    await inbox(withWallet({ instapayNotice: { id: 'ip-1', reason: 'المبلغ أقل من المطلوب' } }));
+    expect(await screen.findByText(t.ipRejectedBanner('المبلغ أقل من المطلوب'))).toBeTruthy();
+    expect(STRINGS.en.ipRejectedBanner('x')).toBe('Your InstaPay payment was not accepted: x');
+  });
+
   it('debt, and an empty balance on a wallet-paid number, say what stops', async () => {
     await inbox(withWallet({ debtMinor: 3000, balanceMinor: -3000, availableMinor: -5500, lowBalance: true }));
     expect(await screen.findByText(t.wBannerDebt(egp(3000)))).toBeTruthy();

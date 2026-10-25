@@ -30,7 +30,9 @@ CREATE TABLE instapay_requests (
   decided_at INTEGER,
   reject_reason TEXT,
   granted_at INTEGER,
-  overdue_alerted_at INTEGER
+  overdue_alerted_at INTEGER,
+  -- A rejection is shown to the owner as a notice until they have opened the InstaPay card.
+  notice_seen_at INTEGER
 );
 CREATE INDEX instapay_requests_state ON instapay_requests (state, created_at);
 CREATE INDEX instapay_requests_workspace ON instapay_requests (workspace_id, created_at);

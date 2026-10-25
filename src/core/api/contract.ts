@@ -384,6 +384,8 @@ export const fundingKind = z.enum(['merchant_card', 'platform_line']);
 export const walletFundingKind = z.enum(['merchant_card', 'platform_line', 'unknown']);
 export const billingCategory = z.enum(['marketing', 'utility', 'authentication', 'service']);
 export const walletDto = z.object({
+  /** Additive: the owner's newest InstaPay rejection not yet opened (shown as an inbox notice with the reason). */
+  instapayNotice: z.object({ id: z.string(), reason: z.string() }).nullable().optional(),
   balanceMinor: z.number().int(),
   heldMinor: z.number().int(),
   /** balance - held; can be negative inside the overdraft. */

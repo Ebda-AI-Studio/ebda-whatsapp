@@ -16,7 +16,7 @@
  */
 import type { Env } from '../../env';
 import { sessionState } from '../identity/session';
-import { businessMsBetween } from './business-hours';
+import { addBusinessMs, businessMsBetween } from './business-hours';
 import type { InstapayPayee } from './instapay-payee';
 import { adjustmentThreshold } from './operator';
 import { ORDER_COLS, grantOrder, type PackageOrderRow } from './package-orders';
@@ -82,18 +82,22 @@ export async function createInstapayRequest(env: Env, a: { workspaceId: string; 
     amount = a.input.amountMinor;
     if (!Number.isSafeInteger(amount) || amount < MIN_TOPUP_MINOR || amount > MAX_TOPUP_MINOR) return { ok: false, reason: 'invalid_amount' };
   }
-  const open = await env.DB.prepare("SELECT count(*) AS n FROM instapay_requests WHERE workspace_id = ? AND state IN ('awaiting_proof', 'under_review')").bind(a.workspaceId).first<{ n: number }>();
-  if ((open?.n ?? 0) >= MAX_OPEN_PER_WORKSPACE) return { ok: false, reason: 'too_many_open' };
   const id = crypto.randomUUID();
   for (let attempt = 0; attempt < 4; attempt++) {
     const reference = newReference();
+    // The cap is part of the insert (one statement): concurrent creates cannot all pass a count taken before any of them wrote. The order row
+    // is written only if the request row exists, so a refused request leaves nothing behind.
+    const req = env.DB.prepare(
+      `INSERT INTO instapay_requests (id, reference, workspace_id, kind, package_id, amount_minor, currency, state, created_by, created_at, expires_at)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, 'EGP', 'awaiting_proof', ?7, ?8, ?9
+        WHERE (SELECT count(*) FROM instapay_requests WHERE workspace_id = ?3 AND state IN ('awaiting_proof', 'under_review')) < ${MAX_OPEN_PER_WORKSPACE}`,
+    ).bind(id, reference, a.workspaceId, a.input.kind, packageId, amount, a.userId, now, now + INSTAPAY_TTL_MS);
     const order = a.input.kind === 'package'
-      ? env.DB.prepare("INSERT INTO package_orders (order_id, workspace_id, package_id, amount_minor, currency, status, created_by, created_at, provider) VALUES (?, ?, ?, ?, 'EGP', 'pending', ?, ?, 'instapay')").bind(id, a.workspaceId, packageId, amount, a.userId, now)
-      : env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, provider) VALUES (?, ?, ?, 0, ?, 'EGP', 'pending', ?, ?, 'instapay')").bind(id, a.workspaceId, amount, amount, a.userId, now);
-    const req = env.DB.prepare("INSERT INTO instapay_requests (id, reference, workspace_id, kind, package_id, amount_minor, currency, state, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, 'EGP', 'awaiting_proof', ?, ?, ?)")
-      .bind(id, reference, a.workspaceId, a.input.kind, packageId, amount, a.userId, now, now + INSTAPAY_TTL_MS);
+      ? env.DB.prepare("INSERT INTO package_orders (order_id, workspace_id, package_id, amount_minor, currency, status, created_by, created_at, provider) SELECT ?, ?, ?, ?, 'EGP', 'pending', ?, ?, 'instapay' WHERE EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?)").bind(id, a.workspaceId, packageId, amount, a.userId, now, id)
+      : env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, provider) SELECT ?, ?, ?, 0, ?, 'EGP', 'pending', ?, ?, 'instapay' WHERE EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?)").bind(id, a.workspaceId, amount, amount, a.userId, now, id);
     try {
-      await env.DB.batch([order, req]); // both rows or neither
+      const res = await env.DB.batch([req, order]); // both rows or neither
+      if (!(res[0]?.meta.changes ?? 0)) return { ok: false, reason: 'too_many_open' };
       return { ok: true, request: dto((await get(env, id))!) };
     } catch (err) {
       if (!/UNIQUE/i.test(String(err instanceof Error ? err.message : err))) throw err; // a reference collision: draw another
@@ -140,7 +144,7 @@ export async function storeProof(env: Env, a: { workspaceId: string; requestId: 
   if (a.bytes.byteLength > MAX_PROOF_BYTES) return { ok: false, reason: 'too_large' };
   const kind = detectProof(new Uint8Array(a.bytes, 0, Math.min(16, a.bytes.byteLength)));
   if (!kind || a.contentType.split(';')[0]!.trim().toLowerCase() !== kind.mime) return { ok: false, reason: 'bad_type' };
-  const key = `instapay-proof/${r.workspace_id}/${r.id}.${kind.ext}`;
+  const key = `instapay-proof/${r.workspace_id}/${r.id}.${crypto.randomUUID()}.${kind.ext}`; // unique per upload: a losing double-submit deletes only ITS OWN object
   await env.MEDIA.put(key, a.bytes, { httpMetadata: { contentType: kind.mime } });
   // The state change is one conditional write: an expiry (or another upload) that got there first wins and the object is removed again.
   const moved = await env.DB.prepare("UPDATE instapay_requests SET state = 'under_review', proof_key = ?, proof_mime = ?, proof_bytes = ?, proof_at = ? WHERE id = ? AND state = 'awaiting_proof' AND expires_at > ?")
@@ -150,15 +154,23 @@ export async function storeProof(env: Env, a: { workspaceId: string; requestId: 
     const cur = await get(env, r.id);
     return { ok: false, reason: cur?.state === 'expired' || (cur && now >= cur.expires_at) ? 'expired' : 'bad_state' };
   }
+  // The review deadline is a one-shot check at that moment (the daily pass stays as a backstop): 4 business hours after the proof arrived.
+  await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(r.workspace_id)).scheduleInstapayOverdue(r.id, addBusinessMs(now, REVIEW_SLA_BUSINESS_MS))
+    .catch((err: unknown) => alert('instapay_sla_not_scheduled', { id: r.id, error: err instanceof Error ? err.name : 'error' }));
   return { ok: true, request: dto((await get(env, r.id))!) };
 }
 
 // ---- signed, short-lived proof links (operator only) ----------------------------------------------------------------------------
 
 const enc = new TextEncoder();
+/** The proof link has its own key, derived (HKDF-SHA-256, info "instapay-proof-link") from TOKEN_ENC_KEY: the raw key is never used to sign it. */
+async function linkKey(secret: string): Promise<CryptoKey> {
+  const base = await crypto.subtle.importKey('raw', enc.encode(secret), 'HKDF', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: enc.encode('instapay-proof-link') }, base, 256);
+  return crypto.subtle.importKey('raw', bits, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+}
 async function hmac(secret: string, text: string): Promise<string> {
-  const k = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return [...new Uint8Array(await crypto.subtle.sign('HMAC', k, enc.encode(`instapay-proof:v1:${text}`)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return [...new Uint8Array(await crypto.subtle.sign('HMAC', await linkKey(secret), enc.encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 export async function signProofLink(env: Env, id: string, now = Date.now()): Promise<{ url: string; expiresAt: number } | null> {
   if (!env.TOKEN_ENC_KEY) return null;
@@ -286,7 +298,7 @@ export async function repairInstapay(env: Env, now = Date.now()): Promise<{ gran
       granted++;
       if (await markOnce(env, 'instapay_confirmed_not_granted', r)) alert('instapay_confirmed_not_granted', { severity: 'P1', id: r.id, workspace: r.workspace_id });
     } catch (err) {
-      alert('instapay_repair_failed', { id: r.id, error: err instanceof Error ? err.name : 'error' });
+      if (await markOnce(env, 'instapay_repair_failed', r)) alert('instapay_repair_failed', { severity: 'P1', id: r.id, error: err instanceof Error ? err.name : 'error' }); // once per request, not every daily pass
     }
   }
   return { granted };
@@ -297,18 +309,33 @@ async function markOnce(env: Env, action: string, r: Row): Promise<boolean> {
   return x.meta.changes > 0;
 }
 
-/** Proofs waiting longer than 4 business hours alert once each (`instapay_proof_overdue`, severity P1). */
+/** One request's overdue check (the scheduled deadline, and the daily backstop): alerts `instapay_proof_overdue` once if it is still under review past 4 business hours. */
+export async function overdueOne(env: Env, id: string, now = Date.now()): Promise<boolean> {
+  const r = await env.DB.prepare("SELECT id, workspace_id, kind, amount_minor, proof_at FROM instapay_requests WHERE id = ? AND state = 'under_review' AND proof_at IS NOT NULL AND overdue_alerted_at IS NULL")
+    .bind(id).first<{ id: string; workspace_id: string; kind: string; amount_minor: number; proof_at: number }>();
+  if (!r) return false;
+  const waited = businessMsBetween(r.proof_at, now);
+  if (waited <= REVIEW_SLA_BUSINESS_MS) return false;
+  const claim = await env.DB.prepare("UPDATE instapay_requests SET overdue_alerted_at = ? WHERE id = ? AND overdue_alerted_at IS NULL AND state = 'under_review'").bind(now, r.id).run();
+  if (!claim.meta.changes) return false;
+  alert('instapay_proof_overdue', { severity: 'P1', id: r.id, workspace: r.workspace_id, kind: r.kind, amountMinor: r.amount_minor, waitedBusinessMinutes: Math.round(waited / 60_000) });
+  return true;
+}
+
+/** Proofs waiting longer than 4 business hours alert once each (`instapay_proof_overdue`, severity P1): the daily backstop for the scheduled checks. */
 export async function overdueInstapay(env: Env, now = Date.now()): Promise<{ alerted: number }> {
-  const { results } = await env.DB.prepare("SELECT id, workspace_id, kind, amount_minor, proof_at FROM instapay_requests WHERE state = 'under_review' AND proof_at IS NOT NULL AND overdue_alerted_at IS NULL ORDER BY proof_at LIMIT 200")
-    .all<{ id: string; workspace_id: string; kind: string; amount_minor: number; proof_at: number }>();
+  const { results } = await env.DB.prepare("SELECT id FROM instapay_requests WHERE state = 'under_review' AND proof_at IS NOT NULL AND overdue_alerted_at IS NULL ORDER BY proof_at LIMIT 200").all<{ id: string }>();
   let alerted = 0;
-  for (const r of results) {
-    const waited = businessMsBetween(r.proof_at, now);
-    if (waited <= REVIEW_SLA_BUSINESS_MS) continue;
-    const claim = await env.DB.prepare("UPDATE instapay_requests SET overdue_alerted_at = ? WHERE id = ? AND overdue_alerted_at IS NULL AND state = 'under_review'").bind(now, r.id).run();
-    if (!claim.meta.changes) continue;
-    alerted++;
-    alert('instapay_proof_overdue', { severity: 'P1', id: r.id, workspace: r.workspace_id, kind: r.kind, amountMinor: r.amount_minor, waitedBusinessMinutes: Math.round(waited / 60_000) });
-  }
+  for (const r of results) if (await overdueOne(env, r.id, now)) alerted++;
   return { alerted };
+}
+
+/** The newest rejection the owner has not opened yet, for the inbox notice. In-app only: no approved utility template exists for it. */
+export async function rejectionNotice(env: Env, workspaceId: string, now = Date.now()): Promise<{ id: string; reason: string } | null> {
+  const r = await env.DB.prepare("SELECT id, reject_reason FROM instapay_requests WHERE workspace_id = ? AND state = 'rejected' AND notice_seen_at IS NULL AND decided_at > ? ORDER BY decided_at DESC LIMIT 1")
+    .bind(workspaceId, now - 14 * 86_400_000).first<{ id: string; reject_reason: string | null }>();
+  return r ? { id: r.id, reason: r.reject_reason ?? '' } : null;
+}
+export async function markRejectionsSeen(env: Env, workspaceId: string, now = Date.now()): Promise<void> {
+  await env.DB.prepare("UPDATE instapay_requests SET notice_seen_at = ? WHERE workspace_id = ? AND state = 'rejected' AND notice_seen_at IS NULL").bind(now, workspaceId).run();
 }

@@ -1,17 +1,17 @@
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { businessMsBetween } from '../src/core/billing/business-hours';
+import { addBusinessMs, businessMsBetween } from '../src/core/billing/business-hours';
 import { confirmInstapay, createInstapayRequest, expireInstapay, overdueInstapay, rejectInstapay, repairInstapay, storeProof } from '../src/core/billing/instapay';
 import { repairPackageOrders } from '../src/core/billing/package-orders';
 import { repairTopups } from '../src/core/billing/topups';
 import { configurePayments } from '../src/core/billing/payments';
 import { configureSessionCheck } from '../src/core/identity/session';
 import { dailyBilling } from '../src/index';
-import { OP1, OP2, apiFor, operatorCall, storeId as W0, useApiKey } from './helpers/api';
+import { OP1, OP2, adminToken, apiFor, operatorCall, storeId as W0, useApiKey } from './helpers/api';
 import { ledger } from './helpers/billing';
 import { testKashier } from './helpers/kashier';
 import { useStoreLink } from './helpers/store-link';
-import { seedNumber, workspace } from './helpers/workspace';
+import { openChat, rows, seedNumber, workspace } from './helpers/workspace';
 
 useApiKey();
 useStoreLink();
@@ -335,15 +335,143 @@ describe('the review SLA: 4 business hours, Sunday to Thursday 09:00-17:00 Afric
   it('alerts instapay_proof_overdue once per proof, after 4 business hours, in the repo\'s alert line format', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const ws = W(50);
-    const r = await pkgReq(ws);
-    await proof(ws, r.id, PNG, cairo('2026-07-02T13:00:00Z')); // Thursday 16:00 Cairo
+    const r = await pkgReq(ws, { now: cairo('2027-07-01T13:00:00Z') });
+    await proof(ws, r.id, PNG, cairo('2027-07-01T13:00:00Z')); // Thursday 16:00 Cairo
     const n = () => spy.mock.calls.filter((c) => String(c[0]).includes('instapay_proof_overdue') && String(c[0]).includes(r.id)).length;
-    await overdueInstapay(env, cairo('2026-07-05T08:00:00Z')); // Sunday 11:00: 3 business hours
+    await overdueInstapay(env, cairo('2027-07-04T08:00:00Z')); // Sunday 11:00: 3 business hours
     expect(n()).toBe(0);
-    await overdueInstapay(env, cairo('2026-07-05T09:30:00Z')); // Sunday 12:30: 4.5 business hours
+    await overdueInstapay(env, cairo('2027-07-04T09:30:00Z')); // Sunday 12:30: 4.5 business hours
     expect(n()).toBe(1);
     expect(String(spy.mock.calls.find((c) => String(c[0]).includes('instapay_proof_overdue') && String(c[0]).includes(r.id))![0])).toContain('"severity":"P1"');
-    await overdueInstapay(env, cairo('2026-07-06T09:30:00Z'));
+    await overdueInstapay(env, cairo('2027-07-05T09:30:00Z'));
     expect(n()).toBe(1);
   });
 });
+
+describe('review round (Opus check of item i)', () => {
+  const cairo = (iso: string) => Date.parse(iso);
+
+  it('IMPORTANT: two concurrent uploads for one request leave exactly one stored proof, and it is the one the row points to and the operator can read', async () => {
+    const ws = W(60);
+    const r = await pkgReq(ws);
+    const [a, b] = await Promise.all([proof(ws, r.id, PNG), proof(ws, r.id, JPG)]);
+    expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
+    const objects = await env.MEDIA.list({ prefix: `instapay-proof/${ws}/` });
+    expect(objects.objects).toHaveLength(1);
+    const key = (await row(r.id))!.proof_key!;
+    expect(objects.objects[0]!.key).toBe(key);
+    expect(await env.MEDIA.get(key)).not.toBeNull();
+    const link = await (await operatorCall(OP1, 'GET', `/instapay/${r.id}/proof-link`)).json() as { url: string };
+    expect((await SELF.fetch(`https://x${link.url}`)).status).toBe(200);
+  });
+
+  it('IMPORTANT: the SLA deadline is scheduled when the proof arrives (4 business hours, Cairo), fires once if still under review, never if it was decided', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const ws = W(61);
+    const r = await pkgReq(ws, { now: cairo('2027-07-01T13:00:00Z') });
+    await proof(ws, r.id, PNG, cairo('2027-07-01T13:00:00Z')); // Thursday 16:00 Cairo: 1 h that day + 3 h on Sunday
+    const due = cairo('2027-07-04T09:00:00Z'); // Sunday 12:00 Cairo
+    expect((await rows<{ kind: string; due_at: number; payload: string }>(ws, "SELECT kind, due_at, payload FROM scheduled_tasks WHERE kind = 'instapay_overdue'"))).toEqual([{ kind: 'instapay_overdue', due_at: due, payload: JSON.stringify({ instapayRequestId: r.id }) }]);
+    const fired = () => spy.mock.calls.filter((c) => String(c[0]).includes('instapay_proof_overdue') && String(c[0]).includes(r.id)).length;
+    await workspace(ws).runDueTasks(due - 1);
+    expect(fired()).toBe(0);
+    await workspace(ws).runDueTasks(due + 1);
+    expect(fired()).toBe(1);
+    await overdueInstapay(env, due + 2 * HOUR); // the daily backstop does not repeat it
+    expect(fired()).toBe(1);
+    const decided = await pkgReq(W(62), { now: cairo('2027-07-01T13:00:00Z') });
+    await proof(W(62), decided.id, PNG, cairo('2027-07-01T13:00:00Z'));
+    await confirmInstapay(env, { id: decided.id, actor: OP1 });
+    await workspace(W(62)).runDueTasks(due + 1);
+    expect(spy.mock.calls.filter((c) => String(c[0]).includes('instapay_proof_overdue') && String(c[0]).includes(decided.id))).toHaveLength(0);
+  });
+
+  it('addBusinessMs lands on the right business moment: Thursday evening, Friday, before opening, after closing', () => {
+    expect(new Date(addBusinessMs(cairo('2026-07-02T13:00:00Z'), 4 * HOUR)).toISOString()).toBe('2026-07-05T09:00:00.000Z'); // Thu 16:00 -> Sun 12:00
+    expect(new Date(addBusinessMs(cairo('2026-07-03T07:00:00Z'), 4 * HOUR)).toISOString()).toBe('2026-07-05T10:00:00.000Z'); // Fri 10:00 -> Sun 13:00
+    expect(new Date(addBusinessMs(cairo('2026-07-05T05:00:00Z'), 4 * HOUR)).toISOString()).toBe('2026-07-05T10:00:00.000Z'); // Sun 08:00 -> Sun 13:00
+    expect(new Date(addBusinessMs(cairo('2026-07-05T12:00:00Z'), 4 * HOUR)).toISOString()).toBe('2026-07-06T08:00:00.000Z'); // Sun 15:00 -> Mon 11:00
+    expect(new Date(addBusinessMs(cairo('2026-12-03T14:30:00Z'), 4 * HOUR)).toISOString()).toBe('2026-12-06T10:30:00.000Z'); // winter Thu 16:30 -> Sun 12:30
+  });
+
+  it('IMPORTANT: a rejection reaches the merchant in the app: the wallet carries a notice until the owner has seen it, with the reason (in-app only: no utility template exists)', async () => {
+    const ws = W(63);
+    const r = await pkgReq(ws);
+    await proof(ws, r.id);
+    await rejectInstapay(env, { id: r.id, actor: OP1, reason: 'The receipt is for another amount' });
+    const owner = await apiFor(ws);
+    const staff = await apiFor(ws, 'staff');
+    expect((await (await staff.call('GET', '/wallet')).json() as { instapayNotice?: unknown }).instapayNotice ?? null).toBeNull(); // staff do not see payment details
+    expect((await (await owner.call('GET', '/wallet')).json() as { instapayNotice: { id: string; reason: string } }).instapayNotice).toEqual({ id: r.id, reason: 'The receipt is for another amount' });
+    expect((await owner.call('GET', '/wallet/instapay')).status).toBe(200); // opening the card = seen
+    expect((await (await owner.call('GET', '/wallet')).json() as { instapayNotice?: unknown }).instapayNotice ?? null).toBeNull();
+  });
+
+  it('MINOR: the five-open-requests cap holds under concurrent creates, and no orphan order is left', async () => {
+    const ws = W(64);
+    await seedNumber('pn-ip-w64', ws);
+    const make = () => createInstapayRequest(env, { workspaceId: ws, userId: 'm', sessionId: 's', input: { kind: 'topup', amountMinor: 5000 }, payee: PAYEE });
+    const out = await Promise.all(Array.from({ length: 9 }, make));
+    expect(out.filter((x) => x.ok)).toHaveLength(5);
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM instapay_requests WHERE workspace_id = ?").bind(ws).first<{ n: number }>())!.n).toBe(5);
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM topups WHERE workspace_id = ? AND provider = 'instapay'").bind(ws).first<{ n: number }>())!.n).toBe(5);
+  });
+
+  it('MINOR: the repair failure alert fires once per request, not on every daily pass', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const ws = W(65);
+    const r = await topupReq(ws, 5000);
+    await proof(ws, r.id);
+    await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?, decided_at = 1 WHERE id = ?").bind(OP1, r.id).run();
+    await env.DB.prepare('DELETE FROM topups WHERE order_id = ?').bind(r.id).run(); // the grant cannot complete
+    await repairInstapay(env);
+    await repairInstapay(env);
+    expect(spy.mock.calls.filter((c) => String(c[0]).includes('instapay_repair_failed') && String(c[0]).includes(r.id))).toHaveLength(1);
+  });
+
+  it('MINOR: the operator proof link re-checks the session (revocation) because proof images are personal data; so does the review list', async () => {
+    const ws = W(66);
+    const r = await pkgReq(ws);
+    await proof(ws, r.id);
+    configureSessionCheck(async () => true);
+    expect((await operatorCall(OP1, 'GET', `/instapay/${r.id}/proof-link`)).status).toBe(403);
+    expect((await operatorCall(OP1, 'GET', '/instapay')).status).toBe(403);
+    configureSessionCheck(async () => false);
+    expect((await operatorCall(OP1, 'GET', `/instapay/${r.id}/proof-link`)).status).toBe(200);
+  });
+
+  it('MINOR: the proof link is signed with its own derived key: a token made with the raw TOKEN_ENC_KEY is refused', async () => {
+    const ws = W(67);
+    const r = await pkgReq(ws);
+    await proof(ws, r.id);
+    const exp = Date.now() + 60_000;
+    const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.TOKEN_ENC_KEY!), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const raw = [...new Uint8Array(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(`instapay-proof:v1:${r.id}.${exp}`)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    expect((await SELF.fetch(`https://x/api/v1/instapay-proof/${r.id}.${exp}.${raw}`)).status).toBe(404);
+    const link = await (await operatorCall(OP1, 'GET', `/instapay/${r.id}/proof-link`)).json() as { url: string };
+    expect((await SELF.fetch(`https://x${link.url}`)).status).toBe(200);
+  });
+
+  it('MINOR: a PDF proof is served as an attachment (sandboxed inline PDFs do not render in Chrome); images stay inline', async () => {
+    const a = await pkgReq(W(68));
+    await proof(W(68), a.id, PDF);
+    const b = await pkgReq(W(69));
+    await proof(W(69), b.id, PNG);
+    const get = async (id: string) => SELF.fetch(`https://x${((await (await operatorCall(OP1, 'GET', `/instapay/${id}/proof-link`)).json()) as { url: string }).url}`);
+    expect((await get(a.id)).headers.get('content-disposition')).toContain('attachment');
+    expect((await get(b.id)).headers.get('content-disposition')).toBe('inline');
+  });
+
+  it('a lapsed shared-number member can send free-form text only inside ITS OWN 24 h window with that customer', async () => {
+    const ws = W(70);
+    const owner = await apiFor(ws);
+    await workspace(ws).applyEntitlement({ version: 99, packageId: 'gold', status: 'past_due', periodStart: 1, periodEnd: Date.now() + DAYMS });
+    const closed = await openChat(ws, '201001230001', { ts: Math.floor(Date.now() / 1000) - 25 * 3600 }); // the window (opened by an inbound of ITS OWN) is over
+    const open = await openChat(ws, '201001230002');
+    const text = (n: number) => ({ type: 'text', clientId: `00000000-0000-4000-8000-00000000007${n}`, text: 'x' });
+    expect((await owner.call('POST', `/conversations/${closed}/messages`, text(1))).status).toBe(409);
+    expect((await owner.call('POST', `/conversations/${open}/messages`, text(2))).status).toBe(202);
+  });
+});
+const DAYMS = 86_400_000;
+

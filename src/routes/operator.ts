@@ -20,7 +20,9 @@ type E = { Bindings: Env; Variables: AuthVars };
 export const operatorRoutes = new Hono<E>();
 // Every state-changing operator action re-checks that the session was not revoked, and fails closed (accounts binding missing or erroring = refused).
 operatorRoutes.use('*', async (c, next) => {
-  if (c.req.method === 'GET' || c.req.method === 'HEAD') return next();
+  // Reads that return personal data (the InstaPay review list and proof images) re-check the session too; other reads keep working while the accounts service is down.
+  const personal = c.req.path.includes('/instapay');
+  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && !personal) return next();
   const s = await sessionState(c.env, c.get('principal').sessionId);
   if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
   if (s === 'unavailable') return c.json({ error: 'rate_limited', message: 'session_check_unavailable' }, 503);
