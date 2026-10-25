@@ -78,4 +78,4 @@ We may update this policy. For a material change we will notify merchants before
 
 ## 12. Contact
 
-ahlan@ebda.app. Security reports: security@ebda.app. If the Arabic and English versions differ, the Arabic version prevails.
+privacy@ebda.app. Security reports: security@ebda.app. If the Arabic and English versions differ, the Arabic version prevails.

@@ -113,8 +113,8 @@ We may update these terms. For a material change we will give you at least 30 da
 
 ## 17. Governing law and disputes
 
-These terms are governed by the laws of the Arab Republic of Egypt. Before starting any proceeding, both sides will try in good faith to settle the dispute by writing to the other (to us: ahlan@ebda.app) and allowing 30 days. Failing that, the courts of Cairo have exclusive jurisdiction. This does not take away any right that a consumer has under Consumer Protection Law No. 181 of 2018 where it applies mandatorily.
+These terms are governed by the laws of the Arab Republic of Egypt. Before starting any proceeding, both sides will try in good faith to settle the dispute by writing to the other (to us: privacy@ebda.app) and allowing 30 days. Failing that, the courts of Cairo have exclusive jurisdiction. This does not take away any right that a consumer has under Consumer Protection Law No. 181 of 2018 where it applies mandatorily.
 
 ## 18. Language and contact
 
-If the Arabic and English versions differ, the Arabic version prevails. Contact: ahlan@ebda.app.
+If the Arabic and English versions differ, the Arabic version prevails. Contact: privacy@ebda.app.

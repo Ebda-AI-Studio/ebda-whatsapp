@@ -73,4 +73,4 @@ Each party's liability under this agreement is subject to the limitation of liab
 
 ## 13. Order and language
 
-If this agreement conflicts with the Terms of Service on the processing of personal data, this agreement prevails on that point. If the Arabic and English versions differ, the Arabic version prevails. Contact: ahlan@ebda.app.
+If this agreement conflicts with the Terms of Service on the processing of personal data, this agreement prevails on that point. If the Arabic and English versions differ, the Arabic version prevails. Contact: privacy@ebda.app.
