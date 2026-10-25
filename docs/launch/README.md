@@ -84,6 +84,7 @@ Each merge: full suite green twice locally, CI green, then deploy.
 META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://wa.ebda.app --expect "$(git rev-parse --short origin/main)" --brand ebda
 ```
 It checks the running commit, the security headers on the API and the page, Meta's webhook handshake, that unsigned/badly-signed webhooks are refused, and that a correctly signed empty webhook is accepted. Anything it could not check prints as SKIP and must be reported as not verified. Then, by hand:
+0. **Live identity round trip** (the first deploy only proves it): Ahmad signs in at `https://wa.ebda.app`; the inbox loads his store, which proves a real accounts.ebda.app token (ES256, `iss` https://accounts.ebda.app, `aud` whatsapp, `stores[]`) passes our verifier. A 401/403 loop here = stop and report, do not continue.
 1. Send a WhatsApp message to the connected number from the owner's phone; it appears in the inbox in real time; reply from the inbox; the owner receives it.
 2. Open the inbox in Arabic and English, on a phone and a desktop.
 3. For the shared number / top-ups: a top-up of the minimum amount with a real card, then the statement shows it (Ahmad approves the payment first).
