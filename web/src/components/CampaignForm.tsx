@@ -79,6 +79,11 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
     && (timing === 'now' || (scheduledAt !== undefined && Number.isFinite(scheduledAt) && scheduledAt > now()))
     && (dailyLimit === '' || Number(dailyLimit) >= 1);
 
+  const [funding, setFunding] = useState<{ funding: 'merchant_card' | 'platform_line' }[] | null>(null);
+  useEffect(() => {
+    void source.wallet?.wallet().then((w) => setFunding(w.funding), () => undefined);
+  }, [source]);
+
   // Any edit after review discards the draft: the estimate no longer matches what would be sent.
   useEffect(() => {
     if (!draft || phase !== 'edit') return;
@@ -132,6 +137,8 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
 
   const n = (v: number) => num(v, lang);
   const est = draft?.estimate;
+  // A zero price is "Meta bills the merchant's card" only when every active number says so; anything unknown stays "not ready".
+  const cardBilled = !!funding && funding.length > 0 && funding.every((f) => f.funding === 'merchant_card');
 
   return (
     <main className="screen" aria-labelledby="new-campaign-title">
@@ -240,7 +247,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
                 <p className="estimate-total">{t.costLine(formatMoney(est.totalMinor, 'EGP', lang))}</p>
                 <p className="muted">{t.costPer(formatMoney(est.perMessageMinor, 'EGP', lang))} · {t.costNote}</p>
               </>
-            ) : <p className="muted">{t.costPending}</p>}
+            ) : <p className="muted">{cardBilled ? t.costCard : t.costPending}</p>}
           </section>
         )}
 

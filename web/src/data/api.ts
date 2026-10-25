@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, campaignDto, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
-  realtimeEvent, searchResponse, segmentPreviewDto, type RealtimeEvent, type SendMessageRequest,
+  changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
+  pricingSettingsDto, realtimeEvent, refundRequestDto, searchResponse, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
+import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
 import type { InboxSource } from './source';
 
 export class ApiError extends Error {
@@ -25,11 +26,13 @@ export function createApiSource(o: Opts): LiveSource {
   const f = o.fetchImpl ?? fetch;
   const root = `${o.baseUrl}/api/v1/stores/${o.storeId}`;
 
-  async function call<S extends z.ZodTypeAny>(path: string, schema: S, init: RequestInit = {}): Promise<z.infer<S>> {
+  const operatorRoot = `${o.baseUrl}/api/v1/operator`;
+
+  async function call<S extends z.ZodTypeAny>(path: string, schema: S, init: RequestInit = {}, base: string = root): Promise<z.infer<S>> {
     const headers = new Headers(init.headers);
     headers.set('authorization', `Bearer ${await o.getToken()}`);
     if (init.body && !(init.body instanceof FormData)) headers.set('content-type', 'application/json');
-    const res = await f(`${root}${path}`, { ...init, headers });
+    const res = await f(`${base}${path}`, { ...init, headers });
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       const err = apiError.safeParse(json);
@@ -39,6 +42,11 @@ export function createApiSource(o: Opts): LiveSource {
     if (!parsed.success) throw new Error(`response does not match the contract: ${path}`);
     return parsed.data;
   }
+
+  const op = <S extends z.ZodTypeAny>(path: string, schema: S, init: RequestInit = {}) => call(path, schema, init, operatorRoot);
+  const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
+  const items = <S extends z.ZodTypeAny>(schema: S) => z.object({ items: z.array(schema) });
+  const done = z.unknown();
 
   const listeners = new Set<(e: RealtimeEvent) => void>();
   const reloaders = new Set<() => void>();
@@ -142,6 +150,38 @@ export function createApiSource(o: Opts): LiveSource {
       },
       imports: async () => (await call('/imports', listImportsResponse)).items,
       rejects: async (id) => (await call(`/imports/${encodeURIComponent(id)}/rejects`, importRejectsResponse)).items,
+    },
+    wallet: {
+      wallet: () => call('/wallet', walletDto),
+      statement: (month) => call(`/wallet/statement?month=${encodeURIComponent(month)}`, statementDto),
+      async statementCsv(month) {
+        const res = await f(`${root}/wallet/statement?month=${encodeURIComponent(month)}&format=csv`, { headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('forbidden', res.status);
+        return URL.createObjectURL(await res.blob());
+      },
+      estimate: (category, count) => call(`/wallet/estimate?category=${category}&count=${count}`, costEstimateDto),
+      topup: (amountMinor) => call('/wallet/topups', topupDto, post({ amountMinor })),
+      topupState: (orderId) => call(`/wallet/topups/${encodeURIComponent(orderId)}`, topupDto),
+      refundRequests: async () => (await call('/wallet/refund-requests', items(refundRequestDto))).items,
+      requestRefund: (amountMinor, note) => call('/wallet/refund-requests', refundRequestDto, post({ amountMinor, ...(note.trim() ? { note: note.trim() } : {}) })),
+    },
+    operator: {
+      pricingSettings: async () => (await op('/pricing-settings', items(pricingSettingsDto))).items,
+      publishPricingSettings: (input) => op('/pricing-settings', pricingSettingsDto, post(input)),
+      rateCards: async () => (await op('/rate-cards', items(rateCardVersionDto))).items,
+      publishRateCard: async (input) => { await op('/rate-cards', done, post(input)); },
+      fxRates: async () => (await op('/fx-rates', items(fxRateDto))).items,
+      publishFx: async (input) => { await op('/fx-rates', done, post(input)); },
+      overrides: async (workspaceId) => (await op(`/pricing-overrides/${encodeURIComponent(workspaceId)}`, items(marginOverrideDto))).items,
+      publishOverride: async (workspaceId, input) => { await op(`/pricing-overrides/${encodeURIComponent(workspaceId)}`, done, post(input)); },
+      setFunding: async (phoneNumberId, funding, reason) => { await op(`/numbers/${encodeURIComponent(phoneNumberId)}/funding`, done, { method: 'PUT', body: JSON.stringify({ funding, reason }) }); },
+      refundQueue: async () => (await op('/refund-requests', items(refundRequestDto))).items,
+      decideRefund: (id, decision, note) => op(`/refund-requests/${encodeURIComponent(id)}/decision`, refundRequestDto, post({ decision, ...(note.trim() ? { note: note.trim() } : {}) })),
+      markRefundPaid: async (id) => { await op(`/refund-requests/${encodeURIComponent(id)}/manual-paid`, done, { method: 'POST' }); },
+      adjustments: async () => (await op('/adjustments', items(adjustmentDto))).items,
+      createAdjustment: (workspaceId, amountMinor, reason) => op(`/workspaces/${encodeURIComponent(workspaceId)}/adjustments`, adjustmentDto, post({ amountMinor, reason })),
+      decideAdjustment: (id, decision) => op(`/adjustments/${encodeURIComponent(id)}/decision`, adjustmentDto, post({ decision })),
+      changeLog: async () => (await op('/change-log?limit=100', items(changeLogItemDto))).items,
     },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });

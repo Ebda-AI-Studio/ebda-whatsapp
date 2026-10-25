@@ -9,8 +9,12 @@ import { AgentScreen } from './components/AgentScreen';
 import { CampaignsScreen } from './components/CampaignsScreen';
 import { ContactsScreen } from './components/ContactsScreen';
 import { NumbersScreen } from './components/NumbersScreen';
+import { OperatorScreen } from './components/OperatorScreen';
+import { WalletScreen } from './components/WalletScreen';
+import type { WalletDto } from './data/billing';
 import type { ConversationFilter, InboxSource } from './data/source';
 import { STRINGS, type Lang } from './i18n';
+import { formatMoney } from './lib/format';
 
 type Props = { source: InboxSource; now?: () => number; initialLang?: Lang };
 
@@ -63,6 +67,24 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { void source.templates().then(setTemplates); }, [source]);
+
+  // The low-balance banner reads the wallet whenever the inbox is on screen (coming back from the wallet screen refreshes it).
+  const [walletDto, setWalletDto] = useState<WalletDto | null>(null);
+  useEffect(() => {
+    if (view !== 'inbox' || !source.wallet) return;
+    let live = true;
+    void source.wallet.wallet().then((w) => { if (live) setWalletDto(w); }, () => undefined);
+    return () => { live = false; };
+  }, [source, view]);
+  const walletNotice = useMemo(() => {
+    if (!walletDto || !(walletDto.lowBalance || walletDto.debtMinor > 0)) return [];
+    const lines: string[] = [];
+    if (walletDto.debtMinor > 0) lines.push(t.wBannerDebt(formatMoney(walletDto.debtMinor, 'EGP', lang)));
+    // Marketing only stops on the wallet when the wallet is what pays for a number; with cards paying Meta the claim would be false.
+    if (walletDto.availableMinor <= 0 && walletDto.funding.some((f) => f.funding === 'platform_line')) lines.push(t.wMarketingPaused);
+    if (lines.length === 0) lines.push(t.wBannerLow);
+    return lines;
+  }, [walletDto, t, lang]);
 
   const selected = useMemo(() => items.find((c) => c.id === selectedId) ?? null, [items, selectedId]);
 
@@ -190,13 +212,15 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
 
   return (
     <div className="app" data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
-      <Rail t={t} view={view} onNavigate={setView} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, numbers: !!source.numbers && source.capabilities.numbers === true }} />
+      <Rail t={t} view={view} onNavigate={setView} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, operator: source.role === 'super_admin' && !!source.operator }} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} />
+        : view === 'wallet' && source.wallet ? <WalletScreen t={t} lang={lang} source={source} api={source.wallet} now={now} />
+        : view === 'operator' && source.operator && source.role === 'super_admin' ? <OperatorScreen t={t} lang={lang} source={source} api={source.operator} now={now} />
         : view === 'numbers' && source.numbers ? <NumbersScreen t={t} lang={lang} source={source} api={source.numbers} />
         : view === 'contacts' && source.contacts ? <ContactsScreen t={t} lang={lang} source={source} api={source.contacts} now={now} /> : (
         <>
-      <ConversationList t={t} lang={lang} now={now()} items={items} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} onFilter={setFilter} onQuery={setQuery} onOpen={open} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} />
+      <ConversationList t={t} lang={lang} now={now()} items={items} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} onFilter={setFilter} onQuery={setQuery} onOpen={open} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} notice={walletNotice} onOpenWallet={() => setView('wallet')} />
       <div className="center">
         {!online && <p className="notice offline" role="status">{t.offline}</p>}
         {error && <p className="notice offline" role="alert">{t.loadError} <button type="button" className="btn ghost" onClick={() => void refresh()}>{t.retry}</button></p>}

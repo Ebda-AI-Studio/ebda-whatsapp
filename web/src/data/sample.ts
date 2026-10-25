@@ -1,6 +1,7 @@
 import type {
   AgentSettingsDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
+import { createSampleOperator, createSampleWallet } from './sample-billing';
 import type { InboxSource } from './source';
 
 // Sample data for preview only (labelled in the UI). Names and orders are invented; no real customers.
@@ -244,6 +245,8 @@ export function createSampleSource(): InboxSource {
       register: async (id) => ({ ...Object.assign(num(id), { status: 'active', registration: 'registered', qualityRating: 'GREEN', messagingLimitTier: 'TIER_250' }) }),
       disconnect: async (id) => ({ ...Object.assign(num(id), { status: 'disconnected' }) }),
     },
+    wallet: createSampleWallet(),
+    operator: createSampleOperator('u-me'),
     contacts: {
       async list(q) {
         const query = q.q?.trim() ?? '';

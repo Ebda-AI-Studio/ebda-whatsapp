@@ -8,6 +8,8 @@ type Props = {
   t: Strings; lang: Lang; now: number;
   items: ConversationDto[]; selectedId: number | null; filter: ConversationFilter; query: string; totalUnread: number;
   onFilter: (f: ConversationFilter) => void; onQuery: (q: string) => void; onOpen: (id: number) => void; onToggleLang: () => void;
+  /** Calm wallet notices (low balance, debt, marketing paused); empty = nothing to say. */
+  notice?: string[]; onOpenWallet?: () => void;
 };
 
 const FILTERS: ConversationFilter[] = ['all', 'unread', 'mine', 'unassigned'];
@@ -16,7 +18,7 @@ export function initials(name: string | null): string {
   return (name ?? '؟').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('');
 }
 
-export function ConversationList({ t, lang, now, items, selectedId, filter, query, totalUnread, onFilter, onQuery, onOpen, onToggleLang }: Props) {
+export function ConversationList({ t, lang, now, items, selectedId, filter, query, totalUnread, onFilter, onQuery, onOpen, onToggleLang, notice = [], onOpenWallet }: Props) {
   return (
     <section className="list-pane" aria-labelledby="list-title">
       <div className="list-head">
@@ -38,6 +40,12 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
           <input type="search" placeholder={t.search} value={query} onChange={(e) => onQuery(e.target.value)} />
         </label>
       </div>
+      {notice.length > 0 && (
+        <div className="wallet-banner" data-banner="wallet" role="status">
+          <span>{notice.map((line) => <span key={line} className="wallet-banner-line">{line}</span>)}</span>
+          <a href="#wallet" onClick={(e) => { e.preventDefault(); onOpenWallet?.(); }}>{t.wBannerLink}</a>
+        </div>
+      )}
       <ul className="rows" aria-label={t.conversations}>
         {items.length === 0 && <li className="empty">{t.noResults}</li>}
         {items.map((c) => (
