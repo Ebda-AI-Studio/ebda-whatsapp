@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { reconcileEntitlements, pushEntitlement } from '../src/core/billing/subscriptions';
-import { openChat, own, rows, seedNumber, workspace } from './helpers/workspace';
+import { exec, openChat, own, rows, seedNumber, workspace } from './helpers/workspace';
 import { seedTemplate } from './helpers/campaigns';
 
 const W = (n: number) => `00000000-0000-4000-8000-0000000071${String(n).padStart(2, '0')}`;
@@ -90,12 +90,17 @@ describe('entitlements: past_due blocks marketing only', () => {
     expect(await rows(ws, "SELECT status, error_reason FROM messages WHERE idempotency_key = 'ui:00000000-0000-4000-8000-00000000b001'")).toEqual([{ status: 'failed', error_reason: 'plan_blocked' }]);
   });
 
-  it('no entitlement on record blocks nothing', async () => {
+  it('no entitlement on record blocks marketing (fail closed) but not utility, service or the inbox', async () => {
     const ws = W(21);
     await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
+    await seedTemplate(ws, { name: 'util', category: 'UTILITY', components: JSON.stringify([{ type: 'BODY', text: 'hi' }]) });
     await own(ws);
+    await exec(ws, 'DELETE FROM entitlements'); // the test helpers give every workspace a baseline plan; this one has none
     const conv = await openChat(ws);
-    expect(await workspace(ws).queueOutbound(conv, 'pn-x', { type: 'template', clientId: '00000000-0000-4000-8000-00000000b002', name: 'promo', language: 'ar', params: ['a', 'b'] })).toMatchObject({ ok: true });
+    const send = (clientId: string, body: Record<string, unknown>) => workspace(ws).queueOutbound(conv, 'pn-x', { clientId, ...body } as never);
+    expect(await send('00000000-0000-4000-8000-00000000b002', { type: 'template', name: 'promo', language: 'ar', params: ['a', 'b'] })).toMatchObject({ ok: false, reason: 'plan_blocked' });
+    expect(await send('00000000-0000-4000-8000-00000000b003', { type: 'template', name: 'util', language: 'ar', params: [] })).toMatchObject({ ok: true });
+    expect(await send('00000000-0000-4000-8000-00000000b004', { type: 'text', text: 'hello' })).toMatchObject({ ok: true });
   });
 });
 

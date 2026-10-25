@@ -7,6 +7,17 @@ export async function seedNumber(phoneNumberId: string, workspaceId: string, sta
     // what connecting an own number does (the connect hook records the funding explicitly)
     env.DB.prepare("INSERT OR IGNORE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, 'merchant_card', 0)").bind(phoneNumberId),
   ]);
+  await seedPlan(workspaceId);
+}
+
+/**
+ * A workspace the control plane has pushed a plan to. Marketing is blocked without one (fail closed), so every test workspace that is
+ * set up with a number gets an active baseline plan at version 0; a test that applies its own entitlement (version >= 1) replaces it.
+ */
+export async function seedPlan(workspaceId: string): Promise<void> {
+  await runInDurableObject(workspace(workspaceId), (_i, state) => {
+    state.storage.sql.exec("INSERT OR IGNORE INTO entitlements (id, version, package_id, status, period_start, period_end, ai_credits, cancelled_at, updated_at) VALUES (1, 0, 'test-plan', 'active', 0, 8640000000000000, 0, NULL, 0)");
+  });
 }
 
 export function workspace(workspaceId: string) {
@@ -48,5 +59,6 @@ export async function own(workspaceId: string, phoneNumberId = 'pn-x', funding: 
     env.DB.prepare("INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status) VALUES (?, 'waba-own', ?, 'active')").bind(phoneNumberId, workspaceId),
     env.DB.prepare('INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, ?, 0)').bind(phoneNumberId, funding),
   ]);
+  await seedPlan(workspaceId);
   await workspace(workspaceId).refreshPricing();
 }

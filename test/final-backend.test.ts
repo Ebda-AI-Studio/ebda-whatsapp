@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { chat, fund, holdOf, jobOf, queueTemplate, setupBilling, pn } from './helpers/billing';
 import { consume } from './helpers/queue';
 import { stubGraph } from './helpers/graph';
-import { rows, workspace } from './helpers/workspace';
+import { exec, rows, workspace } from './helpers/workspace';
 
 const W = (n: number) => `00000000-0000-4000-8000-00000000f${String(n).padStart(3, '0')}`;
 
@@ -35,5 +35,28 @@ describe('Final review: send queue', () => {
     const job = jobOf(await queueTemplate(ws, conv, 'UTILITY'));
     await workspace(ws).markEnqueueFailed(job.idempotencyKey);
     expect(await rows(ws, 'SELECT status, error_reason FROM messages WHERE idempotency_key = ?', job.idempotencyKey)).toEqual([{ status: 'failed', error_reason: 'enqueue_failed' }]);
+  });
+});
+
+describe('Final review: a workspace with no entitlement fails closed for marketing', () => {
+  it('no entitlement row: a marketing template is plan_blocked; utility and an inbox text reply still go', async () => {
+    const ws = W(20);
+    await setupBilling(ws);
+    await fund(ws, 5000);
+    const conv = await chat(ws);
+    await exec(ws, 'DELETE FROM entitlements'); // helpers give every workspace a baseline plan; this one has none
+    expect(await rows(ws, 'SELECT 1 FROM entitlements')).toEqual([]);
+    expect(await queueTemplate(ws, conv, 'MARKETING')).toMatchObject({ ok: false, reason: 'plan_blocked' });
+    expect(await queueTemplate(ws, conv, 'UTILITY')).toMatchObject({ ok: true });
+    expect(await workspace(ws).queueOutbound(conv, pn(ws), { type: 'text', clientId: crypto.randomUUID(), text: 'hi' })).toMatchObject({ ok: true });
+  });
+
+  it('with an active entitlement row the same marketing template is queued', async () => {
+    const ws = W(21);
+    await setupBilling(ws);
+    await fund(ws, 5000);
+    const conv = await chat(ws);
+    await workspace(ws).applyEntitlement({ version: 1, packageId: 'p', status: 'active', periodStart: Date.now() - 1000, periodEnd: Date.now() + 86_400_000 });
+    expect(await queueTemplate(ws, conv, 'MARKETING')).toMatchObject({ ok: true });
   });
 });

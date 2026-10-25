@@ -39,10 +39,14 @@ export function readEntitlement(sql: Sql): Entitlement | null {
   return r ? { version: r.version, packageId: r.package_id, status: r.status, periodStart: r.period_start, periodEnd: r.period_end, aiCredits: r.ai_credits, cancelledAt: r.cancelled_at, updatedAt: r.updated_at } : null;
 }
 
-/** No entitlement on record = nothing blocks (a workspace that predates packages, or one the control plane has not pushed yet). */
+/**
+ * Marketing needs a plan on record that is not lapsed. No entitlement row = BLOCKED (fail closed: a plan gate is money state, and a
+ * workspace the control plane has not pushed yet must not send paid marketing for free). Utility, authentication and service sends and
+ * the inbox never consult this.
+ */
 export function marketingBlocked(sql: Sql): boolean {
   const e = readEntitlement(sql);
-  return e !== null && (e.status === 'past_due' || e.status === 'cancelled' || e.status === 'expired');
+  return e === null || e.status === 'past_due' || e.status === 'cancelled' || e.status === 'expired';
 }
 
 const GRANTING: ReadonlySet<EntitlementStatus> = new Set(['trialing', 'active']);

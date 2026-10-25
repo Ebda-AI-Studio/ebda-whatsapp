@@ -1,7 +1,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { configureCampaignWallet, NO_WALLET, type CampaignWallet, type WalletSettleOutcome } from '../../src/core/campaigns/wallet';
 import type { CampaignSteps } from '../../src/core/campaigns/workflows';
-import { exec, own, rows, workspace } from './workspace';
+import { exec, own, rows, seedPlan, workspace } from './workspace';
 
 export const PN = 'pn-x';
 export const MARKETING = JSON.stringify([{ type: 'BODY', text: 'أهلا {{1}} عرض {{2}}' }]);
@@ -22,6 +22,7 @@ export async function seedContacts(ws: string, n: number, o: { consent?: boolean
 export const PARAMS = [{ kind: 'name', fallback: 'عميلنا' }, { kind: 'text', value: '50%' }] as const;
 
 export async function makeCampaign(ws: string, o: { criteria?: unknown; dailySendLimit?: number; params?: unknown } = {}) {
+  await seedPlan(ws); // marketing needs a plan on record
   const r = await workspace(ws).createCampaign({
     name: 'Eid sale', template: { name: 'promo', language: 'ar' }, params: (o.params ?? PARAMS) as never,
     audience: { criteria: (o.criteria ?? { everyone: true }) as never }, phoneNumberId: PN, actor: 'u1', ...(o.dailySendLimit ? { dailySendLimit: o.dailySendLimit } : {}),
