@@ -3,7 +3,9 @@ import { env, runInDurableObject } from 'cloudflare:test';
 export async function seedNumber(phoneNumberId: string, workspaceId: string, status: 'active' | 'disconnected' = 'active', wabaId = 'waba-1', displayPhone: string | null = null): Promise<void> {
   await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(workspaceId, workspaceId, Date.now()),
-    env.DB.prepare('INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status, display_phone) VALUES (?, ?, ?, ?, ?)').bind(phoneNumberId, wabaId, workspaceId, status, displayPhone),
+    // Idempotent: seeding an already-seeded number is a no-op, so callers never need to swallow errors (a swallowed D1 failure left the
+    // number unregistered and its funding unknown, which only showed on a slow CI runner).
+    env.DB.prepare('INSERT OR IGNORE INTO phone_numbers (phone_number_id, waba_id, workspace_id, status, display_phone) VALUES (?, ?, ?, ?, ?)').bind(phoneNumberId, wabaId, workspaceId, status, displayPhone),
     // what connecting an own number does (the connect hook records the funding explicitly)
     env.DB.prepare("INSERT OR IGNORE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, 'merchant_card', 0)").bind(phoneNumberId),
   ]);

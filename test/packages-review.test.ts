@@ -39,7 +39,7 @@ async function signed(data: Record<string, string | number>, event = 'pay', genu
   return { body: JSON.stringify({ event, data: full }), sig: await hmac(str) };
 }
 async function start(ws: string, packageId = 'gold', now = Date.now()) {
-  await seedNumber(`pn-pr-${ws.slice(-5)}`, ws).catch(() => {});
+  await seedNumber(`pn-pr-${ws.slice(-5)}`, ws);
   const r = await startPackageCheckout(env, { workspaceId: ws, userId: 'u1', sessionId: 's1', packageId }, now);
   if (!r.ok) throw new Error(r.reason);
   return r;

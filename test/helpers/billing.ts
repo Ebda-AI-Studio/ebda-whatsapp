@@ -16,7 +16,7 @@ export const wamidOf = (n: number | string) => `wamid.bill.${n}`;
 type Rate = { country?: string; category: keyof typeof USD | string; usd: number; ver?: number; from?: number };
 /** Rate card, FX and a funded number in D1, then the workspace pulls them. `funding: null` leaves the number unregistered (merchant_card by default). */
 export async function setupBilling(ws: string, o: { funding?: 'platform_line' | 'merchant_card' | null; rates?: Rate[]; fx?: number; fxFrom?: number; settings?: { margin?: number; limit?: number; vat?: number; from?: number } } = {}): Promise<void> {
-  await seedNumber(pn(ws), ws).catch(() => {});
+  await seedNumber(pn(ws), ws);
   const rates: Rate[] = o.rates ?? (Object.entries(USD) as [string, number][]).map(([category, usd]) => ({ category, usd }));
   const stmts = [
     ...rates.map((r) => env.DB.prepare('INSERT OR IGNORE INTO rate_cards (ver, effective_from, country, category, usd_micros, published_at, actor) VALUES (?, ?, ?, ?, ?, 0, ?)').bind(r.ver ?? 1, r.from ?? 0, r.country ?? 'EG', r.category, r.usd, 'test')),

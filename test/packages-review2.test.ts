@@ -45,7 +45,7 @@ const hook = async (orderId: string, tx: string, amount: string, o: Hook = {}) =
 };
 const labelTrusting = Object.assign(Object.create(kashier) as PaymentProvider, { confirm: async (e: never) => e }); // second layer only: the label is believed
 async function start(ws: string, packageId = 'gold', now = Date.now()) {
-  await seedNumber(`pn-p2-${ws.slice(-5)}`, ws).catch(() => {});
+  await seedNumber(`pn-p2-${ws.slice(-5)}`, ws);
   const r = await startPackageCheckout(env, { workspaceId: ws, userId: 'u1', sessionId: 's1', packageId }, now);
   if (!r.ok) throw new Error(r.reason);
   return r;
@@ -57,7 +57,7 @@ const ledgerOf = (ws: string) => rows<{ kind: string; ref: string; amount: numbe
 const credits = async (ws: string) => (await workspace(ws).walletView()).aiCredits.balance;
 const alerts = (spy: { mock: { calls: unknown[][] } }, name: string) => spy.mock.calls.filter((c) => String(c[0]).includes(`"${name}"`)).length;
 const topupRow = async (id: string, ws: string, amount = 5000, fee = 150) => {
-  await seedNumber(`pn-p2-${ws.slice(-5)}`, ws).catch(() => {});
+  await seedNumber(`pn-p2-${ws.slice(-5)}`, ws);
   await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at) VALUES (?, ?, ?, ?, ?, 'EGP', 'pending', 'u1', ?)").bind(id, ws, amount, fee, amount + fee, Date.now()).run();
 };
 const wallet = async (ws: string) => (await ledger(ws)).map((r) => ({ kind: r.kind as string, amount_minor: r.amount_minor as number }));

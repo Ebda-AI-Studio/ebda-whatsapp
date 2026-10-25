@@ -31,7 +31,7 @@ export default defineConfig({
         test: { name: 'workers', testTimeout: 20_000, setupFiles: ['./test/setup.ts'], include: ['test/**/*.test.ts'], exclude: ['test/guards.test.ts', 'test/assets-config.test.ts', 'test/verify-prod.test.ts', 'test/white-label.test.ts'] },
       },
       { test: { name: 'node', environment: 'node', include: ['test/guards.test.ts', 'test/assets-config.test.ts', 'test/verify-prod.test.ts', 'test/white-label.test.ts'] } },
-      { plugins: [react()], resolve: { alias: { '@brand': new URL('./web/brands/ebda/brand.ts', import.meta.url).pathname, '@brand-tokens': new URL('./web/brands/ebda/tokens.css', import.meta.url).pathname } }, test: { name: 'web', environment: 'jsdom', include: ['web/src/**/*.test.{ts,tsx}'] } },
+      { plugins: [react()], resolve: { alias: { '@brand': new URL('./web/brands/ebda/brand.ts', import.meta.url).pathname, '@brand-tokens': new URL('./web/brands/ebda/tokens.css', import.meta.url).pathname } }, test: { name: 'web', environment: 'jsdom', setupFiles: ['./web/src/test-setup.ts'], include: ['web/src/**/*.test.{ts,tsx}'] } },
     ],
   },
 });

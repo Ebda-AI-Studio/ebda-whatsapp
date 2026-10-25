@@ -26,7 +26,7 @@ async function signed(data: Record<string, string | number>, event = 'pay', key 
   return { body: JSON.stringify({ event, data: full }), sig: await hmac(str, key) };
 }
 const pending = async (orderId: string, ws: string, amount = 5000, fee = 150) => {
-  await seedNumber(`pn-${ws.slice(-6)}`, ws).catch(() => {});
+  await seedNumber(`pn-${ws.slice(-6)}`, ws);
   await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at) VALUES (?, ?, ?, ?, ?, 'EGP', 'pending', 'u1', ?)")
     .bind(orderId, ws, amount, fee, amount + fee, Date.now() - 20 * 60_000).run();
 };

@@ -38,7 +38,7 @@ const hook = async (orderId: string, tx: string, amount: string, o: { label?: st
   return handleProviderWebhook(o.e ?? env, body, sig, o.provider ?? kashier, o.now ?? Date.now());
 };
 async function startPkg(ws: string, now = Date.now()) {
-  await seedNumber(`pn-p3-${ws.slice(-5)}`, ws).catch(() => {});
+  await seedNumber(`pn-p3-${ws.slice(-5)}`, ws);
   const r = await startPackageCheckout(env, { workspaceId: ws, userId: 'u1', sessionId: 's1', packageId: 'gold' }, now);
   if (!r.ok) throw new Error(r.reason);
   return r;
@@ -49,7 +49,7 @@ const sub = (ws: string) => env.DB.prepare('SELECT status, period_end, version F
 const credits = async (ws: string) => (await workspace(ws).walletView()).aiCredits.balance;
 const alerts = (spy: { mock: { calls: unknown[][] } }, name: string) => spy.mock.calls.filter((c) => String(c[0]).includes(`"${name}"`)).length;
 const topupRow = async (id: string, ws: string, o: { state?: string; tx?: string | null } = {}) => {
-  await seedNumber(`pn-p3-${ws.slice(-5)}`, ws).catch(() => {});
+  await seedNumber(`pn-p3-${ws.slice(-5)}`, ws);
   await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, transaction_id) VALUES (?, ?, 5000, 150, 5150, 'EGP', ?, 'u1', ?, ?)").bind(id, ws, o.state ?? 'pending', Date.now(), o.tx ?? null).run();
 };
 const interleave = (before: () => Promise<void>): typeof env => {

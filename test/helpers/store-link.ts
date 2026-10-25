@@ -46,7 +46,7 @@ export function useStoreLink(make: () => FakeStore = () => new FakeStore('*')) {
 /** A workspace with an active number and the Ebda default templates approved (OTP included). */
 export async function storeWorkspace(ws: string, opts: { templates?: boolean } = {}): Promise<string> {
   const pn = `pn-${ws}`;
-  await seedNumber(pn, ws).catch(() => {});
+  await seedNumber(pn, ws);
   if (opts.templates !== false) {
     for (const t of EBDA_DEFAULT_TEMPLATES) {
       await exec(ws, "INSERT OR REPLACE INTO templates (name, language, category, status, components, updated_at) VALUES (?, ?, ?, 'APPROVED', ?, 1)", t.name, t.language, t.category, JSON.stringify(t.components));

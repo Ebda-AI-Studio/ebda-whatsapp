@@ -22,7 +22,7 @@ export const jwks = () => [key.jwk];
 
 /** A registered workspace with an active number, and a fetcher for its /api/v1/stores/:id routes. */
 export async function apiFor(storeId: string, role: 'owner' | 'staff' = 'owner', phoneNumberId = `pn-${storeId}`) {
-  await seedNumber(phoneNumberId, storeId).catch(() => {}); // already seeded on a second call
+  await seedNumber(phoneNumberId, storeId); // already seeded on a second call
   const token = await mint(key, { stores: [{ id: storeId, role }] });
   const call = (method: string, path: string, body?: unknown, extra: Record<string, string> = {}) =>
     SELF.fetch(`https://x/api/v1/stores/${storeId}${path}`, {

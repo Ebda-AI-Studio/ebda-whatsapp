@@ -39,7 +39,7 @@ async function signed(data: Record<string, string | number>, sigOverride?: strin
 const order = (id: string) => env.DB.prepare('SELECT status, amount_minor, provider_ref, package_id FROM package_orders WHERE order_id = ?').bind(id).first<{ status: string; amount_minor: number; provider_ref: string | null; package_id: string }>();
 const grants = async (ws: string) => (await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE workspace_id = ? AND action = 'subscription_set'").bind(ws).first<{ n: number }>())!.n;
 async function start(ws: string, packageId = 'gold') {
-  await seedNumber(`pn-pc-${ws.slice(-4)}`, ws).catch(() => {});
+  await seedNumber(`pn-pc-${ws.slice(-4)}`, ws);
   const r = await startPackageCheckout(env, { workspaceId: ws, userId: 'u1', sessionId: 's1', packageId });
   if (!r.ok) throw new Error(r.reason);
   return r;
