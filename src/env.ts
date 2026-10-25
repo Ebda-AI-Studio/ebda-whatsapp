@@ -7,6 +7,8 @@ export type Env = {
   MEDIA: R2Bucket;
   BACKUPS: R2Bucket;
   USAGE: AnalyticsEngineDataset;
+  /** Phase 6.4: one point per tracked-link click (campaign id + buyerKey, no phone). Best effort: absent or failing never blocks the redirect. */
+  LINK_CLICKS?: AnalyticsEngineDataset;
   /** Customer Intelligence outcomes (CI-1). Best effort: absent or failing never blocks an order. */
   CI_OUTCOMES?: AnalyticsEngineDataset;
   /** Service Binding to the Store API Worker (RPC entrypoint WhatsAppBridge). Unbound = the Store link is off. */
@@ -27,6 +29,10 @@ export type Env = {
   AGENT_ALLOWED_HOSTS?: string;
   /** Overrides the default Workers AI model of the agent. */
   AGENT_MODEL?: string;
+  /** Phase 6: contact-import workflow (one instance per uploaded file). */
+  IMPORT_WORKFLOW: Workflow<{ workspaceId: string; importId: string }>;
+  /** Phase 6: campaign broadcasts (one instance per campaign generation, id `<campaignId>-<attempt>`). */
+  CAMPAIGN_WORKFLOW: Workflow<{ workspaceId: string; campaignId: string; attempt: number }>;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
   META_SYSTEM_TOKEN: string;

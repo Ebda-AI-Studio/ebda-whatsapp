@@ -11,6 +11,11 @@ export const contactDto = z.object({
   waId: z.string(), // digits, no '+'
   name: z.string().nullable(),
   optedOut: z.boolean(),
+  /** Phase 6 (additive: the inbox's embedded contact omits them). Tags from the contact and from its conversation. */
+  tags: z.array(z.string()).optional(),
+  /** Where and when the contact agreed to receive marketing (`import:<file>`, `keyword_start`, ...); null = no consent on record, so no marketing. */
+  consent: z.object({ source: z.string(), at: z.number().int() }).nullable().optional(),
+  lastInboundAt: z.number().int().nullable().optional(),
 });
 
 export const messageDto = z.object({
@@ -167,6 +172,129 @@ export const agentSettingsUpdate = agentSettingsFields.extend({ apiKey: z.string
 export type AgentSettingsDto = z.infer<typeof agentSettingsDto>;
 export type AgentSettingsUpdate = z.infer<typeof agentSettingsUpdate>;
 
+/** Phase 6: contacts, imports. */
+export const tagName = z.string().trim().min(1).max(32);
+export const listContactsQuery = z.object({
+  tag: tagName.optional(),
+  optedOut: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+  q: z.string().trim().min(1).max(100).optional(),
+  cursor: z.string().regex(/^\d{1,15}$/).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+export const listContactsResponse = z.object({ items: z.array(contactDto), nextCursor: z.string().nullable() });
+export const setContactTagsRequest = z.object({ tags: z.array(tagName).max(10) });
+export const importMapping = z.object({ phone: z.string().min(1).max(100).optional(), name: z.string().min(1).max(100).optional(), tags: z.string().min(1).max(100).optional() });
+/** The multipart text fields next to the `file` part. `consented` must be the literal string "true" to grant marketing consent. */
+export const createImportFields = z.object({ consented: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'), mapping: z.string().max(1000).optional() });
+export const importDto = z.object({
+  id: z.string(),
+  filename: z.string(),
+  status: z.enum(['pending', 'running', 'done', 'failed']),
+  consented: z.boolean(),
+  total: z.number().int().nonnegative(),
+  created: z.number().int().nonnegative(),
+  updated: z.number().int().nonnegative(),
+  rejected: z.number().int().nonnegative(),
+  error: z.string().nullable(),
+  createdAt: z.number().int(),
+  finishedAt: z.number().int().nullable(),
+});
+export const listImportsResponse = z.object({ items: z.array(importDto) });
+export const importRejectsResponse = z.object({ items: z.array(z.object({ line: z.number().int(), reason: z.string() })) });
+export type ImportDto = z.infer<typeof importDto>;
+
+/**
+ * Phase 6.2: who a campaign may reach. At least one filter, or `everyone: true` (the explicit "all contacts who agreed" audience): an
+ * empty filter never silently widens to everybody. Contacts who opted out, or have no consent on record, are never in an audience
+ * (`optedOut: false` is accepted for clarity; `true` is refused).
+ */
+export const segmentCriteria = z.strictObject({
+  tags: z.strictObject({ any: z.array(tagName).max(10).optional(), all: z.array(tagName).max(10).optional() }).optional(),
+  /** Epoch ms. A contact who never wrote to us has no last inbound and matches neither bound. */
+  lastInboundAfter: z.number().int().nonnegative().optional(),
+  lastInboundBefore: z.number().int().nonnegative().optional(),
+  /** true = has at least one order that is not cancelled / refunded / refused / failed; false = has none. */
+  hasOrdered: z.boolean().optional(),
+  everyone: z.literal(true).optional(),
+  optedOut: z.literal(false).optional(),
+}).refine(
+  (c) => !!c.tags?.any?.length || !!c.tags?.all?.length || c.lastInboundAfter !== undefined || c.lastInboundBefore !== undefined || c.hasOrdered !== undefined || c.everyone === true,
+  { message: 'empty_criteria' },
+).refine((c) => c.lastInboundAfter === undefined || c.lastInboundBefore === undefined || c.lastInboundAfter < c.lastInboundBefore, { message: 'empty_range' });
+export type SegmentCriteria = z.infer<typeof segmentCriteria>;
+export const segmentDto = z.object({ id: z.number().int(), name: z.string(), criteria: segmentCriteria, createdAt: z.number().int(), updatedAt: z.number().int() });
+export const createSegmentRequest = z.object({ name: z.string().trim().min(1).max(60), criteria: segmentCriteria });
+export const updateSegmentRequest = createSegmentRequest.partial().refine((p) => Object.keys(p).length > 0, 'nothing to change');
+export const segmentPreviewRequest = z.object({ criteria: segmentCriteria });
+/** `count` = people who would receive a marketing send; `excluded` = people the filter matches but who cannot be messaged, and why. */
+export const segmentPreviewDto = z.object({ count: z.number().int().nonnegative(), excluded: z.object({ optedOut: z.number().int().nonnegative(), noConsent: z.number().int().nonnegative() }) });
+export const listSegmentsResponse = z.object({ items: z.array(segmentDto) });
+export type SegmentDto = z.infer<typeof segmentDto>;
+export type SegmentPreviewDto = z.infer<typeof segmentPreviewDto>;
+
+/** Phase 6.3: broadcast campaigns. A template send to an audience, paged, paced against the number's tier, pausable. */
+export const campaignParam = z.discriminatedUnion('kind', [
+  /** The same text for everyone. A media header takes its https link here. */
+  z.object({ kind: z.literal('text'), value: z.string().min(1).max(1000) }),
+  /** The contact's name; `fallback` when we have none. */
+  z.object({ kind: z.literal('name'), fallback: z.string().min(1).max(60) }),
+  /** The recipient's own tracked short link (the full https URL), for a text parameter. Needs the campaign's `linkUrl`. */
+  z.object({ kind: z.literal('link') }),
+  /** Only the recipient's link code, for a template URL button written `https://<this service>/t/{{1}}`. Needs `linkUrl`. */
+  z.object({ kind: z.literal('link_code') }),
+]);
+export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled']);
+export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error']);
+export const campaignCreate = z.object({
+  name: z.string().trim().min(1).max(80),
+  template: z.object({ name: z.string().min(1).max(512), language: z.string().min(2).max(10) }),
+  params: z.array(campaignParam).max(20).default([]),
+  audience: z.union([z.strictObject({ segmentId: z.number().int().positive() }), z.strictObject({ criteria: segmentCriteria })]),
+  /** At most this many recipients are queued per rolling 24 h; the rest wait for the next day. */
+  dailySendLimit: z.number().int().min(1).max(1_000_000).optional(),
+  /** Where the tracked links lead: https, a real host. Required with a `link` / `link_code` parameter, refused without one. */
+  linkUrl: z.string().trim().min(1).max(2000).optional(),
+});
+export type CampaignCreate = z.input<typeof campaignCreate>;
+/** `scheduledAt` (epoch ms, at most a year ahead) = start then; absent = start now. */
+export const sendCampaignRequest = z.object({ scheduledAt: z.number().int().positive().optional() });
+export const campaignCounts = z.object({
+  queued: z.number().int(), claimed: z.number().int(), retry: z.number().int(), accepted: z.number().int(), sent: z.number().int(),
+  delivered: z.number().int(), read: z.number().int(), failed: z.number().int(), skipped: z.number().int(),
+});
+export const campaignDto = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: campaignStatus,
+  pauseReason: campaignPauseReason.nullable(),
+  template: z.object({ name: z.string(), language: z.string() }),
+  category: z.string(),
+  params: z.array(campaignParam),
+  audience: z.object({ segmentId: z.number().int().nullable(), criteria: segmentCriteria }),
+  scheduledAt: z.number().int().nullable(),
+  dailySendLimit: z.number().int().nullable(),
+  linkUrl: z.string().nullable(),
+  /** Recipients who opened their link at least once, and all opens. Link-preview fetches are not counted. */
+  clicks: z.object({ unique: z.number().int(), total: z.number().int() }),
+  createdAt: z.number().int(),
+  startedAt: z.number().int().nullable(),
+  finishedAt: z.number().int().nullable(),
+  /** Messages by their own status, plus `skipped` (a recipient who could not be messaged, never sent). */
+  counts: campaignCounts,
+  /** Roll-up: sent = accepted by Meta or further; delivered/read are cumulative; pending = not yet with Meta. */
+  totals: z.object({ recipients: z.number().int(), pending: z.number().int(), sent: z.number().int(), delivered: z.number().int(), read: z.number().int(), failed: z.number().int(), skipped: z.number().int() }),
+  /** Before sending: how many people it would reach and what the wallet expects it to cost (piasters; 0 until a wallet is configured). */
+  estimate: z.object({ audience: z.number().int(), perMessageMinor: z.number().int(), totalMinor: z.number().int() }).optional(),
+});
+export const listCampaignsQuery = z.object({
+  status: campaignStatus.optional(),
+  cursor: z.string().regex(/^\d{1,15}$/).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export const listCampaignsResponse = z.object({ items: z.array(campaignDto), nextCursor: z.string().nullable() });
+export type CampaignDto = z.infer<typeof campaignDto>;
+export type CampaignParam = z.infer<typeof campaignParam>;
+
 export const customerOrdersResponse = z.object({ items: z.array(orderSummaryDto), source: z.enum(['store', 'sample']) });
 
 export type ContactDto = z.infer<typeof contactDto>;
@@ -199,4 +327,19 @@ export const ROUTES = {
   me: 'GET /me',
   storeLinkSettings: 'GET|PATCH /store-link/settings',
   agent: 'GET|PUT /agent',
+  contacts: 'GET /contacts',
+  contactTags: 'PUT /contacts/:waId/tags',
+  imports: 'GET|POST /imports',
+  import: 'GET /imports/:importId',
+  importRejects: 'GET /imports/:importId/rejects',
+  segments: 'GET|POST /segments',
+  segment: 'GET|PUT|DELETE /segments/:segmentId',
+  segmentPreview: 'POST /segments/preview',
+  segmentCount: 'GET /segments/:segmentId/preview',
+  campaigns: 'GET|POST /campaigns',
+  campaign: 'GET|DELETE /campaigns/:campaignId',
+  campaignSend: 'POST /campaigns/:campaignId/send',
+  campaignPause: 'POST /campaigns/:campaignId/pause',
+  campaignResume: 'POST /campaigns/:campaignId/resume',
+  campaignCancel: 'POST /campaigns/:campaignId/cancel',
 } as const;

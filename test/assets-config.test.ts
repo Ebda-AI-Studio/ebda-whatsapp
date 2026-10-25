@@ -9,6 +9,6 @@ it('serves the inbox SPA from web/dist with deep-link fallback', () => {
   expect(cfg.assets).toMatchObject({ directory: 'web/dist', binding: 'ASSETS', not_found_handling: 'single-page-application' });
 });
 
-it('keeps the API, Meta webhook and health on the Worker', () => {
-  expect(cfg.assets.run_worker_first).toEqual(['/api/*', '/meta/*', '/health']);
+it('keeps the API, Meta webhook, health and tracked links (/t/*) on the Worker', () => {
+  expect(cfg.assets.run_worker_first).toEqual(['/api/*', '/meta/*', '/health', '/t/*']);
 });
