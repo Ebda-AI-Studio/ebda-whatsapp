@@ -1,5 +1,5 @@
 import { createExecutionContext, createMessageBatch, env, getQueueResult } from 'cloudflare:test';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 import type { SendJob } from '../src/core/send-queue';
 import { adminToken, apiFor, graphStub, storeId as W, useApiKey } from './helpers/api';
@@ -91,13 +91,14 @@ describe('sync, list and submit use the platform token on the platform WABA', ()
     expect(call.url).toContain(`/${WABA}/message_templates`);
     expect(call.headers.authorization).toBe(`Bearer ${PLATFORM_TOKEN}`);
     expect(await catalog()).toEqual([
+      { name: 'gone', language: 'ar', category: 'UTILITY', status: 'DISABLED' }, // not listed by Meta any more: never sendable (kept, not deleted)
       { name: 'tpl_m', language: 'ar', category: 'MARKETING', status: 'APPROVED' },
       { name: 'tpl_p', language: 'ar', category: 'UTILITY', status: 'PENDING' },
       { name: 'tpl_u', language: 'ar', category: 'UTILITY', status: 'APPROVED' },
     ]);
     const list = (await (await op('GET', '')).json()) as { items: { name: string; paramCount: number; bodyText: string }[] };
-    expect(list.items.map((t) => t.name)).toEqual(['tpl_m', 'tpl_p', 'tpl_u']);
-    expect(list.items[2]).toMatchObject({ paramCount: 1, bodyText: 'أهلا {{1}} tpl_u' });
+    expect(list.items.map((t) => t.name)).toEqual(['gone', 'tpl_m', 'tpl_p', 'tpl_u']);
+    expect(list.items[3]).toMatchObject({ paramCount: 1, bodyText: 'أهلا {{1}} tpl_u' });
   });
   it('a merchant\'s own credential is never used: the token is the platform token even when stores have their own WABA tokens', async () => {
     await apiFor(W(2110));
@@ -255,23 +256,131 @@ describe('the category and status that count are Meta\'s latest answer (WA-SHARE
     await op('POST', '/sync', {});
     expect(await sendable()).toBe(false);
   });
-  it('a category-update webhook for the platform WABA flips the row, and so does a status update (paused / disabled)', async () => {
-    submitAnswering({ status: 'APPROVED', category: 'UTILITY' });
-    await op('POST', '', body);
-    expect(await hook(templateCategoryPayload(WABA, { name: 'order_ready', language: 'ar', previous: 'UTILITY', next: 'MARKETING' }))).toHaveProperty('status', 200);
-    expect((await catalog())[0]!.category).toBe('MARKETING');
-    expect(await sendable()).toBe(false);
-    await hook(templateCategoryPayload(WABA, { name: 'order_ready', language: 'ar', previous: 'MARKETING', next: 'UTILITY' }));
-    expect(await sendable()).toBe(true);
-    await hook(templateStatusPayload(WABA, { event: 'PAUSED', name: 'order_ready', language: 'ar' }));
-    expect((await catalog())[0]!.status).toBe('PAUSED');
-    expect(await sendable()).toBe(false);
-  });
-  it('a webhook for another WABA or an unknown template changes nothing', async () => {
+  it('a webhook for another WABA changes nothing; one for a template not in the catalog is recorded as a tightened placeholder (never sendable)', async () => {
     submitAnswering({ status: 'APPROVED', category: 'UTILITY' });
     await op('POST', '', body);
     await hook(templateCategoryPayload('other-waba', { name: 'order_ready', language: 'ar', previous: 'UTILITY', next: 'MARKETING' }));
-    await hook(templateCategoryPayload(WABA, { name: 'unknown_tpl', language: 'ar', previous: 'UTILITY', next: 'MARKETING' }));
     expect(await catalog()).toEqual([{ name: 'order_ready', language: 'ar', category: 'UTILITY', status: 'APPROVED' }]);
+    await hook(templateCategoryPayload(WABA, { name: 'unknown_tpl', language: 'ar', previous: 'UTILITY', next: 'MARKETING' }));
+    expect(await catalog()).toEqual([
+      { name: 'order_ready', language: 'ar', category: 'UTILITY', status: 'APPROVED' },
+      { name: 'unknown_tpl', language: 'ar', category: 'MARKETING', status: 'PENDING' },
+    ]);
+    expect(await sendable('unknown_tpl')).toBe(false);
+  });
+
+  // ---- direction of Meta's events: tighten at once, loosen only from a fresh Graph read ----------------------------------------------
+  /** Moves the recorded tightening 1 s into the past (no sleeping): a read that starts now is newer than it. */
+  const ageTightening = () => env.DB.prepare("UPDATE shared_templates SET tightened_at = tightened_at - 1000 WHERE name = 'order_ready'").run();
+  const rowOf = () => env.DB.prepare("SELECT category, status FROM shared_templates WHERE name = 'order_ready'").first<{ category: string; status: string }>();
+  const statusEv = (event: string) => hook(templateStatusPayload(WABA, { event, name: 'order_ready', language: 'ar' }));
+  const categoryEv = (previous: string, next: string) => hook(templateCategoryPayload(WABA, { name: 'order_ready', language: 'ar', previous, next }));
+  /** An approved utility template; Graph answers `current` (category, status) to a by-name lookup, or is down. */
+  async function seeded(current: { category: string; status: string } | 'down' = { category: 'UTILITY', status: 'APPROVED' }) {
+    submitAnswering({ status: 'APPROVED', category: 'UTILITY' });
+    await op('POST', '', body);
+    const calls: { url: string; auth: string | undefined }[] = [];
+    graph!.restore();
+    graph = graphStub((c) => {
+      if (c.method === 'GET' && c.url.includes('/message_templates')) {
+        calls.push({ url: c.url, auth: c.headers.authorization });
+        return current === 'down' ? { status: 500, json: { error: { message: 'down' } } } : { status: 200, json: { data: [metaTpl('order_ready', current.category, current.status)] } };
+      }
+      return { status: 200, json: {} };
+    });
+    return calls;
+  }
+
+  it('tightening applies at once and needs no Graph call: PAUSED, REJECTED, DISABLED, PENDING and a move to MARKETING', async () => {
+    const graphCalls = await seeded();
+    for (const [event, status] of [['PAUSED', 'PAUSED'], ['REJECTED', 'REJECTED'], ['DISABLED', 'DISABLED'], ['IN_APPEAL', 'PENDING']] as const) {
+      await env.DB.prepare("UPDATE shared_templates SET status = 'APPROVED', tightened_at = NULL WHERE name = 'order_ready'").run();
+      await statusEv(event);
+      expect((await rowOf())!.status, event).toBe(status);
+    }
+    await categoryEv('UTILITY', 'MARKETING');
+    expect((await rowOf())!.category).toBe('MARKETING');
+    expect(graphCalls).toHaveLength(0);
+  });
+  it('tightening is applied even when Graph is down (it can only make the template less sendable)', async () => {
+    await seeded('down');
+    const res = await statusEv('PAUSED');
+    expect(res.status).toBe(200);
+    expect((await rowOf())!.status).toBe('PAUSED');
+    expect(await sendable()).toBe(false);
+  });
+  it('an old APPROVED arriving after PAUSED does not make the template sendable: only Graph can loosen, and Graph says paused', async () => {
+    const calls = await seeded({ category: 'UTILITY', status: 'PAUSED' });
+    await statusEv('PAUSED');
+    await statusEv('APPROVED'); // a late or redelivered event
+    expect(calls).toHaveLength(1); // the loosening event was checked against Graph, not applied
+    expect(decodeURIComponent(calls[0]!.url)).toContain('name=order_ready');
+    expect(calls[0]!.auth).toBe(`Bearer ${PLATFORM_TOKEN}`);
+    expect((await rowOf())!.status).toBe('PAUSED');
+    expect(await sendable()).toBe(false);
+  });
+  it('a redelivered UTILITY after MARKETING keeps it marketing when Graph still says marketing', async () => {
+    const calls = await seeded({ category: 'MARKETING', status: 'APPROVED' });
+    await categoryEv('UTILITY', 'MARKETING');
+    await categoryEv('MARKETING', 'UTILITY');
+    expect(calls).toHaveLength(1);
+    expect((await rowOf())!.category).toBe('MARKETING');
+    expect(await sendable()).toBe(false);
+  });
+  it('...and loosening happens only from Graph\'s fresh answer: when Graph confirms, the row loosens (status and category)', async () => {
+    const calls = await seeded({ category: 'UTILITY', status: 'APPROVED' });
+    await statusEv('PAUSED');
+    await categoryEv('UTILITY', 'MARKETING');
+    expect(await sendable()).toBe(false);
+    await ageTightening(); // the Graph read below starts later than the tightening on the local clock
+    await statusEv('APPROVED');
+    expect(calls).toHaveLength(1);
+    expect(await rowOf()).toEqual({ category: 'UTILITY', status: 'APPROVED' });
+    expect(await sendable()).toBe(true);
+  });
+  it('if Graph cannot be reached a loosening event changes nothing, the webhook still answers 200, and an alert is logged', async () => {
+    await seeded('down');
+    await statusEv('PAUSED');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await statusEv('APPROVED');
+    expect(res.status).toBe(200);
+    expect((await rowOf())!.status).toBe('PAUSED');
+    expect(err.mock.calls.map((c) => String(c[0])).some((l) => l.includes('shared_template_refresh_failed'))).toBe(true);
+    err.mockRestore();
+  });
+  it('a sync that STARTED before a tightening webhook and finishes after it cannot undo it', async () => {
+    await seeded();
+    graph!.restore();
+    graph = graphStub(
+      () => ({ status: 200, json: { data: [metaTpl('order_ready', 'UTILITY', 'APPROVED')] } }), // Graph read before the pause: approved
+      undefined,
+      async (call) => { if (call.method === 'GET') { await statusEv('PAUSED'); } }, // the pause webhook lands while the sync is in flight
+    );
+    expect((await op('POST', '/sync', {})).status).toBe(200);
+    expect((await rowOf())!.status).toBe('PAUSED');
+    expect(await sendable()).toBe(false);
+  });
+  it('the same holds for a refresh triggered by a loosening webhook', async () => {
+    await seeded();
+    await statusEv('PAUSED');
+    await ageTightening();
+    graph!.restore();
+    graph = graphStub(
+      () => ({ status: 200, json: { data: [metaTpl('order_ready', 'UTILITY', 'APPROVED')] } }),
+      undefined,
+      async (call) => { if (call.method === 'GET') { await categoryEv('UTILITY', 'MARKETING'); } }, // tightens mid-read
+    );
+    await statusEv('APPROVED');
+    expect(await rowOf()).toEqual({ category: 'MARKETING', status: 'PAUSED' }); // a tightening landed during the read: the whole row stays tight (the guard is per row)
+    expect(await sendable()).toBe(false);
+  });
+  it('a sync tightens at once and never loosens past a recorded tightening; it upserts (a template Meta no longer lists is disabled, not deleted)', async () => {
+    await seeded();
+    await statusEv('PAUSED');
+    graph!.restore();
+    graph = graphStub(() => ({ status: 200, json: { data: [] } }));
+    const r = await op('POST', '/sync', {});
+    expect(await r.json()).toEqual({ upserted: 0, removed: 1 });
+    expect(await rowOf()).toMatchObject({ status: 'DISABLED' });
   });
 });

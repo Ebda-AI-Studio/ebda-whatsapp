@@ -10,5 +10,8 @@ CREATE TABLE shared_templates (
   components TEXT NOT NULL,
   rejected_reason TEXT,
   updated_at INTEGER NOT NULL,
+  -- Local clock (ms) of the last TIGHTENING of this row (rejected/paused/disabled/pending, or a move to marketing). A row loosens only from a fresh
+  -- Graph read that STARTED after this moment; tightening applies at once whatever this holds. One clock is compared, never Meta's.
+  tightened_at INTEGER,
   PRIMARY KEY (phone_number_id, name, language)
 ) WITHOUT ROWID;

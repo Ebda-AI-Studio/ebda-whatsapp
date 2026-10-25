@@ -37,25 +37,38 @@ export async function listSharedTemplates(env: Db, number: SharedNumberRow): Pro
   });
 }
 
-/** Replaces the catalog with what Meta returned for the platform WABA (every page, or nothing changes). */
+/** The rule that keeps the catalog fail-closed (WA-SHARED-NOCAMP-1). Tightening always applies; loosening applies only if no tightening was recorded after the read began. */
+const TIGHT = "(excluded.status <> 'APPROVED' OR excluded.category NOT IN ('UTILITY', 'AUTHENTICATION'))";
+const UPSERT_FROM_META = `INSERT INTO shared_templates (phone_number_id, name, language, category, status, components, rejected_reason, updated_at, tightened_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ?5 <> 'APPROVED' OR ?4 NOT IN ('UTILITY', 'AUTHENTICATION') THEN ?8 END)
+  ON CONFLICT(phone_number_id, name, language) DO UPDATE SET
+    status = CASE WHEN excluded.status <> 'APPROVED' OR shared_templates.tightened_at IS NULL OR shared_templates.tightened_at < ?9 THEN excluded.status ELSE shared_templates.status END,
+    category = CASE WHEN excluded.category NOT IN ('UTILITY', 'AUTHENTICATION') OR shared_templates.tightened_at IS NULL OR shared_templates.tightened_at < ?9 THEN excluded.category ELSE shared_templates.category END,
+    components = excluded.components, rejected_reason = excluded.rejected_reason, updated_at = excluded.updated_at,
+    tightened_at = CASE WHEN ${TIGHT} THEN ?8 ELSE shared_templates.tightened_at END`;
+
+type FromMeta = { name: string; language: string; category: string; status: string; components: unknown[]; rejected_reason?: string | null | undefined };
+/** One statement per template Meta described. `readStartedMs` = when the read (or submit) that produced it BEGAN, on our clock. */
+const upsertStatements = (env: Db, phoneNumberId: string, items: FromMeta[], readStartedMs: number) =>
+  items.map((t) => env.DB.prepare(UPSERT_FROM_META).bind(phoneNumberId, t.name, t.language, t.category.toUpperCase(), t.status.toUpperCase(), JSON.stringify(t.components), t.rejected_reason ?? null, Date.now(), readStartedMs));
+/** Templates Meta does not list any more: never sendable. Disabled in place (a tightening), not deleted. */
+const disableStatement = (env: Db, phoneNumberId: string, name: string, language: string) =>
+  env.DB.prepare("UPDATE shared_templates SET status = 'DISABLED', tightened_at = ?, updated_at = ? WHERE phone_number_id = ? AND name = ? AND language = ?").bind(Date.now(), Date.now(), phoneNumberId, name, language);
+
+/** Syncs the catalog from Meta (every page, or nothing changes): upserts with the tighten/loosen rule; what Meta no longer lists is disabled. */
 export async function syncSharedTemplates(env: Env): Promise<{ ok: true; upserted: number; removed: number } | SharedTemplateFailure> {
   const number = await currentSharedNumber(env);
   if (!number) return { ok: false, reason: 'no_number' };
   const token = platformToken(env);
   if (!token) return { ok: false, reason: 'token_unavailable' };
+  const readStarted = Date.now();
   const fetched = await fetchTemplates({ token, graphVersion: env.META_GRAPH_VERSION, wabaId: number.waba_id });
   if (!fetched.ok) return { ok: false, reason: 'meta_unavailable', message: fetched.message };
-  const now = Date.now();
-  const have = new Set((await env.DB.prepare('SELECT name, language FROM shared_templates WHERE phone_number_id = ?').bind(number.phone_number_id).all<{ name: string; language: string }>()).results.map((r) => `${r.name}\u0000${r.language}`));
   const incoming = new Map(fetched.value.map((t) => [`${t.name}\u0000${t.language}`, t]));
-  const removed = [...have].filter((k) => !incoming.has(k)).length;
-  await env.DB.batch([
-    env.DB.prepare('DELETE FROM shared_templates WHERE phone_number_id = ?').bind(number.phone_number_id),
-    ...[...incoming.values()].map((t) =>
-      env.DB.prepare('INSERT INTO shared_templates (phone_number_id, name, language, category, status, components, rejected_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(number.phone_number_id, t.name, t.language, t.category.toUpperCase(), t.status.toUpperCase(), JSON.stringify(t.components), t.rejected_reason ?? null, now)),
-  ]);
-  return { ok: true, upserted: incoming.size, removed };
+  const have = (await env.DB.prepare("SELECT name, language FROM shared_templates WHERE phone_number_id = ? AND status <> 'DISABLED'").bind(number.phone_number_id).all<{ name: string; language: string }>()).results;
+  const gone = have.filter((r) => !incoming.has(`${r.name}\u0000${r.language}`));
+  await env.DB.batch([...upsertStatements(env, number.phone_number_id, [...incoming.values()], readStarted), ...gone.map((r) => disableStatement(env, number.phone_number_id, r.name, r.language))]);
+  return { ok: true, upserted: incoming.size, removed: gone.length };
 }
 
 /** Submits a new template to the platform WABA. Marketing is not accepted: it could never be sent from the shared number. */
@@ -64,30 +77,70 @@ export async function submitSharedTemplate(env: Env, t: { name: string; language
   if (!number) return { ok: false, reason: 'no_number' };
   const token = platformToken(env);
   if (!token) return { ok: false, reason: 'token_unavailable' };
+  const submittedAt = Date.now();
   const res = await submitTemplate({ token, graphVersion: env.META_GRAPH_VERSION, wabaId: number.waba_id }, t);
   if (!res.ok) return { ok: false, reason: res.retryable ? 'meta_unavailable' : 'meta_rejected', message: res.message };
   // Store what META answered, not what we asked for: Meta may recategorise (utility -> marketing). An answer that states no category is kept
-  // as UNCONFIRMED, which is never sendable until a sync or a Meta event says what the template is.
+  // as UNCONFIRMED, which is never sendable until a sync or a Graph read says what the template is.
   const category = res.value.categoryConfirmed ? res.value.category.toUpperCase() : 'UNCONFIRMED';
   const status = res.value.status.toUpperCase();
-  await env.DB.prepare(
-    `INSERT INTO shared_templates (phone_number_id, name, language, category, status, components, rejected_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
-     ON CONFLICT(phone_number_id, name, language) DO UPDATE SET category = excluded.category, status = excluded.status, components = excluded.components, rejected_reason = NULL, updated_at = excluded.updated_at`,
-  ).bind(number.phone_number_id, t.name, t.language, category, status, JSON.stringify(t.components), Date.now()).run();
+  await env.DB.batch(upsertStatements(env, number.phone_number_id, [{ name: t.name, language: t.language, category, status, components: t.components }], submittedAt));
   return { ok: true, status };
 }
 
+const isSendableCategory = (c: string) => SENDABLE_CATEGORIES.includes(c.toUpperCase());
+
 /**
- * Meta's template events for the platform WABA. The catalog row follows Meta's LATEST word; an unknown template or another WABA changes nothing
- * (the next sync brings it). Returns whether a row changed.
+ * Asks Graph for the CURRENT state of one template (every language) and upserts it with the tighten/loosen rule: the only way a row loosens.
+ * Graph unreachable: the row stays exactly as it is (never loosened) and an alert is logged.
  */
-export async function applySharedTemplateEvent(env: Db, wabaId: string, name: string, language: string, change: { status: string; reason: string | null } | { category: string }): Promise<boolean> {
-  const number = await env.DB.prepare('SELECT phone_number_id FROM shared_numbers WHERE waba_id = ?').bind(wabaId).first<{ phone_number_id: string }>();
-  if (!number) return false;
-  const r = 'category' in change
-    ? await env.DB.prepare('UPDATE shared_templates SET category = ?, updated_at = ? WHERE phone_number_id = ? AND name = ? AND language = ?').bind(change.category.toUpperCase(), Date.now(), number.phone_number_id, name, language).run()
-    : await env.DB.prepare('UPDATE shared_templates SET status = ?, rejected_reason = ?, updated_at = ? WHERE phone_number_id = ? AND name = ? AND language = ?').bind(change.status.toUpperCase(), change.reason, Date.now(), number.phone_number_id, name, language).run();
-  return (r.meta.changes ?? 0) > 0;
+async function refreshSharedTemplate(env: Env, number: SharedNumberRow, name: string): Promise<void> {
+  const token = platformToken(env);
+  const readStarted = Date.now();
+  const fetched = token ? await fetchTemplates({ token, graphVersion: env.META_GRAPH_VERSION, wabaId: number.waba_id }, { name }) : null;
+  if (!fetched || !fetched.ok) {
+    console.error(JSON.stringify({ alert: 'shared_template_refresh_failed', name, reason: fetched ? 'meta_unavailable' : 'token_unavailable' }));
+    return;
+  }
+  const mine = fetched.value.filter((t) => t.name === name);
+  const have = (await env.DB.prepare("SELECT language FROM shared_templates WHERE phone_number_id = ? AND name = ? AND status <> 'DISABLED'").bind(number.phone_number_id, name).all<{ language: string }>()).results;
+  await env.DB.batch([
+    ...upsertStatements(env, number.phone_number_id, mine, readStarted),
+    ...have.filter((h) => !mine.some((t) => t.language === h.language)).map((h) => disableStatement(env, number.phone_number_id, name, h.language)),
+  ]);
+}
+
+/**
+ * Meta's template events for the platform WABA. No ordering is trusted (webhooks arrive late, twice, out of order), so the rule does not depend on it:
+ *  - TIGHTENING (status other than APPROVED, or a category other than UTILITY/AUTHENTICATION) applies at once, whatever the row holds, and records
+ *    `tightened_at`. It can only make the template less sendable, so a replay or a Graph outage cannot hurt.
+ *  - LOOSENING is never taken from a webhook: it triggers a fresh Graph read of that template, and the row loosens only from that answer, and only if
+ *    no tightening was recorded after the read began (one clock: ours).
+ * A template the catalog does not know is recorded as a tightened placeholder when the event tightens (so a Graph read already in flight cannot
+ * resurrect it); otherwise ignored. Another WABA changes nothing.
+ */
+export async function applySharedTemplateEvent(
+  env: Env, wabaId: string, name: string, language: string, change: { status: string; reason: string | null } | { category: string },
+): Promise<'tightened' | 'refreshed' | 'ignored'> {
+  const number = await env.DB.prepare('SELECT phone_number_id, waba_id, display_phone FROM shared_numbers WHERE waba_id = ?').bind(wabaId).first<SharedNumberRow>();
+  if (!number) return 'ignored';
+  const now = Date.now();
+  if ('category' in change) {
+    const category = change.category.toUpperCase();
+    if (isSendableCategory(category)) { await refreshSharedTemplate(env, number, name); return 'refreshed'; }
+    await env.DB.prepare(
+      `INSERT INTO shared_templates (phone_number_id, name, language, category, status, components, rejected_reason, updated_at, tightened_at) VALUES (?, ?, ?, ?, 'PENDING', '[]', NULL, ?, ?)
+       ON CONFLICT(phone_number_id, name, language) DO UPDATE SET category = excluded.category, tightened_at = excluded.tightened_at, updated_at = excluded.updated_at`,
+    ).bind(number.phone_number_id, name, language, category, now, now).run();
+    return 'tightened';
+  }
+  const status = change.status.toUpperCase();
+  if (status === 'APPROVED') { await refreshSharedTemplate(env, number, name); return 'refreshed'; }
+  await env.DB.prepare(
+    `INSERT INTO shared_templates (phone_number_id, name, language, category, status, components, rejected_reason, updated_at, tightened_at) VALUES (?, ?, ?, 'UNCONFIRMED', ?, '[]', ?, ?, ?)
+     ON CONFLICT(phone_number_id, name, language) DO UPDATE SET status = excluded.status, rejected_reason = excluded.rejected_reason, tightened_at = excluded.tightened_at, updated_at = excluded.updated_at`,
+  ).bind(number.phone_number_id, name, language, status, change.reason, now, now).run();
+  return 'tightened';
 }
 
 /** May a store send this template from the shared number? Fail closed: anything not found, not approved or not UTILITY/AUTHENTICATION is no. */

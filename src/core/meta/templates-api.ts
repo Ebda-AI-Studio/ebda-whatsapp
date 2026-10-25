@@ -18,9 +18,9 @@ type Auth = { token: string; graphVersion: string; wabaId: string };
 export type TemplatesApiResult<T> = { ok: true; value: T } | { ok: false; message: string; retryable: boolean };
 
 /** Every template of the WABA (follows paging). Any failed page fails the whole call so a sync never half-applies. */
-export async function fetchTemplates(a: Auth): Promise<TemplatesApiResult<MetaTemplate[]>> {
+export async function fetchTemplates(a: Auth, opts: { name?: string } = {}): Promise<TemplatesApiResult<MetaTemplate[]>> {
   const out: MetaTemplate[] = [];
-  let url: string | null = `https://graph.facebook.com/${a.graphVersion}/${a.wabaId}/message_templates?limit=100&fields=name,language,category,status,components,rejected_reason`;
+  let url: string | null = `https://graph.facebook.com/${a.graphVersion}/${a.wabaId}/message_templates?limit=100&fields=name,language,category,status,components,rejected_reason${opts.name ? `&name=${encodeURIComponent(opts.name)}` : ''}`;
   for (let page = 0; url && page < MAX_PAGES; page++) {
     let res: Response;
     try {
