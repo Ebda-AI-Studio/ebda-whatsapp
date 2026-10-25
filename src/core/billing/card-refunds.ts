@@ -87,23 +87,30 @@ export async function settleCardRefund(env: Env, id: string, o: Outcome, now: nu
 type TopupLite = { order_id: string; workspace_id: string };
 
 /**
+ * The ONE decision for an event whose refund id is already owned by a row of another path (an API refund, a link, a recorded webhook).
+ * Only a real card refund (`refund` / `partial_refund`, not a chargeback or reversal) may settle the row and be `refund_reconciled`; anything
+ * else carrying that id is a conflict: it settles nothing, raises a P1 alert, leaves a review item (`billing_audit` `refund_id_conflict`, once
+ * per refund id) and is `refund_unmatched`. Never silent, and never a debit.
+ */
+async function reconcileOwned(env: Env, t: TopupLite, ev: ParsedWebhook, owner: CardRefundRow, isCardRefund: boolean, now: number): Promise<string> {
+  if (!isCardRefund) {
+    if (await auditOnce(env, 'refund_id_conflict', t.workspace_id, ev.transactionId, now)) alert('refund_id_conflict', { severity: 'P1', workspace: t.workspace_id, orderId: t.order_id, refundId: ev.transactionId, operation: ev.operation ?? null, chargeback: !!ev.chargeback });
+    return 'refund_unmatched';
+  }
+  if (owner.state === 'sending' || owner.state === 'pending' || owner.state === 'uncertain') {
+    await settleCardRefund(env, owner.id, { to: ev.status === 'SUCCESS' ? 'succeeded' : 'failed' }, now); // false = another path settled it first
+  }
+  return 'refund_reconciled';
+}
+
+/**
  * A confirmed refund webhook for one of our top-ups (SUCCESS or FAILURE). Returns the resolution word. Throws only when something could
  * not be written (the caller answers 5xx and the delivery is retried; every step is idempotent).
  */
 export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebhook, now: number): Promise<string> {
   const isCardRefund = !ev.chargeback && isCardRefundOperation(ev.operation);
   const byId = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(ev.transactionId).first<CardRefundRow>();
-  if (byId && byId.source !== 'webhook') {
-    if (!isCardRefund) {
-      // A chargeback / reversal / void carrying the id of a refund we recorded is not that refund: nothing is settled, a person looks.
-      alert('refund_id_conflict', { severity: 'P1', workspace: t.workspace_id, orderId: t.order_id });
-      return 'refund_unmatched';
-    }
-    if (byId.state === 'sending' || byId.state === 'pending' || byId.state === 'uncertain') {
-      await settleCardRefund(env, byId.id, { to: ev.status === 'SUCCESS' ? 'succeeded' : 'failed' }, now);
-    }
-    return 'refund_reconciled';
-  }
+  if (byId && byId.source !== 'webhook') return reconcileOwned(env, t, ev, byId, isCardRefund, now);
   if (ev.status !== 'SUCCESS') return 'ignored';
   if (!byId && isCardRefund) {
     // Kashier's own details (confirm) say this is a refund of this order; the signed amount must equal ours, and our row must not have an id yet.
@@ -129,12 +136,8 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
       env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(debit, t.order_id),
     ]);
     row = (await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(ev.transactionId).first<CardRefundRow>())!;
-    if (!(res[0]?.meta.changes ?? 0) && row.source !== 'webhook') {
-      // Another path (an API refund, or a link) took this refund id between our read and our write: it owns the money, the wallet was
-      // debited at approval, and nothing is posted here.
-      if (isCardRefund && (row.state === 'sending' || row.state === 'pending' || row.state === 'uncertain')) await settleCardRefund(env, row.id, { to: 'succeeded' }, now);
-      return 'refund_reconciled';
-    }
+    // Another path took this refund id between our read and our write: it owns the money (the wallet was debited at approval), nothing is posted here.
+    if (!(res[0]?.meta.changes ?? 0) && row.source !== 'webhook') return reconcileOwned(env, t, ev, row, isCardRefund, now);
     // Beyond the credited amount the card fee explains up to `fee_minor`; anything past that is money we cannot place: a person decides.
     const unexplained = excess - Math.min(excess, top?.fee_minor ?? 0);
     if (unexplained > 0 && (await auditOnce(env, 'refund_excess_review', t.workspace_id, ev.transactionId, now))) {

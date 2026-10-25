@@ -395,4 +395,35 @@ describe('review round 3: one operation predicate, an idempotent relink credit, 
     expect((await handleProviderWebhook(racing, body, sig, kashier)).status).toBe(200);
     expect(await kinds(ws)).toEqual([['topup', 20000], ['refund', -15000]]);
   });
+
+  it('a chargeback / reversal whose id equals a refund row another path owns is never reconciled: P1 alert + a review item, nothing settled, nothing debited (read first, and when the row appears between read and write)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const a = await setup(43);
+    refundAnswer = async () => refundOk('TX-OWN43', 15000, 'PENDING');
+    await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 });
+    await hookRefund(a.order, 'TX-OWN43', '150.00', 'SUCCESS', 'reversal');
+    expect((await rowsOf(a.id))[0]).toMatchObject({ state: 'pending', kashier_refund_id: 'TX-OWN43' });
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['refund', -15000]]);
+    expect(alertsOf(spy, 'refund_id_conflict').length).toBeGreaterThanOrEqual(1);
+    expect(String(alertsOf(spy, 'refund_id_conflict')[0]![0])).toContain('"severity":"P1"');
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_id_conflict' AND reason = 'TX-OWN43'").first()).toEqual({ n: 1 });
+    // the same collision, but the owner appears after the webhook's read (the insert is ignored)
+    const b = await setup(44);
+    await decideRefund(OFF, { id: b.id, decision: 'approve', actor: OP1 });
+    let armed = true;
+    const racing = { ...env, DB: new Proxy(env.DB, { get(t, p) {
+      if (p === 'batch') return async (st: D1PreparedStatement[]) => {
+        if (armed) { armed = false; await t.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at) VALUES ('cr:race44', ?, ?, ?, 15000, 'api', 'pending', 'TX-OWN44', 1, 1)").bind(b.id, b.order, b.ws).run(); }
+        return t.batch(st);
+      };
+      const v = Reflect.get(t, p) as unknown; return typeof v === 'function' ? v.bind(t) : v;
+    } }) } as typeof env;
+    const { body, sig } = await signedWebhook({ merchantOrderId: b.order, transactionId: 'TX-OWN44', amount: '150.00' }, 'refund', 'reversal');
+    expect((await handleProviderWebhook(racing, body, sig, kashier)).status).toBe(200);
+    expect((await env.DB.prepare("SELECT state FROM card_refunds WHERE id = 'cr:race44'").first())).toEqual({ state: 'pending' });
+    expect(await kinds(b.ws)).toEqual([['topup', 20000], ['refund', -15000]]);
+    expect(alertsOf(spy, 'refund_id_conflict').some((c) => String(c[0]).includes('"orderId":"' + b.order + '"'))).toBe(true);
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_id_conflict' AND reason = 'TX-OWN44'").first()).toEqual({ n: 1 });
+  });
 });
+
