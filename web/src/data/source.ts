@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, CampaignCreate, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
+  AgentSettingsDto, AgentSettingsUpdate, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
   RealtimeEvent, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, TemplateDto,
 } from '../../../src/core/api/contract';
 
@@ -19,6 +19,19 @@ export interface CampaignsApi {
   remove(id: string): Promise<void>;
   segments(): Promise<SegmentDto[]>;
   preview(criteria: SegmentCriteria): Promise<SegmentPreviewDto>;
+}
+
+/** A merchant's own WhatsApp numbers (Phase 8.1); absent when Embedded Signup is switched off. */
+export interface NumbersApi {
+  list(): Promise<NumberDto[]>;
+  /** Public Meta ids for the signup popup; null when signup is not configured on the server. */
+  signupConfig(): Promise<{ appId: string; configId: string; graphVersion: string } | null>;
+  connect(req: ConnectNumberRequest): Promise<NumberDto>;
+  refresh(phoneNumberId: string): Promise<NumberDto>;
+  register(phoneNumberId: string): Promise<NumberDto>;
+  disconnect(phoneNumberId: string): Promise<NumberDto>;
+  /** Replaces Meta's popup (sample data and tests only); absent = the real Embedded Signup. */
+  launch?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<{ code: string; event: ConnectNumberRequest['event']; wabaId: string; phoneNumberId: string; businessId?: string }>;
 }
 
 export type ContactsQuery = { q?: string; tag?: string; optedOut?: boolean; cursor?: string | null };
@@ -48,7 +61,7 @@ export interface InboxSource {
   /** Confirm or refuse a pending COD order (the store stays the writer of order state). */
   recordCodOutcome(waId: string, orderNumber: string, outcome: 'confirmed' | 'refused'): Promise<void>;
   /** What this source can do today (e.g. COD outcomes need the store route, Phase 4). */
-  capabilities: { codOutcome: boolean };
+  capabilities: { codOutcome: boolean; numbers?: boolean };
   /** A displayable URL for a protected media path (fetch with the token → blob URL). */
   mediaUrl?(path: string): Promise<string>;
   /** Full text of a message longer than 1 KB. */
@@ -61,6 +74,7 @@ export interface InboxSource {
   /** Assign a conversation (null = unassign). */
   assign?(conversationId: number, userId: string | null): Promise<void>;
   campaigns?: CampaignsApi;
+  numbers?: NumbersApi;
   contacts?: ContactsApi;
   /** Called when events were missed beyond repair; the app reloads its list and open chat. */
   onReload?(cb: () => void): () => void;

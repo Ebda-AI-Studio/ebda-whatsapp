@@ -18,7 +18,8 @@ it('serves the SPA with security headers: CSP limited to itself and the identity
   expect(headers).toMatch(/^\/\*$/m);
   const csp = /Content-Security-Policy: (.+)$/m.exec(headers)?.[1] ?? '';
   expect(csp).toContain("default-src 'self'");
-  expect(csp).toContain("script-src 'self'");
+  expect(csp).toContain("script-src 'self' https://connect.facebook.net;");
+  expect(csp).toContain('frame-src https://*.facebook.com');
   expect(csp).toContain("frame-ancestors 'none'");
   expect(csp).toContain("object-src 'none'");
   expect(csp).toContain("connect-src 'self' https://accounts.ebda.app");

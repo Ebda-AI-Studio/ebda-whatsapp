@@ -131,7 +131,7 @@ export const meResponse = z.object({
   userId: z.string(),
   storeId: z.string(),
   role: z.enum(['owner', 'staff', 'super_admin']),
-  capabilities: z.object({ codOutcome: z.boolean() }),
+  capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional() }),
 });
 export type MeResponse = z.infer<typeof meResponse>;
 
@@ -343,6 +343,12 @@ export const ROUTES = {
   campaignPause: 'POST /campaigns/:campaignId/pause',
   campaignResume: 'POST /campaigns/:campaignId/resume',
   campaignCancel: 'POST /campaigns/:campaignId/cancel',
+  numbers: 'GET /numbers',
+  signupConfig: 'GET /numbers/signup-config',
+  numberConnect: 'POST /numbers/connect',
+  numberRefresh: 'POST /numbers/:phoneNumberId/refresh',
+  numberRegister: 'POST /numbers/:phoneNumberId/register',
+  numberDisconnect: 'POST /numbers/:phoneNumberId/disconnect',
 } as const;
 
 // ---- Phase 8.1: connecting a merchant's own number (Embedded Signup) -------------------------------------------------
@@ -384,4 +390,6 @@ export const numberDto = z.object({
   lastStatusSyncAt: z.number().int().nullable(),
 });
 export const listNumbersResponse = z.object({ items: z.array(numberDto) });
+/** GET /numbers/signup-config: public Meta ids for launching Embedded Signup in the page. */
+export const signupConfigDto = z.object({ appId: z.string(), configId: z.string(), graphVersion: z.string() });
 export type NumberDto = z.infer<typeof numberDto>;

@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+  AgentSettingsDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
 import type { InboxSource } from './source';
 
@@ -82,6 +82,16 @@ const SEGMENTS: SegmentDto[] = [
   { id: 1, name: 'عملاء VIP', criteria: { tags: { any: ['vip'] } }, createdAt: BASE - 30 * D, updatedAt: BASE - 30 * D },
   { id: 2, name: 'كلمونا آخر ٣٠ يوم', criteria: { lastInboundAfter: BASE - 30 * D }, createdAt: BASE - 20 * D, updatedAt: BASE - 20 * D },
 ];
+const sampleNumber = (p: Partial<NumberDto> & Pick<NumberDto, 'phoneNumberId' | 'displayPhone'>): NumberDto => ({
+  wabaId: 'waba-sample-1', verifiedName: 'متجر منى', kind: 'own', onboarding: 'cloud_api', status: 'active', registration: 'registered', qualityRating: 'GREEN',
+  messagingLimitTier: 'TIER_1K', throughputLevel: 'STANDARD', nameStatus: 'APPROVED', platformType: 'CLOUD_API', isOnBizApp: false, historySync: null, contactsSync: null,
+  connectedAt: BASE - 9 * D, syncDeadlineAt: null, lastStatusSyncAt: BASE - H, ...p,
+});
+const NUMBERS: NumberDto[] = [
+  sampleNumber({ phoneNumberId: 'pn-sample-1', displayPhone: '+20 100 555 0101', onboarding: 'business_app', registration: 'not_needed', isOnBizApp: true, historySync: 'received', contactsSync: 'received', throughputLevel: null }),
+  sampleNumber({ phoneNumberId: 'pn-sample-2', displayPhone: '+20 100 555 0202', verifiedName: 'متجر منى - فرع ٢', status: 'disconnected', registration: 'failed', qualityRating: null, messagingLimitTier: null, connectedAt: BASE - 2 * H }),
+];
+
 // Illustrative per-message cost for the sample estimate (piasters); the live figure comes from the wallet.
 const SAMPLE_PER_MESSAGE_MINOR = 250;
 
@@ -112,6 +122,12 @@ export function createSampleSource(): InboxSource {
     ...structuredClone(MORE_CONTACTS),
   ];
   const campaigns = structuredClone(CAMPAIGNS);
+  const numbers = structuredClone(NUMBERS);
+  const num = (id: string) => {
+    const n = numbers.find((x) => x.phoneNumberId === id);
+    if (!n) throw new Error('not_found');
+    return n;
+  };
   const imports: ImportDto[] = [{ id: 'i-1', filename: 'customers.csv', status: 'done', consented: true, total: 214, created: 198, updated: 9, rejected: 7, error: null, createdAt: BASE - 40 * D, finishedAt: BASE - 40 * D + 40_000 }];
   const preview = (k: SegmentCriteria) => {
     const hit = k.everyone ? contacts : contacts.filter((c) => matches(c, k));
@@ -130,7 +146,7 @@ export function createSampleSource(): InboxSource {
   let nextId = 1000;
   return {
     kind: 'sample',
-    capabilities: { codOutcome: true },
+    capabilities: { codOutcome: true, numbers: true },
     role: 'owner',
     currentUserId: 'u-me',
     userNames: { 'u-me': 'أنا', 'u-dina': 'دينا' },
@@ -213,6 +229,20 @@ export function createSampleSource(): InboxSource {
       async remove(id) { campaigns.splice(campaigns.findIndex((x) => x.id === id), 1); },
       segments: async () => SEGMENTS,
       preview: async (k) => preview(k),
+    },
+    numbers: {
+      list: async () => numbers.map((n) => ({ ...n })),
+      signupConfig: async () => ({ appId: 'sample', configId: 'sample', graphVersion: 'v25.0' }),
+      // The sample popup "finishes" with an existing WhatsApp Business app number, the most common case for merchants.
+      launch: async () => ({ code: 'sample-code', event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING', wabaId: 'waba-sample-3', phoneNumberId: 'pn-sample-3' }),
+      async connect(req) {
+        const n = sampleNumber({ phoneNumberId: req.phoneNumberId, wabaId: req.wabaId, displayPhone: '+20 100 555 0303', onboarding: req.event === 'FINISH' ? 'cloud_api' : 'business_app', registration: req.event === 'FINISH' ? 'registered' : 'not_needed', isOnBizApp: req.event !== 'FINISH', historySync: req.event === 'FINISH' ? null : 'requested', contactsSync: req.event === 'FINISH' ? null : 'requested', connectedAt: Date.now(), syncDeadlineAt: req.event === 'FINISH' ? null : Date.now() + 24 * H });
+        numbers.push(n);
+        return { ...n };
+      },
+      refresh: async (id) => ({ ...Object.assign(num(id), { lastStatusSyncAt: Date.now() }) }),
+      register: async (id) => ({ ...Object.assign(num(id), { status: 'active', registration: 'registered', qualityRating: 'GREEN', messagingLimitTier: 'TIER_250' }) }),
+      disconnect: async (id) => ({ ...Object.assign(num(id), { status: 'disconnected' }) }),
     },
     contacts: {
       async list(q) {

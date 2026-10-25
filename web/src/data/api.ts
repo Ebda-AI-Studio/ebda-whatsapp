@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, campaignDto, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  listContactsResponse, listConversationsResponse, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
+  listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
   realtimeEvent, searchResponse, segmentPreviewDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import type { InboxSource } from './source';
@@ -115,6 +115,16 @@ export function createApiSource(o: Opts): LiveSource {
       segments: async () => (await call('/segments', listSegmentsResponse)).items,
       preview: (criteria) => call('/segments/preview', segmentPreviewDto, { method: 'POST', body: JSON.stringify({ criteria }) }),
     },
+    numbers: {
+      list: async () => (await call('/numbers', listNumbersResponse)).items,
+      async signupConfig() {
+        try { return await call('/numbers/signup-config', signupConfigDto); } catch (e) { if (e instanceof ApiError && (e.status === 503 || e.status === 404 || e.status === 403)) return null; throw e; }
+      },
+      connect: async (req) => (await call('/numbers/connect', z.object({ number: numberDto }).loose(), { method: 'POST', body: JSON.stringify(req) })).number,
+      refresh: async (id) => (await call(`/numbers/${encodeURIComponent(id)}/refresh`, z.object({ number: numberDto }).loose(), { method: 'POST' })).number,
+      register: async (id) => (await call(`/numbers/${encodeURIComponent(id)}/register`, z.object({ number: numberDto }).loose(), { method: 'POST' })).number,
+      disconnect: async (id) => (await call(`/numbers/${encodeURIComponent(id)}/disconnect`, z.object({ number: numberDto }).loose(), { method: 'POST' })).number,
+    },
     contacts: {
       async list(q) {
         const p = new URLSearchParams({ limit: '50' });
@@ -162,7 +172,7 @@ export function createApiSource(o: Opts): LiveSource {
     async loadCapabilities() {
       try {
         const me = await call('/me', meResponse.partial().loose());
-        source.capabilities = { codOutcome: me.capabilities?.codOutcome === true };
+        source.capabilities = { codOutcome: me.capabilities?.codOutcome === true, numbers: me.capabilities?.numbers === true };
         if (me.role) source.role = me.role;
       } catch {
         source.capabilities = { codOutcome: false };

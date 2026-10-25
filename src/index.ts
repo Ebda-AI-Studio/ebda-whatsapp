@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/cloudflare';
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { selectVerifier } from './identity-select';
+import { signupEnabled } from './core/numbers/numbers';
 import { verifyMetaSignature } from './core/meta/signature';
 import { extractCoexistence, extractEvents, extractNameUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
@@ -92,7 +93,7 @@ const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
 api.get('/stores/:storeId/me', (c) => {
   const p = c.get('principal');
-  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null } });
+  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env) } });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   const role = c.get('storeRole');

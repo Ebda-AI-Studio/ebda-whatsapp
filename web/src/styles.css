@@ -190,10 +190,10 @@ textarea { caret-color: var(--gold-ink); }
 @media (max-width: 819px) {
   :root { --rail: 0px; }
   .app { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
-  .rail { grid-row: 2; flex-direction: row; justify-content: center; gap: 8px; padding: 6px 12px calc(6px + env(safe-area-inset-bottom)); }
+  .rail { grid-row: 2; flex-direction: row; justify-content: center; gap: 4px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
   .rail-mark { display: none; }
   .list-pane, .center, .screen { grid-row: 1; }
-  .rail a { width: auto; min-width: 88px; min-height: 52px; }
+  .rail a { width: auto; flex: 1 1 0; min-width: 0; max-width: 96px; min-height: 52px; font-size: 11px; text-align: center; line-height: 1.2; }
   .app[data-view='chat'] .rail { display: none; }
   .app[data-view='chat'] { grid-template-rows: 1fr; }
   .app[data-view='chat'] .list-pane, .app[data-view='list'] .center { display: none; }
@@ -336,3 +336,22 @@ textarea { caret-color: var(--gold-ink); }
 .link-btn { justify-self: start; border: 0; background: none; padding: 6px 0; min-height: 32px; color: var(--gold-ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 13px; }
 @media (max-width: 1199px) { .contacts-layout { grid-template-columns: 1fr; } .import-panel { position: static; } }
 @media (max-width: 819px) { .param-row { grid-template-columns: 1fr; } .step > select, .field.inset { margin-inline-start: 0; } .head-action span, .head-action { font-size: 14px; } }
+/* Numbers + getting-started checklist (Phase 8.4) */
+.numbers-layout { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; gap: 24px; }
+.numbers-main { display: grid; gap: 12px; }
+.numbers-main .intro { max-width: 65ch; margin: 0; font-size: 14px; }
+.number-card { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; display: grid; gap: 8px; }
+.number-card h2 { font-size: 16px; font-weight: 500; margin: 0; }
+.number-card p { margin: 0; }
+.number-card .flag { justify-self: start; }
+.number-meta { font-size: 13px; }
+.checklist { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; position: sticky; top: 84px; }
+.checklist h2 { font-size: 16px; font-weight: 500; margin: 0 0 8px; }
+.checklist ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.checklist li { display: grid; grid-template-columns: 20px 1fr auto; gap: 10px; align-items: center; min-height: 44px; font-size: 14px; border-bottom: 1px solid var(--line); }
+.checklist li:last-child { border-bottom: 0; }
+.checklist .step-icon { color: var(--line-strong); }
+.checklist li[data-done='true'] .step-icon { color: var(--ok); }
+.checklist li[data-done='true'] .step-label { color: var(--ink-2); }
+.checklist a { color: var(--gold-ink); font-size: 13px; text-underline-offset: 3px; padding: 8px 0; }
+@media (max-width: 1199px) { .numbers-layout { grid-template-columns: 1fr; } .checklist { position: static; } }

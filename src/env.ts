@@ -42,6 +42,8 @@ export type Env = {
   EMBEDDED_SIGNUP_ENABLED?: string;
   /** The Meta app id (Embedded Signup code exchange). Required while the switch is on. */
   META_APP_ID?: string;
+  /** Public: the Facebook Login for Business configuration for WhatsApp Embedded Signup (v4+). */
+  EMBEDDED_SIGNUP_CONFIG_ID?: string;
   /** Base64 of 32 random bytes: encrypts business tokens and registration PINs (AES-GCM). Required while the switch is on. */
   TOKEN_ENC_KEY?: string;
   COMMIT_SHA?: string;

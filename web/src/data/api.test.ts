@@ -63,7 +63,17 @@ describe('createApiSource', () => {
     const { f } = fetchStub({ '/me': () => ({ status: 200, body: { userId: 'u', storeId: STORE, role: 'owner', capabilities: { codOutcome: true } } }) });
     const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
     await src.loadCapabilities();
-    expect(src.capabilities).toEqual({ codOutcome: true });
+    expect(src.capabilities).toEqual({ codOutcome: true, numbers: false });
+    expect(src.role).toBe('owner');
+  });
+
+  it('reads the numbers capability and the role from /me; staff until /me answers', async () => {
+    const { f } = fetchStub({ '/me': () => ({ status: 200, body: { userId: 'u', storeId: STORE, role: 'staff', capabilities: { codOutcome: false, numbers: true } } }) });
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    expect(src.role).toBe('staff');
+    await src.loadCapabilities();
+    expect(src.capabilities.numbers).toBe(true);
+    expect(src.role).toBe('staff');
   });
 
   it('keeps COD outcomes off when /me says nothing or fails', async () => {

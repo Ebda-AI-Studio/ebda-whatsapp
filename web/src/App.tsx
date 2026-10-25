@@ -7,6 +7,7 @@ import { Rail, type View } from './components/Rail';
 import { AgentScreen } from './components/AgentScreen';
 import { CampaignsScreen } from './components/CampaignsScreen';
 import { ContactsScreen } from './components/ContactsScreen';
+import { NumbersScreen } from './components/NumbersScreen';
 import type { ConversationFilter, InboxSource } from './data/source';
 import { STRINGS, type Lang } from './i18n';
 
@@ -188,9 +189,10 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
 
   return (
     <div className="app" data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
-      <Rail t={t} view={view} onNavigate={setView} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings }} />
+      <Rail t={t} view={view} onNavigate={setView} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, numbers: !!source.numbers && source.capabilities.numbers === true }} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} />
+        : view === 'numbers' && source.numbers ? <NumbersScreen t={t} lang={lang} source={source} api={source.numbers} />
         : view === 'contacts' && source.contacts ? <ContactsScreen t={t} lang={lang} source={source} api={source.contacts} now={now} /> : (
         <>
       <ConversationList t={t} lang={lang} now={now()} items={items} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} onFilter={setFilter} onQuery={setQuery} onOpen={open} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} />

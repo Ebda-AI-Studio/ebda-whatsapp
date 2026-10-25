@@ -273,3 +273,21 @@ it('generatePin always gives six digits', () => {
   expect(pins.every((p) => /^\d{6}$/.test(p))).toBe(true);
   expect(new Set(pins).size).toBeGreaterThan(250);
 });
+
+it('gives the owner the public Meta ids the page needs to launch Embedded Signup; staff and a missing config id are refused', async () => {
+  const owner = await apiFor(W(530));
+  const res = await owner.call('GET', '/numbers/signup-config');
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ appId: 'app-1', configId: 'cfg-1', graphVersion: env.META_GRAPH_VERSION });
+  const staff = await apiFor(W(530), 'staff');
+  expect((await staff.call('GET', '/numbers/signup-config')).status).toBe(403);
+  const noCfg = await worker.fetch(new Request(`https://x/api/v1/stores/${W(530)}/numbers/signup-config`, { headers: { authorization: `Bearer ${owner.token}` } }), { ...env, EMBEDDED_SIGNUP_CONFIG_ID: undefined } as typeof env, createExecutionContext());
+  expect(noCfg.status).toBe(503);
+});
+
+it('/me tells the page whether connecting a number is open', async () => {
+  const api = await apiFor(W(531));
+  expect(await (await api.call('GET', '/me')).json()).toMatchObject({ capabilities: { numbers: true } });
+  const off = await worker.fetch(new Request(`https://x/api/v1/stores/${W(531)}/me`, { headers: { authorization: `Bearer ${api.token}` } }), { ...env, EMBEDDED_SIGNUP_ENABLED: '0' } as typeof env, createExecutionContext());
+  expect(await off.json()).toMatchObject({ capabilities: { numbers: false } });
+});
