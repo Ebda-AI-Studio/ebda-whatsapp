@@ -22,7 +22,7 @@ CREATE TABLE refund_requests (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),
   amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
   note TEXT,
-  state TEXT NOT NULL CHECK (state IN ('pending', 'rejected', 'processing', 'paid', 'manual_payout', 'failed', 'abandoned')),
+  state TEXT NOT NULL CHECK (state IN ('pending', 'rejected', 'processing', 'paid', 'manual_payout', 'failed', 'abandoning', 'abandoned')),
   requested_by TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   decided_by TEXT,

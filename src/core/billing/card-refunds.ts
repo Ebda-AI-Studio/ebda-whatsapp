@@ -69,10 +69,12 @@ const ROOM = `coalesce((SELECT t.amount_minor - t.refunded_minor FROM topups t W
  * concurrent run just moved to `calling` is never failed); `busy` = another run owns it (or the room changed under us: nothing is sent, nothing
  * is failed, and the row stays open for a person).
  */
-export async function claimForCall(env: Env, id: string, now: number): Promise<'claimed' | 'busy' | 'over'> {
-  const claimed = await env.DB.prepare(`UPDATE card_refunds SET state = 'calling', updated_at = ?1 WHERE id = ?2 AND state = 'sending' AND ${ROOM} >= card_refunds.amount_minor`).bind(now, id).run();
+export async function claimForCall(env: Env, id: string, now: number, token?: string): Promise<'claimed' | 'busy' | 'over'> {
+  // A run may send a row only while its request is still `processing` under THIS run's lease: an abandon (or a resume that took the lease over) stops a stale run here.
+  const mine = token === undefined ? '' : " AND EXISTS (SELECT 1 FROM refund_requests q WHERE q.id = card_refunds.request_id AND q.state = 'processing' AND q.claimed_by = ?3)";
+  const claimed = await env.DB.prepare(`UPDATE card_refunds SET state = 'calling', updated_at = ?1 WHERE id = ?2 AND state = 'sending'${mine} AND ${ROOM} >= card_refunds.amount_minor`).bind(...(token === undefined ? [now, id] : [now, id, token])).run();
   if (claimed.meta.changes === 1) return 'claimed';
-  const over = await env.DB.prepare(`UPDATE card_refunds SET state = 'failed', updated_at = ?1 WHERE id = ?2 AND state = 'sending' AND ${ROOM} < card_refunds.amount_minor`).bind(now, id).run();
+  const over = await env.DB.prepare(`UPDATE card_refunds SET state = 'failed', updated_at = ?1 WHERE id = ?2 AND state = 'sending'${mine} AND ${ROOM} < card_refunds.amount_minor`).bind(...(token === undefined ? [now, id] : [now, id, token])).run();
   if (over.meta.changes !== 1) return 'busy';
   const row = await getCardRefund(env, id);
   if (row?.request_id) await refreshRequest(env, row.request_id);
@@ -80,8 +82,14 @@ export async function claimForCall(env: Env, id: string, now: number): Promise<'
 }
 
 /** Marks the approval's debit phase finished (every wallet chunk posted and every card refund row written). */
-export async function completeDebitPhase(env: Env, requestId: string): Promise<void> {
-  await env.DB.prepare("UPDATE refund_requests SET debit_complete = 1 WHERE id = ? AND state = 'processing'").bind(requestId).run();
+export async function completeDebitPhase(env: Env, requestId: string, token: string): Promise<boolean> {
+  const r = await env.DB.prepare("UPDATE refund_requests SET debit_complete = 1 WHERE id = ? AND state = 'processing' AND claimed_by = ?").bind(requestId, token).run();
+  return r.meta.changes === 1;
+}
+
+/** True while this run still holds the request: `processing` under its own lease token (an abandon or a takeover makes it false). */
+export async function holdsRequest(env: Env, requestId: string, token: string): Promise<boolean> {
+  return !!(await env.DB.prepare("SELECT 1 AS x FROM refund_requests WHERE id = ? AND state = 'processing' AND claimed_by = ?").bind(requestId, token).first());
 }
 
 const markConfirmed = (env: Env, id: string, now: number) => env.DB.prepare('UPDATE card_refunds SET confirmed_at = ? WHERE id = ? AND confirmed_at IS NULL').bind(now, id).run();
@@ -413,42 +421,71 @@ export type AbandonResult =
 
 /**
  * Abandons a refund request whose approval was cut short (`processing`, wallet debits not complete). Two operators: the first asks, a
- * DIFFERENT one confirms. Confirming (1) takes the request's lease so no run can resume it, (2) refuses if any card refund row may have sent
- * money (calling, succeeded, uncertain, pending, linked), (3) credits back, once, each wallet chunk that was really posted
- * (`refund:<id>:<n>` -> an `adjustment` with the idempotent ref `refund-reversal:<id>:<n>`), (4) closes the planned and sending rows, and only
- * then (5) flips the request to `abandoned`. Money first, flip last: a crash anywhere is finished by the same call. A repeat is a no-op.
+ * DIFFERENT one confirms. Confirming:
+ *  1. ONE compare-and-swap moves the request `processing` -> `abandoning` under a fresh lease token (a live run, or a concurrent abandon, makes it
+ *     `in_progress`). From then on no resume can claim it, and a run holding an older lease can neither post a chunk nor send a row.
+ *  2. The safety read comes AFTER that: any row calling / succeeded / uncertain / pending / linked means money may have left, and the request
+ *     goes back to `processing` untouched.
+ *  3. The planned and sending rows are failed by guarded UPDATEs (each marked `abandoned:<id>`); if one no longer moves (another run got it to
+ *     calling first) the abandon stops the same way as in 2.
+ *  4. Only the chunks that were really posted AND whose rows this abandon moved (or that never had a row) are credited back, once each
+ *     (`refund-reversal:<id>:<n>`, an `adjustment`).
+ *  5. `abandoning` -> `abandoned`, audited. A crash anywhere is finished by repeating the call (it takes the lease over once it expired).
  */
 export async function abandonRefundRequest(env: Env, a: { id: string; actor: string }, now = Date.now()): Promise<AbandonResult> {
-  const req = await env.DB.prepare('SELECT id, workspace_id, state, debit_complete, lease_until, abandon_requested_by FROM refund_requests WHERE id = ?')
-    .bind(a.id).first<{ id: string; workspace_id: string; state: string; debit_complete: number; lease_until: number | null; abandon_requested_by: string | null }>();
+  const req = await env.DB.prepare('SELECT id, workspace_id, state, debit_complete, abandon_requested_by FROM refund_requests WHERE id = ?')
+    .bind(a.id).first<{ id: string; workspace_id: string; state: string; debit_complete: number; abandon_requested_by: string | null }>();
   if (!req) return { ok: false, reason: 'not_found' };
   if (req.state === 'abandoned') return { ok: true, already: true };
-  if (req.state !== 'processing' || req.debit_complete !== 0) return { ok: false, reason: 'not_abandonable' };
+  if (req.state !== 'abandoning' && (req.state !== 'processing' || req.debit_complete !== 0)) return { ok: false, reason: 'not_abandonable' };
   if (req.abandon_requested_by === null) {
     const first = await env.DB.prepare("UPDATE refund_requests SET abandon_requested_by = ?, abandon_requested_at = ? WHERE id = ? AND abandon_requested_by IS NULL AND state = 'processing' AND debit_complete = 0").bind(a.actor, now, a.id).run();
     if (first.meta.changes) return { ok: true, needsSecond: true };
     return abandonRefundRequest(env, a, now);
   }
-  if (req.abandon_requested_by === a.actor) return { ok: false, reason: 'second_approver_required' };
-  const { results: rows } = await env.DB.prepare('SELECT id, state FROM card_refunds WHERE request_id = ?').bind(a.id).all<{ id: string; state: string }>();
-  if (rows.some((r) => !['planned', 'sending', 'failed'].includes(r.state))) return { ok: false, reason: 'money_may_have_left' };
-  // The lease: a live run (or a concurrent abandon) blocks it; an expired one is taken over.
+  if (req.abandon_requested_by === a.actor && req.state === 'processing') return { ok: false, reason: 'second_approver_required' };
+  // 1. the compare-and-swap
   const token = crypto.randomUUID();
-  const lease = await env.DB.prepare("UPDATE refund_requests SET claimed_by = ?, lease_until = ? WHERE id = ? AND state = 'processing' AND debit_complete = 0 AND (lease_until IS NULL OR lease_until < ?)").bind(token, now + 5 * 60_000, a.id, now).run();
-  if (!lease.meta.changes) return { ok: false, reason: 'in_progress' };
+  const cas = await env.DB.prepare(
+    "UPDATE refund_requests SET state = 'abandoning', claimed_by = ?, lease_until = ? WHERE id = ? AND ((state = 'processing' AND debit_complete = 0) OR state = 'abandoning') AND (lease_until IS NULL OR lease_until < ?)",
+  ).bind(token, now + 5 * 60_000, a.id, now).run();
+  if (cas.meta.changes !== 1) {
+    const cur = await env.DB.prepare('SELECT state FROM refund_requests WHERE id = ?').bind(a.id).first<{ state: string }>();
+    return cur?.state === 'abandoned' ? { ok: true, already: true } : { ok: false, reason: 'in_progress' };
+  }
+  const back = async (reason: 'money_may_have_left'): Promise<AbandonResult> => {
+    await env.DB.prepare("UPDATE refund_requests SET state = 'processing', claimed_by = NULL, lease_until = NULL WHERE id = ? AND state = 'abandoning' AND claimed_by = ?").bind(a.id, token).run();
+    return { ok: false, reason };
+  };
+  // 2. the safety read, after the swap
+  const { results: rows } = await env.DB.prepare('SELECT id, state, note FROM card_refunds WHERE request_id = ?').bind(a.id).all<{ id: string; state: string; note: string | null }>();
+  const mine = `abandoned:${a.id}`;
+  if (rows.some((r) => !['planned', 'sending', 'failed'].includes(r.state))) return back('money_may_have_left');
+  // 3. fail the open rows, each by a guarded UPDATE
+  for (const r of rows.filter((x) => x.state === 'planned' || x.state === 'sending')) {
+    const moved = await env.DB.prepare("UPDATE card_refunds SET state = 'failed', note = ?, updated_at = ? WHERE id = ? AND state IN ('planned', 'sending')").bind(mine, now, r.id).run();
+    if (moved.meta.changes !== 1) return back('money_may_have_left');
+  }
+  // 4. reverse only what was posted and whose row this abandon closed (or that never had one)
+  const closed = new Set((await env.DB.prepare('SELECT id FROM card_refunds WHERE request_id = ? AND note = ?').bind(a.id, mine).all<{ id: string }>()).results.map((r) => r.id));
+  const hasRow = new Set(rows.map((r) => r.id));
   const { results: chunks } = await env.DB.prepare('SELECT n, amount_minor FROM refund_chunks WHERE request_id = ? ORDER BY n').bind(a.id).all<{ n: number; amount_minor: number }>();
   const stub = stubOf(env, req.workspace_id);
   const posted = new Set(await stub.walletRefsPresent(chunks.map((c) => `refund:${a.id}:${c.n}`)));
+  let reversed = 0;
   for (const c of chunks) {
     if (!posted.has(`refund:${a.id}:${c.n}`)) continue; // never debited: nothing to give back
+    const rowId = `cr:${a.id}:${c.n}`;
+    if (hasRow.has(rowId) && !closed.has(rowId)) continue; // a row this abandon did not close is not ours to reverse
     const r = await stub.postWallet({ kind: 'adjustment', netMinor: c.amount_minor, ref: `refund-reversal:${a.id}:${c.n}`, actor: a.actor, note: `refund request ${a.id} abandoned: chunk ${c.n} returned` }, now);
     if (!r.ok && r.reason !== 'duplicate') throw new Error(`refund reversal refused: ${r.reason}`);
+    reversed++;
   }
-  await env.DB.prepare("UPDATE card_refunds SET state = 'failed', updated_at = ? WHERE request_id = ? AND state IN ('planned', 'sending')").bind(now, a.id).run();
-  const done = await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', card_refunded_minor = 0, manual_minor = 0, claimed_by = NULL, lease_until = NULL WHERE id = ? AND state = 'processing' AND debit_complete = 0 AND claimed_by = ?").bind(a.id, token).run();
+  // 5. finish
+  const done = await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', card_refunded_minor = 0, manual_minor = 0, claimed_by = NULL, lease_until = NULL WHERE id = ? AND state = 'abandoning' AND claimed_by = ?").bind(a.id, token).run();
   if (done.meta.changes) {
     await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_abandoned', ?, ?, ?, ?)")
-      .bind(now, a.actor, req.workspace_id, JSON.stringify({ requestedBy: req.abandon_requested_by }), JSON.stringify({ reversedChunks: [...posted].length }), a.id).run();
+      .bind(now, a.actor, req.workspace_id, JSON.stringify({ requestedBy: req.abandon_requested_by }), JSON.stringify({ reversedChunks: reversed }), a.id).run();
   }
   return { ok: true };
 }

@@ -452,7 +452,7 @@ export const refundRequestCreate = z.object({ amountMinor: z.number().int().min(
 /** An operator refunded the card in the provider's dashboard to pay a manual payout and links that refund to the request. `orderId` (the top-up) is optional. */
 export const refundDashboardLink = z.object({ kashierRefundId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/), amountMinor: z.number().int().positive(), orderId: z.string().min(1).max(64).optional() });
 export const refundRequestDto = z.object({
-  id: z.string(), workspaceId: z.string(), amountMinor: z.number().int(), note: z.string().nullable(), state: z.enum(['pending', 'rejected', 'processing', 'paid', 'manual_payout', 'failed', 'abandoned']),
+  id: z.string(), workspaceId: z.string(), amountMinor: z.number().int(), note: z.string().nullable(), state: z.enum(['pending', 'rejected', 'processing', 'paid', 'manual_payout', 'failed', 'abandoning', 'abandoned']),
   requestedBy: z.string(), createdAt: z.number().int(), decidedBy: z.string().nullable(), decidedAt: z.number().int().nullable(), decisionNote: z.string().nullable(),
   cardRefundedMinor: z.number().int(), manualMinor: z.number().int(),
 });

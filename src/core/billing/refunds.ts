@@ -14,7 +14,7 @@
 import type { Env } from '../../env';
 import type { z } from 'zod';
 import type { refundRequestDto } from '../api/contract';
-import { claimForCall, completeDebitPhase, openCardRefund, refreshRequest, settleCardRefund } from './card-refunds';
+import { claimForCall, completeDebitPhase, holdsRequest, openCardRefund, refreshRequest, settleCardRefund } from './card-refunds';
 import { paymentProvider, refundsEnabled } from './payments';
 
 export type RefundRequestDto = z.infer<typeof refundRequestDto>;
@@ -128,6 +128,8 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
   // aborts (the balance shrank), nothing was sent to the provider, the request stays `processing` with no manual amount (money that was never
   // debited is never offered for payout), a P1 alert asks a person to look, and the run can be repeated (the plan and the refs are fixed).
   for (const c of chunks) {
+    // A run whose lease was taken over (or whose request was abandoned) must not post anything.
+    if (!(await holdsRequest(env, a.id, token))) return { ok: false, reason: 'not_pending' };
     const posted = await stub.postWallet({ kind: 'refund', netMinor: -c.amount_minor, ref: `refund:${a.id}:${c.n}`, actor: a.actor, note: c.order_id ? `refund of top-up ${c.order_id}` : 'refund beyond card top-ups (bank/InstaPay)' }, now);
     if (!posted.ok && posted.reason !== 'duplicate') {
       await release();
@@ -138,7 +140,7 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     // refund instead of being booked as a second debit. Kashier documents no idempotency key, so the call is made once per row.
     if (c.kind === 'card') await openCardRefund(env, { id: `cr:${a.id}:${c.n}`, requestId: a.id, orderId: c.order_id!, workspaceId: req.workspace_id, amountMinor: c.amount_minor }, now);
   }
-  await completeDebitPhase(env, a.id);
+  if (!(await completeDebitPhase(env, a.id, token))) return { ok: false, reason: 'not_pending' };
 
   // PHASE 2, the provider: each row is sent by the one run that wins the guarded sending -> calling flip, with the amount and transaction RECORDED for it.
   const { results: rows } = await env.DB.prepare("SELECT id, amount_minor FROM card_refunds WHERE request_id = ? AND source = 'api' AND state = 'sending' ORDER BY id").bind(a.id).all<{ id: string; amount_minor: number }>();
@@ -147,8 +149,8 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     const c = chunks.find((x) => x.n === n);
     if (!c || !c.transaction_id) continue;
     if (!provider) { await settleCardRefund(env, row.id, { to: 'failed' }, now); continue; } // the switch went off since the plan: nothing was sent, a manual payout
-    const claim = await claimForCall(env, row.id, now);
-    if (claim === 'busy') continue; // another run owns this row
+    const claim = await claimForCall(env, row.id, now, token);
+    if (claim === 'busy') continue; // another run owns this row, or this run lost its lease
     if (claim === 'over') {
       // The top-up no longer has room for this refund (another approval's refunds came first): nothing is sent, it becomes a manual payout.
       console.error(JSON.stringify({ alert: 'card_refund_over_refundable', severity: 'P1', requestId: a.id, workspace: req.workspace_id, cardRefundId: row.id, amountMinor: row.amount_minor }));

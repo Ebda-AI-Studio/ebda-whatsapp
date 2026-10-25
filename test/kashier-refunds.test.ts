@@ -854,6 +854,7 @@ describe('abandoning a partly debited refund request (two operators, money back 
     return a;
   }
   const abandon = (id: string, actor: string, e: typeof env = env) => abandonRefundRequest(e, { id, actor });
+  const answerAmounts = () => { refundAnswer = async () => refundOk(`TX-RF-AB-${puts().length}`, puts().length === 1 ? 20000 : 5000); };
 
   it('first operator asks, a DIFFERENT operator confirms: the wallet chunks that were really posted come back exactly once, open rows close, the request is abandoned and audited', async () => {
     const a = await partlyDebited(90);
@@ -883,7 +884,7 @@ describe('abandoning a partly debited refund request (two operators, money back 
       const v = Reflect.get(t, p) as unknown; return typeof v === 'function' ? v.bind(t) : v;
     } }) } as typeof env;
     await expect(abandon(a.id, OP2, flaky)).rejects.toThrow();
-    expect(await req(a.id)).toMatchObject({ state: 'processing' });
+    expect(await req(a.id)).toMatchObject({ state: 'abandoning' }); // no resume can claim it now
     await env.DB.prepare('UPDATE refund_requests SET lease_until = NULL, claimed_by = NULL WHERE id = ?').bind(a.id).run();
     expect(await abandon(a.id, OP2)).toEqual({ ok: true });
     expect((await kinds(a.ws)).filter((k) => k[0] === 'adjustment')).toEqual([['adjustment', 20000]]);
@@ -923,6 +924,62 @@ describe('abandoning a partly debited refund request (two operators, money back 
     expect((await operatorCall(OP1, 'POST', `/refund-requests/${a.id}/abandon`, {})).status).toBe(409);
     expect((await operatorCall(OP2, 'POST', `/refund-requests/${a.id}/abandon`, {})).status).toBe(200);
     expect(await req(a.id)).toMatchObject({ state: 'abandoned' });
+  });
+
+  it('HIGH: abandon racing a resume ends in exactly one outcome: the refund is sent and nothing is reversed, or the wallet is reversed and nothing is sent', async () => {
+    const a = await partlyDebited(100);
+    answerAmounts();
+    await abandon(a.id, OP1);
+    const [ab, rs] = await Promise.all([abandon(a.id, OP2), decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 })]);
+    const reversed = (await ledger(a.ws)).some((r) => r.ref.startsWith('refund-reversal:'));
+    const sent = puts().length;
+    expect(reversed && sent > 0).toBe(false); // never both
+    expect(reversed || sent > 0).toBe(true); // one of them happened
+    if (reversed) { expect(ab).toMatchObject({ ok: true }); expect(rs.ok).toBe(false); expect(await req(a.id)).toMatchObject({ state: 'abandoned' }); }
+    else { expect(ab).toMatchObject({ ok: false }); expect(rs.ok).toBe(true); }
+  });
+
+  it('HIGH: a run holding a stale lease cannot post a chunk or send a row after the abandon took over', async () => {
+    const a = await partlyDebited(101);
+    answerAmounts();
+    await abandon(a.id, OP1);
+    let release!: () => void;
+    const gate = new Promise<void>((res) => { release = res; });
+    let held = false;
+    const slow = { ...env, DB: new Proxy(env.DB, { get(t, p) {
+      if (p === 'prepare') return (sql: string) => {
+        const st = t.prepare(sql);
+        if (!held && sql.includes('FROM refund_chunks WHERE request_id')) { held = true; return { bind: (...b: unknown[]) => ({ all: async () => { await gate; return st.bind(...b).all(); } }) } as never; }
+        return st;
+      };
+      const v = Reflect.get(t, p) as unknown; return typeof v === 'function' ? v.bind(t) : v;
+    } }) } as typeof env;
+    const stale = decideRefund(slow, { id: a.id, decision: 'approve', actor: OP1 }); // claims the lease, then waits before posting
+    await new Promise((r) => setTimeout(r, 20));
+    await env.DB.prepare('UPDATE refund_requests SET lease_until = 1 WHERE id = ?').bind(a.id).run(); // its lease ran out
+    expect(await abandon(a.id, OP2)).toEqual({ ok: true });
+    release();
+    expect((await stale).ok).toBe(false);
+    expect(puts()).toEqual([]);
+    expect((await kinds(a.ws)).filter((k) => k[0] === 'refund')).toEqual([['refund', -20000]]); // nothing new was debited
+    expect(await req(a.id)).toMatchObject({ state: 'abandoned' });
+    expect((await kinds(a.ws)).filter((k) => k[0] === 'adjustment')).toEqual([['adjustment', 20000]]);
+  });
+
+  it('HIGH: a row that moves to calling after the safety read is not reversed: the abandon stops, the request goes back to processing and nothing is credited for it', async () => {
+    const a = await partlyDebited(102);
+    await abandon(a.id, OP1);
+    let flipped = false;
+    const racing = { ...env, DB: new Proxy(env.DB, { get(t, p) {
+      if (p === 'prepare') return (sql: string) => {
+        if (!flipped && sql.includes("SET state = 'failed'") && sql.includes('card_refunds')) { flipped = true; return { bind: (...b: unknown[]) => ({ run: async () => { await t.prepare("UPDATE card_refunds SET state = 'calling' WHERE request_id = ? AND state IN ('planned', 'sending')").bind(a.id).run(); return t.prepare(sql).bind(...b).run(); } }) } as never; }
+        return t.prepare(sql);
+      };
+      const v = Reflect.get(t, p) as unknown; return typeof v === 'function' ? v.bind(t) : v;
+    } }) } as typeof env;
+    expect(await abandon(a.id, OP2, racing)).toEqual({ ok: false, reason: 'money_may_have_left' });
+    expect((await kinds(a.ws)).filter((k) => k[0] === 'adjustment')).toEqual([]);
+    expect(await req(a.id)).toMatchObject({ state: 'processing' });
   });
 });
 
