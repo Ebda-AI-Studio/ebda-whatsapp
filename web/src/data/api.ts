@@ -219,6 +219,11 @@ export function createApiSource(o: Opts): LiveSource {
       decideAdjustment: (id, decision) => op(`/adjustments/${encodeURIComponent(id)}/decision`, adjustmentDto, post({ decision })),
       changeLog: async () => (await op('/change-log?limit=100', items(changeLogItemDto))).items,
     },
+    sharedTemplates: {
+      list: async () => (await op('/shared-templates', listTemplatesResponse)).items,
+      sync: () => op('/shared-templates/sync', z.object({ upserted: z.number(), removed: z.number() }), post({})),
+      submit: (input) => op('/shared-templates', z.object({ status: z.string() }).loose(), post(input)),
+    },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });
       if (!res.ok) throw new ApiError('not_found', res.status);

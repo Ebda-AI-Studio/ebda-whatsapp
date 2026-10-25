@@ -7,6 +7,7 @@ import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
 import { parseRates, parseScaled, toMicros } from '../lib/rates';
 import { dateTime } from './CampaignsScreen';
+import { SharedTemplatesPanel } from './SharedTemplatesPanel';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: OperatorApi; now: () => number };
 type Note = { kind: 'alert' | 'status'; lines: string[] } | null;
@@ -16,7 +17,7 @@ type PanelProps = { t: Strings; lang: Lang; api: OperatorApi; now: () => number;
 const HOUR = 3_600_000;
 const SETTINGS_LEAD_H = 1;
 const RATE_LEAD_H = 24;
-const TABS = ['pricing', 'rates', 'account', 'queues', 'log'] as const;
+const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared'] as const;
 type Tab = (typeof TABS)[number];
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -63,7 +64,7 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
       <div className="settings wide operator-layout">
         <p className="muted intro">{t.opIntro}</p>
         <div className="chips" role="group" aria-label={t.opTitle}>
-          {TABS.map((k) => <button key={k} type="button" className="chip" aria-pressed={tab === k} onClick={() => { setTab(k); setNote(null); }}>{t.opTabs[k]}</button>)}
+          {TABS.filter((k) => k !== 'shared' || source.sharedTemplates).map((k) => <button key={k} type="button" className="chip" aria-pressed={tab === k} onClick={() => { setTab(k); setNote(null); }}>{t.opTabs[k]}</button>)}
         </div>
         {note && <div role={note.kind} className={note.kind === 'alert' ? 'error-text op-note' : 'wallet-ok op-note'}>{note.lines.map((l) => <p key={l}>{l}</p>)}</div>}
         {tab === 'pricing' && <PricingPanel {...panel} />}
@@ -71,6 +72,7 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
         {tab === 'account' && <AccountPanel {...panel} />}
         {tab === 'queues' && <QueuesPanel {...panel} />}
         {tab === 'log' && <LogPanel {...panel} />}
+        {tab === 'shared' && source.sharedTemplates && <SharedTemplatesPanel t={t} lang={lang} api={source.sharedTemplates} run={run} fail={fail} />}
       </div>
     </main>
   );

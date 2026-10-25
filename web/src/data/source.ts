@@ -4,6 +4,7 @@ import type {
 } from '../../../src/core/api/contract';
 
 import type { OperatorApi, WalletApi } from './billing';
+import type { SharedTemplatesApi } from './shared-templates';
 
 export type ConversationFilter = 'all' | 'unread' | 'mine' | 'unassigned';
 export type Role = 'owner' | 'staff' | 'super_admin';
@@ -93,6 +94,8 @@ export interface InboxSource {
   wallet?: WalletApi;
   /** Super-admin console; only offered when `role` is super_admin. */
   operator?: OperatorApi;
+  /** The platform WABA's templates (super admin only, with `operator`). */
+  sharedTemplates?: SharedTemplatesApi;
   /** Called when events were missed beyond repair; the app reloads its list and open chat. */
   onReload?(cb: () => void): () => void;
   /** Realtime events; returns an unsubscribe function. */

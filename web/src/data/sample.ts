@@ -2,6 +2,7 @@ import type {
   AgentSettingsDto, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
+import type { SharedTemplatesApi } from './shared-templates';
 import type { InboxSource } from './source';
 
 // Sample data for preview only (labelled in the UI). Names and orders are invented; no real customers.
@@ -284,6 +285,7 @@ export function createSampleSource(): InboxSource {
     },
     wallet: createSampleWallet(),
     operator: createSampleOperator('u-me'),
+    sharedTemplates: createSampleSharedTemplates(),
     contacts: {
       async list(q) {
         const query = q.q?.trim() ?? '';
@@ -307,5 +309,18 @@ export function createSampleSource(): InboxSource {
       listeners.add(onEvent);
       return () => listeners.delete(onEvent);
     },
+  };
+}
+
+function createSampleSharedTemplates(): SharedTemplatesApi {
+  const items: TemplateDto[] = [
+    { name: 'order_update', language: 'ar', category: 'UTILITY', status: 'APPROVED', bodyText: 'طلبك {{1}} اتحدّث', paramCount: 1, rejectedReason: null },
+    { name: 'weekend_offer', language: 'ar', category: 'MARKETING', status: 'APPROVED', bodyText: 'عرض الويك إند {{1}}', paramCount: 1, rejectedReason: null },
+    { name: 'pending_utility', language: 'ar', category: 'UTILITY', status: 'PENDING', bodyText: 'تذكير {{1}}', paramCount: 1, rejectedReason: null },
+  ];
+  return {
+    list: async () => items.map((t) => ({ ...t })),
+    sync: async () => ({ upserted: items.length, removed: 0 }),
+    submit: async (input) => { items.push({ name: input.name, language: input.language, category: input.category, status: 'PENDING', bodyText: input.components[0]!.text, paramCount: 0, rejectedReason: null }); return { status: 'PENDING' }; },
   };
 }
