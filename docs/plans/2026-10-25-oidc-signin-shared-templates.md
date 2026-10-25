@@ -39,7 +39,12 @@ Branch `feat/oidc-signin-shared-templates`. Binding rules: `CLAUDE.md` and the G
 
 ## Item f: integrator server tokens (product side)
 
-Built against `docs/contracts/identity-v1.3-integrator-tokens.md` on `origin/docs/identity-v1.3-integrator-tokens` (the current revision is read when f starts and recorded in the ledger), behind `INTEGRATOR_TOKENS_ENABLED` (default off; off = any `client:true` or role `integration` token is 401). Detailed in an addendum to this plan when f starts.
+Built against `docs/contracts/identity-v1.3-integrator-tokens.md` on `origin/docs/identity-v1.3-integrator-tokens`, **draft r2 (commit 00002d0), not yet approved**, behind `INTEGRATOR_TOKENS_ENABLED` (default off; off = any `client:true` or role `integration` token is 401).
+- `verify(token, { integratorTokens })`: strict client-token schema (sub = sid = `cli_…`, one store with role `integration`, `client: true`, a known scope; no `pa`/`auth_time`/`email`); anything that looks like a client token but is not exactly one is 401. The OIDC verifier never accepts one.
+- One map `src/core/identity/scopes.ts` (`METHOD path` to scope | `any` | `person_only`); a request not in the map is 403; a test walks every registered store route.
+- Middleware: revocation check on EVERY integration request (`Accounts.isRevoked(clientId)`, 503 fail closed, 30 s per-isolate cache of "ok" only, BOUNDED-stale), then the gate, then the audit line for writes.
+- Tests: client-token vector accepted; refused for wrong scope, person-only route, missing `client:true`, `pa`, revoked, switch off; route-map walk; cache bound; audit shape.
+- Docs: `docs/site/{ar,en}/whatsapp/api.mdx` "API access for your server" (marked available once enabled), `docs/launch/README.md` switch.
 
 ## Out of scope
 `src/core/billing/*` and the shared-number join path (another agent). `src/core/api/store-events.ts` is frozen.

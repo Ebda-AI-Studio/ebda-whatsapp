@@ -85,6 +85,8 @@ export function createOidcVerifier(cfg: OidcConfig, opts: { fetchJwks?: typeof f
       } catch {
         throw new IdentityError(401, 'invalid token');
       }
+      // Integrator server tokens belong to the suite accounts service; a tenant's own provider never gets them.
+      if (payload.client !== undefined) throw new IdentityError(401, 'client token');
       // An ID token (meant for the browser) is not an API credential, even when its audience matches.
       if (payload.nonce !== undefined || payload.at_hash !== undefined) throw new IdentityError(401, 'id token');
       const userId = claimAt(payload, cfg.userIdClaim);

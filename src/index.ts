@@ -148,6 +148,8 @@ api.route('/', instapayProofRoutes);
 api.route('/', packageRoutes);
 api.route('/', sharedNumberRoutes);
 app.route('/api/v1', api);
+/** The /api/v1 routes, exported so a test can walk them (every store route needs a scope decision in core/identity/scopes.ts). */
+export const apiRoutes = api;
 
 function sameString(a: string, b: string): boolean {
   const x = new TextEncoder().encode(a);

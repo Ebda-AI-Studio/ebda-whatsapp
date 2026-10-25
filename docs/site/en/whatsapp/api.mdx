@@ -32,8 +32,29 @@ Authorization: Bearer <access_token>
 
 `role` is `owner`, `staff` or `super_admin`.
 
-### API access for integrations
-Today the token comes from a person signing in, so the API is used by the Ebda WhatsApp inbox and by tools acting for a signed-in user. Access for your own server, without a person signing in, comes after launch; this page will say how to get it when it is available.
+### API access for your server
+Status: **available once enabled.** This is not live yet. It depends on the sign-in service issuing server tokens (a draft contract that is still being agreed), and on Ebda WhatsApp switching the feature on. Until then, use the sign-in token described above.
+
+The flow, as designed:
+
+1. The **owner** of the store creates an API client in the Ebda AI Studio account settings (a fresh second factor is required). You get a `client_id` (`cli_…`) and a `client_secret` (`ebs_…`). The secret is shown once; store it like a password. Each client belongs to one store and has a fixed list of scopes.
+2. Your server asks the sign-in service for a token with HTTP Basic authentication (`client_id` and `client_secret`): `POST https://accounts.ebda.app/oauth/token` with `grant_type=client_credentials` and `audience=whatsapp`. Never call it from a browser. The answer is an access token that lives 10 minutes; there is no refresh token, so ask again when it expires.
+3. Send it as `Authorization: Bearer <access_token>`, exactly like a person's token.
+
+What such a token can do is limited by its **scope**:
+
+| Scope | Allows |
+|---|---|
+| `conversations:read` | Read conversations, messages, media, search and the event feed |
+| `messages:send` | Send messages and upload media for them |
+| `templates:read` | List templates |
+| `contacts:read` | Read contacts and a contact's orders |
+| `contacts:write` | Change a contact's tags |
+| `campaigns:read` | Read campaigns and saved segments |
+
+Everything else answers `403 forbidden` to a server token: connecting or disconnecting numbers, the wallet, top-ups and refunds, package checkout, staff changes, deleting a contact's data, bot and agent settings, connectors, creating or sending campaigns, and the operator console. A route that is not listed is also `403`.
+
+Good to know: the owner can revoke a client at any time; a revoked client is refused within about 30 seconds. Rotating a secret keeps the old one working for a window the owner chooses. Every write a server token makes is logged with the client id, the store and the scope (never the message text or phone numbers). A server token cannot read or change anything for another store.
 
 ## Errors
 

@@ -19,6 +19,8 @@ export function useApiKey() {
 export const graphStub = (responder?: (call: GraphCall, n: number) => GraphReply, delayMs?: number, before?: (call: GraphCall) => Promise<void> | void) =>
   stubGraph(responder, { jwks: [key.jwk], ...(delayMs ? { delayMs } : {}), ...(before ? { before } : {}) });
 export const jwks = () => [key.jwk];
+/** The signing key `useApiKey` created (for tests that mint other kinds of token). */
+export const apiKey = (): TestKey => key;
 
 /** A registered workspace with an active number, and a fetcher for its /api/v1/stores/:id routes. */
 export async function apiFor(storeId: string, role: 'owner' | 'staff' = 'owner', phoneNumberId = `pn-${storeId}`) {

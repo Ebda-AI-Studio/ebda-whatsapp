@@ -6,6 +6,8 @@ export type Principal = {
   superAdmin: boolean;
   /** When the access token expires (epoch seconds). Long-lived connections must not outlive it. */
   expiresAt: number;
+  /** Set only for an integrator server token (identity contract v1.3 r2): a merchant's own server, never a person. */
+  integration?: { clientId: string; jti: string; scopes: string[] };
 };
 
 export class IdentityError extends Error {
@@ -15,6 +17,9 @@ export class IdentityError extends Error {
 }
 
 export interface IdentityVerifier {
-  /** Resolves the principal or throws IdentityError(401). */
-  verify(token: string): Promise<Principal>;
+  /**
+   * Resolves the principal or throws IdentityError(401). `integratorTokens` is the deployment's switch: while it is false (the default)
+   * any client token (`client` claim or role "integration") is refused.
+   */
+  verify(token: string, opts?: { integratorTokens?: boolean }): Promise<Principal>;
 }
