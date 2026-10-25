@@ -37,7 +37,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       # CI-only: 2 workers (the shared 4.9 GB VM ran out of memory and time with the default pool); local runs keep the default.
-      # scripts/ci-test.mjs: vitest's own verdict, plus a guard for a pool that never exits AFTER printing its summary (PR #7 run 40190537795).
+      # scripts/ci-test.mjs: vitest's own verdict, plus a guard for a pool that never exits after printing its summary (PR #7 run 40190537795)
+      # or after every listed file reported but before the summary (main run 40217314246, PR #11 run 40222548576): per-file marks decide.
       - name: Tests (suite duration reported, to see creep)
         shell: bash
         env:
