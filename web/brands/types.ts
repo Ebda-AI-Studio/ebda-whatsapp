@@ -1,0 +1,16 @@
+/** What the inbox page needs from a brand. Selected at build time: `BRAND=<id> npm run build:web` (default: ebda). */
+export type WebBrand = {
+  id: string;
+  /** Shown in the tab title. */
+  productName: string;
+  /** The rail mark (served from web/brands/<brand>/public) and its accessible name (the company). */
+  mark: { src: string; alt: string; width: number; height: number };
+  /** Apple touch icon path in this brand's public folder, or null for none. */
+  appleTouchIcon: string | null;
+  /** Where the access token comes from (identity contract v1); null for a tenant on its own identity provider (sign-in handled by its portal). */
+  accountsUrl: string | null;
+  /** Where a help guide lives for the interface language (the slug is the docs/help file name without its NN- prefix). Null hides the "How?" links. */
+  helpUrl: ((lang: 'ar' | 'en', slug: string) => string) | null;
+  /** The linked store product, when the brand has one; null hides the store step everywhere. */
+  storeName: string | null;
+};

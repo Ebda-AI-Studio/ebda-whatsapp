@@ -1,0 +1,15 @@
+/* Demo brand: a cool slate + teal world, to show that a client's colours replace the suite's without touching shared CSS. */
+:root {
+  --night: #0f172a;
+  --night-2: #1e293b;
+  --night-line: #334155;
+  --gold: #0f766e;
+  --gold-ink: #115e59;
+  --lift: #5eead4;
+  --gold-hover: #0d9488;
+  --cream: #f8fafc;
+  --sand: #e0f2f1;
+  --sand-2: #f0fdfa;
+  --on-night: #e2e8f0;
+  --on-night-2: #94a3b8;
+}

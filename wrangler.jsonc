@@ -5,16 +5,68 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-24",
   "compatibility_flags": ["nodejs_compat"],
+  // Production host (LAUNCH-SUITE-1). workers.dev stays on until wa.ebda.app is verified live, then goes off (one surface).
   "workers_dev": true,
+  "routes": [{ "pattern": "wa.ebda.app", "custom_domain": true }],
+  "assets": {
+    "directory": "web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/meta/*", "/health", "/t/*"]
+  },
   "observability": { "enabled": true },
-  "vars": { "META_GRAPH_VERSION": "v25.0" },
+  // One daily pass (Phase 7): re-send subscriptions, repair lost top-up webhooks. No cron shorter than a day.
+  "triggers": { "crons": ["17 1 * * *"] },
+  "vars": {
+    "META_GRAPH_VERSION": "v25.0",
+    "IDENTITY_ISSUER": "https://accounts.ebda.app",
+    "IDENTITY_JWKS_URL": "https://accounts.ebda.app/.well-known/jwks.json",
+    "IDENTITY_AUDIENCE": "whatsapp",
+    // This Worker's public origin: tracked campaign links and Store proof links are built on it.
+    "PUBLIC_BASE_URL": "https://wa.ebda.app"
+  },
   "durable_objects": { "bindings": [{ "name": "WORKSPACE_DO", "class_name": "WorkspaceDO" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],
   "d1_databases": [{ "binding": "DB", "database_name": "ebda-wa-platform", "database_id": "80c011f6-b03c-4289-b20a-102aa3ca79ef", "migrations_dir": "migrations/d1" }],
-  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "ebda-wa-media" }],
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "ebda-wa-media" },
+    { "binding": "BACKUPS", "bucket_name": "ebda-wa-backups" }
+  ],
   "queues": {
     "producers": [{ "binding": "SEND_QUEUE", "queue": "ebda-wa-send" }],
     "consumers": [{ "queue": "ebda-wa-send", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-send-dlq" }]
   },
-  "analytics_engine_datasets": [{ "binding": "USAGE", "dataset": "ebda_wa_usage" }]
+  // Workers AI: the AI agent's default model and the knowledge-base embeddings (@cf/baai/bge-m3). Billed to this account.
+  "ai": { "binding": "AI" },
+  "analytics_engine_datasets": [
+    { "binding": "USAGE", "dataset": "ebda_wa_usage" },
+    { "binding": "CI_OUTCOMES", "dataset": "ebda_ci_outcomes" },
+    { "binding": "LINK_CLICKS", "dataset": "ebda_wa_link_clicks" }
+  ],
+  // Phase 6: contact imports (parsed in steps) and campaign broadcasts (paged, paced against the number's tier) run as Workflows.
+  "workflows": [
+    { "name": "ebda-wa-import", "binding": "IMPORT_WORKFLOW", "class_name": "ImportWorkflow" },
+    { "name": "ebda-wa-campaign", "binding": "CAMPAIGN_WORKFLOW", "class_name": "CampaignWorkflow" }
+  ]
+  // ---- Billing (Phase 7). Switches and secrets (see docs/billing.md). TOPUPS_ENABLED stays off until Kashier is configured:
+  //   vars: TOPUPS_ENABLED ("true"), KASHIER_MERCHANT_ID, KASHIER_FEE_BPS, KASHIER_FEE_FIXED_MINOR, ADJUSTMENT_APPROVAL_MINOR, ADJUSTMENT_DAILY_CAP
+  //   secret: KASHIER_API_KEY (`wrangler secret put`); service binding ACCOUNTS is required for top-ups and operator writes (fail closed
+  //   with 503 until it exists). The accounts Worker must be deployed first; then uncomment (RPC: isRevoked(sid) → true for unknown sid):
+  //   "services": [{ "binding": "ACCOUNTS", "service": "ebda-accounts", "entrypoint": "Accounts" }],
+  // Before a platform-paid number sends: publish a rate card + FX through /api/v1/operator and set the number's funding.
+  // ---- AI agent (Phase 5). The knowledge base and the catalog search use a Vectorize index; it does not exist yet, so the binding
+  // stays commented out (a binding to a missing index fails the deploy) and the agent answers without a knowledge base meanwhile.
+  // Create it, then uncomment: `npx wrangler vectorize create ebda-wa-kb --dimensions=1024 --metric=cosine`
+  //   "vectorize": [{ "binding": "VECTORIZE", "index_name": "ebda-wa-kb" }],
+  // Secrets: AGENT_SECRETS_KEY (base64, 32 random bytes; encrypts merchants' own model keys). Var AGENT_MODEL overrides the default Workers AI model.
+  // ---- Own number (Phase 8.1, docs/numbers.md). Var EMBEDDED_SIGNUP_ENABLED="1" turns the /numbers routes on; secrets TOKEN_ENC_KEY (base64, 32 random bytes) and
+  // META_APP_ID are then required (a request answers 503 naming the missing key). META_APP_SECRET and META_SYSTEM_TOKEN are already secrets.
+  // ---- Store link (Phase 4). Left OFF until the Store side exists: a binding to a service or queue that is not
+  // deployed fails the whole deploy. When the Store Worker, `ebda-wa-events` and `ebda-store-events` exist, add:
+  //   "services": [{ "binding": "STORE_BRIDGE", "service": "<store api worker name>", "entrypoint": "WhatsAppBridge" }],
+  //   queues.producers += { "binding": "STORE_EVENTS", "queue": "ebda-store-events" },
+  //   queues.consumers += { "queue": "ebda-wa-events", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-events-dlq" },
+  // and set the PROOF_URL_SECRET secret (wrangler secret put) and the PUBLIC_BASE_URL var (this Worker's public origin).
+  // The accounts service reaches the one-time-code RPC with a service binding whose entrypoint is "WhatsAppOtp". Until then the link is inert: the consumer is never
+  // called, /me reports codOutcome:false and the ordering bot stays silent.
 }

@@ -1,0 +1,198 @@
+---
+title: واجهة HTTP
+section: "Ebda WhatsApp"
+order: 3
+description: واجهة HTTP الخاصة بـ Ebda WhatsApp للمطوّرين اللي بيربطوا أنظمتهم: التوثيق والـ endpoints وشكل الطلبات والردود والأخطاء.
+---
+
+# واجهة HTTP
+
+الرابط الأساسي: `https://wa.ebda.app/api/v1`
+
+كل endpoints المتجر تحت `/stores/{storeId}`. الـ `storeId` هو معرّف متجرك في Ebda Store. كل الطلبات والردود JSON (`content-type: application/json`) إلا لما نقول إنها رفع ملف أو CSV.
+
+## التوثيق
+
+ابعت access token في الهيدر ده:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+- التوكن هو access token (JWT موقّع) بيصدره تسجيل الدخول بتاع Ebda AI Studio (`accounts.ebda.app`). الخدمة بتتحقق من التوقيع والجهة المُصدِرة والجمهور المقصود وعمر التوكن. مفيش مفتاح API ثابت منفصل.
+- التوكن بيحدد المستخدم، والمتاجر اللي ينتمي لها، ودوره في كل متجر: **owner** (صاحب المتجر) أو **staff** (موظف). الطلب على `/stores/{storeId}/...` بينجح بس لو التوكن فيه المتجر ده. غير كده الرد `403 forbidden`.
+- توكن ناقص أو غلط أو منتهي بيرجّع `401 unauthorized`.
+- الـ endpoints المكتوب عليها **للمالك فقط** بترد `403 forbidden` لو المستخدم موظف.
+
+`GET /stores/{storeId}/me` بيرجّع التوكن ده بتاع مين:
+
+```json
+{ "userId": "…", "storeId": "…", "role": "owner", "capabilities": { "codOutcome": true, "numbers": true } }
+```
+
+الـ `role` بتكون `owner` أو `staff` أو `super_admin`.
+
+### الوصول للـ API من أنظمتك
+النهارده التوكن بييجي من شخص بيسجّل دخوله، فالـ API بيستخدمه صندوق رسايل Ebda WhatsApp والأدوات اللي بتشتغل باسم مستخدم مسجّل دخوله. الوصول من السيرفر بتاعك من غير ما حد يسجّل دخول هيكون متاح بعد الإطلاق، والصفحة دي هتشرح إزاي تاخده لما يبقى متاح.
+
+## الأخطاء
+
+كل الأخطاء بنفس الشكل:
+
+```json
+{ "error": "invalid_request", "message": "تفصيل اختياري" }
+```
+
+| `error` | الحالة المعتادة | المعنى |
+|---|---|---|
+| `unauthorized` | 401 | التوكن ناقص أو غلط |
+| `forbidden` | 403 | التوكن مالوش صلاحية على المتجر ده، أو الـ endpoint للمالك فقط |
+| `not_found` | 404 | محادثة أو حملة أو مساحة عمل مش موجودة |
+| `invalid_request` | 400 (و409 مع `no_active_number`) | الطلب مش مطابق للشكل المطلوب. الإرسال من غير رقم متصل بيرد `409` و`message: "no_active_number"` |
+| `window_closed` | 409 | نافذة الـ 24 ساعة اتقفلت: مينفعش غير القوالب |
+| `opted_out` | 409 | العميل أوقف الرسايل |
+| `template_not_approved` | 409 | القالب لسه ما اتعتمدش |
+| `unsupported_media` | 415 | نوع الملف مش مدعوم |
+| `wallet_empty` | 409 | رصيد المحفظة مش كفاية للإرسال |
+| `plan_blocked` و`funding_unknown` و`rate_unavailable` | 409 | الإرسال مرفوض بسبب الباقة أو مصدر التمويل أو التسعير |
+| `rate_limited` | 503 (و429 في اختبار الموصّل) | حالة مؤقتة، زي إن Meta مش متاحة أو إن الإرسال ما اتحطش في الطابور. حاول بعد شوية |
+| `registration_locked` و`number_conflict` و`signup_failed` و`signup_unavailable` | بتختلف | مشاكل في ربط الرقم |
+
+مش كل كود بيرجع من كل endpoint. اعتمد على نص الـ `error` كأنه العقد، والحالة كدليل.
+
+مفيش حد عام لعدد الطلبات موثّق في الكود. اللي بيحدد إنت تقدر تبعت كام: نافذة الـ 24 ساعة، والحد اليومي بتاع الرقم عند Meta، ورصيد المحفظة.
+
+## المحادثات
+
+| الطريقة والمسار | الغرض |
+|---|---|
+| `GET /conversations` | قايمة المحادثات. Query: ‏`filter` ‏(`all` و`unread` و`mine` و`unassigned`، الافتراضي `all`) و`cursor` و`limit` ‏(من 1 لـ 50، الافتراضي 30). بيرجّع `{ items, nextCursor }` |
+| `GET /conversations/{conversationId}/messages` | رسايل المحادثة، الأحدث الأول. Query: ‏`before` ‏(رقم رسالة) و`limit` ‏(من 1 لـ 50، الافتراضي 50). بيرجّع `{ items, nextBefore }` |
+| `GET /messages/{messageId}/body` | النص الكامل للرسالة اللي أطول من 1 كيلوبايت |
+| `POST /conversations/{conversationId}/read` | تعليم المحادثة كمقروءة |
+| `POST /conversations/{conversationId}/assign` | Body ‏`{ "userId": "…" }` أو `{ "userId": null }` لإلغاء الإسناد |
+| `PUT /conversations/{conversationId}/tags` | Body ‏`{ "tags": ["vip"] }`، لحد 10 وسوم، كل وسم من 1 لـ 32 حرف |
+| `GET` و`POST /conversations/{conversationId}/notes` | قايمة الملاحظات، أو إضافة واحدة بـ `{ "text": "…" }` ‏(من 1 لـ 2000 حرف) |
+| `GET /search` | بحث في الرسايل. Query: ‏`q` ‏(من 1 لـ 100 حرف) و`limit` ‏(من 1 لـ 50، الافتراضي 20). بيرجّع `{ items: [{ conversationId, messageId, snippet, at }] }` |
+
+شكل المحادثة:
+
+```json
+{
+  "id": 7,
+  "contact": { "waId": "2010…", "name": "…", "optedOut": false },
+  "lastMessage": { "preview": "…", "direction": "in", "type": "text", "status": null, "at": 1790000000000 },
+  "unread": 2,
+  "assigneeUserId": null,
+  "tags": [],
+  "windowOpenUntil": 1790086400000
+}
+```
+
+`windowOpenUntil` بالميلي ثانية (epoch)، أو `null` لما النافذة مقفولة (قوالب بس). كل الأوقات بالميلي ثانية.
+
+الرسالة فيها: `id` و`clientId` و`wamid` و`direction` ‏(`in` أو `out`) و`type` ‏(`text` و`template` و`interactive` و`image` و`audio` و`video` و`document` و`sticker` و`location` و`order` و`unsupported`) و`text` و`hasLongBody` و`media` ‏(`{ mime, size, url }` أو `null`) و`template` ‏(`{ name, language }` أو `null`) و`status` ‏(`queued` و`claimed` و`accepted` و`sent` و`delivered` و`read` و`failed` و`retry`، أو `null`) و`errorCode` و`at`، واختياريًا `author` ‏(`agent` و`bot` و`staff` و`app`).
+
+## إرسال رسالة
+
+`POST /conversations/{conversationId}/messages`
+
+الـ body بيكون واحد من أربع أنواع. الـ `clientId` هو UUID بتولّده إنت لكل رسالة.
+
+```json
+{ "type": "text", "clientId": "5b1f…", "text": "طلبك في الطريق" }
+```
+
+```json
+{ "type": "template", "clientId": "…", "name": "order_update", "language": "ar", "params": ["A-1042"] }
+```
+
+```json
+{ "type": "interactive", "clientId": "…", "body": "تأكّد الطلب؟", "buttons": [{ "id": "yes", "title": "تأكيد" }] }
+```
+
+```json
+{ "type": "media", "clientId": "…", "uploadId": "…", "caption": "الفاتورة" }
+```
+
+الحدود: `text` من 1 لـ 4096 حرف، و`params` لحد 20، و`interactive` فيها من 1 لـ 3 أزرار (`id` لحد 256 حرف و`title` لحد 20 حرف) و`body` لحد 1024، و`caption` لحد 1024.
+
+الرد `202 Accepted` ومعاه الرسالة. حالة الرسالة بعد كده بتتغير وهي بتتبعت، وتقدر تقراها من قايمة الرسايل. الرسالة الحرة محتاجة نافذة الـ 24 ساعة تكون مفتوحة، وإلا هييجي `window_closed` وتبعت قالب معتمد.
+
+لإرسال ملف، ارفعه الأول بـ `POST /media` ‏(multipart form data، اسم الحقل `file`، والرد `201` بـ `{ uploadId, mime, size, filename }`)، وبعدين ابعت بالـ `uploadId` ده. و`GET /media/{messageId}` بينزّل ملف الرسالة.
+
+`GET /events?after={seq}` بيرجّع `{ items, latestSeq }`: أحداث اللحظة (`message.created` و`message.status` و`conversation.updated`) بعد رقم تسلسلي معين، للاستعلام الدوري أو لتعويض فجوة.
+
+## القوالب
+
+| الطريقة والمسار | الغرض |
+|---|---|
+| `GET /templates` | قايمة القوالب: `{ items: [{ name, language, category, status, bodyText, paramCount, rejectedReason }] }`. الـ `category` ‏`MARKETING` أو `UTILITY` أو `AUTHENTICATION`. والـ `status` ‏`APPROVED` أو `PENDING` أو `REJECTED` أو `PAUSED` أو `DISABLED` |
+| `POST /templates/sync` | سحب القوالب الحالية وحالة مراجعتها من Meta |
+| `POST /templates` | تقديم قالب جديد للمراجعة. **للمالك فقط** |
+| `POST /templates/install-defaults` | تقديم مجموعة القوالب الجاهزة. **للمالك فقط** |
+
+القوالب `APPROVED` بس هي اللي تتبعت.
+
+## جهات الاتصال
+
+| الطريقة والمسار | الغرض |
+|---|---|
+| `GET /contacts` | قايمة جهات الاتصال. Query: ‏`tag` و`optedOut` ‏(`true` أو `false`) و`q` ‏(من 1 لـ 100 حرف) و`cursor` و`limit` ‏(من 1 لـ 100، الافتراضي 50). بيرجّع `{ items, nextCursor }` |
+| `PUT /contacts/{waId}/tags` | Body ‏`{ "tags": [...] }`، لحد 10 |
+| `DELETE /contacts/{waId}` | مسح بيانات عميل. **للمالك فقط** |
+
+جهة الاتصال: `waId` ‏(أرقام من غير `+`) و`name` و`optedOut`، واختياريًا `tags` و`consent` ‏(`{ source, at }` أو `null`، و`null` معناها مفيش موافقة تسويقية مسجّلة) و`lastInboundAt`.
+
+## الحملات
+
+الحملة بتبعت قالب معتمد واحد لجمهور من العملاء اللي وافقوا يستلموا رسايل تسويقية. بتتوزع على حسب حد الرقم عند Meta وتقدر توقفها.
+
+| الطريقة والمسار | الغرض |
+|---|---|
+| `GET /campaigns` | القايمة. Query: ‏`status` ‏(`draft` و`scheduled` و`running` و`paused` و`completed` و`cancelled`) و`cursor` و`limit` ‏(من 1 لـ 50، الافتراضي 20). بيرجّع `{ items, nextCursor }` |
+| `POST /campaigns` | إنشاء مسودة. **للمالك فقط** |
+| `GET /campaigns/{campaignId}` | حملة واحدة بأعدادها وإجمالياتها وتقدير التكلفة |
+| `DELETE /campaigns/{campaignId}` | حذف. **للمالك فقط** |
+| `POST /campaigns/{campaignId}/send` | تشغيل دلوقتي، أو في `scheduledAt`. الرد `202`. **للمالك فقط** |
+| `POST /campaigns/{campaignId}/pause` | إيقاف مؤقت (الموظف يقدر) |
+| `POST /campaigns/{campaignId}/resume` | استئناف. **للمالك فقط** لأنه بيصرف فلوس تاني |
+| `POST /campaigns/{campaignId}/cancel` | إلغاء (الموظف يقدر) |
+
+الـ body بتاع الإنشاء:
+
+```json
+{
+  "name": "عرض العيد",
+  "template": { "name": "eid_offer", "language": "ar" },
+  "params": [{ "kind": "name", "fallback": "عميلنا العزيز" }, { "kind": "text", "value": "20%" }],
+  "audience": { "criteria": { "tags": { "any": ["vip"] } } },
+  "dailySendLimit": 1000
+}
+```
+
+- `name` من 1 لـ 80 حرف. `params` لحد 20، كل واحد `{ "kind": "text", "value" }` أو `{ "kind": "name", "fallback" }` أو `{ "kind": "link" }` أو `{ "kind": "link_code" }`. نوعين الروابط محتاجين `linkUrl` ‏(عنوان https) على الحملة.
+- `audience` هو `{ "segmentId": 3 }` أو `{ "criteria": { ... } }`. الـ criteria لازم فيها فلتر واحد على الأقل: `tags.any` أو `tags.all` أو `lastInboundAfter` أو `lastInboundBefore` ‏(epoch ms) أو `hasOrdered` أو `everyone: true`. الفلتر الفاضي بيترفض، ومبيتحولش لكل الناس. اللي رفض الرسايل أو مفيش موافقة مسجّلة منه عمره ما بيدخل.
+- `dailySendLimit` ‏(من 1 لـ 1,000,000) بيحدد كام مستلم يتحطوا في الطابور كل 24 ساعة متحركة.
+- `POST /campaigns/{id}/send` بياخد اختياريًا `{ "scheduledAt": <epoch ms، لحد سنة قدام> }`.
+
+رد الحملة فيه `id` و`name` و`status` و`pauseReason` ‏(`manual` و`wallet_empty` و`template_unavailable` و`internal_error` و`plan_blocked` و`funding_unknown` و`rate_unavailable`، أو `null`) و`template` و`params` و`audience` و`scheduledAt` و`dailySendLimit` و`linkUrl` و`clicks` ‏(`{ unique, total }`) و`createdAt` و`startedAt` و`finishedAt` و`counts` ‏(حسب حالة الرسالة، زائد `skipped`) و`totals` و`estimate` اختياري.
+
+الشرايح (جماهير محفوظة) ليها endpoints: ‏`GET /segments` و`GET /segments/{segmentId}` و`POST /segments/preview` و`GET /segments/{segmentId}/preview` لأي حد معاه صلاحية، أما `POST /segments` و`PUT /segments/{segmentId}` و`DELETE /segments/{segmentId}` فـ**للمالك فقط**. الشريحة هي `{ name ‏(من 1 لـ 60 حرف)، criteria }` بنفس criteria الجمهور. المعاينة بترجّع `{ count, excluded: { optedOut, noConsent } }`.
+
+الحملات مش متاحة على الرقم المشترك.
+
+## الأرقام
+
+| الطريقة والمسار | الغرض |
+|---|---|
+| `GET /numbers` | أرقام المتجر |
+| `GET /numbers/signup-config` | معرّفات Meta العامة اللي الصفحة محتاجاها عشان تفتح Embedded Signup. **للمالك فقط** |
+| `POST /numbers/connect` | إنهاء الربط بالكود الجاي من Embedded Signup. **للمالك فقط** |
+| `POST /numbers/{phoneNumberId}/refresh` | إعادة قراءة حالة الرقم من Meta |
+| `POST /numbers/{phoneNumberId}/register` | إعادة محاولة تسجيل رقم ما خلصش. **للمالك فقط** |
+| `POST /numbers/{phoneNumberId}/disconnect` | فصل الرقم. **للمالك فقط** |
+
+الرقم فيه `phoneNumberId` و`wabaId` و`displayPhone` و`verifiedName` و`kind` ‏(`own` أو `platform`) و`onboarding` ‏(`cloud_api` أو `business_app`) و`status` ‏(`active` أو `disconnected`) و`registration` و`qualityRating` و`messagingLimitTier` و`connectedAt` وحقول حالة تانية.
+
+الـ body بتاع الربط `{ "code", "event", "wabaId", "phoneNumberId", "businessId"? }`، والـ `event` ‏`FINISH` أو `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING`. الـ `code` بييجي من نافذة Embedded Signup وبينتهي بعد 30 ثانية، فالطلب ده بتعمله الصفحة على طول بعد قفل النافذة.

@@ -1,0 +1,52 @@
+import type { MiddlewareHandler } from 'hono';
+import type { Env } from '../../env';
+import { IdentityError, type IdentityVerifier, type Principal } from './verifier';
+
+export type AuthVars = { principal: Principal; storeRole: 'owner' | 'staff' | 'super_admin' };
+
+/** Requires a valid bearer token whose principal may act on the `:storeId` route param. */
+export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier): MiddlewareHandler<{ Bindings: Env; Variables: AuthVars }> {
+  return async (c, next) => {
+    const header = c.req.header('authorization') ?? '';
+    let token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    // Browsers cannot set headers on a WebSocket, so the token may ride in Sec-WebSocket-Protocol as "bearer.<token>".
+    if (!token && c.req.header('upgrade')?.toLowerCase() === 'websocket') {
+      const offered = (c.req.header('sec-websocket-protocol') ?? '').split(',').map((p) => p.trim());
+      token = offered.find((p) => p.startsWith('bearer.'))?.slice(7) ?? '';
+    }
+    if (!token) return c.json({ error: 'unauthorized' }, 401);
+    let principal: Principal;
+    try {
+      principal = await getVerifier(c.env).verify(token);
+    } catch (e) {
+      const status = e instanceof IdentityError ? e.status : 401;
+      return c.json({ error: status === 403 ? 'forbidden' : 'unauthorized' }, status);
+    }
+    const storeId = c.req.param('storeId');
+    const membership = principal.stores.find((s) => s.id === storeId);
+    if (!membership && !principal.superAdmin) return c.json({ error: 'forbidden' }, 403);
+    c.set('principal', principal);
+    c.set('storeRole', principal.superAdmin ? 'super_admin' : membership!.role);
+    await next();
+  };
+}
+
+/** Requires a valid bearer token of a super admin (`pa: super_admin`). No store membership is looked at: operator routes are not store-scoped. */
+export function requireSuperAdmin(getVerifier: (env: Env) => IdentityVerifier): MiddlewareHandler<{ Bindings: Env; Variables: AuthVars }> {
+  return async (c, next) => {
+    const header = c.req.header('authorization') ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!token) return c.json({ error: 'unauthorized' }, 401);
+    let principal: Principal;
+    try {
+      principal = await getVerifier(c.env).verify(token);
+    } catch (e) {
+      const status = e instanceof IdentityError ? e.status : 401;
+      return c.json({ error: status === 403 ? 'forbidden' : 'unauthorized' }, status);
+    }
+    if (!principal.superAdmin) return c.json({ error: 'forbidden' }, 403);
+    c.set('principal', principal);
+    c.set('storeRole', 'super_admin');
+    await next();
+  };
+}

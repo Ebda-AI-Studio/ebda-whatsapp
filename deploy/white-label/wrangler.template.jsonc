@@ -1,0 +1,51 @@
+// White-label deployment of the WhatsApp product into a CLIENT's own Cloudflare account. Rendered by bootstrap.sh into
+// wrangler.<prefix>.jsonc; never edit the rendered file by hand, re-render it. Placeholders: __ACCOUNT_ID__, __PREFIX__,
+// __D1_ID__, __BRAND__, __IDENTITY_MODE__, __PUBLIC_BASE_URL__, __IDENTITY_ISSUER__, __IDENTITY_JWKS_URL__, __IDENTITY_AUDIENCE__.
+// deploy.sh refuses to deploy unless web/dist/brand.json names __BRAND__.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "__PREFIX__",
+  "account_id": "__ACCOUNT_ID__",
+  "main": "../../src/index.ts",
+  "compatibility_date": "2026-10-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "assets": {
+    "directory": "../../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/meta/*", "/health", "/t/*"]
+  },
+  "observability": { "enabled": true },
+  "vars": {
+    "META_GRAPH_VERSION": "v25.0",
+    "BRAND": "__BRAND__",
+    "IDENTITY_MODE": "__IDENTITY_MODE__",
+    "PUBLIC_BASE_URL": "__PUBLIC_BASE_URL__",
+    // Filled by bootstrap.sh for the suite identity service only; empty for an oidc tenant, which sets the IDENTITY_OIDC_CONFIG secret instead.
+    "IDENTITY_ISSUER": "__IDENTITY_ISSUER__",
+    "IDENTITY_JWKS_URL": "__IDENTITY_JWKS_URL__",
+    "IDENTITY_AUDIENCE": "__IDENTITY_AUDIENCE__"
+  },
+  "durable_objects": { "bindings": [{ "name": "WORKSPACE_DO", "class_name": "WorkspaceDO" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],
+  "d1_databases": [{ "binding": "DB", "database_name": "__PREFIX__-platform", "database_id": "__D1_ID__", "migrations_dir": "../../migrations/d1" }],
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "__PREFIX__-media" },
+    { "binding": "BACKUPS", "bucket_name": "__PREFIX__-backups" }
+  ],
+  "queues": {
+    "producers": [{ "binding": "SEND_QUEUE", "queue": "__PREFIX__-send" }],
+    "consumers": [{ "queue": "__PREFIX__-send", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "__PREFIX__-send-dlq" }]
+  },
+  "ai": { "binding": "AI" },
+  "analytics_engine_datasets": [
+    { "binding": "USAGE", "dataset": "__DATASET___usage" },
+    { "binding": "CI_OUTCOMES", "dataset": "__DATASET___ci_outcomes" },
+    { "binding": "LINK_CLICKS", "dataset": "__DATASET___link_clicks" }
+  ],
+  "workflows": [
+    { "name": "__PREFIX__-import", "binding": "IMPORT_WORKFLOW", "class_name": "ImportWorkflow" },
+    { "name": "__PREFIX__-campaign", "binding": "CAMPAIGN_WORKFLOW", "class_name": "CampaignWorkflow" }
+  ]
+}

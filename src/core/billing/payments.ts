@@ -1,0 +1,94 @@
+/**
+ * The card provider behind wallet top-ups, as an interface so the money logic never depends on one vendor's shapes.
+ *
+ * Kashier webhook verification follows the official documentation (https://developers.kashier.io/docs/webhooks, payloads at
+ * https://developers.kashier.io/docs/webhooks/payloads): header `x-kashier-signature`; take `data.signatureKeys`, sort them
+ * alphabetically, build `key=encodeURIComponent(value)` pairs joined with `&` from `data`, HMAC-SHA256 with the Payment API Key,
+ * hex digest, compared case-insensitively; `data.status` (not `event`) says success; `data.hash` is ignored.
+ *
+ * NOT VERIFIED against a live account: the hosted checkout link (`createSession`), the inquiry and the refund calls. They are behind
+ * the interface; `KashierProvider` implements the checkout link from Kashier's published payment-hash scheme and reports inquiry and
+ * refund as unsupported until they are confirmed with real credentials (callers then keep the item for a person: see Ruling in the ledger).
+ */
+import type { Env } from '../../env';
+
+export type ProviderEvent = 'pay' | 'refund' | 'other';
+export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string };
+export type Inquiry = { status: 'SUCCESS' | 'FAILURE' | 'PENDING'; transactionId: string | null; amountMinor: number | null; currency: string | null };
+export type RefundResult = { ok: true; refundId: string } | { ok: false; reason: 'unsupported' | 'rejected' | 'unavailable' };
+
+export interface PaymentProvider {
+  readonly name: string;
+  createSession(a: { orderId: string; totalMinor: number; currency: string; returnUrl?: string }): Promise<{ checkoutUrl: string }>;
+  /** Null when the signature or the structure is not valid. Never throws on hostile input. */
+  verifyWebhook(rawBody: string, signatureHeader: string | null): Promise<ParsedWebhook | null>;
+  inquire(orderId: string): Promise<Inquiry | 'unsupported' | 'unavailable'>;
+  refund(a: { transactionId: string; amountMinor: number }): Promise<RefundResult>;
+}
+
+let factory: (env: Env) => PaymentProvider | null = (env) => (env.KASHIER_MERCHANT_ID && env.KASHIER_API_KEY ? new KashierProvider(env.KASHIER_MERCHANT_ID, env.KASHIER_API_KEY, env.KASHIER_CHECKOUT_URL) : null);
+/** Tests install a fake here. */
+export const configurePayments = (f: (env: Env) => PaymentProvider | null): void => { factory = f; };
+export const paymentProvider = (env: Env): PaymentProvider | null => factory(env);
+export const topupsEnabled = (env: Env): boolean => env.TOPUPS_ENABLED === 'true';
+
+const enc = new TextEncoder();
+async function hmacHex(key: string, text: string): Promise<string> {
+  const k = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return [...new Uint8Array(await crypto.subtle.sign('HMAC', k, enc.encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+function sameHex(a: string, b: string): boolean {
+  const x = enc.encode(a.toLowerCase());
+  const y = enc.encode(b.toLowerCase());
+  return x.byteLength === y.byteLength && crypto.subtle.timingSafeEqual(x, y);
+}
+
+/** "12.34" or 12.34 (EGP) to 1234 piasters without a float; null for anything else. */
+export function egpToMinor(v: unknown): number | null {
+  const s = typeof v === 'number' ? String(v) : typeof v === 'string' ? v : '';
+  const m = /^(\d{1,9})(?:\.(\d{1,2}))?$/.exec(s.trim());
+  return m ? Number(m[1]) * 100 + Number((m[2] ?? '').padEnd(2, '0') || 0) : null;
+}
+export const minorToEgp = (minor: number): string => `${Math.floor(minor / 100)}.${String(minor % 100).padStart(2, '0')}`;
+
+/** Fields a webhook must have signed, or an attacker could simply leave them out of signatureKeys. */
+const MUST_BE_SIGNED = ['amount', 'currency', 'merchantOrderId', 'status', 'transactionId'] as const;
+
+export class KashierProvider implements PaymentProvider {
+  readonly name = 'kashier';
+  constructor(private readonly merchantId: string, private readonly apiKey: string, private readonly checkoutOrigin = 'https://checkout.kashier.io') {}
+
+  async createSession(a: { orderId: string; totalMinor: number; currency: string; returnUrl?: string }): Promise<{ checkoutUrl: string }> {
+    const amount = minorToEgp(a.totalMinor);
+    const hash = await hmacHex(this.apiKey, `/?payment=${this.merchantId}.${a.orderId}.${amount}.${a.currency}`);
+    const q = new URLSearchParams({ merchantId: this.merchantId, orderId: a.orderId, amount, currency: a.currency, hash, mode: 'live', allowedMethods: 'card', ...(a.returnUrl ? { merchantRedirect: a.returnUrl } : {}) });
+    return { checkoutUrl: `${this.checkoutOrigin}/?${q.toString()}` };
+  }
+
+  async verifyWebhook(rawBody: string, signatureHeader: string | null): Promise<ParsedWebhook | null> {
+    if (!signatureHeader) return null;
+    let body: unknown;
+    try { body = JSON.parse(rawBody); } catch { return null; }
+    const root = body as { event?: unknown; data?: Record<string, unknown> };
+    const data = root?.data;
+    if (!data || typeof data !== 'object' || !Array.isArray(data.signatureKeys) || !data.signatureKeys.every((k) => typeof k === 'string')) return null;
+    const keys = [...(data.signatureKeys as string[])].sort();
+    if (!MUST_BE_SIGNED.every((k) => keys.includes(k))) return null;
+    if (keys.some((k) => data[k] === undefined || data[k] === null || typeof data[k] === 'object')) return null;
+    const signed = keys.map((k) => `${k}=${encodeURIComponent(String(data[k]))}`).join('&');
+    if (!sameHex(await hmacHex(this.apiKey, signed), signatureHeader.trim())) return null;
+    const status = data.status === 'SUCCESS' || data.status === 'FAILURE' || data.status === 'PENDING' ? data.status : null;
+    const amountMinor = egpToMinor(data.amount);
+    if (!status || amountMinor === null || typeof data.merchantOrderId !== 'string' || typeof data.transactionId !== 'string' || typeof data.currency !== 'string') return null;
+    const ev = root.event === 'pay' ? 'pay' : root.event === 'refund' || root.event === 'partial_refund' || root.event === 'reversal' ? 'refund' : 'other';
+    return { event: ev, status, orderId: data.merchantOrderId, transactionId: data.transactionId, amountMinor, currency: data.currency };
+  }
+
+  async inquire(): Promise<'unsupported'> {
+    return 'unsupported';
+  }
+
+  async refund(): Promise<RefundResult> {
+    return { ok: false, reason: 'unsupported' };
+  }
+}

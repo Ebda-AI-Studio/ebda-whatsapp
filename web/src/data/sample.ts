@@ -1,0 +1,275 @@
+import type {
+  AgentSettingsDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+} from '../../../src/core/api/contract';
+import { createSampleOperator, createSampleWallet } from './sample-billing';
+import type { InboxSource } from './source';
+
+// Sample data for preview only (labelled in the UI). Names and orders are invented; no real customers.
+const BASE = Date.UTC(2026, 9, 24, 17, 0);
+const MIN = 60_000;
+const H = 60 * MIN;
+
+type Seed = { id: number; name: string; waId: string; preview: string; ago: number; unread: number; assignee: string | null; windowH: number | null; tags: string[] };
+const SEEDS: Seed[] = [
+  { id: 1, name: 'منى عبد الرحمن', waId: '201001112233', preview: 'عايزة أأكد الأوردر بتاع امبارح', ago: 2 * MIN, unread: 2, assignee: 'u-dina', windowH: 22, tags: ['cod_pending'] },
+  { id: 2, name: 'كريم سمير', waId: '201002223344', preview: 'الشحنة اتأخرت يومين', ago: 12 * MIN, unread: 1, assignee: null, windowH: 23, tags: ['needs_human'] },
+  { id: 3, name: 'هالة فؤاد', waId: '201003334455', preview: 'تمام شكرًا ليكي', ago: 35 * MIN, unread: 0, assignee: 'u-me', windowH: 23, tags: [] },
+  { id: 4, name: 'أحمد ناصر', waId: '201004445566', preview: 'ممكن أغيّر المقاس؟', ago: 1 * H, unread: 1, assignee: 'u-me', windowH: 0.5, tags: ['استبدال'] },
+  { id: 5, name: 'سارة محمود', waId: '201005556677', preview: 'الدفع عند الاستلام متاح؟', ago: 2 * H, unread: 0, assignee: null, windowH: 21, tags: [] },
+  { id: 6, name: 'يوسف علي', waId: '201006667788', preview: 'تم الاستلام، شكرًا', ago: 30 * H, unread: 0, assignee: 'u-dina', windowH: null, tags: [] },
+];
+
+function msg(id: number, direction: 'in' | 'out', text: string, at: number, status: MessageDto['status'] = null): MessageDto {
+  return { id, clientId: null, wamid: `sample.${id}`, direction, type: 'text', text, hasLongBody: false, media: null, template: null, status, errorCode: null, at };
+}
+
+const THREADS: Record<number, MessageDto[]> = {
+  1: [
+    msg(11, 'in', 'مساء الخير، أنا طلبت امبارح تيشيرتين مقاس L', BASE - 6 * MIN),
+    msg(12, 'out', 'أهلًا يا منى! الطلب #1048 جاهز، نأكده على العنوان في مدينة نصر؟', BASE - 4 * MIN, 'read'),
+    msg(13, 'in', 'عايزة أأكد الأوردر بتاع امبارح', BASE - 2 * MIN),
+  ],
+  2: [msg(21, 'in', 'الشحنة اتأخرت يومين، هي فين؟', BASE - 12 * MIN)],
+  3: [msg(31, 'out', 'وصلك الطلب يا هالة؟', BASE - 40 * MIN, 'read'), msg(32, 'in', 'تمام شكرًا ليكي', BASE - 35 * MIN)],
+  4: [msg(41, 'in', 'ممكن أغيّر المقاس؟ طلبت M ومحتاج L', BASE - 1 * H)],
+  5: [msg(51, 'in', 'الدفع عند الاستلام متاح؟', BASE - 2 * H), { ...msg(52, 'out', 'أيوه متاح في القاهرة والجيزة.', BASE - 2 * H + 5 * MIN, 'delivered'), author: 'agent' }],
+  6: [msg(61, 'out', 'طلبك #0996 اتسلّم. شكرًا إنك اشتريت مننا!', BASE - 31 * H, 'read'), msg(62, 'in', 'تم الاستلام، شكرًا', BASE - 30 * H)],
+};
+
+const ORDERS: Record<string, OrderSummaryDto[]> = {
+  '201001112233': [
+    { orderNumber: '#1048', status: 'pending_confirmation', totalMinor: 68000, currency: 'EGP', paymentMethod: 'cod', itemsCount: 2, at: BASE - 20 * H },
+    { orderNumber: '#0996', status: 'delivered', totalMinor: 42000, currency: 'EGP', paymentMethod: 'cod', itemsCount: 1, at: BASE - 20 * 24 * H },
+    { orderNumber: '#0871', status: 'delivered', totalMinor: 95000, currency: 'EGP', paymentMethod: 'link', itemsCount: 3, at: BASE - 60 * 24 * H },
+  ],
+  '201002223344': [{ orderNumber: '#1031', status: 'shipped', totalMinor: 125000, currency: 'EGP', paymentMethod: 'cod', itemsCount: 2, at: BASE - 3 * 24 * H }],
+  '201004445566': [{ orderNumber: '#1040', status: 'confirmed', totalMinor: 54000, currency: 'EGP', paymentMethod: 'card', itemsCount: 1, at: BASE - 26 * H }],
+  '201006667788': [{ orderNumber: '#0996', status: 'delivered', totalMinor: 42000, currency: 'EGP', paymentMethod: 'cod', itemsCount: 1, at: BASE - 2 * 24 * H }],
+};
+
+const TEMPLATES: TemplateDto[] = [
+  { name: 'cod_confirmation', language: 'ar', category: 'UTILITY', status: 'APPROVED', bodyText: 'أهلًا {{1}}، عندك طلب رقم {{2}} بإجمالي {{3}}. تحب نأكده؟', paramCount: 3, rejectedReason: null },
+  { name: 'shipping_update', language: 'ar', category: 'UTILITY', status: 'APPROVED', bodyText: 'طلبك {{1}} اتشحن، وتقدر تتابعه من هنا: {{2}}', paramCount: 2, rejectedReason: null },
+  { name: 'order_confirmation', language: 'ar', category: 'UTILITY', status: 'APPROVED', bodyText: 'شكرًا يا {{1}}، طلبك {{2}} اتأكد وهيوصلك خلال {{3}} أيام.', paramCount: 3, rejectedReason: null },
+  { name: 'eid_offer', language: 'ar', category: 'MARKETING', status: 'APPROVED', bodyText: 'كل سنة وانت طيب يا {{1}}! خصم ٢٠٪ على كل حاجة لحد آخر الأسبوع: {{2}}', paramCount: 2, rejectedReason: null },
+  { name: 'back_in_stock', language: 'ar', category: 'MARKETING', status: 'APPROVED', bodyText: 'المنتج اللي كنت مستنيه رجع تاني يا {{1}}.', paramCount: 1, rejectedReason: null },
+];
+
+// Extra sample contacts for the contacts screen and audience counts (invented).
+const MORE_CONTACTS: ContactDto[] = [
+  { waId: '201007778899', name: 'نورا حسن', optedOut: false, tags: ['vip'], consent: { source: 'import:customers.csv', at: BASE - 40 * 24 * H }, lastInboundAt: BASE - 3 * 24 * H },
+  { waId: '201008889900', name: 'مصطفى عادل', optedOut: true, tags: [], consent: { source: 'import:customers.csv', at: BASE - 40 * 24 * H }, lastInboundAt: BASE - 50 * 24 * H },
+  { waId: '201009990011', name: null, optedOut: false, tags: ['vip'], consent: null, lastInboundAt: null },
+];
+
+const D = 24 * H;
+const counts0 = { queued: 0, claimed: 0, retry: 0, accepted: 0, sent: 0, delivered: 0, read: 0, failed: 0, skipped: 0 };
+function sampleCampaign(p: Partial<CampaignDto> & Pick<CampaignDto, 'id' | 'name' | 'status'>, t: CampaignDto['totals']): CampaignDto {
+  return {
+    pauseReason: null, template: { name: 'eid_offer', language: 'ar' }, category: 'MARKETING', params: [{ kind: 'name', fallback: 'يا فندم' }, { kind: 'link' }],
+    audience: { segmentId: 1, criteria: { tags: { any: ['vip'] } } }, scheduledAt: null, dailySendLimit: null, linkUrl: 'https://example.com/eid',
+    clicks: { unique: Math.round(t.read * 0.31), total: Math.round(t.read * 0.42) }, createdAt: BASE - 3 * D, startedAt: BASE - 2 * D, finishedAt: null,
+    counts: { ...counts0, delivered: t.delivered - t.read, read: t.read, failed: t.failed, skipped: t.skipped, queued: t.pending },
+    totals: t, ...p,
+  };
+}
+const CAMPAIGNS: CampaignDto[] = [
+  sampleCampaign({ id: 'c-1', name: 'عروض العيد', status: 'running' }, { recipients: 1240, pending: 380, sent: 860, delivered: 812, read: 534, failed: 31, skipped: 17 }),
+  sampleCampaign({ id: 'c-2', name: 'رجوع المقاسات', status: 'scheduled', template: { name: 'back_in_stock', language: 'ar' }, params: [{ kind: 'name', fallback: 'يا فندم' }], linkUrl: null, scheduledAt: BASE + 18 * H, startedAt: null }, { recipients: 320, pending: 320, sent: 0, delivered: 0, read: 0, failed: 0, skipped: 0 }),
+  sampleCampaign({ id: 'c-3', name: 'تخفيضات نص الشهر', status: 'paused', pauseReason: 'wallet_empty' }, { recipients: 2100, pending: 1500, sent: 600, delivered: 571, read: 290, failed: 12, skipped: 8 }),
+  sampleCampaign({ id: 'c-4', name: 'العملاء الجداد', status: 'completed', finishedAt: BASE - 9 * D, createdAt: BASE - 12 * D, startedAt: BASE - 11 * D }, { recipients: 410, pending: 0, sent: 402, delivered: 396, read: 301, failed: 6, skipped: 8 }),
+];
+const SEGMENTS: SegmentDto[] = [
+  { id: 1, name: 'عملاء VIP', criteria: { tags: { any: ['vip'] } }, createdAt: BASE - 30 * D, updatedAt: BASE - 30 * D },
+  { id: 2, name: 'كلمونا آخر ٣٠ يوم', criteria: { lastInboundAfter: BASE - 30 * D }, createdAt: BASE - 20 * D, updatedAt: BASE - 20 * D },
+];
+const sampleNumber = (p: Partial<NumberDto> & Pick<NumberDto, 'phoneNumberId' | 'displayPhone'>): NumberDto => ({
+  wabaId: 'waba-sample-1', verifiedName: 'متجر منى', kind: 'own', onboarding: 'cloud_api', status: 'active', registration: 'registered', qualityRating: 'GREEN',
+  messagingLimitTier: 'TIER_1K', throughputLevel: 'STANDARD', nameStatus: 'APPROVED', platformType: 'CLOUD_API', isOnBizApp: false, historySync: null, contactsSync: null,
+  connectedAt: BASE - 9 * D, syncDeadlineAt: null, lastStatusSyncAt: BASE - H, ...p,
+});
+const NUMBERS: NumberDto[] = [
+  sampleNumber({ phoneNumberId: 'pn-sample-1', displayPhone: '+20 100 555 0101', onboarding: 'business_app', registration: 'not_needed', isOnBizApp: true, historySync: 'received', contactsSync: 'received', throughputLevel: null }),
+  sampleNumber({ phoneNumberId: 'pn-sample-2', displayPhone: '+20 100 555 0202', verifiedName: 'متجر منى - فرع ٢', status: 'disconnected', registration: 'failed', qualityRating: null, messagingLimitTier: null, connectedAt: BASE - 2 * H }),
+];
+
+// Illustrative per-message cost for the sample estimate (piasters); the live figure comes from the wallet.
+const SAMPLE_PER_MESSAGE_MINOR = 250;
+
+function matches(c: ContactDto, k: SegmentCriteria): boolean {
+  const tags = c.tags ?? [];
+  if (k.tags?.any?.length && !k.tags.any.some((t) => tags.includes(t))) return false;
+  if (k.tags?.all?.length && !k.tags.all.every((t) => tags.includes(t))) return false;
+  if (k.lastInboundAfter !== undefined && !(c.lastInboundAt != null && c.lastInboundAt > k.lastInboundAfter)) return false;
+  if (k.lastInboundBefore !== undefined && !(c.lastInboundAt != null && c.lastInboundAt < k.lastInboundBefore)) return false;
+  return true;
+}
+
+export function createSampleSource(): InboxSource {
+  const threads = structuredClone(THREADS);
+  const orders = structuredClone(ORDERS);
+  const convs: ConversationDto[] = SEEDS.map((s) => ({
+    id: s.id,
+    contact: { waId: s.waId, name: s.name, optedOut: false },
+    lastMessage: { preview: s.preview, direction: 'in', type: 'text', status: null, at: BASE - s.ago },
+    unread: s.unread,
+    assigneeUserId: s.assignee,
+    tags: s.tags,
+    windowOpenUntil: s.windowH === null ? null : BASE + s.windowH * H,
+  }));
+  let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', provider: 'workers-ai', model: null, baseUrl: null, hasApiKey: false, credits: 500, knowledgeReady: false };
+  const contacts: ContactDto[] = [
+    ...SEEDS.map((x): ContactDto => ({ waId: x.waId, name: x.name, optedOut: false, tags: x.tags.filter((t) => t !== 'needs_human' && t !== 'cod_pending'), consent: x.id % 2 ? { source: 'keyword_start', at: BASE - 10 * D } : null, lastInboundAt: BASE - x.ago })),
+    ...structuredClone(MORE_CONTACTS),
+  ];
+  const campaigns = structuredClone(CAMPAIGNS);
+  const numbers = structuredClone(NUMBERS);
+  const num = (id: string) => {
+    const n = numbers.find((x) => x.phoneNumberId === id);
+    if (!n) throw new Error('not_found');
+    return n;
+  };
+  const imports: ImportDto[] = [{ id: 'i-1', filename: 'customers.csv', status: 'done', consented: true, total: 214, created: 198, updated: 9, rejected: 7, error: null, createdAt: BASE - 40 * D, finishedAt: BASE - 40 * D + 40_000 }];
+  const preview = (k: SegmentCriteria) => {
+    const hit = k.everyone ? contacts : contacts.filter((c) => matches(c, k));
+    const optedOut = hit.filter((c) => c.optedOut).length;
+    const noConsent = hit.filter((c) => !c.optedOut && !c.consent).length;
+    // Sample counts are scaled up so the screens show realistic numbers; the live API counts real contacts.
+    return { count: (hit.length - optedOut - noConsent) * 100, excluded: { optedOut: optedOut * 100, noConsent: noConsent * 100 } };
+  };
+  const find = (id: string) => {
+    const c = campaigns.find((x) => x.id === id);
+    if (!c) throw new Error('not_found');
+    return c;
+  };
+  const listeners = new Set<(e: RealtimeEvent) => void>();
+  let seq = 0;
+  let nextId = 1000;
+  return {
+    kind: 'sample',
+    capabilities: { codOutcome: true, numbers: true },
+    role: 'owner',
+    currentUserId: 'u-me',
+    userNames: { 'u-me': 'أنا', 'u-dina': 'دينا' },
+    async listConversations(filter, q) {
+      const query = q.trim();
+      return convs
+        .filter((c) => (filter === 'unread' ? c.unread > 0 : filter === 'mine' ? c.assigneeUserId === 'u-me' : filter === 'unassigned' ? c.assigneeUserId === null : true))
+        .filter((c) => !query || (c.contact.name ?? '').includes(query) || (c.lastMessage?.preview ?? '').includes(query))
+        .sort((a, b) => (b.lastMessage?.at ?? 0) - (a.lastMessage?.at ?? 0));
+    },
+    async getMessages(id) {
+      return threads[id] ?? [];
+    },
+    async send(id, req) {
+      const tpl = req.type === 'template' ? TEMPLATES.find((x) => x.name === req.name) : undefined;
+      const text = req.type === 'text' ? req.text
+        : req.type === 'template' ? (tpl?.bodyText ?? req.name).replace(/\{\{(\d+)\}\}/g, (_m, i) => req.params[Number(i) - 1] ?? '')
+        : req.type === 'interactive' ? req.body : (req.caption ?? '');
+      const m: MessageDto = { ...msg(nextId++, 'out', text, Date.now(), 'queued'), clientId: req.clientId, type: req.type === 'template' ? 'template' : 'text' };
+      (threads[id] ??= []).push(m);
+      const c = convs.find((x) => x.id === id);
+      if (c) c.lastMessage = { preview: text, direction: 'out', type: m.type, status: 'queued', at: m.at };
+      setTimeout(() => listeners.forEach((l) => l({ type: 'message.status', seq: ++seq, conversationId: id, messageId: m.id, status: 'sent', errorCode: null })), 600);
+      return m;
+    },
+    async markRead(id) {
+      const c = convs.find((x) => x.id === id);
+      if (c) c.unread = 0;
+    },
+    async orders(waId) {
+      return { items: (orders[waId] ?? []).map((o) => ({ ...o })), source: 'sample' };
+    },
+    async templates() {
+      return TEMPLATES;
+    },
+    async recordCodOutcome(waId, orderNumber, outcome) {
+      const o = orders[waId]?.find((x) => x.orderNumber === orderNumber);
+      if (o && o.status === 'pending_confirmation') o.status = outcome;
+    },
+    async agentSettings() {
+      return { ...agent };
+    },
+    async saveAgentSettings(update) {
+      const { apiKey, ...rest } = update;
+      agent = { ...agent, ...rest, hasApiKey: apiKey === undefined ? agent.hasApiKey : apiKey !== null };
+      return { ...agent };
+    },
+    async assign(id, userId) {
+      const c = convs.find((x) => x.id === id);
+      if (c) {
+        c.assigneeUserId = userId;
+        c.tags = c.tags.filter((t) => t !== 'needs_human');
+      }
+    },
+    campaigns: {
+      list: async () => campaigns.map((c) => ({ ...c })).sort((a, b) => b.createdAt - a.createdAt),
+      get: async (id) => ({ ...find(id) }),
+      async create(req) {
+        const criteria = 'segmentId' in req.audience ? SEGMENTS.find((x) => x.id === (req.audience as { segmentId: number }).segmentId)!.criteria : req.audience.criteria;
+        const audience = preview(criteria).count;
+        const c = sampleCampaign({
+          id: `c-${nextId++}`, name: req.name, status: 'draft', template: req.template, params: req.params ?? [], linkUrl: req.linkUrl ?? null,
+          category: TEMPLATES.find((x) => x.name === req.template.name)?.category ?? 'MARKETING', dailySendLimit: req.dailySendLimit ?? null,
+          audience: { segmentId: 'segmentId' in req.audience ? req.audience.segmentId : null, criteria }, createdAt: Date.now(), startedAt: null,
+          estimate: { audience, perMessageMinor: SAMPLE_PER_MESSAGE_MINOR, totalMinor: audience * SAMPLE_PER_MESSAGE_MINOR },
+        }, { recipients: 0, pending: 0, sent: 0, delivered: 0, read: 0, failed: 0, skipped: 0 });
+        c.clicks = { unique: 0, total: 0 };
+        campaigns.push(c);
+        return { ...c };
+      },
+      async send(id, scheduledAt) {
+        const c = find(id);
+        const n = c.estimate?.audience ?? 0;
+        Object.assign(c, { status: scheduledAt ? 'scheduled' : 'running', scheduledAt: scheduledAt ?? null, startedAt: scheduledAt ? null : Date.now(), estimate: undefined, totals: { recipients: n, pending: n, sent: 0, delivered: 0, read: 0, failed: 0, skipped: 0 } });
+        return { ...c };
+      },
+      async pause(id) { return { ...Object.assign(find(id), { status: 'paused', pauseReason: 'manual' }) }; },
+      async resume(id) { return { ...Object.assign(find(id), { status: 'running', pauseReason: null }) }; },
+      async cancel(id) { return { ...Object.assign(find(id), { status: 'cancelled', pauseReason: null, finishedAt: Date.now() }) }; },
+      async remove(id) { campaigns.splice(campaigns.findIndex((x) => x.id === id), 1); },
+      segments: async () => SEGMENTS,
+      preview: async (k) => preview(k),
+    },
+    numbers: {
+      list: async () => numbers.map((n) => ({ ...n })),
+      signupConfig: async () => ({ appId: 'sample', configId: 'sample', graphVersion: 'v25.0' }),
+      prepare: async () => undefined,
+      // The sample popup "finishes" with an existing WhatsApp Business app number, the most common case for merchants.
+      launch: async () => ({ code: 'sample-code', event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING', wabaId: 'waba-sample-3', phoneNumberId: 'pn-sample-3' }),
+      async connect(req) {
+        const n = sampleNumber({ phoneNumberId: req.phoneNumberId, wabaId: req.wabaId, displayPhone: '+20 100 555 0303', onboarding: req.event === 'FINISH' ? 'cloud_api' : 'business_app', registration: req.event === 'FINISH' ? 'registered' : 'not_needed', isOnBizApp: req.event !== 'FINISH', historySync: req.event === 'FINISH' ? null : 'requested', contactsSync: req.event === 'FINISH' ? null : 'requested', connectedAt: Date.now(), syncDeadlineAt: req.event === 'FINISH' ? null : Date.now() + 24 * H });
+        numbers.push(n);
+        return { ...n };
+      },
+      refresh: async (id) => ({ ...Object.assign(num(id), { lastStatusSyncAt: Date.now() }) }),
+      register: async (id) => ({ ...Object.assign(num(id), { status: 'active', registration: 'registered', qualityRating: 'GREEN', messagingLimitTier: 'TIER_250' }) }),
+      disconnect: async (id) => ({ ...Object.assign(num(id), { status: 'disconnected' }) }),
+    },
+    wallet: createSampleWallet(),
+    operator: createSampleOperator('u-me'),
+    contacts: {
+      async list(q) {
+        const query = q.q?.trim() ?? '';
+        const items = contacts
+          .filter((c) => !query || (c.name ?? '').includes(query) || c.waId.includes(query.replace(/\D/g, '') || '\u0000'))
+          .filter((c) => !q.tag || (c.tags ?? []).includes(q.tag))
+          .filter((c) => q.optedOut === undefined || c.optedOut === q.optedOut);
+        return { items: items.map((c) => ({ ...c })), nextCursor: null };
+      },
+      async importCsv(file, consented) {
+        const id = `i-${nextId++}`;
+        const imp: ImportDto = { id, filename: file.name, status: 'running', consented, total: 0, created: 0, updated: 0, rejected: 0, error: null, createdAt: Date.now(), finishedAt: null };
+        imports.unshift(imp);
+        setTimeout(() => Object.assign(imp, { status: 'done', total: 52, created: 48, updated: 2, rejected: 2, finishedAt: Date.now() }), 1500);
+        return id;
+      },
+      imports: async () => imports.map((i) => ({ ...i })),
+      rejects: async () => [{ line: 14, reason: 'invalid_phone' }, { line: 37, reason: 'duplicate_in_file' }],
+    },
+    subscribe(onEvent) {
+      listeners.add(onEvent);
+      return () => listeners.delete(onEvent);
+    },
+  };
+}

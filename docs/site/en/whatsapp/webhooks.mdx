@@ -1,0 +1,126 @@
+---
+title: Webhooks and connectors
+section: "Ebda WhatsApp"
+order: 4
+description: The signed webhook connector that lets the Ebda WhatsApp AI agent call your own system, and how to verify its signature.
+---
+
+# Webhooks and connectors
+
+## What this is, and what it is not
+
+Ebda WhatsApp does not push a general event feed (new message, delivery status and so on) to your server. The outbound webhook that exists is the **webhook connector** of the AI agent: you describe a few tools, and when a customer's question needs one, the agent calls your URL with a signed request and uses your answer in its reply.
+
+If you need to follow messages and statuses from your own system, use the [HTTP API](/whatsapp/api) (`GET /events?after={seq}` and the messages list).
+
+## The Ebda Store link is built in
+
+The link between Ebda WhatsApp and Ebda Store (order confirmations, COD confirmation, shipping updates, ordering in the chat) is built in. There is nothing to configure and no webhook to set up for it.
+
+## Set up a connector
+
+Connectors are for the store owner only; staff get `403 forbidden`. The agent offers a connector's tools only while the connector is enabled and the AI agent is on. Up to 5 connectors per store.
+
+| Method and path (under `/stores/{storeId}`) | Purpose |
+|---|---|
+| `GET /connectors` | List connectors (the secret is never returned; `hasSecret` tells you if one is set) |
+| `PUT /connectors/{id}` | Create or fully replace a connector. `id` is lowercase letters and digits with single hyphens, up to 16 characters |
+| `DELETE /connectors/{id}` | Delete |
+| `POST /connectors/{id}/test` | Send a signed `ping` and report `{ ok, error?, detail? }`. One test per connector every 5 seconds (`429` otherwise). Works on a disabled connector |
+
+`PUT` body for a webhook connector:
+
+```json
+{
+  "kind": "webhook",
+  "enabled": true,
+  "secret": "<YOUR_SHARED_SECRET>",
+  "config": {
+    "url": "https://example.com/hooks/ebda",
+    "tools": [
+      {
+        "name": "check_booking",
+        "description": "Look up a booking by its reference",
+        "params": [{ "name": "reference", "type": "string", "required": true, "maxLength": 20 }]
+      }
+    ]
+  }
+}
+```
+
+- `secret` is the signing secret, 16 to 400 characters. It is write-only: send it to set it, leave it out to keep the current one. Changing the host of `url` requires entering the secret again.
+- `url` must be `https` on the standard port, with no credentials, query or fragment, no IP address and no internal-looking name. Redirects are not followed.
+- Up to 10 tools per connector and 10 parameters per tool. Tool names use lowercase letters, digits and single underscores (up to 40 characters). A parameter has a `name`, a `type` (`string`, `number`, `boolean` or `enum`), and optionally `description`, `required`, `maxLength` (strings, 1 to 500, default 200), `min` and `max` (numbers) and `values` (required for enums, up to 20).
+- The model only supplies those declared arguments, validated against your declaration before anything is sent.
+- Refusals use fixed codes in `message`: `invalid_url`, `secret_required`, `kind_mismatch`, `too_many_connectors`, `secrets_unavailable`.
+
+## The request you receive
+
+`POST` to your `url`, `content-type: application/json`:
+
+```json
+{
+  "event": "tool_call",
+  "tool": "check_booking",
+  "args": { "reference": "AB12" },
+  "workspaceId": "…",
+  "conversationId": 7,
+  "buyerKey": "<hex>",
+  "idempotencyKey": "conn:123:0",
+  "at": "2026-11-02T16:30:00.000Z"
+}
+```
+
+`buyerKey` is a pseudonymous customer key. The customer's phone number is never sent.
+
+The test button sends `{ "event": "ping", "workspaceId": "…", "at": "…" }`, signed the same way, and expects `{ "ok": true }` back.
+
+Headers:
+
+| Header | Value |
+|---|---|
+| `x-timestamp` | Unix time in seconds |
+| `x-signature` | `sha256=` followed by the hex of `HMAC-SHA256(secret, x-timestamp + "." + rawBody)` |
+| `idempotency-key` | Same as `idempotencyKey`; stable for that tool call of that customer message |
+
+## Verify the signature
+
+Compute the HMAC over the raw body bytes, before any JSON parsing, and compare in constant time.
+
+```js
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+function verify(rawBody /* Buffer, before JSON.parse */, headers, secret) {
+  const ts = headers['x-timestamp'];
+  if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false; // reject stale calls
+  const want = 'sha256=' + createHmac('sha256', secret).update(`${ts}.${rawBody}`).digest('hex');
+  const got = headers['x-signature'] ?? '';
+  return got.length === want.length && timingSafeEqual(Buffer.from(got), Buffer.from(want));
+}
+```
+
+The 5-minute freshness check is your own policy, shown here as a good practice.
+
+## Your response
+
+Answer with HTTP 2xx and JSON of at most 32 KB, exactly this shape:
+
+```json
+{ "ok": true, "result": { "status": "confirmed" } }
+```
+
+or `{ "ok": false, "message": "short reason" }`. `ok: false` is reported to the agent as a rejected call, and your `message` (cut to 300 characters) is passed on.
+
+## Retries and timing
+
+- Each request times out after 8 seconds, and one tool call after 12 seconds in total.
+- There are no automatic retries. If a call fails, the agent is told it failed and may decide to ask again. A repeat for the same tool call carries the same `idempotency-key`, so deduplicate on it for anything that changes state.
+- The agent makes at most 3 connector calls per round and 3 rounds per customer message.
+- What the agent sees of your answer is cut to about 3,000 characters.
+- If the customer was erased or sent STOP, no call is made.
+
+Failures reach the agent as one of these codes: `timeout`, `network`, `redirect`, `http_error`, `too_large`, `bad_response`, `blocked_host`, `invalid_arguments`, `unknown_tool`, `rejected`, `unavailable`.
+
+## Odoo connector
+
+A second connector kind, `odoo`, connects the agent to your Odoo directly (`config`: `{ url, database, login }`, with an API key or password as `secret`). It has fixed tools and needs no server on your side. It has not yet been verified against a live Odoo, so test it on your own instance before relying on it.

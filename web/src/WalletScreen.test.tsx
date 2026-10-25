@@ -1,0 +1,316 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { App } from './App';
+import { WalletScreen } from './components/WalletScreen';
+import { ApiError } from './data/api';
+import type { WalletDto } from './data/billing';
+import { createSampleSource } from './data/sample';
+import type { InboxSource } from './data/source';
+import { STRINGS } from './i18n';
+import { formatMoney } from './lib/format';
+
+// Node 25 ships a half-working global localStorage; tests get a plain in-memory one.
+const store = new Map<string, string>();
+beforeEach(() => vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, String(v)), removeItem: (k: string) => void store.delete(k), clear: () => store.clear() }));
+afterEach(() => { cleanup(); store.clear(); vi.unstubAllGlobals(); });
+const now = () => Date.UTC(2026, 9, 24, 17, 0);
+const egp = (minor: number) => formatMoney(minor, 'EGP', 'ar');
+const t = STRINGS.ar;
+
+/** The sample source with its wallet changed: `patch` edits the DTO the screen will read. */
+function withWallet(patch: Partial<WalletDto>, role: InboxSource['role'] = 'owner'): InboxSource {
+  const source = createSampleSource();
+  source.role = role;
+  const real = source.wallet!.wallet;
+  source.wallet!.wallet = async () => ({ ...(await real()), ...patch });
+  return source;
+}
+
+async function openWallet(source = createSampleSource()) {
+  render(<App source={source} now={now} />);
+  await act(async () => fireEvent.click(screen.getByRole('link', { name: 'المحفظة' })));
+  await screen.findByRole('heading', { name: 'المحفظة', level: 1 });
+  return source;
+}
+
+describe('wallet: balance and who pays Meta', () => {
+  it('shows available, balance and held, with the overdraft explained in one sentence', async () => {
+    await openWallet();
+    const bal = screen.getByRole('region', { name: t.wBalanceTitle });
+    expect(within(bal).getByText(egp(16000))).toBeTruthy();
+    expect(within(bal).getByText(egp(18500))).toBeTruthy();
+    expect(within(bal).getByText(egp(2500))).toBeTruthy();
+    expect(within(bal).getByText(t.wOverdraft(egp(5000)))).toBeTruthy();
+    expect(within(bal).queryByText(/مديونية/)).toBeNull();
+  });
+
+  it('a number whose card Meta bills says so; a wallet-paid number says that instead', async () => {
+    await openWallet();
+    const funding = screen.getByRole('region', { name: t.wFundingTitle });
+    const card = within(funding).getByText(/\+20 100 555 0101/).closest('li')!;
+    expect(within(card).getByText(t.wFundingCard)).toBeTruthy();
+    const shared = within(funding).getByText(/\+20 100 555 0900/).closest('li')!;
+    expect(within(shared).getByText(t.wFundingWallet)).toBeTruthy();
+  });
+
+  it('a number whose payer is not set says it is not ready, and never claims Meta bills the card', async () => {
+    await openWallet(withWallet({ funding: [{ phoneNumberId: 'pn-x', displayPhone: '+20 100 555 0777', funding: 'unknown' }] }));
+    const funding = screen.getByRole('region', { name: t.wFundingTitle });
+    const li = within(funding).getByText(/\+20 100 555 0777/).closest('li')!;
+    expect(within(li).getByText(t.wFundingUnknown)).toBeTruthy();
+    expect(within(li).getByText(t.opFundingUnknown)).toBeTruthy();
+    expect(within(li).queryByText(t.wFundingCard)).toBeNull();
+    expect(within(li).queryByText(t.wFundingWallet)).toBeNull();
+    expect(screen.queryByText(t.wFundingCard)).toBeNull(); // the top-up card does not claim card billing either
+  });
+
+  it('debt is stated and says the next top-up pays it first', async () => {
+    await openWallet(withWallet({ debtMinor: 3000, balanceMinor: -3000, availableMinor: -5500 }));
+    expect(screen.getAllByText(t.wDebtLine(egp(3000))).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(t.wMarketingPaused).length).toBeGreaterThan(0);
+  });
+
+  it('a past-due plan says marketing is paused', async () => {
+    await openWallet(withWallet({ plan: { packageId: 'growth', status: 'past_due', periodEnd: now(), cancelledAt: null } }));
+    const plan = screen.getByRole('region', { name: t.wPlanTitle });
+    expect(within(plan).getByText(t.planStatus.past_due!)).toBeTruthy();
+    expect(within(plan).getByText(t.wPlanPastDue)).toBeTruthy();
+  });
+
+  it('shows the AI credits', async () => {
+    await openWallet();
+    expect(screen.getByText(/٤٨٠|480/)).toBeTruthy();
+  });
+});
+
+describe('wallet: top-up', () => {
+  it('shows the fee on top, sends the exact amount, and redirects only to an https checkout', async () => {
+    const source = createSampleSource();
+    const go = vi.fn();
+    const topup = vi.spyOn(source.wallet!, 'topup');
+    render(<WalletScreen t={t} lang="ar" source={source} api={source.wallet!} now={now} go={go} />);
+    const card = await screen.findByRole('region', { name: t.wTopupTitle });
+    expect(within(card).getByText(t.wTopupHint)).toBeTruthy();
+    fireEvent.change(within(card).getByLabelText(t.wTopupAmount), { target: { value: '200' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wTopupContinue })));
+    expect(topup).toHaveBeenCalledWith(20000);
+    const fee = Math.round(20000 * 0.025) + 300;
+    expect(await screen.findByText(t.wTopupSummary(egp(20000), egp(fee), egp(20000 + fee)))).toBeTruthy();
+    // Nothing has been paid yet: no success claim.
+    expect(screen.queryByText(t.wTopupArrived)).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: t.wTopupPay })));
+    expect(go).toHaveBeenCalledWith('https://pay.example.test/checkout/T-1');
+    expect(screen.getByRole('status').textContent).toContain(t.wTopupWaiting);
+  });
+
+  it('refuses a checkout URL that is not https', async () => {
+    const source = createSampleSource();
+    source.wallet!.topup = async (a) => ({ orderId: 'T-9', state: 'pending', amountMinor: a, feeMinor: 0, totalMinor: a, checkoutUrl: 'javascript:alert(1)' });
+    const go = vi.fn();
+    render(<WalletScreen t={t} lang="ar" source={source} api={source.wallet!} now={now} go={go} />);
+    const card = await screen.findByRole('region', { name: t.wTopupTitle });
+    fireEvent.change(within(card).getByLabelText(t.wTopupAmount), { target: { value: '100' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wTopupContinue })));
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: t.wTopupPay })));
+    expect(go).not.toHaveBeenCalled();
+    expect((await screen.findByRole('alert')).textContent).toContain(t.wTopupError);
+  });
+
+  it('keeps waiting after the return trip; when the order cannot be asked, "arrived" needs the wallet itself to have grown', async () => {
+    const source = createSampleSource();
+    let balance = 18500;
+    const real = source.wallet!.wallet;
+    source.wallet!.wallet = async () => ({ ...(await real()), balanceMinor: balance, availableMinor: balance - 2500 });
+    source.wallet!.topupState = async () => { throw new Error('order lookup down'); };
+    const go = vi.fn();
+    const props = { t, lang: 'ar' as const, source, api: source.wallet!, now, go };
+    const first = render(<WalletScreen {...props} />);
+    const card = await screen.findByRole('region', { name: t.wTopupTitle });
+    fireEvent.change(within(card).getByLabelText(t.wTopupAmount), { target: { value: '100' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wTopupContinue })));
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: t.wTopupPay })));
+    first.unmount(); // the browser left for the checkout page
+
+    render(<WalletScreen {...props} />); // ...and came back
+    expect((await screen.findByRole('status')).textContent).toContain(t.wTopupWaiting);
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    expect(screen.queryByText(t.wTopupArrived)).toBeNull();
+    balance += 10000;
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain(t.wTopupArrived));
+  });
+
+  it('the order\'s own state wins: an unrelated credit while the order is still pending does not say "arrived"', async () => {
+    const source = createSampleSource();
+    let balance = 18500;
+    let state: 'pending' | 'paid' = 'pending';
+    const real = source.wallet!.wallet;
+    source.wallet!.wallet = async () => ({ ...(await real()), balanceMinor: balance, availableMinor: balance - 2500 });
+    source.wallet!.topupState = async (orderId) => ({ orderId, state, amountMinor: 10000, feeMinor: 0, totalMinor: 10000 });
+    const props = { t, lang: 'ar' as const, source, api: source.wallet!, now, go: vi.fn() };
+    const first = render(<WalletScreen {...props} />);
+    const card = await screen.findByRole('region', { name: t.wTopupTitle });
+    fireEvent.change(within(card).getByLabelText(t.wTopupAmount), { target: { value: '100' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wTopupContinue })));
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: t.wTopupPay })));
+    first.unmount();
+    render(<WalletScreen {...props} />);
+    balance += 10000; // a refund or an adjustment lands; the card payment has not
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    expect(screen.getByRole('status').textContent).toContain(t.wTopupWaiting);
+    expect(screen.queryByText(t.wTopupArrived)).toBeNull();
+    state = 'paid';
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain(t.wTopupArrived));
+  });
+
+  it('a failed or expired order stops the waiting and says nothing was taken', async () => {
+    const source = createSampleSource();
+    source.wallet!.topupState = async (orderId) => ({ orderId, state: 'failed', amountMinor: 10000, feeMinor: 0, totalMinor: 10000 });
+    const props = { t, lang: 'ar' as const, source, api: source.wallet!, now, go: vi.fn() };
+    const first = render(<WalletScreen {...props} />);
+    const card = await screen.findByRole('region', { name: t.wTopupTitle });
+    fireEvent.change(within(card).getByLabelText(t.wTopupAmount), { target: { value: '100' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wTopupContinue })));
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: t.wTopupPay })));
+    first.unmount();
+    render(<WalletScreen {...props} />);
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain(t.wTopupFailed));
+  });
+
+  it('rejects an amount outside the range without calling the server', async () => {
+    const source = createSampleSource();
+    const topup = vi.spyOn(source.wallet!, 'topup');
+    render(<WalletScreen t={t} lang="ar" source={source} api={source.wallet!} now={now} go={vi.fn()} />);
+    const card = await screen.findByRole('region', { name: t.wTopupTitle });
+    fireEvent.change(within(card).getByLabelText(t.wTopupAmount), { target: { value: '5' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wTopupContinue })));
+    expect(topup).not.toHaveBeenCalled();
+    expect(within(card).getByRole('alert').textContent).toContain(t.wTopupBadAmount);
+  });
+
+  it('is the owner’s only, and only while the server has top-ups switched on', async () => {
+    await openWallet(withWallet({}, 'staff'));
+    expect(screen.queryByRole('region', { name: t.wTopupTitle })).toBeNull();
+    cleanup();
+    await openWallet(withWallet({ topupsEnabled: false }));
+    const card = screen.getByRole('region', { name: t.wTopupTitle });
+    expect(within(card).getByText(t.wTopupOff)).toBeTruthy();
+    expect(within(card).queryByRole('button', { name: t.wTopupContinue })).toBeNull();
+  });
+});
+
+describe('wallet: statement', () => {
+  it('shows opening and closing, the totals and every row of the month', async () => {
+    await openWallet();
+    const st = screen.getByRole('region', { name: t.wStatementTitle });
+    expect(await within(st).findByText(egp(30000))).toBeTruthy(); // opening
+    expect(within(st).getAllByText(egp(18500)).length).toBeGreaterThan(0); // closing
+    const rows = within(within(st).getByRole('list', { name: t.wRows })).getAllByRole('listitem');
+    expect(rows).toHaveLength(6);
+    expect(within(rows[0]!).getByText(t.ledgerKinds.topup!)).toBeTruthy();
+    expect(within(st).getByRole('list', { name: t.wByKind })).toBeTruthy();
+    expect(within(st).getByRole('list', { name: t.wByCategory })).toBeTruthy();
+    expect(within(st).getByText(/تسويق: /)).toBeTruthy(); // card-billed messages, by category
+  });
+
+  it('loads another month and says when it is empty', async () => {
+    const source = createSampleSource();
+    const statement = vi.spyOn(source.wallet!, 'statement');
+    await openWallet(source);
+    await screen.findByRole('list', { name: t.wRows });
+    fireEvent.change(screen.getByLabelText(t.wMonth), { target: { value: '2026-09' } });
+    await waitFor(() => expect(statement).toHaveBeenLastCalledWith('2026-09'));
+    expect(await screen.findByText(t.wNoRows)).toBeTruthy();
+  });
+
+  it('downloads the CSV through the token-carrying API, not a bare link', async () => {
+    const source = createSampleSource();
+    const csv = vi.spyOn(source.wallet!, 'statementCsv');
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    await openWallet(source);
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: t.wCsv })));
+    expect(csv).toHaveBeenCalledWith('2026-10');
+    expect(click).toHaveBeenCalled();
+    click.mockRestore();
+  });
+
+  it('staff do not see the statement (the server would answer 403)', async () => {
+    await openWallet(withWallet({}, 'staff'));
+    expect(screen.queryByRole('region', { name: t.wStatementTitle })).toBeNull();
+    expect(screen.queryByRole('region', { name: t.wRefundTitle })).toBeNull();
+  });
+});
+
+describe('wallet: refund requests', () => {
+  it('states the rules, lists past requests with their state and the reviewer’s note', async () => {
+    await openWallet();
+    const card = screen.getByRole('region', { name: t.wRefundTitle });
+    expect(within(card).getByText(t.wRefundRules)).toBeTruthy();
+    const list = await within(card).findByRole('list', { name: t.wRefundPast });
+    expect(within(list).getByText(t.refundStates.rejected!)).toBeTruthy();
+    expect(within(list).getByText('الرصيد اتصرف على حملة قبل الطلب.')).toBeTruthy();
+    expect(within(list).getByText(t.refundStates.paid!)).toBeTruthy();
+  });
+
+  it('refuses less than 50 EGP before asking the server, then sends a valid request', async () => {
+    const source = createSampleSource();
+    const request = vi.spyOn(source.wallet!, 'requestRefund');
+    await openWallet(source);
+    const card = screen.getByRole('region', { name: t.wRefundTitle });
+    fireEvent.change(within(card).getByLabelText(t.wRefundAmount), { target: { value: '49' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wRefundSend })));
+    expect(request).not.toHaveBeenCalled();
+    expect(within(card).getByRole('alert').textContent).toContain(t.wRefundBelowMin);
+    fireEvent.change(within(card).getByLabelText(t.wRefundAmount), { target: { value: '120.5' } });
+    fireEvent.change(within(card).getByLabelText(t.wRefundNote), { target: { value: 'ألغيت الاشتراك' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wRefundSend })));
+    expect(request).toHaveBeenCalledWith(12050, 'ألغيت الاشتراك');
+    expect(await within(card).findByText(t.wRefundSent)).toBeTruthy();
+    expect(within(card).getByText(t.refundStates.pending!)).toBeTruthy();
+  });
+
+  it('explains the server’s refusal in plain words', async () => {
+    const source = createSampleSource();
+    source.wallet!.requestRefund = async () => { throw new ApiError('invalid_request', 409, 'plan_still_active'); };
+    await openWallet(source);
+    const card = screen.getByRole('region', { name: t.wRefundTitle });
+    fireEvent.change(within(card).getByLabelText(t.wRefundAmount), { target: { value: '100' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wRefundSend })));
+    expect((await within(card).findByRole('alert')).textContent).toContain(t.refundReasons.plan_still_active!);
+  });
+});
+
+describe('wallet: low balance banner in the inbox', () => {
+  async function inbox(source: InboxSource) {
+    render(<App source={source} now={now} />);
+    await screen.findByRole('list', { name: 'المحادثات' });
+  }
+
+  it('shows nothing while the wallet is healthy', async () => {
+    await inbox(createSampleSource());
+    await act(async () => undefined);
+    expect(document.querySelector('[data-banner="wallet"]')).toBeNull();
+  });
+
+  it('a low balance gives a calm banner with a link to the wallet', async () => {
+    await inbox(withWallet({ lowBalance: true }));
+    const banner = await screen.findByText(t.wBannerLow);
+    const link = within(banner.closest('[data-banner="wallet"]') as HTMLElement).getByRole('link', { name: t.wBannerLink });
+    await act(async () => fireEvent.click(link));
+    expect(await screen.findByRole('heading', { name: 'المحفظة', level: 1 })).toBeTruthy();
+  });
+
+  it('debt, and an empty balance on a wallet-paid number, say what stops', async () => {
+    await inbox(withWallet({ debtMinor: 3000, balanceMinor: -3000, availableMinor: -5500, lowBalance: true }));
+    expect(await screen.findByText(t.wBannerDebt(egp(3000)))).toBeTruthy();
+    expect(screen.getByText(t.wMarketingPaused)).toBeTruthy();
+  });
+
+  it('an empty balance does not claim marketing is paused when only cards pay Meta', async () => {
+    await inbox(withWallet({ availableMinor: 0, balanceMinor: 0, lowBalance: true, funding: [{ phoneNumberId: 'p', displayPhone: '+20 100', funding: 'merchant_card' }] }));
+    expect(await screen.findByText(t.wBannerLow)).toBeTruthy();
+    expect(screen.queryByText(t.wMarketingPaused)).toBeNull();
+  });
+});

@@ -1,0 +1,51 @@
+# Campaigns (Phase 6)
+
+Contacts, CSV import, segments, broadcast campaigns and tracked links. Code: `src/core/campaigns/**` (core: it never names the product), routes in `src/routes/{contacts,imports,segments,campaigns,track}.ts`, all state in the workspace Durable Object (migrations v21 to v24). Every route below is `/api/v1/stores/:storeId/...` behind `requireStoreAccess`, except the public `/t/:code`.
+
+## Who may do what
+| Action | Role |
+|---|---|
+| list contacts, imports, segments, campaigns; previews; tag a contact | owner or staff |
+| upload an import, create/edit/delete a segment, create/send/resume a campaign, delete a draft | owner (they assert consent or spend money) |
+| pause or cancel a campaign | owner or staff (stopping spend is the safe direction) |
+
+## The consent rule (read this first)
+**An audience is always `opted_out_at IS NULL AND consent_at IS NOT NULL AND <your filters>`**, for every campaign whatever its template category. It is built in `audienceWhere()` (`segments.ts`), not in the criteria JSON, so no criteria can switch it off, and `optedOut: true` is a validation error.
+
+- A STOP sets `opted_out_at` and wins until the customer sends START; a send that waited (tier, pause, 131049) re-checks at claim time (`marketingToOptedOut`), so a STOP after queueing still stops the message.
+- Consent is recorded by: the customer's START keyword (`keyword_start`), an import ticked "these contacts agreed to receive messages" (`import:<file>`), or the Store. A customer who merely wrote to us has **no** marketing consent.
+- An import never clears an opt-out and never overwrites consent already on record.
+- Segment preview returns `{count, excluded: {optedOut, noConsent}}` so a merchant sees why the audience is smaller than the contact list.
+
+## Contacts and import (6.1)
+- `GET /contacts?tag=&optedOut=true|false&q=&cursor=&limit=` newest first, keyset pagination; each item has `tags` (contact tags plus the inbox's conversation tags), `consent {source, at}` and `lastInboundAt`. `PUT /contacts/:waId/tags` replaces the contact's own tags (max 10 per call, 20 stored).
+- `POST /imports` (multipart: `file` text/csv up to 10 MB, `consented=true|false`, optional `mapping={"phone":"..","name":"..","tags":".."}`) stores the file in R2 (`imports/<ws>/<id>.csv`), takes the workspace's single import slot (409 while another runs) and starts `ImportWorkflow`. Excel's `application/vnd.ms-excel` is accepted when the name ends in `.csv`.
+- The workflow reads the file in slices (256 KB or 2,000 records per step), parses on bytes (so an Arabic letter or a quoted line break cannot be split), detects `,` `;` or tab, matches the header (English and Arabic names) or the explicit mapping, normalises each phone with `normaliseE164` (digits only stored), cleans names (the literal `null`/`N/A` is not a name) and tags (`; , | ،` separated, lower-cased, 32 chars, 10 per row), and applies the slice in one transaction keyed by its starting byte offset: a step that ran twice changes nothing.
+- A number repeated inside one file is rejected as `duplicate_in_file` (first wins); other rejects are `empty_phone`, `invalid_phone`, `unreadable_row`. `GET /imports/:id/rejects` lists `{line, reason}` (first 1,000). **The phone is never stored in a reject, and the uploaded file is deleted from R2 when the import ends** (done or failed). At most 100,000 rows per import.
+- Existing contacts are merged: a name only fills a gap (a WhatsApp profile name is not replaced), tags are added.
+
+## Segments (6.2)
+`POST /segments {name, criteria}`, `GET|PUT|DELETE /segments/:id`, `POST /segments/preview {criteria}`, `GET /segments/:id/preview`. Criteria (strict JSON, see `segmentCriteria` in the contract): `tags {any, all}` (either tag source, case-insensitive), `lastInboundAfter/Before` (epoch ms; a contact who never wrote matches neither), `hasOrdered` (local `store_orders`, "ordered" = status not cancelled/canceled/refunded/refused/failed; as fresh as the last Store event), `everyone: true`. **At least one filter or `everyone: true`**: an empty criteria never widens to everybody.
+
+## Broadcasts (6.3)
+Create: `POST /campaigns {name, template{name,language}, params[], audience{segmentId}|{criteria}, dailySendLimit?, linkUrl?}` checks now that the template is APPROVED and not AUTHENTICATION, that the parameters render, and that the audience is not empty; the audience criteria are snapshotted. Params: `{kind:'text',value}`, `{kind:'name',fallback}`, `{kind:'link'}`, `{kind:'link_code'}`. A draft carries `estimate {audience, perMessageMinor, totalMinor}` from the wallet hook.
+
+States: `draft -> scheduled|running -> completed`, `paused` (reason `manual | wallet_empty | template_unavailable | internal_error | plan_blocked | funding_unknown | rate_unavailable`), `cancelled`. `POST /campaigns/:id/send {scheduledAt?}`, `/pause`, `/resume`, `/cancel`, `DELETE` (drafts only). `GET /campaigns[?status=&cursor=]` and `GET /campaigns/:id` return `counts` (messages by their own status plus `skipped`), `totals` (sent = Meta accepted or beyond, delivered, read, failed, skipped, pending) and `clicks`; counts are read from the messages through the stable key, so they cannot drift. The campaigns screen has Arabic and English words for every reason (the copy tables are typed by the contract enums, so a new reason fails typecheck until it has copy) and a generic line for a code newer than the build.
+
+### The workflow (`CampaignWorkflow`, `workflows.ts`)
+One instance per generation, id `<campaignId>-<attempt>`. `runCampaign()` is the whole loop and is tested with a fake step API:
+1. `start` (is this still the live generation?), then for a scheduled campaign `sleepUntil(scheduledAt)` and `activate`.
+2. Loop: `page-i` asks the workspace for page number *p* (`campaignPage`). A page is up to 500 recipients, the next ones after the stored cursor, re-evaluated against the consent/opt-out guard each time. The answer is `next`, `done` (audience exhausted: campaign `completed`), `wait {until}` (`sleepUntil`), `stop {reason}` (paused, cancelled, superseded, out of order, template withdrawn, wallet empty, plan blocked, funding unknown, rate unavailable) or `retry` (wallet unreachable: the step throws, Workflows retries with backoff).
+3. **Idempotence.** A page is stored in `campaign_pages` in the same transaction that creates its messages, so a step that runs again gets the stored answer and queues nothing. Message key `camp:<campaignId>:<contactId>`, reservation ref `camp:<campaignId>:p<page>`. Queueing reuses `queueTemplate` (template + consent re-check, message row and its `send_release` scheduler row in one transaction), then the normal pipeline: claim, tier, MPS, 131049, opt-out re-check.
+4. **Pacing.** Room = the number's tier minus slots in use minus sends waiting for a slot minus this workspace's campaign messages still on their way, narrowed by `daily_send_limit`. No room: `sleepUntil(oldest slot or recipient + 24 h + 1 s)`, or 30 s while sends drain. (Ported from the old `daily_send_limit`.)
+5. **Pause/resume/cancel.** Resume starts a new generation (the old one stops at its next step and is terminated best effort). A manual pause moves the campaign's unsent `send_release` rows 30 days ahead (reason `campaign_paused`) and a queued copy that comes back is re-parked at claim time; resume brings them back. Cancel fails unsent messages (`campaign_cancelled`), deletes their scheduler rows, and a late queue copy is a no-op. A pause for `wallet_empty` or `template_unavailable` does not park pages already reserved.
+6. **Sweep.** The DO task `campaign_step` runs every 10 min while a campaign is scheduled or running (nothing is scheduled otherwise): restarts a campaign whose instance is missing, errored, terminated or complete early, pauses one after 30 generations (`internal_error`), retries failed wallet settlements. A restored backup is picked up the same way.
+
+### Wallet hook (Phase 7 replaces the no-op)
+`campaigns/wallet.ts`: `walletEstimate(ws, category)`, `walletReserve(ws, ref, estimateMinor)` (idempotent per ref; `{ok:false, reason:'wallet_empty'}` pauses the campaign), `walletSettle(ws, ref, {recipients, ended})` (called when the campaign completes or is cancelled, and for an abandoned reservation; idempotent per ref). The default is now the real wallet (`LEDGER_WALLET`): a merchant-card number reserves nothing; a platform number reserves the page (`reserveParent`) and each message's hold (created at claim) draws from it via `parentHoldRef`. The page's reservation closes only when none of its messages is waiting. `reason` may also be `funding_unknown` or `rate_unavailable`. See `docs/billing.md`. Money is integer piasters.
+
+## Tracked links (6.4)
+A campaign with `linkUrl` (https, a real host, no credentials, not this service) and a `link` or `link_code` parameter gives every recipient their own link `PUBLIC_BASE_URL/t/<workspaceId>.<22 chars>` (16 random bytes, 128 bits). `link` puts the full URL in a text parameter; `link_code` puts only the code, for a template URL button `https://<this service>/t/{{1}}`. `GET /t/:code` (public, `run_worker_first` in wrangler) answers `302` to the merchant's URL with `utm_source=whatsapp&utm_medium=campaign&utm_campaign=<slug>` added where the merchant did not set them, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`. A malformed code, an unregistered workspace, an unknown code or an erased contact is a 404 (the first two before any Durable Object is touched). A click bumps `campaign_links` and writes one Analytics Engine point to `LINK_CLICKS` (`ebda_wa_link_clicks`): blobs `[click, campaignId, buyerKey, workspaceId]`, never the phone number or the code. Link-preview bots (WhatsApp, Facebook, crawlers) and HEAD requests are redirected but not counted.
+
+## Not here yet
+The Campaigns and Contacts screens (controller). The old product's CSV/Excel `.xlsx` import is not ported (CSV only).

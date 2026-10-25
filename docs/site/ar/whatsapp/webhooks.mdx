@@ -1,0 +1,126 @@
+---
+title: الـ Webhooks والموصّلات
+section: "Ebda WhatsApp"
+order: 4
+description: موصّل الـ webhook الموقّع اللي بيخلي المساعد الذكي في Ebda WhatsApp يكلّم نظامك، وإزاي تتحقق من التوقيع.
+---
+
+# الـ Webhooks والموصّلات
+
+## إيه ده، وإيه اللي مش ده
+
+Ebda WhatsApp مبيبعتش لسيرفرك تدفّق أحداث عام (رسالة جديدة، حالة تسليم وهكذا). الـ webhook الخارجي الموجود هو **موصّل الـ webhook** بتاع المساعد الذكي: إنت بتوصف كام أداة، ولما سؤال العميل يحتاج واحدة منهم، المساعد بينده على رابطك بطلب موقّع ويستخدم ردّك في إجابته.
+
+لو عايز تتابع الرسايل والحالات من نظامك، استخدم [واجهة HTTP](/whatsapp/api) ‏(`GET /events?after={seq}` وقايمة الرسايل).
+
+## الربط مع Ebda Store جاهز
+
+الربط بين Ebda WhatsApp وEbda Store (تأكيد الطلبات، وتأكيد الدفع عند الاستلام، وتحديثات الشحن، وأخد الطلب في المحادثة) جاهز جوه المنتج. مفيش حاجة تضبطها ولا webhook تعمله.
+
+## إعداد موصّل
+
+الموصّلات لصاحب المتجر بس، والموظف بياخد `403 forbidden`. المساعد مبيعرضش أدوات الموصّل غير لما الموصّل يكون مفعّل والمساعد الذكي شغّال. لحد 5 موصّلات للمتجر.
+
+| الطريقة والمسار (تحت `/stores/{storeId}`) | الغرض |
+|---|---|
+| `GET /connectors` | قايمة الموصّلات (السر مبيرجعش أبدًا، و`hasSecret` بتقولك لو فيه سر متسجّل) |
+| `PUT /connectors/{id}` | إنشاء موصّل أو استبداله بالكامل. الـ `id` حروف إنجليزي صغيرة وأرقام بشرطة واحدة بين الأجزاء، لحد 16 حرف |
+| `DELETE /connectors/{id}` | حذف |
+| `POST /connectors/{id}/test` | بيبعت `ping` موقّع ويرجّع `{ ok, error?, detail? }`. اختبار واحد لكل موصّل كل 5 ثواني (غير كده `429`). بيشتغل حتى لو الموصّل متوقف |
+
+الـ body بتاع `PUT` لموصّل webhook:
+
+```json
+{
+  "kind": "webhook",
+  "enabled": true,
+  "secret": "<YOUR_SHARED_SECRET>",
+  "config": {
+    "url": "https://example.com/hooks/ebda",
+    "tools": [
+      {
+        "name": "check_booking",
+        "description": "البحث عن حجز برقمه المرجعي",
+        "params": [{ "name": "reference", "type": "string", "required": true, "maxLength": 20 }]
+      }
+    ]
+  }
+}
+```
+
+- `secret` هو سر التوقيع، من 16 لـ 400 حرف. بيتكتب بس ومبيرجعش: ابعته عشان تضبطه، واسيبه عشان يفضل الحالي. لو غيّرت الدومين في `url` لازم تدخل السر تاني.
+- الـ `url` لازم يكون `https` على البورت العادي، من غير بيانات دخول أو query أو fragment، ومن غير عنوان IP، ومن غير اسم شكله داخلي. التحويلات (redirects) مبتتتبعش.
+- لحد 10 أدوات للموصّل و10 معاملات للأداة. أسماء الأدوات حروف إنجليزي صغيرة وأرقام وشرطة سفلية واحدة (لحد 40 حرف). المعامل ليه `name` و`type` ‏(`string` أو `number` أو `boolean` أو `enum`)، واختياريًا `description` و`required` و`maxLength` ‏(للنصوص، من 1 لـ 500، الافتراضي 200) و`min` و`max` ‏(للأرقام) و`values` ‏(إجبارية للـ enum، لحد 20).
+- النموذج بيبعت بس المعاملات اللي عرّفتها، وبتتراجع على تعريفك قبل ما أي حاجة تتبعت.
+- الرفض بيرجع بأكواد ثابتة في `message`: ‏`invalid_url` و`secret_required` و`kind_mismatch` و`too_many_connectors` و`secrets_unavailable`.
+
+## الطلب اللي هيوصلك
+
+`POST` على `url` بتاعك، و`content-type: application/json`:
+
+```json
+{
+  "event": "tool_call",
+  "tool": "check_booking",
+  "args": { "reference": "AB12" },
+  "workspaceId": "…",
+  "conversationId": 7,
+  "buyerKey": "<hex>",
+  "idempotencyKey": "conn:123:0",
+  "at": "2026-11-02T16:30:00.000Z"
+}
+```
+
+`buyerKey` مفتاح مستعار للعميل. رقم تليفون العميل عمره ما بيتبعت.
+
+زرار الاختبار بيبعت `{ "event": "ping", "workspaceId": "…", "at": "…" }` موقّع بنفس الطريقة، وبيستنى `{ "ok": true }`.
+
+الهيدرز:
+
+| الهيدر | القيمة |
+|---|---|
+| `x-timestamp` | الوقت بالثواني (Unix) |
+| `x-signature` | ‏`sha256=` وبعدها hex بتاع `HMAC-SHA256(secret, x-timestamp + "." + rawBody)` |
+| `idempotency-key` | زي `idempotencyKey`، وثابت لنفس استدعاء الأداة لنفس رسالة العميل |
+
+## التحقق من التوقيع
+
+احسب الـ HMAC على بايتات الـ body الخام قبل أي parsing للـ JSON، وقارن بطريقة وقتها ثابت.
+
+```js
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+function verify(rawBody /* Buffer، قبل JSON.parse */, headers, secret) {
+  const ts = headers['x-timestamp'];
+  if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false; // ارفض الطلبات القديمة
+  const want = 'sha256=' + createHmac('sha256', secret).update(`${ts}.${rawBody}`).digest('hex');
+  const got = headers['x-signature'] ?? '';
+  return got.length === want.length && timingSafeEqual(Buffer.from(got), Buffer.from(want));
+}
+```
+
+فحص الخمس دقايق سياسة من عندك، وموضوع هنا كممارسة كويسة.
+
+## ردّك
+
+رد بـ HTTP 2xx وJSON مش أكبر من 32 كيلوبايت، بالشكل ده بالظبط:
+
+```json
+{ "ok": true, "result": { "status": "confirmed" } }
+```
+
+أو `{ "ok": false, "message": "سبب مختصر" }`. الـ `ok: false` بتوصل للمساعد كاستدعاء مرفوض، والـ `message` بتاعك (متقصوصة لحد 300 حرف) بتتمرر.
+
+## إعادة المحاولة والمهلة
+
+- كل طلب ليه مهلة 8 ثواني، واستدعاء الأداة كله 12 ثانية.
+- مفيش إعادة محاولة تلقائية. لو الاستدعاء فشل، المساعد بيعرف إنه فشل وممكن يقرر يطلبه تاني. التكرار لنفس استدعاء الأداة بيحمل نفس الـ `idempotency-key`، فامنع التكرار بيه في أي حاجة بتغيّر بيانات.
+- المساعد بيعمل لحد 3 استدعاءات موصّل في الجولة، و3 جولات لكل رسالة عميل.
+- اللي المساعد بيشوفه من ردّك بيتقصّ لحوالي 3,000 حرف.
+- لو العميل اتمسحت بياناته أو بعت STOP، مفيش استدعاء بيحصل.
+
+الفشل بيوصل للمساعد بواحد من الأكواد دي: `timeout` و`network` و`redirect` و`http_error` و`too_large` و`bad_response` و`blocked_host` و`invalid_arguments` و`unknown_tool` و`rejected` و`unavailable`.
+
+## موصّل Odoo
+
+نوع تاني من الموصّلات، `odoo`، بيربط المساعد بـ Odoo بتاعك مباشرة (الـ `config`: ‏`{ url, database, login }`، ومفتاح API أو كلمة السر في `secret`). أدواته ثابتة ومش محتاج سيرفر من عندك. لسه ما اتجربش على Odoo حقيقي، فجرّبه على نسختك قبل ما تعتمد عليه.
