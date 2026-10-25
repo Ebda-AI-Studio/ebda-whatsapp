@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DEFAULT_HOURS, DEFAULT_MENU, hoursSchema, menuSchema } from './bot-settings';
+import { DEFAULT_HOURS, DEFAULT_MENU, hoursSchema, locationSchema, menuSchema } from './bot-settings';
 import type { LinkHost } from './host';
 
 /** Workspace settings of the Store link. Absent keys take the defaults below. */
@@ -16,15 +16,17 @@ export const storeLinkSettingsSchema = z.object({
   menu: menuSchema,
   /** Business hours and the out-of-hours reply. */
   hours: hoursSchema,
+  /** Where the shop is: sent as a WhatsApp location message plus a map link. Null = not set. */
+  location: locationSchema,
 });
 export type StoreLinkSettings = z.infer<typeof storeLinkSettingsSchema>;
 export const storeLinkSettingsPatch = storeLinkSettingsSchema.partial();
 
-export const DEFAULT_SETTINGS: StoreLinkSettings = { orderConfirmations: true, orderingBot: true, otpViaWhatsApp: false, catalogId: null, menu: DEFAULT_MENU, hours: DEFAULT_HOURS };
+export const DEFAULT_SETTINGS: StoreLinkSettings = { orderConfirmations: true, orderingBot: true, otpViaWhatsApp: false, catalogId: null, menu: DEFAULT_MENU, hours: DEFAULT_HOURS, location: null };
 
 const KEYS = Object.keys(DEFAULT_SETTINGS) as (keyof StoreLinkSettings)[];
 /** Settings kept as JSON text (the rest are flags or the catalog id). An unreadable stored value falls back to the default. */
-const JSON_KEYS = { menu: menuSchema, hours: hoursSchema } as const;
+const JSON_KEYS = { menu: menuSchema, hours: hoursSchema, location: locationSchema } as const;
 type JsonKey = keyof typeof JSON_KEYS;
 const isJsonKey = (k: string): k is JsonKey => k in JSON_KEYS;
 

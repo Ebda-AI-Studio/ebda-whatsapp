@@ -76,6 +76,7 @@ export type BotMsg =
   | { kind: 'text'; text: string }
   | { kind: 'image'; link: string; caption: string }
   | { kind: 'buttons'; body: string; buttons: { id: string; title: string }[] }
+  | { kind: 'location'; latitude: number; longitude: number; name: string; address: string }
   | { kind: 'list'; body: string; button: string; rows: { id: string; title: string; description?: string }[] };
 
 const cut = (s: string, n: number) => (Array.from(s).length <= n ? s : `${Array.from(s).slice(0, n - 1).join('')}…`);
@@ -85,6 +86,7 @@ export function toJob(host: LinkHost, to: string, pn: string, key: string, m: Bo
   switch (m.kind) {
     case 'text': return { job: { ...base, kind: 'text', text: cut(m.text, 4096) }, type: 'text', preview: m.text };
     case 'image': return { job: { ...base, kind: 'image_link', imageLink: { link: m.link, caption: cut(m.caption, 1024) } }, type: 'image', preview: m.caption };
+    case 'location': return { job: { ...base, kind: 'location', location: { latitude: m.latitude, longitude: m.longitude, name: cut(m.name, 100), address: cut(m.address, 300) } }, type: 'location', preview: m.name };
     case 'buttons': return { job: { ...base, kind: 'interactive', interactive: { body: cut(m.body, 1024), buttons: m.buttons.slice(0, 3).map((b) => ({ id: b.id, title: cut(b.title, 20) })) } }, type: 'interactive', preview: m.body };
     case 'list': return { job: { ...base, kind: 'list', list: { body: cut(m.body, 1024), button: cut(m.button, 20), rows: m.rows.slice(0, 10).map((r) => ({ id: r.id, title: cut(r.title, 24), ...(r.description ? { description: cut(r.description, 72) } : {}) })) } }, type: 'interactive', preview: m.body };
   }

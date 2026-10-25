@@ -83,3 +83,8 @@ export function sendList(opts: Base & { body: string; button: string; rows: List
 export function sendImageLink(opts: Base & { link: string; caption?: string }): Promise<SendResult> {
   return postMessage(opts, { type: 'image', image: { link: opts.link, ...(opts.caption ? { caption: opts.caption } : {}) } });
 }
+
+/** A location message (a pin with a name and an address). Free-form: only inside the 24 h window, like every non-template send. */
+export function sendLocation(opts: Base & { latitude: number; longitude: number; name?: string; address?: string }): Promise<SendResult> {
+  return postMessage(opts, { type: 'location', location: { latitude: opts.latitude, longitude: opts.longitude, ...(opts.name ? { name: opts.name } : {}), ...(opts.address ? { address: opts.address } : {}) } });
+}

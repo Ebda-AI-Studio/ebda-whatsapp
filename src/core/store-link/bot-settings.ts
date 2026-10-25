@@ -41,3 +41,13 @@ export const hoursSchema = z.object({
 export type HoursSettings = z.infer<typeof hoursSchema>;
 const NO_RANGES = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
 export const DEFAULT_HOURS: HoursSettings = { enabled: false, timezone: 'Africa/Cairo', week: NO_RANGES, awayMessage: { ar: 'مقفولين دلوقتي', en: 'We are closed right now' }, ordersWhileClosed: true };
+
+// ---- store location ----------------------------------------------------------------------------------------------------
+
+export const locationSchema = z.object({
+  name: chars(100),
+  address: chars(300),
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+}).strict().nullable();
+export type LocationSettings = z.infer<typeof locationSchema>;

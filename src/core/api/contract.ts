@@ -3,7 +3,7 @@
  * All routes live under /api/v1/stores/:storeId/ and require a bearer token (identity v1).
  */
 import { z } from 'zod';
-import { hoursSchema, menuSchema } from '../store-link/bot-settings';
+import { hoursSchema, locationSchema, menuSchema } from '../store-link/bot-settings';
 
 export const messageStatus = z.enum(['queued', 'claimed', 'accepted', 'sent', 'delivered', 'read', 'failed', 'retry']);
 export const messageType = z.enum(['text', 'template', 'interactive', 'image', 'audio', 'video', 'document', 'sticker', 'location', 'order', 'unsupported']);
@@ -144,6 +144,7 @@ export const storeLinkSettingsResponse = z.object({
   catalogId: z.string().nullable(),
   menu: menuSchema,
   hours: hoursSchema,
+  location: locationSchema,
 });
 export const storeLinkSettingsPatch = z.object({
   orderConfirmations: z.boolean(),
@@ -152,6 +153,7 @@ export const storeLinkSettingsPatch = z.object({
   catalogId: z.string().regex(/^\d{5,25}$/).nullable(),
   menu: menuSchema,
   hours: hoursSchema,
+  location: locationSchema,
 }).partial().refine((p) => Object.keys(p).length > 0, 'nothing to change');
 
 /** AI agent settings (owner only). `apiKey` never comes back: only `hasApiKey` does. */

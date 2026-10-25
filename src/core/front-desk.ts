@@ -29,7 +29,9 @@ export function menuActive(host: Pick<LinkHost, 'sql'>): boolean {
 
 /** Any front-desk feature is on: the inbound message needs a turn even when neither the ordering bot nor the agent is. */
 export function frontDeskActive(host: Pick<LinkHost, 'sql'>): boolean {
-  return menuActive(host) || (storeLink().copy !== null && readSettings(host).hours.enabled);
+  if (storeLink().copy === null) return false;
+  const s = readSettings(host);
+  return menuActive(host) || s.hours.enabled || s.location !== null;
 }
 
 /** The front desk answers every message itself right now (a menu is on, or the shop is closed): the generic auto reply would double it. */
@@ -42,6 +44,12 @@ export function frontDeskOwnsReplies(host: Pick<LinkHost, 'sql'>, now: number): 
 function midOrder(host: Pick<LinkHost, 'sql'>, from: string, now: number): boolean {
   const row = host.sql.exec<{ state: string; updated_at: number }>('SELECT state, updated_at FROM bot_sessions WHERE wa_id = ?', from).toArray()[0];
   return !!row && row.state !== 'idle' && now - row.updated_at < SESSION_FRESH_MS;
+}
+
+/** The bot is waiting for a typed delivery address: the next free text is that address, whatever it says. */
+function awaitingAddress(host: Pick<LinkHost, 'sql'>, from: string, now: number): boolean {
+  const row = host.sql.exec<{ state: string; updated_at: number }>('SELECT state, updated_at FROM bot_sessions WHERE wa_id = ?', from).toArray()[0];
+  return row?.state === 'awaiting_address' && now - row.updated_at < SESSION_FRESH_MS;
 }
 
 function localeOfText(host: Pick<LinkHost, 'sql'>, input: BotInput): Locale {
@@ -69,12 +77,19 @@ async function send(host: LinkHost, input: BotInput, now: number, out: BotMsg[],
   }
 }
 
+function locationMessages(host: Pick<LinkHost, 'sql'>): BotMsg[] {
+  const l = readSettings(host).location!;
+  return [{ kind: 'location', latitude: l.latitude, longitude: l.longitude, name: l.name, address: l.address }, { kind: 'text', text: `https://maps.google.com/?q=${l.latitude},${l.longitude}` }];
+}
+
 function menuList(host: LinkHost, locale: Locale): BotMsg {
   const copy = storeLink().copy!.menu;
   const settings = readSettings(host);
   const rows: { id: string; title: string }[] = [];
   if (orderingActive(host)) rows.push({ id: `menu:${locale}:order`, title: copy.orderRow[locale] });
-  const tail: { id: string; title: string }[] = [{ id: `menu:${locale}:human`, title: copy.humanRow[locale] }];
+  const tail: { id: string; title: string }[] = [];
+  if (settings.location) tail.push({ id: `menu:${locale}:loc`, title: copy.locationRow[locale] });
+  tail.push({ id: `menu:${locale}:human`, title: copy.humanRow[locale] });
   // Meta allows 10 rows: the fixed rows always fit and the merchant's items fill what is left, in their order.
   const room = MAX_ROWS - rows.length - tail.length;
   for (const item of settings.menu.items.slice(0, room)) rows.push({ id: `menu:${locale}:faq:${item.id}`, title: item.title[locale] });
@@ -107,10 +122,12 @@ export async function runHoursGate(host: LinkHost, input: BotInput, now: number)
  */
 export async function runFrontDesk(host: LinkHost, input: BotInput, now: number, ctx: { agentOn: boolean }): Promise<'handled' | 'pass'> {
   const copy = storeLink().copy;
-  if (!copy || !menuActive(host)) return 'pass';
+  const menuOn = menuActive(host);
+  const hasLocation = readSettings(host).location !== null;
+  if (!copy || (!menuOn && !hasLocation)) return 'pass';
   if (turnGone(host, input)) return 'handled';
 
-  const tap = input.reply?.kind === 'list' ? ROW.exec(input.reply.id) : null;
+  const tap = menuOn && input.reply?.kind === 'list' ? ROW.exec(input.reply.id) : null;
   if (tap) {
     const locale = tap[1] as Locale;
     if (tap[2] === 'order') {
@@ -127,6 +144,10 @@ export async function runFrontDesk(host: LinkHost, input: BotInput, now: number,
       if (ok) await send(host, input, now, [{ kind: 'text', text: copy.menu.handedOff[locale] }]);
       return 'handled';
     }
+    if (tap[2] === 'loc') {
+      await send(host, input, now, hasLocation ? locationMessages(host) : [menuList(host, locale)]);
+      return 'handled';
+    }
     const item = tap[3] ? readSettings(host).menu.items.find((i) => i.id === tap[3]) : undefined;
     await send(host, input, now, [item ? { kind: 'text', text: item.answer[locale] } : menuList(host, locale)]);
     return 'handled';
@@ -135,8 +156,9 @@ export async function runFrontDesk(host: LinkHost, input: BotInput, now: number,
   if (input.type !== 'text' || !input.text || input.reply || input.order) return 'pass';
   const word = normaliseText(input.text);
   const open = (): Promise<'handled'> => send(host, input, now, [menuList(host, localeOfText(host, input))]).then(() => 'handled' as const);
-  if (normIn(copy.menu.menuWords).has(word)) return open();
-  if (midOrder(host, input.from, now)) return 'pass';
+  if (menuOn && normIn(copy.menu.menuWords).has(word)) return open();
+  if (hasLocation && !awaitingAddress(host, input.from, now) && normIn(copy.menu.locationWords).has(word)) { await send(host, input, now, locationMessages(host)); return 'handled'; }
+  if (!menuOn || midOrder(host, input.from, now)) return 'pass';
   if (normIn(copy.menu.greetingWords).has(word)) return open();
   // Anything else while idle: the menu answers unless the agent can (it answers free text) or the text is an ordering keyword.
   if (!ctx.agentOn && !orderingEngaged(host, input, now)) return open();
