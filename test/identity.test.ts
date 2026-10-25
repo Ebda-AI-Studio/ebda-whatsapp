@@ -111,3 +111,49 @@ describe('GET /api/v1/stores/:storeId/me', () => {
     expect((await get(await mint(k1, { pa: 'super_admin' }))).status).toBe(200);
   });
 });
+
+// The exact token the live issuer mints (Store repo docs/contracts/identity-token-v1.2.example.json, pinned there by
+// apps/accounts/test/token-contract.test.ts), signed here with a test key of the same shape.
+describe('identity contract v1.2: the real issuer token shape', () => {
+  const KID = 'ebda-id-2026-10-25-832525b2';
+  const STAFF_STORE = '22222222-2222-4222-8222-222222222222';
+  async function real(over: { aud?: string; typ?: string; omitStores?: boolean; key?: TestKey; alg?: string } = {}) {
+    const key = over.key ?? (await newKey(KID));
+    const iat = Math.floor(Date.now() / 1000);
+    const payload: Record<string, unknown> = {
+      sid: crypto.randomUUID(), auth_time: iat, email: 'merchant@example.com', email_verified: true,
+      ...(over.omitStores ? {} : { stores: [{ id: STORE, role: 'owner' }, { id: STAFF_STORE, role: 'staff' }] }),
+    };
+    const token = await new SignJWT(payload)
+      .setProtectedHeader({ alg: over.alg ?? 'ES256', kid: key.kid, typ: over.typ ?? 'at+jwt' })
+      .setIssuer(ISSUER).setAudience(over.aud ?? 'whatsapp').setSubject(crypto.randomUUID()).setJti(crypto.randomUUID())
+      .setIssuedAt(iat).setNotBefore(iat).setExpirationTime(iat + 900)
+      .sign(key.privateKey);
+    return { token, key, sid: payload.sid as string };
+  }
+
+  it('accepts it, with at+jwt, auth_time, email claims and stores of both roles', async () => {
+    const { token, key, sid } = await real();
+    const p = await verifierWith([key]).verifier.verify(token);
+    expect(p).toMatchObject({ sessionId: sid, superAdmin: false, stores: [{ id: STORE, role: 'owner' }, { id: STAFF_STORE, role: 'staff' }] });
+  });
+  it('rejects the same shape for another product (aud store)', async () => {
+    const { token, key } = await real({ aud: 'store' });
+    await rejects(verifierWith([key]).verifier.verify(token), 401);
+  });
+  it('rejects the same shape with another typ (an id token, "JWT")', async () => {
+    const { token, key } = await real({ typ: 'JWT' });
+    await rejects(verifierWith([key]).verifier.verify(token), 401);
+  });
+  it('rejects the same shape signed with another algorithm (ES384)', async () => {
+    const { privateKey, publicKey } = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-384' }, true, ['sign', 'verify']) as CryptoKeyPair;
+    const jwk = { ...(await crypto.subtle.exportKey('jwk', publicKey)), kid: KID, alg: 'ES384', use: 'sig' };
+    const key = { kid: KID, privateKey, jwk } as unknown as TestKey;
+    const { token } = await real({ key, alg: 'ES384' });
+    await rejects(verifierWith([key]).verifier.verify(token), 401);
+  });
+  it('rejects the same shape without the stores claim', async () => {
+    const { token, key } = await real({ omitStores: true });
+    await rejects(verifierWith([key]).verifier.verify(token), 401);
+  });
+});
