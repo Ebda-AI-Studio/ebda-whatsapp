@@ -45,6 +45,8 @@ export type Env = {
   KASHIER_FEE_FIXED_MINOR?: string;
   /** Service binding to the accounts service: `isRevoked(sessionId)`. A top-up session is refused (fail closed) when it is unbound. */
   ACCOUNTS?: { isRevoked(sessionId: string): Promise<boolean> };
+  /** An operator adjustment above this many piasters waits for a second super admin. Default 100000 (1,000 EGP). */
+  ADJUSTMENT_APPROVAL_MINOR?: string;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
   META_SYSTEM_TOKEN: string;

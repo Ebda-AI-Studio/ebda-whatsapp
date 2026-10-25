@@ -10,7 +10,8 @@ import { consumeSendBatch, type SendJob } from './core/send-queue';
 import { EBDA_COPY } from './addons/ebda/copy';
 import { EBDA_OPT_IN_KEYWORDS } from './addons/ebda/consent';
 import { createEbdaAccountsVerifier } from './addons/ebda/identity';
-import { requireStoreAccess, type AuthVars } from './core/identity/middleware';
+import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
+import { operatorRoutes } from './routes/operator';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { TIER_LIMITS } from './core/throttle';
@@ -68,6 +69,8 @@ const getVerifier = (env: Env): IdentityVerifier =>
 
 const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
+api.use('/operator/*', requireSuperAdmin(getVerifier));
+api.route('/operator', operatorRoutes);
 api.get('/stores/:storeId/me', (c) => {
   const p = c.get('principal');
   return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null } });
