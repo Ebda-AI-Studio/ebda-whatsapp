@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { sendMessageRequest } from '../core/api/contract';
+import { sharedTemplateSendable } from '../core/shared/shared-templates';
 import { senderNumber, apiError, intParam, workspaceStub, type ApiEnv } from './shared';
 
 export const messagesRoutes = new Hono<ApiEnv>();
@@ -12,6 +13,10 @@ messagesRoutes.post('/stores/:storeId/conversations/:conversationId/messages', a
   if (!ws) return apiError(c, 404, 'not_found');
   const number = await senderNumber(c);
   if (!number) return apiError(c, 409, 'invalid_request', 'no_active_number');
+  // WA-SHARED-NOCAMP-1: refuse up front what the send chokepoint would refuse anyway (the platform catalog decides, not the store's copy).
+  if (number.shared && parsed.data.type === 'template' && !(await sharedTemplateSendable(c.env, number.phoneNumberId, parsed.data.name, parsed.data.language))) {
+    return apiError(c, 409, 'template_not_approved');
+  }
   const r = await ws.queueOutbound(conversationId, number.phoneNumberId, parsed.data);
   if (!r.ok) {
     switch (r.reason) {

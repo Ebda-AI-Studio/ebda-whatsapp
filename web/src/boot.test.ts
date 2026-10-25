@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accountsUrlFor, chooseMode, pickStore } from './boot';
+import { accountsUrlFor, chooseMode, pickStore, signInMode } from './boot';
 
 describe('boot', () => {
   it('a production build always runs live, even with ?sample=1', () => {
@@ -24,5 +24,18 @@ describe('sign-in address', () => {
     expect(accountsUrlFor(undefined, 'https://brand.example')).toBe('https://brand.example');
     expect(accountsUrlFor('', null)).toBeNull();
     expect(accountsUrlFor(undefined, null)).toBeNull();
+  });
+});
+
+describe('which sign-in this build uses', () => {
+  const oidc = { issuer: 'https://login.client.example', clientId: 'c' };
+  it('accounts service, own OIDC provider, or none (never a blank page)', () => {
+    expect(signInMode('https://accounts.example', null)).toBe('accounts');
+    expect(signInMode(null, oidc)).toBe('oidc');
+    expect(signInMode(null, null)).toBe('none');
+    expect(signInMode(null, undefined)).toBe('none');
+  });
+  it('a brand that names both is a configuration error, not a silent pick', () => {
+    expect(() => signInMode('https://accounts.example', oidc)).toThrow(/one sign-in/);
   });
 });

@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { billingCategory, campaignPauseReason, CampaignDto, ImportDto, NumberDto, WalletDto } from '../../src/core/api/contract';
 import type { RefundRequest } from './data/billing';
+import type { SignInErrorCode } from './data/oidc';
 
 export type Lang = 'ar' | 'en';
 
@@ -14,6 +15,7 @@ type HistorySync = NonNullable<NumberDto['historySync']>;
 type ContactsSync = NonNullable<NumberDto['contactsSync']>;
 type PlanStatus = NonNullable<WalletDto['plan']>['status'];
 type RefundState = RefundRequest['state'];
+type SignInErr = SignInErrorCode;
 type NumberStateKey = 'active' | 'pending' | 'failed' | 'locked' | 'disconnected';
 
 
@@ -82,7 +84,12 @@ const ar = {
   failedLine: (f: string, s: string) => `${f} ما وصلتش · ${s} اتشالوا`, scheduledFor: (d: string) => `هتبدأ ${d}`, startedAt: (d: string) => `بدأت ${d}`, finishedAt: (d: string) => `خلصت ${d}`,
   pause: 'وقّف', resume: 'كمّل', cancelCampaign: 'إلغاء الحملة', cancelAsk: 'متأكد؟ الرسايل اللي لسه ما اتبعتتش مش هتتبعت.', cancelYes: 'أيوه، الغي', cancelNo: 'لا، رجوع', deleteDraft: 'امسح المسودة',
   stepAudience: 'مين هيستقبل الحملة؟', stepMessage: 'الرسالة', stepTiming: 'إمتى؟', stepReview: 'راجع وابعت',
-  campaignName: 'اسم الحملة (ليك إنت بس)', audienceSegment: 'شريحة محفوظة', audienceTags: 'العملاء اللي عندهم وسم', audienceEveryone: 'كل العملاء اللي وافقوا', audienceUnknown: 'مقدرناش نحسب عدد اللي هيوصلهم دلوقتي.', signInNotConfigured: 'تسجيل الدخول مش متظبّط في النسخة دي. افتح الصفحة من البوابة بتاعتكم، أو كلّم اللي سلّمك التطبيق.',
+  campaignName: 'اسم الحملة (ليك إنت بس)', audienceSegment: 'شريحة محفوظة', audienceTags: 'العملاء اللي عندهم وسم', audienceEveryone: 'كل العملاء اللي وافقوا', audienceUnknown: 'مقدرناش نحسب عدد اللي هيوصلهم دلوقتي.', signInNotConfigured: 'تسجيل الدخول مش متظبّط في النسخة دي. افتح الصفحة من البوابة بتاعتكم، أو كلّم اللي سلّمك التطبيق.', signOut: 'تسجيل الخروج', signedOutLocal: 'اتسجّل خروجك من التطبيق هنا. اطلع كمان من حسابك عند مزوّد تسجيل الدخول، علشان الشخص اللي بعدك مايدخلش بحسابك.', signedOutSignIn: 'سجّل دخول تاني',
+  signInFailed: 'مقدرناش نسجّلك دخول', signInTryAgain: 'جرّب تسجيل الدخول تاني',
+  signInErrors: copy<SignInErr>({
+    denied: 'مزوّد تسجيل الدخول رفض الطلب أو اتلغى.', state: 'طلب تسجيل الدخول مش مظبوط أو اتستخدم قبل كده. ابدأ من جديد.', nonce: 'ردّ تسجيل الدخول مش متطابق مع الطلب. ابدأ من جديد.',
+    token: 'مزوّد تسجيل الدخول مرجّعش تصريح دخول صالح.', discovery: 'مقدرناش نوصل لإعدادات مزوّد تسجيل الدخول أو إعداداته مش مطابقة.', missing_id_token: 'مزوّد تسجيل الدخول مرجّعش إثبات الهوية المطلوب.', claims: 'إثبات الهوية اللي رجع مش صالح لتطبيقنا.',
+  }),
   tagLabel: 'الوسم', paramKind: (n: string) => `نوع المتغير ${n}`, paramValue: 'النص', tagsPlaceholder: 'مثال: vip', audienceCount: (n: string) => `هتوصل لـ ${n} عميل`, audienceCounting: 'بنحسب...',
   excludedLine: (o: string, c: string) => `مش هتوصل لـ ${o} عشان طلبوا يوقفوا الرسايل، ولا لـ ${c} عشان مفيش موافقة مسجلة منهم.`,
   consentRule: 'الحملات بتوصل بس للعملاء اللي وافقوا يستقبلوا عروض ومطلبوش يوقفوها. ده شرط من واتساب ومش بيتقفل.',
@@ -163,7 +170,13 @@ const ar = {
   wBannerLow: 'رصيد المحفظة قليل. اشحن علشان الخدمات اللي بتتخصم منها تفضل شغالة.', wBannerDebt: (a: string) => `عليك مديونية ${a} في المحفظة.`, wBannerLink: 'افتح المحفظة',
   costCard: 'واتساب بيحاسب كارتك مباشرة على الرسايل دي، ومفيش حاجة هتتخصم من المحفظة.',
   opNav: 'لوحة التشغيل', opTitle: 'لوحة التشغيل', opIntro: 'أسعار المحافظ والمراجعات. كل تغيير بيتسجّل باسمك وبسببه.',
-  opTabs: { pricing: 'التسعير', rates: 'أسعار ميتا والصرف', account: 'حساب عميل', queues: 'الاسترداد والتسويات', log: 'سجل التغييرات' } as Record<string, string>,
+  opTabs: { pricing: 'التسعير', rates: 'أسعار ميتا والصرف', account: 'حساب عميل', queues: 'الاسترداد والتسويات', log: 'سجل التغييرات', shared: 'قوالب الرقم المشترك' } as Record<string, string>,
+  opSharedTitle: 'قوالب الرقم المشترك', opSharedHelp: 'دي قوالب حساب واتساب بتاع المنصة. المتاجر مبتشوفهاش ومبتعدّلهاش، وبتستخدم منها بس القوالب المعتمدة من نوع خدمي أو تحقق.', opSharedSync: 'تحديث من ميتا',
+  opSharedSynced: (up: string, gone: string) => `اتحدّث: ${up} قالب، واتشال ${gone}.`, opSharedEmpty: 'مفيش قوالب لسه. اضغط تحديث من ميتا أو ابعت قالب جديد.',
+  opSharedName: 'اسم القالب', opSharedLang: 'اللغة', opSharedCategory: 'النوع', opSharedStatus: 'الحالة', opSharedStores: 'للمتاجر',
+  opSharedUsable: 'متاح للمتاجر', opSharedBlocked: 'غير متاح للمتاجر', opSharedSubmitTitle: 'إرسال قالب جديد لميتا', opSharedNoMarketing: 'القوالب التسويقية مش متاحة على الرقم المشترك، فمش بنقبلها هنا.',
+  opSharedBody: 'نص القالب', opSharedSubmit: 'إرسال للاعتماد', opSharedSubmitted: 'اتبعت لميتا. الحالة هتتحدّث بعد المراجعة.', opSharedBadName: 'اسم القالب حروف إنجليزي صغيرة وأرقام وشرطة سفلية بس.',
+  opSharedBodyNeeded: 'اكتب نص القالب.', opSharedUnavailable: 'الرقم المشترك مش شغّال: مفيش رقم منصة متسجّل أو الخاصية مقفولة.',
   opGuard: 'حماية الجلسات لسه مش متفعلة، فالتعديلات مقفولة لحد ما تتفعل.', opRevoked: 'الجلسة دي اتقفلت. سجّل دخول من جديد.',
   opSaved: 'اتسجّل.', opFailed: 'مقدرناش نسجّل التغيير. راجع البيانات وجرّب تاني.', opLoadError: 'مقدرناش نحمّل البيانات. جرّب تاني.',
   opTooSoon: (h: string) => `وقت السريان لازم يكون بعد ${h} ساعة على الأقل من دلوقتي.`, opBadNumber: 'راجع الأرقام اللي كتبتها.', opReasonShort: 'اكتب السبب (٥ حروف على الأقل).',
@@ -268,7 +281,12 @@ const en: typeof ar = {
   failedLine: (f: string, s: string) => `${f} failed · ${s} skipped`, scheduledFor: (d: string) => `Starts ${d}`, startedAt: (d: string) => `Started ${d}`, finishedAt: (d: string) => `Finished ${d}`,
   pause: 'Pause', resume: 'Resume', cancelCampaign: 'Cancel campaign', cancelAsk: 'Are you sure? Messages not sent yet will not be sent.', cancelYes: 'Yes, cancel', cancelNo: 'No, go back', deleteDraft: 'Delete draft',
   stepAudience: 'Who receives it?', stepMessage: 'Message', stepTiming: 'When?', stepReview: 'Review and send',
-  campaignName: 'Campaign name (only you see it)', audienceSegment: 'Saved segment', audienceTags: 'Customers with a tag', audienceEveryone: 'Everyone who agreed', audienceUnknown: 'We could not count who this would reach right now.', signInNotConfigured: 'Sign-in is not configured in this build. Open the page from your own portal, or ask whoever set the app up for you.',
+  campaignName: 'Campaign name (only you see it)', audienceSegment: 'Saved segment', audienceTags: 'Customers with a tag', audienceEveryone: 'Everyone who agreed', audienceUnknown: 'We could not count who this would reach right now.', signInNotConfigured: 'Sign-in is not configured in this build. Open the page from your own portal, or ask whoever set the app up for you.', signOut: 'Sign out', signedOutLocal: 'You are signed out here. Sign out at your sign-in provider too, so the next person does not get in with your account.', signedOutSignIn: 'Sign in again',
+  signInFailed: 'We could not sign you in', signInTryAgain: 'Try signing in again',
+  signInErrors: copy<SignInErr>({
+    denied: 'The sign-in provider refused the request, or it was cancelled.', state: 'This sign-in request is not valid or was already used. Start again.', nonce: 'The sign-in answer does not match the request. Start again.',
+    token: 'The sign-in provider did not return a valid access token.', discovery: 'We could not reach the sign-in provider\'s settings, or they do not match this app.', missing_id_token: 'The sign-in provider did not return the identity proof that is required.', claims: 'The identity proof that came back is not valid for this app.',
+  }),
   tagLabel: 'Tag', paramKind: (n: string) => `Variable ${n} type`, paramValue: 'Text', tagsPlaceholder: 'e.g. vip', audienceCount: (n: string) => `Reaches ${n} customers`, audienceCounting: 'Counting…',
   excludedLine: (o: string, c: string) => `Not reaching ${o} who asked to stop messages, or ${c} with no consent on record.`,
   consentRule: 'Campaigns only reach customers who agreed to receive offers and have not opted out. WhatsApp requires it and it cannot be switched off.',
@@ -349,7 +367,13 @@ const en: typeof ar = {
   wBannerLow: 'The wallet balance is low. Top up so the services paid from it keep running.', wBannerDebt: (a) => `You owe ${a} in the wallet.`, wBannerLink: 'Open the wallet',
   costCard: 'WhatsApp bills your card directly for these messages; nothing is taken from the wallet.',
   opNav: 'Operations', opTitle: 'Operations', opIntro: 'Wallet pricing and reviews. Every change is recorded under your name with its reason.',
-  opTabs: { pricing: 'Pricing', rates: 'Meta rates and FX', account: 'One account', queues: 'Refunds and adjustments', log: 'Change log' } as Record<string, string>,
+  opTabs: { pricing: 'Pricing', rates: 'Meta rates and FX', account: 'One account', queues: 'Refunds and adjustments', log: 'Change log', shared: 'Shared number templates' } as Record<string, string>,
+  opSharedTitle: 'Shared number templates', opSharedHelp: 'These are the platform WhatsApp account\'s templates. Stores cannot see or change them, and may use only approved utility or authentication ones.', opSharedSync: 'Sync from Meta',
+  opSharedSynced: (up: string, gone: string) => `Synced: ${up} templates, ${gone} removed.`, opSharedEmpty: 'No templates yet. Sync from Meta or submit a new one.',
+  opSharedName: 'Template name', opSharedLang: 'Language', opSharedCategory: 'Category', opSharedStatus: 'Status', opSharedStores: 'For stores',
+  opSharedUsable: 'Stores can use it', opSharedBlocked: 'Not available to stores', opSharedSubmitTitle: 'Submit a new template to Meta', opSharedNoMarketing: 'Marketing templates are not available on the shared number, so they are not accepted here.',
+  opSharedBody: 'Template text', opSharedSubmit: 'Submit for approval', opSharedSubmitted: 'Sent to Meta. The status updates after review.', opSharedBadName: 'The template name is lowercase English letters, digits and underscores only.',
+  opSharedBodyNeeded: 'Write the template text.', opSharedUnavailable: 'The shared number is not available: no platform number is registered, or the feature is off.',
   opGuard: 'Session protection is not switched on yet, so changes are locked until it is.', opRevoked: 'This session was closed. Sign in again.',
   opSaved: 'Recorded.', opFailed: 'We could not record the change. Check the details and try again.', opLoadError: 'We could not load the data. Try again.',
   opTooSoon: (h) => `The effective time must be at least ${h} hours from now.`, opBadNumber: 'Check the numbers you entered.', opReasonShort: 'Write the reason (at least 5 characters).',

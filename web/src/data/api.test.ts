@@ -223,3 +223,31 @@ describe('connectRealtime', () => {
     await vi.waitFor(() => expect(fetchEvents).toHaveBeenCalledWith(5));
   });
 });
+
+describe('connectRealtime: stop', () => {
+  it('after stop() nothing more is delivered, and a token fetch still in flight never opens a socket', async () => {
+    const got: number[] = [];
+    FakeSocket.last = undefined as never;
+    let release!: (t: string) => void;
+    const token = new Promise<string>((r) => { release = r; });
+    const stop = connectRealtime({ url: 'wss://wa.test/ws', getToken: () => token, onEvent: (e) => got.push(e.seq), fetchEvents: async (a) => ({ items: [], latestSeq: a }), socketImpl: FakeSocket as never, backoffMs: () => 0 });
+    stop();
+    release('tok');
+    await Promise.resolve(); await Promise.resolve();
+    expect(FakeSocket.last).toBeUndefined();
+    expect(got).toEqual([]);
+  });
+  it('an event that arrives after stop() is dropped (signed-out screens must not keep receiving messages)', async () => {
+    const got: number[] = [];
+    const stop = connectRealtime({ url: 'wss://wa.test/ws', getToken: async () => 'tok', onEvent: (e) => got.push(e.seq), fetchEvents: async (a) => ({ items: [], latestSeq: a || 1 }), socketImpl: FakeSocket as never, backoffMs: () => 0 });
+    await vi.waitFor(() => expect(FakeSocket.last).toBeTruthy());
+    const sock = FakeSocket.last;
+    sock.onopen?.();
+    sock.onmessage?.({ data: JSON.stringify({ type: 'conversation.updated', seq: 2, conversation: conv }) });
+    stop();
+    sock.onmessage?.({ data: JSON.stringify({ type: 'conversation.updated', seq: 3, conversation: conv }) });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(got).not.toContain(3);
+    expect(sock.closed).toBe(true);
+  });
+});

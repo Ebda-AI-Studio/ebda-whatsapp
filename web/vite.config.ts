@@ -15,7 +15,11 @@ export default defineConfig({
     {
       // Stamps which brand this build is for: the white-label deploy and scripts/verify-prod.mjs refuse a page built for another one.
       name: 'brand-stamp',
-      generateBundle() { this.emitFile({ type: 'asset', fileName: 'brand.json', source: JSON.stringify({ brand }) }); },
+      async generateBundle() {
+        // A brand on its own OIDC provider also stamps the issuer, so the deploy kit can prove the CSP and the Worker's config name the same one.
+        const { BRAND } = (await import(join(brandDir, 'brand.ts'))) as { BRAND: { oidc?: { issuer: string } | null } };
+        this.emitFile({ type: 'asset', fileName: 'brand.json', source: JSON.stringify({ brand, ...(BRAND.oidc ? { oidcIssuer: BRAND.oidc.issuer } : {}) }) });
+      },
     },
     {
       name: 'brand-html',

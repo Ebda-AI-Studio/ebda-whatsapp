@@ -5,6 +5,7 @@ import { EBDA_DEFAULT_TEMPLATES } from '../src/addons/ebda/templates';
 import { fundingStatement } from '../src/core/billing/funding';
 import { afterSharedSend, joinShared } from '../src/core/shared/shared-number';
 import { fund, setupBilling } from './helpers/billing';
+import { seedSharedTemplate } from './helpers/campaigns';
 import { stubGraph } from './helpers/graph';
 import { BUYER_KEY_1, PHONE_1, sentJobs, storeEvent, useStoreLink } from './helpers/store-link';
 import { exec, rows, seedPlan, workspace } from './helpers/workspace';
@@ -24,6 +25,7 @@ async function sharedOnlyStore(n: number): Promise<string> {
     env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, 1)').bind(ws, `store ${n}`),
   ]);
   for (const t of EBDA_DEFAULT_TEMPLATES) {
+    await seedSharedTemplate(PLAT, { name: t.name, language: t.language, category: t.category, components: t.components });
     await exec(ws, "INSERT OR REPLACE INTO templates (name, language, category, status, components, updated_at) VALUES (?, ?, ?, 'APPROVED', ?, 1)", t.name, t.language, t.category, JSON.stringify(t.components));
   }
   await seedPlan(ws); // joining needs a plan that includes the shared number

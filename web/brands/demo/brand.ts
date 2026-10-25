@@ -7,6 +7,8 @@ export const BRAND: WebBrand = {
   mark: { src: '/brand/demo-mark.svg', alt: 'Demo Company', width: 30, height: 30 },
   appleTouchIcon: null,
   accountsUrl: null,
+  // The client's own OpenID Connect provider (placeholder host). A real client brand sets its issuer and public client id; `_headers` must list the same origin.
+  oidc: { issuer: 'https://login.demo-company.example/realms/main', clientId: 'demo-inbox' },
   helpUrl: null,
   storeName: null,
 };

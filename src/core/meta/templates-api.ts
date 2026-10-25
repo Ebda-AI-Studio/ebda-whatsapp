@@ -18,9 +18,9 @@ type Auth = { token: string; graphVersion: string; wabaId: string };
 export type TemplatesApiResult<T> = { ok: true; value: T } | { ok: false; message: string; retryable: boolean };
 
 /** Every template of the WABA (follows paging). Any failed page fails the whole call so a sync never half-applies. */
-export async function fetchTemplates(a: Auth): Promise<TemplatesApiResult<MetaTemplate[]>> {
+export async function fetchTemplates(a: Auth, opts: { name?: string } = {}): Promise<TemplatesApiResult<MetaTemplate[]>> {
   const out: MetaTemplate[] = [];
-  let url: string | null = `https://graph.facebook.com/${a.graphVersion}/${a.wabaId}/message_templates?limit=100&fields=name,language,category,status,components,rejected_reason`;
+  let url: string | null = `https://graph.facebook.com/${a.graphVersion}/${a.wabaId}/message_templates?limit=100&fields=name,language,category,status,components,rejected_reason${opts.name ? `&name=${encodeURIComponent(opts.name)}` : ''}`;
   for (let page = 0; url && page < MAX_PAGES; page++) {
     let res: Response;
     try {
@@ -41,7 +41,7 @@ export async function fetchTemplates(a: Auth): Promise<TemplatesApiResult<MetaTe
   return { ok: true, value: out };
 }
 
-export async function submitTemplate(a: Auth, body: { name: string; language: string; category: string; components: unknown[] }): Promise<TemplatesApiResult<{ status: string; category: string }>> {
+export async function submitTemplate(a: Auth, body: { name: string; language: string; category: string; components: unknown[] }): Promise<TemplatesApiResult<{ status: string; category: string; categoryConfirmed: boolean }>> {
   let res: Response;
   try {
     res = await fetch(`https://graph.facebook.com/${a.graphVersion}/${a.wabaId}/message_templates`, {
@@ -54,6 +54,7 @@ export async function submitTemplate(a: Auth, body: { name: string; language: st
     return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
   }
   const json = (await res.json().catch(() => null)) as { id?: string; status?: string; category?: string; error?: { message?: string; error_user_msg?: string } } | null;
-  if (res.ok && json?.id) return { ok: true, value: { status: json.status ?? 'PENDING', category: json.category ?? body.category } };
+  // `categoryConfirmed` = Meta itself stated the category (it may differ from the requested one); when absent, `category` is only what we asked for.
+  if (res.ok && json?.id) return { ok: true, value: { status: json.status ?? 'PENDING', category: json.category ?? body.category, categoryConfirmed: typeof json.category === 'string' } };
   return { ok: false, message: json?.error?.error_user_msg ?? json?.error?.message ?? `http ${res.status}`, retryable: res.status >= 500 || res.status === 429 };
 }

@@ -64,3 +64,27 @@ it('the production Worker answers on wa.ebda.app as a custom domain, and its pub
   expect(cfg.routes).toEqual([{ pattern: 'wa.ebda.app', custom_domain: true }]);
   expect(cfg.vars.PUBLIC_BASE_URL).toBe('https://wa.ebda.app');
 });
+
+it('a brand with its own OIDC provider lists that issuer origin, exactly, in connect-src and form-action and adds no other host', async () => {
+  const brandsDir = join(import.meta.dirname, '..', 'web', 'brands');
+  const brands = readdirSync(brandsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  const withOidc: string[] = [];
+  for (const b of brands) {
+    const { BRAND } = (await import(`../web/brands/${b}/brand.ts`)) as { BRAND: { accountsUrl: string | null; oidc?: { issuer: string; clientId: string } | null } };
+    const csp = /Content-Security-Policy: (.+)$/m.exec(readFileSync(join(brandsDir, b, 'public', '_headers'), 'utf8'))?.[1] ?? '';
+    const directive = (name: string) => (csp.split(';').map((d) => d.trim()).find((d) => d.startsWith(`${name} `)) ?? '').split(/\s+/).slice(1);
+    const hosts = (list: string[]) => list.filter((t) => t.startsWith('https://') && !t.includes('facebook.') && !t.includes('fbcdn.'));
+    if (!BRAND.oidc) {
+      expect(directive('form-action'), b).toEqual(["'self'"]);
+      continue;
+    }
+    withOidc.push(b);
+    const origin = new URL(BRAND.oidc.issuer).origin;
+    expect(origin.startsWith('https://'), b).toBe(true);
+    expect(hosts(directive('connect-src')), b).toEqual([origin]);
+    expect(directive('form-action'), b).toEqual(["'self'", origin]);
+    expect(BRAND.accountsUrl, `${b}: one sign-in path per brand`).toBeNull();
+    for (const d of ['script-src', 'img-src', 'frame-src', 'default-src']) expect(directive(d).join(' '), `${b} ${d}`).not.toContain(origin);
+  }
+  expect(withOidc).toContain('demo'); // the demo brand proves the seam
+});

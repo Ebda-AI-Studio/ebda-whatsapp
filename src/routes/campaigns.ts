@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 import { campaignCreate, listCampaignsQuery, sendCampaignRequest } from '../core/api/contract';
-import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
+import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 
 export const campaignsRoutes = new Hono<ApiEnv>();
 
-const owner = (c: ApiContext) => c.get('storeRole') !== 'staff';
+const owner = managesStore;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const idOf = (c: ApiContext): string | null => (UUID.test(c.req.param('campaignId') ?? '') ? c.req.param('campaignId')! : null);
 

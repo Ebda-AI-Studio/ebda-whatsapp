@@ -65,6 +65,8 @@ export type Env = {
   ADJUSTMENT_DAILY_CAP?: string;
   /** Phase 8.2 switch: "1" or "true" turns on the shared platform number (membership routes, inbound routing by last sender). Unset = the routes answer 404 and the number is unknown to the webhook. */
   SHARED_NUMBER_ENABLED?: string;
+  /** Integrator server tokens (identity contract v1.3 r2, DRAFT): "1" or "true" lets a merchant's own server call the API with a scoped client token. Unset = every client token is 401. */
+  INTEGRATOR_TOKENS_ENABLED?: string;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
   /** The platform's own token: the shared number and platform-level calls. A merchant's own number uses its business token (see core/numbers/token.ts). */

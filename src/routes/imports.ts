@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { createImportFields, importMapping } from '../core/api/contract';
 import { MAX_IMPORT_BYTES } from '../core/campaigns/contacts';
-import { apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
+import { apiError, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 
 export const importsRoutes = new Hono<ApiEnv>();
 
@@ -11,7 +11,7 @@ const CSV_TYPES = new Set(['text/csv', 'application/csv', 'text/x-csv']);
 /** Excel and Windows save a CSV as one of these; they are accepted only when the name says .csv. */
 const CSV_BY_NAME_TYPES = new Set(['application/vnd.ms-excel', 'text/plain', 'application/octet-stream', '']);
 
-const ownerOnly = (c: ApiContext) => c.get('storeRole') !== 'staff';
+const ownerOnly = managesStore;
 
 /**
  * Uploads a contact file (CSV, up to 10 MB) to R2 and starts the import workflow. `consented=true` is the merchant's statement that

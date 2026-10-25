@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { listTemplatesResponse } from '../core/api/contract';
 import { fetchTemplates, submitTemplate } from '../core/meta/templates-api';
 import { componentsSchema } from '../core/templates';
-import { activeNumber, apiError, bizToken, workspaceStub, type ApiContext, type ApiEnv } from './shared';
+import { activeNumber, apiError, bizToken, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 
 export const submitTemplateRequest = z.object({
   name: z.string().regex(/^[a-z0-9_]{1,512}$/),
@@ -13,7 +13,7 @@ export const submitTemplateRequest = z.object({
 });
 export type TemplateSeed = z.input<typeof submitTemplateRequest>;
 
-const canManage = (c: ApiContext) => c.get('storeRole') !== 'staff';
+const canManage = managesStore;
 
 /** Template routes. `defaults` is the product's starter set (supplied by an addon, never imported here). */
 export function templatesRoutes(defaults: readonly TemplateSeed[]) {

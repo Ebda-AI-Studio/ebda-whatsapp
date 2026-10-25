@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import { connectNumberRequest, listNumbersResponse, signupConfigDto } from '../core/api/contract';
 import { SignupConfigError, connectNumber, disconnectNumber, listNumbers, refreshNumber, resumeSetup, signupEnabled, type NumberResult } from '../core/numbers/numbers';
-import { apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
+import { apiError, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 
-const owner = (c: ApiContext) => c.get('storeRole') !== 'staff';
+const owner = managesStore;
 const PN = /^[0-9]{1,30}$/;
 
 /** Reply for a connect/refresh/register/disconnect result. A failure that left a number behind still shows its state. */

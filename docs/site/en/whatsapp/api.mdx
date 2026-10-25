@@ -32,8 +32,54 @@ Authorization: Bearer <access_token>
 
 `role` is `owner`, `staff` or `super_admin`.
 
-### API access for integrations
-Today the token comes from a person signing in, so the API is used by the Ebda WhatsApp inbox and by tools acting for a signed-in user. Access for your own server, without a person signing in, comes after launch; this page will say how to get it when it is available.
+### API access for your server
+Available once enabled for your store. It is not live for every store yet: it needs the sign-in service to issue server tokens and Ebda WhatsApp to switch the feature on for your store. Until then, use the sign-in token described above.
+
+**1. The store owner creates an API client.** In the Ebda AI Studio account settings, under API clients, the owner creates a client for one store and picks its scopes. Creating, rotating or revoking a client asks for a fresh second factor, and staff cannot do it. You get a `client_id` (`cli_…`) and a `client_secret` (`ebs_…`). The secret is shown once, so store it like a password. A client belongs to one store and cannot be moved.
+
+**2. Your server asks for a token.** Never from a browser: a request that carries an `Origin` header is refused.
+
+```http
+POST https://accounts.ebda.app/oauth/token
+Authorization: Basic base64(client_id:client_secret)
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&audience=whatsapp&scope=conversations:read messages:send
+```
+
+`scope` is optional and must be a subset of the client's scopes (the default is all of them). A secret sent in the body is refused; use Basic authentication. The answer:
+
+```json
+{ "access_token": "…", "token_type": "Bearer", "expires_in": 600, "scope": "conversations:read messages:send" }
+```
+
+The token lives **10 minutes** and there is no refresh token. Ask for a new one when it expires, and a little before is fine.
+
+**3. Use it like any token.** Send `Authorization: Bearer <access_token>` to the endpoints above. `GET /stores/{storeId}/me` works with any server token and returns the store the token belongs to. Any other store answers `403 forbidden`.
+
+#### Scopes
+| Scope | Allows |
+|---|---|
+| `conversations:read` | Read conversations, messages, media, search, throttle and the event feed (poll `GET /events?after=`) |
+| `messages:send` | Send messages and upload media for them |
+| `templates:read` | List templates |
+| `contacts:read` | Read contacts and a contact's orders |
+| `contacts:write` | Change a contact's tags |
+| `campaigns:read` | Read campaigns and saved segments (including the audience preview) |
+
+A scope you did not hold answers `403 forbidden`.
+
+#### Routes that always refuse a server token
+These answer `403 forbidden` to every server token, whatever its scopes: the live WebSocket (a server follows the inbox by polling `/events`, so a revoked client is never left connected); connecting, registering and disconnecting numbers and the numbers list; the wallet, top-ups, InstaPay payments, statements and refunds; packages and package checkout; joining or leaving the shared number; staff changes (assigning conversations, internal notes, marking read, conversation tags); deleting a contact's data; bot and agent settings and store-link settings; connectors; creating, changing or sending campaigns and segments; template submission, sync and defaults; imports; and the operator console. A route that is not in the scope table is `403` too.
+
+#### Revocation
+The owner can revoke a client at any time. A revoked client gets `401 invalid_client` when asking for a token, and a token it already holds is refused with `401 unauthorized` within about 30 seconds (the service remembers a good answer that long). Rotating a secret keeps the old secret working for a window the owner chooses (up to 7 days), and tokens already issued stay valid until they expire. If the sign-in service cannot be reached to check a client, the API answers `503 rate_limited` with `message: "session_check_unavailable"` instead of letting the request through.
+
+#### Rate limits and errors
+- Token endpoint: 60 tokens per hour per client. Wrong credentials are limited per client and network, so someone guessing your client id from another address cannot lock your server out. Over a limit: `429` with `Retry-After`.
+- Token endpoint errors follow RFC 6749: `invalid_client` (401, the same answer for an unknown id, a wrong secret or a revoked client), `invalid_scope`, `unauthorized_client` (wrong audience).
+- API errors use the envelope below. `401 unauthorized` for a token that is invalid, expired, revoked, or sent while the feature is off for your store; `403 forbidden` for another store, a missing scope or a route in the list above; `503` when the revocation check is unavailable.
+- Every write a server token makes is logged with the client id, the store and the scope. Message text and phone numbers are never part of that log line.
 
 ## Errors
 

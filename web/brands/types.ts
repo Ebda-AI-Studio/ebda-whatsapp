@@ -1,3 +1,10 @@
+/**
+ * A tenant on its own OpenID Connect provider signs in from the browser with Authorization Code + PKCE. The issuer is data here so the same
+ * origin is written into this brand's `_headers` (connect-src and form-action), exactly. `refresh` lets the page use a refresh token if the
+ * provider issues one; otherwise it signs in again.
+ */
+export type OidcWebConfig = { issuer: string; clientId: string; audience?: string; refresh?: boolean };
+
 /** What the inbox page needs from a brand. Selected at build time: `BRAND=<id> npm run build:web` (default: ebda). */
 export type WebBrand = {
   id: string;
@@ -9,6 +16,8 @@ export type WebBrand = {
   appleTouchIcon: string | null;
   /** Where the access token comes from (identity contract v1); null for a tenant on its own identity provider (sign-in handled by its portal). */
   accountsUrl: string | null;
+  /** The tenant's own OpenID Connect provider for browser sign-in; null when sign-in is `accountsUrl` or handled by the tenant's portal. */
+  oidc?: OidcWebConfig | null;
   /** Where a help guide lives for the interface language (the slug is the docs/help file name without its NN- prefix). Null hides the "How?" links. */
   helpUrl: ((lang: 'ar' | 'en', slug: string) => string) | null;
   /** The linked store product, when the brand has one; null hides the store step everywhere. */

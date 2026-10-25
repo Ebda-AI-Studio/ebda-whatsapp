@@ -7,7 +7,7 @@ import type { SendJob } from '../src/core/send-queue';
 import { adminToken, apiFor, graphStub, storeId as W, useApiKey } from './helpers/api';
 import { sign } from './helpers/meta';
 import { inboundPayload, rawMessagePayload, listReply, statusPayload } from './helpers/payload';
-import { seedTemplate } from './helpers/campaigns';
+import { seedSharedTemplate, seedTemplate } from './helpers/campaigns';
 import { setupBilling, fund } from './helpers/billing';
 import { exec, rows, workspace } from './helpers/workspace';
 
@@ -59,6 +59,7 @@ async function writeTo(ws: string, waId = CUST, orderRef?: string): Promise<{ wa
   await exec(ws, 'INSERT OR IGNORE INTO contacts (wa_id, profile_name) VALUES (?, ?)', waId, 'c');
   await exec(ws, 'INSERT OR IGNORE INTO conversations (contact_id, last_message_at) SELECT id, 1 FROM contacts WHERE wa_id = ?', waId);
   const convId = (await rows<{ id: number }>(ws, 'SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.wa_id = ?', waId))[0]!.id;
+  await seedSharedTemplate(PLAT, { name: 'tpl-u', language: 'ar' }); // the platform catalog decides what may go out (item e)
   const r = await workspace(ws).queueOutbound(convId, PLAT, { type: 'template', clientId: crypto.randomUUID(), name: 'tpl-u', language: 'ar', params: [] });
   if (!r.ok || !r.job) throw new Error(`not queued: ${JSON.stringify(r)}`);
   const job: SendJob = orderRef ? { ...r.job, orderRef } : r.job;
@@ -78,7 +79,7 @@ const texts = () => graph!.calls.filter((c) => c.body?.type === 'text');
 beforeEach(async () => {
   graph = graphStub();
   await env.DB.batch([
-    env.DB.prepare('DELETE FROM shared_routes'), env.DB.prepare('DELETE FROM shared_sent'),
+    env.DB.prepare('DELETE FROM shared_templates'), env.DB.prepare('DELETE FROM shared_routes'), env.DB.prepare('DELETE FROM shared_sent'),
     env.DB.prepare('DELETE FROM shared_number_members'), env.DB.prepare('DELETE FROM shared_numbers'),
     env.DB.prepare('DELETE FROM number_funding WHERE phone_number_id = ?').bind(PLAT),
   ]);
