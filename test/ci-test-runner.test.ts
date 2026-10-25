@@ -6,8 +6,16 @@ const script = join(import.meta.dirname, '..', 'scripts', 'ci-test.mjs');
 const fake = (body: string) => JSON.stringify(['node', '-e', body]);
 // The expected test files (what `vitest list --filesOnly --json` prints), replaced for these tests by CI_TEST_LIST_CMD.
 const LIST = JSON.stringify([{ file: join(process.cwd(), 'test/a.test.ts'), projectName: 'workers' }, { file: join(process.cwd(), 'test/b.test.ts'), projectName: 'node' }]);
-const run = (body: string, graceMs = 300) =>
-  spawnSync('node', [script], { env: { ...process.env, CI_TEST_CMD: fake(body), CI_TEST_LIST_CMD: fake(`console.log(${JSON.stringify(LIST)})`), CI_TEST_GRACE_MS: String(graceMs) }, encoding: 'utf8', timeout: 20_000 });
+// The collected tests (what `vitest list --json` prints): 3 in a, 2 in b. Read only when a hung run has to be stopped.
+const tests = (a: number, b: number) => JSON.stringify([...Array.from({ length: a }, (_, i) => ({ name: `a${i}`, file: join(process.cwd(), 'test/a.test.ts') })), ...Array.from({ length: b }, (_, i) => ({ name: `b${i}`, file: join(process.cwd(), 'test/b.test.ts') }))]);
+const run = (body: string, graceMs = 300, o: { collect?: string; idleMs?: number } = {}) =>
+  spawnSync('node', [script], {
+    env: {
+      ...process.env, GITHUB_ACTIONS: 'true', CI_TEST_CMD: fake(body), CI_TEST_LIST_CMD: fake(`console.log(${JSON.stringify(LIST)})`),
+      CI_TEST_COLLECT_CMD: o.collect ?? fake(`console.log(${JSON.stringify(tests(3, 2))})`), CI_TEST_GRACE_MS: String(graceMs), CI_TEST_IDLE_MS: String(o.idleMs ?? 600_000),
+    },
+    encoding: 'utf8', timeout: 20_000,
+  });
 const FILE_A_OK = 'console.log(" ✓  workers  test/a.test.ts (3 tests) 5ms");';
 const FILE_B_OK = 'console.log(" ✓  node  test/b.test.ts (2 tests) 4ms");';
 const FILE_B_FAIL = 'console.log(" ❯  node  test/b.test.ts (2 tests | 1 failed) 4ms");';
@@ -45,6 +53,29 @@ it('a run whose every file reported and then hangs before the summary (the pool 
   expect(r.status).toBe(0);
   expect(r.stderr).toContain('vitest_pool_close_hang');
   expect(r.stderr).toContain('"verdict":"pass"');
+  expect(r.stdout).toContain('::warning title=vitest pool hang'); // every stop stays visible on the run, even a green one
+});
+
+it('a stopped run whose reported test count differs from the collected count fails (a test that never ran is not a pass)', () => {
+  const r = run(FILE_A_OK + FILE_B_OK + HANG, 300, { collect: fake(`console.log(${JSON.stringify(tests(4, 2))})`) });
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('"verdict":"fail"');
+  expect(r.stderr).toContain('test/a.test.ts');
+  expect(r.stdout).toContain('::error title=vitest pool hang');
+});
+
+it('skipped tests are not counted against the collected tests; a collection that cannot be read fails', () => {
+  const skipped = 'console.log(" ✓  workers  test/a.test.ts (4 tests | 1 skipped) 5ms");';
+  expect(run(skipped + FILE_B_OK + HANG).status).toBe(0);
+  expect(run(FILE_A_OK + FILE_B_OK + HANG, 300, { collect: fake('process.exit(2)') }).status).toBe(1);
+});
+
+it('a run that goes silent with a file never reported fails after the idle limit and names the file', () => {
+  const r = run(FILE_A_OK + HANG, 300, { idleMs: 800 });
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('vitest_silent_hang');
+  expect(r.stderr).toContain('test/b.test.ts');
+  expect(r.stdout).toContain('::error title=vitest hang');
 });
 
 it('the same hang with a failed file, or an unhandled error printed, fails', () => {
