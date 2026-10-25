@@ -39,6 +39,8 @@ import { segmentsRoutes } from './routes/segments';
 import { campaignsRoutes } from './routes/campaigns';
 import { trackRoutes } from './routes/track';
 import { reconcileEntitlements } from './core/billing/subscriptions';
+import { handleProviderWebhook, repairTopups } from './core/billing/topups';
+import { walletRoutes } from './routes/wallet';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY });
@@ -98,6 +100,7 @@ api.route('/', contactsRoutes);
 api.route('/', importsRoutes);
 api.route('/', segmentsRoutes);
 api.route('/', campaignsRoutes);
+api.route('/', walletRoutes);
 app.route('/api/v1', api);
 
 function sameString(a: string, b: string): boolean {
@@ -107,6 +110,12 @@ function sameString(a: string, b: string): boolean {
 }
 
 app.route('/', trackRoutes);
+
+// The card provider's webhook: public, authenticated by its HMAC over the raw body (never by anything in the payload).
+app.post('/kashier/webhook', async (c) => {
+  const out = await handleProviderWebhook(c.env, await c.req.text(), c.req.header('x-kashier-signature') ?? null);
+  return c.text(out.body, out.status);
+});
 
 app.get('/health', (c) => c.json({ ok: true, service: 'ebda-wa', commit: c.env.COMMIT_SHA ?? 'dev' }));
 
@@ -179,6 +188,7 @@ app.post('/meta/webhook', async (c) => {
 /** The daily control-plane pass. Each step is independent: one failing never skips the rest. */
 export async function dailyBilling(env: Env): Promise<void> {
   await reconcileEntitlements(env).catch((err) => console.error(JSON.stringify({ alert: 'entitlement_reconcile_failed', error: err instanceof Error ? err.name : 'error' })));
+  await repairTopups(env).catch((err) => console.error(JSON.stringify({ alert: 'topup_repair_failed', error: err instanceof Error ? err.name : 'error' })));
 }
 
 let warnedNoDsn = false;

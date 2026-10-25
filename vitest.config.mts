@@ -14,7 +14,7 @@ export default defineConfig({
             remoteBindings: false,
             wrangler: { configPath: './wrangler.jsonc' },
             miniflare: {
-              bindings: { META_APP_SECRET: 'test-secret', META_VERIFY_TOKEN: 'VT', META_SYSTEM_TOKEN: 'test-token', TEST_MIGRATIONS: migrations, BENCH: process.env.BENCH ?? '0' },
+              bindings: { TOPUPS_ENABLED: 'true', META_APP_SECRET: 'test-secret', META_VERIFY_TOKEN: 'VT', META_SYSTEM_TOKEN: 'test-token', TEST_MIGRATIONS: migrations, BENCH: process.env.BENCH ?? '0' },
             },
           }),
         ],
