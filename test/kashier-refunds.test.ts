@@ -1076,12 +1076,13 @@ describe('abandoning a partly debited refund request (two operators, money back 
     expect((await env.DB.prepare('SELECT swept_at FROM refund_requests WHERE id = ?').bind(a.id).first<{ swept_at: number | null }>())?.swept_at).toBe(later); // marked once no run can still post
   });
 
-  it('MEDIUM: 250 abandoned requests are all swept across passes: the sweep marks what it finished, so older rows cannot starve behind newer ones', async () => {
+  it('MEDIUM: a backlog larger than one pass is swept across passes: the sweep marks what it finished, so older rows cannot starve behind newer ones', async () => {
+    // 25 requests in passes of 10 prove what 250 in passes of 200 do, with a tenth of the calls (the 250 version crossed 60 s on the CI VM).
     const a = await setup(117, 5000);
     await fund(a.ws, 1_000_000, 'kashier:big-117');
     const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
     const base = Date.now() - 3 * 86_400_000;
-    for (let i = 0; i < 250; i++) {
+    for (let i = 0; i < 25; i++) {
       const id = `ab-${i}`;
       await env.DB.batch([
         env.DB.prepare("INSERT INTO refund_requests (id, workspace_id, amount_minor, state, requested_by, created_at, decided_at, abandoned_at) VALUES (?, ?, 100, 'abandoned', 'u', 1, ?, ?)").bind(id, a.ws, base + i, base + i),
@@ -1089,13 +1090,10 @@ describe('abandoning a partly debited refund request (two operators, money back 
       ]);
       await real.postWallet({ kind: 'refund', netMinor: -100, ref: `refund:${id}:1`, actor: 'u', note: 'x' });
     }
-    const first = await sweepAbandonedRefunds(env);
-    const second = await sweepAbandonedRefunds(env);
-    const third = await sweepAbandonedRefunds(env);
-    expect(first.reversed + second.reversed + third.reversed).toBe(250);
-    expect(first.reversed).toBeLessThanOrEqual(200);
-    expect(third.reversed).toBe(0);
-    expect((await ledger(a.ws)).filter((r) => r.ref.startsWith('refund-reversal:ab-'))).toHaveLength(250);
+    const passes = [];
+    for (let i = 0; i < 4; i++) passes.push((await sweepAbandonedRefunds(env, Date.now(), 10)).reversed);
+    expect(passes).toEqual([10, 10, 5, 0]); // oldest first, each pass takes the next unmarked batch
+    expect((await ledger(a.ws)).filter((r) => r.ref.startsWith('refund-reversal:ab-'))).toHaveLength(25);
   });
 });
 
