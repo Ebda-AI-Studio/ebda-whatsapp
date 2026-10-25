@@ -11,12 +11,15 @@ const iso = z.string().datetime({ offset: true });
 const phone = z.string().regex(/^\+[1-9]\d{7,14}$/);
 const key = z.string().regex(/^[0-9a-f]{64}$/);
 const locale = z.string().min(2).max(10);
+/** A store's plan or package standing; the same five states on both sides. */
+const planStatus = z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']);
 
 const envelope = { id: z.string().uuid(), v: z.literal(1), storeId: z.string().min(1), occurredAt: iso };
 const ev = <T extends string, D extends z.ZodType>(type: T, data: D) => z.object({ ...envelope, type: z.literal(type), data });
 
 export const storeEventSchema = z.discriminatedUnion('type', [
-  ev('store.plan_changed', z.object({ planCode: z.string(), includesWhatsApp: z.boolean(), ownerUserId: z.string(), effectiveAt: iso })),
+  // `status` and `periodEnd` are optional for compatibility; with them a dunning suspension or a cancellation reaches the package gate.
+  ev('store.plan_changed', z.object({ planCode: z.string(), includesWhatsApp: z.boolean(), ownerUserId: z.string(), effectiveAt: iso, status: planStatus.optional(), periodEnd: iso.optional() })),
   ev('store.linked', z.object({ ownerUserId: z.string() })),
   ev('store.unlinked', z.object({ ownerUserId: z.string() })),
   ev('catalog.product_upserted', z.object({ productId: z.string().min(1), variantIds: z.array(z.string().min(1)), updatedAt: iso })),
@@ -64,5 +67,8 @@ export const outboundStoreEventSchema = z.discriminatedUnion('type', [
   out('whatsapp.cod_outcome', z.object({ orderId: z.string(), outcome: z.enum(['confirmed', 'refused', 'no_reply']), source: z.literal('whatsapp') })),
   // An order was created from chat for a customer who was erased at the same moment: the Store should erase or cancel it.
   out('whatsapp.order_after_erasure', z.object({ orderId: z.string(), buyerKey: key })),
+  // The store's messaging package changed (bought here, included by its Store plan, or assigned by an operator). `version` only goes
+  // up; the Store ignores an event whose version is not newer than the last it applied. `automation` = the Store may run WhatsApp automation.
+  out('whatsapp.entitlement_changed', z.object({ packageId: z.string().min(1).max(64), automation: z.boolean(), status: planStatus, validUntil: iso, version: z.number().int().positive() })),
 ]);
 export type OutboundStoreEvent = z.infer<typeof outboundStoreEventSchema>;
