@@ -89,15 +89,27 @@ export async function sharedStatus(env: Env, workspaceId: string): Promise<Share
   return { available: true, member: !!m, displayName: m?.display_name ?? null, displayPhone: num.display_phone };
 }
 
+// Letters from other scripts that render like a Latin or Arabic letter, and characters that read as one another (a TR39-style skeleton, kept small).
+const LOOKALIKE: Record<string, string> = {
+  'а': 'a', 'в': 'b', 'е': 'e', 'ё': 'e', 'к': 'k', 'м': 'm', 'н': 'h', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', 'у': 'y', 'х': 'x', 'і': 'i', 'ї': 'i', 'ј': 'j', 'ѕ': 's', 'ԁ': 'd', 'ԛ': 'q', 'ԝ': 'w',
+  'α': 'a', 'β': 'b', 'ε': 'e', 'η': 'n', 'ι': 'i', 'κ': 'k', 'ν': 'v', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'u', 'χ': 'x', 'ς': 's',
+  '0': 'o', '1': 'l', 'i': 'l',
+  'ی': 'ي', 'ې': 'ي', 'ک': 'ك', 'ڪ': 'ك', 'ہ': 'ه', 'ۀ': 'ه', 'ۃ': 'ه', 'ھ': 'ه',
+};
+
 /**
- * The comparison key for a display name: Unicode compatibility forms folded (full-width letters), case folded, Arabic diacritics and
- * tatweel removed, alef/yaa/taa-marbuta variants unified, all spacing and punctuation dropped. Two names with one key look the same to a customer.
+ * The comparison key for a display name, taken over what a customer actually sees (the list row clips long names): Unicode compatibility
+ * forms folded (full-width letters), case folded, Arabic diacritics and tatweel removed, alef/yaa/kaf/haa/taa-marbuta variants unified,
+ * Arabic-Indic and Persian digits made ASCII, look-alike letters mapped to one skeleton, all spacing and punctuation dropped.
+ * Two names with one key look the same to a customer.
  */
 export function displayNameKey(name: string): string {
-  return name.normalize('NFKC').toLowerCase()
-    .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+  const folded = clip(name.trim(), ROW_TITLE_MAX).normalize('NFKC').toLowerCase()
+    .replace(/[ً-ٰٟـ]/g, '')
     .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
-    .replace(/[^\p{L}\p{N}]+/gu, '');
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+  return Array.from(folded, (ch) => LOOKALIKE[ch] ?? ch).join('').replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
 export async function joinShared(env: Env, workspaceId: string, displayName?: string, now = Date.now()): Promise<SharedStatus | null | 'name_taken'> {

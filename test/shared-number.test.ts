@@ -457,4 +457,25 @@ describe('security review fixes (2026-10-25)', () => {
     }
     expect((await c.call('POST', '/shared-number/join', { displayName: 'متجر الفجر' })).status).toBe(200);
   });
+
+  it('look-alike letters from other scripts and digit forms count as the same name', async () => {
+    await operatorRegister();
+    await member(779, 'Cairo Shop 1');
+    await member(780, 'متجر كريم ٢');
+    const c = await store(781);
+    // Cyrillic о/р/С, Greek ο; Persian ک/ی and digit forms; a 1 that reads as l.
+    for (const name of ['Cаirо Shор 1', 'Cairο Shop 1', 'Cairo Shop l', 'متجر کریم 2', 'متجر كريم ۲']) {
+      const r = await c.call('POST', '/shared-number/join', { displayName: name });
+      expect(r.status, name).toBe(409);
+    }
+  });
+
+  it('uniqueness is judged on the name the customer sees in the list, not the full stored name', async () => {
+    await operatorRegister();
+    await member(782, 'Nile Fashion House Downtown Branch');
+    const c = await store(783);
+    // Same first 23 characters: the 24-character list row shows both as "Nile Fashion House Down…".
+    expect((await c.call('POST', '/shared-number/join', { displayName: 'Nile Fashion House Downstairs' })).status).toBe(409);
+    expect((await c.call('POST', '/shared-number/join', { displayName: 'Nile Fashion Uptown' })).status).toBe(200);
+  });
 });
