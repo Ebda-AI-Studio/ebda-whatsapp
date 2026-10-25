@@ -31,5 +31,8 @@ there is no self-serve checkout.
 
 ## Status (2026-10-25)
 - Built and checked: the template, the bootstrap script in `--dry-run` (renders valid config with no leftover placeholders; refuses bad input), the generic OIDC verifier (tested).
-- Not yet built: **brand packs** (Phase 9.1). `BRAND` is passed through as a var, but the web build and the copy do not read it yet, so every deployment shows the default brand until 9.1 lands. Connectors to the client's systems (webhook, Odoo) are Phase 9.3.
+- Not yet built: **brand packs** (Phase 9.1). `BRAND` is passed through as a var, but the web build and the copy do not read it yet, so every deployment shows the default brand until 9.1 lands. Connectors to the client's systems (webhook, Odoo) are built (Phase 9.3, below), not yet run against a real client system.
 - Not yet run for real: the resource creation and the D1-id lookup (`wrangler d1 info --json`) have only run in dry-run; the first real tenant setup verifies them.
+
+## Connecting the client's own systems (connectors)
+The agent can call the client's webhook or Odoo (draft quotations, stock, calendar bookings). The owner sets this up in the product after deploy (`PUT /connectors/:id`, secrets are encrypted per workspace); deploy-time you only need `AGENT_SECRETS_KEY` (already in the secrets list) and, if you want connectors limited to named hosts, `AGENT_ALLOWED_HOSTS`. Contract, signature verification, Odoo setup and limits: `docs/connectors.md`.
