@@ -59,3 +59,8 @@ it('the toast is placed with logical properties, so it is centred and padded rig
   expect(rules).not.toMatch(/\b(left|right)\s*:|translateX|padding\s*:\s*[^;]*\d+px\s+\d+px\s+\d+px\s+\d+px|\[dir=/);
   expect(rules).toMatch(/inset-inline/);
 });
+
+it('the production Worker answers on wa.ebda.app as a custom domain, and its public origin is that host', () => {
+  expect(cfg.routes).toEqual([{ pattern: 'wa.ebda.app', custom_domain: true }]);
+  expect(cfg.vars.PUBLIC_BASE_URL).toBe('https://wa.ebda.app');
+});

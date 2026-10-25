@@ -33,6 +33,7 @@ The `WhatsAppBridge` RPC entrypoint, the `ebda-wa-events` / `ebda-store-events` 
 
 ## 6. Cloudflare resources (Claude, on the personal account `69188202efc4df480140dd76545aa3ab` only)
 Check `npx wrangler whoami` first; never deploy to any other account.
+`bash scripts/cf-resources.sh` lists what exists and prints what is missing (dry run, creates nothing); `--apply` creates the missing ones after the launch go. Dry run 2026-10-25: D1 `ebda-wa-platform`, R2 `ebda-wa-media`, queues `ebda-wa-send`(+dlq) exist; **`ebda-wa-backups` is missing although `wrangler.jsonc` binds it, so a deploy fails until it is created**; the Store-link queues and the Vectorize index are also missing.
 | Resource | Command / place | Binding |
 |---|---|---|
 | R2 backups + 30-day lifecycle | `npx wrangler r2 bucket create ebda-wa-backups` · `npx wrangler r2 bucket lifecycle add ebda-wa-backups expire-30d --expire-days 30` | `BACKUPS` |
@@ -44,9 +45,22 @@ Check `npx wrangler whoami` first; never deploy to any other account.
 | Billing alerts (Ahmad clicks) | `docs/runbooks/cloudflare-account.md` § Billing alerts | n/a |
 
 ## 7. Secrets (Ahmad pastes values, Claude runs the commands)
-`npx wrangler secret put <NAME>` for each; values never go into chat, git or command-line arguments.
-`META_APP_ID`, `META_APP_SECRET`, `META_VERIFY_TOKEN`, `META_SYSTEM_TOKEN`, `TOKEN_ENC_KEY` (32 random bytes, base64), `AGENT_SECRETS_KEY` (32 random bytes, base64), `SUITE_BUYER_KEY_SECRET` (the same value as Ebda Store's), `PROOF_URL_SECRET`, `SENTRY_DSN`, the `KASHIER_*` set from `docs/billing.md`.
+One session, Worker `ebda-wa` only: `npx wrangler secret put <NAME>` for each; values never go into chat, git or command-line arguments.
 Generate random keys locally: `node -e "console.log(crypto.randomBytes(32).toString('base64'))"`.
+
+| Secret (Worker `ebda-wa`) | Value comes from | Needed for |
+|---|---|---|
+| `META_APP_SECRET` | Meta app → Settings → Basic | webhook signatures (required) |
+| `META_VERIFY_TOKEN` | any random string, also typed into Meta's webhook setup | webhook handshake (required) |
+| `META_SYSTEM_TOKEN` | Meta Business → System user token | platform calls, shared number (required) |
+| `TOKEN_ENC_KEY` | random 32 bytes, base64 | own numbers (encrypts each business token) |
+| `AGENT_SECRETS_KEY` | random 32 bytes, base64 | AI agent (encrypts merchants' own model keys) |
+| `SUITE_BUYER_KEY_SECRET` | **the same value as Ebda Store's** (set on both Workers in the same session) | store link (buyer keys) |
+| `PROOF_URL_SECRET` | random 32 bytes, base64 | store link (signed proof links) |
+| `KASHIER_API_KEY` | Kashier dashboard | top-ups and their webhook HMAC |
+| `SENTRY_DSN` | Sentry project | error reports |
+
+Plain vars, not secrets (set in `wrangler.jsonc` or the dashboard): `META_APP_ID`, `EMBEDDED_SIGNUP_CONFIG_ID`, `KASHIER_MERCHANT_ID`, `KASHIER_FEE_BPS`, `KASHIER_FEE_FIXED_MINOR`, `ADJUSTMENT_APPROVAL_MINOR`, `ADJUSTMENT_DAILY_CAP`, and the switches in §8. `IDENTITY_OIDC_CONFIG` is only for white-label tenants on their own identity provider (`deploy/white-label`).
 
 ## 8. Switches (Claude, one at a time, each verified before the next)
 `EMBEDDED_SIGNUP_ENABLED` → `SHARED_NUMBER_ENABLED` → `TOPUPS_ENABLED`. Each stays off until the Meta/Kashier step it depends on is done.
@@ -67,7 +81,7 @@ Each merge: full suite green twice locally, CI green, then deploy.
 
 ## 13. Verify production (Claude) — after EVERY deploy
 ```
-META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://<host> --expect "$(git rev-parse --short origin/main)" --brand ebda
+META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://wa.ebda.app --expect "$(git rev-parse --short origin/main)" --brand ebda
 ```
 It checks the running commit, the security headers on the API and the page, Meta's webhook handshake, that unsigned/badly-signed webhooks are refused, and that a correctly signed empty webhook is accepted. Anything it could not check prints as SKIP and must be reported as not verified. Then, by hand:
 1. Send a WhatsApp message to the connected number from the owner's phone; it appears in the inbox in real time; reply from the inbox; the owner receives it.
