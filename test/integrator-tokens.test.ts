@@ -118,6 +118,14 @@ describe('API: what an integrator token may do', () => {
     expect((await call(await tok({ scope: ALL }), 'GET', '/operator/pricing-settings')).status).toBe(403);
     expect((await call(await tok({ scope: ALL }), 'POST', '/operator/shared-templates/sync', {}, {})).status).toBe(403);
   });
+  it('a WebSocket upgrade is refused for a server token (a socket would outlive a revocation); /events is the way to follow', async () => {
+    const t = await tok({ scope: ALL });
+    const r = await worker.fetch(new Request(`https://x/api/v1/stores/${STORE}/ws`, { headers: { authorization: `Bearer ${t}`, upgrade: 'websocket' } }), { ...env, ...live } as typeof env, createExecutionContext());
+    expect(r.status).toBe(403);
+    const viaProtocol = await worker.fetch(new Request(`https://x/api/v1/stores/${STORE}/ws`, { headers: { 'sec-websocket-protocol': `inbox.v1, bearer.${t}`, upgrade: 'websocket' } }), { ...env, ...live } as typeof env, createExecutionContext());
+    expect(viaProtocol.status).toBe(403);
+    expect((await call(await tok({ scope: 'conversations:read' }), 'GET', `/stores/${STORE}/events?after=0`)).status).toBe(200);
+  });
   it('a route nobody mapped is 403, not 404 (default deny)', async () => {
     expect((await call(await tok({ scope: ALL }), 'GET', `/stores/${STORE}/definitely-not-a-route`)).status).toBe(403);
   });
@@ -171,13 +179,43 @@ describe('API: what an integrator token may do', () => {
   });
 });
 
+/**
+ * Routes (from Hono's table) that have no scope decision. A method-ALL handler serves every method, so it needs a decision for each; a wildcard
+ * can serve unlisted routes. The only ALL entries allowed to skip a decision are the two auth middlewares and the feature-switch guards below
+ * (each only answers 404 while its switch is off, then calls next()): listing them here is a deliberate, reviewed act.
+ */
+type R = { method: string; path: string };
+const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+const MIDDLEWARE = new Set([
+  '/stores/:storeId/*', '/operator/*', // authentication
+  '/stores/:storeId/numbers', '/stores/:storeId/numbers/*', '/stores/:storeId/packages', '/stores/:storeId/packages/*', '/stores/:storeId/shared-number', '/stores/:storeId/shared-number/*', // switch guards
+]);
+export function undecided(routes: R[], map: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const r of routes) {
+    if (!r.path.startsWith('/stores/:storeId/')) continue;
+    if (r.method === 'ALL' && MIDDLEWARE.has(r.path)) continue;
+    if (r.path.includes('*')) { out.push(`${r.method} ${r.path}`); continue; }
+    for (const m of r.method === 'ALL' ? METHODS : [r.method]) if (!(`${m} ${r.path}` in map)) out.push(`${m} ${r.path}`);
+  }
+  return out;
+}
+
 describe('the route scope map is complete', () => {
   const SCOPES = new Set<string>(WHATSAPP_SCOPES);
-  const real = apiRoutes.routes.filter((r) => r.method !== 'ALL' && r.path.startsWith('/stores/:storeId/')).map((r) => `${r.method} ${r.path}`);
+  const table = apiRoutes.routes as R[];
+  const real = table.filter((r) => r.method !== 'ALL' && r.path.startsWith('/stores/:storeId/')).map((r) => `${r.method} ${r.path}`);
 
-  it('walks every store route: each one has a scope decision in the single map', () => {
+  it('walks every store route, method-ALL handlers and wildcard handlers included: each needs a scope decision in the single map', () => {
     expect(real.length).toBeGreaterThan(60);
-    expect(real.filter((k) => !(k in ROUTE_SCOPES)), 'routes with no scope decision (add them to src/core/identity/scopes.ts)').toEqual([]);
+    expect(undecided(table, ROUTE_SCOPES), 'routes with no scope decision (add them to src/core/identity/scopes.ts)').toEqual([]);
+  });
+  it('the walk itself flags an ALL handler without a decision for every method, an unknown wildcard, and an unmapped route', () => {
+    expect(undecided([{ method: 'ALL', path: '/stores/:storeId/export' }], ROUTE_SCOPES)).toEqual(METHODS.map((m) => `${m} /stores/:storeId/export`));
+    expect(undecided([{ method: 'GET', path: '/stores/:storeId/*' }], ROUTE_SCOPES)).toEqual(['GET /stores/:storeId/*']);
+    expect(undecided([{ method: 'ALL', path: '/stores/:storeId/files/*' }], ROUTE_SCOPES)).toEqual(['ALL /stores/:storeId/files/*']);
+    expect(undecided([{ method: 'GET', path: '/stores/:storeId/new-thing' }], ROUTE_SCOPES)).toEqual(['GET /stores/:storeId/new-thing']);
+    expect(undecided([{ method: 'GET', path: '/stores/:storeId/me' }, { method: 'ALL', path: '/stores/:storeId/*' }], ROUTE_SCOPES)).toEqual([]);
   });
   it('has no stale entries, and every entry is a known scope, "any" or "person_only"', () => {
     expect(Object.keys(ROUTE_SCOPES).filter((k) => !real.includes(k)), 'map entries with no route').toEqual([]);
@@ -186,7 +224,8 @@ describe('the route scope map is complete', () => {
   it('never offers orders:events (unissuable), and keeps the contract\'s person-only surfaces person-only', () => {
     expect(SCOPES.has('orders:events')).toBe(false);
     for (const k of ['POST /stores/:storeId/numbers/connect', 'POST /stores/:storeId/numbers/:phoneNumberId/disconnect', 'POST /stores/:storeId/wallet/topups', 'POST /stores/:storeId/wallet/refund-requests',
-      'POST /stores/:storeId/packages/:packageId/checkout', 'DELETE /stores/:storeId/contacts/:waId', 'PUT /stores/:storeId/agent', 'PUT /stores/:storeId/connectors/:connectorId', 'PATCH /stores/:storeId/store-link/settings']) {
+      'POST /stores/:storeId/packages/:packageId/checkout', 'DELETE /stores/:storeId/contacts/:waId', 'PUT /stores/:storeId/agent', 'PUT /stores/:storeId/connectors/:connectorId', 'PATCH /stores/:storeId/store-link/settings',
+      'GET /stores/:storeId/ws']) {
       expect(ROUTE_SCOPES[k], k).toBe('person_only');
     }
   });

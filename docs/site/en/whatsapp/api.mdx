@@ -60,7 +60,7 @@ The token lives **10 minutes** and there is no refresh token. Ask for a new one 
 #### Scopes
 | Scope | Allows |
 |---|---|
-| `conversations:read` | Read conversations, messages, media, search, throttle and the event feed |
+| `conversations:read` | Read conversations, messages, media, search, throttle and the event feed (poll `GET /events?after=`) |
 | `messages:send` | Send messages and upload media for them |
 | `templates:read` | List templates |
 | `contacts:read` | Read contacts and a contact's orders |
@@ -70,7 +70,7 @@ The token lives **10 minutes** and there is no refresh token. Ask for a new one 
 A scope you did not hold answers `403 forbidden`.
 
 #### Routes that always refuse a server token
-These answer `403 forbidden` to every server token, whatever its scopes: connecting, registering and disconnecting numbers and the numbers list; the wallet, top-ups, statements and refunds; packages and package checkout; joining or leaving the shared number; staff changes (assigning conversations, internal notes, marking read, conversation tags); deleting a contact's data; bot and agent settings and store-link settings; connectors; creating, changing or sending campaigns and segments; template submission, sync and defaults; imports; and the operator console. A route that is not in the scope table is `403` too.
+These answer `403 forbidden` to every server token, whatever its scopes: the live WebSocket (a server follows the inbox by polling `/events`, so a revoked client is never left connected); connecting, registering and disconnecting numbers and the numbers list; the wallet, top-ups, statements and refunds; packages and package checkout; joining or leaving the shared number; staff changes (assigning conversations, internal notes, marking read, conversation tags); deleting a contact's data; bot and agent settings and store-link settings; connectors; creating, changing or sending campaigns and segments; template submission, sync and defaults; imports; and the operator console. A route that is not in the scope table is `403` too.
 
 #### Revocation
 The owner can revoke a client at any time. A revoked client gets `401 invalid_client` when asking for a token, and a token it already holds is refused with `401 unauthorized` within about 30 seconds (the service remembers a good answer that long). Rotating a secret keeps the old secret working for a window the owner chooses (up to 7 days), and tokens already issued stay valid until they expire. If the sign-in service cannot be reached to check a client, the API answers `503 rate_limited` with `message: "session_check_unavailable"` instead of letting the request through.

@@ -20,8 +20,7 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`GET ${S}/messages/:messageId/body`]: 'conversations:read',
   [`GET ${S}/media/:messageId`]: 'conversations:read',
   [`GET ${S}/search`]: 'conversations:read',
-  [`GET ${S}/events`]: 'conversations:read',
-  [`GET ${S}/ws`]: 'conversations:read',
+  [`GET ${S}/events`]: 'conversations:read', // how a server follows the inbox: polling, with `after`
   [`GET ${S}/throttle`]: 'conversations:read',
 
   [`POST ${S}/conversations/:conversationId/messages`]: 'messages:send',
@@ -39,6 +38,9 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`GET ${S}/segments/:segmentId`]: 'campaigns:read',
   [`GET ${S}/segments/:segmentId/preview`]: 'campaigns:read',
   [`POST ${S}/segments/preview`]: 'campaigns:read', // read-only audience preview
+
+  // A WebSocket outlives the revocation check (made once, at the upgrade), so a server token never gets one: it polls /events.
+  [`GET ${S}/ws`]: 'person_only',
 
   // ---- person / owner only ------------------------------------------------------------------------------------------------------
   [`DELETE ${S}/contacts/:waId`]: 'person_only', // erasure
