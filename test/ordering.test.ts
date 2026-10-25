@@ -23,8 +23,9 @@ async function setup(n: number, opts: { gap?: number } = {}) {
 }
 
 type Sent = { kind: string; body: Record<string, any> };
-function sentOf(g: ReturnType<typeof stubGraph>, from = 0): Sent[] {
-  return g.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/messages')).slice(from).map((c) => {
+/** Sends to Meta, optionally only from one number: every test has its own (pn-<ws>), so work left over from another test never counts. */
+function sentOf(g: ReturnType<typeof stubGraph>, from = 0, pn?: string): Sent[] {
+  return g.calls.filter((c) => c.method === 'POST' && c.url.endsWith(pn ? `/${pn}/messages` : '/messages')).slice(from).map((c) => {
     const b = c.body as Record<string, any>;
     const kind = b.type === 'interactive' ? (b.interactive.type === 'list' ? 'list' : 'buttons') : b.type;
     return { kind, body: b };
@@ -34,10 +35,10 @@ const kinds = (g: ReturnType<typeof stubGraph>, from = 0) => sentOf(g, from).map
 
 /** One inbound message, through the real webhook, then the bot's task. Returns what the bot sent in reply. */
 async function say(ws: string, pn: string, message: Record<string, unknown>, g: ReturnType<typeof stubGraph>) {
-  const from = g.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/messages')).length;
+  const from = g.calls.filter((c) => c.method === 'POST' && c.url.endsWith(`/${pn}/messages`)).length;
   expect((await postWebhook(SELF, rawMessagePayload(pn, message))).status).toBe(200);
   await workspace(ws).runDueTasks();
-  return sentOf(g, from);
+  return sentOf(g, from, pn);
 }
 const text = (t: string, from = WA_1) => ({ id: wamid(), from, type: 'text', text: { body: t } });
 const tapList = (id: string, title = 'x') => listReply(wamid(), id, title);

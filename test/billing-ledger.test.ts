@@ -215,6 +215,9 @@ describe('money tables ride the backup and restore without a trigger bypass', ()
     await sendOut(src, job, wamidOf('bk'));
     await status(src, wamidOf('bk'), 'sent', nowS(), pricing('utility'));
     await status(src, wamidOf('bk'), 'delivered', nowS());
+    // Drain the outbox first: the scheduled drain otherwise lands at a real-time moment of its own (between the snapshot and the
+    // comparison on a slow machine) and the source would no longer match what the snapshot holds.
+    expect((await workspace(src).drainLedger()).remaining).toBe(0);
     const manifest = await workspace(src).exportSnapshot('2026-10-25');
     expect(manifest.tables.wallet_ledger?.rows).toBe(2);
     expect(manifest.tables.billable_sends?.rows).toBe(1);
