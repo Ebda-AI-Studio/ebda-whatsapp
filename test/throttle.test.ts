@@ -78,6 +78,7 @@ it('131049 reschedules that recipient +24 h and never marks the contact bad; a t
   await api.call('POST', `/conversations/${conv}/messages`, { type: 'template', clientId: '00000000-0000-4000-8000-000000000131', name: 'promo', language: 'ar', params: [] });
   // Pick this send by its key: another workspace's alarm may hand an unrelated job to the same spy at any moment.
   const queued = vi.mocked(env.SEND_QUEUE.sendBatch).mock.calls.flatMap((c) => c[0] as { body: SendJob }[]).filter((m) => m.body.idempotencyKey === 'ui:00000000-0000-4000-8000-000000000131');
+  expect(queued).toHaveLength(1); // the filter must not hide a double enqueue of this send
   const g = graphStub(() => ({ status: 400, json: { error: { code: 131049, message: 'frequency cap' } } }));
   const res = await consume([queued[0]!.body]);
   expect(res.explicitAcks).toEqual(['m0']);
