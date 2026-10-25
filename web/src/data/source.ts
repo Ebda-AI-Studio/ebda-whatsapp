@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotSettingsDto, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
   RealtimeEvent, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, TemplateDto,
 } from '../../../src/core/api/contract';
 
@@ -75,6 +75,9 @@ export interface InboxSource {
   /** AI agent settings (owner only); undefined when the source has no agent. */
   agentSettings?(): Promise<AgentSettingsDto | null>;
   saveAgentSettings?(update: AgentSettingsUpdate): Promise<AgentSettingsDto>;
+  /** Service menu, business hours and store location. Everyone may read; only the owner may save (the server decides). */
+  botSettings?(): Promise<BotSettingsDto>;
+  saveBotSettings?(update: BotSettingsDto): Promise<BotSettingsDto>;
   /** Assign a conversation (null = unassign). */
   assign?(conversationId: number, userId: string | null): Promise<void>;
   campaigns?: CampaignsApi;

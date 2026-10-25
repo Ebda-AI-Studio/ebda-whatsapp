@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+  AgentSettingsDto, BotSettingsDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
 import type { InboxSource } from './source';
@@ -118,6 +118,11 @@ export function createSampleSource(): InboxSource {
     windowOpenUntil: s.windowH === null ? null : BASE + s.windowH * H,
   }));
   let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', provider: 'workers-ai', model: null, baseUrl: null, hasApiKey: false, credits: 500, knowledgeReady: false };
+  let bot: BotSettingsDto = {
+    menu: { enabled: false, items: [] },
+    hours: { enabled: false, timezone: 'Africa/Cairo', week: { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }, awayMessage: { ar: 'احنا مقفولين دلوقتي، هنرد عليك أول ما نفتح.', en: 'We are closed right now; we will reply as soon as we open.' }, ordersWhileClosed: true },
+    location: null,
+  };
   const contacts: ContactDto[] = [
     ...SEEDS.map((x): ContactDto => ({ waId: x.waId, name: x.name, optedOut: false, tags: x.tags.filter((t) => t !== 'needs_human' && t !== 'cod_pending'), consent: x.id % 2 ? { source: 'keyword_start', at: BASE - 10 * D } : null, lastInboundAt: BASE - x.ago })),
     ...structuredClone(MORE_CONTACTS),
@@ -194,6 +199,13 @@ export function createSampleSource(): InboxSource {
       const { apiKey, ...rest } = update;
       agent = { ...agent, ...rest, hasApiKey: apiKey === undefined ? agent.hasApiKey : apiKey !== null };
       return { ...agent };
+    },
+    async botSettings() {
+      return structuredClone(bot);
+    },
+    async saveBotSettings(update) {
+      bot = structuredClone(update);
+      return structuredClone(bot);
     },
     async assign(id, userId) {
       const c = convs.find((x) => x.id === id);

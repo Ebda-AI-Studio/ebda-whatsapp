@@ -19,6 +19,22 @@ function fetchStub(routes: Record<string, (init?: RequestInit) => { status: numb
 
 afterEach(() => vi.restoreAllMocks());
 
+describe('createApiSource bot settings', () => {
+  const bot = {
+    menu: { enabled: true, items: [] },
+    hours: { enabled: false, timezone: 'Africa/Cairo', week: { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }, awayMessage: { ar: 'م', en: 'c' }, ordersWhileClosed: true },
+    location: null,
+  };
+  it('reads the merchant part of the store-link settings and saves it with PATCH', async () => {
+    const { f, calls } = fetchStub({ '/store-link/settings': () => ({ status: 200, body: { orderConfirmations: true, orderingBot: true, otpViaWhatsApp: false, catalogId: null, ...bot } }) });
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    expect(await src.botSettings!()).toEqual(bot);
+    await src.saveBotSettings!(bot as never);
+    expect(calls[1]!.init?.method).toBe('PATCH');
+    expect(JSON.parse(String(calls[1]!.init?.body))).toEqual(bot);
+  });
+});
+
 describe('createApiSource', () => {
   it('lists conversations with the bearer token and validates the response', async () => {
     const { f, calls } = fetchStub({ '/conversations?filter=unread': () => ({ status: 200, body: { items: [conv], nextCursor: null } }) });

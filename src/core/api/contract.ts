@@ -146,6 +146,9 @@ export const storeLinkSettingsResponse = z.object({
   hours: hoursSchema,
   location: locationSchema,
 });
+/** The merchant-written part of the settings (service menu, business hours, location): what the Bot screen edits. */
+export const botSettingsDto = storeLinkSettingsResponse.pick({ menu: true, hours: true, location: true });
+export type BotSettingsDto = z.infer<typeof botSettingsDto>;
 export const storeLinkSettingsPatch = z.object({
   orderConfirmations: z.boolean(),
   orderingBot: z.boolean(),

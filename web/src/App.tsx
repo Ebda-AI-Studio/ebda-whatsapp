@@ -6,6 +6,7 @@ import { OrderPane } from './components/OrderPane';
 import { Rail, type View } from './components/Rail';
 import { BRAND } from '@brand';
 import { AgentScreen } from './components/AgentScreen';
+import { BotScreen } from './components/BotScreen';
 import { CampaignsScreen, dateTime } from './components/CampaignsScreen';
 import { ContactsScreen } from './components/ContactsScreen';
 import { NumbersScreen } from './components/NumbersScreen';
@@ -223,8 +224,9 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
 
   return (
     <div className="app" data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
-      <Rail t={t} view={view} onNavigate={setView} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, operator: source.role === 'super_admin' && !!source.operator }} />
+      <Rail t={t} view={view} onNavigate={setView} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, operator: source.role === 'super_admin' && !!source.operator }} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
+        : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
         : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} />
         : view === 'wallet' && source.wallet ? <WalletScreen t={t} lang={lang} source={source} api={source.wallet} now={now} />
         : view === 'operator' && source.operator && source.role === 'super_admin' ? <OperatorScreen t={t} lang={lang} source={source} api={source.operator} now={now} />
