@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { MAX_DOCUMENT_BYTES, UPLOAD_OVERHEAD_BYTES, canonicalMime, outboundMediaFor, safeFilename } from '../core/media';
-import { activeNumber, apiError, intParam, workspaceStub, type ApiEnv } from './shared';
+import { activeNumber, apiError, bizToken, intParam, workspaceStub, type ApiEnv } from './shared';
 
 export const mediaRoutes = new Hono<ApiEnv>();
 
@@ -60,6 +60,8 @@ mediaRoutes.post('/stores/:storeId/media', async (c) => {
   const ws = await workspaceStub(c);
   const number = await activeNumber(c);
   if (!ws || !number) return apiError(c, 404, 'not_found');
+  const token = await bizToken(c, { phoneNumberId: number.phoneNumberId });
+  if (!token) return apiError(c, 503, 'rate_limited', 'token_unavailable');
   const mime = canonicalMime(file.type);
   const filename = safeFilename(file.name);
 
@@ -71,7 +73,7 @@ mediaRoutes.post('/stores/:storeId/media', async (c) => {
   try {
     metaRes = await fetch(`https://graph.facebook.com/${c.env.META_GRAPH_VERSION}/${number.phoneNumberId}/media`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${c.env.META_SYSTEM_TOKEN}` },
+      headers: { authorization: `Bearer ${token}` },
       body: form,
       signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
     });

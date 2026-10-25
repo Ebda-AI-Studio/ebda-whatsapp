@@ -3,11 +3,13 @@ import type { Env } from '../env';
 import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, toNdjson, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
 import type { SendResult } from './meta/client';
-import type { InboundMessage, StatusEvent } from './meta/webhook-schema';
+import type { CoexMessage, InboundMessage, StatusEvent, SyncedContact } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
 import { jobKind, sendToMeta } from './send-queue';
 import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
+import { activeNumberFor } from './routing';
+import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOut } from './consent';
 import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
@@ -61,6 +63,7 @@ export const STALE_CLAIM_MS = 2 * 60 * 1000;
 const STATUS_RANK = { sent: 1, failed: 2, delivered: 3, read: 4 } as const;
 
 export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[]; receivedAt: number };
+export type CoexBatch = { phoneNumberId: string; echoes: CoexMessage[]; history: CoexMessage[]; contacts: SyncedContact[] };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
@@ -172,7 +175,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         result.stored++;
         this.indexMessage(inserted.id, cols.preview);
         if (m.media) {
-          addTask(this.sql, 'media_fetch', now, { messageId: inserted.id, mediaId: m.media.id });
+          addTask(this.sql, 'media_fetch', now, { messageId: inserted.id, mediaId: m.media.id, phoneNumberId: batch.phoneNumberId });
           scheduledMedia = true;
         }
         this.emitMessageCreated(inserted.id);
@@ -196,6 +199,70 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
     if (scheduledMedia || linkWork) await this.arm();
     return result;
+  }
+
+  /**
+   * Coexistence (a number kept on the merchant's WhatsApp Business app). Echoes are what the merchant typed in the app: stored as
+   * outgoing messages by 'app', never sent. History is the past chat, stored with its original timestamps. Neither opens a 24 h
+   * window, raises unread, wakes the bot or agent, or sends an auto reply. Synced contacts get NO consent. All idempotent on wamid.
+   */
+  async ingestCoexistence(batch: CoexBatch): Promise<{ echoes: number; history: number; contacts: number; duplicates: number }> {
+    const workspaceId = this.workspaceId;
+    const all = [...batch.echoes.map((m) => ({ m, live: true })), ...batch.history.map((m) => ({ m, live: false }))];
+    const bodies = new Map<string, string>();
+    for (const { m } of all) {
+      if (!m.text || byteLength(m.text) <= INLINE_BODY_BYTES) continue;
+      if (this.sql.exec('SELECT 1 FROM messages WHERE wamid = ?', m.wamid).toArray().length) continue;
+      const key = `bodies/${workspaceId}/${m.wamid}`;
+      await this.env.MEDIA.put(key, m.text);
+      bodies.set(m.wamid, key);
+    }
+    await this.ensureBackupAlarm();
+    const out = { echoes: 0, history: 0, contacts: 0, duplicates: 0 };
+    let scheduledMedia = false;
+    const touched = new Set<number>();
+    this.ctx.storage.transactionSync(() => {
+      const now = Date.now();
+      for (const { m, live } of all) {
+        const { conversationId } = this.ensureConversation(m.customer, m.ts * 1000);
+        const cols = this.bodyColumns(m.text ?? m.caption, bodies.get(m.wamid));
+        const out_ = m.direction === 'out';
+        const status = out_ ? (live ? 'sent' : (m.status ?? 'sent')) : null;
+        const inserted = this.sql.exec<{ id: number }>(
+          `INSERT INTO messages (wamid, conversation_id, direction, type, preview, body, body_r2_key, media_mime, status, status_rank, author, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(wamid) DO NOTHING RETURNING id`,
+          m.wamid, conversationId, m.direction, m.type, cols.preview, cols.body, cols.key, live ? (m.media?.mime ?? null) : null,
+          status, status ? STATUS_RANK[status as keyof typeof STATUS_RANK] : 0, out_ ? 'app' : null, m.ts * 1000, now,
+        ).toArray()[0];
+        if (!inserted) {
+          out.duplicates++;
+          continue;
+        }
+        live ? out.echoes++ : out.history++;
+        this.indexMessage(inserted.id, cols.preview);
+        this.sql.exec('UPDATE conversations SET last_message_at = max(coalesce(last_message_at, 0), ?) WHERE id = ?', m.ts, conversationId);
+        touched.add(conversationId);
+        if (live) {
+          if (m.media) {
+            addTask(this.sql, 'media_fetch', now, { messageId: inserted.id, mediaId: m.media.id, phoneNumberId: batch.phoneNumberId });
+            scheduledMedia = true;
+          }
+          // A person answered from the app: the bot stays silent for a fresh handoff window (no-op when none is open).
+          staffReplied(this.host(), m.customer, now);
+          this.emitMessageCreated(inserted.id);
+        }
+      }
+      for (const c of batch.contacts) {
+        const r = this.sql.exec(
+          'INSERT INTO contacts (wa_id, profile_name) VALUES (?, ?) ON CONFLICT(wa_id) DO UPDATE SET profile_name = coalesce(profile_name, excluded.profile_name)', c.waId, c.name ?? null,
+        );
+        if (r.rowsWritten) out.contacts++;
+      }
+      // One update per conversation, not per message: a history import can carry thousands of messages.
+      for (const id of touched) this.emitConversationUpdated(id);
+    });
+    if (scheduledMedia) await this.arm();
+    return out;
   }
 
   private replyJob(workspaceId: string, batch: IngestBatch, m: InboundMessage, text: string): SendJob {
@@ -1058,11 +1125,14 @@ export class WorkspaceDO extends DurableObject<Env> {
   // ---- media ------------------------------------------------------------------------------------------------------
 
   /** Downloads an inbound file to R2 and tells clients the media is ready. A message erased meanwhile leaves nothing behind. */
-  private async fetchInboundMedia(messageId: number, mediaId: string): Promise<void> {
+  private async fetchInboundMedia(messageId: number, mediaId: string, phoneNumberId?: string): Promise<void> {
     const msg = this.sql.exec<{ wamid: string | null; media_mime: string | null }>('SELECT wamid, media_mime FROM messages WHERE id = ?', messageId).toArray()[0];
     if (!msg?.wamid) return; // erased before we got to it
     const key = `media/${this.workspaceId}/${msg.wamid}`;
-    const got = await downloadToR2(this.env, mediaId, key, msg.media_mime ?? 'application/octet-stream');
+    // The file is fetched with the token of the number it arrived on (a task queued before this field existed falls back to the workspace's active number).
+    const via = phoneNumberId ?? (await activeNumberFor(this.env.DB, this.workspaceId))?.phoneNumberId;
+    const token = via ? await graphTokenFor(this.env, { phoneNumberId: via }) : this.env.META_SYSTEM_TOKEN;
+    const got = await downloadToR2(this.env, token, mediaId, key, msg.media_mime ?? 'application/octet-stream');
     const stillThere = this.ctx.storage.transactionSync(() => {
       const r = this.sql.exec('UPDATE messages SET media_r2_key = ?, media_size = ?, media_mime = ?, updated_at = ? WHERE id = ?', key, got.size, got.mime, Date.now(), messageId);
       if (r.rowsWritten === 0) return false;
@@ -1319,10 +1389,10 @@ export class WorkspaceDO extends DurableObject<Env> {
         return undefined;
       }
       case 'media_fetch': {
-        const p = JSON.parse(payload ?? 'null') as { messageId?: number; mediaId?: string } | null;
+        const p = JSON.parse(payload ?? 'null') as { messageId?: number; mediaId?: string; phoneNumberId?: string } | null;
         if (typeof p?.messageId !== 'number' || typeof p.mediaId !== 'string') return undefined;
         try {
-          await this.fetchInboundMedia(p.messageId, p.mediaId);
+          await this.fetchInboundMedia(p.messageId, p.mediaId, p.phoneNumberId);
         } catch (err) {
           if (attempts + 1 < MEDIA_FETCH_MAX_ATTEMPTS) throw err;
           // Meta media ids live 30 days and we retried for hours: stop, say so, keep the message (without its media).

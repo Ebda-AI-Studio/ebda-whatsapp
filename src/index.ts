@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env } from './env';
 import { selectVerifier } from './identity-select';
 import { verifyMetaSignature } from './core/meta/signature';
-import { extractEvents, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
+import { extractCoexistence, extractEvents, extractNameUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
 import { scrubEvent } from './core/observability';
@@ -38,6 +38,7 @@ import { importsRoutes } from './routes/imports';
 import { segmentsRoutes } from './routes/segments';
 import { campaignsRoutes } from './routes/campaigns';
 import { trackRoutes } from './routes/track';
+import { numbersRoutes } from './routes/numbers';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY });
@@ -121,6 +122,7 @@ api.route('/', contactsRoutes);
 api.route('/', importsRoutes);
 api.route('/', segmentsRoutes);
 api.route('/', campaignsRoutes);
+api.route('/', numbersRoutes);
 app.route('/api/v1', api);
 
 function sameString(a: string, b: string): boolean {
@@ -162,6 +164,27 @@ app.post('/meta/webhook', async (c) => {
     const tier = TIER_LIMITS[u.currentLimit];
     const number = tier === undefined ? null : await numberForDisplayPhone(c.env.DB, u.wabaId, u.displayPhone);
     if (number && tier !== undefined) await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(number.workspaceId)).setNumberLimits(number.phoneNumberId, { tier });
+    if (number) await c.env.DB.prepare('UPDATE phone_numbers SET messaging_limit_tier = ? WHERE phone_number_id = ?').bind(u.currentLimit, number.phoneNumberId).run();
+  }
+  for (const u of extractNameUpdates(payload)) {
+    const number = await numberForDisplayPhone(c.env.DB, u.wabaId, u.displayPhone);
+    if (!number) continue;
+    // The name Meta approved becomes the verified name; a refusal or a wait only changes the status the merchant sees.
+    await c.env.DB.prepare('UPDATE phone_numbers SET name_status = ?, verified_name = CASE WHEN ? = 1 THEN coalesce(?, verified_name) ELSE verified_name END WHERE phone_number_id = ?')
+      .bind(u.decision, u.decision === 'APPROVED' ? 1 : 0, u.requestedName, number.phoneNumberId).run();
+  }
+  for (const co of extractCoexistence(payload)) {
+    const workspaceId = await workspaceForPhoneNumber(c.env.DB, co.phoneNumberId);
+    if (!workspaceId) {
+      console.warn('meta webhook: unrouted phone_number_id');
+      continue;
+    }
+    const res = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).ingestCoexistence({ phoneNumberId: co.phoneNumberId, echoes: co.echoes, history: co.history, contacts: co.contacts });
+    // What the merchant sees about the two one-time syncs. A declined history stays declined.
+    if (co.historyDeclined) await c.env.DB.prepare("UPDATE phone_numbers SET history_sync = 'declined' WHERE phone_number_id = ?").bind(co.phoneNumberId).run();
+    else if (co.history.length) await c.env.DB.prepare("UPDATE phone_numbers SET history_sync = 'received' WHERE phone_number_id = ? AND coalesce(history_sync, '') != 'declined'").bind(co.phoneNumberId).run();
+    if (co.contacts.length) await c.env.DB.prepare("UPDATE phone_numbers SET contacts_sync = 'received' WHERE phone_number_id = ?").bind(co.phoneNumberId).run();
+    console.log(JSON.stringify({ audit: 'coexistence_ingested', workspace: workspaceId, ...res, declined: co.historyDeclined }));
   }
   const events = extractEvents(payload);
   if (!events) {

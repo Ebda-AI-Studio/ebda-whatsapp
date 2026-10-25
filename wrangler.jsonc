@@ -47,6 +47,8 @@
   // Create it, then uncomment: `npx wrangler vectorize create ebda-wa-kb --dimensions=1024 --metric=cosine`
   //   "vectorize": [{ "binding": "VECTORIZE", "index_name": "ebda-wa-kb" }],
   // Secrets: AGENT_SECRETS_KEY (base64, 32 random bytes; encrypts merchants' own model keys). Var AGENT_MODEL overrides the default Workers AI model.
+  // ---- Own number (Phase 8.1, docs/numbers.md). Var EMBEDDED_SIGNUP_ENABLED="1" turns the /numbers routes on; secrets TOKEN_ENC_KEY (base64, 32 random bytes) and
+  // META_APP_ID are then required (a request answers 503 naming the missing key). META_APP_SECRET and META_SYSTEM_TOKEN are already secrets.
   // ---- Store link (Phase 4). Left OFF until the Store side exists: a binding to a service or queue that is not
   // deployed fails the whole deploy. When the Store Worker, `ebda-wa-events` and `ebda-store-events` exist, add:
   //   "services": [{ "binding": "STORE_BRIDGE", "service": "<store api worker name>", "entrypoint": "WhatsAppBridge" }],

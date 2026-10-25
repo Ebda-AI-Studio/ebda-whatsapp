@@ -42,13 +42,22 @@ import { sendImageLink, sendInteractive, sendList, sendMedia, sendTemplate, send
 import type { Env } from '../env';
 import { mark } from './timing';
 import { workspaceForPhoneNumber } from './routing';
+import { graphTokenFor, TokenUnavailable } from './numbers/token';
 import { STALE_CLAIM_MS } from './workspace-do';
 
 const MAX_RETRY_DELAY_S = 300;
 
 /** Sends one job to Meta in the shape its kind calls for. */
-export function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>): Promise<SendResult> {
-  const base = { token: env.META_SYSTEM_TOKEN, graphVersion: env.META_GRAPH_VERSION, phoneNumberId: job.phoneNumberId, to: job.to };
+export async function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>): Promise<SendResult> {
+  let token: string;
+  try {
+    token = await graphTokenFor(env, { phoneNumberId: job.phoneNumberId });
+  } catch (err) {
+    if (!(err instanceof TokenUnavailable)) throw err;
+    console.error(JSON.stringify({ alert: 'business_token_unavailable', workspace: job.workspaceId, reason: err.reason }));
+    return { ok: false, code: 0, retryable: false, message: 'token_unavailable' };
+  }
+  const base = { token, graphVersion: env.META_GRAPH_VERSION, phoneNumberId: job.phoneNumberId, to: job.to };
   switch (jobKind(job)) {
     case 'template': return sendTemplate({ ...base, ...job.template! });
     case 'interactive': return sendInteractive({ ...base, ...job.interactive! });

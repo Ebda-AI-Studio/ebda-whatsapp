@@ -34,6 +34,8 @@ export class FakeStore implements StoreBridge {
   failNext = new Map<string, BridgeFailure>();
   /** Delay every call by this many ms, so overlapping runs can interleave like a real service binding. */
   latencyMs = 0;
+  /** When set, every call waits (after recording itself in `calls`) until this returns true: lets a test act mid-call without guessing with a sleep. Polled on the fake's own timer. */
+  holdUntil: (() => boolean) | undefined;
   private seq = 1000;
 
   /** `storeId` '*' accepts any store id (tests that use one fake across many workspaces). */
@@ -54,6 +56,7 @@ export class FakeStore implements StoreBridge {
   private async gate<T>(method: string, storeId: string, args: unknown[], run: () => BridgeResult<T>): Promise<BridgeResult<T>> {
     this.calls.push({ method, args });
     if (this.latencyMs) await new Promise((r) => setTimeout(r, this.latencyMs));
+    while (this.holdUntil && !this.holdUntil()) await new Promise((r) => setTimeout(r, 5));
     const injected = this.failNext.get(method);
     if (injected) {
       this.failNext.delete(method);

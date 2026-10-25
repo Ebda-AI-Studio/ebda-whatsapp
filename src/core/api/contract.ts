@@ -32,7 +32,7 @@ export const messageDto = z.object({
   errorCode: z.number().int().nullable(),
   at: z.number().int(), // epoch ms
   /** Who wrote an outgoing message, so the inbox can mark it (additive; absent = a person or a system message). */
-  author: z.enum(['agent', 'bot', 'staff']).nullable().optional(),
+  author: z.enum(['agent', 'bot', 'staff', 'app']).nullable().optional(),
 });
 
 export const conversationDto = z.object({
@@ -76,6 +76,7 @@ export const apiError = z.object({
   error: z.enum([
     'unauthorized', 'forbidden', 'not_found', 'invalid_request',
     'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited',
+    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable',
   ]),
   message: z.string().optional(),
 });
@@ -343,3 +344,44 @@ export const ROUTES = {
   campaignResume: 'POST /campaigns/:campaignId/resume',
   campaignCancel: 'POST /campaigns/:campaignId/cancel',
 } as const;
+
+// ---- Phase 8.1: connecting a merchant's own number (Embedded Signup) -------------------------------------------------
+const metaId = z.string().regex(/^[0-9]{1,30}$/);
+/** FINISH = a new Cloud API number; FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING = an existing WhatsApp Business app number (coexistence). */
+export const signupEvent = z.enum(['FINISH', 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING']);
+export const connectNumberRequest = z.object({
+  /** The one-time code from the Embedded Signup popup; it expires 30 seconds after it is issued. */
+  code: z.string().min(1).max(2048),
+  event: signupEvent,
+  wabaId: metaId,
+  phoneNumberId: metaId,
+  businessId: metaId.optional(),
+});
+export type ConnectNumberRequest = z.infer<typeof connectNumberRequest>;
+
+export const numberDto = z.object({
+  phoneNumberId: z.string(),
+  wabaId: z.string(),
+  displayPhone: z.string().nullable(),
+  verifiedName: z.string().nullable(),
+  kind: z.enum(['own', 'platform']),
+  onboarding: z.enum(['cloud_api', 'business_app']).nullable(),
+  /** active = can send and receive; disconnected = removed, or not finished (see registration). */
+  status: z.enum(['active', 'disconnected']),
+  registration: z.enum(['pending', 'registered', 'failed', 'locked', 'not_needed']).nullable(),
+  qualityRating: z.string().nullable(),
+  messagingLimitTier: z.string().nullable(),
+  throughputLevel: z.string().nullable(),
+  nameStatus: z.string().nullable(),
+  platformType: z.string().nullable(),
+  isOnBizApp: z.boolean().nullable(),
+  /** Outcome of the one-time syncs for a number kept on the WhatsApp Business app. */
+  historySync: z.enum(['requested', 'refused', 'declined', 'received']).nullable(),
+  contactsSync: z.enum(['requested', 'refused', 'received']).nullable(),
+  connectedAt: z.number().int().nullable(),
+  /** The last moment the one-time syncs can still be requested (24 h after onboarding); null when they do not apply. */
+  syncDeadlineAt: z.number().int().nullable(),
+  lastStatusSyncAt: z.number().int().nullable(),
+});
+export const listNumbersResponse = z.object({ items: z.array(numberDto) });
+export type NumberDto = z.infer<typeof numberDto>;

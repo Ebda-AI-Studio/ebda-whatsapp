@@ -4,6 +4,8 @@ import { plainAmount } from '../ordering/money';
 import { addTask } from '../scheduler';
 import type { CatalogRow } from '../store-bridge';
 import { bridgeFor } from '../store-link';
+import type { Env } from '../../env';
+import { graphTokenFor, TokenUnavailable } from '../numbers/token';
 import type { LinkHost } from './host';
 import { getState, readSettings } from './settings';
 
@@ -56,7 +58,7 @@ export async function verifiedAuth(host: LinkHost): Promise<Ready | null> {
   if (!wabaId) return refuse('no_verified_waba');
   const owns = await host.env.DB.prepare("SELECT 1 FROM phone_numbers WHERE workspace_id = ? AND waba_id = ? AND status = 'active'").bind(host.workspaceId, wabaId).first();
   if (!owns) return refuse('waba_not_owned');
-  const auth = { token: host.env.META_SYSTEM_TOKEN, graphVersion: host.env.META_GRAPH_VERSION };
+  const auth = { token: await graphTokenFor(host.env, { wabaId }), graphVersion: host.env.META_GRAPH_VERSION };
   const listed = await listWabaCatalogs({ ...auth, wabaId });
   if (!listed.ok) throw new Error(`catalog verification failed: ${listed.message}`); // an outage, not an answer: retry
   if (!listed.value.includes(catalogId)) return refuse('not_in_waba');
@@ -64,8 +66,15 @@ export async function verifiedAuth(host: LinkHost): Promise<Ready | null> {
 }
 
 /** Is `catalogId` connected to this WABA? Used before a catalog id is saved. */
-export async function catalogBelongsToWaba(env: { META_SYSTEM_TOKEN: string; META_GRAPH_VERSION: string }, wabaId: string, catalogId: string): Promise<'yes' | 'no' | 'unavailable'> {
-  const listed = await listWabaCatalogs({ token: env.META_SYSTEM_TOKEN, graphVersion: env.META_GRAPH_VERSION, wabaId });
+export async function catalogBelongsToWaba(env: Env, wabaId: string, catalogId: string): Promise<'yes' | 'no' | 'unavailable'> {
+  let token: string;
+  try {
+    token = await graphTokenFor(env, { wabaId });
+  } catch (err) {
+    if (err instanceof TokenUnavailable) return 'unavailable';
+    throw err;
+  }
+  const listed = await listWabaCatalogs({ token, graphVersion: env.META_GRAPH_VERSION, wabaId });
   if (!listed.ok) return 'unavailable';
   return listed.value.includes(catalogId) ? 'yes' : 'no';
 }
