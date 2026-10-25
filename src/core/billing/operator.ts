@@ -97,6 +97,8 @@ export async function setFunding(env: Env, a: { actor: string; phoneNumberId: st
   const before = await env.DB.prepare('SELECT funding FROM number_funding WHERE phone_number_id = ?').bind(a.phoneNumberId).first<{ funding: string }>();
   await env.DB.prepare('INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, ?, ?)').bind(a.phoneNumberId, a.funding, now).run();
   await audit(env, { actor: a.actor, action: 'number_funding_set', workspaceId: number.workspace_id, before: before ?? null, after: { phoneNumberId: a.phoneNumberId, funding: a.funding }, reason: a.reason }, now);
+  // Funding is never-stale money state: the owning workspace's copy is refreshed now, not at its next 30-minute pull.
+  await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(number.workspace_id)).refreshPricing();
   return 'ok';
 }
 
