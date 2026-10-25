@@ -22,10 +22,10 @@ CREATE TABLE workspace_subscriptions (
   updated_at INTEGER NOT NULL
 );
 
--- Who pays Meta for a number: merchant_card = Meta bills the merchant (we only show the cost); ebda_line = the wallet pays.
+-- Who pays Meta for a number: merchant_card = Meta bills the merchant (we only show the cost); platform_line = the wallet pays.
 CREATE TABLE number_funding (
   phone_number_id TEXT PRIMARY KEY,
-  funding TEXT NOT NULL CHECK (funding IN ('merchant_card', 'ebda_line')),
+  funding TEXT NOT NULL CHECK (funding IN ('merchant_card', 'platform_line')),
   updated_at INTEGER NOT NULL
 );
 
