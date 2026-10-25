@@ -1,4 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { createSampleSource } from './data/sample';
@@ -101,7 +103,20 @@ describe('numbers', () => {
     expect(number.getAttribute('data-done')).toBe('true');
     const agent = within(list).getByText('شغّل المساعد الذكي (اختياري)').closest('li')!;
     expect(agent.getAttribute('data-done')).toBe('false');
-    expect(within(list).getAllByRole('link').every((a) => a.getAttribute('href')!.startsWith('https://help.ebda.app/'))).toBe(true);
+    // One published shape: <help host>/<ar|en>/<slug> (docs/help/README.md), and every slug is a guide that exists in both languages.
+    const hrefs = within(list).getAllByRole('link').map((a) => a.getAttribute('href')!);
+    expect(hrefs.every((h) => /^https:\/\/help\.ebda\.app\/ar\/[a-z0-9-]+$/.test(h))).toBe(true);
+    for (const lang of ['ar', 'en']) {
+      const files = readdirSync(join(import.meta.dirname, '../../docs/help', lang)).map((f) => f.replace(/^\d+-/, '').replace(/\.md$/, ''));
+      for (const h of hrefs) expect(files, `${lang}: ${h}`).toContain(h.split('/').pop());
+    }
+  });
+
+  it('the guide links follow the interface language', async () => {
+    render(<App source={createSampleSource()} now={now} initialLang="en" />);
+    await act(async () => fireEvent.click(screen.getByRole('link', { name: 'WhatsApp number' })));
+    const list = await screen.findByRole('list', { name: 'Getting started' });
+    expect(within(list).getAllByRole('link').every((a) => /^https:\/\/help\.ebda\.app\/en\/[a-z0-9-]+$/.test(a.getAttribute('href')!))).toBe(true);
   });
 
   it('the rail offers the screen only when the server says connecting numbers is open', async () => {
