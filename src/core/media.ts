@@ -32,10 +32,10 @@ const TIMEOUT_MS = 30_000;
 
 /**
  * Downloads one inbound media file from Meta into R2 (two Graph calls: resolve the media id to a short-lived URL,
- * then fetch it with the token). Throws on any failure so the scheduler retries with backoff.
+ * then fetch it with `token`: the business token of the number the file arrived on). Throws on any failure so the scheduler retries with backoff.
  */
-export async function downloadToR2(env: { META_SYSTEM_TOKEN: string; META_GRAPH_VERSION: string; MEDIA: R2Bucket }, mediaId: string, key: string, fallbackMime: string): Promise<{ mime: string; size: number }> {
-  const auth = { authorization: `Bearer ${env.META_SYSTEM_TOKEN}` };
+export async function downloadToR2(env: { META_GRAPH_VERSION: string; MEDIA: R2Bucket }, token: string, mediaId: string, key: string, fallbackMime: string): Promise<{ mime: string; size: number }> {
+  const auth = { authorization: `Bearer ${token}` };
   const metaRes = await fetch(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(mediaId)}`, { headers: auth, signal: AbortSignal.timeout(TIMEOUT_MS) });
   const meta = (await metaRes.json().catch(() => null)) as { url?: string; mime_type?: string; file_size?: number } | null;
   if (!metaRes.ok || !meta?.url) throw new Error(`media lookup failed: http ${metaRes.status}`);

@@ -35,8 +35,15 @@ export type Env = {
   CAMPAIGN_WORKFLOW: Workflow<{ workspaceId: string; campaignId: string; attempt: number }>;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
+  /** The platform's own token: the shared number and platform-level calls. A merchant's own number uses its business token (see core/numbers/token.ts). */
   META_SYSTEM_TOKEN: string;
   META_GRAPH_VERSION: string;
+  /** Phase 8.1 switch: "1" or "true" turns on connecting a merchant's own number (Embedded Signup). Unset = the numbers routes answer 404. */
+  EMBEDDED_SIGNUP_ENABLED?: string;
+  /** The Meta app id (Embedded Signup code exchange). Required while the switch is on. */
+  META_APP_ID?: string;
+  /** Base64 of 32 random bytes: encrypts business tokens and registration PINs (AES-GCM). Required while the switch is on. */
+  TOKEN_ENC_KEY?: string;
   COMMIT_SHA?: string;
   IDENTITY_ISSUER: string;
   IDENTITY_JWKS_URL: string;

@@ -8,6 +8,8 @@ import type { SendJob } from './send-queue';
 import { jobKind, sendToMeta } from './send-queue';
 import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
+import { activeNumberFor } from './routing';
+import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOut } from './consent';
 import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
@@ -172,7 +174,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         result.stored++;
         this.indexMessage(inserted.id, cols.preview);
         if (m.media) {
-          addTask(this.sql, 'media_fetch', now, { messageId: inserted.id, mediaId: m.media.id });
+          addTask(this.sql, 'media_fetch', now, { messageId: inserted.id, mediaId: m.media.id, phoneNumberId: batch.phoneNumberId });
           scheduledMedia = true;
         }
         this.emitMessageCreated(inserted.id);
@@ -1058,11 +1060,14 @@ export class WorkspaceDO extends DurableObject<Env> {
   // ---- media ------------------------------------------------------------------------------------------------------
 
   /** Downloads an inbound file to R2 and tells clients the media is ready. A message erased meanwhile leaves nothing behind. */
-  private async fetchInboundMedia(messageId: number, mediaId: string): Promise<void> {
+  private async fetchInboundMedia(messageId: number, mediaId: string, phoneNumberId?: string): Promise<void> {
     const msg = this.sql.exec<{ wamid: string | null; media_mime: string | null }>('SELECT wamid, media_mime FROM messages WHERE id = ?', messageId).toArray()[0];
     if (!msg?.wamid) return; // erased before we got to it
     const key = `media/${this.workspaceId}/${msg.wamid}`;
-    const got = await downloadToR2(this.env, mediaId, key, msg.media_mime ?? 'application/octet-stream');
+    // The file is fetched with the token of the number it arrived on (a task queued before this field existed falls back to the workspace's active number).
+    const via = phoneNumberId ?? (await activeNumberFor(this.env.DB, this.workspaceId))?.phoneNumberId;
+    const token = via ? await graphTokenFor(this.env, { phoneNumberId: via }) : this.env.META_SYSTEM_TOKEN;
+    const got = await downloadToR2(this.env, token, mediaId, key, msg.media_mime ?? 'application/octet-stream');
     const stillThere = this.ctx.storage.transactionSync(() => {
       const r = this.sql.exec('UPDATE messages SET media_r2_key = ?, media_size = ?, media_mime = ?, updated_at = ? WHERE id = ?', key, got.size, got.mime, Date.now(), messageId);
       if (r.rowsWritten === 0) return false;
@@ -1319,10 +1324,10 @@ export class WorkspaceDO extends DurableObject<Env> {
         return undefined;
       }
       case 'media_fetch': {
-        const p = JSON.parse(payload ?? 'null') as { messageId?: number; mediaId?: string } | null;
+        const p = JSON.parse(payload ?? 'null') as { messageId?: number; mediaId?: string; phoneNumberId?: string } | null;
         if (typeof p?.messageId !== 'number' || typeof p.mediaId !== 'string') return undefined;
         try {
-          await this.fetchInboundMedia(p.messageId, p.mediaId);
+          await this.fetchInboundMedia(p.messageId, p.mediaId, p.phoneNumberId);
         } catch (err) {
           if (attempts + 1 < MEDIA_FETCH_MAX_ATTEMPTS) throw err;
           // Meta media ids live 30 days and we retried for hours: stop, say so, keep the message (without its media).

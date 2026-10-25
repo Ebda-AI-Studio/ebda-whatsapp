@@ -2,6 +2,8 @@ import { defineConfig } from 'vitest/config';
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 import react from '@vitejs/plugin-react';
 
+// Test-only key, generated from a byte sequence (never a literal), not a secret.
+const testKey = () => Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => i + 101)).toString('base64');
 const migrations = await readD1Migrations('./migrations/d1');
 
 export default defineConfig({
@@ -14,7 +16,7 @@ export default defineConfig({
             remoteBindings: false,
             wrangler: { configPath: './wrangler.jsonc' },
             miniflare: {
-              bindings: { META_APP_SECRET: 'test-secret', META_VERIFY_TOKEN: 'VT', META_SYSTEM_TOKEN: 'test-token', TEST_MIGRATIONS: migrations, BENCH: process.env.BENCH ?? '0' },
+              bindings: { META_APP_SECRET: 'test-secret', META_VERIFY_TOKEN: 'VT', META_SYSTEM_TOKEN: 'test-token', EMBEDDED_SIGNUP_ENABLED: '1', META_APP_ID: 'app-1', TOKEN_ENC_KEY: testKey(), TEST_MIGRATIONS: migrations, BENCH: process.env.BENCH ?? '0' },
             },
           }),
         ],
