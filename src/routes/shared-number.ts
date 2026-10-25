@@ -23,6 +23,7 @@ sharedNumberRoutes.post('/stores/:storeId/shared-number/join', async (c) => {
   if (!(await workspaceStub(c))) return apiError(c, 404, 'not_found');
   const st = await joinShared(c.env, c.req.param('storeId')!, body.data.displayName);
   if (!st) return apiError(c, 404, 'not_found'); // no platform number registered yet
+  if (st === 'name_taken') return apiError(c, 409, 'invalid_request', 'display_name_taken'); // another store on the number already looks like this
   console.log(JSON.stringify({ audit: 'shared_number_joined', storeId: c.req.param('storeId'), by: c.get('principal').userId }));
   return c.json(st);
 });

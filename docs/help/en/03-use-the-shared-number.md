@@ -4,7 +4,7 @@ The shared number is one WhatsApp number run by the Ebda AI Studio team that you
 
 ## How it works
 - Your messages go out from the shared number under your **store name**, so customers know the message comes from your store.
-- A customer's reply reaches the store that wrote to them last. If more than one store wrote to the same customer within 24 hours, the customer gets a short list asking **"which store do you want to continue with?"**, and their message waits until they choose. If nobody wrote to them first, they get one polite note and nothing reaches any store. No store ever sees another store's conversations or customers.
+- A customer's reply reaches the store that wrote to them last. If more than one store wrote to the same customer within the last 30 days, the customer gets a short list asking **"which store do you want to continue with?"**, and their message waits until they choose. If nobody wrote to them first, they get one polite note and nothing reaches any store. No store ever sees another store's conversations or customers, and writing to someone else's customer never takes them over: the customer chooses. Each store's name on the shared number must be clearly different from the others'.
 - If a customer sends **STOP**, they are opted out of your store (and of every store that wrote to them, if we cannot tell which one they meant).
 - It is a **paid add-on** that you switch on from Packages. Its price is set by the Ebda AI Studio team.
 

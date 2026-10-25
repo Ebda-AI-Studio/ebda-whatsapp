@@ -21,7 +21,8 @@ import type { WorkspaceConfig } from '../workspace-do';
 export const sharedEnabled = (env: Pick<Env, 'SHARED_NUMBER_ENABLED'>): boolean => env.SHARED_NUMBER_ENABLED === '1' || env.SHARED_NUMBER_ENABLED?.toLowerCase() === 'true';
 
 /** Two stores that wrote to the same customer within this window make a reply ambiguous. */
-export const AMBIGUITY_WINDOW_MS = 24 * 3_600_000;
+/** How long a store's contact with a customer counts when another store writes too: within it, the customer chooses (never a silent takeover). */
+export const ROUTE_MEMORY_MS = 30 * 24 * 3_600_000;
 /** A message waiting for the customer's choice is kept this long, then swept (the daily pass). */
 export const PARKED_TTL_MS = 48 * 3_600_000;
 /** One "which store?" list per customer per this long; one generic no-route reply per customer per this long. */
@@ -88,16 +89,32 @@ export async function sharedStatus(env: Env, workspaceId: string): Promise<Share
   return { available: true, member: !!m, displayName: m?.display_name ?? null, displayPhone: num.display_phone };
 }
 
-export async function joinShared(env: Env, workspaceId: string, displayName?: string, now = Date.now()): Promise<SharedStatus | null> {
+/**
+ * The comparison key for a display name: Unicode compatibility forms folded (full-width letters), case folded, Arabic diacritics and
+ * tatweel removed, alef/yaa/taa-marbuta variants unified, all spacing and punctuation dropped. Two names with one key look the same to a customer.
+ */
+export function displayNameKey(name: string): string {
+  return name.normalize('NFKC').toLowerCase()
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+    .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+export async function joinShared(env: Env, workspaceId: string, displayName?: string, now = Date.now()): Promise<SharedStatus | null | 'name_taken'> {
   const num = await currentSharedNumber(env);
   if (!num) return null;
   const name = displayName ?? (await env.DB.prepare('SELECT name FROM workspaces WHERE id = ?').bind(workspaceId).first<{ name: string }>())?.name;
   if (!name) return null;
-  await env.DB.prepare(
-    `INSERT INTO shared_number_members (workspace_id, phone_number_id, display_name, status, joined_at) VALUES (?, ?, ?, 'active', ?)
-     ON CONFLICT(workspace_id, phone_number_id) DO UPDATE SET display_name = excluded.display_name,
-       joined_at = CASE WHEN status = 'active' THEN joined_at ELSE excluded.joined_at END, status = 'active'`,
-  ).bind(workspaceId, num.phone_number_id, name, now).run();
+  try {
+    await env.DB.prepare(
+      `INSERT INTO shared_number_members (workspace_id, phone_number_id, display_name, name_key, status, joined_at) VALUES (?, ?, ?, ?, 'active', ?)
+       ON CONFLICT(workspace_id, phone_number_id) DO UPDATE SET display_name = excluded.display_name, name_key = excluded.name_key,
+         joined_at = CASE WHEN status = 'active' THEN joined_at ELSE excluded.joined_at END, status = 'active'`,
+    ).bind(workspaceId, num.phone_number_id, name, displayNameKey(name), now).run();
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE/i.test(err.message)) return 'name_taken';
+    throw err;
+  }
   // The store's copy of the funding map is refreshed at once, so the number is usable now rather than after the next pull.
   await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId)).refreshPricing();
   return sharedStatus(env, workspaceId);
@@ -129,25 +146,35 @@ export async function senderNumberFor(env: Env, workspaceId: string): Promise<{ 
 // ---- outbound bookkeeping ----------------------------------------------------------------------------------------------------
 
 /**
- * Before a send through a platform-token number. 'not_shared' = an ordinary number; 'refused' = it is the shared number but the switch is off
- * or the store is not an active member (never sent); 'shared' = the route was recorded (before the send, so a reply can never beat it)
- * and the caller must call `afterSharedSend` with Meta's message id.
+ * Before a send through a platform-token number. 'not_shared' = an ordinary number; 'refused' = it is the shared number but the switch is off,
+ * the store is not an active member, or the message carries the platform's own "which store?" ids (a store could otherwise forge the
+ * customer's choice); 'shared' = the caller sends and then calls `afterSharedSend` with Meta's message id.
  */
-export async function beforeSharedSend(env: Env, job: Pick<SendJob, 'workspaceId' | 'phoneNumberId' | 'to' | 'orderRef'>, now = Date.now()): Promise<'not_shared' | 'refused' | 'shared'> {
+export async function beforeSharedSend(env: Env, job: Pick<SendJob, 'workspaceId' | 'phoneNumberId' | 'to' | 'list' | 'interactive'>): Promise<'not_shared' | 'refused' | 'shared'> {
   if (!(await sharedNumberById(env, job.phoneNumberId))) return 'not_shared';
   if (!sharedEnabled(env) || !(await isActiveMember(env, job.workspaceId, job.phoneNumberId))) return 'refused';
-  const key = await customerKey(env, job.to);
-  await env.DB.prepare(
-    `INSERT INTO shared_routes (phone_number_id, customer_key, workspace_id, last_at, order_ref) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(phone_number_id, customer_key, workspace_id) DO UPDATE SET last_at = max(last_at, excluded.last_at), order_ref = coalesce(excluded.order_ref, order_ref)`,
-  ).bind(job.phoneNumberId, key, job.workspaceId, now, job.orderRef ?? null).run();
+  const ids = [...(job.list?.rows ?? []).map((r) => r.id), ...(job.interactive?.buttons ?? []).map((b) => b.id)];
+  if (ids.some((id) => id.startsWith(PICK_PREFIX))) {
+    console.warn(JSON.stringify({ alert: 'shared_pick_id_refused', workspace: job.workspaceId }));
+    return 'refused';
+  }
   return 'shared';
 }
 
-/** Remembers which store sent `wamid`, so Meta's statuses for it reach that store. A failure is an alert, never a retry of an accepted send. */
-export async function afterSharedSend(env: Env, job: Pick<SendJob, 'workspaceId' | 'to'>, wamid: string, now = Date.now()): Promise<void> {
+/**
+ * After Meta ACCEPTED a send from the platform number: only now does the store hold a route to this customer (a refused send claims
+ * nothing), and Meta's statuses for `wamid` can reach that store. A failure is an alert, never a retry of an accepted send.
+ */
+export async function afterSharedSend(env: Env, job: Pick<SendJob, 'workspaceId' | 'phoneNumberId' | 'to' | 'orderRef'>, wamid: string, now = Date.now()): Promise<void> {
   try {
-    await env.DB.prepare('INSERT OR IGNORE INTO shared_sent (wamid, workspace_id, customer_key, at) VALUES (?, ?, ?, ?)').bind(wamid, job.workspaceId, await customerKey(env, job.to), now).run();
+    const key = await customerKey(env, job.to);
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO shared_routes (phone_number_id, customer_key, workspace_id, last_at, order_ref) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(phone_number_id, customer_key, workspace_id) DO UPDATE SET last_at = max(last_at, excluded.last_at), order_ref = coalesce(excluded.order_ref, order_ref)`,
+      ).bind(job.phoneNumberId, key, job.workspaceId, now, job.orderRef ?? null),
+      env.DB.prepare('INSERT OR IGNORE INTO shared_sent (wamid, workspace_id, customer_key, at) VALUES (?, ?, ?, ?)').bind(wamid, job.workspaceId, key, now),
+    ]);
   } catch (err) {
     console.error(JSON.stringify({ alert: 'shared_sent_not_recorded', workspace: job.workspaceId, error: err instanceof Error ? err.name : 'error' }));
   }
@@ -178,18 +205,22 @@ async function candidatesFor(env: Db, phoneNumberId: string, key: string): Promi
 }
 
 /**
- * Pure. The customer's choice (`chosen_at`) settles replies until ANOTHER store writes after it. Without a choice, more than one store
- * within the window is ambiguous; otherwise the newest store wins however old it is.
+ * Pure. A store's route counts for ROUTE_MEMORY_MS. The customer's choice (`chosen_at`) settles replies until ANOTHER store writes after
+ * it; then, as whenever more than one store wrote within the memory, the customer chooses again. The newest writer never takes over a
+ * customer another store is still dealing with: a route claimed by messaging someone only ever earns a place on the list.
  */
 export function decide(cands: Candidate[], now: number): Decision {
   if (!cands.length) return { kind: 'none' };
-  const since = now - AMBIGUITY_WINDOW_MS;
-  const pin = cands.filter((c) => c.chosen_at !== null).sort((x, y) => y.chosen_at! - x.chosen_at!)[0];
+  const since = now - ROUTE_MEMORY_MS;
   const at = (c: Candidate) => Math.max(c.last_at, c.chosen_at ?? 0);
-  const relevant = cands.filter((c) => (pin && c.workspace_id === pin.workspace_id ? at(c) > since : c.last_at > since && (!pin || c.last_at > pin.chosen_at!)));
-  if (relevant.length > 1) return { kind: 'ambiguous', candidates: relevant };
-  if (relevant.length === 1) return { kind: 'route', workspaceId: relevant[0]!.workspace_id };
-  return { kind: 'route', workspaceId: (pin ?? cands[0]!).workspace_id };
+  const recent = cands.filter((c) => at(c) > since);
+  if (!recent.length) return { kind: 'route', workspaceId: cands[0]!.workspace_id }; // only stale contacts: the latest one
+  const pin = recent.filter((c) => c.chosen_at !== null).sort((x, y) => y.chosen_at! - x.chosen_at!)[0];
+  if (pin) {
+    const challengers = recent.filter((c) => c.workspace_id !== pin.workspace_id && c.last_at > pin.chosen_at!);
+    return challengers.length ? { kind: 'ambiguous', candidates: [pin, ...challengers] } : { kind: 'route', workspaceId: pin.workspace_id };
+  }
+  return recent.length > 1 ? { kind: 'ambiguous', candidates: recent } : { kind: 'route', workspaceId: recent[0]!.workspace_id };
 }
 
 // ---- R2 markers and parked messages -----------------------------------------------------------------------------------------------

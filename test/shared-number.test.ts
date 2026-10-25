@@ -389,3 +389,72 @@ describe('brand packs', () => {
     expect(JSON.stringify(brandPack('demo').sharedNumber)).not.toMatch(/ebda|إبدا/i);
   });
 });
+
+describe('security review fixes (2026-10-25)', () => {
+  /** Queue + consume one job without assuming Meta accepted it. */
+  async function consumeJob(job: SendJob) {
+    const batch = createMessageBatch<SendJob>('ebda-wa-send', [{ id: 'm0', timestamp: new Date(), attempts: 1, body: job }]);
+    const ctx = createExecutionContext();
+    await worker.queue(batch, envWith(), ctx);
+    return getQueueResult(batch, ctx);
+  }
+
+  it('a send Meta refuses claims no route: the customer\'s replies stay with the store they deal with', async () => {
+    await operatorRegister();
+    const a = await member(770, 'متجر النور');
+    const b = await member(771, 'متجر الأمل');
+    await writeTo(a.ws);
+    graph!.restore();
+    graph = graphStub(() => ({ status: 400, json: { error: { code: 131026, message: 'undeliverable' } } }));
+    await exec(b.ws, 'INSERT OR IGNORE INTO contacts (wa_id) VALUES (?)', CUST);
+    await consumeJob({ workspaceId: b.ws, phoneNumberId: PLAT, to: CUST, text: 'عرض خاص', idempotencyKey: 'refused:1' });
+    expect(await routes(b.ws)).toEqual([]);
+    graph!.restore();
+    graph = graphStub();
+    await inbound('فين طلبي؟');
+    expect((await msgs(a.ws)).map((m) => m.body)).toEqual(['فين طلبي؟']);
+    expect(lists()).toHaveLength(0);
+  });
+
+  it('a second store writing to an established customer, even days later, is never a silent takeover: the customer chooses', async () => {
+    await operatorRegister();
+    const a = await member(772, 'متجر النور');
+    const b = await member(773, 'متجر الأمل');
+    await writeTo(a.ws);
+    await env.DB.prepare('UPDATE shared_routes SET last_at = ? WHERE workspace_id = ?').bind(Date.now() - 3 * 24 * 3_600_000, a.ws).run();
+    await writeTo(b.ws);
+    await inbound('أهلاً');
+    expect(lists()).toHaveLength(1);
+    expect(await msgs(a.ws)).toEqual([]);
+    expect(await msgs(b.ws)).toEqual([]);
+  });
+
+  it('a store cannot send the platform\'s "which store?" ids: such a message is refused before Meta (real queue path)', async () => {
+    await operatorRegister();
+    const a = await member(774, 'متجر النور');
+    await writeTo(a.ws);
+    await inbound('مساء الخير'); // the customer writes: the 24 h window opens, so buttons may be sent at all
+    const convId = (await rows<{ id: number }>(a.ws, 'SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.wa_id = ?', CUST))[0]!.id;
+    const before = graph!.calls.length;
+    const r = await workspace(a.ws).queueOutbound(convId, PLAT, { type: 'interactive', clientId: crypto.randomUUID(), body: 'اختار المتجر', buttons: [{ id: `shared:pick:${W(775)}`, title: 'متجر تاني' }] });
+    if (r.ok && r.job) await consumeJob(r.job);
+    expect(graph!.calls.length).toBe(before);
+    // control: the same message without the platform prefix does go out
+    const ok = await workspace(a.ws).queueOutbound(convId, PLAT, { type: 'interactive', clientId: crypto.randomUUID(), body: 'تأكيد', buttons: [{ id: 'confirm:1', title: 'تمام' }] });
+    if (!ok.ok || !ok.job) throw new Error('control message was not queued');
+    await consumeJob(ok.job);
+    expect(graph!.calls.length).toBe(before + 1);
+  });
+
+  it('display names are unique among the number\'s active members, folding case, diacritics, Unicode forms and spacing', async () => {
+    await operatorRegister();
+    await member(776, 'متجر النور');
+    await member(777, 'Al Noor Shop');
+    const c = await store(778);
+    for (const name of ['مَتجر  النّور', ' متجر النور ', 'al  noor   SHOP', 'Ａｌ Ｎｏｏｒ Ｓｈｏｐ']) {
+      const r = await c.call('POST', '/shared-number/join', { displayName: name });
+      expect(r.status, name).toBe(409);
+    }
+    expect((await c.call('POST', '/shared-number/join', { displayName: 'متجر الفجر' })).status).toBe(200);
+  });
+});

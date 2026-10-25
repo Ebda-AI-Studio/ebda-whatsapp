@@ -60,7 +60,7 @@ export async function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>):
     console.error(JSON.stringify({ alert: 'business_token_unavailable', workspace: job.workspaceId, reason: err.reason }));
     return { ok: false, code: 0, retryable: false, message: 'token_unavailable' };
   }
-  // The platform number answers to no single store: a send through it records the route first (a reply can never beat it) and is refused
+  // The platform number answers to no single store: a send through it is refused
   // unless the switch is on and the store is an active member. Only platform-token numbers can be it, so own numbers skip the lookup.
   let shared = false;
   if (token === env.META_SYSTEM_TOKEN) {
@@ -79,7 +79,7 @@ export async function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>):
       default: return sendText({ ...base, text: job.text! });
     }
   })();
-  if (shared && sent.ok) await afterSharedSend(env, job, sent.wamid);
+  if (shared && sent.ok) await afterSharedSend(env, job, sent.wamid); // the route exists only once Meta accepted the send
   return sent;
 }
 /** Must match max_retries in wrangler.jsonc: the last attempt marks the message failed instead of leaving it in 'retry'. */

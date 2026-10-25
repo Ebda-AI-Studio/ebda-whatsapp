@@ -10,7 +10,7 @@ Backend only. Switch: `SHARED_NUMBER_ENABLED` (`1` or `true`, default off). Off 
 
 ## Membership
 - `GET /stores/:storeId/shared-number` → `{ available, member, displayName, displayPhone }` (any role).
-- `POST /stores/:storeId/shared-number/join` `{ displayName? }` (owner). The display name (2-60 characters, default the workspace name) is what customers read in the "which store?" list (cut to 24 characters there). The workspace's copy of the funding map is refreshed at once, so the number works now, not after the 30-minute pull.
+- `POST /stores/:storeId/shared-number/join` `{ displayName? }` (owner). The display name (2-60 characters, default the workspace name) is what customers read in the "which store?" list (cut to 24 characters there). It must differ from every other active member's name after folding case, Unicode forms, Arabic diacritics, letter variants and spacing (`displayNameKey`, unique index in migration 0007): a look-alike is refused with 409 `display_name_taken`, so one store cannot pose as another. The workspace's copy of the funding map is refreshed at once, so the number works now, not after the 30-minute pull.
 - `POST /stores/:storeId/shared-number/leave` (owner): status `left`, the store's `shared_routes` rows are deleted, the funding copy drops the number. Queued sends from it are dropped at the consumer.
 - `GET /me` → `capabilities.sharedNumber`.
 - A store with its OWN active number keeps sending from it (own wins, WA-SHARED-PICK-1); a member without one sends from the platform number (API sends, media upload, wallet estimate, throttle report). Campaigns, catalog and template management stay on own numbers (see "Not done").
@@ -26,7 +26,7 @@ Every send through a platform-token number looks the number up in `shared_number
 Only for the number found in `shared_numbers` while the switch is on. Per message:
 1. `candidates` = active members with a route for this customer, newest first.
 2. A tap on the list (row id `shared:pick:<workspaceId>`) naming a candidate: sets that route's `chosen_at`, delivers the parked messages to that store, deletes them and the list marker. The tap itself is never stored in a store.
-3. `decide()` (pure): with a chosen store, it keeps the replies until ANOTHER store writes after the choice; without one, more than one store within 24 h is ambiguous, otherwise the newest store wins however old.
+3. `decide()` (pure): with a chosen store, it keeps the replies until ANOTHER store writes after the choice; a store's contact counts for 30 days (`ROUTE_MEMORY_MS`); more than one store within it is ambiguous (the customer chooses), so messaging someone else's customer only earns a place on the list, never a silent takeover. A route is written only after Meta ACCEPTED the store's send (`afterSharedSend`): a refused send claims nothing. A store's message carrying the platform's `shared:pick:` ids is refused before Meta (it could forge the customer's choice).
 4. Routed → the message is ingested into that store's Durable Object (normal path: opt-out words, bot, agent, auto reply).
 5. Ambiguous → the message is parked in R2 (`shared-parked/<number>/<customer_key>/…`, 48 h) and the customer gets ONE list (`shared-list/…` marker, 24 h, claimed with a conditional put) with store display names only; nothing from any store's conversation goes into it.
 6. No route → one generic reply per customer per 24 h (`shared-noroute/…` marker); nothing is stored in any store.
