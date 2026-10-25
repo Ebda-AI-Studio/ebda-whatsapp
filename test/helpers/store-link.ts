@@ -7,7 +7,7 @@ import { configureStoreLink, type StoreEventSink, type StoreLinkConfig } from '.
 import type { SendJob } from '../../src/core/send-queue';
 import worker from '../../src/index';
 import { FakeStore } from './fake-store';
-import { exec, seedNumber, workspace } from './workspace';
+import { exec, rows, seedNumber, workspace } from './workspace';
 
 export const BUYER_SECRET = 'ebda-suite-buyer-key-test-v1';
 /** HMAC of +201001234567 under BUYER_SECRET (the pinned vector of the integration contract). */
@@ -74,11 +74,19 @@ export const sentJobs = (): SendJob[] => vi.mocked(env.SEND_QUEUE.sendBatch).moc
 
 /**
  * Runs the workspace's due tasks (the hand-over of stored messages to the send queue) and returns what this workspace queued.
- * The look-ahead covers hand-overs due at an event time a few ms ahead (tests stamp `updatedAt: now + 5`): on a slow machine the clock
- * has not reached them yet and the workspace's own alarm would hand them over during a later test. One second fires no retry or timeout.
+ * The look-ahead covers hand-overs due at an event time a few ms ahead (tests stamp `updatedAt: now + 5`). The workspace's own alarm
+ * may already have claimed a task (it is then leased) and still be handing it over when we look: wait until nothing in the look-ahead
+ * is due or leased, so what we return is complete. On a fast machine the first pass is enough; on a slow one the alarm sometimes wins.
  */
 export async function flush(ws: string): Promise<SendJob[]> {
-  await workspace(ws).runDueTasks(Date.now() + 1_000);
+  const horizon = Date.now() + 1_000;
+  for (let i = 0; ; i++) {
+    await workspace(ws).runDueTasks(horizon);
+    const busy = await rows<{ n: number }>(ws, 'SELECT count(*) AS n FROM scheduled_tasks WHERE due_at <= ? OR (lease_until IS NOT NULL AND lease_until > ?)', horizon, Date.now());
+    if (busy[0]!.n === 0) break;
+    if (i >= 250) throw new Error(`flush: tasks of ${ws} did not settle`);
+    await new Promise((r) => setTimeout(r, 20)); // let the alarm's hand-over finish (bounded wait, not a timing assumption)
+  }
   return sentJobs().filter((j) => j.workspaceId === ws);
 }
 
