@@ -208,6 +208,7 @@ export function createApiSource(o: Opts): LiveSource {
       refundQueue: async () => (await op('/refund-requests', items(refundRequestDto))).items,
       decideRefund: (id, decision, note) => op(`/refund-requests/${encodeURIComponent(id)}/decision`, refundRequestDto, post({ decision, ...(note.trim() ? { note: note.trim() } : {}) })),
       linkDashboardRefund: async (id, kashierRefundId, amountMinor) => { await op(`/refund-requests/${encodeURIComponent(id)}/link-dashboard-refund`, done, { method: 'POST', body: JSON.stringify({ kashierRefundId, amountMinor }) }); },
+      abandonRefund: (id) => op(`/refund-requests/${encodeURIComponent(id)}/abandon`, z.object({ ok: z.literal(true), needsSecond: z.literal(true).optional(), already: z.literal(true).optional() }).loose(), post({})),
       markRefundPaid: async (id) => { await op(`/refund-requests/${encodeURIComponent(id)}/manual-paid`, done, { method: 'POST' }); },
       instapayQueue: async () => (await op('/instapay?state=under_review', items(operatorInstapayDto))).items,
       instapayProofLink: (id) => op(`/instapay/${encodeURIComponent(id)}/proof-link`, z.object({ url: z.string(), expiresAt: z.number().int() })),

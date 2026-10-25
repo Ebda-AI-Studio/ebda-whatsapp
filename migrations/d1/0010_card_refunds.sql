@@ -39,6 +39,9 @@ ALTER TABLE refund_requests ADD COLUMN debit_complete INTEGER NOT NULL DEFAULT 1
 -- One run at a time: an approval (or a resume of one whose debit phase was cut short) claims the request with a lease (compare-and-swap).
 ALTER TABLE refund_requests ADD COLUMN claimed_by TEXT;
 ALTER TABLE refund_requests ADD COLUMN lease_until INTEGER;
+-- Abandoning a partly debited request takes two operators: the first one asks (recorded here), a DIFFERENT one confirms.
+ALTER TABLE refund_requests ADD COLUMN abandon_requested_by TEXT;
+ALTER TABLE refund_requests ADD COLUMN abandon_requested_at INTEGER;
 
 -- The plan of an approval, recorded once BEFORE any money moves: a resume replays exactly these amounts, refs and transactions, whatever the
 -- top-ups look like by then. kind 'card' = asks the provider; 'manual' = a manual payout (no card, switch off, or beyond the card top-ups).

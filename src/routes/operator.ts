@@ -11,7 +11,7 @@ import {
 } from '../core/billing/operator';
 import { setSubscription } from '../core/billing/subscriptions';
 import { registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
-import { linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
+import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
@@ -109,6 +109,11 @@ operatorRoutes.post('/refund-requests/:id/card-refunds/:cardRefundId/mark-failed
   const r = await markCardRefundFailed(c.env, { requestId: c.req.param('id'), cardRefundId: decodeURIComponent(c.req.param('cardRefundId')), actor: actor(c) });
   if (r.ok) return c.json({ ok: true });
   if (r.reason === 'provider_unavailable') return c.json({ error: 'rate_limited', message: r.reason }, 503);
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
+});
+operatorRoutes.post('/refund-requests/:id/abandon', async (c) => {
+  const r = await abandonRefundRequest(c.env, { id: c.req.param('id'), actor: actor(c) });
+  if (r.ok) return c.json({ ok: true, ...(r.needsSecond ? { needsSecond: true } : {}), ...(r.already ? { already: true } : {}) });
   return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
 });
 operatorRoutes.post('/refund-requests/:id/manual-paid', async (c) => ((await markManualPaid(c.env, c.req.param('id'), actor(c))) ? c.json({ ok: true }) : c.json({ error: 'invalid_request', message: 'not_manual_payout' }, 409)));

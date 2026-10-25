@@ -406,3 +406,49 @@ export async function markCardRefundFailed(env: Env, a: { requestId: string; car
     .bind(now, a.actor, row.workspace_id, JSON.stringify({ amountMinor: row.amount_minor }), row.id).run();
   return { ok: true };
 }
+
+export type AbandonResult =
+  | { ok: true; needsSecond?: true; already?: true }
+  | { ok: false; reason: 'not_found' | 'not_abandonable' | 'second_approver_required' | 'money_may_have_left' | 'in_progress' };
+
+/**
+ * Abandons a refund request whose approval was cut short (`processing`, wallet debits not complete). Two operators: the first asks, a
+ * DIFFERENT one confirms. Confirming (1) takes the request's lease so no run can resume it, (2) refuses if any card refund row may have sent
+ * money (calling, succeeded, uncertain, pending, linked), (3) credits back, once, each wallet chunk that was really posted
+ * (`refund:<id>:<n>` -> an `adjustment` with the idempotent ref `refund-reversal:<id>:<n>`), (4) closes the planned and sending rows, and only
+ * then (5) flips the request to `abandoned`. Money first, flip last: a crash anywhere is finished by the same call. A repeat is a no-op.
+ */
+export async function abandonRefundRequest(env: Env, a: { id: string; actor: string }, now = Date.now()): Promise<AbandonResult> {
+  const req = await env.DB.prepare('SELECT id, workspace_id, state, debit_complete, lease_until, abandon_requested_by FROM refund_requests WHERE id = ?')
+    .bind(a.id).first<{ id: string; workspace_id: string; state: string; debit_complete: number; lease_until: number | null; abandon_requested_by: string | null }>();
+  if (!req) return { ok: false, reason: 'not_found' };
+  if (req.state === 'abandoned') return { ok: true, already: true };
+  if (req.state !== 'processing' || req.debit_complete !== 0) return { ok: false, reason: 'not_abandonable' };
+  if (req.abandon_requested_by === null) {
+    const first = await env.DB.prepare("UPDATE refund_requests SET abandon_requested_by = ?, abandon_requested_at = ? WHERE id = ? AND abandon_requested_by IS NULL AND state = 'processing' AND debit_complete = 0").bind(a.actor, now, a.id).run();
+    if (first.meta.changes) return { ok: true, needsSecond: true };
+    return abandonRefundRequest(env, a, now);
+  }
+  if (req.abandon_requested_by === a.actor) return { ok: false, reason: 'second_approver_required' };
+  const { results: rows } = await env.DB.prepare('SELECT id, state FROM card_refunds WHERE request_id = ?').bind(a.id).all<{ id: string; state: string }>();
+  if (rows.some((r) => !['planned', 'sending', 'failed'].includes(r.state))) return { ok: false, reason: 'money_may_have_left' };
+  // The lease: a live run (or a concurrent abandon) blocks it; an expired one is taken over.
+  const token = crypto.randomUUID();
+  const lease = await env.DB.prepare("UPDATE refund_requests SET claimed_by = ?, lease_until = ? WHERE id = ? AND state = 'processing' AND debit_complete = 0 AND (lease_until IS NULL OR lease_until < ?)").bind(token, now + 5 * 60_000, a.id, now).run();
+  if (!lease.meta.changes) return { ok: false, reason: 'in_progress' };
+  const { results: chunks } = await env.DB.prepare('SELECT n, amount_minor FROM refund_chunks WHERE request_id = ? ORDER BY n').bind(a.id).all<{ n: number; amount_minor: number }>();
+  const stub = stubOf(env, req.workspace_id);
+  const posted = new Set(await stub.walletRefsPresent(chunks.map((c) => `refund:${a.id}:${c.n}`)));
+  for (const c of chunks) {
+    if (!posted.has(`refund:${a.id}:${c.n}`)) continue; // never debited: nothing to give back
+    const r = await stub.postWallet({ kind: 'adjustment', netMinor: c.amount_minor, ref: `refund-reversal:${a.id}:${c.n}`, actor: a.actor, note: `refund request ${a.id} abandoned: chunk ${c.n} returned` }, now);
+    if (!r.ok && r.reason !== 'duplicate') throw new Error(`refund reversal refused: ${r.reason}`);
+  }
+  await env.DB.prepare("UPDATE card_refunds SET state = 'failed', updated_at = ? WHERE request_id = ? AND state IN ('planned', 'sending')").bind(now, a.id).run();
+  const done = await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', card_refunded_minor = 0, manual_minor = 0, claimed_by = NULL, lease_until = NULL WHERE id = ? AND state = 'processing' AND debit_complete = 0 AND claimed_by = ?").bind(a.id, token).run();
+  if (done.meta.changes) {
+    await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_abandoned', ?, ?, ?, ?)")
+      .bind(now, a.actor, req.workspace_id, JSON.stringify({ requestedBy: req.abandon_requested_by }), JSON.stringify({ reversedChunks: [...posted].length }), a.id).run();
+  }
+  return { ok: true };
+}

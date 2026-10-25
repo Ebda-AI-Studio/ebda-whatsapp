@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KashierProvider, configurePayments, type PaymentProvider } from '../src/core/billing/payments';
-import { linkDashboardRefund, matchHeldRefund, reconcileCardRefunds } from '../src/core/billing/card-refunds';
+import { abandonRefundRequest, linkDashboardRefund, matchHeldRefund, reconcileCardRefunds } from '../src/core/billing/card-refunds';
 import { createRefundRequest, decideRefund } from '../src/core/billing/refunds';
 import { handleProviderWebhook } from '../src/core/billing/topups';
 import { configureSessionCheck } from '../src/core/identity/session';
@@ -832,6 +832,97 @@ describe('round 5: an approval is run by exactly one run at a time, and a resume
     expect((await ins('cr:ok86', 'planned')).meta.changes).toBe(1);
     expect((await ins('cr:ok86', 'planned')).meta.changes).toBe(0);
     expect(await env.DB.prepare("SELECT count(*) AS n FROM card_refunds WHERE id IN ('cr:bad86', 'cr:ok86')").first()).toEqual({ n: 1 });
+  });
+});
+
+describe('abandoning a partly debited refund request (two operators, money back exactly once)', () => {
+  /** Two top-ups, a 25000 request, and a first run whose second wallet debit is refused: chunk 1 (20000) is debited, chunk 2 (5000) never. */
+  async function partlyDebited(n: number) {
+    const a = await setup(n, 15000);
+    await env.DB.prepare('UPDATE refund_requests SET amount_minor = 25000 WHERE id = ?').bind(a.id).run();
+    await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, transaction_id, paid_at) VALUES (?, ?, 10000, 0, 10000, 'EGP', 'paid', 'u', 1, ?, 6)").bind(`o-kr${n}b`, a.ws, `TX-KR${n}b`).run();
+    await fund(a.ws, 10000, `kashier:TX-KR${n}b`);
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    let posts = 0;
+    const shrinking = { ...env, WORKSPACE_DO: { idFromName: (x: string) => env.WORKSPACE_DO.idFromName(x), get: () => ({
+      walletView: (t?: number) => real.walletView(t),
+      postWallet: async (x: Parameters<typeof real.postWallet>[0], t?: number) => (x.kind === 'refund' && ++posts === 2 ? { ok: false as const, reason: 'insufficient' as never } : real.postWallet(x, t)),
+    }) } } as unknown as typeof env;
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await decideRefund(shrinking, { id: a.id, decision: 'approve', actor: OP1 })).toEqual({ ok: false, reason: 'insufficient_balance' });
+    await env.DB.prepare('UPDATE refund_requests SET lease_until = NULL, claimed_by = NULL WHERE id = ?').bind(a.id).run();
+    return a;
+  }
+  const abandon = (id: string, actor: string, e: typeof env = env) => abandonRefundRequest(e, { id, actor });
+
+  it('first operator asks, a DIFFERENT operator confirms: the wallet chunks that were really posted come back exactly once, open rows close, the request is abandoned and audited', async () => {
+    const a = await partlyDebited(90);
+    expect(await abandon(a.id, OP1)).toEqual({ ok: true, needsSecond: true });
+    expect(await abandon(a.id, OP1)).toEqual({ ok: false, reason: 'second_approver_required' });
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['topup', 10000], ['refund', -20000]]); // nothing moved yet
+    expect(await abandon(a.id, OP2)).toEqual({ ok: true });
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['topup', 10000], ['refund', -20000], ['adjustment', 20000]]); // only the posted chunk is reversed
+    expect((await ledger(a.ws)).map((r) => r.ref)).toContain(`refund-reversal:${a.id}:1`);
+    expect((await workspace(a.ws).walletView()).balanceMinor).toBe(30000);
+    expect(await req(a.id)).toEqual({ state: 'abandoned', card_refunded_minor: 0, manual_minor: 0 });
+    expect(await rowsOf(a.id)).toEqual([{ state: 'failed', source: 'api', amount_minor: 20000, kashier_refund_id: null }, { state: 'failed', source: 'api', amount_minor: 5000, kashier_refund_id: null }]); // the planned row of the never-debited chunk closes too
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_abandoned' AND workspace_id = ?").bind(a.ws).first()).toEqual({ n: 1 });
+    // replays change nothing
+    expect(await abandon(a.id, OP2)).toEqual({ ok: true, already: true });
+    expect(await abandon(a.id, OP1)).toEqual({ ok: true, already: true });
+    expect((await kinds(a.ws)).filter((k) => k[0] === 'adjustment')).toHaveLength(1);
+    expect((await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 })).ok).toBe(false); // an abandoned request cannot be run again
+  });
+
+  it('a crash after the credit but before the flip is finished by the retry without crediting twice', async () => {
+    const a = await partlyDebited(91);
+    await abandon(a.id, OP1);
+    let broke = false;
+    const flaky = { ...env, DB: new Proxy(env.DB, { get(t, p) {
+      if (p === 'prepare') return (sql: string) => { if (!broke && sql.includes("state = 'abandoned'")) { broke = true; throw new Error('db down'); } return t.prepare(sql); };
+      const v = Reflect.get(t, p) as unknown; return typeof v === 'function' ? v.bind(t) : v;
+    } }) } as typeof env;
+    await expect(abandon(a.id, OP2, flaky)).rejects.toThrow();
+    expect(await req(a.id)).toMatchObject({ state: 'processing' });
+    await env.DB.prepare('UPDATE refund_requests SET lease_until = NULL, claimed_by = NULL WHERE id = ?').bind(a.id).run();
+    expect(await abandon(a.id, OP2)).toEqual({ ok: true });
+    expect((await kinds(a.ws)).filter((k) => k[0] === 'adjustment')).toEqual([['adjustment', 20000]]);
+    expect(await req(a.id)).toMatchObject({ state: 'abandoned' });
+  });
+
+  it.each(['calling', 'succeeded', 'uncertain', 'pending'])('refused while any row is %s (that money may have left): nothing is credited or closed', async (state) => {
+    const a = await partlyDebited(state === 'calling' ? 92 : state === 'succeeded' ? 93 : state === 'uncertain' ? 94 : 95);
+    await env.DB.prepare("UPDATE card_refunds SET state = ? WHERE request_id = ?").bind(state, a.id).run();
+    await abandon(a.id, OP1);
+    expect(await abandon(a.id, OP2)).toEqual({ ok: false, reason: 'money_may_have_left' });
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['topup', 10000], ['refund', -20000]]);
+    expect(await req(a.id)).toMatchObject({ state: 'processing' });
+  });
+
+  it('refused for a live run (lease) and for a request that is not partly debited (pending, finished)', async () => {
+    const a = await partlyDebited(96);
+    await abandon(a.id, OP1);
+    await env.DB.prepare('UPDATE refund_requests SET claimed_by = ?, lease_until = ? WHERE id = ?').bind('other-run', Date.now() + 60_000, a.id).run();
+    expect(await abandon(a.id, OP2)).toEqual({ ok: false, reason: 'in_progress' });
+    const fresh = await setup(97);
+    expect(await abandon(fresh.id, OP1)).toEqual({ ok: false, reason: 'not_abandonable' });
+    const done = await setup(98);
+    refundAnswer = async () => refundOk('TX-RF98', 15000);
+    await decideRefund(env, { id: done.id, decision: 'approve', actor: OP1 });
+    expect(await abandon(done.id, OP1)).toEqual({ ok: false, reason: 'not_abandonable' });
+    expect(await abandon('nope', OP1)).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  it('over the operator API: super admin only, a revoked session is refused, the second call by another operator executes', async () => {
+    const a = await partlyDebited(99);
+    expect((await operatorCall(null, 'POST', `/refund-requests/${a.id}/abandon`, {})).status).toBe(401);
+    configureSessionCheck(async () => true);
+    expect((await operatorCall(OP1, 'POST', `/refund-requests/${a.id}/abandon`, {})).status).toBe(403);
+    configureSessionCheck(async () => false);
+    expect(await (await operatorCall(OP1, 'POST', `/refund-requests/${a.id}/abandon`, {})).json()).toMatchObject({ needsSecond: true });
+    expect((await operatorCall(OP1, 'POST', `/refund-requests/${a.id}/abandon`, {})).status).toBe(409);
+    expect((await operatorCall(OP2, 'POST', `/refund-requests/${a.id}/abandon`, {})).status).toBe(200);
+    expect(await req(a.id)).toMatchObject({ state: 'abandoned' });
   });
 });
 

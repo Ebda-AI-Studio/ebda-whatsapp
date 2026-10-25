@@ -190,6 +190,7 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
     instapayProofLink: async () => ({ url: '/api/v1/instapay-proof/sample', expiresAt: Date.now() + 120_000 }),
     async confirmInstapay(id) { return { id, reference: 'WA-H4N8T2PC', kind: 'topup', packageId: null, amountMinor: 20000, currency: 'EGP', state: 'confirmed', createdAt: BASE - D, expiresAt: BASE + D, hasProof: true, rejectReason: null, decidedAt: Date.now(), workspaceId: 'ws-sample', createdBy: 'u-merchant', proofAt: BASE - D, firstApprover: null, decidedBy: currentUserId, proofMime: 'image/png' }; },
     async rejectInstapay(id, reason) { return { id, reference: 'WA-H4N8T2PC', kind: 'topup', packageId: null, amountMinor: 20000, currency: 'EGP', state: 'rejected', createdAt: BASE - D, expiresAt: BASE + D, hasProof: true, rejectReason: reason, decidedAt: Date.now(), workspaceId: 'ws-sample', createdBy: 'u-merchant', proofAt: BASE - D, firstApprover: null, decidedBy: currentUserId, proofMime: 'image/png' }; },
+    async abandonRefund() { return { needsSecond: true as const }; },
     async markRefundPaid(id) { Object.assign(find(refunds, id), { state: 'paid' }); },
     adjustments: async () => structuredClone(adjustments),
     async createAdjustment(workspaceId, amountMinor, reason) {

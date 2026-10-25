@@ -1376,6 +1376,11 @@ export class WorkspaceDO extends DurableObject<Env> {
     return r;
   }
 
+  /** Which of these wallet refs are on the ledger (to reverse only what was really posted). */
+  async walletRefsPresent(refs: string[]): Promise<string[]> {
+    return refs.filter((ref) => this.sql.exec('SELECT 1 FROM wallet_ledger WHERE ref = ?', ref).toArray().length > 0);
+  }
+
   async getEntitlement() {
     return readEntitlement(this.sql);
   }

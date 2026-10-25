@@ -370,6 +370,12 @@ function QueuesPanel({ t, lang, api, source, run, now, fail }: PanelProps) {
                     </div>
                   )
                 )}
+                {r.state === 'processing' && (
+                  <div className="campaign-actions">
+                    <button type="button" className="btn quiet" onClick={() => void run(async () => { const out = await api.abandonRefund(r.id); if (out.needsSecond) setNotes((n) => ({ ...n, [r.id]: t.opAbandonNeedsSecond })); refunds.reload(); })}>{t.opAbandon}</button>
+                    {notes[r.id] === t.opAbandonNeedsSecond && <span className="campaign-reason">{t.opAbandonNeedsSecond}</span>}
+                  </div>
+                )}
                 {r.state === 'manual_payout' && (
                   <div className="op-actions">
                     <label className="field"><span>{t.opLinkLabel}</span><input dir="ltr" maxLength={64} value={links[r.id] ?? ''} onChange={(e) => setLinks({ ...links, [r.id]: e.target.value })} /></label>

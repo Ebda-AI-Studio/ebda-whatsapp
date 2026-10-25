@@ -152,7 +152,7 @@ const ar = {
   wRefundTitle: 'طلب استرداد', wRefundRules: 'تقدر تطلب استرداد بعد ما الاشتراك يخلص أو يتلغي وخلال ١٢ شهر، والحد الأدنى ٥٠ جنيه، ومش أكتر من رصيدك المتاح.',
   wRefundAmount: 'المبلغ بالجنيه', wRefundNote: 'ملاحظة (اختياري)', wRefundSend: 'ابعت الطلب', wRefundSent: 'الطلب اتبعت. هنراجعه ونرد عليك.', wRefundEmpty: 'لسه ما طلبتش استرداد.',
   wRefundPast: 'طلباتك', wRefundBelowMin: 'أقل مبلغ للاسترداد ٥٠ جنيه.',
-  refundStates: copy<RefundState>({ pending: 'بيتراجع', rejected: 'اترفض', processing: 'بيتنفّذ', paid: 'اترد', manual_payout: 'هيتحوّل يدوي', failed: 'فشل' }),
+  refundStates: copy<RefundState>({ pending: 'بيتراجع', rejected: 'اترفض', processing: 'بيتنفّذ', paid: 'اترد', manual_payout: 'هيتحوّل يدوي', failed: 'فشل', abandoned: 'اتلغى' }),
   refundReasons: { plan_still_active: 'الاشتراك لسه شغال. تقدر تطلب الاسترداد بعد ما يخلص أو يتلغي.', period_not_ended: 'فترة الاشتراك لسه ما خلصتش.', window_passed: 'عدّت مدة الاسترداد (١٢ شهر).', below_minimum: 'أقل مبلغ للاسترداد ٥٠ جنيه.', exceeds_refundable: 'المبلغ أكبر من رصيدك المتاح للاسترداد.' } as Record<string, string>,
   wPackagesTitle: 'الباقات', wPackagesIntro: 'اشترك في باقة بالكارت. الباقة بتشتغل شهر، وقبل ما تخلص بأسبوع هنفكّرك علشان تجدّدها.',
   wPackageCredits: (n: string) => `${n} رصيد ذكاء اصطناعي في الشهر`, wPackageBuy: 'اشترك بالكارت', wPackageWaiting: 'بنستنى تأكيد الدفع. الباقة هتتفعّل لوحدها أول ما يوصلنا.',
@@ -196,6 +196,7 @@ const ar = {
   
   sharedTitle: 'الرقم المشترك', sharedIntro: 'ابعت واستقبل رسايل العملاء من رقم المنصة المشترك من غير ما توصّل رقمك.', sharedNameLabel: 'اسمك اللي العميل هيشوفه', sharedJoin: 'انضم للرقم المشترك', sharedLeave: 'سيب الرقم المشترك',
   sharedMember: (n: string) => `انت على الرقم المشترك باسم ${n}`, sharedPackageRequired: 'باقتك الحالية مش بتشمل الرقم المشترك. فعّل باقة بتشمله وجرّب تاني.', sharedNameTaken: 'الاسم ده شبه اسم متجر تاني على الرقم. اختار اسم مختلف.', sharedError: 'حصلت مشكلة، جرّب تاني.',
+  opAbandon: 'الغي الطلب ورجّع الرصيد', opAbandonNeedsSecond: 'اتسجّل طلبك. لازم مشرف تاني يأكّد.', opAbandonRefused: 'مش ممكن: ممكن تكون فلوس خرجت. راجع الاسترداد الأول.',
   opManualPaid: 'اتحوّل يدوي', opLinkLabel: 'رقم الاسترداد من لوحة كاشير', opLinkButton: 'اتردّت من لوحة كاشير', opRefundLine: (c: string, m: string) => `اترد على الكارت ${c} • يدوي ${m}`, opRequestedBy: (a: string) => `طلبه ${a}`,
   opAdjList: 'التسويات', opAdjEmpty: 'مفيش تسويات.', adjStates: { pending: 'مستنية موافقة', approved: 'اتنفّذت', rejected: 'اترفضت' } as Record<string, string>,
   opOwnRequest: 'ده طلبك، ولازم مشرف تاني يوافق عليه أو يرفضه.', opSecondApprover: 'لازم مشرف تاني يوافق على الطلب ده.',
@@ -337,7 +338,7 @@ const en: typeof ar = {
   wRefundTitle: 'Request a refund', wRefundRules: 'You can ask for a refund after your plan ends or is cancelled, within 12 months, for at least 50 EGP and no more than your available balance.',
   wRefundAmount: 'Amount in EGP', wRefundNote: 'Note (optional)', wRefundSend: 'Send request', wRefundSent: 'Request sent. We will review it and get back to you.', wRefundEmpty: 'You have not requested a refund yet.',
   wRefundPast: 'Your requests', wRefundBelowMin: 'The minimum refund is 50 EGP.',
-  refundStates: copy<RefundState>({ pending: 'Under review', rejected: 'Rejected', processing: 'Being processed', paid: 'Refunded', manual_payout: 'Paid out by hand', failed: 'Failed' }),
+  refundStates: copy<RefundState>({ pending: 'Under review', rejected: 'Rejected', processing: 'Being processed', paid: 'Refunded', manual_payout: 'Paid out by hand', failed: 'Failed', abandoned: 'Abandoned' }),
   refundReasons: { plan_still_active: 'Your plan is still active. You can ask for a refund after it ends or is cancelled.', period_not_ended: 'The plan period has not ended yet.', window_passed: 'The 12-month refund window has passed.', below_minimum: 'The minimum refund is 50 EGP.', exceeds_refundable: 'The amount is more than your refundable balance.' } as Record<string, string>,
   wPackagesTitle: 'Packages', wPackagesIntro: 'Subscribe to a package by card. It runs for one month, and we remind you a week before it ends so you can renew.',
   wPackageCredits: (n) => `${n} AI credits a month`, wPackageBuy: 'Subscribe by card', wPackageWaiting: 'Waiting for payment confirmation. The package turns on by itself once we receive it.',
@@ -381,6 +382,7 @@ const en: typeof ar = {
   
   sharedTitle: 'Shared number', sharedIntro: 'Send and receive customer messages through the shared platform number without connecting your own.', sharedNameLabel: 'The name customers see', sharedJoin: 'Join the shared number', sharedLeave: 'Leave the shared number',
   sharedMember: (n: string) => `You are on the shared number as ${n}`, sharedPackageRequired: 'Your current package does not include the shared number. Activate a package that does, then try again.', sharedNameTaken: 'This name looks like another store on the number. Choose a different one.', sharedError: 'Something went wrong, try again.',
+  opAbandon: 'Abandon and return the balance', opAbandonNeedsSecond: 'Your request is recorded. A second operator must confirm.', opAbandonRefused: 'Not possible: money may have left. Reconcile the refund first.',
   opManualPaid: 'Paid out by hand', opLinkLabel: 'Refund id from the Kashier dashboard', opLinkButton: 'Refunded in the Kashier dashboard', opRefundLine: (c, m) => `Refunded to card ${c} • by hand ${m}`, opRequestedBy: (a) => `Requested by ${a}`,
   opAdjList: 'Adjustments', opAdjEmpty: 'No adjustments.', adjStates: { pending: 'Waiting for approval', approved: 'Applied', rejected: 'Rejected' } as Record<string, string>,
   opOwnRequest: 'This is your request; another super admin has to approve or reject it.', opSecondApprover: 'Another super admin has to approve this request.',
