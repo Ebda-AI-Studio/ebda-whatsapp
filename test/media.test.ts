@@ -15,7 +15,7 @@ const mediaReplies = (id: string, mime = 'image/jpeg') => (c: { url: string }) =
     : { status: 200, body: JPEG, headers: { 'content-type': mime } };
 
 async function inboundImage(store: string, pn: string, wamid: string, mediaId: string, extra: Record<string, unknown> = {}) {
-  await seedNumber(pn, store).catch(() => {});
+  await seedNumber(pn, store);
   const ts = Math.floor(Date.now() / 1000);
   expect((await postWebhook(SELF, inboundPayload(pn, [{ id: wamid, type: 'image', ts, mediaId, ...extra }]))).status).toBe(200);
   return (await rows<{ id: number; conversation_id: number }>(store, 'SELECT id, conversation_id FROM messages WHERE wamid = ?', wamid))[0]!;

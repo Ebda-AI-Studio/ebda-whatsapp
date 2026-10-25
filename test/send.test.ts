@@ -15,7 +15,7 @@ function job(ws: string, key: string): SendJob {
 }
 
 async function runBatch(jobs: SendJob[], attempts = 1) {
-  for (const j of jobs) if (j.workspaceId) await seedNumber(j.phoneNumberId, j.workspaceId).catch(() => {}); // already seeded on redelivery
+  for (const j of jobs) if (j.workspaceId) await seedNumber(j.phoneNumberId, j.workspaceId); // already seeded on redelivery
   const batch = createMessageBatch<SendJob>('ebda-wa-send', jobs.map((body, i) => ({ id: `m${i}`, timestamp: new Date(), attempts, body })));
   const ctx = createExecutionContext();
   await worker.queue(batch, env, ctx);

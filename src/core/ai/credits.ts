@@ -100,11 +100,32 @@ export function upgradeGrant(sql: Sql, a: { periodStart: number; toPackage: stri
   return grantCredits(sql, { periodStart: a.periodStart, packageId: a.toPackage, credits: diff, now: a.now, ...(a.actor ? { actor: a.actor } : {}) });
 }
 
+/** Credits of this period's grant already expired (period end, a refund, a partial refund). Each such row is tagged `parent_ref = period:<start>`. */
+const expiredInPeriod = (sql: Sql, periodStart: number): number =>
+  sql.exec<{ e: number }>("SELECT coalesce(-sum(amount), 0) AS e FROM credit_ledger WHERE kind = 'expire' AND parent_ref = ?", `period:${periodStart}`).one().e;
+
+/**
+ * The part of this period's grant nobody has used and nothing has expired yet. Consumption draws on the grant first; PURCHASED credits are
+ * never part of it (they are neither granted in the period nor counted here), and the result is capped by what is really available.
+ */
+function unusedGrant(sql: Sql, periodStart: number, now: number): number {
+  const used = sql.exec<{ u: number }>("SELECT coalesce(-sum(amount), 0) AS u FROM credit_ledger WHERE kind = 'ai_charge' AND at >= ?", periodStart).one().u;
+  return Math.min(Math.max(0, grantedInPeriod(sql, periodStart) - used - expiredInPeriod(sql, periodStart)), creditsAvailable(sql, now));
+}
+
 /** Period end: the granted credits nobody used expire (consumption draws on the grant first); purchased credits roll over. Returns how many expired. */
-export function expireGrant(sql: Sql, a: { periodStart: number; now: number }): number {
-  const used = sql.exec<{ u: number }>("SELECT coalesce(-sum(amount), 0) AS u FROM credit_ledger WHERE kind = 'ai_charge' AND at >= ?", a.periodStart).one().u;
-  const unused = Math.min(Math.max(0, grantedInPeriod(sql, a.periodStart) - used), creditsAvailable(sql, a.now));
+export function expireGrant(sql: Sql, a: { periodStart: number; now: number; ref?: string }): number {
+  const unused = unusedGrant(sql, a.periodStart, a.now);
   if (unused <= 0) return 0;
-  const r = postCredit(sql, { kind: 'expire', amount: -unused, ref: `expire:${a.periodStart}`, now: a.now });
+  const r = postCredit(sql, { kind: 'expire', amount: -unused, ref: a.ref ?? `expire:${a.periodStart}`, parentRef: `period:${a.periodStart}`, now: a.now });
   return r.ok ? unused : 0;
+}
+
+/** A partial refund: `num/den` of the period's UNUSED granted credits expire (a ledger row under `ref`, so a retry is a no-op; used credits stay used). */
+export function expireGrantFraction(sql: Sql, a: { periodStart: number; num: number; den: number; now: number; ref: string }): number {
+  if (!(a.num > 0 && a.den > 0)) return 0;
+  const amount = Math.floor((unusedGrant(sql, a.periodStart, a.now) * Math.min(a.num, a.den)) / a.den);
+  if (amount <= 0) return 0;
+  const r = postCredit(sql, { kind: 'expire', amount: -amount, ref: a.ref, parentRef: `period:${a.periodStart}`, now: a.now });
+  return r.ok ? amount : 0;
 }

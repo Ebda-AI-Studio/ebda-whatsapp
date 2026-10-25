@@ -16,7 +16,13 @@ export default defineConfig({
             remoteBindings: false,
             wrangler: { configPath: './wrangler.jsonc' },
             miniflare: {
-              bindings: { TOPUPS_ENABLED: 'true', META_APP_SECRET: 'test-secret', META_VERIFY_TOKEN: 'VT', META_SYSTEM_TOKEN: 'test-token', EMBEDDED_SIGNUP_ENABLED: '1', META_APP_ID: 'app-1', EMBEDDED_SIGNUP_CONFIG_ID: 'cfg-1', TOKEN_ENC_KEY: testKey(), TEST_MIGRATIONS: migrations, BENCH: process.env.BENCH ?? '0', BENCH_BUDGET_MS: process.env.BENCH_BUDGET_MS ?? '150' },
+              // The production ACCOUNTS binding targets the ebda-accounts Worker. Tests get a stand-in whose isRevoked always fails, which
+              // the code treats exactly like an unreachable accounts service (fail closed); tests that need a working check inject their own.
+              workers: [{
+                name: 'ebda-accounts', modules: true, compatibilityDate: '2026-10-24',
+                script: "import { WorkerEntrypoint } from 'cloudflare:workers'; export class Accounts extends WorkerEntrypoint { async isRevoked() { throw new Error('accounts service is not available in tests'); } } export default { fetch() { return new Response(null, { status: 404 }); } };",
+              }],
+              bindings: { TOPUPS_ENABLED: 'true', PACKAGE_CHECKOUT_ENABLED: 'true', META_APP_SECRET: 'test-secret', META_VERIFY_TOKEN: 'VT', META_SYSTEM_TOKEN: 'test-token', EMBEDDED_SIGNUP_ENABLED: '1', META_APP_ID: 'app-1', EMBEDDED_SIGNUP_CONFIG_ID: 'cfg-1', TOKEN_ENC_KEY: testKey(), TEST_MIGRATIONS: migrations, BENCH: process.env.BENCH ?? '0', BENCH_BUDGET_MS: process.env.BENCH_BUDGET_MS ?? '150' },
             },
           }),
         ],
@@ -25,7 +31,7 @@ export default defineConfig({
         test: { name: 'workers', testTimeout: 20_000, setupFiles: ['./test/setup.ts'], include: ['test/**/*.test.ts'], exclude: ['test/guards.test.ts', 'test/assets-config.test.ts', 'test/verify-prod.test.ts', 'test/white-label.test.ts'] },
       },
       { test: { name: 'node', environment: 'node', include: ['test/guards.test.ts', 'test/assets-config.test.ts', 'test/verify-prod.test.ts', 'test/white-label.test.ts'] } },
-      { plugins: [react()], resolve: { alias: { '@brand': new URL('./web/brands/ebda/brand.ts', import.meta.url).pathname, '@brand-tokens': new URL('./web/brands/ebda/tokens.css', import.meta.url).pathname } }, test: { name: 'web', environment: 'jsdom', include: ['web/src/**/*.test.{ts,tsx}'] } },
+      { plugins: [react()], resolve: { alias: { '@brand': new URL('./web/brands/ebda/brand.ts', import.meta.url).pathname, '@brand-tokens': new URL('./web/brands/ebda/tokens.css', import.meta.url).pathname } }, test: { name: 'web', environment: 'jsdom', setupFiles: ['./web/src/test-setup.ts'], include: ['web/src/**/*.test.{ts,tsx}'] } },
     ],
   },
 });

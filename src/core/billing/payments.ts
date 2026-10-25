@@ -11,9 +11,10 @@
  * refund as unsupported until they are confirmed with real credentials (callers then keep the item for a person: see Ruling in the ledger).
  */
 import type { Env } from '../../env';
+import { KashierUnconfirmedError, classifyKashierTransaction, kashierTransactionDetailsPath } from './kashier-confirm';
 
 export type ProviderEvent = 'pay' | 'refund' | 'other';
-export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string };
+export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string; /** A chargeback (Kashier's `reversal` operation). Only ever set by `confirm`, from Kashier's own record. */ chargeback?: true; /** `kashier:<transactionId>:<status>`: built from SIGNED values only, never from the unsigned `event` label. */ eventKey?: string };
 export type Inquiry = { status: 'SUCCESS' | 'FAILURE' | 'PENDING'; transactionId: string | null; amountMinor: number | null; currency: string | null };
 export type RefundResult = { ok: true; refundId: string } | { ok: false; reason: 'unsupported' | 'rejected' | 'unavailable' };
 
@@ -22,15 +23,24 @@ export interface PaymentProvider {
   createSession(a: { orderId: string; totalMinor: number; currency: string; returnUrl?: string }): Promise<{ checkoutUrl: string }>;
   /** Null when the signature or the structure is not valid. Never throws on hostile input. */
   verifyWebhook(rawBody: string, signatureHeader: string | null): Promise<ParsedWebhook | null>;
+  /**
+   * The webhook's `event` label is unsigned, so it is never applied. This asks the provider for ITS record of the signed transaction and
+   * returns the event with the kind and status the provider reports. Throws when the provider cannot be asked or its answer does not
+   * match the signed body (the caller answers 5xx and nothing is applied).
+   */
+  confirm(ev: ParsedWebhook): Promise<ParsedWebhook>;
+  /** False when webhooks for this provider could not be confirmed (no secret key): checkout must not open, or customers would pay while every webhook is refused. */
+  confirmationReady(): boolean;
   inquire(orderId: string): Promise<Inquiry | 'unsupported' | 'unavailable'>;
   refund(a: { transactionId: string; amountMinor: number }): Promise<RefundResult>;
 }
 
-let factory: (env: Env) => PaymentProvider | null = (env) => (env.KASHIER_MERCHANT_ID && env.KASHIER_API_KEY ? new KashierProvider(env.KASHIER_MERCHANT_ID, env.KASHIER_API_KEY, env.KASHIER_CHECKOUT_URL) : null);
+let factory: (env: Env) => PaymentProvider | null = (env) => (env.KASHIER_MERCHANT_ID && env.KASHIER_API_KEY ? new KashierProvider(env.KASHIER_MERCHANT_ID, env.KASHIER_API_KEY, env.KASHIER_CHECKOUT_URL, { ...(env.KASHIER_SECRET_KEY ? { secretKey: env.KASHIER_SECRET_KEY } : {}), ...(env.KASHIER_API_URL ? { apiBase: env.KASHIER_API_URL } : {}) }) : null);
 /** Tests install a fake here. */
 export const configurePayments = (f: (env: Env) => PaymentProvider | null): void => { factory = f; };
 export const paymentProvider = (env: Env): PaymentProvider | null => factory(env);
 export const topupsEnabled = (env: Env): boolean => env.TOPUPS_ENABLED === 'true';
+export const packagesEnabled = (env: Env): boolean => env.PACKAGE_CHECKOUT_ENABLED === 'true';
 
 const enc = new TextEncoder();
 async function hmacHex(key: string, text: string): Promise<string> {
@@ -56,7 +66,35 @@ const MUST_BE_SIGNED = ['amount', 'currency', 'merchantOrderId', 'status', 'tran
 
 export class KashierProvider implements PaymentProvider {
   readonly name = 'kashier';
-  constructor(private readonly merchantId: string, private readonly apiKey: string, private readonly checkoutOrigin = 'https://checkout.kashier.io') {}
+  private readonly secretKey: string | undefined;
+  private readonly apiBase: string;
+  private readonly fetchImpl: (url: string, init: RequestInit) => Promise<Response>;
+  constructor(private readonly merchantId: string, private readonly apiKey: string, private readonly checkoutOrigin = 'https://checkout.kashier.io', opts: { secretKey?: string; apiBase?: string; fetch?: (url: string, init: RequestInit) => Promise<Response> } = {}) {
+    this.secretKey = opts.secretKey;
+    this.apiBase = (opts.apiBase ?? 'https://api.kashier.io').replace(/\/$/, '');
+    this.fetchImpl = opts.fetch ?? ((url, init) => fetch(url, init));
+  }
+
+  confirmationReady(): boolean {
+    return !!this.secretKey;
+  }
+
+  async confirm(ev: ParsedWebhook): Promise<ParsedWebhook> {
+    if (!this.secretKey) throw new KashierUnconfirmedError('the Kashier secret key is not configured');
+    if (!/^https:\/\//i.test(this.apiBase)) throw new KashierUnconfirmedError('the Kashier API origin is not https');
+    let answer: unknown;
+    try {
+      const res = await this.fetchImpl(`${this.apiBase}${kashierTransactionDetailsPath(ev.transactionId)}`, { method: 'GET', headers: { Authorization: this.secretKey, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new KashierUnconfirmedError(`details answered ${res.status}`); // a 404 is "not there YET", retried like an outage
+      answer = await res.json();
+    } catch (err) {
+      throw err instanceof KashierUnconfirmedError ? err : new KashierUnconfirmedError('the Kashier details API could not be reached');
+    }
+    const txn = classifyKashierTransaction(answer, { transactionId: ev.transactionId, merchantOrderId: ev.orderId });
+    if (txn.status !== ev.status) throw new KashierUnconfirmedError('Kashier reports a different status than the signed body');
+    const { chargeback: _drop, ...rest } = ev;
+    return { ...rest, event: txn.kind === 'refund' ? 'refund' : txn.kind === 'payment' ? 'pay' : 'other', ...(txn.operation === 'reversal' ? { chargeback: true as const } : {}) };
+  }
 
   async createSession(a: { orderId: string; totalMinor: number; currency: string; returnUrl?: string }): Promise<{ checkoutUrl: string }> {
     const amount = minorToEgp(a.totalMinor);
@@ -81,7 +119,7 @@ export class KashierProvider implements PaymentProvider {
     const amountMinor = egpToMinor(data.amount);
     if (!status || amountMinor === null || typeof data.merchantOrderId !== 'string' || typeof data.transactionId !== 'string' || typeof data.currency !== 'string') return null;
     const ev = root.event === 'pay' ? 'pay' : root.event === 'refund' || root.event === 'partial_refund' || root.event === 'reversal' ? 'refund' : 'other';
-    return { event: ev, status, orderId: data.merchantOrderId, transactionId: data.transactionId, amountMinor, currency: data.currency };
+    return { event: ev, status, orderId: data.merchantOrderId, transactionId: data.transactionId, amountMinor, currency: data.currency, eventKey: `kashier:${data.transactionId}:${data.status}` };
   }
 
   async inquire(): Promise<'unsupported'> {

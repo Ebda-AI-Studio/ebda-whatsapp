@@ -61,7 +61,7 @@ walletRoutes.post('/stores/:storeId/wallet/topups', async (c) => {
   if (r.ok) return c.json({ orderId: r.orderId, state: 'pending', amountMinor: r.amountMinor, feeMinor: r.feeMinor, totalMinor: r.totalMinor, checkoutUrl: r.checkoutUrl }, 201);
   if (r.reason === 'invalid_amount') return apiError(c, 400, 'invalid_request', r.reason);
   if (r.reason === 'session_revoked') return apiError(c, 401, 'unauthorized');
-  return apiError(c, 503, 'rate_limited', r.reason); // disabled / unavailable: nothing was written
+  return apiError(c, 503, r.reason === 'unavailable' ? 'unavailable' : 'rate_limited', r.reason); // disabled / unavailable: nothing was written
 });
 
 /** Read only: where the browser lands after paying. It never credits anything; the webhook does. */

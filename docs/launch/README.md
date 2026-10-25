@@ -57,13 +57,14 @@ Generate random keys locally: `node -e "console.log(crypto.randomBytes(32).toStr
 | `AGENT_SECRETS_KEY` | random 32 bytes, base64 | AI agent (encrypts merchants' own model keys) |
 | `SUITE_BUYER_KEY_SECRET` | **the same value as Ebda Store's** (set on both Workers in the same session) | store link (buyer keys) |
 | `PROOF_URL_SECRET` | random 32 bytes, base64 | store link (signed proof links) |
-| `KASHIER_API_KEY` | Kashier dashboard | top-ups and their webhook HMAC |
+| `KASHIER_API_KEY` | Kashier dashboard (Payment API Key) | top-ups and package checkout; webhook HMAC |
+| `KASHIER_SECRET_KEY` | Kashier dashboard (the **Secret key**, a different key) | confirms every webhook with Kashier's transaction-details API before money moves; without it webhooks answer 503 |
 | `SENTRY_DSN` | Sentry project | error reports |
 
-Plain vars, not secrets (set in `wrangler.jsonc` or the dashboard): `META_APP_ID`, `EMBEDDED_SIGNUP_CONFIG_ID`, `KASHIER_MERCHANT_ID`, `KASHIER_FEE_BPS`, `KASHIER_FEE_FIXED_MINOR`, `ADJUSTMENT_APPROVAL_MINOR`, `ADJUSTMENT_DAILY_CAP`, and the switches in §8. `IDENTITY_OIDC_CONFIG` is only for white-label tenants on their own identity provider (`deploy/white-label`).
+Plain vars, not secrets (set in `wrangler.jsonc` or the dashboard): `META_APP_ID`, `EMBEDDED_SIGNUP_CONFIG_ID`, `KASHIER_MERCHANT_ID`, `KASHIER_API_URL` (default `https://api.kashier.io`), `KASHIER_FEE_BPS`, `KASHIER_FEE_FIXED_MINOR`, `ADJUSTMENT_APPROVAL_MINOR`, `ADJUSTMENT_DAILY_CAP`, and the switches in §8. `IDENTITY_OIDC_CONFIG` is only for white-label tenants on their own identity provider (`deploy/white-label`).
 
 ## 8. Switches (Claude, one at a time, each verified before the next)
-`EMBEDDED_SIGNUP_ENABLED` → `SHARED_NUMBER_ENABLED` → `TOPUPS_ENABLED`. Each stays off until the Meta/Kashier step it depends on is done.
+`EMBEDDED_SIGNUP_ENABLED` → `SHARED_NUMBER_ENABLED` → `TOPUPS_ENABLED` → `PACKAGE_CHECKOUT_ENABLED`. Each stays off until the Meta/Kashier step it depends on is done. `PACKAGE_CHECKOUT_ENABLED` (self-serve package purchase) needs the same Kashier steps as top-ups: set `KASHIER_MERCHANT_ID` + `KASHIER_API_KEY` + `KASHIER_SECRET_KEY`, point the Kashier webhook at `/kashier/webhook` (one webhook serves both kinds), bind `ACCOUNTS`, apply D1 migration `0008_packages.sql` first (it seeds the `store-included` package and marks existing subscription rows operator-owned), and insert the sellable `packages` rows (`price_minor`, `ai_credits`, `active = 1`). Verify with a real small payment before announcing.
 
 ## 9. CI back on (Ahmad decides, Claude sets up)
 CI is paused by Ahmad's instruction. To resume: bring the Umbra runner for this repo online, set repo variable `EBDA_RUNS_ON` to `["self-hosted","umbra-ebda"]` (JSON), and confirm the remote Actions cache stays off on the self-hosted runner. Branch protection: require `ci` + `gitleaks` on `main`.
@@ -84,6 +85,7 @@ Each merge: full suite green twice locally, CI green, then deploy.
 META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://wa.ebda.app --expect "$(git rev-parse --short origin/main)" --brand ebda
 ```
 It checks the running commit, the security headers on the API and the page, Meta's webhook handshake, that unsigned/badly-signed webhooks are refused, and that a correctly signed empty webhook is accepted. Anything it could not check prints as SKIP and must be reported as not verified. Then, by hand:
+0. **Live identity round trip** (the first deploy only proves it): Ahmad signs in at `https://wa.ebda.app`; the inbox loads his store, which proves a real accounts.ebda.app token (ES256, `iss` https://accounts.ebda.app, `aud` whatsapp, `stores[]`) passes our verifier. A 401/403 loop here = stop and report, do not continue.
 1. Send a WhatsApp message to the connected number from the owner's phone; it appears in the inbox in real time; reply from the inbox; the owner receives it.
 2. Open the inbox in Arabic and English, on a phone and a desktop.
 3. For the shared number / top-ups: a top-up of the minimum amount with a real card, then the statement shows it (Ahmad approves the payment first).

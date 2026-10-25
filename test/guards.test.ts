@@ -41,10 +41,10 @@ const LEGAL_PINS: Record<string, string> = {
   'docs/legal/README.md': '3e2ac6be2d00104de0be887baab908784ba2468e0e97761579646c2640b8cf31',
   'docs/legal/ar/whatsapp-dpa.md': '43dfa98c3dc681bc047ff7f04738279a326d6e71d80d9c1afbb75bb2c0975e51',
   'docs/legal/ar/whatsapp-privacy.md': '93cc40cde3913d7f0c31bcbe5c93a1b63e5676250528b282b8ff45a9f4e59cc8',
-  'docs/legal/ar/whatsapp-terms.md': 'bea85fd51b4c49636cab89503a631c66685c9d0a7ba79264132a5fb8b4942b44',
+  'docs/legal/ar/whatsapp-terms.md': '83ff0b9a36f3fbda22adec3f1be5813190e855a8ce780587130c4ff93b0efbca',
   'docs/legal/en/whatsapp-dpa.md': '8cfe9328d4478c1150c2c445835b0761c4a7f90849301d69dbe4e777b7f4a65a',
   'docs/legal/en/whatsapp-privacy.md': '139b5484f759014a0245ebbbf90b3a504aebf324717f98bbd3426397ade7008a',
-  'docs/legal/en/whatsapp-terms.md': '0dbca59f8db45f4ff7ea573b47c9038ac6a71114ec2f6cb304ce504c30adf9fb',
+  'docs/legal/en/whatsapp-terms.md': 'c4d72c46ca6a74b57eabf2c5ec86e89edf08b94ac06ac07c4287da3eeea064d8',
 };
 it('legal pages are pinned: a change needs a new pin AND a message to the Store session, which publishes them', async () => {
   const { readFileSync, readdirSync } = await import('node:fs');

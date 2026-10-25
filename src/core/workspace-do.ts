@@ -34,7 +34,7 @@ import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, p
 import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
 import type { AgentSettingsDto } from './api/contract';
-import { creditBalance, creditsAvailable, expireGrant, grantCredits, postCredit, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
+import { creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, postCredit, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
@@ -57,6 +57,7 @@ import { countryToDigits } from './billing/country';
 import type { WalletPosted } from './billing/engine';
 import { PRICING_MAX_AGE_MS, applyPricing, copyCursor, fundingOf, pullPricing } from './billing/pricing';
 import { parentHoldRef } from './campaigns/campaigns';
+import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { applyEntitlement, expireSubscription, marketingBlocked, readEntitlement, type EntitlementEvent } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
@@ -1255,8 +1256,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     return this.ctx.storage.transactionSync(() => upgradeGrant(this.sql, { ...a, now }));
   }
   /** Period end: unused granted credits expire; returns how many. */
-  async expireAiCredits(periodStart: number, now = Date.now()): Promise<{ expired: number }> {
-    return { expired: this.ctx.storage.transactionSync(() => expireGrant(this.sql, { periodStart, now })) };
+  async expireAiCredits(periodStart: number, now = Date.now(), ref?: string): Promise<{ expired: number }> {
+    return { expired: this.ctx.storage.transactionSync(() => expireGrant(this.sql, { periodStart, now, ...(ref ? { ref } : {}) })) };
+  }
+  /** A partial refund of a package: `num/den` of the period's unused granted credits expire under `ref` (idempotent). */
+  async expireAiCreditsFraction(a: { periodStart: number; num: number; den: number; ref: string }, now = Date.now()): Promise<{ expired: number }> {
+    return { expired: this.ctx.storage.transactionSync(() => expireGrantFraction(this.sql, { ...a, now })) };
   }
   /** A purchase, refund or operator adjustment: the ref makes it idempotent; an operator adjustment needs an actor and a reason. */
   async postAiCredits(a: { kind: Extract<CreditKind, 'purchase' | 'refund' | 'adjustment'>; amount: number; ref: string; actor?: string; note?: string }, now = Date.now()): Promise<Posted | { ok: false; reason: 'actor_and_note_required' }> {
@@ -1799,8 +1804,20 @@ export class WorkspaceDO extends DurableObject<Env> {
         const again = await runTrueup(this.env, this.sql, this.billing, (f) => this.ctx.storage.transactionSync(f), this.workspaceId, month, now);
         return again ?? undefined;
       }
-      case 'subscription_expire':
+      case 'subscription_expire': {
+        // A paid early renewal queued behind this period starts now instead of the plan expiring (the control plane owns the queue).
+        try {
+          await rollRenewals(this.env, this.workspaceId, now);
+          // ALWAYS load the control plane's current subscription and apply it when it is newer: a roll that committed in an earlier attempt
+          // (whose push then failed) has nothing left to roll now, but the paid period it started must still reach this workspace.
+          const ev = await currentEvent(this.env, this.workspaceId);
+          if (ev) await this.applyEntitlement(ev, now);
+        } catch (err) {
+          console.error(JSON.stringify({ alert: 'queued_period_roll_failed', workspace: this.workspaceId, error: errClass(err) }));
+          return now + 60_000; // never expire a renewal that was paid for because D1 blinked
+        }
         return this.ctx.storage.transactionSync(() => expireSubscription(this.sql, now)) ?? undefined;
+      }
       default:
         return undefined;
     }

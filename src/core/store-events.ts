@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { parseStoreEvent } from './api/store-events';
+import { applyStorePlan } from './billing/store-plan';
 import { errClass } from './observability';
 import { senderNumberFor } from './shared/shared-number';
 
@@ -29,6 +30,8 @@ export async function consumeStoreEvents(batch: MessageBatch<unknown>, env: Env)
         msg.retry({ delaySeconds: retryDelay(msg.attempts) });
         continue;
       }
+      // The package lives in D1: a plan change is applied here, before the workspace records the event, so a failure is retried with it.
+      if (event.type === 'store.plan_changed') await applyStorePlan(env, event);
       // Own number, else the shared platform number for a member (transactional events carry their order ref there).
       const number = await senderNumberFor(env, event.storeId);
       const result = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(event.storeId)).applyStoreEvent(event, { phoneNumberId: number?.phoneNumberId ?? null, shared: number?.shared ?? false });

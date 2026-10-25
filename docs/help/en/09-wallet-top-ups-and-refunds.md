@@ -14,6 +14,14 @@ The wallet is a prepaid balance in Egyptian pounds. It pays Meta's cost on the *
 
 *Note:* if the wallet is in debt, your first top-up pays the debt and the rest is added to the balance.
 
+## Buy a package
+1. Open **Wallet** and find the **Packages** card (the owner sees it; it appears once package purchase is switched on for your account).
+2. Pick a package. The price and the monthly AI credits are shown; the price is set by us and is exactly what the card is charged (no extra card fee, unlike a top-up).
+3. Pay on the Kashier page. The package turns on when Kashier confirms the payment, not when you return to the page. Until then you see "waiting for confirmation".
+4. A package runs for **one month** and does **not renew by itself**. A week before it ends, the inbox shows a reminder with a link to the wallet; buy again to renew. If you renew early, the new month starts the day the current one ends (you do not lose days), and the AI credits of a month are valid for that month only; the new month brings a fresh amount.
+
+*Notes:* if your store plan already includes WhatsApp, you get the included package automatically. A package you bought is never replaced by a change in the store plan while it is running. Support can also assign a package to your account.
+
 ## Overdraft
 - There is an overdraft limit of **50 EGP** for urgent messages (service replies inside the window, and verification codes).
 - **Marketing messages stop at zero** and never go below zero.

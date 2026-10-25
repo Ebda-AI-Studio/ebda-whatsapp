@@ -35,9 +35,15 @@ export type Env = {
   CAMPAIGN_WORKFLOW: Workflow<{ workspaceId: string; campaignId: string; attempt: number }>;
   /** Phase 7.4: 'true' turns wallet top-ups on. Anything else (or unset) = off. */
   TOPUPS_ENABLED?: string;
+  /** 'true' turns self-serve package checkout on (the routes answer 404 otherwise). Needs the same Kashier settings as top-ups. */
+  PACKAGE_CHECKOUT_ENABLED?: string;
   /** Kashier merchant id (var) and Payment API Key (secret). The key signs checkout links and verifies webhooks. */
   KASHIER_MERCHANT_ID?: string;
   KASHIER_API_KEY?: string;
+  /** Kashier SECRET key (a different key from the Payment API Key): authenticates the transaction-details call that confirms every webhook before money moves. Unset = webhooks are answered 503 and nothing is applied. */
+  KASHIER_SECRET_KEY?: string;
+  /** Kashier API origin for that call; default https://api.kashier.io (test: https://test-api.kashier.io). */
+  KASHIER_API_URL?: string;
   /** Hosted checkout origin; default https://checkout.kashier.io. */
   KASHIER_CHECKOUT_URL?: string;
   /** The card fee the merchant pays ON TOP of a top-up (WA-TOPUP-FEE-1): basis points of the amount, plus a fixed part in piasters. Set both before enabling. */

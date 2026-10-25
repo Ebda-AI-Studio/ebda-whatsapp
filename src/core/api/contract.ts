@@ -76,7 +76,7 @@ export const apiError = z.object({
   error: z.enum([
     'unauthorized', 'forbidden', 'not_found', 'invalid_request',
     'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited', 'plan_blocked', 'funding_unknown', 'rate_unavailable',
-    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable',
+    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable',
   ]),
   message: z.string().optional(),
 });
@@ -409,6 +409,9 @@ export const topupDto = z.object({
   orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired']), amountMinor: z.number().int(), feeMinor: z.number().int(), totalMinor: z.number().int(),
   checkoutUrl: z.string().url().optional(),
 });
+/** Packages a merchant can buy (PACKAGE_CHECKOUT_ENABLED). The amount is the server's price; the client never sends one. */
+export const packageDto = z.object({ id: z.string(), name: z.string(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative() });
+export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired', 'refunded']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
 export const refundRequestCreate = z.object({ amountMinor: z.number().int().min(5000), note: z.string().trim().max(500).optional() });
 export const refundRequestDto = z.object({
   id: z.string(), workspaceId: z.string(), amountMinor: z.number().int(), note: z.string().nullable(), state: z.enum(['pending', 'rejected', 'processing', 'paid', 'manual_payout', 'failed']),
@@ -434,6 +437,7 @@ export const rateCardPublish = z.object({
 });
 export const fxPublish = z.object({ effectiveFrom: z.number().int().positive(), egpPerUsdMicros: z.number().int().min(1).max(1_000_000_000_000), bufferBps: z.number().int().min(0).max(10_000).default(0), reason: z.string().trim().min(5).max(500) });
 export const operatorFundingSet = z.object({ funding: z.enum(['merchant_card', 'platform_line']), reason: z.string().trim().min(5).max(500) });
+export const operatorSubscriptionSet = z.object({ packageId: z.string().min(1).max(64), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int().positive(), reason: z.string().trim().min(5).max(500) });
 export const operatorAdjustmentCreate = z.object({ amountMinor: z.number().int().refine((n) => n !== 0), reason: z.string().trim().min(5).max(500) });
 export const operatorDecision = z.object({ decision: z.enum(['approve', 'reject']), note: z.string().trim().max(500).optional() });
 export const trueupPublish = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), phoneNumberId: z.string().min(1), actualMinor: z.number().int().min(0) });
@@ -490,7 +494,10 @@ export const ROUTES = {
   walletTopups: 'POST /wallet/topups',
   walletTopup: 'GET /wallet/topups/:orderId',
   walletRefundRequests: 'GET|POST /wallet/refund-requests',
-  operator: 'GET|POST /api/v1/operator/{pricing-settings,pricing-overrides/:workspaceId,rate-cards,fx-rates,numbers/:phoneNumberId/funding,refund-requests,adjustments,trueups,change-log}',
+  packages: 'GET /packages',
+  packageCheckout: 'POST /packages/:packageId/checkout',
+  packageOrder: 'GET /packages/orders/:orderId',
+  operator: 'GET|POST /api/v1/operator/{pricing-settings,pricing-overrides/:workspaceId,rate-cards,fx-rates,numbers/:phoneNumberId/funding,workspaces/:workspaceId/subscription,refund-requests,adjustments,trueups,change-log}',
 } as const;
 
 // ---- Phase 8.1: connecting a merchant's own number (Embedded Signup) -------------------------------------------------
