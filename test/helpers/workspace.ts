@@ -17,6 +17,7 @@ export async function seedNumber(phoneNumberId: string, workspaceId: string, sta
  * set up with a number gets an active baseline plan at version 0; a test that applies its own entitlement (version >= 1) replaces it.
  */
 export async function seedPlan(workspaceId: string): Promise<void> {
+  await env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('test-plan', 'Test plan', 0, 0, 1, 0)").run(); // the control plane knows the baseline package (it includes the shared number)
   await runInDurableObject(workspace(workspaceId), (_i, state) => {
     state.storage.sql.exec("INSERT OR IGNORE INTO entitlements (id, version, package_id, status, period_start, period_end, ai_credits, cancelled_at, updated_at) VALUES (1, 0, 'test-plan', 'active', 0, 8640000000000000, 0, NULL, 0)");
   });

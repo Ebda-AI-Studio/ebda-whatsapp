@@ -62,6 +62,7 @@ import type { WalletPosted } from './billing/engine';
 import { PRICING_MAX_AGE_MS, applyPricing, copyCursor, fundingOf, pullPricing } from './billing/pricing';
 import { parentHoldRef } from './campaigns/campaigns';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
+import { overdueOne } from './billing/instapay';
 import { applyEntitlement, expireSubscription, marketingBlocked, readEntitlement, type EntitlementEvent } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
@@ -1375,8 +1376,19 @@ export class WorkspaceDO extends DurableObject<Env> {
     return r;
   }
 
+  /** Which of these wallet refs are on the ledger (to reverse only what was really posted). */
+  async walletRefsPresent(refs: string[]): Promise<string[]> {
+    return refs.filter((ref) => this.sql.exec('SELECT 1 FROM wallet_ledger WHERE ref = ?', ref).toArray().length > 0);
+  }
+
   async getEntitlement() {
     return readEntitlement(this.sql);
+  }
+
+  /** One-shot check at an InstaPay proof's review deadline (the SLA): the control plane alerts once if the request is still under review. */
+  async scheduleInstapayOverdue(requestId: string, dueAt: number): Promise<void> {
+    this.ctx.storage.transactionSync(() => addTask(this.sql, 'instapay_overdue', dueAt, { instapayRequestId: requestId }));
+    await this.arm();
   }
 
   /**
@@ -1824,6 +1836,11 @@ export class WorkspaceDO extends DurableObject<Env> {
         const orderId = (JSON.parse(payload ?? 'null') as { orderId?: string } | null)?.orderId;
         if (typeof orderId === 'string') this.ctx.storage.transactionSync(() => closeUnanswered(this.host(), orderId, now));
         return undefined; // the push it schedules runs in this same pass
+      }
+      case 'instapay_overdue': {
+        const id = (JSON.parse(payload ?? 'null') as { instapayRequestId?: string } | null)?.instapayRequestId;
+        if (typeof id === 'string') await overdueOne(this.env, id, now);
+        return undefined;
       }
       case 'bot_turn': {
         const input = botInputSchema.safeParse(JSON.parse(payload ?? 'null'));

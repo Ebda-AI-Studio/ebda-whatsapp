@@ -14,7 +14,7 @@
  */
 import type { Env } from '../../env';
 import { sessionState } from '../identity/session';
-import { packagesEnabled, paymentProvider, type ParsedWebhook } from './payments';
+import { packagesEnabled, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { MONTH_SQL, announceSubscription, fallbackToStorePlan, setSubscription } from './subscriptions';
 
 const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
@@ -27,7 +27,7 @@ export type PackageOrderRow = {
   order_id: string; workspace_id: string; package_id: string; amount_minor: number; currency: string; status: OrderStatus; created_at: number;
   provider_ref: string | null; granted_at: number | null; queued: number; refunded_minor: number;
 };
-const COLS = 'order_id, workspace_id, package_id, amount_minor, currency, status, created_at, provider_ref, granted_at, queued, refunded_minor';
+export const ORDER_COLS = 'order_id, workspace_id, package_id, amount_minor, currency, status, created_at, provider_ref, granted_at, queued, refunded_minor';
 
 /** Active packages a merchant can buy (a free package, like the one a Store plan includes, is not for sale). */
 export async function listPackages(env: Env): Promise<PackageDto[]> {
@@ -64,7 +64,7 @@ export async function startPackageCheckout(env: Env, a: { workspaceId: string; u
 }
 
 export async function getPackageOrder(env: Env, workspaceId: string, orderId: string): Promise<PackageOrderRow | null> {
-  return env.DB.prepare(`SELECT ${COLS} FROM package_orders WHERE order_id = ? AND workspace_id = ?`).bind(orderId, workspaceId).first<PackageOrderRow>();
+  return env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE order_id = ? AND workspace_id = ?`).bind(orderId, workspaceId).first<PackageOrderRow>();
 }
 
 /** What the merchant's page may be told: `paid` only once the package was really granted. */
@@ -73,7 +73,7 @@ export function publicState(o: Pick<PackageOrderRow, 'status' | 'granted_at'>): 
   return o.status === 'charged_back' ? 'refunded' : o.status;
 }
 
-export const findPackageOrder = (env: Env, orderId: string): Promise<PackageOrderRow | null> => env.DB.prepare(`SELECT ${COLS} FROM package_orders WHERE order_id = ?`).bind(orderId).first<PackageOrderRow>();
+export const findPackageOrder = (env: Env, orderId: string): Promise<PackageOrderRow | null> => env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE order_id = ?`).bind(orderId).first<PackageOrderRow>();
 
 function addMonth(ms: number): number {
   const d = new Date(ms);
@@ -91,7 +91,7 @@ const orderPaidUngranted = (orderId: string, ref: string) => ({
  * The same batch records which period the order paid for: `owns_running` (a new period) or `queued_seq` (an early renewal of the same
  * running package, queued behind it), so a later refund knows what to take back.
  */
-async function grantOrder(env: Env, row: PackageOrderRow, ref: string, now: number, opts: { claim: boolean }): Promise<'granted' | 'replay'> {
+export async function grantOrder(env: Env, row: PackageOrderRow, ref: string, now: number, opts: { claim: boolean }): Promise<'granted' | 'replay'> {
   const claim = env.DB.prepare("UPDATE package_orders SET status = 'paid', provider_ref = ?, paid_at = ? WHERE order_id = ? AND status IN ('pending', 'failed', 'expired')").bind(ref, now, row.order_id);
   const RUNNING = "EXISTS (SELECT 1 FROM workspace_subscriptions s WHERE s.workspace_id = package_orders.workspace_id AND s.package_id = package_orders.package_id AND s.period_end > ? AND s.status IN ('active', 'trialing'))";
   const flag = env.DB.prepare(
@@ -115,9 +115,14 @@ async function grantOrder(env: Env, row: PackageOrderRow, ref: string, now: numb
   return 'replay';
 }
 
+/** Appends the audit row only if no row with this action + reason exists. True when this call wrote it (the caller alerts only then). */
+export async function auditOnce(env: Env, action: string, workspaceId: string, reason: string, now: number): Promise<boolean> {
+  const r = await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, ?, ?, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = ? AND reason = ?)')
+    .bind(now, 'provider', action, workspaceId, JSON.stringify({ orderId: reason }), reason, action, reason).run();
+  return r.meta.changes > 0;
+}
 async function recordOnce(env: Env, action: string, row: PackageOrderRow, reason: string, now: number): Promise<void> {
-  await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, ?, ?, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = ? AND reason = ?)')
-    .bind(now, 'provider', action, row.workspace_id, JSON.stringify({ orderId: row.order_id }), reason, action, reason).run();
+  await auditOnce(env, action, row.workspace_id, reason, now);
 }
 
 /**
@@ -141,7 +146,8 @@ export async function applyPackageWebhook(env: Env, row: PackageOrderRow, ev: Pa
   }
   if (ev.status !== 'SUCCESS') return 'ignored';
   if (ev.currency !== row.currency || ev.amountMinor !== row.amount_minor) {
-    alert('package_amount_mismatch', { workspace: row.workspace_id });
+    // Once per order: the daily repair would otherwise repeat it every pass.
+    if (await auditOnce(env, 'package_amount_mismatch', row.workspace_id, row.order_id, now)) alert('package_amount_mismatch', { workspace: row.workspace_id });
     return 'amount_mismatch';
   }
   const granted = await grantOrder(env, row, ev.transactionId, now, { claim: true });
@@ -201,9 +207,9 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
     // decision was made on: a refund that committed in between makes the insert a no-op, and the loop decides again.
     const stmts: D1PreparedStatement[] = [
       env.DB.prepare(
-        `INSERT OR IGNORE INTO package_refunds (refund_ref, order_id, amount_minor, at, period_start, applied, frac_num, frac_den)
+        `INSERT INTO package_refunds (refund_ref, order_id, amount_minor, at, period_start, applied, frac_num, frac_den)
          SELECT ?, ?, ?, ?, (SELECT period_start FROM workspace_subscriptions WHERE workspace_id = ?), 0, ?, ?
-         WHERE EXISTS (SELECT 1 FROM package_orders WHERE order_id = ? AND status = 'paid' AND refunded_minor = ?)`,
+         WHERE EXISTS (SELECT 1 FROM package_orders WHERE order_id = ? AND status = 'paid' AND refunded_minor = ?) ON CONFLICT DO NOTHING`,
       ).bind(refundRef, oid, r, now, ws, r, remainingBefore, oid, before),
     ];
     const audit = (note: string) => env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, 'provider', 'subscription_set', ?, NULL, ?, ? WHERE changes() > 0").bind(now, ws, JSON.stringify({ note }), oid);
@@ -276,13 +282,35 @@ async function finishRefund(env: Env, orderId: string, refundRef: string, now: n
   }
 }
 
+/** A pending order is asked about after this long (the webhook normally arrives within seconds); an unpaid one is asked about for a week. */
+export const REPAIR_AFTER_MS = 15 * 60_000;
+export const INQUIRE_UNTIL_MS = 7 * 86_400_000;
+
 /**
- * Daily: a `paid` order that was never granted (no batch ran) is granted now and reported; pending orders older than 24 h expire
- * (a payment that still arrives is granted, see `grantOrder`).
+ * Daily: (1) a pending or expired order whose webhook never came is looked up with Kashier by our order id; a confirmed payment goes through
+ * `applyPackageWebhook`, the webhook's own claim/grant path (so a repair racing the webhook grants once); an unreachable Kashier changes
+ * nothing and the order is asked again tomorrow. (2) A `paid` order that was never granted (no batch ran) is granted now and reported.
+ * (3) Pending orders older than 24 h expire (a payment that still arrives is granted, see `grantOrder`).
  */
-export async function repairPackageOrders(env: Env, now = Date.now()): Promise<{ granted: number; expired: number }> {
+export async function repairPackageOrders(env: Env, now = Date.now(), provider: PaymentProvider | null = paymentProvider(env)): Promise<{ granted: number; expired: number; confirmed: number }> {
   let granted = 0;
-  const { results } = await env.DB.prepare(`SELECT ${COLS} FROM package_orders WHERE status = 'paid' AND granted_at IS NULL AND provider_ref IS NOT NULL ORDER BY created_at LIMIT 200`).all<PackageOrderRow>();
+  let confirmed = 0;
+  if (packagesEnabled(env) && provider) {
+    const { results: stuck } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE provider = 'kashier' AND status IN ('pending', 'expired') AND created_at < ? AND created_at > ? ORDER BY created_at LIMIT 200`)
+      .bind(now - REPAIR_AFTER_MS, now - INQUIRE_UNTIL_MS).all<PackageOrderRow>();
+    for (const row of stuck) {
+      try {
+        const q = await provider.inquire(row.order_id);
+        if (q === 'unsupported' || q === 'unavailable' || q.status === 'PENDING') continue;
+        if (q.status === 'SUCCESS' && !q.transactionId) continue;
+        const ev: ParsedWebhook = { event: 'pay', status: q.status, orderId: row.order_id, transactionId: q.transactionId ?? `none:${row.order_id}`, amountMinor: q.amountMinor ?? -1, currency: q.currency ?? '', eventKey: `kashier:${q.transactionId ?? row.order_id}:${q.status}` };
+        if ((await applyPackageWebhook(env, row, ev, now)) === 'granted') confirmed++;
+      } catch (err) {
+        alert('package_repair_failed', { orderId: row.order_id, error: errName(err) });
+      }
+    }
+  }
+  const { results } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE status = 'paid' AND granted_at IS NULL AND provider_ref IS NOT NULL ORDER BY created_at LIMIT 200`).all<PackageOrderRow>();
   for (const row of results) {
     alert('package_paid_not_granted', { workspace: row.workspace_id, orderId: row.order_id });
     try {
@@ -291,6 +319,6 @@ export async function repairPackageOrders(env: Env, now = Date.now()): Promise<{
       alert('package_repair_failed', { orderId: row.order_id, error: errName(err) });
     }
   }
-  const exp = await env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE status = 'pending' AND created_at < ?").bind(now - PENDING_EXPIRES_AFTER_MS).run();
-  return { granted, expired: exp.meta.changes };
+  const exp = await env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE provider = 'kashier' AND status = 'pending' AND created_at < ?").bind(now - PENDING_EXPIRES_AFTER_MS).run();
+  return { granted, expired: exp.meta.changes, confirmed };
 }

@@ -9,7 +9,7 @@ The shared number is one WhatsApp number run by the Ebda AI Studio team that you
 - It is a **paid add-on** that you switch on from Packages. Its price is set by the Ebda AI Studio team.
 
 ## What you need before you start
-- An Ebda AI Studio account and an active Ebda WhatsApp package.
+- An Ebda AI Studio account and an **active (or trial) package that includes the shared number**. If your package does not include it, joining is refused with the reason "your package does not include the shared number": activate a package that does, then try again.
 - Wallet balance (see [Wallet](09-wallet-top-ups-and-refunds.md)). On the shared number **the wallet pays Meta's cost**.
 
 ## Steps
@@ -22,6 +22,9 @@ The shared number is one WhatsApp number run by the Ebda AI Studio team that you
 ## Cost
 - Each message is charged at Meta's price with no markup; **Ebda AI Studio's margin is currently 0%**. This may change later and we will announce it first.
 - **Service replies** (a reply within 24 hours of the customer's message) are charged at a steady, predictable price all month. At month end we compare what you were charged with what Meta actually billed for the number, and **any difference in your favor is credited back to your wallet**, shared among stores in proportion to the service replies each used. This does not apply to your own numbers, because Meta bills you for those directly.
+
+## If your package ends
+Your store stays on the shared number and **customers' replies keep reaching you**, and you can answer them (free-text replies inside the 24 hours). But you **cannot start new conversations** (template messages) until you have an active package that includes the shared number again. Marketing is already stopped when a package lapses.
 
 ## Troubleshooting
 - **A message was not sent and shows "insufficient balance":** top up the wallet. Marketing messages stop at zero. Urgent service messages may go down to the overdraft limit (50 EGP), then you must top up.

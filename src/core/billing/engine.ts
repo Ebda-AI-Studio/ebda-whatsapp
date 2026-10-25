@@ -230,7 +230,7 @@ export class Billing {
     const first = this.sql.exec<{ wait_until: number }>('SELECT wait_until FROM wallet_waits WHERE key = ?', key).toArray()[0];
     if (first) return first.wait_until;
     const until = Math.min(createdAt + WAIT_MAX_MS, windowEndsAt ?? Number.MAX_SAFE_INTEGER);
-    this.sql.exec('INSERT OR IGNORE INTO wallet_waits (key, wait_until, created_at) VALUES (?, ?, ?)', key, until, now);
+    this.sql.exec('INSERT INTO wallet_waits (key, wait_until, created_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING', key, until, now);
     return until;
   }
 
@@ -310,7 +310,7 @@ export class Billing {
     const h = this.hold(`msg:${key}`);
     if (!h) return;
     this.sql.exec(
-      'INSERT OR IGNORE INTO billable_sends (wamid, hold_ref, number_id, country, category_est, funding, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO billable_sends (wamid, hold_ref, number_id, country, category_est, funding, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
       wamid, h.ref, h.number_id, h.country, h.category_est, h.funding ?? 'merchant_card', now,
     );
   }

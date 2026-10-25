@@ -1,6 +1,6 @@
 import type {
   AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
-  RealtimeEvent, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, TemplateDto,
+  RealtimeEvent, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
 } from '../../../src/core/api/contract';
 
 import type { OperatorApi, WalletApi } from './billing';
@@ -32,6 +32,8 @@ export interface NumbersApi {
   refresh(phoneNumberId: string): Promise<NumberDto>;
   register(phoneNumberId: string): Promise<NumberDto>;
   disconnect(phoneNumberId: string): Promise<NumberDto>;
+  /** The shared platform number (absent, or `status` rejecting with 404, = the feature is off). Joining needs a plan that includes it: a 402 `package_required`. */
+  shared?: { status(): Promise<SharedNumberDto>; join(displayName?: string): Promise<SharedNumberDto>; leave(): Promise<SharedNumberDto> };
   /** Loads what the popup needs ahead of the click (sample data and tests replace it); absent = Meta's SDK. */
   prepare?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<void>;
   /** Replaces Meta's popup (sample data and tests only); absent = the real Embedded Signup. */

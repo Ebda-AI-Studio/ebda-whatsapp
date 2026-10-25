@@ -303,6 +303,12 @@ describe('wallet: low balance banner in the inbox', () => {
     expect(await screen.findByRole('heading', { name: 'المحفظة', level: 1 })).toBeTruthy();
   });
 
+  it('a rejected InstaPay payment shows a notice with the reason, in the inbox banner', async () => {
+    await inbox(withWallet({ instapayNotice: { id: 'ip-1', reason: 'المبلغ أقل من المطلوب' } }));
+    expect(await screen.findByText(t.ipRejectedBanner('المبلغ أقل من المطلوب'))).toBeTruthy();
+    expect(STRINGS.en.ipRejectedBanner('x')).toBe('Your InstaPay payment was not accepted: x');
+  });
+
   it('debt, and an empty balance on a wallet-paid number, say what stops', async () => {
     await inbox(withWallet({ debtMinor: 3000, balanceMinor: -3000, availableMinor: -5500, lowBalance: true }));
     expect(await screen.findByText(t.wBannerDebt(egp(3000)))).toBeTruthy();
@@ -416,5 +422,51 @@ describe('wallet: renew reminder in the inbox', () => {
     await inbox(withWallet(plan('store-included', 2)));
     await act(async () => undefined);
     expect(document.querySelector('[data-banner="wallet"]')).toBeNull();
+  });
+});
+
+describe('wallet: pay with InstaPay', () => {
+  const file = (name: string, type: string, bytes = 100) => new File([new Uint8Array(bytes)], name, { type });
+
+  it('lists past requests (a rejection shows its reason), creates a package request and shows the payee, the exact amount and the reference', async () => {
+    await openWallet();
+    const card = await screen.findByRole('region', { name: t.wIpTitle });
+    expect(within(card).getByText(t.instapayStates.rejected!)).toBeTruthy();
+    expect(within(card).getByText(t.wIpRejectedLine('المبلغ في الإيصال أقل من المطلوب'))).toBeTruthy();
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wIpCreate })));
+    expect(await within(card).findByText(/sample@instapay/)).toBeTruthy();
+    expect(within(card).getAllByText(egp(25000)).length).toBeGreaterThanOrEqual(2); // the package option and the exact amount: the server's price, the client never sent one
+    expect(within(card).getByText(t.wIpReference, { exact: false })).toBeTruthy();
+    expect(within(card).getByLabelText(t.wIpUpload)).toBeTruthy();
+  });
+
+  it('refuses a wrong type or an oversize file before anything is sent, and uploads a valid one', async () => {
+    const source = createSampleSource();
+    const upload = vi.spyOn(source.wallet!, 'uploadInstapayProof');
+    await openWallet(source);
+    const card = await screen.findByRole('region', { name: t.wIpTitle });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wIpCreate })));
+    const input = await within(card).findByLabelText(t.wIpUpload);
+    await act(async () => fireEvent.change(input, { target: { files: [file('x.svg', 'image/svg+xml')] } }));
+    expect(within(card).getByRole('alert').textContent).toContain(t.wIpBadType);
+    await act(async () => fireEvent.change(input, { target: { files: [file('big.png', 'image/png', 5 * 1024 * 1024 + 1)] } }));
+    expect(within(card).getByRole('alert').textContent).toContain(t.wIpTooBig);
+    expect(upload).not.toHaveBeenCalled();
+    await act(async () => fireEvent.change(input, { target: { files: [file('proof.pdf', 'application/pdf')] } }));
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(await within(card).findByText(t.wIpUploaded)).toBeTruthy();
+  });
+
+  it('is hidden while the server has InstaPay billing off, and for staff', async () => {
+    const off = createSampleSource();
+    off.wallet!.instapay = async () => { throw new ApiError('not_found', 404); };
+    await openWallet(off);
+    await screen.findByRole('region', { name: t.wRefundTitle });
+    expect(screen.queryByRole('region', { name: t.wIpTitle })).toBeNull();
+    cleanup();
+    const staff = createSampleSource();
+    staff.role = 'staff';
+    await openWallet(staff);
+    expect(screen.queryByRole('region', { name: t.wIpTitle })).toBeNull();
   });
 });

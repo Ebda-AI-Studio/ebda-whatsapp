@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import {
-  fxPublish, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
+  fxPublish, instapayReject, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -11,6 +11,8 @@ import {
 } from '../core/billing/operator';
 import { setSubscription } from '../core/billing/subscriptions';
 import { registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
+import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
+import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -18,7 +20,9 @@ type E = { Bindings: Env; Variables: AuthVars };
 export const operatorRoutes = new Hono<E>();
 // Every state-changing operator action re-checks that the session was not revoked, and fails closed (accounts binding missing or erroring = refused).
 operatorRoutes.use('*', async (c, next) => {
-  if (c.req.method === 'GET' || c.req.method === 'HEAD') return next();
+  // Reads that return personal data (the InstaPay review list and proof images) re-check the session too; other reads keep working while the accounts service is down.
+  const personal = c.req.path.includes('/instapay');
+  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && !personal) return next();
   const s = await sessionState(c.env, c.get('principal').sessionId);
   if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
   if (s === 'unavailable') return c.json({ error: 'rate_limited', message: 'session_check_unavailable' }, 503);
@@ -87,6 +91,31 @@ operatorRoutes.post('/refund-requests/:id/decision', async (c) => {
   if (r.ok) return c.json(r.request);
   return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
 });
+operatorRoutes.post('/refund-requests/:id/link-dashboard-refund', async (c) => {
+  const b = refundDashboardLink.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c);
+  const r = await linkDashboardRefund(c.env, { requestId: c.req.param('id'), actor: actor(c), ...b.data });
+  if (r.ok) return c.json({ ok: true, ...(r.adjustment ? { adjustment: r.adjustment } : {}) });
+  if (r.reason === 'provider_unavailable') return c.json({ error: 'rate_limited', message: r.reason }, 503);
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
+});
+operatorRoutes.post('/card-refunds/held/:refundId/match', async (c) => {
+  const r = await matchHeldRefund(c.env, { refundId: c.req.param('refundId'), actor: actor(c) });
+  if (r.ok) return c.json({ ok: true });
+  if (r.reason === 'provider_unavailable') return c.json({ error: 'rate_limited', message: r.reason }, 503);
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
+});
+operatorRoutes.post('/refund-requests/:id/card-refunds/:cardRefundId/mark-failed', async (c) => {
+  const r = await markCardRefundFailed(c.env, { requestId: c.req.param('id'), cardRefundId: decodeURIComponent(c.req.param('cardRefundId')), actor: actor(c) });
+  if (r.ok) return c.json({ ok: true });
+  if (r.reason === 'provider_unavailable') return c.json({ error: 'rate_limited', message: r.reason }, 503);
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
+});
+operatorRoutes.post('/refund-requests/:id/abandon', async (c) => {
+  const r = await abandonRefundRequest(c.env, { id: c.req.param('id'), actor: actor(c) });
+  if (r.ok) return c.json({ ok: true, ...(r.needsSecond ? { needsSecond: true } : {}), ...(r.already ? { already: true } : {}) });
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
+});
 operatorRoutes.post('/refund-requests/:id/manual-paid', async (c) => ((await markManualPaid(c.env, c.req.param('id'), actor(c))) ? c.json({ ok: true }) : c.json({ error: 'invalid_request', message: 'not_manual_payout' }, 409)));
 
 operatorRoutes.get('/adjustments', async (c) => c.json({ items: await listAdjustments(c.env, c.req.query('state') || undefined) }));
@@ -137,4 +166,26 @@ operatorRoutes.get('/change-log', async (c) => {
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? 50) || 50));
   const before = Number(c.req.query('before') ?? 0) || undefined;
   return c.json({ items: await changeLog(c.env, { limit, ...(before ? { before } : {}), ...(c.req.query('workspaceId') ? { workspaceId: c.req.query('workspaceId')! } : {}) }) });
+});
+
+// ---- InstaPay billing review (super admin; every write re-checks the session above) --------------------------------------------
+operatorRoutes.get('/instapay', async (c) => c.json({ items: await listForOperator(c.env, c.req.query('state') || undefined) }));
+operatorRoutes.get('/instapay/:id/proof-link', async (c) => {
+  const row = await c.env.DB.prepare('SELECT workspace_id, proof_key FROM instapay_requests WHERE id = ?').bind(c.req.param('id')).first<{ workspace_id: string; proof_key: string | null }>();
+  if (!row?.proof_key) return c.json({ error: 'not_found' }, 404);
+  const link = await signProofLink(c.env, c.req.param('id'));
+  if (!link) return c.json({ error: 'rate_limited', message: 'proof_links_unavailable' }, 503);
+  await c.env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'instapay_proof_viewed', ?, NULL, NULL, ?)").bind(Date.now(), actor(c), row.workspace_id, c.req.param('id')).run();
+  return c.json(link);
+});
+const decided = (c: { json(b: unknown, s?: 200 | 403 | 404 | 409): Response }, r: DecideResult) => {
+  if (r.ok) return c.json({ ...r.request, ...(r.needsSecond ? { needsSecond: true } : {}) });
+  const status = r.reason === 'not_found' ? 404 : r.reason === 'self_approval_refused' ? 403 : 409;
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : status === 403 ? 'forbidden' : 'invalid_request', message: r.reason }, status);
+};
+operatorRoutes.post('/instapay/:id/confirm', async (c) => decided(c, await confirmInstapay(c.env, { id: c.req.param('id'), actor: actor(c) })));
+operatorRoutes.post('/instapay/:id/reject', async (c) => {
+  const b = instapayReject.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  return decided(c, await rejectInstapay(c.env, { id: c.req.param('id'), actor: actor(c), reason: b.data.reason }));
 });

@@ -114,7 +114,8 @@ describe('(e) the D1 mirror equals the workspace after a drain', () => {
     await status(ws, wamidOf('m'), 'sent', nowS(), pricing('marketing'));
     await status(ws, wamidOf('m'), 'delivered', nowS());
     expect((await ledger(ws)).map((r) => r.kind)).toEqual(['topup', 'adjustment', 'meta_charge']);
-    expect(await workspace(ws).drainLedger()).toMatchObject({ drained: 4, remaining: 0 });
+    // The workspace's own `ledger_drain` task may already have copied some rows (a slow host runs the alarm first): assert the end state.
+    expect(await workspace(ws).drainLedger()).toMatchObject({ remaining: 0 });
     expect(await workspace(ws).drainLedger()).toMatchObject({ drained: 0, remaining: 0 });
     const check = await workspace(ws).mirrorCheck();
     expect(check).toEqual([

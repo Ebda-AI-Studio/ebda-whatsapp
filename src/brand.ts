@@ -1,6 +1,7 @@
 import type { AgentCopy } from './core/ai/config';
 import type { StoreLinkConfig } from './core/store-link';
 import type { TemplateSeed } from './routes/templates';
+import type { InstapayPayee } from './core/billing/instapay-payee';
 import { DEMO_PACK } from './addons/demo/pack';
 import { EBDA_PACK } from './addons/ebda/pack';
 
@@ -28,6 +29,8 @@ export type BrandPack = {
   agentCopy: AgentCopy;
   /** Words of the shared platform number (Phase 8.2). */
   sharedNumber: SharedNumberCopy;
+  /** Who a merchant pays by InstaPay for packages and top-ups, read from the environment at call time. Null (or no function) = InstaPay billing is unavailable for this brand. */
+  instapayPayee?: (env: Record<string, string | undefined>) => InstapayPayee | null;
   /** Only the suite brand links to a Store; a white-label pack leaves it out (the ordering bot stays silent). */
   storeLink?: Pick<StoreLinkConfig, 'bridge' | 'events' | 'copy' | 'otp'>;
 };

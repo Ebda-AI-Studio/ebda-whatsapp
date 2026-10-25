@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { costEstimateQuery, refundRequestCreate, statementQuery, topupRequest, type WalletDto } from '../core/api/contract';
 import { statementCsv } from '../core/billing/statement';
 import { topupsEnabled } from '../core/billing/payments';
+import { rejectionNotice } from '../core/billing/instapay';
 import { getTopup, startTopup } from '../core/billing/topups';
 import { createRefundRequest, listRefundRequests } from '../core/billing/refunds';
 import { apiError, senderNumber, workspaceStub, type ApiContext, type ApiEnv } from './shared';
@@ -23,6 +24,7 @@ walletRoutes.get('/stores/:storeId/wallet', async (c) => {
     balanceMinor: v.balanceMinor, heldMinor: v.heldMinor, availableMinor: v.availableMinor, debtMinor: v.debtMinor, creditLimitMinor: v.creditLimitMinor, currency: 'EGP',
     funding: results.map((r) => ({ phoneNumberId: r.phone_number_id, displayPhone: r.display_phone, funding: r.funding ?? 'unknown' })),
     topupsEnabled: topupsEnabled(c.env), lowBalance: v.lowBalance, aiCredits: v.aiCredits, plan: v.plan as WalletDto['plan'],
+    ...(owner(c) ? { instapayNotice: await rejectionNotice(c.env, c.req.param('storeId')!) } : {}),
   };
   return c.json(dto);
 });

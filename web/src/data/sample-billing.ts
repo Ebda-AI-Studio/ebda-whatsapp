@@ -1,4 +1,4 @@
-import type { ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, WalletDto } from './billing';
+import type { InstapayRequest, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, WalletDto } from './billing';
 import { ApiError } from './api';
 
 // Sample billing data for preview only (the app labels the whole source as sample). Amounts are invented; nothing here is real money.
@@ -59,6 +59,9 @@ export function createSampleWallet(): WalletApi {
     { id: 'r-1', workspaceId: 'ws-sample', amountMinor: 20000, note: 'نهاية الاشتراك', state: 'rejected', requestedBy: 'u-me', createdAt: BASE - 20 * D, decidedBy: 'u-root', decidedAt: BASE - 19 * D, decisionNote: 'الرصيد اتصرف على حملة قبل الطلب.', cardRefundedMinor: 0, manualMinor: 0 },
     { id: 'r-2', workspaceId: 'ws-sample', amountMinor: 5000, note: null, state: 'paid', requestedBy: 'u-me', createdAt: BASE - 60 * D, decidedBy: 'u-root', decidedAt: BASE - 58 * D, decisionNote: null, cardRefundedMinor: 5000, manualMinor: 0 },
   ];
+  const instapayItems: InstapayRequest[] = [
+    { id: 'ip-0', reference: 'WA-K7M2Q9XD', kind: 'package', packageId: 'gold', amountMinor: 50000, currency: 'EGP', state: 'rejected', createdAt: BASE - 5 * D, expiresAt: BASE - 3 * D, hasProof: true, rejectReason: 'المبلغ في الإيصال أقل من المطلوب', decidedAt: BASE - 4 * D },
+  ];
   const wallet: WalletDto = {
     balanceMinor: 18500, heldMinor: 2500, availableMinor: 16000, debtMinor: 0, creditLimitMinor: 5000, currency: 'EGP',
     funding: [{ phoneNumberId: 'pn-sample-1', displayPhone: '+20 100 555 0101', funding: 'merchant_card' }, { phoneNumberId: 'pn-sample-shared', displayPhone: '+20 100 555 0900', funding: 'platform_line' }],
@@ -89,6 +92,21 @@ export function createSampleWallet(): WalletApi {
       return { orderId: `P-${id}`, state: 'pending', packageId, amountMinor: packageId === 'basic' ? 25000 : 50000, checkoutUrl: `https://pay.example.test/checkout/P-${id}` };
     },
     packageOrderState: async (orderId) => ({ orderId, state: 'pending', packageId: 'gold', amountMinor: 50000 }),
+    async instapay() {
+      return { enabled: true, payee: { handle: 'sample@instapay', name: 'Sample Studio', qrUrl: null }, items: instapayItems.map((r) => ({ ...r })) };
+    },
+    async createInstapay(input) {
+      const id = `ip-${nextId++}`;
+      const r: InstapayRequest = { id, reference: `WA-SAMPLE${nextId}`.slice(0, 11), kind: input.kind, packageId: input.kind === 'package' ? input.packageId : null, amountMinor: input.kind === 'package' ? (input.packageId === 'basic' ? 25000 : 50000) : input.amountMinor, currency: 'EGP', state: 'awaiting_proof', createdAt: Date.now(), expiresAt: Date.now() + 48 * 3_600_000, hasProof: false, rejectReason: null, decidedAt: null };
+      instapayItems.unshift(r);
+      return { ...r, payee: { handle: 'sample@instapay', name: 'Sample Studio', qrUrl: null } };
+    },
+    async uploadInstapayProof(requestId) {
+      const r = instapayItems.find((x) => x.id === requestId);
+      if (!r) throw new ApiError('not_found', 404);
+      Object.assign(r, { state: 'under_review', hasProof: true });
+      return { ...r };
+    },
     refundRequests: async () => refunds.map((r) => ({ ...r })).sort((a, b) => b.createdAt - a.createdAt),
     async requestRefund(amountMinor, note) {
       if (amountMinor < 5000) throw new ApiError('invalid_request', 409, 'below_minimum');
@@ -167,6 +185,12 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       record(`refund_${decision}`, r.workspaceId, { state: 'pending' }, { state: r.state }, note.trim() || '—');
       return { ...r };
     },
+    async linkDashboardRefund(id, _refundId, amountMinor) { const r = find(refunds, id); Object.assign(r, { cardRefundedMinor: r.cardRefundedMinor + amountMinor, manualMinor: Math.max(0, r.manualMinor - amountMinor), state: r.manualMinor - amountMinor > 0 ? 'manual_payout' : 'paid' }); },
+    instapayQueue: async () => [{ id: 'ip-op-1', reference: 'WA-H4N8T2PC', kind: 'topup', packageId: null, amountMinor: 20000, currency: 'EGP', state: 'under_review', createdAt: BASE - D, expiresAt: BASE + D, hasProof: true, rejectReason: null, decidedAt: null, workspaceId: 'ws-sample', createdBy: 'u-merchant', proofAt: BASE - D, firstApprover: null, decidedBy: null, proofMime: 'image/png' }],
+    instapayProofLink: async () => ({ url: '/api/v1/instapay-proof/sample', expiresAt: Date.now() + 120_000 }),
+    async confirmInstapay(id) { return { id, reference: 'WA-H4N8T2PC', kind: 'topup', packageId: null, amountMinor: 20000, currency: 'EGP', state: 'confirmed', createdAt: BASE - D, expiresAt: BASE + D, hasProof: true, rejectReason: null, decidedAt: Date.now(), workspaceId: 'ws-sample', createdBy: 'u-merchant', proofAt: BASE - D, firstApprover: null, decidedBy: currentUserId, proofMime: 'image/png' }; },
+    async rejectInstapay(id, reason) { return { id, reference: 'WA-H4N8T2PC', kind: 'topup', packageId: null, amountMinor: 20000, currency: 'EGP', state: 'rejected', createdAt: BASE - D, expiresAt: BASE + D, hasProof: true, rejectReason: reason, decidedAt: Date.now(), workspaceId: 'ws-sample', createdBy: 'u-merchant', proofAt: BASE - D, firstApprover: null, decidedBy: currentUserId, proofMime: 'image/png' }; },
+    async abandonRefund() { return { needsSecond: true as const }; },
     async markRefundPaid(id) { Object.assign(find(refunds, id), { state: 'paid' }); },
     adjustments: async () => structuredClone(adjustments),
     async createAdjustment(workspaceId, amountMinor, reason) {

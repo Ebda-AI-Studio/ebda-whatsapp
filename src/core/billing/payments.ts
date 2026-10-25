@@ -7,16 +7,26 @@
  * hex digest, compared case-insensitively; `data.status` (not `event`) says success; `data.hash` is ignored.
  *
  * NOT VERIFIED against a live account: the hosted checkout link (`createSession`), the inquiry and the refund calls. They are behind
- * the interface; `KashierProvider` implements the checkout link from Kashier's published payment-hash scheme and reports inquiry and
- * refund as unsupported until they are confirmed with real credentials (callers then keep the item for a person: see Ruling in the ledger).
+ * the interface; `KashierProvider` implements the checkout link from Kashier's published payment-hash scheme. Inquiry is built on the
+ * documented transaction list (`GET /v2/aggregator/transactions?search=<our order id>&type=payment`, https://developers.kashier.io/openapi.yaml,
+ * `listTransactions`) and then confirmed with the transaction-details call the webhook path uses. The refund call is added behind
+ * `KASHIER_REFUNDS_ENABLED` (see `refund` below).
  */
 import type { Env } from '../../env';
-import { KashierUnconfirmedError, classifyKashierTransaction, kashierTransactionDetailsPath } from './kashier-confirm';
+import { KashierUnconfirmedError, TRANSACTION_ID, classifyKashierTransaction, kashierTransactionDetailsPath } from './kashier-confirm';
 
 export type ProviderEvent = 'pay' | 'refund' | 'other';
-export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string; /** A chargeback (Kashier's `reversal` operation). Only ever set by `confirm`, from Kashier's own record. */ chargeback?: true; /** `kashier:<transactionId>:<status>`: built from SIGNED values only, never from the unsigned `event` label. */ eventKey?: string };
+export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string; /** A chargeback (Kashier's `reversal` operation). Only ever set by `confirm`, from Kashier's own record. */ chargeback?: true; /** Kashier's own operation for the transaction (refund, partial_refund, void, reversal, pay...), set only by `confirm`. */ operation?: string; /** `kashier:<transactionId>:<status>`: built from SIGNED values only, never from the unsigned `event` label. */ eventKey?: string };
 export type Inquiry = { status: 'SUCCESS' | 'FAILURE' | 'PENDING'; transactionId: string | null; amountMinor: number | null; currency: string | null };
-export type RefundResult = { ok: true; refundId: string } | { ok: false; reason: 'unsupported' | 'rejected' | 'unavailable' };
+/**
+ * `ok` = Kashier took the refund (`status` SUCCESS, default; PENDING = initiated, the processor has not answered).
+ * `unsupported` / `unavailable` / `rejected` = Kashier definitely did NOT refund (nothing was sent, or it answered a clear refusal).
+ * `uncertain` = the request may have been processed (timeout, 5xx, an answer we cannot read): never retried, reconciled instead.
+ */
+export type RefundResult = { ok: true; refundId: string; status?: 'SUCCESS' | 'PENDING' } | { ok: false; reason: 'unsupported' | 'rejected' | 'unavailable' | 'uncertain' };
+/** The ONE definition of "a card refund of a payment" (Kashier operations `refund` / `partial_refund`). A reversal (chargeback) or void is not one. Every path that decides whether an event or a listed transaction can settle one of our refunds uses this. */
+export const isCardRefundOperation = (operation: string | undefined): boolean => operation === 'refund' || operation === 'partial_refund';
+export type ProviderRefund = { refundId: string; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; amountMinor: number | null; /** Kashier's operation for it: only `refund` / `partial_refund` is a card refund; `reversal` / `void` are not. */ operation: string };
 
 export interface PaymentProvider {
   readonly name: string;
@@ -32,7 +42,12 @@ export interface PaymentProvider {
   /** False when webhooks for this provider could not be confirmed (no secret key): checkout must not open, or customers would pay while every webhook is refused. */
   confirmationReady(): boolean;
   inquire(orderId: string): Promise<Inquiry | 'unsupported' | 'unavailable'>;
-  refund(a: { transactionId: string; amountMinor: number }): Promise<RefundResult>;
+  /** `reason` carries our refund request id (Kashier documents no idempotency key). Never called twice for one recorded refund. */
+  refund(a: { transactionId: string; amountMinor: number; reason?: string }): Promise<RefundResult>;
+  /** Kashier's own record of one refund transaction (reconciliation of a pending or uncertain refund). */
+  refundStatus?(refundId: string): Promise<'SUCCESS' | 'FAILURE' | 'PENDING' | 'unavailable'>;
+  /** Refund transactions Kashier lists for our order id (reconciliation of a refund whose answer we never saw). */
+  listRefunds?(orderId: string): Promise<ProviderRefund[] | 'unavailable'>;
 }
 
 let factory: (env: Env) => PaymentProvider | null = (env) => (env.KASHIER_MERCHANT_ID && env.KASHIER_API_KEY ? new KashierProvider(env.KASHIER_MERCHANT_ID, env.KASHIER_API_KEY, env.KASHIER_CHECKOUT_URL, { ...(env.KASHIER_SECRET_KEY ? { secretKey: env.KASHIER_SECRET_KEY } : {}), ...(env.KASHIER_API_URL ? { apiBase: env.KASHIER_API_URL } : {}) }) : null);
@@ -41,6 +56,8 @@ export const configurePayments = (f: (env: Env) => PaymentProvider | null): void
 export const paymentProvider = (env: Env): PaymentProvider | null => factory(env);
 export const topupsEnabled = (env: Env): boolean => env.TOPUPS_ENABLED === 'true';
 export const packagesEnabled = (env: Env): boolean => env.PACKAGE_CHECKOUT_ENABLED === 'true';
+/** Card refunds through the provider's API. Default off: every refund is then a manual payout, exactly as before. */
+export const refundsEnabled = (env: Env): boolean => env.KASHIER_REFUNDS_ENABLED === 'true';
 
 const enc = new TextEncoder();
 async function hmacHex(key: string, text: string): Promise<string> {
@@ -76,12 +93,12 @@ export class KashierProvider implements PaymentProvider {
   }
 
   confirmationReady(): boolean {
-    return !!this.secretKey;
+    return this.ready();
   }
 
   async confirm(ev: ParsedWebhook): Promise<ParsedWebhook> {
     if (!this.secretKey) throw new KashierUnconfirmedError('the Kashier secret key is not configured');
-    if (!/^https:\/\//i.test(this.apiBase)) throw new KashierUnconfirmedError('the Kashier API origin is not https');
+    if (!KashierProvider.pinned(this.apiBase)) throw new KashierUnconfirmedError('the Kashier API origin is not https on kashier.io');
     let answer: unknown;
     try {
       const res = await this.fetchImpl(`${this.apiBase}${kashierTransactionDetailsPath(ev.transactionId)}`, { method: 'GET', headers: { Authorization: this.secretKey, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000) });
@@ -93,7 +110,7 @@ export class KashierProvider implements PaymentProvider {
     const txn = classifyKashierTransaction(answer, { transactionId: ev.transactionId, merchantOrderId: ev.orderId });
     if (txn.status !== ev.status) throw new KashierUnconfirmedError('Kashier reports a different status than the signed body');
     const { chargeback: _drop, ...rest } = ev;
-    return { ...rest, event: txn.kind === 'refund' ? 'refund' : txn.kind === 'payment' ? 'pay' : 'other', ...(txn.operation === 'reversal' ? { chargeback: true as const } : {}) };
+    return { ...rest, event: txn.kind === 'refund' ? 'refund' : txn.kind === 'payment' ? 'pay' : 'other', operation: txn.operation, ...(txn.operation === 'reversal' ? { chargeback: true as const } : {}) };
   }
 
   async createSession(a: { orderId: string; totalMinor: number; currency: string; returnUrl?: string }): Promise<{ checkoutUrl: string }> {
@@ -122,11 +139,148 @@ export class KashierProvider implements PaymentProvider {
     return { event: ev, status, orderId: data.merchantOrderId, transactionId: data.transactionId, amountMinor, currency: data.currency, eventKey: `kashier:${data.transactionId}:${data.status}` };
   }
 
-  async inquire(): Promise<'unsupported'> {
-    return 'unsupported';
+  private async getJson(url: string): Promise<unknown> {
+    const res = await this.fetchImpl(url, { method: 'GET', headers: { Authorization: this.secretKey!, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new KashierUnconfirmedError(`answered ${res.status}`);
+    return res.json();
+  }
+  /**
+   * The secret key is only ever sent to Kashier: the API origin must be https on kashier.io or a subdomain of it (api., test-api.), whatever
+   * KASHIER_API_URL says. Anything else is refused before a request is made.
+   */
+  private ready(): boolean {
+    return !!this.secretKey && KashierProvider.pinned(this.apiBase);
+  }
+  static pinned(base: string): boolean {
+    try {
+      const u = new URL(base);
+      return u.protocol === 'https:' && !u.username && !u.password && (u.hostname === 'kashier.io' || u.hostname.endsWith('.kashier.io'));
+    } catch {
+      return false;
+    }
   }
 
-  async refund(): Promise<RefundResult> {
-    return { ok: false, reason: 'unsupported' };
+  /** Rows of the documented list call whose `merchantOrderId` is exactly ours, over up to 5 pages. Throws when the answer cannot be trusted. */
+  private async listCandidates(orderId: string, type: 'payment' | 'refund'): Promise<Map<string, { amountMinor: number | null; currency: string | null }>> {
+    const candidates = new Map<string, { amountMinor: number | null; currency: string | null }>();
+    const PAGE = 20;
+    for (let page = 1; ; page++) {
+      const listed = await this.getJson(`${this.apiBase}/v2/aggregator/transactions?search=${encodeURIComponent(orderId)}&type=${type}&limit=${PAGE}&page=${page}`);
+      const rows = listed && typeof listed === 'object' ? (listed as { body?: unknown }).body : undefined;
+      if (!Array.isArray(rows)) throw new KashierUnconfirmedError('the list carried no rows');
+      for (const r of rows) {
+        if (!r || typeof r !== 'object') continue;
+        const row = r as Record<string, unknown>;
+        if (row.merchantOrderId !== orderId || typeof row.transactionId !== 'string' || (typeof row.type === 'string' && row.type.toUpperCase() !== type.toUpperCase())) continue;
+        if (!candidates.has(row.transactionId)) candidates.set(row.transactionId, { amountMinor: egpToMinor(row.amount ?? row.totalAuthorizedAmount), currency: typeof row.currency === 'string' ? row.currency : null });
+      }
+      if (rows.length < PAGE) return candidates;
+      if (page >= 5) throw new KashierUnconfirmedError('too many rows to read safely'); // an order with 100+ rows is not guessed at
+    }
+  }
+
+  /**
+   * Our order id is the `merchantOrderId` Kashier knows. The documented list call has a `search` filter ("keyword for trxId or merchant
+   * orderId"); only rows whose `merchantOrderId` equals our id exactly are candidates, and EVERY candidate is then confirmed with the
+   * transaction-details call the webhook path uses (status, kind and order come from that record, never from the list). The amount and
+   * currency come from the list row (details carry no amount in the documented example); a wrong guess there only ever fails closed
+   * (the caller sees a mismatch). Anything unclear is `unavailable`, retried on the next pass; several successful payments for one
+   * order are not guessed between (alert). NOT VERIFIED live: the list row's amount field (`amount` or `totalAuthorizedAmount`).
+   */
+  async inquire(orderId: string): Promise<Inquiry | 'unsupported' | 'unavailable'> {
+    if (!this.ready() || !TRANSACTION_ID.test(orderId)) return 'unavailable';
+    try {
+      const candidates = await this.listCandidates(orderId, 'payment');
+      const confirmed: { transactionId: string; status: Inquiry['status']; amountMinor: number | null; currency: string | null }[] = [];
+      for (const [transactionId, listedRow] of candidates) {
+        const txn = classifyKashierTransaction(await this.getJson(`${this.apiBase}${kashierTransactionDetailsPath(transactionId)}`), { transactionId, merchantOrderId: orderId });
+        if (txn.kind === 'payment') confirmed.push({ transactionId, status: txn.status, ...listedRow });
+      }
+      const paid = confirmed.filter((c) => c.status === 'SUCCESS');
+      if (paid.length > 1) {
+        console.error(JSON.stringify({ alert: 'inquiry_multiple_success', orderId, count: paid.length }));
+        return 'unavailable';
+      }
+      if (paid.length === 1) return { status: 'SUCCESS', transactionId: paid[0]!.transactionId, amountMinor: paid[0]!.amountMinor, currency: paid[0]!.currency };
+      if (confirmed.length > 0 && confirmed.every((c) => c.status === 'FAILURE')) return { status: 'FAILURE', transactionId: null, amountMinor: null, currency: null };
+      return { status: 'PENDING', transactionId: null, amountMinor: null, currency: null };
+    } catch {
+      return 'unavailable';
+    }
+  }
+
+  async refundStatus(refundId: string): Promise<'SUCCESS' | 'FAILURE' | 'PENDING' | 'unavailable'> {
+    if (!this.ready() || !TRANSACTION_ID.test(refundId)) return 'unavailable';
+    try {
+      const txn = classifyKashierTransaction(await this.getJson(`${this.apiBase}${kashierTransactionDetailsPath(refundId)}`), { transactionId: refundId, merchantOrderId: null });
+      return txn.kind === 'refund' ? txn.status : 'unavailable';
+    } catch {
+      return 'unavailable';
+    }
+  }
+
+  /** NOT VERIFIED live: that a refund row carries the ORIGINAL order's merchantOrderId (the webhook handling already assumes it). */
+  async listRefunds(orderId: string): Promise<ProviderRefund[] | 'unavailable'> {
+    if (!this.ready() || !TRANSACTION_ID.test(orderId)) return 'unavailable';
+    try {
+      const out: ProviderRefund[] = [];
+      for (const [refundId, row] of await this.listCandidates(orderId, 'refund')) {
+        const txn = classifyKashierTransaction(await this.getJson(`${this.apiBase}${kashierTransactionDetailsPath(refundId)}`), { transactionId: refundId, merchantOrderId: orderId });
+        if (txn.kind === 'refund' && isCardRefundOperation(txn.operation)) out.push({ refundId, status: txn.status, amountMinor: row.amountMinor, operation: txn.operation });
+      }
+      return out;
+    } catch {
+      return 'unavailable';
+    }
+  }
+
+  /**
+   * Card refund through Kashier's documented refund operation: `PUT {api}/v3/payment/refund/{kashier order id}` (the same operation as
+   * `PUT fep.kashier.io/v3/orders/{id}` with `apiOperation: REFUND`; this route avoids a second host and a forwarding hop), body
+   * `{apiOperation: 'REFUND', reason, transaction: {amount}}` (EGP, https://developers.kashier.io/openapi.yaml `refundOrder`).
+   * The path id is "Kashier's order id": it is read from the paid transaction's details (`body.order.orderId`), never guessed from ours; if
+   * the details do not carry it nothing is sent (`unsupported`). Kashier documents NO idempotency key, so this method is called at most once
+   * per recorded refund (the caller writes the row first) and any answer that might mean "processed" is `uncertain`, never a retry.
+   * Success needs top-level `status` SUCCESS, `response.status` SUCCESS|PENDING, `response.operation` refund, a plain `response.transactionId`
+   * and the amount we asked for; anything else that came back 200 is `uncertain`. 400/401/403/404/422 and an explicit FAILURE are `rejected`.
+   * NOT VERIFIED live: the response shape, that the path accepts this id, and PENDING behaviour.
+   */
+  async refund(a: { transactionId: string; amountMinor: number; reason?: string }): Promise<RefundResult> {
+    if (!this.ready() || !TRANSACTION_ID.test(a.transactionId) || !Number.isSafeInteger(a.amountMinor) || a.amountMinor <= 0) return { ok: false, reason: 'unsupported' };
+    let kashierOrderId = '';
+    try {
+      const details = await this.getJson(`${this.apiBase}${kashierTransactionDetailsPath(a.transactionId)}`);
+      const txn = classifyKashierTransaction(details, { transactionId: a.transactionId, merchantOrderId: null });
+      const order = ((details as { body?: { order?: { orderId?: unknown } } }).body?.order ?? {}).orderId;
+      if (txn.kind !== 'payment' || txn.status !== 'SUCCESS' || typeof order !== 'string' || !TRANSACTION_ID.test(order)) return { ok: false, reason: 'unsupported' };
+      kashierOrderId = order;
+    } catch (err) {
+      return { ok: false, reason: err instanceof KashierUnconfirmedError && /answered (4\d\d)/.test(err.message) ? 'unsupported' : 'unavailable' }; // nothing was sent yet
+    }
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.apiBase}/v3/payment/refund/${kashierOrderId}`, {
+        method: 'PUT',
+        headers: { Authorization: this.secretKey!, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiOperation: 'REFUND', ...(a.reason ? { reason: a.reason } : {}), transaction: { amount: Number(minorToEgp(a.amountMinor)) } }),
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch {
+      return { ok: false, reason: 'uncertain' }; // the request may have reached Kashier
+    }
+    if ([400, 401, 403, 404, 422].includes(res.status)) return { ok: false, reason: 'rejected' };
+    if (!res.ok) return { ok: false, reason: 'uncertain' };
+    let body: unknown;
+    try { body = await res.json(); } catch { return { ok: false, reason: 'uncertain' }; }
+    const top = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+    const inner = top.response && typeof top.response === 'object' ? (top.response as Record<string, unknown>) : {};
+    const refundId = typeof inner.transactionId === 'string' ? inner.transactionId : typeof top.transactionId === 'string' ? top.transactionId : '';
+    const innerStatus = typeof inner.status === 'string' ? inner.status.toUpperCase() : '';
+    if (innerStatus === 'FAILURE' || top.status === 'FAILURE') return { ok: false, reason: 'rejected' };
+    const asked = egpToMinor(inner.amount);
+    if (top.status === 'SUCCESS' && (innerStatus === 'SUCCESS' || innerStatus === 'PENDING') && isCardRefundOperation(String(inner.operation).toLowerCase()) && TRANSACTION_ID.test(refundId) && asked === a.amountMinor) {
+      return { ok: true, refundId, status: innerStatus };
+    }
+    return { ok: false, reason: 'uncertain' };
   }
 }

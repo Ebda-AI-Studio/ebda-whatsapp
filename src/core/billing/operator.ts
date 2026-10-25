@@ -124,10 +124,11 @@ async function applyAdjustment(env: Env, r: Adj, now: number): Promise<void> {
   if (!res.ok && res.reason !== 'duplicate') throw new Error(`adjustment refused: ${res.reason}`);
 }
 
-export async function requestAdjustment(env: Env, a: { actor: string; workspaceId: string; amountMinor: number; reason: string }, now = Date.now()) {
+/** `id` makes the request idempotent (e.g. `relink:<refund id>`): the primary key allows it once. */
+export async function requestAdjustment(env: Env, a: { actor: string; workspaceId: string; amountMinor: number; reason: string; id?: string; secondApproverAlways?: boolean }, now = Date.now()) {
   const known = await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(a.workspaceId).first();
   if (!known) return { ok: false as const, reason: 'not_found' as const };
-  const id = crypto.randomUUID();
+  const id = a.id ?? crypto.randomUUID();
   // Every adjustment starts PENDING. The promotion to self-approved is ONE conditional UPDATE that recomputes, inside the same statement, what
   // this actor already approved for themselves in the last 24 h (absolute values, all workspaces, this request included) and how many: D1 runs a
   // statement atomically, so N parallel requests cannot all read the old total. Only a promotion that changed exactly one row is applied.
@@ -136,14 +137,23 @@ export async function requestAdjustment(env: Env, a: { actor: string; workspaceI
   const promoted = await env.DB.prepare(
     `UPDATE wallet_adjustments SET state = 'approved', approved_by = requested_by, decided_at = ?1
       WHERE id = ?2 AND state = 'pending'
+        AND ?8 = 0
         AND (SELECT coalesce(sum(abs(w.amount_minor)), 0) FROM wallet_adjustments w WHERE w.requested_by = ?3 AND w.approved_by = w.requested_by AND w.state = 'approved' AND w.created_at > ?4) + abs(?5) <= ?6
         AND (SELECT count(*) FROM wallet_adjustments w WHERE w.requested_by = ?3 AND w.approved_by = w.requested_by AND w.state = 'approved' AND w.created_at > ?4) < ?7`,
-  ).bind(now, id, a.actor, now - SELF_APPROVE_WINDOW_MS, a.amountMinor, adjustmentThreshold(env), adjustmentDailyCap(env)).run();
+  ).bind(now, id, a.actor, now - SELF_APPROVE_WINDOW_MS, a.amountMinor, adjustmentThreshold(env), adjustmentDailyCap(env), a.secondApproverAlways ? 1 : 0).run();
   const small = promoted.meta.changes === 1;
   const row = (await env.DB.prepare(`SELECT ${ADJ_COLS} FROM wallet_adjustments WHERE id = ?`).bind(id).first<Adj>())!;
   await audit(env, { actor: a.actor, action: small ? 'adjustment_applied' : 'adjustment_requested', workspaceId: a.workspaceId, after: adjDto(row), reason: a.reason }, now);
   if (small) await applyAdjustment(env, row, now);
   return { ok: true as const, adjustment: adjDto(row) };
+}
+
+/** An adjustment that is approved but whose wallet post may not have happened (a crash after the approval): posts it, idempotently by its ref. */
+export async function ensureAdjustmentApplied(env: Env, id: string, now = Date.now()): Promise<{ id: string; state: 'pending' | 'approved' | 'rejected' } | null> {
+  const row = await env.DB.prepare(`SELECT ${ADJ_COLS} FROM wallet_adjustments WHERE id = ?`).bind(id).first<Adj>();
+  if (!row) return null;
+  if (row.state === 'approved') await applyAdjustment(env, row, now);
+  return { id: row.id, state: row.state };
 }
 
 export async function decideAdjustment(env: Env, a: { actor: string; id: string; decision: 'approve' | 'reject' }, now = Date.now()) {

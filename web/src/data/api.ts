@@ -2,7 +2,7 @@ import { z } from 'zod';
 import {
   agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
-  packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, searchResponse, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
+  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, searchResponse, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
 import type { InboxSource } from './source';
@@ -147,6 +147,11 @@ export function createApiSource(o: Opts): LiveSource {
       refresh: async (id) => (await call(`/numbers/${encodeURIComponent(id)}/refresh`, z.object({ number: numberDto }).loose(), { method: 'POST' })).number,
       register: async (id) => (await call(`/numbers/${encodeURIComponent(id)}/register`, z.object({ number: numberDto }).loose(), { method: 'POST' })).number,
       disconnect: async (id) => (await call(`/numbers/${encodeURIComponent(id)}/disconnect`, z.object({ number: numberDto }).loose(), { method: 'POST' })).number,
+      shared: {
+        status: () => call('/shared-number', sharedNumberDto),
+        join: (displayName) => call('/shared-number/join', sharedNumberDto, post(displayName ? { displayName } : {})),
+        leave: () => call('/shared-number/leave', sharedNumberDto, post({})),
+      },
     },
     contacts: {
       async list(q) {
@@ -180,6 +185,13 @@ export function createApiSource(o: Opts): LiveSource {
       packages: async () => (await call('/packages', items(packageDto))).items,
       buyPackage: (packageId) => call(`/packages/${encodeURIComponent(packageId)}/checkout`, packageOrderDto, post({})),
       packageOrderState: (orderId) => call(`/packages/orders/${encodeURIComponent(orderId)}`, packageOrderDto),
+      instapay: () => call('/wallet/instapay', instapayViewDto),
+      createInstapay: (input) => call('/wallet/instapay', instapayCreatedDto, post(input)),
+      async uploadInstapayProof(requestId, file) {
+        const res = await f(`${root}/wallet/instapay/${encodeURIComponent(requestId)}/proof`, { method: 'PUT', headers: { authorization: `Bearer ${await o.getToken()}`, 'content-type': file.type }, body: file });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
+        return instapayRequestDto.parse(await res.json());
+      },
       refundRequests: async () => (await call('/wallet/refund-requests', items(refundRequestDto))).items,
       requestRefund: (amountMinor, note) => call('/wallet/refund-requests', refundRequestDto, post({ amountMinor, ...(note.trim() ? { note: note.trim() } : {}) })),
     },
@@ -195,7 +207,13 @@ export function createApiSource(o: Opts): LiveSource {
       setFunding: async (phoneNumberId, funding, reason) => { await op(`/numbers/${encodeURIComponent(phoneNumberId)}/funding`, done, { method: 'PUT', body: JSON.stringify({ funding, reason }) }); },
       refundQueue: async () => (await op('/refund-requests', items(refundRequestDto))).items,
       decideRefund: (id, decision, note) => op(`/refund-requests/${encodeURIComponent(id)}/decision`, refundRequestDto, post({ decision, ...(note.trim() ? { note: note.trim() } : {}) })),
+      linkDashboardRefund: async (id, kashierRefundId, amountMinor) => { await op(`/refund-requests/${encodeURIComponent(id)}/link-dashboard-refund`, done, { method: 'POST', body: JSON.stringify({ kashierRefundId, amountMinor }) }); },
+      abandonRefund: (id) => op(`/refund-requests/${encodeURIComponent(id)}/abandon`, z.object({ ok: z.literal(true), needsSecond: z.literal(true).optional(), already: z.literal(true).optional() }).loose(), post({})),
       markRefundPaid: async (id) => { await op(`/refund-requests/${encodeURIComponent(id)}/manual-paid`, done, { method: 'POST' }); },
+      instapayQueue: async () => (await op('/instapay?state=under_review', items(operatorInstapayDto))).items,
+      instapayProofLink: (id) => op(`/instapay/${encodeURIComponent(id)}/proof-link`, z.object({ url: z.string(), expiresAt: z.number().int() })),
+      confirmInstapay: (id) => op(`/instapay/${encodeURIComponent(id)}/confirm`, operatorInstapayDto.extend({ needsSecond: z.literal(true).optional() }), post({})),
+      rejectInstapay: (id, reason) => op(`/instapay/${encodeURIComponent(id)}/reject`, operatorInstapayDto, post({ reason })),
       adjustments: async () => (await op('/adjustments', items(adjustmentDto))).items,
       createAdjustment: (workspaceId, amountMinor, reason) => op(`/workspaces/${encodeURIComponent(workspaceId)}/adjustments`, adjustmentDto, post({ amountMinor, reason })),
       decideAdjustment: (id, decision) => op(`/adjustments/${encodeURIComponent(id)}/decision`, adjustmentDto, post({ decision })),

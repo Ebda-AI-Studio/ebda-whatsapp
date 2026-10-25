@@ -86,6 +86,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     // A bought package does not renew itself: a week before it ends the owner is reminded (the Store-included one is renewed by the Store).
     const plan = walletDto.plan;
     if (plan && plan.packageId !== 'store-included' && (plan.status === 'active' || plan.status === 'trialing') && plan.periodEnd > now() && plan.periodEnd - now() <= 7 * 86_400_000) lines.push(t.wBannerRenew(dateTime(plan.periodEnd, lang)));
+    if (walletDto.instapayNotice) lines.push(t.ipRejectedBanner(walletDto.instapayNotice.reason));
     if (walletDto.lowBalance || walletDto.debtMinor > 0) {
       const money: string[] = [];
       if (walletDto.debtMinor > 0) money.push(t.wBannerDebt(formatMoney(walletDto.debtMinor, 'EGP', lang)));

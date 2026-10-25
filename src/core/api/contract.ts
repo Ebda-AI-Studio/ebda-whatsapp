@@ -77,7 +77,7 @@ export const apiError = z.object({
   error: z.enum([
     'unauthorized', 'forbidden', 'not_found', 'invalid_request',
     'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited', 'plan_blocked', 'funding_unknown', 'rate_unavailable',
-    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable',
+    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable', 'package_required',
   ]),
   message: z.string().optional(),
 });
@@ -384,6 +384,8 @@ export const fundingKind = z.enum(['merchant_card', 'platform_line']);
 export const walletFundingKind = z.enum(['merchant_card', 'platform_line', 'unknown']);
 export const billingCategory = z.enum(['marketing', 'utility', 'authentication', 'service']);
 export const walletDto = z.object({
+  /** Additive: the owner's newest InstaPay rejection not yet opened (shown as an inbox notice with the reason). */
+  instapayNotice: z.object({ id: z.string(), reason: z.string() }).nullable().optional(),
   balanceMinor: z.number().int(),
   heldMinor: z.number().int(),
   /** balance - held; can be negative inside the overdraft. */
@@ -428,9 +430,29 @@ export const topupDto = z.object({
 /** Packages a merchant can buy (PACKAGE_CHECKOUT_ENABLED). The amount is the server's price; the client never sends one. */
 export const packageDto = z.object({ id: z.string(), name: z.string(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative() });
 export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired', 'refunded']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
+// ---- InstaPay billing (INSTAPAY_BILLING_ENABLED). Additive. The amount is the server's: a package's price, or a top-up within the card top-up bounds. ----
+export const instapayState = z.enum(['awaiting_proof', 'under_review', 'confirmed', 'rejected', 'expired']);
+export const instapayCreate = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('package'), packageId: z.string().min(1).max(64) }).strict(),
+  z.object({ kind: z.literal('topup'), amountMinor: z.number().int().min(1000).max(5_000_000) }).strict(),
+]);
+export const instapayPayeeDto = z.object({ handle: z.string(), name: z.string(), qrUrl: z.string().url().nullable() });
+export const instapayRequestDto = z.object({
+  id: z.string(), reference: z.string(), kind: z.enum(['package', 'topup']), packageId: z.string().nullable(), amountMinor: z.number().int(), currency: z.string(), state: instapayState,
+  createdAt: z.number().int(), expiresAt: z.number().int(), hasProof: z.boolean(), rejectReason: z.string().nullable(), decidedAt: z.number().int().nullable(),
+});
+/** GET /wallet/instapay: `payee` is null when the brand has no InstaPay account configured (the card is then shown as unavailable). */
+export const instapayViewDto = z.object({ enabled: z.boolean(), payee: instapayPayeeDto.nullable(), items: z.array(instapayRequestDto) });
+export const instapayCreatedDto = instapayRequestDto.extend({ payee: instapayPayeeDto });
+export const operatorInstapayDto = instapayRequestDto.extend({
+  workspaceId: z.string(), createdBy: z.string(), proofAt: z.number().int().nullable(), firstApprover: z.string().nullable(), decidedBy: z.string().nullable(), proofMime: z.string().nullable(),
+});
+export const instapayReject = z.object({ reason: z.string().trim().min(3).max(300) });
 export const refundRequestCreate = z.object({ amountMinor: z.number().int().min(5000), note: z.string().trim().max(500).optional() });
+/** An operator refunded the card in the provider's dashboard to pay a manual payout and links that refund to the request. `orderId` (the top-up) is optional. */
+export const refundDashboardLink = z.object({ kashierRefundId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/), amountMinor: z.number().int().positive(), orderId: z.string().min(1).max(64).optional() });
 export const refundRequestDto = z.object({
-  id: z.string(), workspaceId: z.string(), amountMinor: z.number().int(), note: z.string().nullable(), state: z.enum(['pending', 'rejected', 'processing', 'paid', 'manual_payout', 'failed']),
+  id: z.string(), workspaceId: z.string(), amountMinor: z.number().int(), note: z.string().nullable(), state: z.enum(['pending', 'rejected', 'processing', 'paid', 'manual_payout', 'failed', 'abandoning', 'abandoned']),
   requestedBy: z.string(), createdAt: z.number().int(), decidedBy: z.string().nullable(), decidedAt: z.number().int().nullable(), decisionNote: z.string().nullable(),
   cardRefundedMinor: z.number().int(), manualMinor: z.number().int(),
 });
@@ -588,6 +610,8 @@ export const sharedNumberDto = z.object({
   member: z.boolean(),
   displayName: z.string().nullable(),
   displayPhone: z.string().nullable(),
+  /** Additive: true when the store is not a member and its plan does not include the shared number (joining answers 402 package_required). */
+  packageRequired: z.boolean().optional(),
 });
 export type SharedNumberDto = z.infer<typeof sharedNumberDto>;
 /** POST /operator/shared-numbers (super admin). Registers the platform number and records its funding (platform_line) in the same write. */

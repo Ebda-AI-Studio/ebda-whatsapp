@@ -1,7 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
+import { ApiError } from './data/api';
 import { createSampleSource } from './data/sample';
+import { STRINGS } from './i18n';
 import { SignupStopped } from './lib/embedded-signup';
 
 afterEach(cleanup);
@@ -120,5 +122,46 @@ describe('numbers', () => {
     source.capabilities = { ...source.capabilities, numbers: false };
     render(<App source={source} now={now} />);
     expect(screen.queryByRole('link', { name: 'رقم واتساب' })).toBeNull();
+  });
+});
+
+describe('numbers: the shared number', () => {
+  const t = STRINGS.ar;
+
+  it('joins with a chosen name and can leave again', async () => {
+    const source = createSampleSource();
+    const join = vi.spyOn(source.numbers!.shared!, 'join');
+    await open(source);
+    const card = await screen.findByRole('region', { name: t.sharedTitle });
+    fireEvent.change(within(card).getByLabelText(t.sharedNameLabel), { target: { value: 'متجر النور' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.sharedJoin })));
+    expect(join).toHaveBeenCalledWith('متجر النور');
+    expect(await within(card).findByText(t.sharedMember('متجر النور'))).toBeTruthy();
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.sharedLeave })));
+    expect(await within(card).findByRole('button', { name: t.sharedJoin })).toBeTruthy();
+  });
+
+  it('says why when the plan does not include it (402 package_required): before trying and after, in Arabic with an English twin', async () => {
+    const source = createSampleSource();
+    source.numbers!.shared!.status = async () => ({ available: true, member: false, displayName: null, displayPhone: '+20', packageRequired: true });
+    source.numbers!.shared!.join = async () => { throw new ApiError('package_required', 402, 'package_required'); };
+    await open(source);
+    const card = await screen.findByRole('region', { name: t.sharedTitle });
+    expect(within(card).getByRole('note').textContent).toBe(t.sharedPackageRequired); // told before trying
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.sharedJoin })));
+    expect(within(card).getByRole('alert').textContent).toBe(t.sharedPackageRequired);
+    expect(STRINGS.en.sharedPackageRequired).toMatch(/does not include the shared number/);
+  });
+
+  it('is hidden while the server has the shared number off, and for staff', async () => {
+    const off = createSampleSource();
+    off.numbers!.shared!.status = async () => { throw new ApiError('not_found', 404); };
+    await open(off);
+    expect(screen.queryByRole('region', { name: t.sharedTitle })).toBeNull();
+    cleanup();
+    const staff = createSampleSource();
+    staff.role = 'staff';
+    await open(staff);
+    expect(screen.queryByRole('region', { name: t.sharedTitle })).toBeNull();
   });
 });

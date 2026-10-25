@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { StatementDto, WalletDto } from '../../../src/core/api/contract';
-import { changeLogItemDto, costEstimateDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
+import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
 
 export type { StatementDto, WalletDto };
 export type CostEstimateDto = z.infer<typeof costEstimateDto>;
@@ -8,6 +8,10 @@ export type TopupDto = z.infer<typeof topupDto>;
 export type PackageDto = z.infer<typeof packageDto>;
 export type PackageOrderDto = z.infer<typeof packageOrderDto>;
 export type RefundRequest = z.infer<typeof refundRequestDto>;
+export type InstapayRequest = z.infer<typeof instapayRequestDto>;
+export type InstapayView = z.infer<typeof instapayViewDto>;
+export type InstapayCreated = z.infer<typeof instapayCreatedDto>;
+export type OperatorInstapay = z.infer<typeof operatorInstapayDto>;
 export type PricingSettings = z.infer<typeof pricingSettingsDto>;
 export type ChangeLogItem = z.infer<typeof changeLogItemDto>;
 
@@ -43,6 +47,12 @@ export interface WalletApi {
   /** Starts a checkout for a package (owner only). Only the id goes up: the server owns the price. The plan changes only when the server's webhook says paid. */
   buyPackage(packageId: string): Promise<PackageOrderDto>;
   packageOrderState(orderId: string): Promise<PackageOrderDto>;
+  /** InstaPay billing (owner). Rejects with a 404 ApiError while the server has it switched off. `payee` is null when the brand has no InstaPay account configured. */
+  instapay(): Promise<InstapayView>;
+  /** The server computes the amount: a package's price, or the top-up amount within the card top-up limits. */
+  createInstapay(input: { kind: 'package'; packageId: string } | { kind: 'topup'; amountMinor: number }): Promise<InstapayCreated>;
+  /** Uploads the transfer proof (jpeg / png / webp / pdf, up to 5 MB). */
+  uploadInstapayProof(requestId: string, file: File): Promise<InstapayRequest>;
   refundRequests(): Promise<RefundRequest[]>;
   requestRefund(amountMinor: number, note: string): Promise<RefundRequest>;
 }
@@ -63,6 +73,15 @@ export interface OperatorApi {
   refundQueue(): Promise<RefundRequest[]>;
   decideRefund(id: string, decision: 'approve' | 'reject', note: string): Promise<RefundRequest>;
   markRefundPaid(id: string): Promise<void>;
+  /** Two operators: the first call records the request (`needsSecond`), a different operator's call executes it. */
+  abandonRefund(id: string): Promise<{ needsSecond?: true }>;
+  /** The card was refunded in the provider's dashboard to pay this manual payout: links that refund so its webhook never debits again. */
+  linkDashboardRefund(id: string, kashierRefundId: string, amountMinor: number): Promise<void>;
+  instapayQueue(): Promise<OperatorInstapay[]>;
+  /** A signed link that opens the proof for a couple of minutes. */
+  instapayProofLink(id: string): Promise<{ url: string; expiresAt: number }>;
+  confirmInstapay(id: string): Promise<OperatorInstapay & { needsSecond?: true }>;
+  rejectInstapay(id: string, reason: string): Promise<OperatorInstapay>;
   adjustments(): Promise<Adjustment[]>;
   createAdjustment(workspaceId: string, amountMinor: number, reason: string): Promise<Adjustment>;
   decideAdjustment(id: string, decision: 'approve' | 'reject'): Promise<Adjustment>;

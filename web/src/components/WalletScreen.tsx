@@ -2,7 +2,7 @@ import { Download, Wallet } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { StatementDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
-import type { PackageDto, RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/billing';
+import type { InstapayCreated, InstapayRequest, InstapayView, PackageDto, RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -156,6 +156,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
             onStarted={(p) => { writePending(p); setPending(p); setTopupNote('waiting'); }} cardOnly={cardOnly} />
         )}
         {owner && <PackagesCard t={t} lang={lang} api={api} go={go} now={now} onActivated={() => void api.wallet().then(setWallet, () => undefined)} />}
+        {owner && <InstapayCard t={t} lang={lang} api={api} />}
         {canSeeStatement && <StatementCard t={t} lang={lang} api={api} now={now} />}
         {owner && <RefundCard t={t} lang={lang} api={api} />}
       </div>
@@ -446,6 +447,114 @@ function RefundCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }
               <span className="wallet-row-main"><b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{signed(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={r.state === 'paid' ? 'done' : r.state === 'rejected' || r.state === 'failed' ? 'failed' : 'pending'}>{t.refundStates[r.state] ?? r.state}</span>
                 {r.decisionNote && <span className="muted op-line" dir="auto">{r.decisionNote}</span>}</span>
               <span className="muted wallet-row-date">{dateTime(r.createdAt, lang)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+const PROOF_MAX_BYTES = 5 * 1024 * 1024;
+const PROOF_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+
+/** Pay a package or a top-up by InstaPay transfer (owner). Hidden while the server has it off (404). The server owns the amount; the proof is checked again there. */
+function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }) {
+  const [view, setView] = useState<InstapayView | 'loading' | 'off' | 'error'>('loading');
+  const [packages, setPackages] = useState<PackageDto[]>([]);
+  const [kind, setKind] = useState<'package' | 'topup'>('package');
+  const [packageId, setPackageId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [created, setCreated] = useState<InstapayCreated | null>(null);
+  const [msg, setMsg] = useState<{ kind: 'alert' | 'status'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+
+  const load = useCallback(() => {
+    api.instapay().then(setView, (e: unknown) => setView(e instanceof ApiError && e.status === 404 ? 'off' : 'error'));
+  }, [api]);
+  useEffect(load, [load]);
+  useEffect(() => { api.packages().then((p) => { setPackages(p); setPackageId((cur) => cur || p[0]?.id || ''); }, () => setPackages([])); }, [api]);
+
+  if (view === 'loading' || view === 'off') return null;
+  if (view === 'error') return <section className="wallet-card" aria-labelledby="w-ip-title"><h2 id="w-ip-title">{t.wIpTitle}</h2><p role="alert" className="error-text">{t.wIpError}</p></section>;
+  if (!view.payee) return <section className="wallet-card" aria-labelledby="w-ip-title"><h2 id="w-ip-title">{t.wIpTitle}</h2><p className="muted">{t.wIpUnavailable}</p></section>;
+
+  const start = async (e: FormEvent) => {
+    e.preventDefault();
+    setMsg(null);
+    let input: Parameters<WalletApi['createInstapay']>[0];
+    if (kind === 'package') {
+      if (!packageId) return;
+      input = { kind: 'package', packageId };
+    } else {
+      const minor = egpToMinor(amount);
+      if (minor === null || minor < MIN_TOPUP_MINOR || minor > MAX_TOPUP_MINOR) { setMsg({ kind: 'alert', text: t.wTopupBadAmount }); return; }
+      input = { kind: 'topup', amountMinor: minor };
+    }
+    setBusy(true);
+    try { setCreated(await api.createInstapay(input)); load(); } catch { setMsg({ kind: 'alert', text: t.wIpError }); } finally { setBusy(false); }
+  };
+
+  const upload = async (id: string, file: File | undefined) => {
+    if (!file) return;
+    if (file.size > PROOF_MAX_BYTES) { setMsg({ kind: 'alert', text: t.wIpTooBig }); return; }
+    if (!PROOF_TYPES.includes(file.type)) { setMsg({ kind: 'alert', text: t.wIpBadType }); return; }
+    setBusy(true);
+    setMsg(null);
+    try { await api.uploadInstapayProof(id, file); setCreated(null); setMsg({ kind: 'status', text: t.wIpUploaded }); load(); } catch (err) {
+      setMsg({ kind: 'alert', text: err instanceof ApiError && err.status === 409 ? t.wIpExpiredUpload : err instanceof ApiError && err.status === 413 ? t.wIpTooBig : err instanceof ApiError && err.status === 415 ? t.wIpBadType : t.wIpError });
+    } finally { setBusy(false); }
+  };
+
+  const payee = created?.payee ?? view.payee;
+  const safeQr = (() => { try { return payee.qrUrl && new URL(payee.qrUrl).protocol === 'https:' ? payee.qrUrl : null; } catch { return null; } })();
+
+  return (
+    <section className="wallet-card" aria-labelledby="w-ip-title">
+      <h2 id="w-ip-title">{t.wIpTitle}</h2>
+      <p className="muted">{t.wIpIntro}</p>
+      {!created && (
+        <form className="wallet-form" onSubmit={(e) => void start(e)} noValidate>
+          <div role="radiogroup" aria-label={t.wIpTitle} className="campaign-actions">
+            <label><input type="radio" name="ip-kind" checked={kind === 'package'} onChange={() => setKind('package')} /> {t.wIpKindPackage}</label>
+            <label><input type="radio" name="ip-kind" checked={kind === 'topup'} onChange={() => setKind('topup')} /> {t.wIpKindTopup}</label>
+          </div>
+          {kind === 'package' ? (
+            <label className="field"><span>{t.wIpPickPackage}</span>
+              <select value={packageId} onChange={(e) => setPackageId(e.target.value)}>{packages.map((p) => <option key={p.id} value={p.id}>{p.name} • {money(p.priceMinor)}</option>)}</select>
+            </label>
+          ) : (
+            <label className="field"><span>{t.wIpAmount}</span><input inputMode="decimal" dir="ltr" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+          )}
+          <div className="settings-actions"><button type="submit" className="btn primary" disabled={busy}>{t.wIpCreate}</button></div>
+        </form>
+      )}
+      {created && (
+        <>
+          <div className="wallet-summary">
+            <p><b>{t.wIpPayTo}</b> <bdi dir="ltr">{payee.handle}</bdi> • {t.wIpPayee(payee.name)}</p>
+            {safeQr && <img src={safeQr} alt={t.wIpQrAlt} width={160} height={160} loading="lazy" />}
+            <p>{t.wIpExact}: <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(created.amountMinor)}</bdi></b></p>
+            <p>{t.wIpReference}: <b><bdi dir="ltr">{created.reference}</bdi></b></p>
+            <p className="muted">{t.wIpExpires(dateTime(created.expiresAt, lang))}</p>
+          </div>
+          <label className="field"><span>{t.wIpUpload}</span><input type="file" accept={PROOF_TYPES.join(',')} disabled={busy} onChange={(e) => void upload(created.id, e.target.files?.[0])} /></label>
+          <small className="muted">{t.wIpUploadHint}</small>
+        </>
+      )}
+      {msg && <p role={msg.kind === 'alert' ? 'alert' : 'status'} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
+      <h3 className="pane-sub">{t.wIpPast}</h3>
+      {view.items.length === 0 ? <p className="muted">{t.wIpNone}</p> : (
+        <ul className="wallet-rows" aria-label={t.wIpPast}>
+          {view.items.map((r: InstapayRequest) => (
+            <li key={r.id}>
+              <span className="wallet-row-main">
+                <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={r.state === 'confirmed' ? 'done' : r.state === 'rejected' || r.state === 'expired' ? 'failed' : 'pending'}>{t.instapayStates[r.state] ?? r.state}</span>
+                <span className="muted op-line"><bdi dir="ltr">{r.reference}</bdi> • {dateTime(r.createdAt, lang)}</span>
+                {r.state === 'rejected' && r.rejectReason && <span className="op-line" dir="auto">{t.wIpRejectedLine(r.rejectReason)}</span>}
+              </span>
+              {r.state === 'awaiting_proof' && Date.now() < r.expiresAt && <button type="button" className="btn" onClick={() => setCreated({ ...r, payee: view.payee! })}>{t.wIpOpen}</button>}
             </li>
           ))}
         </ul>

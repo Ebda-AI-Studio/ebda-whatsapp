@@ -7,7 +7,7 @@ import { afterSharedSend, joinShared } from '../src/core/shared/shared-number';
 import { fund, setupBilling } from './helpers/billing';
 import { stubGraph } from './helpers/graph';
 import { BUYER_KEY_1, PHONE_1, sentJobs, storeEvent, useStoreLink } from './helpers/store-link';
-import { exec, rows, workspace } from './helpers/workspace';
+import { exec, rows, seedPlan, workspace } from './helpers/workspace';
 
 useStoreLink();
 const W = (n: number) => `00000000-0000-4000-8000-00000000e${String(n).padStart(3, '0')}`;
@@ -26,6 +26,7 @@ async function sharedOnlyStore(n: number): Promise<string> {
   for (const t of EBDA_DEFAULT_TEMPLATES) {
     await exec(ws, "INSERT OR REPLACE INTO templates (name, language, category, status, components, updated_at) VALUES (?, ?, ?, 'APPROVED', ?, 1)", t.name, t.language, t.category, JSON.stringify(t.components));
   }
+  await seedPlan(ws); // joining needs a plan that includes the shared number
   expect(await joinShared(on, ws, `Shop ${n}`)).toMatchObject({ member: true });
   await fund(ws, 100_000);
   return ws;
