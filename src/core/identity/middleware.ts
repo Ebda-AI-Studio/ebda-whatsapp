@@ -30,3 +30,23 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     await next();
   };
 }
+
+/** Requires a valid bearer token of a super admin (`pa: super_admin`). No store membership is looked at: operator routes are not store-scoped. */
+export function requireSuperAdmin(getVerifier: (env: Env) => IdentityVerifier): MiddlewareHandler<{ Bindings: Env; Variables: AuthVars }> {
+  return async (c, next) => {
+    const header = c.req.header('authorization') ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!token) return c.json({ error: 'unauthorized' }, 401);
+    let principal: Principal;
+    try {
+      principal = await getVerifier(c.env).verify(token);
+    } catch (e) {
+      const status = e instanceof IdentityError ? e.status : 401;
+      return c.json({ error: status === 403 ? 'forbidden' : 'unauthorized' }, status);
+    }
+    if (!principal.superAdmin) return c.json({ error: 'forbidden' }, 403);
+    c.set('principal', principal);
+    c.set('storeRole', 'super_admin');
+    await next();
+  };
+}

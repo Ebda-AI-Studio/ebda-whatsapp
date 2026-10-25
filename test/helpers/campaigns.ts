@@ -1,7 +1,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { configureCampaignWallet, NO_WALLET, type CampaignWallet, type WalletSettleOutcome } from '../../src/core/campaigns/wallet';
 import type { CampaignSteps } from '../../src/core/campaigns/workflows';
-import { exec, rows, workspace } from './workspace';
+import { exec, own, rows, workspace } from './workspace';
 
 export const PN = 'pn-x';
 export const MARKETING = JSON.stringify([{ type: 'BODY', text: 'أهلا {{1}} عرض {{2}}' }]);
@@ -36,7 +36,10 @@ export const setTier = (ws: string, tier: number) => exec(ws, 'INSERT OR REPLACE
  * Stops this workspace's alarm from running its due tasks, so a test can look at (and move) the scheduler rows it just created.
  * Tests still run tasks themselves with runDueTasks().
  */
-export const holdAlarm = (ws: string) => runInDurableObject(workspace(ws), (inst) => { (inst as unknown as { alarm: () => Promise<void> }).alarm = async () => undefined; });
+export const holdAlarm = async (ws: string) => {
+  await own(ws); // the campaign's number is registered (and funded by the merchant's card), as connecting it does
+  await runInDurableObject(workspace(ws), (inst) => { (inst as unknown as { alarm: () => Promise<void> }).alarm = async () => undefined; });
+};
 export const campaignMessages = (ws: string) => rows<{ idempotency_key: string; status: string; error_reason: string | null }>(ws, "SELECT idempotency_key, status, error_reason FROM messages WHERE idempotency_key LIKE 'camp:%' ORDER BY id");
 
 export type WalletCalls = { estimate: string[]; reserve: { ref: string; minor: number }[]; settle: { ref: string; outcome: WalletSettleOutcome }[] };

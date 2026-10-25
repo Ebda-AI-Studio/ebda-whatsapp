@@ -291,3 +291,11 @@ it('/me tells the page whether connecting a number is open', async () => {
   const off = await worker.fetch(new Request(`https://x/api/v1/stores/${W(531)}/me`, { headers: { authorization: `Bearer ${api.token}` } }), { ...env, EMBEDDED_SIGNUP_ENABLED: '0' } as typeof env, createExecutionContext());
   expect(await off.json()).toMatchObject({ capabilities: { numbers: false } });
 });
+
+it('a connected own number is funded merchant_card (Meta bills the merchant) and usable at once: the workspace copy is refreshed, no 30-minute wait', async () => {
+  const api = await apiFor(W(532));
+  graph = graphStub(meta('9532', '8532'));
+  expect((await connect(api, '9532', '8532')).status).toBe(200);
+  expect(await env.DB.prepare('SELECT funding FROM number_funding WHERE phone_number_id = ?').bind('8532').first('funding')).toBe('merchant_card');
+  expect(await rows(W(532), "SELECT funding FROM number_funding WHERE phone_number_id = '8532'")).toEqual([{ funding: 'merchant_card' }]);
+});

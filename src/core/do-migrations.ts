@@ -312,7 +312,108 @@ export const DO_MIGRATIONS: readonly string[] = [
    ) WITHOUT ROWID;
    CREATE UNIQUE INDEX campaign_links_recipient ON campaign_links (campaign_id, contact_id);
    CREATE INDEX campaign_links_contact ON campaign_links (contact_id);`,
-  // v25 (Phase 9.3, connectors): the agent's tools into a client's own systems. `secret_enc` is AES-GCM (workspace id as AD), never returned by any API.
+  // v25 (Phase 7.1, packages): the workspace's copy of its subscription. `version` only moves forward; see billing/entitlements.ts.
+  `CREATE TABLE entitlements (
+     id INTEGER PRIMARY KEY CHECK (id = 1),
+     version INTEGER NOT NULL,
+     package_id TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('trialing', 'active', 'past_due', 'cancelled', 'expired')),
+     period_start INTEGER NOT NULL,
+     period_end INTEGER NOT NULL,
+     ai_credits INTEGER NOT NULL DEFAULT 0,
+     cancelled_at INTEGER,
+     updated_at INTEGER NOT NULL
+   );`,
+  // v26 (Phase 7.2, money). Authoritative for one workspace; see billing/engine.ts for the invariants.
+  // wallet_ledger: append-only (triggers), one row per money movement, balance_after written in the same transaction as the row.
+  // Amounts are signed integer piasters; amount_minor = net_minor + vat_minor. No phone number, name or message text is ever stored here.
+  // wallet_holds: reservations (never deleted); a hold is 'held' until the message settles it. billable_sends: one row per Meta message
+  // id, kept for as long as the money rows are (erasing a contact does not touch it). ledger_outbox: rows waiting to be copied to D1.
+  `CREATE TABLE wallet_ledger (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     at INTEGER NOT NULL,
+     kind TEXT NOT NULL CHECK (kind IN ('topup', 'meta_charge', 'meta_adjust', 'ai_charge', 'refund', 'chargeback', 'adjustment', 'grant', 'expire')),
+     net_minor INTEGER NOT NULL,
+     vat_minor INTEGER NOT NULL DEFAULT 0,
+     amount_minor INTEGER NOT NULL CHECK (amount_minor <> 0 AND amount_minor = net_minor + vat_minor),
+     balance_after INTEGER NOT NULL,
+     ref TEXT NOT NULL UNIQUE,
+     wamid TEXT,
+     category TEXT,
+     usd_micros INTEGER,
+     rate_ver INTEGER,
+     fx_ver INTEGER,
+     pricing_ver INTEGER,
+     actor TEXT,
+     note TEXT
+   );
+   CREATE INDEX wallet_ledger_at ON wallet_ledger (at);
+   CREATE TRIGGER wallet_ledger_no_update BEFORE UPDATE ON wallet_ledger BEGIN SELECT RAISE(ABORT, 'wallet_ledger is append-only'); END;
+   CREATE TRIGGER wallet_ledger_no_delete BEFORE DELETE ON wallet_ledger BEGIN SELECT RAISE(ABORT, 'wallet_ledger is append-only'); END;
+   CREATE TABLE wallet_holds (
+     ref TEXT PRIMARY KEY,
+     parent_ref TEXT,
+     amount_minor INTEGER NOT NULL CHECK (amount_minor >= 0),
+     category_est TEXT,
+     state TEXT NOT NULL CHECK (state IN ('held', 'charged', 'released', 'expired')),
+     wait_until INTEGER,
+     expires_at INTEGER NOT NULL,
+     created_at INTEGER NOT NULL,
+     settled_at INTEGER,
+     number_id TEXT,
+     country TEXT,
+     funding TEXT,
+     release_reason TEXT,
+     closing INTEGER NOT NULL DEFAULT 0
+   );
+   CREATE INDEX wallet_holds_state ON wallet_holds (state, expires_at);
+   CREATE INDEX wallet_holds_parent ON wallet_holds (parent_ref) WHERE parent_ref IS NOT NULL;
+   CREATE TRIGGER wallet_holds_no_delete BEFORE DELETE ON wallet_holds BEGIN SELECT RAISE(ABORT, 'wallet holds are never deleted'); END;
+   CREATE TABLE billable_sends (
+     wamid TEXT PRIMARY KEY,
+     hold_ref TEXT,
+     number_id TEXT,
+     country TEXT,
+     category_est TEXT,
+     category_meta TEXT,
+     type TEXT,
+     pricing_model TEXT,
+     billable INTEGER,
+     funding TEXT NOT NULL,
+     delivered_at INTEGER,
+     charged_ref TEXT,
+     charged_category TEXT,
+     charged_minor INTEGER,
+     unpriced INTEGER NOT NULL DEFAULT 0,
+     cost_usd_micros INTEGER,
+     created_at INTEGER NOT NULL
+   );
+   CREATE INDEX billable_sends_month ON billable_sends (delivered_at);
+   CREATE TRIGGER billable_sends_no_delete BEFORE DELETE ON billable_sends BEGIN SELECT RAISE(ABORT, 'billable_sends are never deleted'); END;
+   CREATE TABLE ledger_outbox (
+     ledger TEXT NOT NULL CHECK (ledger IN ('wallet', 'credit')),
+     ref TEXT NOT NULL,
+     row_json TEXT NOT NULL,
+     drained_at INTEGER,
+     PRIMARY KEY (ledger, ref)
+   ) WITHOUT ROWID;
+   CREATE INDEX ledger_outbox_pending ON ledger_outbox (ledger, ref) WHERE drained_at IS NULL;
+   INSERT INTO ledger_outbox (ledger, ref, row_json) SELECT 'credit', ref, json_object('at', at, 'kind', kind, 'amount', amount, 'balance_after', balance_after) FROM credit_ledger;
+   CREATE TABLE wallet_waits (key TEXT PRIMARY KEY, wait_until INTEGER NOT NULL, created_at INTEGER NOT NULL);
+   ALTER TABLE message_status_events ADD COLUMN pricing_json TEXT;`,
+  // v27 (Phase 7.2/7.3, price inputs): this workspace's copy of the D1 control-plane versions. Immutable once copied (src_id is the D1 row id,
+  // so the pull is incremental); funding is replaced as a whole. Staleness class BOUNDED: at most PRICING_MAX_AGE_MS old, and every
+  // effective-dated change is published far enough ahead that the copy has it before it takes effect (see billing/pricing.ts).
+  `CREATE TABLE pricing_rates (src_id INTEGER PRIMARY KEY, ver INTEGER NOT NULL, effective_from INTEGER NOT NULL, country TEXT NOT NULL, category TEXT NOT NULL, usd_micros INTEGER NOT NULL);
+   CREATE INDEX pricing_rates_lookup ON pricing_rates (country, category, effective_from);
+   CREATE TABLE pricing_fx (src_id INTEGER PRIMARY KEY, ver INTEGER NOT NULL, effective_from INTEGER NOT NULL, egp_per_usd_micros INTEGER NOT NULL, buffer_bps INTEGER NOT NULL);
+   CREATE TABLE pricing_settings (src_id INTEGER PRIMARY KEY, ver INTEGER NOT NULL, effective_from INTEGER NOT NULL, margin_bps INTEGER NOT NULL, credit_limit_minor INTEGER NOT NULL, fx_buffer_bps INTEGER NOT NULL, vat_bps INTEGER NOT NULL);
+   CREATE TABLE pricing_overrides (src_id INTEGER PRIMARY KEY, ver INTEGER NOT NULL, effective_from INTEGER NOT NULL, margin_bps INTEGER NOT NULL);
+   CREATE TABLE number_funding (phone_number_id TEXT PRIMARY KEY, funding TEXT NOT NULL CHECK (funding IN ('merchant_card', 'platform_line')));`,
+  // v28 (fail-closed money): a billable delivery whose rate cannot be found is kept as pending_rate and charged when the rate appears.
+  `ALTER TABLE billable_sends ADD COLUMN pending_rate INTEGER NOT NULL DEFAULT 0;
+   CREATE INDEX billable_sends_pending ON billable_sends (wamid) WHERE pending_rate = 1;`,
+  // v29 (Phase 9.3, connectors): the agent's tools into a client's own systems. `secret_enc` is AES-GCM (workspace id as AD), never returned by any API.
   `CREATE TABLE connectors (
      id TEXT PRIMARY KEY,
      kind TEXT NOT NULL CHECK (kind IN ('webhook', 'odoo')),

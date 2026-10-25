@@ -7,12 +7,13 @@ import { selectVerifier } from './identity-select';
 import { configureAgent } from './core/ai/config';
 import { signupEnabled } from './core/numbers/numbers';
 import { verifyMetaSignature } from './core/meta/signature';
-import { extractCoexistence, extractEvents, extractNameUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
+import { extractCoexistence, extractEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
 import { scrubEvent } from './core/observability';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
-import { requireStoreAccess, type AuthVars } from './core/identity/middleware';
+import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
+import { operatorRoutes } from './routes/operator';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { TIER_LIMITS } from './core/throttle';
@@ -37,6 +38,9 @@ import { segmentsRoutes } from './routes/segments';
 import { campaignsRoutes } from './routes/campaigns';
 import { trackRoutes } from './routes/track';
 import { numbersRoutes } from './routes/numbers';
+import { reconcileEntitlements } from './core/billing/subscriptions';
+import { handleProviderWebhook, repairTopups } from './core/billing/topups';
+import { walletRoutes } from './routes/wallet';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 // The brand pack (BRAND var; unset = the suite brand) is chosen once per isolate, before any request: copy, templates, agent words,
@@ -93,6 +97,8 @@ const getVerifier = (env: Env): IdentityVerifier => (verifier ??= selectVerifier
 
 const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
+api.use('/operator/*', requireSuperAdmin(getVerifier));
+api.route('/operator', operatorRoutes);
 api.get('/stores/:storeId/me', (c) => {
   const p = c.get('principal');
   return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env) } });
@@ -127,6 +133,7 @@ api.route('/', importsRoutes);
 api.route('/', segmentsRoutes);
 api.route('/', campaignsRoutes);
 api.route('/', numbersRoutes);
+api.route('/', walletRoutes);
 app.route('/api/v1', api);
 
 function sameString(a: string, b: string): boolean {
@@ -136,6 +143,12 @@ function sameString(a: string, b: string): boolean {
 }
 
 app.route('/', trackRoutes);
+
+// The card provider's webhook: public, authenticated by its HMAC over the raw body (never by anything in the payload).
+app.post('/kashier/webhook', async (c) => {
+  const out = await handleProviderWebhook(c.env, await c.req.text(), c.req.header('x-kashier-signature') ?? null);
+  return c.text(out.body, out.status);
+});
 
 app.get('/health', (c) => c.json({ ok: true, service: 'ebda-wa', commit: c.env.COMMIT_SHA ?? 'dev' }));
 
@@ -162,6 +175,11 @@ app.post('/meta/webhook', async (c) => {
   for (const t of extractTemplateStatuses(payload)) {
     for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
       await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
+    }
+  }
+  for (const t of extractTemplateCategoryUpdates(payload)) {
+    for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
+      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateCategory(t.name, t.language, t.newCategory);
     }
   }
   for (const u of extractTierUpdates(payload)) {
@@ -221,6 +239,12 @@ app.post('/meta/webhook', async (c) => {
   return c.text('ok');
 });
 
+/** The daily control-plane pass. Each step is independent: one failing never skips the rest. */
+export async function dailyBilling(env: Env): Promise<void> {
+  await reconcileEntitlements(env).catch((err) => console.error(JSON.stringify({ alert: 'entitlement_reconcile_failed', error: err instanceof Error ? err.name : 'error' })));
+  await repairTopups(env).catch((err) => console.error(JSON.stringify({ alert: 'topup_repair_failed', error: err instanceof Error ? err.name : 'error' })));
+}
+
 let warnedNoDsn = false;
 
 export default Sentry.withSentry((env: Env) => {
@@ -231,6 +255,10 @@ export default Sentry.withSentry((env: Env) => {
   return env.SENTRY_DSN ? { dsn: env.SENTRY_DSN, release: env.COMMIT_SHA, beforeSend: scrubEvent, tracesSampleRate: 0 } : undefined;
 }, {
   fetch: app.fetch,
+  /** Daily (the only cron; no polling): re-send subscriptions so a lost push heals. Idempotent by construction. */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(dailyBilling(env));
+  },
   async queue(batch: MessageBatch<unknown>, env: Env, _ctx: ExecutionContext): Promise<void> {
     if (batch.queue === STORE_EVENTS_QUEUE) await consumeStoreEvents(batch, env);
     else await consumeSendBatch(batch, env);

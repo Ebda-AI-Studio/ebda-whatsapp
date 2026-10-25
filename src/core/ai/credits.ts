@@ -9,6 +9,8 @@
  *   GRANTED credits at period end while purchased credits roll over (consumption draws on the grant first).
  * No phone number or name is stored here, so erasure never touches it.
  */
+import { addTask } from '../scheduler';
+
 type Sql = DurableObjectStorage['sql'];
 
 export const AI_TURN_CREDITS = 1;
@@ -28,6 +30,9 @@ export function postCredit(sql: Sql, r: { kind: CreditKind; amount: number; ref:
   if (sql.exec('SELECT 1 FROM credit_ledger WHERE ref = ?', r.ref).toArray().length) return { ok: false, reason: 'duplicate' };
   const balance = creditBalance(sql) + r.amount;
   sql.exec('INSERT INTO credit_ledger (at, kind, amount, balance_after, ref, parent_ref, actor, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', r.now, r.kind, r.amount, balance, r.ref, r.parentRef ?? null, r.actor ?? null, r.note ?? null);
+  // Copied to D1 by the ledger_drain task (same outbox as the wallet ledger); written in this very transaction.
+  sql.exec("INSERT INTO ledger_outbox (ledger, ref, row_json) VALUES ('credit', ?, ?)", r.ref, JSON.stringify({ at: r.now, kind: r.kind, amount: r.amount, balance_after: balance }));
+  addTask(sql, 'ledger_drain', r.now + 1000);
   return { ok: true, balance };
 }
 

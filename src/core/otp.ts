@@ -5,7 +5,7 @@ import { errClass } from './observability';
 import { activeNumberFor } from './routing';
 import { storeLink } from './store-link';
 
-export type OtpFailure = 'invalid' | 'country_not_allowed' | 'not_found' | 'disabled' | 'no_number' | 'template_unavailable' | 'rate_limited' | 'send_failed' | 'unavailable';
+export type OtpFailure = 'invalid' | 'country_not_allowed' | 'not_found' | 'disabled' | 'no_number' | 'template_unavailable' | 'rate_limited' | 'send_failed' | 'wallet_empty' | 'unavailable';
 export type OtpResult = { ok: true } | { ok: false; reason: OtpFailure };
 
 const requestSchema = z.object({

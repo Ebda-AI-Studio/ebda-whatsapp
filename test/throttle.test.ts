@@ -7,7 +7,7 @@ import { apiFor, graphStub, storeId as W, useApiKey } from './helpers/api';
 import { postWebhook } from './helpers/meta';
 import { tierPayload } from './helpers/payload';
 import { consume } from './helpers/queue';
-import { exec, openChat, rows, seedNumber, workspace } from './helpers/workspace';
+import { exec, openChat, own, rows, seedNumber, workspace } from './helpers/workspace';
 
 useApiKey();
 const PN = 'pn-th';
@@ -25,6 +25,7 @@ it('token bucket math: refills at mps up to a one-second burst, and says how lon
 it('Review Focus 1: a burst of 500 on a 250-tier number: replies go, new recipients beyond the tier wait and are reported, nothing is dropped', { timeout: 30_000 }, async () => {
   const ws = 'ws-t1';
   const stub = workspace(ws);
+  await own(ws, PN);
   await stub.setNumberLimits(PN, { tier: 250, mps: 100_000 });
   const now = Date.now();
   const replies = await Promise.all(Array.from({ length: 20 }, (_, i) => openChat(ws, `2010100000${String(i).padStart(2, '0')}`)));
@@ -59,6 +60,7 @@ it('Review Focus 1: a burst of 500 on a 250-tier number: replies go, new recipie
 it('a throughput-limited job is delayed by the time it takes the bucket to refill, then goes', async () => {
   const ws = 'ws-t2';
   const stub = workspace(ws);
+  await own(ws, PN);
   await stub.setNumberLimits(PN, { mps: 2 });
   await openChat(ws);
   const now = Date.now();

@@ -1,6 +1,7 @@
 import type { Env } from '../../env';
 import type { ConnectNumberRequest, NumberDto } from '../api/contract';
 import { decryptSecret, encryptSecret } from '../ai/secrets';
+import { recordNumberFunding } from '../billing/funding';
 import { TIER_LIMITS } from '../throttle';
 import { HISTORY_DECLINED_CODE, REGISTRATION_LOCKED_CODE, deregisterNumber, exchangeCode, fetchPhone, fetchWabaNumbers, registerNumber, requestSync, subscribeApp, unsubscribeApp, type GraphFail, type PhoneStatus } from './graph';
 import { graphTokenFor, invalidateNumber, invalidateWaba, TokenUnavailable } from './token';
@@ -89,8 +90,14 @@ export function generatePin(): string {
  * Runs after a number finished connecting (and again whenever a half-finished connect is completed, so it must be idempotent).
  * billing records funding = merchant_card here (Ruling WA-FUND-1). Intentionally empty until Phase 7's number_funding is merged.
  */
-export async function onNumberConnected(_env: Env, _n: { workspaceId: string; phoneNumberId: string; wabaId: string; kind: 'own' }): Promise<void> {
-  // billing records funding = merchant_card here (Ruling WA-FUND-1)
+/**
+ * Ruling WA-FUND-1: Meta bills the merchant's own card for an own number, so the wallet never pays Meta for it. Funding is written
+ * explicitly here (no default anywhere: a number without it cannot send), then the workspace's copy of the price inputs is refreshed
+ * at once so the number is usable now rather than after the next 30-minute pull. Idempotent: a resumed connect calls it again.
+ */
+export async function onNumberConnected(env: Env, n: { workspaceId: string; phoneNumberId: string; wabaId: string; kind: 'own' }): Promise<void> {
+  await recordNumberFunding(env, n.phoneNumberId, 'merchant_card');
+  await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(n.workspaceId)).refreshPricing();
 }
 
 // ---- status ----------------------------------------------------------------------------------------------------------

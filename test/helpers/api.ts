@@ -38,3 +38,16 @@ export const storeId = (n: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padSt
 
 /** A token for `storeId` that expires `expSeconds` from now (negative = already expired, still inside the verifier's skew tolerance). */
 export const tokenFor = (storeId: string, expSeconds: number, role: 'owner' | 'staff' = 'owner') => mint(key, { stores: [{ id: storeId, role }] }, { expSeconds });
+
+/** A bearer token for a super admin (identity claim `pa: super_admin`); `sub` tells two operators apart. */
+export const adminToken = (sub = '11111111-1111-4111-8111-111111111111') => mint(key, { sub, pa: 'super_admin', stores: [] });
+export async function operatorCall(sub: string | null, method: string, path: string, body?: unknown) {
+  const token = sub === null ? null : await adminToken(sub);
+  return SELF.fetch(`https://x/api/v1/operator${path}`, {
+    method,
+    headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+}
+export const OP1 = '11111111-1111-4111-8111-111111111111';
+export const OP2 = '22222222-2222-4222-8222-222222222222';

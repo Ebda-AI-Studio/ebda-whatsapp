@@ -33,6 +33,22 @@ export type Env = {
   IMPORT_WORKFLOW: Workflow<{ workspaceId: string; importId: string }>;
   /** Phase 6: campaign broadcasts (one instance per campaign generation, id `<campaignId>-<attempt>`). */
   CAMPAIGN_WORKFLOW: Workflow<{ workspaceId: string; campaignId: string; attempt: number }>;
+  /** Phase 7.4: 'true' turns wallet top-ups on. Anything else (or unset) = off. */
+  TOPUPS_ENABLED?: string;
+  /** Kashier merchant id (var) and Payment API Key (secret). The key signs checkout links and verifies webhooks. */
+  KASHIER_MERCHANT_ID?: string;
+  KASHIER_API_KEY?: string;
+  /** Hosted checkout origin; default https://checkout.kashier.io. */
+  KASHIER_CHECKOUT_URL?: string;
+  /** The card fee the merchant pays ON TOP of a top-up (WA-TOPUP-FEE-1): basis points of the amount, plus a fixed part in piasters. Set both before enabling. */
+  KASHIER_FEE_BPS?: string;
+  KASHIER_FEE_FIXED_MINOR?: string;
+  /** Service binding to the accounts service: `isRevoked(sessionId)`. A top-up session is refused (fail closed) when it is unbound. */
+  ACCOUNTS?: { isRevoked(sessionId: string): Promise<boolean> };
+  /** An operator adjustment above this many piasters waits for a second super admin. Default 100000 (1,000 EGP). */
+  ADJUSTMENT_APPROVAL_MINOR?: string;
+  /** Most adjustments one operator may approve for themselves in a rolling day. Default 20. */
+  ADJUSTMENT_DAILY_CAP?: string;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
   /** The platform's own token: the shared number and platform-level calls. A merchant's own number uses its business token (see core/numbers/token.ts). */

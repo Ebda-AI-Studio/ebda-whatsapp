@@ -88,3 +88,18 @@ export const templateButton = (wamid: string, text: string, payload?: string, fr
   ({ id: wamid, from, type: 'button', button: { text, ...(payload ? { payload } : {}) } });
 export const catalogOrder = (wamid: string, items: { id: string; qty: number; price: number }[], from = '201001234567') =>
   ({ id: wamid, from, type: 'order', order: { catalog_id: '123456', text: '', product_items: items.map((i) => ({ product_retailer_id: i.id, quantity: i.qty, item_price: i.price, currency: 'EGP' })) } });
+
+export function templateCategoryPayload(wabaId: string, u: { name: string; language: string; previous: string; next: string }): string {
+  return JSON.stringify({
+    object: 'whatsapp_business_account',
+    entry: [{ id: wabaId, time: BASE_TS, changes: [{ field: 'template_category_update', value: { message_template_id: 1, message_template_name: u.name, message_template_language: u.language, previous_category: u.previous, new_category: u.next } }] }],
+  });
+}
+
+/** A status webhook carrying Meta's `pricing` object. */
+export function pricedStatusPayload(phoneNumberId: string, wamid: string, status: 'sent' | 'delivered' | 'read', pricing: { billable: boolean; pricing_model: string; category: string }, ts = BASE_TS): string {
+  return JSON.stringify({
+    object: 'whatsapp_business_account',
+    entry: [{ id: 'waba-1', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550000000', phone_number_id: phoneNumberId }, statuses: [{ id: wamid, status, timestamp: String(ts), recipient_id: '201001234567', pricing }] } }] }],
+  });
+}

@@ -8,7 +8,10 @@ import { DEFAULT_TIER, TIER_WINDOW_MS } from '../throttle';
 import { buyerKey } from '../buyer-key';
 import { campaignLinks, newCode, validateTrackedUrl, withUtm } from './links';
 import { audiencePage, getSegment, previewAudience } from './segments';
-import { campaignWallet } from './wallet';
+import { marketingBlocked } from '../billing/entitlements';
+import { countryOf } from '../billing/country';
+import { pricingReady } from '../billing/pricing';
+import { campaignWallet, type WalletCtx } from './wallet';
 
 /** Recipients queued per workflow step. */
 export const PAGE_SIZE = 500;
@@ -28,6 +31,8 @@ type Row = {
   attempt: number; next_page: number; cursor: number; created_by: string | null; created_at: number; updated_at: number; started_at: number | null; finished_at: number | null;
 };
 const COLS = 'id, name, template_name, template_language, category, params, criteria, segment_id, phone_number_id, link_url, status, pause_reason, scheduled_at, daily_send_limit, attempt, next_page, cursor, created_by, created_at, updated_at, started_at, finished_at';
+
+const walletCtx = (host: LinkHost, phoneNumberId: string, countries?: string[]): WalletCtx => ({ billing: host.billing, storage: host.storage, phoneNumberId, now: Date.now(), ...(countries ? { countries: [...new Set(countries)] } : {}) });
 
 const read = (host: LinkHost, id: string): Row | null => host.sql.exec<Row>(`SELECT ${COLS} FROM campaigns WHERE id = ?`, id).toArray()[0] ?? null;
 
@@ -97,7 +102,7 @@ async function view(host: LinkHost, r: Row, withEstimate: boolean): Promise<Camp
   };
   if (withEstimate && (r.status === 'draft' || r.status === 'scheduled')) {
     const audience = previewAudience(host, criteria).count;
-    const perMessageMinor = await campaignWallet().walletEstimate(host.workspaceId, r.category);
+    const perMessageMinor = await campaignWallet().walletEstimate(host.workspaceId, r.category, walletCtx(host, r.phone_number_id));
     dto.estimate = { audience, perMessageMinor, totalMinor: perMessageMinor * audience };
   }
   return dto;
@@ -236,6 +241,7 @@ export async function cancelCampaign(host: LinkHost, id: string, now: number, em
        AND idempotency_key IN (SELECT idem FROM campaign_recipients WHERE campaign_id = ?) RETURNING id`, now, id,
   ).toArray();
   for (const m of failed) emitStatus(m.id);
+  host.billing.settleCampaignMessages(id, 'campaign_cancelled', now); // the messages will never be sent: their holds go back
   return { ok: true, campaign: await view(host, read(host, id)!, false), launch: false };
 }
 
@@ -334,6 +340,11 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
     host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'template_unavailable', updated_at = ? WHERE id = ?", now, id);
     return stop('template_unavailable');
   }
+  if (c.category === 'MARKETING' && marketingBlocked(host.sql)) {
+    // A plan that is past due, cancelled or expired may not spend on marketing; the merchant resumes after fixing the plan.
+    host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'plan_blocked', updated_at = ? WHERE id = ? AND status = 'running'", now, id);
+    return stop('plan_blocked');
+  }
   // The origin was known when the campaign was made; if it is gone the deployment is misconfigured. Nothing is touched: ask again later.
   const baseUrl = c.link_url ? campaignLinks().baseUrl(host.env) : null;
   if (c.link_url && !baseUrl) return { state: 'retry', reason: 'tracking_unavailable' };
@@ -346,17 +357,20 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
   const wallet = campaignWallet();
   let reservedMinor = 0;
   if (rows.length) {
+    await host.ensurePricing();
+    if (!pricingReady(host.sql)) return { state: 'retry', reason: 'pricing_unavailable' }; // an empty copy decides nothing
     let res: Awaited<ReturnType<typeof wallet.walletReserve>>;
     try {
-      reservedMinor = (await wallet.walletEstimate(host.workspaceId, c.category)) * rows.length;
-      res = await wallet.walletReserve(host.workspaceId, ref, reservedMinor);
+      const ctx = walletCtx(host, c.phone_number_id, rows.map((r) => countryOf(r.waId)));
+      reservedMinor = (await wallet.walletEstimate(host.workspaceId, c.category, ctx)) * rows.length;
+      res = await wallet.walletReserve(host.workspaceId, ref, reservedMinor, ctx);
     } catch (err) {
       console.error(JSON.stringify({ alert: 'campaign_wallet_unavailable', workspace: host.workspaceId, error: errClass(err) }));
       return { state: 'retry', reason: 'wallet_unavailable' };
     }
     if (!res.ok) {
-      host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'wallet_empty', updated_at = ? WHERE id = ? AND status = 'running' AND attempt = ?", now, id, attempt);
-      return stop('wallet_empty');
+      host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = ?, updated_at = ? WHERE id = ? AND status = 'running' AND attempt = ?", res.reason, now, id, attempt);
+      return stop(res.reason);
     }
     // The reservation was an await: another call for this very page may have queued it meanwhile (then its answer is ours, and the
     // reservation, which has the same ref, is theirs to keep), or the merchant may have paused or cancelled (then give it back).
@@ -364,7 +378,7 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
     if (raced) return raced;
     const after = read(host, id);
     if (!after || after.attempt !== attempt || after.status !== 'running' || after.next_page !== page) {
-      await wallet.walletSettle(host.workspaceId, ref, { recipients: 0, ended: 'abandoned' });
+      await wallet.walletSettle(host.workspaceId, ref, { recipients: 0, ended: 'abandoned' }, walletCtx(host, c.phone_number_id));
       return stop(after && after.attempt === attempt ? after.status : 'superseded');
     }
   }
@@ -417,9 +431,10 @@ export async function settleWallet(host: LinkHost, id: string): Promise<void> {
   const c = read(host, id);
   if (!c || (c.status !== 'completed' && c.status !== 'cancelled')) return;
   const ended = c.status === 'completed' ? 'completed' : 'cancelled';
+  const ctx = walletCtx(host, c.phone_number_id);
   const pages = host.sql.exec<{ page: number; count: number; reserve_ref: string }>('SELECT page, count, reserve_ref FROM campaign_pages WHERE campaign_id = ? AND settled = 0 ORDER BY page', id).toArray();
   for (const p of pages) {
-    await campaignWallet().walletSettle(host.workspaceId, p.reserve_ref, { recipients: p.count, ended });
+    await campaignWallet().walletSettle(host.workspaceId, p.reserve_ref, { recipients: p.count, ended }, ctx);
     host.sql.exec('UPDATE campaign_pages SET settled = 1 WHERE campaign_id = ? AND page = ?', id, p.page);
   }
 }

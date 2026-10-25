@@ -1,4 +1,5 @@
 import type { Env } from '../../env';
+import type { Billing } from '../billing/engine';
 import type { SendJob } from '../send-queue';
 
 /** What the Store-link code needs from the workspace Durable Object. Implemented by WorkspaceDO; never exposed over RPC. */
@@ -7,6 +8,10 @@ export interface LinkHost {
   readonly storage: DurableObjectStorage;
   readonly env: Env;
   readonly workspaceId: string;
+  /** The workspace's wallet (holds, charges). Synchronous: call it inside the same transaction as the message it settles. */
+  readonly billing: Billing;
+  /** Brings the copy of the price inputs up to date (cheap when it is fresh). Await it before a wallet decision that is not part of a send. */
+  ensurePricing(): Promise<void>;
   /** Contact and conversation for a WhatsApp id (digits, no +), created if missing. Call inside a transaction. */
   ensureConversation(waId: string, now: number, profileName?: string | null): { contactId: number; conversationId: number };
   /** Inserts an outbound 'queued' message row (search index, realtime events included). Call inside a transaction. */
