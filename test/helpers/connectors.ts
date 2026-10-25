@@ -4,6 +4,9 @@ import type { ConnectorCtx } from '../../src/core/connectors/types';
 import { stubGraph } from './graph';
 import { jwks } from './api';
 
+/** The identity keys exist only in files that called useApiKey(). */
+const keys = () => { try { return jwks(); } catch { return undefined; } };
+
 export type ConnCall = { url: string; headers: Record<string, string>; raw: string; json: any };
 export type ConnReply = { status?: number; json?: unknown; text?: string; headers?: Record<string, string> };
 /** Resolves to a reply, or throws to simulate the network failing. May await (hold points). */
@@ -23,7 +26,7 @@ export const hangs = (signal: AbortSignal | undefined): Promise<never> => new Pr
 export function stubClient(handler: ConnHandler, host = 'hooks.acme-client.com') {
   const calls: ConnCall[] = [];
   const g = stubGraph(undefined, {
-    jwks: jwks(),
+    ...(keys() ? { jwks: keys()! } : {}),
     other: (url, init) => {
       if (new URL(url).hostname !== host) return undefined;
       const raw = typeof init?.body === 'string' ? init.body : '';

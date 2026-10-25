@@ -1,5 +1,9 @@
 /** The connectors a turn may use: enabled ones only, tool names prefixed with the connector id (`<id>__<tool>`). */
 import type { Env } from '../../env';
+import { buyerKey } from '../buyer-key';
+import { errClass } from '../observability';
+import { isE164 } from '../phone';
+import { storeLink } from '../store-link';
 import type { ToolDef } from '../ai/provider';
 import { connectorSecret, listConnectors, TOOL_SEP, type ConnectorRow } from './store';
 import { odooConnector, pingOdoo } from './odoo';
@@ -8,7 +12,8 @@ import type { Connector, ConnectorCtx, ToolResult } from './types';
 
 type Host = { sql: SqlStorage; env: Env; workspaceId: string };
 
-export const CALL_WINDOW_MS = 12_000;
+/** How long one tool call may wait on the client's system in all (a request is bounded to 8 s on its own). Tests shorten it. */
+export const connectorLimits = { callWindowMs: 12_000 };
 const CONTENT_MAX = 3000;
 
 function build(host: Host, row: ConnectorRow): Connector {
@@ -57,4 +62,31 @@ export async function testConnector(host: Host, id: string): Promise<{ ok: boole
   const secret = await connectorSecret(host.env, host.workspaceId, host.sql, id);
   if (!secret) return { ok: false, error: 'secret_required' };
   return row.kind === 'webhook' ? pingWebhook(host.env, row.config, secret, host.workspaceId) : pingOdoo(host.env, row.config, secret);
+}
+
+/**
+ * The context of one tool call for the customer `from` (WhatsApp id, digits). Null when the suite secret that derives the buyer key
+ * is not configured or the number is not E.164: such a call is not made.
+ */
+export async function connectorCtx(host: Host, from: string, idempotencyKey: string): Promise<ConnectorCtx | null> {
+  const secret = storeLink().buyerSecret(host.env);
+  const e164 = `+${from}`;
+  if (!secret || !isE164(e164)) return null;
+  const conv = host.sql.exec<{ id: number }>('SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.wa_id = ?', from).toArray()[0];
+  if (!conv) return null;
+  return { workspaceId: host.workspaceId, buyerKey: await buyerKey(secret, e164), conversationId: conv.id, idempotencyKey, deadline: Date.now() + connectorLimits.callWindowMs, buyerPhone: () => e164 };
+}
+
+/** One tool call, end to end: context, call, log of failures as classes only (never arguments, results or the number). */
+export async function runConnectorTool(host: Host, set: ConnectorSet, from: string, name: string, args: unknown, idempotencyKey: string): Promise<string> {
+  let res: ToolResult;
+  try {
+    const ctx = await connectorCtx(host, from, idempotencyKey);
+    res = ctx ? await set.call(name, args, ctx) : { ok: false, error: 'unavailable' };
+  } catch (e) {
+    console.error(JSON.stringify({ alert: 'connector_call_crashed', workspace: host.workspaceId, tool: name.slice(0, 60), error: errClass(e) }));
+    res = { ok: false, error: 'unavailable' };
+  }
+  if (!res.ok) console.error(JSON.stringify({ alert: 'connector_call_failed', workspace: host.workspaceId, tool: name.slice(0, 60), error: res.error }));
+  return toolContent(res);
 }
