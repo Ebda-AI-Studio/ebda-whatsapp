@@ -1,4 +1,21 @@
+import type { z } from 'zod';
+import type { billingCategory, campaignPauseReason, CampaignDto, ImportDto, NumberDto, WalletDto } from '../../src/core/api/contract';
+import type { RefundRequest } from './data/billing';
+
 export type Lang = 'ar' | 'en';
+
+// Copy keyed by a server enum: a code the server can send but this table lacks fails typecheck. Lookups stay open (`?? fallback`) for codes newer than this build.
+const copy = <K extends string>(m: Record<K, string>): Record<string, string> => m;
+type PauseReason = z.infer<typeof campaignPauseReason>;
+type CampaignStatus = CampaignDto['status'];
+type ImportStatus = ImportDto['status'];
+type BillCategory = z.infer<typeof billingCategory>;
+type HistorySync = NonNullable<NumberDto['historySync']>;
+type ContactsSync = NonNullable<NumberDto['contactsSync']>;
+type PlanStatus = NonNullable<WalletDto['plan']>['status'];
+type RefundState = RefundRequest['state'];
+type NumberStateKey = 'active' | 'pending' | 'failed' | 'locked' | 'disconnected';
+
 
 const ar = {
   nav: 'التنقل الرئيسي', inbox: 'المحادثات', templates: 'القوالب', campaigns: 'الحملات', settings: 'الإعدادات',
@@ -37,8 +54,8 @@ const ar = {
   quickReplyTexts: ['أهلًا بيك! أقدر أساعدك إزاي؟', 'طلبك اتأكد وهيوصلك خلال ٢–٣ أيام.', 'ممكن تبعتلي العنوان بالتفصيل؟', 'شكرًا ليك، في خدمتك في أي وقت.'],
   contacts: 'العملاء', campaignsTitle: 'الحملات', newCampaign: 'حملة جديدة', backToCampaigns: 'رجوع للحملات',
   campaignsEmpty: 'لسه مفيش حملات. ابدأ أول حملة وابعت قالب معتمد لعملائك اللي وافقوا يستقبلوا عروض.',
-  campaignStatus: { draft: 'مسودة', scheduled: 'متجدولة', running: 'شغالة', paused: 'متوقفة', completed: 'خلصت', cancelled: 'اتلغت' } as Record<string, string>,
-  pauseReasons: { manual: 'وقّفتها يدوي', wallet_empty: 'المحفظة فاضية. اشحن رصيد وكمّل الحملة.', template_unavailable: 'القالب مبقاش معتمد من واتساب.', internal_error: 'حصلت مشكلة عندنا، وفريقنا بيتابعها.' } as Record<string, string>,
+  campaignStatus: copy<CampaignStatus>({ draft: 'مسودة', scheduled: 'متجدولة', running: 'شغالة', paused: 'متوقفة', completed: 'خلصت', cancelled: 'اتلغت' }),
+  pauseReasons: copy<PauseReason>({ manual: 'وقّفتها يدوي', wallet_empty: 'المحفظة فاضية. اشحن رصيد وكمّل الحملة.', template_unavailable: 'القالب مبقاش معتمد من واتساب.', internal_error: 'حصلت مشكلة عندنا، وفريقنا بيتابعها.', plan_blocked: 'اشتراكك مش بيسمح بالحملات دلوقتي. جدّد الاشتراك وكمّل الحملة.', funding_unknown: 'لسه ما اتحددش مين بيدفع لواتساب على رقمك، فالحملة واقفة لحد ما يتحدد.', rate_unavailable: 'سعر الرسالة لسه مش جاهز، فالحملة واقفة لحد ما يتحدد.' }), pauseUnknown: 'الحملة واقفة لسبب مش معروف. لو فضلت واقفة، كلّم الدعم.',
   stopSent: 'اتبعت', stopDelivered: 'وصل', stopRead: 'اتقرا', stopQueued: 'في الطابور',
   ofRecipients: (a: string, b: string) => `${a} من ${b}`, clicksLine: (u: string, t: string) => `${u} فتحوا اللينك · ${t} فتحة`,
   failedLine: (f: string, s: string) => `${f} ما وصلتش · ${s} اتشالوا`, scheduledFor: (d: string) => `هتبدأ ${d}`, startedAt: (d: string) => `بدأت ${d}`, finishedAt: (d: string) => `خلصت ${d}`,
@@ -63,7 +80,7 @@ const ar = {
   chooseFile: 'اختار ملف', importConsent: 'العملاء دول وافقوا يستقبلوا مني عروض على واتساب، وعندي ما يثبت ده.',
   importConsentHint: 'لو مش متأكد، سيبها فاضية: هنضيف العملاء بس من غير ما يستقبلوا حملات.', startImport: 'ابدأ الاستيراد', importing: 'بنرفع الملف...',
   importFailed: 'الملف ما اترفعش. اتأكد إنه CSV وأقل من ١٠ ميجا.', importsHistory: 'آخر الملفات',
-  importStatus: { pending: 'مستني', running: 'شغال', done: 'خلص', failed: 'فشل' } as Record<string, string>,
+  importStatus: copy<ImportStatus>({ pending: 'مستني', running: 'شغال', done: 'خلص', failed: 'فشل' }),
   importLine: (c: string, u: string, r: string) => `${c} جديد · ${u} اتحدّث · ${r} اترفض`, showRejects: 'شوف المرفوض', rejectLine: (l: string) => `سطر ${l}`,
   rejectReasons: { empty_phone: 'الرقم فاضي', invalid_phone: 'الرقم مش صحيح', duplicate_in_file: 'الرقم متكرر في الملف', unreadable_row: 'السطر مش مقروء' } as Record<string, string>,
   importErrors: { no_header: 'الملف فاضي أو من غير عناوين أعمدة.', no_phone_column: 'مش لاقيين عمود للرقم في الملف.' } as Record<string, string>,
@@ -71,14 +88,14 @@ const ar = {
   numbersNav: 'رقم واتساب', numbersTitle: 'رقم واتساب', connectNumber: 'اربط رقم واتساب', connecting: 'بنربط الرقم...',
   numbersIntro: 'اربط رقم واتساب بتاع متجرك. لو بتستخدم تطبيق واتساب بيزنس على الرقم ده، هيفضل شغال عادي وكمان هتستقبل الرسايل هنا.',
   numbersEmpty: 'لسه مفيش رقم مربوط. اربط رقمك علشان تبدأ تستقبل رسايل عملائك هنا.',
-  numberState: { active: 'شغال', pending: 'التسجيل ما خلصش', failed: 'التسجيل ما خلصش', locked: 'اتقفل التسجيل مؤقتًا', disconnected: 'مفصول' } as Record<string, string>,
+  numberState: copy<NumberStateKey>({ active: 'شغال', pending: 'التسجيل ما خلصش', failed: 'التسجيل ما خلصش', locked: 'اتقفل التسجيل مؤقتًا', disconnected: 'مفصول' }),
   onBizApp: 'شغال كمان على تطبيق واتساب بيزنس',
   lockedHelp: 'واتساب بيقفل تسجيل الرقم ٧٢ ساعة بعد ١٠ محاولات. جرّب تاني بعد المدة دي.',
   pendingHelp: 'الرقم اتربط بس لسه محتاج يتسجل علشان يبعت ويستقبل.',
   quality: { GREEN: 'جودة الرقم: كويسة', YELLOW: 'جودة الرقم: متوسطة', RED: 'جودة الرقم: ضعيفة' } as Record<string, string>,
   tierLine: (n: string) => `حد المحادثات الجديدة: ${n} في اليوم`, tierUnlimited: 'حد المحادثات الجديدة: مفتوح',
-  historySync: { requested: 'بننقل الرسايل القديمة', received: 'اتنقلت الرسايل القديمة', declined: 'اخترت ما تنقلش الرسايل القديمة', refused: 'مقدرناش ننقل الرسايل القديمة' } as Record<string, string>,
-  contactsSync: { requested: 'بننقل العملاء', received: 'اتنقل العملاء', refused: 'مقدرناش ننقل العملاء' } as Record<string, string>,
+  historySync: copy<HistorySync>({ requested: 'بننقل الرسايل القديمة', received: 'اتنقلت الرسايل القديمة', declined: 'اخترت ما تنقلش الرسايل القديمة', refused: 'مقدرناش ننقل الرسايل القديمة' }),
+  contactsSync: copy<ContactsSync>({ requested: 'بننقل العملاء', received: 'اتنقل العملاء', refused: 'مقدرناش ننقل العملاء' }),
   syncDeadline: (d: string) => `النقل متاح لحد ${d} بس`,
   resumeRegistration: 'كمّل التسجيل', refreshNumber: 'حدّث الحالة', disconnectNumber: 'افصل الرقم',
   disconnectAsk: 'متأكد؟ الرقم هيبطل يستقبل ويبعت من هنا، والمحادثات القديمة هتفضل.', disconnectYes: 'أيوه، افصله', disconnectNo: 'لا، رجوع',
@@ -99,7 +116,7 @@ const ar = {
   wFundingWallet: 'تمن رسايل الرقم ده بيتخصم من المحفظة.', wFundingUnknown: 'مين بيدفع لواتساب على الرقم ده لسه ما اتحددش، فالإرسال منه مش جاهز لحد ما يتحدد.', wFundingNone: 'مفيش أرقام شغالة لسه.',
   wPlanTitle: 'الاشتراك', wPlanNone: 'مفيش اشتراك دلوقتي.', wPlanName: (id: string) => `الباقة: ${id}`, wPlanEnds: (d: string) => `بيخلص ${d}`,
   wPlanPastDue: 'الدفع متأخر، فالحملات التسويقية واقفة لحد ما الاشتراك يتسدد.',
-  planStatus: { trialing: 'تجربة', active: 'شغال', past_due: 'الدفع متأخر', cancelled: 'اتلغى', expired: 'خلص' } as Record<string, string>,
+  planStatus: copy<PlanStatus>({ trialing: 'تجربة', active: 'شغال', past_due: 'الدفع متأخر', cancelled: 'اتلغى', expired: 'خلص' }),
   wTopupTitle: 'اشحن الرصيد', wTopupAmount: 'المبلغ بالجنيه', wTopupHint: 'رسوم الدفع بالكارت بتتضاف فوق المبلغ، والمحفظة بتاخد المبلغ كامل.',
   wTopupRange: (a: string, b: string) => `من ${a} لحد ${b}`, wTopupContinue: 'كمّل للدفع', wTopupOff: 'الشحن بالكارت مش متاح دلوقتي.',
   wTopupSummary: (add: string, fee: string, total: string) => `الرصيد هيزيد ${add}. الكارت هيتخصم ${total}، منها رسوم ${fee}.`, wTopupPay: 'ادفع بالكارت',
@@ -110,11 +127,11 @@ const ar = {
   wCardCosts: 'رسايل اتحاسبت على كارتك', wCardCostLine: (c: string, n: string, usd: string) => `${c}: ${n} رسالة • حوالي ${usd} دولار`, wStatementError: 'مقدرناش نحمّل كشف الحساب. جرّب تاني.',
   wCount: (n: string) => `${n} رسالة`, wNet: 'الصافي', wVat: 'الضريبة',
   ledgerKinds: { topup: 'شحن رصيد', meta_charge: 'رسايل واتساب', meta_adjust: 'تعديل رسايل', ai_charge: 'الذكاء الاصطناعي', refund: 'استرداد', chargeback: 'استرجاع من البنك', adjustment: 'تسوية', grant: 'رصيد هدية', expire: 'رصيد انتهى' } as Record<string, string>,
-  billCategories: { marketing: 'تسويق', utility: 'خدمة وإشعارات', authentication: 'تحقق', service: 'رد على العميل' } as Record<string, string>,
+  billCategories: copy<BillCategory>({ marketing: 'تسويق', utility: 'خدمة وإشعارات', authentication: 'تحقق', service: 'رد على العميل' }),
   wRefundTitle: 'طلب استرداد', wRefundRules: 'تقدر تطلب استرداد بعد ما الاشتراك يخلص أو يتلغي وخلال ١٢ شهر، والحد الأدنى ٥٠ جنيه، ومش أكتر من رصيدك المتاح.',
   wRefundAmount: 'المبلغ بالجنيه', wRefundNote: 'ملاحظة (اختياري)', wRefundSend: 'ابعت الطلب', wRefundSent: 'الطلب اتبعت. هنراجعه ونرد عليك.', wRefundEmpty: 'لسه ما طلبتش استرداد.',
   wRefundPast: 'طلباتك', wRefundBelowMin: 'أقل مبلغ للاسترداد ٥٠ جنيه.',
-  refundStates: { pending: 'بيتراجع', rejected: 'اترفض', processing: 'بيتنفّذ', paid: 'اترد', manual_payout: 'هيتحوّل يدوي', failed: 'فشل' } as Record<string, string>,
+  refundStates: copy<RefundState>({ pending: 'بيتراجع', rejected: 'اترفض', processing: 'بيتنفّذ', paid: 'اترد', manual_payout: 'هيتحوّل يدوي', failed: 'فشل' }),
   refundReasons: { plan_still_active: 'الاشتراك لسه شغال. تقدر تطلب الاسترداد بعد ما يخلص أو يتلغي.', period_not_ended: 'فترة الاشتراك لسه ما خلصتش.', window_passed: 'عدّت مدة الاسترداد (١٢ شهر).', below_minimum: 'أقل مبلغ للاسترداد ٥٠ جنيه.', exceeds_refundable: 'المبلغ أكبر من رصيدك المتاح للاسترداد.' } as Record<string, string>,
   wBannerLow: 'رصيد المحفظة قليل. اشحن علشان الخدمات اللي بتتخصم منها تفضل شغالة.', wBannerDebt: (a: string) => `عليك مديونية ${a} في المحفظة.`, wBannerLink: 'افتح المحفظة',
   costCard: 'واتساب بيحاسب كارتك مباشرة على الرسايل دي، ومفيش حاجة هتتخصم من المحفظة.',
@@ -182,8 +199,8 @@ const en: typeof ar = {
   quickReplyTexts: ['Hi! How can I help?', 'Your order is confirmed and arrives in 2–3 days.', 'Could you send your full address?', 'Thank you, we are here anytime.'],
   contacts: 'Contacts', campaignsTitle: 'Campaigns', newCampaign: 'New campaign', backToCampaigns: 'Back to campaigns',
   campaignsEmpty: 'No campaigns yet. Start one and send an approved template to customers who agreed to receive offers.',
-  campaignStatus: { draft: 'Draft', scheduled: 'Scheduled', running: 'Running', paused: 'Paused', completed: 'Completed', cancelled: 'Cancelled' } as Record<string, string>,
-  pauseReasons: { manual: 'Paused by you', wallet_empty: 'The wallet is empty. Top up to continue.', template_unavailable: 'The template is no longer approved by WhatsApp.', internal_error: 'Something went wrong on our side; our team is on it.' } as Record<string, string>,
+  campaignStatus: copy<CampaignStatus>({ draft: 'Draft', scheduled: 'Scheduled', running: 'Running', paused: 'Paused', completed: 'Completed', cancelled: 'Cancelled' }),
+  pauseReasons: copy<PauseReason>({ manual: 'Paused by you', wallet_empty: 'The wallet is empty. Top up to continue.', template_unavailable: 'The template is no longer approved by WhatsApp.', internal_error: 'Something went wrong on our side; our team is on it.', plan_blocked: 'Your plan does not allow campaigns right now. Renew it and resume the campaign.', funding_unknown: 'Who pays WhatsApp for your number is not set yet, so the campaign is stopped until it is.', rate_unavailable: 'The message price is not ready yet, so the campaign is stopped until it is.' }), pauseUnknown: 'The campaign is stopped for a reason we do not know. If it stays stopped, contact support.',
   stopSent: 'Sent', stopDelivered: 'Delivered', stopRead: 'Read', stopQueued: 'Queued',
   ofRecipients: (a: string, b: string) => `${a} of ${b}`, clicksLine: (u: string, t: string) => `${u} opened the link · ${t} opens`,
   failedLine: (f: string, s: string) => `${f} failed · ${s} skipped`, scheduledFor: (d: string) => `Starts ${d}`, startedAt: (d: string) => `Started ${d}`, finishedAt: (d: string) => `Finished ${d}`,
@@ -208,7 +225,7 @@ const en: typeof ar = {
   chooseFile: 'Choose file', importConsent: 'These customers agreed to receive offers from me on WhatsApp, and I can prove it.',
   importConsentHint: 'If unsure, leave it unticked: the contacts are added but will not receive campaigns.', startImport: 'Start import', importing: 'Uploading…',
   importFailed: 'Upload failed. Make sure it is a CSV under 10 MB.', importsHistory: 'Recent files',
-  importStatus: { pending: 'Waiting', running: 'Running', done: 'Done', failed: 'Failed' } as Record<string, string>,
+  importStatus: copy<ImportStatus>({ pending: 'Waiting', running: 'Running', done: 'Done', failed: 'Failed' }),
   importLine: (c: string, u: string, r: string) => `${c} new · ${u} updated · ${r} rejected`, showRejects: 'See rejected rows', rejectLine: (l: string) => `Line ${l}`,
   rejectReasons: { empty_phone: 'Empty number', invalid_phone: 'Invalid number', duplicate_in_file: 'Duplicate in the file', unreadable_row: 'Unreadable row' } as Record<string, string>,
   importErrors: { no_header: 'The file is empty or has no column headers.', no_phone_column: 'No phone column found in the file.' } as Record<string, string>,
@@ -216,14 +233,14 @@ const en: typeof ar = {
   numbersNav: 'WhatsApp number', numbersTitle: 'WhatsApp number', connectNumber: 'Connect a WhatsApp number', connecting: 'Connecting…',
   numbersIntro: 'Connect your store’s WhatsApp number. If you use the WhatsApp Business app on it, it keeps working and messages also arrive here.',
   numbersEmpty: 'No number connected yet. Connect yours to start receiving your customers’ messages here.',
-  numberState: { active: 'Working', pending: 'Registration not finished', failed: 'Registration not finished', locked: 'Registration locked for now', disconnected: 'Disconnected' } as Record<string, string>,
+  numberState: copy<NumberStateKey>({ active: 'Working', pending: 'Registration not finished', failed: 'Registration not finished', locked: 'Registration locked for now', disconnected: 'Disconnected' }),
   onBizApp: 'Also working on the WhatsApp Business app',
   lockedHelp: 'WhatsApp locks registration for 72 hours after 10 attempts. Try again after that.',
   pendingHelp: 'The number is connected but still needs registering before it can send and receive.',
   quality: { GREEN: 'Quality: good', YELLOW: 'Quality: medium', RED: 'Quality: low' } as Record<string, string>,
   tierLine: (n: string) => `New conversations: ${n} a day`, tierUnlimited: 'New conversations: unlimited',
-  historySync: { requested: 'Bringing over past messages', received: 'Past messages brought over', declined: 'You chose not to bring past messages', refused: 'Past messages could not be brought over' } as Record<string, string>,
-  contactsSync: { requested: 'Bringing over contacts', received: 'Contacts brought over', refused: 'Contacts could not be brought over' } as Record<string, string>,
+  historySync: copy<HistorySync>({ requested: 'Bringing over past messages', received: 'Past messages brought over', declined: 'You chose not to bring past messages', refused: 'Past messages could not be brought over' }),
+  contactsSync: copy<ContactsSync>({ requested: 'Bringing over contacts', received: 'Contacts brought over', refused: 'Contacts could not be brought over' }),
   syncDeadline: (d: string) => `Available until ${d} only`,
   resumeRegistration: 'Finish registration', refreshNumber: 'Refresh status', disconnectNumber: 'Disconnect number',
   disconnectAsk: 'Are you sure? The number stops sending and receiving here; past conversations stay.', disconnectYes: 'Yes, disconnect', disconnectNo: 'No, go back',
@@ -244,7 +261,7 @@ const en: typeof ar = {
   wFundingWallet: 'This number’s message costs are taken from the wallet.', wFundingUnknown: 'Who pays WhatsApp for this number is not set yet, so sending from it is not ready until that is set.', wFundingNone: 'No active numbers yet.',
   wPlanTitle: 'Plan', wPlanNone: 'No plan right now.', wPlanName: (id) => `Plan: ${id}`, wPlanEnds: (d) => `Ends ${d}`,
   wPlanPastDue: 'Payment is overdue, so marketing campaigns are paused until the plan is paid.',
-  planStatus: { trialing: 'Trial', active: 'Active', past_due: 'Payment overdue', cancelled: 'Cancelled', expired: 'Expired' } as Record<string, string>,
+  planStatus: copy<PlanStatus>({ trialing: 'Trial', active: 'Active', past_due: 'Payment overdue', cancelled: 'Cancelled', expired: 'Expired' }),
   wTopupTitle: 'Top up', wTopupAmount: 'Amount in EGP', wTopupHint: 'The card fee is added on top of the amount; the wallet receives the full amount.',
   wTopupRange: (a, b) => `From ${a} to ${b}`, wTopupContinue: 'Continue to payment', wTopupOff: 'Card top-ups are not available right now.',
   wTopupSummary: (add, fee, total) => `Your balance grows by ${add}. Your card is charged ${total}, including a ${fee} fee.`, wTopupPay: 'Pay by card',
@@ -255,11 +272,11 @@ const en: typeof ar = {
   wCardCosts: 'Messages billed to your card', wCardCostLine: (c, n, usd) => `${c}: ${n} messages • about ${usd} USD`, wStatementError: 'We could not load the statement. Try again.',
   wCount: (n) => `${n} messages`, wNet: 'Net', wVat: 'VAT',
   ledgerKinds: { topup: 'Top-up', meta_charge: 'WhatsApp messages', meta_adjust: 'Message adjustment', ai_charge: 'AI', refund: 'Refund', chargeback: 'Bank reversal', adjustment: 'Adjustment', grant: 'Gift credit', expire: 'Credit expired' } as Record<string, string>,
-  billCategories: { marketing: 'Marketing', utility: 'Service and alerts', authentication: 'Verification', service: 'Replies to customers' } as Record<string, string>,
+  billCategories: copy<BillCategory>({ marketing: 'Marketing', utility: 'Service and alerts', authentication: 'Verification', service: 'Replies to customers' }),
   wRefundTitle: 'Request a refund', wRefundRules: 'You can ask for a refund after your plan ends or is cancelled, within 12 months, for at least 50 EGP and no more than your available balance.',
   wRefundAmount: 'Amount in EGP', wRefundNote: 'Note (optional)', wRefundSend: 'Send request', wRefundSent: 'Request sent. We will review it and get back to you.', wRefundEmpty: 'You have not requested a refund yet.',
   wRefundPast: 'Your requests', wRefundBelowMin: 'The minimum refund is 50 EGP.',
-  refundStates: { pending: 'Under review', rejected: 'Rejected', processing: 'Being processed', paid: 'Refunded', manual_payout: 'Paid out by hand', failed: 'Failed' } as Record<string, string>,
+  refundStates: copy<RefundState>({ pending: 'Under review', rejected: 'Rejected', processing: 'Being processed', paid: 'Refunded', manual_payout: 'Paid out by hand', failed: 'Failed' }),
   refundReasons: { plan_still_active: 'Your plan is still active. You can ask for a refund after it ends or is cancelled.', period_not_ended: 'The plan period has not ended yet.', window_passed: 'The 12-month refund window has passed.', below_minimum: 'The minimum refund is 50 EGP.', exceeds_refundable: 'The amount is more than your refundable balance.' } as Record<string, string>,
   wBannerLow: 'The wallet balance is low. Top up so the services paid from it keep running.', wBannerDebt: (a) => `You owe ${a} in the wallet.`, wBannerLink: 'Open the wallet',
   costCard: 'WhatsApp bills your card directly for these messages; nothing is taken from the wallet.',

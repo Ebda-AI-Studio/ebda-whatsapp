@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { ApiError } from './data/api';
 import { createSampleSource } from './data/sample';
+import { STRINGS } from './i18n';
 
 afterEach(cleanup);
 const now = () => Date.UTC(2026, 9, 24, 17, 0);
@@ -83,6 +84,21 @@ describe('campaigns', () => {
     await reviewWithZeroCost('unknown');
     expect(screen.getByText('التكلفة هتظهر هنا لما المحفظة تتفعّل.')).toBeTruthy();
     expect(screen.queryByText('واتساب بيحاسب كارتك مباشرة على الرسايل دي، ومفيش حاجة هتتخصم من المحفظة.')).toBeNull();
+  });
+
+  it('every pause reason the server can send has words, and an unknown one still says something', async () => {
+    const source = createSampleSource();
+    const list = source.campaigns!.list;
+    const reasons = ['plan_blocked', 'funding_unknown', 'rate_unavailable', 'brand_new_code'];
+    source.campaigns!.list = async () => {
+      const base = (await list())[0]!;
+      return reasons.map((r, i) => ({ ...base, id: `p${i}`, name: `حملة ${i}`, status: 'paused' as const, pauseReason: r as never }));
+    };
+    await openCampaigns(source);
+    const texts = reasons.map((_r, i) => (within(screen.getByRole('article', { name: `حملة ${i}` })).getByText((_c, el) => el?.className === 'campaign-reason')).textContent);
+    expect(texts.every((x) => !!x && x.length > 8)).toBe(true);
+    expect(new Set(texts).size).toBe(4);
+    expect(texts[3]).toBe(STRINGS.ar.pauseUnknown);
   });
 
   it('refuses to review a tracked link that is not https', async () => {

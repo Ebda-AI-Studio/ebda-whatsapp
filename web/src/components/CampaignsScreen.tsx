@@ -73,7 +73,7 @@ function CampaignRow({ c, t, lang, owner, api, onChange, onRemoved }: { c: Campa
       <p className="muted campaign-meta">
         <bdi>{t.templateNames[c.template.name] ?? c.template.name}</bdi>{when && <> · {when}</>}
       </p>
-      {c.status === 'paused' && c.pauseReason && <p className="campaign-reason" data-reason={c.pauseReason}>{t.pauseReasons[c.pauseReason]}</p>}
+      {c.status === 'paused' && c.pauseReason && <p className="campaign-reason" data-reason={c.pauseReason}>{t.pauseReasons[c.pauseReason] ?? t.pauseUnknown}</p>}
       {c.status === 'scheduled' && total > 0 && <p className="audience-line">{t.audienceCount(n(total))}</p>}
       {total > 0 && c.status !== 'scheduled' && (
         <>
