@@ -24,6 +24,8 @@ export type Inquiry = { status: 'SUCCESS' | 'FAILURE' | 'PENDING'; transactionId
  * `uncertain` = the request may have been processed (timeout, 5xx, an answer we cannot read): never retried, reconciled instead.
  */
 export type RefundResult = { ok: true; refundId: string; status?: 'SUCCESS' | 'PENDING' } | { ok: false; reason: 'unsupported' | 'rejected' | 'unavailable' | 'uncertain' };
+/** The ONE definition of "a card refund of a payment" (Kashier operations `refund` / `partial_refund`). A reversal (chargeback) or void is not one. Every path that decides whether an event or a listed transaction can settle one of our refunds uses this. */
+export const isCardRefundOperation = (operation: string | undefined): boolean => operation === 'refund' || operation === 'partial_refund';
 export type ProviderRefund = { refundId: string; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; amountMinor: number | null; /** Kashier's operation for it: only `refund` / `partial_refund` is a card refund; `reversal` / `void` are not. */ operation: string };
 
 export interface PaymentProvider {
@@ -212,7 +214,7 @@ export class KashierProvider implements PaymentProvider {
       const out: ProviderRefund[] = [];
       for (const [refundId, row] of await this.listCandidates(orderId, 'refund')) {
         const txn = classifyKashierTransaction(await this.getJson(`${this.apiBase}${kashierTransactionDetailsPath(refundId)}`), { transactionId: refundId, merchantOrderId: orderId });
-        if (txn.kind === 'refund') out.push({ refundId, status: txn.status, amountMinor: row.amountMinor, operation: txn.operation });
+        if (txn.kind === 'refund' && isCardRefundOperation(txn.operation)) out.push({ refundId, status: txn.status, amountMinor: row.amountMinor, operation: txn.operation });
       }
       return out;
     } catch {

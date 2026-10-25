@@ -17,9 +17,9 @@
  */
 import type { Env } from '../../env';
 import { TRANSACTION_ID } from './kashier-confirm';
-import { requestAdjustment } from './operator';
+import { ensureAdjustmentApplied, requestAdjustment } from './operator';
 import { auditOnce } from './package-orders';
-import { paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
+import { isCardRefundOperation, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 
 export const OPEN = "('sending', 'pending', 'uncertain')";
 const STUCK_AFTER_MS = 3 * 86_400_000;
@@ -29,9 +29,9 @@ const stubOf = (env: Env, workspaceId: string) => env.WORKSPACE_DO.get(env.WORKS
 
 export type CardRefundRow = {
   id: string; request_id: string | null; order_id: string; workspace_id: string; amount_minor: number; source: 'api' | 'dashboard' | 'webhook';
-  state: 'sending' | 'pending' | 'uncertain' | 'succeeded' | 'failed' | 'linked'; kashier_refund_id: string | null; created_at: number; updated_at: number;
+  state: 'sending' | 'pending' | 'uncertain' | 'succeeded' | 'failed' | 'linked'; kashier_refund_id: string | null; created_at: number; updated_at: number; note: string | null;
 };
-const COLS = 'id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at';
+const COLS = 'id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, note';
 export const getCardRefund = (env: Env, id: string) => env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE id = ?`).bind(id).first<CardRefundRow>();
 
 /**
@@ -86,15 +86,12 @@ export async function settleCardRefund(env: Env, id: string, o: Outcome, now: nu
 
 type TopupLite = { order_id: string; workspace_id: string };
 
-/** Only these Kashier operations are a card refund of a payment; `reversal` (chargeback) and `void` are not what an API refund of ours looks like. */
-const CARD_REFUND_OPS = new Set(['refund', 'partial_refund']);
-
 /**
  * A confirmed refund webhook for one of our top-ups (SUCCESS or FAILURE). Returns the resolution word. Throws only when something could
  * not be written (the caller answers 5xx and the delivery is retried; every step is idempotent).
  */
 export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebhook, now: number): Promise<string> {
-  const isCardRefund = !ev.chargeback && ev.operation !== undefined && CARD_REFUND_OPS.has(ev.operation);
+  const isCardRefund = !ev.chargeback && isCardRefundOperation(ev.operation);
   const byId = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(ev.transactionId).first<CardRefundRow>();
   if (byId && byId.source !== 'webhook') {
     if (!isCardRefund) {
@@ -126,12 +123,18 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
     const debit = Math.min(ev.amountMinor, credited);
     if (debit <= 0) throw new Error('refund of a top-up that credited nothing');
     excess = ev.amountMinor - debit;
-    await env.DB.batch([
+    const res = await env.DB.batch([
       env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, note) VALUES (?, NULL, ?, ?, ?, 'webhook', 'succeeded', ?, ?, ?, ?)")
         .bind(`wh:${ev.transactionId}`, t.order_id, t.workspace_id, debit, ev.transactionId, now, now, excess > 0 ? `excess_minor=${excess};fee_minor=${top?.fee_minor ?? 0}` : null),
       env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(debit, t.order_id),
     ]);
     row = (await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(ev.transactionId).first<CardRefundRow>())!;
+    if (!(res[0]?.meta.changes ?? 0) && row.source !== 'webhook') {
+      // Another path (an API refund, or a link) took this refund id between our read and our write: it owns the money, the wallet was
+      // debited at approval, and nothing is posted here.
+      if (isCardRefund && (row.state === 'sending' || row.state === 'pending' || row.state === 'uncertain')) await settleCardRefund(env, row.id, { to: 'succeeded' }, now);
+      return 'refund_reconciled';
+    }
     // Beyond the credited amount the card fee explains up to `fee_minor`; anything past that is money we cannot place: a person decides.
     const unexplained = excess - Math.min(excess, top?.fee_minor ?? 0);
     if (unexplained > 0 && (await auditOnce(env, 'refund_excess_review', t.workspace_id, ev.transactionId, now))) {
@@ -143,6 +146,16 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
   if (r.ok) alert('topup_refunded_by_provider', { workspace: t.workspace_id, orderId: t.order_id });
   else if (r.reason !== 'duplicate') throw new Error(`refund debit refused: ${r.reason}`);
   return 'refunded';
+}
+
+/** The credit that returns a duplicate debit, as ONE adjustment per Kashier refund id. */
+async function relinkCredit(env: Env, a: { requestId: string; kashierRefundId: string; actor: string }, workspaceId: string, row: CardRefundRow & { note?: string | null }, now: number): Promise<{ id: string; state: 'pending' | 'approved' | 'rejected' }> {
+  const id = `relink:${a.kashierRefundId}`;
+  const already = await ensureAdjustmentApplied(env, id, now); // exists: finish its wallet post if that was interrupted, never create another
+  if (already) return already;
+  const adj = await requestAdjustment(env, { id, actor: a.actor, workspaceId, amountMinor: row.amount_minor, reason: `refund ${a.kashierRefundId} linked to request ${a.requestId}: duplicate debit returned` }, now);
+  if (!adj.ok) throw new Error(adj.reason);
+  return { id: adj.adjustment.id, state: adj.adjustment.state };
 }
 
 export type LinkResult =
@@ -162,9 +175,15 @@ export async function linkDashboardRefund(env: Env, a: { requestId: string; kash
   if (!TRANSACTION_ID.test(a.kashierRefundId)) return { ok: false, reason: 'invalid_refund_id' };
   const req = await env.DB.prepare('SELECT id, workspace_id, state, manual_minor FROM refund_requests WHERE id = ?').bind(a.requestId).first<{ id: string; workspace_id: string; state: string; manual_minor: number }>();
   if (!req) return { ok: false, reason: 'not_found' };
+  const existing = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(a.kashierRefundId).first<CardRefundRow>();
+  if (existing && existing.source === 'dashboard' && existing.note === 'relink' && existing.request_id === a.requestId && existing.workspace_id === req.workspace_id) {
+    // A retry of a relink that was claimed but did not finish: make sure the credit exists (once), then finish.
+    const adjustment = await relinkCredit(env, a, req.workspace_id, existing, now);
+    await refreshRequest(env, a.requestId);
+    return { ok: true, adjustment };
+  }
   if (req.state !== 'manual_payout') return { ok: false, reason: 'not_manual_payout' };
   if (!Number.isSafeInteger(a.amountMinor) || a.amountMinor <= 0 || a.amountMinor > req.manual_minor) return { ok: false, reason: 'exceeds_manual' };
-  const existing = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(a.kashierRefundId).first<CardRefundRow>();
   if (existing && (existing.source !== 'webhook' || existing.workspace_id !== req.workspace_id)) return { ok: false, reason: 'already_linked' };
   if (existing && existing.amount_minor !== a.amountMinor) return { ok: false, reason: 'amount_mismatch' };
   // Which top-up the refund belongs to.
@@ -186,22 +205,16 @@ export async function linkDashboardRefund(env: Env, a: { requestId: string; kash
   const listed = await provider.listRefunds(topup.order_id);
   if (listed === 'unavailable') return { ok: false, reason: 'provider_unavailable' };
   const real = listed.find((r) => r.refundId === a.kashierRefundId);
-  if (!real || real.status !== 'SUCCESS' || !CARD_REFUND_OPS.has(real.operation) || real.amountMinor !== a.amountMinor) return { ok: false, reason: 'refund_not_verified' };
+  if (!real || real.status !== 'SUCCESS' || !isCardRefundOperation(real.operation) || real.amountMinor !== a.amountMinor) return { ok: false, reason: 'refund_not_verified' };
 
   let adjustment: { id: string; state: 'pending' | 'approved' | 'rejected' } | undefined;
   if (existing) {
     // The refund webhook came first and debited the wallet a second time. Claim the row for this request, then ask for the credit through the
-    // adjustment flow; if asking fails the claim is undone so a retry starts clean.
-    const claim = await env.DB.prepare("UPDATE card_refunds SET source = 'dashboard', state = 'linked', request_id = ?, updated_at = ? WHERE id = ? AND source = 'webhook'").bind(a.requestId, now, existing.id).run();
+    // adjustment flow under a deterministic id (`relink:<refund id>`): asking twice finds the first adjustment, so a retry never credits twice,
+    // and once the adjustment exists the claim is never undone.
+    const claim = await env.DB.prepare("UPDATE card_refunds SET source = 'dashboard', state = 'linked', request_id = ?, updated_at = ?, note = 'relink' WHERE id = ? AND source = 'webhook'").bind(a.requestId, now, existing.id).run();
     if (!claim.meta.changes) return { ok: false, reason: 'already_linked' };
-    try {
-      const adj = await requestAdjustment(env, { actor: a.actor, workspaceId: req.workspace_id, amountMinor: existing.amount_minor, reason: `refund ${a.kashierRefundId} linked to request ${a.requestId}: duplicate debit returned` }, now);
-      if (!adj.ok) throw new Error(adj.reason);
-      adjustment = { id: adj.adjustment.id, state: adj.adjustment.state };
-    } catch (err) {
-      await env.DB.prepare("UPDATE card_refunds SET source = 'webhook', state = 'succeeded', request_id = NULL, updated_at = ? WHERE id = ? AND source = 'dashboard' AND request_id = ?").bind(now, existing.id, a.requestId).run();
-      throw err;
-    }
+    adjustment = await relinkCredit(env, a, req.workspace_id, existing, now);
   } else {
     try {
       await env.DB.batch([
@@ -239,7 +252,7 @@ export async function reconcileCardRefunds(env: Env, provider: PaymentProvider |
         const listed = await provider.listRefunds(row.order_id);
         if (listed !== 'unavailable') {
           for (const cand of listed) {
-            if (cand.status !== 'SUCCESS' || cand.amountMinor !== row.amount_minor) continue;
+            if (cand.status !== 'SUCCESS' || cand.amountMinor !== row.amount_minor || !isCardRefundOperation(cand.operation)) continue;
             const taken = await env.DB.prepare('SELECT 1 AS x FROM card_refunds WHERE kashier_refund_id = ?').bind(cand.refundId).first();
             if (taken) continue;
             outcome = { to: 'succeeded', refundId: cand.refundId };

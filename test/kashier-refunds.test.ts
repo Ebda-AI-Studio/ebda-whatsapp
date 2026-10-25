@@ -314,7 +314,7 @@ describe('reconciling refunds nobody answered for', () => {
     const a = await setup(20);
     refundAnswer = async () => { throw new Error('timeout'); };
     await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 });
-    const listing: PaymentProvider = Object.assign(Object.create(kashier) as PaymentProvider, { listRefunds: async (o: string) => (o === a.order ? [{ refundId: 'TX-RL20', status: 'SUCCESS' as const, amountMinor: 15000 }] : []) });
+    const listing: PaymentProvider = Object.assign(Object.create(kashier) as PaymentProvider, { listRefunds: async (o: string) => (o === a.order ? [{ refundId: 'TX-RL20', status: 'SUCCESS' as const, amountMinor: 15000, operation: 'refund' }] : []) });
     const later = Date.now() + 20 * 60_000;
     // the file shares one D1: other tests' open rows are in the pass too, so this one is checked by its own request
     expect((await reconcileCardRefunds(env, listing, later)).settled).toBeGreaterThanOrEqual(1);
@@ -340,5 +340,59 @@ describe('reconciling refunds nobody answered for', () => {
     expect(spy.mock.calls.filter((c) => String(c[0]).includes('card_refund_stuck') && String(c[0]).includes(`cr:${a.id}:1`))).toHaveLength(1);
     expect(await req(a.id)).toMatchObject({ state: 'processing' });
     expect(puts()).toHaveLength(1);
+  });
+});
+
+describe('review round 3: one operation predicate, an idempotent relink credit, no debit when another path owns the id', () => {
+  it('the reconciler never settles our refund with a reversal (or void): the provider only lists real card refunds, and the pass applies the same predicate', async () => {
+    const a = await setup(40);
+    refundAnswer = async () => { throw new Error('timeout'); };
+    await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 });
+    const later = Date.now() + 20 * 60_000;
+    const lying: PaymentProvider = Object.assign(Object.create(kashier) as PaymentProvider, { listRefunds: async (o: string) => (o === a.order ? [{ refundId: 'REV-40', status: 'SUCCESS' as const, amountMinor: 15000, operation: 'reversal' }, { refundId: 'VOID-40', status: 'SUCCESS' as const, amountMinor: 15000, operation: 'void' }] : []) });
+    await reconcileCardRefunds(env, lying, later);
+    expect((await rowsOf(a.id))[0]).toMatchObject({ state: 'uncertain', kashier_refund_id: null });
+    // through the real provider: a reversal in Kashier's list is not even returned
+    kashierRefunds.set(a.order, []);
+    kashierHasRefund(a.order, 'REV-40b', '150.00', 'reversal');
+    kashierHasRefund(a.order, 'RF-40b', '150.00', 'partial_refund');
+    expect(await kashier.listRefunds(a.order)).toEqual([{ refundId: 'RF-40b', status: 'SUCCESS', amountMinor: 15000, operation: 'partial_refund' }]);
+  });
+
+  it('a relink that fails AFTER the credit was requested keeps the claim; the retry creates no second adjustment (exactly one credit)', async () => {
+    const { ws, id, order } = await setup(41);
+    await decideRefund(OFF, { id, decision: 'approve', actor: OP1 });
+    await hookRefund(order, 'DASH-41', '150.00'); // booked as unknown first: the wallet was debited twice
+    kashierHasRefund(order, 'DASH-41', '150.00');
+    let armed = true;
+    const flaky = { ...env, DB: new Proxy(env.DB, { get(t, p) {
+      if (p === 'prepare') return (sql: string) => { if (armed && sql.includes("'refund_dashboard_linked'")) { armed = false; throw new Error('db down after the credit was requested'); } return t.prepare(sql); };
+      const v = Reflect.get(t, p) as unknown; return typeof v === 'function' ? v.bind(t) : v;
+    } }) } as typeof env;
+    await expect(link(id, 'DASH-41', 15000, {}, flaky)).rejects.toThrow();
+    expect((await rowsOf(id))[0]).toMatchObject({ source: 'dashboard', state: 'linked' }); // the claim is NOT undone once the adjustment exists
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM wallet_adjustments WHERE id = 'relink:DASH-41'").first<{ n: number }>())!.n).toBe(1);
+    const again = await link(id, 'DASH-41', 15000);
+    expect(again).toMatchObject({ ok: true, adjustment: { id: 'relink:DASH-41' } });
+    await link(id, 'DASH-41', 15000);
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM wallet_adjustments WHERE workspace_id = ?").bind(ws).first<{ n: number }>())!.n).toBe(1);
+    expect(await kinds(ws)).toEqual([['topup', 20000], ['refund', -15000], ['chargeback', -15000], ['adjustment', 15000]]);
+    expect(await req(id)).toEqual({ state: 'paid', card_refunded_minor: 15000, manual_minor: 0 });
+  });
+
+  it('another path (a link) took the refund id between the webhook\'s read and its write: the webhook reconciles and posts NO chargeback', async () => {
+    const { ws, id, order } = await setup(42);
+    await decideRefund(OFF, { id, decision: 'approve', actor: OP1 });
+    let armed = true;
+    const racing = { ...env, DB: new Proxy(env.DB, { get(t, p) {
+      if (p === 'batch') return async (s: D1PreparedStatement[]) => {
+        if (armed) { armed = false; await t.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at) VALUES ('dash:TX-RACE', ?, ?, ?, 15000, 'dashboard', 'linked', 'TX-RACE', 1, 1)").bind(id, order, ws).run(); }
+        return t.batch(s);
+      };
+      const v = Reflect.get(t, p) as unknown; return typeof v === 'function' ? v.bind(t) : v;
+    } }) } as typeof env;
+    const { body, sig } = await signedWebhook({ merchantOrderId: order, transactionId: 'TX-RACE', amount: '150.00' }, 'refund', 'reversal');
+    expect((await handleProviderWebhook(racing, body, sig, kashier)).status).toBe(200);
+    expect(await kinds(ws)).toEqual([['topup', 20000], ['refund', -15000]]);
   });
 });
