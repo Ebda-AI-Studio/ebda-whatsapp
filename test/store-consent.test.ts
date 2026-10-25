@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BUYER_KEY_1, PHONE_1, WA_1, deliver, flush, iso, storeEvent, storeWorkspace, useStoreLink } from './helpers/store-link';
+import { segmentCriteria } from '../src/core/api/contract';
 import { exec, openChat, rows, workspace } from './helpers/workspace';
 
 const W = (n: number) => `00000000-0000-4000-8000-0000000098${String(n).padStart(2, '0')}`;
@@ -126,5 +127,65 @@ describe('erasure', () => {
     expect(await rows(ws, "SELECT 1 FROM store_state WHERE key LIKE 'optver:%'")).toEqual([]);
     expect(await rows(ws, "SELECT 1 FROM scheduled_tasks WHERE kind = 'opt_out_push'")).toEqual([]);
     expect(await rows(ws, 'SELECT 1 FROM contacts')).toEqual([]);
+  });
+});
+
+describe('checkout consent is scoped (review fix 1)', () => {
+  it('records nothing on the shared number', async () => {
+    const ws = W(10);
+    await storeWorkspace(ws);
+    const out = await workspace(ws).applyStoreEvent(abandoned(ws, 'c1') as never, { phoneNumberId: 'pn-x', shared: true });
+    expect(out.status).toBe('skipped');
+    expect(await rows(ws, 'SELECT 1 FROM contacts')).toEqual([]);
+  });
+
+  it('gets the cart reminder but is not in a campaign audience until the buyer writes first', async () => {
+    const ws = W(11);
+    await storeWorkspace(ws);
+    await deliver([abandoned(ws, 'c1')]);
+    expect((await flush(ws)).map((j) => j.idempotencyKey)).toContain('cart:c1');
+    const everyone = segmentCriteria.parse({ everyone: true });
+    expect(await workspace(ws).audiencePage(everyone, 0, 10)).toEqual([]);
+    expect((await workspace(ws).previewAudience(everyone)).count).toBe(0);
+    await say(ws, 'hello', 1);
+    expect((await workspace(ws).audiencePage(everyone, 0, 10)).map((r) => r.waId)).toEqual([WA_1]);
+    expect((await workspace(ws).previewAudience(everyone)).count).toBe(1);
+  });
+});
+
+describe('withdrawal is remembered per buyer (review fix 2)', () => {
+  const revokedRows = (ws: string) => rows(ws, "SELECT 1 FROM store_state WHERE key LIKE 'revoked:%'");
+  it('a withdrawal for an unknown buyer blocks an older or equal attestation, a newer one grants', async () => {
+    const ws = W(12);
+    await storeWorkspace(ws);
+    const t = Date.now();
+    await deliver([changed(ws, false, iso(t))]);
+    expect(await revokedRows(ws)).toHaveLength(1);
+    await deliver([abandoned(ws, 'old', iso(t - 1000))]);
+    await deliver([abandoned(ws, 'tie', iso(t))]);
+    expect((await consent(ws))[0]?.consent_at ?? null).toBeNull();
+    expect((await flush(ws)).map((j) => j.idempotencyKey)).not.toContain('cart:old');
+    await deliver([abandoned(ws, 'new', iso(t + 1))]);
+    expect(await consent(ws)).toMatchObject([{ consent_source: 'store_checkout', consent_at: t + 1 }]);
+  });
+
+  it('a consent_changed true that is not strictly newer than the withdrawal is ignored', async () => {
+    const ws = W(13);
+    await storeWorkspace(ws);
+    const t = Date.now();
+    await deliver([changed(ws, false, iso(t))]);
+    await say(ws, 'hello', 1);
+    await keyed(ws);
+    await deliver([changed(ws, true, iso(t))]);
+    expect((await consent(ws))[0]?.consent_at ?? null).toBeNull();
+  });
+
+  it('erasure clears the withdrawal record', async () => {
+    const ws = W(14);
+    await storeWorkspace(ws);
+    await deliver([changed(ws, false)]);
+    expect(await revokedRows(ws)).toHaveLength(1);
+    await deliver([storeEvent(ws, 'customer.erased', { buyerKey: BUYER_KEY_1 })]);
+    expect(await revokedRows(ws)).toEqual([]);
   });
 });

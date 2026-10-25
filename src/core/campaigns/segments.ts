@@ -39,9 +39,12 @@ export function criteriaWhere(criteria: SegmentCriteria): Where {
  * Who may receive a campaign: the segment's filter AND not opted out AND a consent on record. The two guards are not part of the criteria
  * and cannot be switched off. The latest STOP wins because `opted_out_at` is set by the newest STOP and only a START clears it.
  */
+/** Consent that counts for a campaign: on record, and a consent given only at a Store checkout (a phone the buyer typed) counts once the contact has written to us. */
+export const CAMPAIGN_CONSENT = "c.consent_at IS NOT NULL AND (c.consent_source IS NOT 'store_checkout' OR c.last_inbound_at IS NOT NULL)";
+
 export function audienceWhere(criteria: SegmentCriteria): Where {
   const f = criteriaWhere(criteria);
-  return { sql: `c.opted_out_at IS NULL AND c.consent_at IS NOT NULL AND ${f.sql}`, params: f.params };
+  return { sql: `c.opted_out_at IS NULL AND ${CAMPAIGN_CONSENT} AND ${f.sql}`, params: f.params };
 }
 
 export type AudienceRow = { id: number; waId: string; name: string | null };
@@ -58,8 +61,8 @@ export function previewAudience(host: LinkHost, criteria: SegmentCriteria): Segm
   const f = criteriaWhere(criteria);
   const one = (extra: string) => host.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM contacts c WHERE ${extra} AND ${f.sql}`, ...f.params).one().n;
   return {
-    count: one('c.opted_out_at IS NULL AND c.consent_at IS NOT NULL'),
-    excluded: { optedOut: one('c.opted_out_at IS NOT NULL'), noConsent: one('c.opted_out_at IS NULL AND c.consent_at IS NULL') },
+    count: one(`c.opted_out_at IS NULL AND ${CAMPAIGN_CONSENT}`),
+    excluded: { optedOut: one('c.opted_out_at IS NOT NULL'), noConsent: one(`c.opted_out_at IS NULL AND NOT (${CAMPAIGN_CONSENT})`) },
   };
 }
 

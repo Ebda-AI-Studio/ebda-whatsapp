@@ -11,7 +11,7 @@ import { queueFreeText, queueTemplate, setTag, cleanParam, type QueueResult } fr
 import { ensureCatalogReconcile } from './catalog';
 import { isLinked, putState, readSettings } from './settings';
 import { acceptVersion, locale, orderRow, rememberBuyerKey, schedulePendingPushes, upsertOrder } from './order-store';
-import { applyConsentChanged, forgetBuyer, recordCheckoutConsent } from './consent';
+import { applyConsentChanged, forgetBuyer, recordCheckoutConsent, recordWithdrawal } from './consent';
 
 export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
 
@@ -140,6 +140,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       return { status: 'applied' };
     case 'customer.consent_changed': {
       // Withdrawing marketing consent is never gated by link state; granting it needs a linked store (campaigns follow consent_at).
+      if (!event.data.marketingOptIn) recordWithdrawal(host, event.data.buyerKey, at(event.data.at)); // before the unknown-buyer return
       if (event.data.marketingOptIn && !isLinked(host)) return { status: 'skipped', detail: 'unlinked' };
       if (!pre.consentWaId) return { status: 'skipped', detail: 'unknown_buyer' }; // the attestation comes with a later event
       return applyConsentChanged(host, pre.consentWaId, event.data.buyerKey, event.data.marketingOptIn, at(event.data.at));
@@ -256,11 +257,12 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
     case 'cart.abandoned': {
       const d = event.data;
       const waId = d.phoneE164.slice(1);
-      // WA-CONSENT-1: the Store sends this event only for a buyer who ticked the WhatsApp marketing opt-in at checkout, so it attests the
-      // consent. Our opt-out always wins (the contact is left alone when opted out).
-      recordCheckoutConsent(host, waId, d.buyerKey, at(event.occurredAt));
       if (!copy || !opts.phoneNumberId) return { status: 'skipped', detail: copy ? 'no_number' : 'no_copy' };
       if (opts.shared) return { status: 'skipped', detail: 'shared_number_no_marketing' }; // WA-SHARED-NOCAMP-1
+      // WA-CONSENT-1: the Store sends this event only for a buyer who ticked the WhatsApp marketing opt-in at checkout, so it attests the
+      // consent for THIS reminder (campaigns need the contact to have written to us too, see CAMPAIGN_CONSENT). The checkout phone is typed
+      // by the buyer, so nothing is recorded where we would not act. Our opt-out always wins. Recorded only after the checks above.
+      recordCheckoutConsent(host, waId, d.buyerKey, at(event.occurredAt));
       const loc = locale(d.locale);
       // Marketing: needs a recorded opt-in and no opt-out. (Phase 7 adds the wallet check here: fail closed at zero.)
       const r = queueTemplate(host, {

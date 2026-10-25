@@ -34,6 +34,8 @@ export type TemplateSend = {
   extraComponents?: TemplateComponent[];
   /** Marketing sends need a recorded opt-in, not just the absence of an opt-out. */
   requireConsent?: boolean;
+  /** A campaign message: consent given only at a Store checkout counts once the contact has written to us on WhatsApp. */
+  campaign?: boolean;
   profileName?: string | null;
   /** Refuse unless the approved template has exactly this Meta category. */
   requireCategory?: string;
@@ -60,10 +62,11 @@ export function queueTemplate(host: LinkHost, a: TemplateSend): QueueResult {
   }
   if (!t) return { ok: false, reason: 'template_not_approved' };
   if (a.requireCategory && t.category !== a.requireCategory) return { ok: false, reason: 'wrong_category' };
-  const contact = host.sql.exec<{ opted_out_at: number | null; consent_at: number | null }>('SELECT opted_out_at, consent_at FROM contacts WHERE wa_id = ?', a.waId).toArray()[0];
+  const contact = host.sql.exec<{ opted_out_at: number | null; consent_at: number | null; consent_source: string | null; last_inbound_at: number | null }>('SELECT opted_out_at, consent_at, consent_source, last_inbound_at FROM contacts WHERE wa_id = ?', a.waId).toArray()[0];
   if (t.category === 'MARKETING') {
     if (contact?.opted_out_at != null) return { ok: false, reason: 'opted_out' };
     if (a.requireConsent && contact?.consent_at == null) return { ok: false, reason: 'no_consent' };
+    if (a.campaign && contact?.consent_source === 'store_checkout' && contact.last_inbound_at == null) return { ok: false, reason: 'no_consent' };
     if (marketingBlocked(host.sql)) return { ok: false, reason: 'plan_blocked' };
   }
   const stored = componentsSchema.safeParse(JSON.parse(t.components));
