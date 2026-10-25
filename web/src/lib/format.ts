@@ -41,3 +41,8 @@ export function orderStops(status: OrderSummaryDto['status']): Stop[] {
   const keys: Stop['key'][] = ['placed', 'confirmed', 'shipped', 'delivered'];
   return keys.map((key, i) => ({ key, done: i <= reached, ...(i === 1 && (status === 'refused' || status === 'cancelled') ? { halted: true } : {}) }));
 }
+
+/** Money with an explicit minus (U+2212) up front, so a negative amount reads the same in Arabic and English runs. */
+export function formatSigned(minor: number, lang: Lang): string {
+  return (minor < 0 ? '−' : '') + formatMoney(Math.abs(minor), 'EGP', lang);
+}

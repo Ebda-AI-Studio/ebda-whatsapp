@@ -1,6 +1,6 @@
 # Billing (Phase 7)
 
-Backend only. The UI (wallet, operator console) is built separately against the DTOs in `src/core/api/contract.ts` ("Billing (Phase 7)" block). Amounts are integer piasters (EGP x 100); the currency is always EGP.
+The UI (wallet, operator console) is built against the DTOs in `src/core/api/contract.ts` ("Billing (Phase 7)" block); see "In the page" at the end. Amounts are integer piasters (EGP x 100); the currency is always EGP.
 
 ## Who pays Meta (WA-FUND-1)
 `number_funding(phone_number_id, funding)` in D1, copied into each workspace.
@@ -59,3 +59,11 @@ Each workspace's `shared_number_trueup` task reports its service charges per pla
 
 ## Alerts (structured logs)
 `funding_unknown`, `rate_unavailable`, `rate_missing_pending`, `rate_missing_estimate_charged`, `pricing_copy_missing`, `pricing_pull_failed`, `billing_unpriced_model`, `wallet_low_balance`, `wallet_wait_expired`, `ledger_mirror_mismatch`, `shared_trueup_not_published`, `topup_*`.
+
+## In the page (web)
+- **Wallet** (rail "المحفظة", every role can read): balance / held / available / AI credits, the 50 EGP overdraft in one sentence, debt (paid first by the next top-up), who pays Meta per active number (`merchant_card` gets the "WhatsApp bills your card directly" notice), plan card (`past_due` says marketing is paused). Owner only: top-up (shown only when `topupsEnabled`; the card fee is on top, the wallet gets the exact amount; the order is created first so the fee is shown before redirecting; only an `https` checkout URL is ever opened), statement by month (not for staff) with a token-fetched CSV, refund request (minimum 50 EGP, rules in one sentence, past requests with state and the reviewer's note).
+- **Top-up never claims success from the redirect.** The pending order (`wallet.pendingTopup` in localStorage, 3 h) survives the round trip; on focus and every 8 s the page re-reads the wallet and `GET /wallet/topups/:orderId`. "Arrived" shows only when the order is `paid` (the server credits before it marks paid) or the balance itself grew by the amount; `failed`/`expired` says nothing was taken.
+- **Inbox banner**: `lowBalance` or debt shows a calm banner above the conversation list with a link to the wallet. "Marketing paused" is said only when available <= 0 AND at least one active number is `platform_line` (with cards paying Meta the wallet does not gate campaigns).
+- **Campaign review**: a zero per-message cost reads "WhatsApp bills your card directly" only when every active number is `merchant_card`; otherwise it stays "price not ready".
+- **Operator** ("لوحة التشغيل", rail item only for `super_admin`; the server still checks every call): pricing settings (current / scheduled / earlier; publish with percent and EGP parsed as exact integers, effective-from >= 1 h, reason >= 5 chars, "never retroactive"), rate cards (textarea `country,category,usd`, parsed client-side with line-numbered errors, >= 24 h) and FX, per-account margin override / who-pays-Meta / adjustment request, refund queue (approve explains the wallet is debited first and asks to confirm), adjustments (your own pending request has no approve/reject and says another super admin must decide), change log. A `503` on any write shows "session protection is not switched on yet, changes are locked"; reads keep working.
+- Preview: `npx vite web` then `?role=super_admin` (or `staff`) switches the sample role. Everything under it is invented sample data.

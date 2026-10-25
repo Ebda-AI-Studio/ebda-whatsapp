@@ -5,7 +5,7 @@ import { ApiError } from '../data/api';
 import type { RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
-import { formatMoney } from '../lib/format';
+import { formatMoney, formatSigned } from '../lib/format';
 import { dateTime } from './CampaignsScreen';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: WalletApi; now: () => number; go?: (url: string) => void };
@@ -53,6 +53,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
   const owner = source.role === 'owner';
   const canSeeStatement = source.role !== 'staff';
   const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const signed = (m: number) => formatSigned(m, lang);
 
   const [pending, setPending] = useState<Pending | null>(() => readPending(now()));
   const [topupNote, setTopupNote] = useState<'waiting' | 'arrived' | 'failed' | null>(() => (readPending(now()) ? 'waiting' : null));
@@ -167,6 +168,7 @@ function TopupCard({ t, lang, api, wallet, pending, note, go, now, onStarted, ca
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const signed = (m: number) => formatSigned(m, lang);
 
   if (!wallet.topupsEnabled) {
     return <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2><p className="muted">{t.wTopupOff}</p></section>;
@@ -221,6 +223,7 @@ function StatementCard({ t, lang, api, now }: { t: Strings; lang: Lang; api: Wal
   const [st, setSt] = useState<StatementDto | null | 'error'>(null);
   const [csvError, setCsvError] = useState(false);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const signed = (m: number) => formatSigned(m, lang);
 
   useEffect(() => {
     let live = true;
@@ -244,7 +247,7 @@ function StatementCard({ t, lang, api, now }: { t: Strings; lang: Lang; api: Wal
   };
 
   const totalLine = (label: string, v: { count: number; amountMinor: number }) => (
-    <li key={label}><span>{label}</span><span className="wallet-count">{t.wCount(num(v.count, lang))}</span><b><bdi dir="ltr">{money(v.amountMinor)}</bdi></b></li>
+    <li key={label}><span>{label}</span><span className="wallet-count">{t.wCount(num(v.count, lang))}</span><b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{signed(v.amountMinor)}</bdi></b></li>
   );
 
   return (
@@ -279,9 +282,9 @@ function StatementCard({ t, lang, api, now }: { t: Strings; lang: Lang; api: Wal
               <ul className="wallet-rows" aria-label={t.wRows}>
                 {st.rows.map((r) => (
                   <li key={r.ref}>
-                    <span className="wallet-row-main"><b>{t.ledgerKinds[r.kind] ?? r.kind}</b>{r.category && <span className="muted"> · {t.billCategories[r.category] ?? r.category}</span>}{r.note && <span className="muted" dir="auto"> · {r.note}</span>}</span>
+                    <span className="wallet-row-main"><b>{t.ledgerKinds[r.kind] ?? r.kind}</b>{r.category && <span className="muted"> • {t.billCategories[r.category] ?? r.category}</span>}{r.note && <span className="muted" dir="auto"> • {r.note}</span>}</span>
                     <span className="muted wallet-row-date">{dateTime(r.at, lang)}</span>
-                    <b className="wallet-amount" data-sign={r.amountMinor < 0 ? 'out' : 'in'}><bdi dir="ltr">{money(r.amountMinor)}</bdi></b>
+                    <b className="wallet-amount" data-sign={r.amountMinor < 0 ? 'out' : 'in'}><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{signed(r.amountMinor)}</bdi></b>
                   </li>
                 ))}
               </ul>
@@ -309,6 +312,7 @@ function RefundCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }
   const [msg, setMsg] = useState<{ kind: 'alert' | 'status'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const signed = (m: number) => formatSigned(m, lang);
 
   useEffect(() => { void api.refundRequests().then(setItems, () => setItems([])); }, [api]);
 
@@ -343,7 +347,7 @@ function RefundCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }
         <ul className="wallet-rows" aria-label={t.wRefundPast}>
           {items.map((r) => (
             <li key={r.id}>
-              <span className="wallet-row-main"><b><bdi dir="ltr">{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={r.state === 'paid' ? 'done' : r.state === 'rejected' || r.state === 'failed' ? 'failed' : 'pending'}>{t.refundStates[r.state] ?? r.state}</span>
+              <span className="wallet-row-main"><b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{signed(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={r.state === 'paid' ? 'done' : r.state === 'rejected' || r.state === 'failed' ? 'failed' : 'pending'}>{t.refundStates[r.state] ?? r.state}</span>
                 {r.decisionNote && <span className="muted op-line" dir="auto">{r.decisionNote}</span>}</span>
               <span className="muted wallet-row-date">{dateTime(r.createdAt, lang)}</span>
             </li>

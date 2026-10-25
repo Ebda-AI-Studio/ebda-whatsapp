@@ -4,7 +4,7 @@ import { ApiError } from '../data/api';
 import type { Adjustment, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
-import { formatMoney } from '../lib/format';
+import { formatMoney, formatSigned } from '../lib/format';
 import { parseRates, parseScaled, toMicros } from '../lib/rates';
 import { dateTime } from './CampaignsScreen';
 
@@ -96,6 +96,7 @@ const pct = (bps: number, lang: Lang) => num(bps / 100, lang);
 function PricingPanel({ t, lang, api, now, run, fail }: PanelProps) {
   const { items, error, reload } = useList<PricingSettings>(api.pricingSettings);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const signed = (m: number) => formatSigned(m, lang);
   const line = (s: PricingSettings) => t.opSettingsLine(pct(s.marginBps, lang), money(s.creditLimitMinor), pct(s.fxBufferBps, lang), pct(s.vatBps, lang));
   const current = items?.filter((s) => s.effectiveFrom <= now()).sort((a, b) => b.effectiveFrom - a.effectiveFrom || b.ver - a.ver)[0];
   const scheduled = items?.filter((s) => s.effectiveFrom > now()) ?? [];
@@ -124,7 +125,7 @@ function PricingPanel({ t, lang, api, now, run, fail }: PanelProps) {
     <ul className="wallet-rows">
       {xs.map((s) => (
         <li key={s.ver}>
-          <span className="wallet-row-main"><b>{t.opVersion(num(s.ver, lang))}</b> <span className="muted">· {t.opFrom(dateTime(s.effectiveFrom, lang))} · {t.opBy(s.actor)}</span>
+          <span className="wallet-row-main"><b>{t.opVersion(num(s.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(s.effectiveFrom, lang))} • {t.opBy(s.actor)}</span>
             <span className="op-line">{line(s)}</span><span className="muted op-line" dir="auto">{s.reason}</span></span>
         </li>
       ))}
@@ -188,7 +189,7 @@ function RatesPanel({ t, lang, api, now, run, fail }: PanelProps) {
         {cards.error && <p className="error-text">{t.opLoadError}</p>}
         <ul className="wallet-rows">
           {cards.items?.map((c) => (
-            <li key={c.ver}><span className="wallet-row-main"><b>{t.opVersion(num(c.ver, lang))}</b> <span className="muted">· {t.opFrom(dateTime(c.effectiveFrom, lang))} · {t.opRatesRows(num(c.rows, lang))} · {t.opBy(c.actor)}</span></span></li>
+            <li key={c.ver}><span className="wallet-row-main"><b>{t.opVersion(num(c.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(c.effectiveFrom, lang))} • {t.opRatesRows(num(c.rows, lang))} • {t.opBy(c.actor)}</span></span></li>
           ))}
         </ul>
         <p className="muted">{t.opNeverRetro}</p>
@@ -196,7 +197,7 @@ function RatesPanel({ t, lang, api, now, run, fail }: PanelProps) {
           <div className="field">
             <label htmlFor="op-rates-text">{t.opRatesInput}</label>
             <textarea id="op-rates-text" dir="ltr" rows={6} spellCheck={false} placeholder="EG,marketing,0.0529" aria-describedby="op-rates-help" value={rates} onChange={(e) => setRates(e.target.value)} />
-            <small id="op-rates-help" className="muted">{t.opRatesHelp} · {t.opRatesLead}</small>
+            <small id="op-rates-help" className="muted">{t.opRatesHelp} • {t.opRatesLead}</small>
           </div>
           <label className="field"><span>{t.opRatesEffective}</span><input type="datetime-local" value={ratesAt} onChange={(e) => setRatesAt(e.target.value)} /></label>
           <label className="field"><span>{t.opReason}</span><input dir="auto" maxLength={500} value={ratesReason} onChange={(e) => setRatesReason(e.target.value)} /></label>
@@ -207,7 +208,7 @@ function RatesPanel({ t, lang, api, now, run, fail }: PanelProps) {
         {fxs.error && <p className="error-text">{t.opLoadError}</p>}
         <ul className="wallet-rows">
           {fxs.items?.map((x) => (
-            <li key={x.ver}><span className="wallet-row-main"><b>{t.opVersion(num(x.ver, lang))}</b> <span className="muted">· {t.opFrom(dateTime(x.effectiveFrom, lang))} · {t.opBy(x.actor)}</span>
+            <li key={x.ver}><span className="wallet-row-main"><b>{t.opVersion(num(x.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(x.effectiveFrom, lang))} • {t.opBy(x.actor)}</span>
               <span className="op-line">{t.opFxLine(num(x.egpPerUsdMicros / 1_000_000, lang), pct(x.bufferBps, lang))}</span></span></li>
           ))}
         </ul>
@@ -278,7 +279,7 @@ function AccountPanel({ t, lang, api, now, run, fail }: PanelProps) {
         {loaded && (loaded.items.length === 0 ? <p className="muted">{t.opOverrideNone}</p> : (
           <ul className="wallet-rows">
             {loaded.items.map((o) => (
-              <li key={o.ver}><span className="wallet-row-main"><b>{t.opVersion(num(o.ver, lang))}</b> <span className="muted">· {t.opFrom(dateTime(o.effectiveFrom, lang))} · {t.opBy(o.actor)}</span>
+              <li key={o.ver}><span className="wallet-row-main"><b>{t.opVersion(num(o.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(o.effectiveFrom, lang))} • {t.opBy(o.actor)}</span>
                 <span className="op-line">{t.opMargin} {pct(o.marginBps, lang)}</span><span className="muted op-line" dir="auto">{o.reason}</span></span></li>
             ))}
           </ul>
@@ -320,6 +321,7 @@ function QueuesPanel({ t, lang, api, source, run }: PanelProps) {
   const refunds = useList<RefundRequest>(api.refundQueue);
   const adjustments = useList<Adjustment>(api.adjustments);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const signed = (m: number) => formatSigned(m, lang);
   const [asking, setAsking] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [local, setLocal] = useState<Record<string, RefundRequest | Adjustment>>({});
@@ -344,8 +346,8 @@ function QueuesPanel({ t, lang, api, source, run }: PanelProps) {
             return (
               <li key={r.id}>
                 <span className="wallet-row-main">
-                  <b><bdi dir="ltr">{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={chip(r.state)}>{t.refundStates[r.state] ?? r.state}</span>
-                  <span className="muted op-line"><bdi dir="ltr">{r.workspaceId}</bdi> · {t.opRequestedBy(r.requestedBy)} · {dateTime(r.createdAt, lang)}</span>
+                  <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{signed(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={chip(r.state)}>{t.refundStates[r.state] ?? r.state}</span>
+                  <span className="muted op-line"><bdi dir="ltr">{r.workspaceId}</bdi> • {t.opRequestedBy(r.requestedBy)} • {dateTime(r.createdAt, lang)}</span>
                   {r.note && <span className="op-line" dir="auto">{r.note}</span>}
                   {r.state !== 'pending' && (r.cardRefundedMinor > 0 || r.manualMinor > 0) && <span className="muted op-line">{t.opRefundLine(money(r.cardRefundedMinor), money(r.manualMinor))}</span>}
                   {r.decisionNote && <span className="muted op-line" dir="auto">{r.decisionNote}</span>}
@@ -383,9 +385,9 @@ function QueuesPanel({ t, lang, api, source, run }: PanelProps) {
             return (
               <li key={a.id}>
                 <span className="wallet-row-main">
-                  <b><bdi dir="ltr">{money(a.amountMinor)}</bdi></b> <span className="status-chip" data-status={chip(a.state)}>{t.adjStates[a.state] ?? a.state}</span>
+                  <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{signed(a.amountMinor)}</bdi></b> <span className="status-chip" data-status={chip(a.state)}>{t.adjStates[a.state] ?? a.state}</span>
                   <span className="op-line" dir="auto">{a.reason}</span>
-                  <span className="muted op-line"><bdi dir="ltr">{a.workspaceId}</bdi> · {t.opRequestedBy(a.requestedBy)} · {dateTime(a.createdAt, lang)}</span>
+                  <span className="muted op-line"><bdi dir="ltr">{a.workspaceId}</bdi> • {t.opRequestedBy(a.requestedBy)} • {dateTime(a.createdAt, lang)}</span>
                 </span>
                 {a.state === 'pending' && (
                   mine ? <p className="muted">{t.opOwnRequest}</p> : (
@@ -419,7 +421,7 @@ function LogPanel({ t, lang, api }: PanelProps) {
       <ul className="wallet-rows op-rows">
         {items?.map((l) => (
           <li key={l.id}>
-            <span className="wallet-row-main"><span className="muted">{dateTime(l.at, lang)}</span> · <b>{l.actor}</b> · <bdi dir="ltr">{l.action}</bdi>{l.workspaceId && <span className="muted"> · <bdi dir="ltr">{l.workspaceId}</bdi></span>}</span>
+            <span className="wallet-row-main"><span className="muted">{dateTime(l.at, lang)}</span> • <b>{l.actor}</b> • <bdi dir="ltr">{l.action}</bdi>{l.workspaceId && <span className="muted"> • <bdi dir="ltr">{l.workspaceId}</bdi></span>}</span>
             <dl className="op-diff"><div><dt>{t.opBefore}</dt><dd><code dir="ltr">{json(l.before)}</code></dd></div><div><dt>{t.opAfter}</dt><dd><code dir="ltr">{json(l.after)}</code></dd></div></dl>
             {l.reason && <p className="muted" dir="auto">{l.reason}</p>}
           </li>
