@@ -38,6 +38,7 @@ import { importsRoutes } from './routes/imports';
 import { segmentsRoutes } from './routes/segments';
 import { campaignsRoutes } from './routes/campaigns';
 import { trackRoutes } from './routes/track';
+import { reconcileEntitlements } from './core/billing/subscriptions';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY });
@@ -170,6 +171,11 @@ app.post('/meta/webhook', async (c) => {
   return c.text('ok');
 });
 
+/** The daily control-plane pass. Each step is independent: one failing never skips the rest. */
+export async function dailyBilling(env: Env): Promise<void> {
+  await reconcileEntitlements(env).catch((err) => console.error(JSON.stringify({ alert: 'entitlement_reconcile_failed', error: err instanceof Error ? err.name : 'error' })));
+}
+
 let warnedNoDsn = false;
 
 export default Sentry.withSentry((env: Env) => {
@@ -180,6 +186,10 @@ export default Sentry.withSentry((env: Env) => {
   return env.SENTRY_DSN ? { dsn: env.SENTRY_DSN, release: env.COMMIT_SHA, beforeSend: scrubEvent, tracesSampleRate: 0 } : undefined;
 }, {
   fetch: app.fetch,
+  /** Daily (the only cron; no polling): re-send subscriptions so a lost push heals. Idempotent by construction. */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(dailyBilling(env));
+  },
   async queue(batch: MessageBatch<unknown>, env: Env, _ctx: ExecutionContext): Promise<void> {
     if (batch.queue === STORE_EVENTS_QUEUE) await consumeStoreEvents(batch, env);
     else await consumeSendBatch(batch, env);

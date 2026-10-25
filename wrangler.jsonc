@@ -13,6 +13,8 @@
     "run_worker_first": ["/api/*", "/meta/*", "/health", "/t/*"]
   },
   "observability": { "enabled": true },
+  // One daily pass (Phase 7): re-send subscriptions, repair lost top-up webhooks. No cron shorter than a day.
+  "triggers": { "crons": ["17 1 * * *"] },
   "vars": {
     "META_GRAPH_VERSION": "v25.0",
     "IDENTITY_ISSUER": "https://accounts.ebda.app",

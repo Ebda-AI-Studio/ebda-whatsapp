@@ -42,6 +42,7 @@ import { storeLink } from './store-link';
 import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
 import { agentActive } from './ai/agent';
 import { runTurn } from './ai/router';
+import { applyEntitlement, expireSubscription, marketingBlocked, readEntitlement, type EntitlementEvent } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
@@ -63,7 +64,7 @@ const STATUS_RANK = { sent: 1, failed: 2, delivered: 3, read: 4 } as const;
 export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; statuses: StatusEvent[]; receivedAt: number };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
-export type OutboundRefusal = 'window_closed' | 'opted_out' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
+export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
 export type TaskPayload = { job?: SendJob; phoneNumberId?: string; reason?: 'tier' | 'throughput' | 'frequency_cap' | 'event'; n?: number; messageId?: number; mediaId?: string; orderId?: string };
@@ -275,6 +276,11 @@ export class WorkspaceDO extends DurableObject<Env> {
           this.emitMessageStatus(existing.id);
           return 'dropped';
         }
+        if (this.isMarketingJob(job) && marketingBlocked(this.sql)) {
+          this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'plan_blocked', updated_at = ? WHERE id = ?", now, existing.id);
+          this.emitMessageStatus(existing.id);
+          return 'dropped';
+        }
       }
       if (existing.status === 'queued' || existing.status === 'retry' || (existing.status === 'claimed' && now - existing.updated_at > STALE_CLAIM_MS && existing.claim_attempts < 2)) {
         this.sql.exec("UPDATE messages SET status = 'claimed', claim_attempts = claim_attempts + 1, updated_at = ? WHERE id = ?", now, existing.id);
@@ -282,6 +288,11 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       return existing.status === 'claimed' ? 'in_flight' : 'already_sent';
     }
+  }
+
+  private isMarketingJob(job: SendJob): boolean {
+    if (jobKind(job) !== 'template' || !job.template) return false;
+    return this.sql.exec<{ category: string }>('SELECT category FROM templates WHERE name = ? AND language = ?', job.template.name, job.template.language).toArray()[0]?.category === 'MARKETING';
   }
 
   private marketingToOptedOut(job: SendJob): boolean {
@@ -444,6 +455,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           const t = this.sql.exec<{ category: string; status: string; components: string }>('SELECT category, status, components FROM templates WHERE name = ? AND language = ?', req.name, req.language).toArray()[0];
           if (!t || t.status !== 'APPROVED') return { ok: false, reason: 'template_not_approved' };
           if (t.category === 'MARKETING' && conv.opted_out_at !== null) return { ok: false, reason: 'opted_out' };
+          if (t.category === 'MARKETING' && marketingBlocked(this.sql)) return { ok: false, reason: 'plan_blocked' };
           const stored = componentsSchema.safeParse(JSON.parse(t.components));
           if (!stored.success) return { ok: false, reason: 'invalid_request', message: 'stored template is malformed' };
           const rendered = renderTemplate(stored.data, req.params, t.category);
@@ -956,6 +968,19 @@ export class WorkspaceDO extends DurableObject<Env> {
     return this.ctx.storage.transactionSync(() => postCredit(this.sql, { ...a, now }));
   }
 
+  // ---- Packages (Phase 7.1) ----------------------------------------------------------------------------------------
+
+  /** One subscription event from the control plane. An older or equal version is ignored ('stale'). */
+  async applyEntitlement(ev: EntitlementEvent, now = Date.now()): Promise<'applied' | 'stale' | 'invalid'> {
+    const r = this.ctx.storage.transactionSync(() => applyEntitlement(this.sql, ev, now));
+    if (r === 'applied') await this.arm();
+    return r;
+  }
+
+  async getEntitlement() {
+    return readEntitlement(this.sql);
+  }
+
   /** Operator action: a full reconcile now. `allowMassDelete` lifts the automatic safety limit on archiving. */
   async reconcileCatalog(opts: { allowMassDelete?: boolean } = {}): Promise<void> {
     await runCatalogReconcile(this.host(), Date.now(), opts);
@@ -1368,6 +1393,8 @@ export class WorkspaceDO extends DurableObject<Env> {
         return runCatalogReconcile(this.host(), now);
       case 'campaign_step':
         return sweepCampaigns(this.host(), now);
+      case 'subscription_expire':
+        return this.ctx.storage.transactionSync(() => expireSubscription(this.sql, now)) ?? undefined;
       default:
         return undefined;
     }

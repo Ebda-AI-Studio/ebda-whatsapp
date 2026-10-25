@@ -312,6 +312,18 @@ export const DO_MIGRATIONS: readonly string[] = [
    ) WITHOUT ROWID;
    CREATE UNIQUE INDEX campaign_links_recipient ON campaign_links (campaign_id, contact_id);
    CREATE INDEX campaign_links_contact ON campaign_links (contact_id);`,
+  // v25 (Phase 7.1, packages): the workspace's copy of its subscription. `version` only moves forward; see billing/entitlements.ts.
+  `CREATE TABLE entitlements (
+     id INTEGER PRIMARY KEY CHECK (id = 1),
+     version INTEGER NOT NULL,
+     package_id TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('trialing', 'active', 'past_due', 'cancelled', 'expired')),
+     period_start INTEGER NOT NULL,
+     period_end INTEGER NOT NULL,
+     ai_credits INTEGER NOT NULL DEFAULT 0,
+     cancelled_at INTEGER,
+     updated_at INTEGER NOT NULL
+   );`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

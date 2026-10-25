@@ -75,7 +75,7 @@ export type SendMessageRequest = z.infer<typeof sendMessageRequest>;
 export const apiError = z.object({
   error: z.enum([
     'unauthorized', 'forbidden', 'not_found', 'invalid_request',
-    'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited',
+    'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited', 'plan_blocked',
   ]),
   message: z.string().optional(),
 });
@@ -244,7 +244,7 @@ export const campaignParam = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('link_code') }),
 ]);
 export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled']);
-export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error']);
+export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked']);
 export const campaignCreate = z.object({
   name: z.string().trim().min(1).max(80),
   template: z.object({ name: z.string().min(1).max(512), language: z.string().min(2).max(10) }),

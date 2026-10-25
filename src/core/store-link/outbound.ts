@@ -1,5 +1,6 @@
 import type { TemplateComponent } from '../meta/client';
 import { WINDOW_MS } from '../dto';
+import { marketingBlocked } from '../billing/entitlements';
 import { addTask } from '../scheduler';
 import type { SendJob } from '../send-queue';
 import { componentsSchema, renderTemplate } from '../templates';
@@ -16,7 +17,7 @@ export function cleanParam(value: string | null | undefined, fallback: string, m
 export type QueueResult =
   | { ok: true; duplicate: false; messageId: number; job: SendJob }
   | { ok: true; duplicate: true }
-  | { ok: false; reason: 'template_not_approved' | 'wrong_category' | 'opted_out' | 'no_consent' | 'invalid_request'; message?: string };
+  | { ok: false; reason: 'template_not_approved' | 'wrong_category' | 'opted_out' | 'no_consent' | 'plan_blocked' | 'invalid_request'; message?: string };
 
 export type TemplateSend = {
   waId: string;
@@ -61,6 +62,7 @@ export function queueTemplate(host: LinkHost, a: TemplateSend): QueueResult {
   if (t.category === 'MARKETING') {
     if (contact?.opted_out_at != null) return { ok: false, reason: 'opted_out' };
     if (a.requireConsent && contact?.consent_at == null) return { ok: false, reason: 'no_consent' };
+    if (marketingBlocked(host.sql)) return { ok: false, reason: 'plan_blocked' };
   }
   const stored = componentsSchema.safeParse(JSON.parse(t.components));
   if (!stored.success) return { ok: false, reason: 'invalid_request', message: 'stored template is malformed' };
