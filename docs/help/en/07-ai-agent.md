@@ -21,7 +21,7 @@ The agent replies to your customers in chat in Egyptian Arabic, searches the cat
 - The agent does not change prices or add discounts. Orders, prices and stock come from Ebda Store.
 
 ## Handoff to staff
-The conversation is tagged **needs_human**, is highlighted in the inbox, and you are notified. The agent stays silent until the handoff period passes or until a staff member replies. Choose **Take over** at the top of the chat to handle it yourself.
+The conversation is tagged **needs_human**, is highlighted in the inbox, and you are notified. The agent stays silent until the handoff period passes or until a staff member replies. Choose **Take over** at the top of the chat to handle it yourself. When you reply to a customer (from the inbox or the WhatsApp Business app) or assign the chat to a person, the agent also stays silent for the handoff period, even if the chat was never handed over.
 Handoff happens when the customer asks for a person, the agent cannot answer, or credits run out.
 
 ## Tips

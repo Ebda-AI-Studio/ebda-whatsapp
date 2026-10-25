@@ -1593,7 +1593,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (userId !== null && userId !== callerUserId && !this.sql.exec('SELECT 1 FROM conversations WHERE assignee_user_id = ? LIMIT 1', userId).toArray().length) {
       return { ok: false, reason: 'unknown_assignee' };
     }
-    this.sql.exec('UPDATE conversations SET assignee_user_id = ? WHERE id = ?', userId, conversationId);
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec('UPDATE conversations SET assignee_user_id = ? WHERE id = ?', userId, conversationId);
+      // A person owns the chat now: the agent stays out of it for the handoff window.
+      const wa = userId === null ? undefined : this.sql.exec<{ wa_id: string }>('SELECT ct.wa_id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = ?', conversationId).toArray()[0]?.wa_id;
+      if (wa) staffReplied(this.host(), wa, now);
+    });
     this.emitConversationUpdated(conversationId);
     const conversation = await this.conversationById(conversationId, now);
     return conversation ? { ok: true, conversation } : { ok: false, reason: 'not_found' };
