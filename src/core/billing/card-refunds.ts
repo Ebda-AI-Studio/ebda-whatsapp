@@ -334,12 +334,14 @@ export async function matchHeldRefund(env: Env, a: { refundId: string; actor: st
     const top = await env.DB.prepare('SELECT amount_minor FROM topups WHERE order_id = ?').bind(held.order_id).first<{ amount_minor: number }>();
     const debit = Math.min(held.amount_minor, top?.amount_minor ?? 0);
     if (debit > 0) {
+      // Money first (the ref is idempotent per Kashier transaction, so a retry cannot debit twice), THEN the state flip: if the wallet post
+      // throws, the row is still `held` and the retry finds it.
+      const r = await stubOf(env, held.workspace_id).postWallet({ kind: 'chargeback', netMinor: -debit, ref: `chargeback:${a.refundId}`, note: `provider refund of ${held.order_id}: operator review` }, now);
+      if (!r.ok && r.reason !== 'duplicate') throw new Error(`refund debit refused: ${r.reason}`);
       await env.DB.batch([
         env.DB.prepare("UPDATE card_refunds SET source = 'webhook', state = 'succeeded', amount_minor = ?, updated_at = ? WHERE id = ? AND source = 'held' AND state = 'held'").bind(debit, now, held.id),
         env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(debit, held.order_id),
       ]);
-      const r = await stubOf(env, held.workspace_id).postWallet({ kind: 'chargeback', netMinor: -debit, ref: `chargeback:${a.refundId}`, note: `provider refund of ${held.order_id}: operator review` }, now);
-      if (!r.ok && r.reason !== 'duplicate') throw new Error(`refund debit refused: ${r.reason}`);
     }
     alert('refund_held_debited', { severity: 'P1', workspace: held.workspace_id, orderId: held.order_id, refundId: a.refundId, candidate: cand.id, debitedMinor: debit });
     return { ok: false, reason: 'separate_refund_debited' };

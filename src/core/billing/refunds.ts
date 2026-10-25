@@ -22,10 +22,11 @@ export const MIN_REFUND_MINOR = 5000;
 export const REFUND_WINDOW_MS = 365 * 86_400_000;
 
 type Row = {
+  debit_complete?: number;
   id: string; workspace_id: string; amount_minor: number; note: string | null; state: RefundRequestDto['state']; requested_by: string; created_at: number;
   decided_by: string | null; decided_at: number | null; decision_note: string | null; card_refunded_minor: number; manual_minor: number;
 };
-const COLS = 'id, workspace_id, amount_minor, note, state, requested_by, created_at, decided_by, decided_at, decision_note, card_refunded_minor, manual_minor';
+const COLS = 'debit_complete, id, workspace_id, amount_minor, note, state, requested_by, created_at, decided_by, decided_at, decision_note, card_refunded_minor, manual_minor';
 const dto = (r: Row): RefundRequestDto => ({
   id: r.id, workspaceId: r.workspace_id, amountMinor: r.amount_minor, note: r.note, state: r.state, requestedBy: r.requested_by, createdAt: r.created_at,
   decidedBy: r.decided_by, decidedAt: r.decided_at, decisionNote: r.decision_note, cardRefundedMinor: r.card_refunded_minor, manualMinor: r.manual_minor,
@@ -64,7 +65,9 @@ export type Decide = { ok: true; request: RefundRequestDto } | { ok: false; reas
 export async function decideRefund(env: Env, a: { id: string; decision: 'approve' | 'reject'; actor: string; note?: string }, now = Date.now()): Promise<Decide> {
   const req = await env.DB.prepare(`SELECT ${COLS} FROM refund_requests WHERE id = ?`).bind(a.id).first<Row>();
   if (!req) return { ok: false, reason: 'not_found' };
-  if (req.state !== 'pending') return { ok: false, reason: 'not_pending' };
+  // A run whose debit phase was cut short (`processing`, debits not complete) may be run again: every effect below is idempotent.
+  const resume = req.state === 'processing' && req.debit_complete === 0;
+  if (req.state !== 'pending' && !resume) return { ok: false, reason: 'not_pending' };
   const done = async (state: Row['state'], card = 0, manual = 0): Promise<Decide> => {
     await env.DB.prepare('UPDATE refund_requests SET state = ?, decided_by = ?, decided_at = ?, decision_note = ?, card_refunded_minor = ?, manual_minor = ? WHERE id = ?').bind(state, a.actor, now, a.note ?? null, card, manual, a.id).run();
     return { ok: true, request: dto((await env.DB.prepare(`SELECT ${COLS} FROM refund_requests WHERE id = ?`).bind(a.id).first<Row>())!) };
@@ -74,16 +77,16 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     return done('rejected');
   }
   const stub = stubOf(env, req.workspace_id);
-  if ((await stub.walletView(now)).availableMinor < req.amount_minor) return { ok: false, reason: 'insufficient_balance' };
+  if (!resume && (await stub.walletView(now)).availableMinor < req.amount_minor) return { ok: false, reason: 'insufficient_balance' };
   // Claim the request before any money moves, so two approvers cannot both run it.
-  const claimed = await env.DB.prepare("UPDATE refund_requests SET state = 'processing', debit_complete = 0, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND state = 'pending'").bind(a.actor, now, a.note ?? null, a.id).run();
+  const claimed = await env.DB.prepare("UPDATE refund_requests SET state = 'processing', debit_complete = 0, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND (state = 'pending' OR (state = 'processing' AND debit_complete = 0))").bind(a.actor, now, a.note ?? null, a.id).run();
   if (!claimed.meta.changes) return { ok: false, reason: 'not_pending' };
   // The card top-ups, oldest first, minus what was already returned and what an open card refund has reserved.
   const { results: topups } = await env.DB.prepare(
     `SELECT t.order_id, t.transaction_id, t.amount_minor, t.refunded_minor,
-            coalesce((SELECT sum(c.amount_minor) FROM card_refunds c WHERE c.order_id = t.order_id AND c.state IN ('sending', 'pending', 'uncertain')), 0) AS reserved
+            coalesce((SELECT sum(c.amount_minor) FROM card_refunds c WHERE c.order_id = t.order_id AND c.state IN ('sending', 'pending', 'uncertain') AND coalesce(c.request_id, '') != ?), 0) AS reserved
        FROM topups t WHERE t.workspace_id = ? AND t.state = 'paid' AND t.transaction_id IS NOT NULL ORDER BY t.paid_at, t.order_id`,
-  ).bind(req.workspace_id).all<{ order_id: string; transaction_id: string; amount_minor: number; refunded_minor: number; reserved: number }>();
+  ).bind(a.id, req.workspace_id).all<{ order_id: string; transaction_id: string; amount_minor: number; refunded_minor: number; reserved: number }>();
   // Off (default): no provider call at all, every card chunk is a manual payout, exactly as before the card API existed.
   const provider = refundsEnabled(env) ? paymentProvider(env) : null;
   // PHASE 1, the debits: every wallet chunk of the approval is posted (and its card refund row written) BEFORE any provider call. If this phase

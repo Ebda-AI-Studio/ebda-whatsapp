@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KashierProvider, configurePayments, type PaymentProvider } from '../src/core/billing/payments';
-import { linkDashboardRefund, reconcileCardRefunds } from '../src/core/billing/card-refunds';
+import { linkDashboardRefund, matchHeldRefund, reconcileCardRefunds } from '../src/core/billing/card-refunds';
 import { createRefundRequest, decideRefund } from '../src/core/billing/refunds';
 import { handleProviderWebhook } from '../src/core/billing/topups';
 import { configureSessionCheck } from '../src/core/identity/session';
@@ -584,6 +584,68 @@ describe('round 4 (Opus check)', () => {
     expect(String(alertsOf(spy, 'refund_held_debited')[0]![0])).toContain('"severity":"P1"');
     expect((await hookRefund(a.order, 'TX-W62', '50.00')).status).toBe(200); // a replay posts nothing more
     expect(await kinds(a.ws)).toEqual([['topup', 40000], ['refund', -5000], ['chargeback', -5000]]);
+  });
+
+  it('money first, then the state flip: a wallet post that throws once leaves the held row held, and the retry debits exactly once and ends converted', async () => {
+    const a = await setup(63, 5000, { amount: 40000 });
+    refundAnswer = async () => refundOk('TX-R63', 5000);
+    await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 });
+    await hookRefund(a.order, 'TX-W63', '50.00');
+    kashierHasRefund(a.order, 'TX-W63', '50.00');
+    kashierHasRefund(a.order, 'TX-R63', '50.00');
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    let thrown = false;
+    const flaky = { ...env, WORKSPACE_DO: { idFromName: (n: string) => env.WORKSPACE_DO.idFromName(n), get: () => ({
+      walletView: (n?: number) => real.walletView(n),
+      postWallet: async (x: Parameters<typeof real.postWallet>[0], n?: number) => { if (x.kind === 'chargeback' && !thrown) { thrown = true; throw new Error('wallet down'); } return real.postWallet(x, n); },
+    }) } } as unknown as typeof env;
+    await expect(matchHeldRefund(flaky, { refundId: 'TX-W63', actor: OP1 }, Date.now(), kashier)).rejects.toThrow();
+    expect(await env.DB.prepare("SELECT source, state FROM card_refunds WHERE kashier_refund_id = 'TX-W63'").first()).toEqual({ source: 'held', state: 'held' }); // not converted before the money moved
+    expect(await matchHeldRefund(flaky, { refundId: 'TX-W63', actor: OP1 }, Date.now(), kashier)).toEqual({ ok: false, reason: 'separate_refund_debited' });
+    expect(await kinds(a.ws)).toEqual([['topup', 40000], ['refund', -5000], ['chargeback', -5000]]);
+    expect(await env.DB.prepare("SELECT source, state FROM card_refunds WHERE kashier_refund_id = 'TX-W63'").first()).toEqual({ source: 'webhook', state: 'succeeded' });
+    expect(await refunded(a.order)).toBe(10000);
+  });
+
+  it('an unknown refund whose wallet post throws once is retried by the webhook redelivery and debits exactly once', async () => {
+    const a = await setup(64, 5000);
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    let thrown = false;
+    const flaky = { ...env, WORKSPACE_DO: { idFromName: (n: string) => env.WORKSPACE_DO.idFromName(n), get: () => ({
+      walletView: (n?: number) => real.walletView(n),
+      postWallet: async (x: Parameters<typeof real.postWallet>[0], n?: number) => { if (x.kind === 'chargeback' && !thrown) { thrown = true; throw new Error('wallet down'); } return real.postWallet(x, n); },
+    }) } } as unknown as typeof env;
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { body, sig } = await signedWebhook({ merchantOrderId: a.order, transactionId: 'CB-64', amount: '80.00' }, 'refund', 'reversal');
+    expect((await handleProviderWebhook(flaky, body, sig, kashier)).status).toBe(500);
+    expect((await handleProviderWebhook(flaky, body, sig, kashier)).status).toBe(200);
+    expect((await handleProviderWebhook(flaky, body, sig, kashier)).status).toBe(200);
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['chargeback', -8000]]);
+    expect(await refunded(a.order)).toBe(8000);
+  });
+
+  it('an approval whose debit phase aborted can be run again once the wallet allows: the first chunk is not debited twice, the second is, and the provider is asked once per row', async () => {
+    const a = await setup(65, 15000);
+    const ws = a.ws;
+    await env.DB.prepare('UPDATE refund_requests SET amount_minor = 25000 WHERE id = ?').bind(a.id).run();
+    await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, transaction_id, paid_at) VALUES ('o-kr65b', ?, 10000, 0, 10000, 'EGP', 'paid', 'u', 1, 'TX-KR65b', 6)").bind(ws).run();
+    kashierLedger.set('TX-KR65b', { operation: 'pay', status: 'SUCCESS', orderId: 'o-kr65b' });
+    await fund(ws, 10000, 'kashier:TX-KR65b');
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(ws));
+    let posts = 0;
+    const shrinking = { ...env, WORKSPACE_DO: { idFromName: (n: string) => env.WORKSPACE_DO.idFromName(n), get: () => ({
+      walletView: (n?: number) => real.walletView(n),
+      postWallet: async (x: Parameters<typeof real.postWallet>[0], n?: number) => (x.kind === 'refund' && ++posts === 2 ? { ok: false as const, reason: 'insufficient' as never } : real.postWallet(x, n)),
+    }) } } as unknown as typeof env;
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await decideRefund(shrinking, { id: a.id, decision: 'approve', actor: OP1 })).toEqual({ ok: false, reason: 'insufficient_balance' });
+    refundAnswer = async () => refundOk(`TX-RF65-${puts().length}`, puts().length === 1 ? 20000 : 5000);
+    const again = await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 });
+    expect(again).toMatchObject({ ok: true });
+    expect(await kinds(ws)).toEqual([['topup', 20000], ['topup', 10000], ['refund', -20000], ['refund', -5000]]);
+    expect(puts()).toHaveLength(2);
+    expect(await req(a.id)).toEqual({ state: 'paid', card_refunded_minor: 25000, manual_minor: 0 });
+    expect((await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 })).ok).toBe(false); // finished: never a third run
   });
 });
 
