@@ -31,6 +31,7 @@ A campaign is a marketing message sent with an approved template to a group of y
 
 ## Opt-out
 - If a customer writes **STOP**, **إلغاء** or **وقف**, marketing to them stops immediately and the choice is recorded.
+- Opting out on WhatsApp is also recorded at your store, so the customer is not marketed to there either.
 - Order and service messages (like an order confirmation) are not affected, because they are not marketing.
 - Do not add someone who opted out again without new consent from them.
 

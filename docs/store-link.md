@@ -34,8 +34,15 @@ Schemas: `src/core/api/store-events.ts` (envelope `{id, type, v:1, storeId, occu
 | `order.cod_confirmation_requested` | COD template with Confirm/Refuse quick replies (payload `cod:y|n:<orderId>`), tag `cod_pending`, order row `cod_state=pending`, 24 h `cod_no_reply` task; one request per order however many envelopes |
 | `order.status_changed` | status; any cancel/refund closes the COD state; `paid` tells an InstaPay/link customer inside the window |
 | `shipment.updated` | tracking template (with URL) or status template; only announced statuses, once per shipment+status |
-| `cart.abandoned` | marketing template, never on the shared platform number (skipped `shared_number_no_marketing`); needs a recorded opt-in and no opt-out, a plan that is not past due, and (on a platform-paid number) wallet funds; see `docs/billing.md` |
+| `cart.abandoned` | marketing template, never on the shared platform number (skipped `shared_number_no_marketing`); the event itself attests the checkout opt-in (see Consent below); never sent to an opted-out contact; needs a plan that is not past due, and (on a platform-paid number) wallet funds; see `docs/billing.md` |
+| `customer.consent_changed` | v1.1. Contact found by `buyerKey` (unknown: skipped `unknown_buyer`, nothing stored). `marketingOptIn=true` records `store_checkout` consent at `at` unless the contact is opted out; `false` clears it (`consent_at` NULL, `consent_source='store_revoked'`): marketing stops, utility and service messages do not. Older than the last applied change for that buyer: `stale` |
 | `customer.erased` | deletes the customer's contact, messages, orders, bot session; **never gated by link state; recorded as processed only after the erase succeeded** |
+
+## Consent (WA-CONSENT-1)
+- **Attestation in:** the Store sends `cart.abandoned` only for a buyer who ticked the WhatsApp marketing opt-in at checkout. On receipt we record `consent_source='store_checkout'`, `consent_at` = the event's `occurredAt` (ms) for that contact (created if needed, buyer key remembered), only when `opted_out_at` is NULL, then queue the reminder through the normal `requireConsent` path. Our opt-out always wins.
+- **Opt-out out:** a STOP or START on WhatsApp that really changes the contact's opt-out state, and only when a `buyerKey` is known for that wa_id, schedules `opt_out_push` in the same transaction; the task sends `whatsapp.opt_out_changed {buyerKey, optedOut, at, version}` on `ebda-store-events`. `version` is per buyer, monotonic (`store_state` `optver:<buyerKey>`), and the event id derives from buyer + version, so a retry is idempotent. A repeated STOP emits nothing. A START does not re-opt-in the buyer at the Store.
+- **Stale guard:** the newest consent time applied per buyer is kept in `entity_versions` (`consent:<buyerKey>`); an attestation or `customer.consent_changed` older than it changes nothing.
+- **Erasure** (`customer.erased` and `eraseContact`) removes `consent:<buyerKey>`, `optver:<buyerKey>` and any pending `opt_out_push`.
 
 ## COD confirmation and outcomes
 A customer's tap (or the merchant in the inbox: `POST /contacts/:waId/orders/:orderNumber/cod-outcome`, owner or staff) goes through one function, `resolveCod`: only cash-on-delivery orders, only of that customer (exact `wa_id`), only while the order is not over; first answer wins, the same answer is idempotent, the opposite is 409; a real answer may replace `no_reply`. Recording is local and atomic; telling the Store is a retried task (`cod_outcome_push`): RPC `recordCodOutcome` then a `whatsapp.cod_outcome` event on `ebda-store-events`, both under one idempotency key. One Analytics Engine point per recorded outcome in `ebda_ci_outcomes`: `indexes [storeId]`, `blobs [buyerKey, storeId, outcome, orderId, 'whatsapp']`, `doubles [at]`; never a phone number.
@@ -67,7 +74,7 @@ Runs inside the customer's turn lock (`ai/router.ts`) before the ordering bot an
 v13 `processed_events`, `entity_versions`, `store_state`, `contacts.buyer_key`, `store_orders`, `catalog_dirty` · v14 `store_orders.locale` · v15 `bot_sessions`. Backed up: `store_orders`, `store_state`.
 
 ## Scheduler kinds added
-`catalog_sync` (singleton, debounce), `catalog_reconcile` (singleton, nightly), `cod_no_reply`, `cod_outcome_push`, `bot_turn`.
+`catalog_sync` (singleton, debounce), `catalog_reconcile` (singleton, nightly), `cod_no_reply`, `cod_outcome_push`, `opt_out_push`, `bot_turn`.
 
 ## Not done / needs the other side
 Native Meta `catalog_message`/`product_list` sends; the Store's real RPC and queues; `PUBLIC_BASE_URL`/`PROOF_URL_SECRET` values; wallet checks (done in Phase 7, `docs/billing.md`). The AI agent and its handoff words are in `docs/ai-agent.md`.
