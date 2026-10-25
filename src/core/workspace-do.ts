@@ -45,6 +45,7 @@ import type { OtpResult } from './otp';
 import { queueTemplate } from './store-link/outbound';
 import { forgetBuyer, noteOptOutChange, pushOptOut } from './store-link/consent';
 import { storeLink } from './store-link';
+import { eraseFunnelMarkers, funnelRollup } from './bot-funnel';
 import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
 import { agentActive } from './ai/agent';
 import { runTurn } from './ai/router';
@@ -1861,6 +1862,8 @@ export class WorkspaceDO extends DurableObject<Env> {
         const again = await runTrueup(this.env, this.sql, this.billing, (f) => this.ctx.storage.transactionSync(f), this.workspaceId, month, now);
         return again ?? undefined;
       }
+      case 'funnel_rollup':
+        return funnelRollup(this.sql, now);
       case 'subscription_expire': {
         // A paid early renewal queued behind this period starts now instead of the plan expiring (the control plane owns the queue).
         try {
@@ -2009,6 +2012,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec('DELETE FROM contacts WHERE id = ?', contact.id);
       return { found: true, keys, messages: msgs.length, statusEvents };
     });
+    // After the delete (a turn recording a step checks the message still exists, so nothing new can land): their unrolled analytics markers go too.
+    await eraseFunnelMarkers(this.sql, waId);
     // The shared platform number keeps (in D1) which store wrote to this customer: that is this store's record too, so it goes with the contact.
     await eraseSharedFor(this.env, this.workspaceId, waId);
     const r2Pending = await this.drainR2Deletes();

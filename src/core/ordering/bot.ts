@@ -10,6 +10,7 @@
  * the turn without sending anything twice.
  */
 import { z } from 'zod';
+import { recordFunnel, type FunnelStep } from '../bot-funnel';
 import { buyerKey } from '../buyer-key';
 import type { InboundOrder, InboundReply } from '../meta/webhook-schema';
 import { isE164 } from '../phone';
@@ -127,7 +128,7 @@ function alive(t: Turn): void {
 
 type Turn = {
   host: LinkHost; copy: OrderingCopy; bridge: StoreBridge; ws: string; input: BotInput; now: number;
-  session: Session; out: BotMsg[]; profile?: StoreProfile | null; buyer?: Buyer | null;
+  session: Session; out: BotMsg[]; steps: Set<FunnelStep>; profile?: StoreProfile | null; buyer?: Buyer | null;
 };
 
 const loc = <T extends Record<Locale, string>>(t: Turn, l: T): string => l[t.session.locale];
@@ -196,7 +197,7 @@ export async function runBotTurnLocked(host: LinkHost, input: BotInput, now: num
   if (!copy || !bridge || !orderingActive(host)) return;
   const session = loadSession(host, input.from);
   if (session.data.lastMessageId >= input.messageId) return; // already applied (a replayed task)
-  const t: Turn = { host, copy, bridge, ws: host.workspaceId, input, now, session, out: [] };
+  const t: Turn = { host, copy, bridge, ws: host.workspaceId, input, now, session, out: [], steps: new Set() };
   try {
     alive(t);
     if (session.fresh) {
@@ -206,6 +207,9 @@ export async function runBotTurnLocked(host: LinkHost, input: BotInput, now: num
     await (opts.restart ? restart(t) : dispatch(t));
     alive(t);
     await flush(t);
+    alive(t);
+    // Before the session is saved: a turn that dies in between is replayed and the (day, step, customer) key makes the second record a no-op.
+    for (const step of t.steps) await recordFunnel(host, { step, waId: input.from, now, skip: () => turnGone(host, input) });
     alive(t);
     saveSession(t);
   } catch (err) {
@@ -356,6 +360,7 @@ async function browse(t: Turn, cursor: string | null, greet: boolean): Promise<v
   })).filter((r) => r.id.length <= MAX_ROW_ID);
   const next = res.value.nextCursor;
   if (next && `more:${next}`.length <= MAX_ROW_ID) listRows.push({ id: `more:${next}`, title: loc(t, t.copy.t.moreRow), description: '' });
+  t.steps.add('browse');
   t.out.push({ kind: 'list', body: loc(t, t.copy.t.browseBody), button: loc(t, t.copy.t.browseButton), rows: listRows.map((r) => (r.description ? r : { id: r.id, title: r.title })) });
   t.session.data.rows = rows;
   t.session.data.pageCursor = cursor;
@@ -414,6 +419,7 @@ async function quantity(t: Turn, n: number): Promise<void> {
   else if (cart.length < MAX_CART_LINES) cart.push({ variantId: id, title: row.title, priceMinor: row.priceMinor, currency: row.currency, quantity: n });
   t.session.data.selected = null;
   t.session.data.orderKey = null; // a changed cart is a new order attempt
+  if (cart.length) t.steps.add('cart');
   return cartSummary(t);
 }
 
@@ -448,6 +454,7 @@ async function receiveCart(t: Turn): Promise<void> {
   }
   t.session.data.cart = cart;
   t.session.data.orderKey = null;
+  if (cart.length) t.steps.add('cart');
   return cartSummary(t);
 }
 
@@ -455,6 +462,7 @@ async function receiveCart(t: Turn): Promise<void> {
 
 async function checkout(t: Turn): Promise<void> {
   if (!t.session.data.cart.length) return cartSummary(t);
+  t.steps.add('checkout');
   const p = await profile(t);
   if (!p) return unavailable(t);
   const methods = p.paymentMethods;
@@ -560,6 +568,7 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
   const total = o.totalMinor ?? subtotal(d.cart);
   const currency = o.currency ?? d.cart[0]!.currency;
   upsertOrder(t.host, { orderId: o.orderId, orderNumber: o.orderNumber, waId: t.input.from, buyerKey: buyer.buyerKey, paymentMethod: method, status: 'created', totalMinor: total, currency, locale: t.session.locale }, t.now);
+  t.steps.add('order');
   const L = t.session.locale;
   d.cart = [];
   d.selected = null;
