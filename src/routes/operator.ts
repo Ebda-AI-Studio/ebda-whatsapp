@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import {
-  fxPublish, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
+  fxPublish, instapayReject, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -12,6 +12,7 @@ import {
 import { setSubscription } from '../core/billing/subscriptions';
 import { registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
 import { linkDashboardRefund } from '../core/billing/card-refunds';
+import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -146,4 +147,26 @@ operatorRoutes.get('/change-log', async (c) => {
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? 50) || 50));
   const before = Number(c.req.query('before') ?? 0) || undefined;
   return c.json({ items: await changeLog(c.env, { limit, ...(before ? { before } : {}), ...(c.req.query('workspaceId') ? { workspaceId: c.req.query('workspaceId')! } : {}) }) });
+});
+
+// ---- InstaPay billing review (super admin; every write re-checks the session above) --------------------------------------------
+operatorRoutes.get('/instapay', async (c) => c.json({ items: await listForOperator(c.env, c.req.query('state') || undefined) }));
+operatorRoutes.get('/instapay/:id/proof-link', async (c) => {
+  const row = await c.env.DB.prepare('SELECT workspace_id, proof_key FROM instapay_requests WHERE id = ?').bind(c.req.param('id')).first<{ workspace_id: string; proof_key: string | null }>();
+  if (!row?.proof_key) return c.json({ error: 'not_found' }, 404);
+  const link = await signProofLink(c.env, c.req.param('id'));
+  if (!link) return c.json({ error: 'rate_limited', message: 'proof_links_unavailable' }, 503);
+  await c.env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'instapay_proof_viewed', ?, NULL, NULL, ?)").bind(Date.now(), actor(c), row.workspace_id, c.req.param('id')).run();
+  return c.json(link);
+});
+const decided = (c: { json(b: unknown, s?: 200 | 403 | 404 | 409): Response }, r: DecideResult) => {
+  if (r.ok) return c.json({ ...r.request, ...(r.needsSecond ? { needsSecond: true } : {}) });
+  const status = r.reason === 'not_found' ? 404 : r.reason === 'self_approval_refused' ? 403 : 409;
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : status === 403 ? 'forbidden' : 'invalid_request', message: r.reason }, status);
+};
+operatorRoutes.post('/instapay/:id/confirm', async (c) => decided(c, await confirmInstapay(c.env, { id: c.req.param('id'), actor: actor(c) })));
+operatorRoutes.post('/instapay/:id/reject', async (c) => {
+  const b = instapayReject.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  return decided(c, await rejectInstapay(c.env, { id: c.req.param('id'), actor: actor(c), reason: b.data.reason }));
 });

@@ -96,7 +96,7 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     const posted = await stub.postWallet({ kind: 'refund', netMinor: -chunk, ref: `refund:${a.id}:${n}`, actor: a.actor, note: `refund of top-up ${t.order_id}` }, now);
     if (!posted.ok && posted.reason !== 'duplicate') return { ok: false, reason: 'insufficient_balance' };
     left -= chunk;
-    if (!provider) continue;
+    if (!provider || t.transaction_id.startsWith('instapay:')) continue; // an InstaPay top-up has no card to refund: its share is a manual payout
     // The row is written BEFORE the provider is asked: a refund webhook that arrives mid-call (or an answer we never see) is then matched to
     // this refund instead of being booked as a second debit. Kashier documents no idempotency key, so the call is made once per row.
     const row = await openCardRefund(env, { id: `cr:${a.id}:${n}`, requestId: a.id, orderId: t.order_id, workspaceId: req.workspace_id, amountMinor: chunk }, now);

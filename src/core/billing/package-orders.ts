@@ -27,7 +27,7 @@ export type PackageOrderRow = {
   order_id: string; workspace_id: string; package_id: string; amount_minor: number; currency: string; status: OrderStatus; created_at: number;
   provider_ref: string | null; granted_at: number | null; queued: number; refunded_minor: number;
 };
-const COLS = 'order_id, workspace_id, package_id, amount_minor, currency, status, created_at, provider_ref, granted_at, queued, refunded_minor';
+export const ORDER_COLS = 'order_id, workspace_id, package_id, amount_minor, currency, status, created_at, provider_ref, granted_at, queued, refunded_minor';
 
 /** Active packages a merchant can buy (a free package, like the one a Store plan includes, is not for sale). */
 export async function listPackages(env: Env): Promise<PackageDto[]> {
@@ -64,7 +64,7 @@ export async function startPackageCheckout(env: Env, a: { workspaceId: string; u
 }
 
 export async function getPackageOrder(env: Env, workspaceId: string, orderId: string): Promise<PackageOrderRow | null> {
-  return env.DB.prepare(`SELECT ${COLS} FROM package_orders WHERE order_id = ? AND workspace_id = ?`).bind(orderId, workspaceId).first<PackageOrderRow>();
+  return env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE order_id = ? AND workspace_id = ?`).bind(orderId, workspaceId).first<PackageOrderRow>();
 }
 
 /** What the merchant's page may be told: `paid` only once the package was really granted. */
@@ -73,7 +73,7 @@ export function publicState(o: Pick<PackageOrderRow, 'status' | 'granted_at'>): 
   return o.status === 'charged_back' ? 'refunded' : o.status;
 }
 
-export const findPackageOrder = (env: Env, orderId: string): Promise<PackageOrderRow | null> => env.DB.prepare(`SELECT ${COLS} FROM package_orders WHERE order_id = ?`).bind(orderId).first<PackageOrderRow>();
+export const findPackageOrder = (env: Env, orderId: string): Promise<PackageOrderRow | null> => env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE order_id = ?`).bind(orderId).first<PackageOrderRow>();
 
 function addMonth(ms: number): number {
   const d = new Date(ms);
@@ -91,7 +91,7 @@ const orderPaidUngranted = (orderId: string, ref: string) => ({
  * The same batch records which period the order paid for: `owns_running` (a new period) or `queued_seq` (an early renewal of the same
  * running package, queued behind it), so a later refund knows what to take back.
  */
-async function grantOrder(env: Env, row: PackageOrderRow, ref: string, now: number, opts: { claim: boolean }): Promise<'granted' | 'replay'> {
+export async function grantOrder(env: Env, row: PackageOrderRow, ref: string, now: number, opts: { claim: boolean }): Promise<'granted' | 'replay'> {
   const claim = env.DB.prepare("UPDATE package_orders SET status = 'paid', provider_ref = ?, paid_at = ? WHERE order_id = ? AND status IN ('pending', 'failed', 'expired')").bind(ref, now, row.order_id);
   const RUNNING = "EXISTS (SELECT 1 FROM workspace_subscriptions s WHERE s.workspace_id = package_orders.workspace_id AND s.package_id = package_orders.package_id AND s.period_end > ? AND s.status IN ('active', 'trialing'))";
   const flag = env.DB.prepare(
@@ -296,7 +296,7 @@ export async function repairPackageOrders(env: Env, now = Date.now(), provider: 
   let granted = 0;
   let confirmed = 0;
   if (packagesEnabled(env) && provider) {
-    const { results: stuck } = await env.DB.prepare(`SELECT ${COLS} FROM package_orders WHERE status IN ('pending', 'expired') AND created_at < ? AND created_at > ? ORDER BY created_at LIMIT 200`)
+    const { results: stuck } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE provider = 'kashier' AND status IN ('pending', 'expired') AND created_at < ? AND created_at > ? ORDER BY created_at LIMIT 200`)
       .bind(now - REPAIR_AFTER_MS, now - INQUIRE_UNTIL_MS).all<PackageOrderRow>();
     for (const row of stuck) {
       try {
@@ -310,7 +310,7 @@ export async function repairPackageOrders(env: Env, now = Date.now(), provider: 
       }
     }
   }
-  const { results } = await env.DB.prepare(`SELECT ${COLS} FROM package_orders WHERE status = 'paid' AND granted_at IS NULL AND provider_ref IS NOT NULL ORDER BY created_at LIMIT 200`).all<PackageOrderRow>();
+  const { results } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE status = 'paid' AND granted_at IS NULL AND provider_ref IS NOT NULL ORDER BY created_at LIMIT 200`).all<PackageOrderRow>();
   for (const row of results) {
     alert('package_paid_not_granted', { workspace: row.workspace_id, orderId: row.order_id });
     try {
@@ -319,6 +319,6 @@ export async function repairPackageOrders(env: Env, now = Date.now(), provider: 
       alert('package_repair_failed', { orderId: row.order_id, error: errName(err) });
     }
   }
-  const exp = await env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE status = 'pending' AND created_at < ?").bind(now - PENDING_EXPIRES_AFTER_MS).run();
+  const exp = await env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE provider = 'kashier' AND status = 'pending' AND created_at < ?").bind(now - PENDING_EXPIRES_AFTER_MS).run();
   return { granted, expired: exp.meta.changes, confirmed };
 }

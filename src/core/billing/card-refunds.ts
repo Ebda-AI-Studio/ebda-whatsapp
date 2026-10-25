@@ -196,7 +196,7 @@ export async function linkDashboardRefund(env: Env, a: { requestId: string; kash
   } else if (a.orderId) {
     topup = await env.DB.prepare("SELECT order_id, amount_minor, refunded_minor FROM topups WHERE workspace_id = ? AND state = 'paid' AND order_id = ?").bind(req.workspace_id, a.orderId).first();
   } else {
-    topup = await env.DB.prepare("SELECT order_id, amount_minor, refunded_minor FROM topups WHERE workspace_id = ? AND state = 'paid' AND transaction_id IS NOT NULL AND amount_minor - refunded_minor >= ? ORDER BY paid_at, order_id LIMIT 1").bind(req.workspace_id, a.amountMinor).first();
+    topup = await env.DB.prepare("SELECT order_id, amount_minor, refunded_minor FROM topups WHERE workspace_id = ? AND state = 'paid' AND provider = 'kashier' AND transaction_id IS NOT NULL AND amount_minor - refunded_minor >= ? ORDER BY paid_at, order_id LIMIT 1").bind(req.workspace_id, a.amountMinor).first();
   }
   if (!topup) return { ok: false, reason: a.orderId ? 'invalid_order' : 'exceeds_order' };
   if (!existing) {

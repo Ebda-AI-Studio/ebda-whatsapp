@@ -22,7 +22,7 @@ export const REPAIR_AFTER_MS = 15 * 60_000;
 export const EXPIRE_AFTER_MS = 7 * 86_400_000;
 
 export type TopupRow = { order_id: string; workspace_id: string; amount_minor: number; fee_minor: number; total_minor: number; currency: string; state: 'pending' | 'paid' | 'failed' | 'expired'; created_at: number; transaction_id: string | null };
-const COLS = 'order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_at, transaction_id';
+export const TOPUP_COLS = 'order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_at, transaction_id';
 const stubOf = (env: Env, workspaceId: string) => env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId));
 const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
 
@@ -63,7 +63,7 @@ export async function startTopup(env: Env, a: { workspaceId: string; userId: str
 }
 
 export async function getTopup(env: Env, workspaceId: string, orderId: string): Promise<TopupRow | null> {
-  return env.DB.prepare(`SELECT ${COLS} FROM topups WHERE order_id = ? AND workspace_id = ?`).bind(orderId, workspaceId).first<TopupRow>();
+  return env.DB.prepare(`SELECT ${TOPUP_COLS} FROM topups WHERE order_id = ? AND workspace_id = ?`).bind(orderId, workspaceId).first<TopupRow>();
 }
 
 /**
@@ -71,13 +71,13 @@ export async function getTopup(env: Env, workspaceId: string, orderId: string): 
  * while empty): a second SUCCESS carrying another transaction id is `conflict` and credits nothing, so two different payments (or a refund
  * relabelled as a payment) can never both credit one order. Throws if the workspace could not be reached (the caller answers 5xx).
  */
-async function credit(env: Env, row: TopupRow, transactionId: string, now: number): Promise<'credited' | 'duplicate' | 'conflict'> {
+export async function credit(env: Env, row: TopupRow, transactionId: string, now: number, walletRef = `kashier:${transactionId}`): Promise<'credited' | 'duplicate' | 'conflict'> {
   const claim = await env.DB.prepare('UPDATE topups SET transaction_id = ? WHERE order_id = ? AND transaction_id IS NULL').bind(transactionId, row.order_id).run();
   if (claim.meta.changes !== 1) {
     const cur = await env.DB.prepare('SELECT transaction_id FROM topups WHERE order_id = ?').bind(row.order_id).first<{ transaction_id: string | null }>();
     if (cur?.transaction_id !== transactionId) return 'conflict';
   }
-  const r = await stubOf(env, row.workspace_id).postWallet({ kind: 'topup', netMinor: row.amount_minor, ref: `kashier:${transactionId}`, note: `top-up ${row.order_id}` }, now);
+  const r = await stubOf(env, row.workspace_id).postWallet({ kind: 'topup', netMinor: row.amount_minor, ref: walletRef, note: `top-up ${row.order_id}` }, now);
   if (!r.ok && r.reason !== 'duplicate') throw new Error(`top-up credit refused: ${r.reason}`);
   await env.DB.prepare("UPDATE topups SET state = 'paid', paid_at = coalesce(paid_at, ?) WHERE order_id = ? AND state IN ('pending', 'expired', 'failed')").bind(now, row.order_id).run();
   return r.ok ? 'credited' : 'duplicate';
@@ -166,7 +166,7 @@ export async function handleProviderWebhook(env: Env, raw: string, signature: st
   if (!provider) return { status: 503, body: 'unavailable' };
   const signed = await provider.verifyWebhook(raw, signature);
   if (!signed) return { status: 401, body: 'unauthorized' };
-  const row = await env.DB.prepare(`SELECT ${COLS} FROM topups WHERE order_id = ?`).bind(signed.orderId).first<TopupRow>();
+  const row = await env.DB.prepare(`SELECT ${TOPUP_COLS} FROM topups WHERE order_id = ?`).bind(signed.orderId).first<TopupRow>();
   const pkg = row ? null : await findPackageOrder(env, signed.orderId);
   if (!row && !pkg) {
     alert('topup_unknown_order');
@@ -238,7 +238,7 @@ export async function reconfirmUnconfirmed(env: Env, provider: PaymentProvider |
 /** Daily: ask the provider about top-ups still pending after REPAIR_AFTER_MS; credit what was paid, close what failed or is a week old. */
 export async function repairTopups(env: Env, provider: PaymentProvider | null = paymentProvider(env), now = Date.now()): Promise<{ checked: number; credited: number; unsupported: boolean }> {
   if (!topupsEnabled(env) || !provider) return { checked: 0, credited: 0, unsupported: false };
-  const { results } = await env.DB.prepare(`SELECT ${COLS} FROM topups WHERE state = 'pending' AND created_at < ? ORDER BY created_at LIMIT 200`).bind(now - REPAIR_AFTER_MS).all<TopupRow>();
+  const { results } = await env.DB.prepare(`SELECT ${TOPUP_COLS} FROM topups WHERE provider = 'kashier' AND state = 'pending' AND created_at < ? ORDER BY created_at LIMIT 200`).bind(now - REPAIR_AFTER_MS).all<TopupRow>();
   let credited = 0;
   let unsupported = false;
   for (const row of results) {

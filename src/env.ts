@@ -44,6 +44,12 @@ export type Env = {
   KASHIER_SECRET_KEY?: string;
   /** Kashier API origin for that call; default https://api.kashier.io (test: https://test-api.kashier.io). */
   KASHIER_API_URL?: string;
+  /** 'true' lets merchants pay packages and top-ups by InstaPay transfer with a proof an operator confirms. Needs the brand's payee settings (EBDA_INSTAPAY_*), else it is unavailable (503). */
+  INSTAPAY_BILLING_ENABLED?: string;
+  /** Ebda AI Studio's InstaPay address (a secret; the SAME value as ebda-api), its public QR image url (https only; the Store's is https://media.ebda.app/platform/instapay-qr.jpg) and the payee name shown to merchants. */
+  EBDA_INSTAPAY_HANDLE?: string;
+  EBDA_INSTAPAY_QR_URL?: string;
+  EBDA_INSTAPAY_PAYEE_NAME?: string;
   /** 'true' sends the card-refundable part of an approved refund to the provider's refund API. Default off: every refund is a manual payout. */
   KASHIER_REFUNDS_ENABLED?: string;
   /** Hosted checkout origin; default https://checkout.kashier.io. */
