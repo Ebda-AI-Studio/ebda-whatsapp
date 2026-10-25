@@ -60,7 +60,7 @@ function localeOfText(host: Pick<LinkHost, 'sql'>, input: BotInput): Locale {
 }
 
 /** Stores and sends the messages of this turn, in order. Mirrors the ordering bot's flush (same erasure and opt-out guards). */
-async function send(host: LinkHost, input: BotInput, now: number, out: BotMsg[], prefix = 'front'): Promise<void> {
+async function send(host: LinkHost, input: BotInput, now: number, out: BotMsg[], prefix = 'front'): Promise<boolean> {
   for (let i = 0; i < out.length; i++) {
     const key = `${prefix}:${input.messageId}:${i}`;
     const built = toJob(host, input.from, input.phoneNumberId, key, out[i]!);
@@ -71,10 +71,11 @@ async function send(host: LinkHost, input: BotInput, now: number, out: BotMsg[],
       host.insertOutbound(conversationId, { type: built.type, preview: built.preview, body: built.preview, key, author: 'bot' }, now);
       return false;
     });
-    if (gone) return;
+    if (gone) return false;
     await host.deliver(built.job);
     if (i < out.length - 1 && host.sendGapMs > 0) await new Promise((r) => setTimeout(r, host.sendGapMs));
   }
+  return true;
 }
 
 function locationMessages(host: Pick<LinkHost, 'sql'>): BotMsg[] {
@@ -108,8 +109,10 @@ export async function runHoursGate(host: LinkHost, input: BotInput, now: number)
   const mine = host.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', `away:${input.messageId}:0`).toArray().length > 0;
   if (getState(host, stateKey) !== period || mine) {
     if (turnGone(host, input)) return 'stop';
-    await send(host, input, now, [{ kind: 'text', text: hours.awayMessage[localeOfText(host, input)] }], 'away');
-    putState(host, stateKey, period);
+    const sent = await send(host, input, now, [{ kind: 'text', text: hours.awayMessage[localeOfText(host, input)] }], 'away');
+    // The customer may have been erased or said stop while the send was in flight: then nothing about them is written.
+    if (!sent) return 'stop';
+    host.storage.transactionSync(() => { if (!turnGone(host, input)) putState(host, stateKey, period); });
   } else if (!hours.ordersWhileClosed) {
     return 'stop'; // already told this period: stay quiet instead of repeating it
   }

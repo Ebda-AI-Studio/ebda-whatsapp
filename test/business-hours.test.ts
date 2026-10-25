@@ -2,6 +2,7 @@ import { SELF, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { isOpen, nextOpenAt } from '../src/core/front-desk-hours';
 import type { HoursSettings } from '../src/core/store-link/bot-settings';
+import { holdPoint } from './helpers/hold';
 import { ScriptedProvider, useAgent } from './helpers/agent';
 import { apiFor, storeId, useApiKey } from './helpers/api';
 import { stubGraph } from './helpers/graph';
@@ -171,6 +172,21 @@ describe('away message and erasure', () => {
     expect(await rows(ws, "SELECT 1 FROM store_state WHERE key LIKE 'away:%'")).toHaveLength(1);
     await workspace(ws).eraseContact(WA_1);
     expect(await rows(ws, "SELECT 1 FROM store_state WHERE key LIKE 'away:%'")).toHaveLength(0);
+  });
+});
+
+describe('away message and a customer erased in flight', () => {
+  it('a customer erased while the away message is being sent leaves no state row behind', async () => {
+    const { ws, pn } = await setup(10, hours({ ordersWhileClosed: false }));
+    const hp = holdPoint();
+    const g = stubGraph(undefined, { before: () => hp.hold() });
+    const turn = say(ws, pn, 'مرحبا', g, CLOSED_THU);
+    await hp.reached();
+    await workspace(ws).eraseContact(WA_1);
+    hp.release();
+    await turn;
+    expect(await rows(ws, "SELECT 1 FROM store_state WHERE key LIKE 'away:%'")).toEqual([]);
+    expect(await rows(ws, 'SELECT 1 FROM contacts')).toEqual([]);
   });
 });
 
