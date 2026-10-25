@@ -271,6 +271,7 @@ describe('state-changing operator routes check the session (fail closed)', () =>
     ['POST', '/refund-requests/x/decision', { decision: 'approve' }],
     ['POST', '/refund-requests/x/manual-paid', undefined],
     ['POST', '/trueups', { month: '2020-01', phoneNumberId: 'p', actualMinor: 0 }],
+    ['PUT', `/workspaces/${W(1070)}/subscription`, { packageId: 'p', status: 'active', periodEnd: 9_999_999_999_999, reason: 'session check' }],
   ];
   it.each(writes)('%s %s: a revoked session is refused (403), nothing is written', async (method, path, body) => {
     configureSessionCheck(async () => true);

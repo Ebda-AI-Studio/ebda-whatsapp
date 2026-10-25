@@ -434,6 +434,7 @@ export const rateCardPublish = z.object({
 });
 export const fxPublish = z.object({ effectiveFrom: z.number().int().positive(), egpPerUsdMicros: z.number().int().min(1).max(1_000_000_000_000), bufferBps: z.number().int().min(0).max(10_000).default(0), reason: z.string().trim().min(5).max(500) });
 export const operatorFundingSet = z.object({ funding: z.enum(['merchant_card', 'platform_line']), reason: z.string().trim().min(5).max(500) });
+export const operatorSubscriptionSet = z.object({ packageId: z.string().min(1).max(64), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int().positive(), reason: z.string().trim().min(5).max(500) });
 export const operatorAdjustmentCreate = z.object({ amountMinor: z.number().int().refine((n) => n !== 0), reason: z.string().trim().min(5).max(500) });
 export const operatorDecision = z.object({ decision: z.enum(['approve', 'reject']), note: z.string().trim().max(500).optional() });
 export const trueupPublish = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), phoneNumberId: z.string().min(1), actualMinor: z.number().int().min(0) });

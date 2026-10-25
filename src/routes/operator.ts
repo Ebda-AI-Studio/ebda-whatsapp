@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import {
-  fxPublish, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, operatorFundingSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
+  fxPublish, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -9,6 +9,7 @@ import {
   changeLog, decideAdjustment, listAdjustments, listFx, listOverrides, listRateCards, listSettings, publishFx, publishOverride, publishRateCard, publishSettings, publishTrueup,
   requestAdjustment, setFunding,
 } from '../core/billing/operator';
+import { setSubscription } from '../core/billing/subscriptions';
 import { registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
@@ -115,6 +116,21 @@ operatorRoutes.get('/workspaces/:workspaceId/wallet', async (c) => {
   const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(c.req.param('workspaceId')).first();
   if (!known) return c.json({ error: 'not_found' }, 404);
   return c.json(await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(c.req.param('workspaceId'))).walletView());
+});
+
+// An operator assigns a package (a deal, a goodwill extension). The session was checked above (writes fail closed); the one writer pushes and tells the Store.
+operatorRoutes.put('/workspaces/:workspaceId/subscription', async (c) => {
+  const b = operatorSubscriptionSet.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, b.error.issues[0]?.message);
+  const workspaceId = c.req.param('workspaceId');
+  const [ws, pkg] = await Promise.all([
+    c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(workspaceId).first(),
+    c.env.DB.prepare('SELECT 1 FROM packages WHERE id = ?').bind(b.data.packageId).first(),
+  ]);
+  if (!ws || !pkg) return c.json({ error: 'not_found' }, 404);
+  const r = await setSubscription(c.env, { workspaceId, packageId: b.data.packageId, status: b.data.status, periodStart: Date.now(), periodEnd: b.data.periodEnd, source: 'operator', ref: actor(c), reason: b.data.reason });
+  console.log(JSON.stringify({ audit: 'operator_subscription_set', workspace: workspaceId, packageId: b.data.packageId, status: b.data.status, version: r.version, actor: actor(c) }));
+  return c.json({ packageId: b.data.packageId, status: b.data.status, periodEnd: b.data.periodEnd, version: r.version, applied: r.applied });
 });
 
 operatorRoutes.get('/change-log', async (c) => {
