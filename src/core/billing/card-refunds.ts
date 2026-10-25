@@ -19,6 +19,7 @@ import type { Env } from '../../env';
 import { TRANSACTION_ID } from './kashier-confirm';
 import { ensureAdjustmentApplied, requestAdjustment } from './operator';
 import { auditOnce } from './package-orders';
+import { APPROVAL_LEASE_MS } from './refunds';
 import { isCardRefundOperation, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 
 /** Rows that count against a top-up's room: the open ones, the planned ones (reserved, not debited yet) and held refunds (real refunds awaiting a match). */
@@ -454,7 +455,7 @@ export async function reverseUnreversedChunks(env: Env, requestId: string, works
 
 /**
  * The daily backstop for the race between a run's wallet post and an abandon. Takes the oldest abandoned requests not yet marked clean
- * (`swept_at`), reverses what is eligible and marks each one it finished (clean or blocked-and-alerted), so a backlog is worked off across
+ * (`swept_at`), reverses what is eligible and marks each one it finished (clean or blocked-and-alerted) once it is past the grace window, so a backlog is worked off across
  * passes and older requests never starve behind newer ones.
  */
 export async function sweepAbandonedRefunds(env: Env, now = Date.now()): Promise<{ checked: number; reversed: number }> {
@@ -463,7 +464,8 @@ export async function sweepAbandonedRefunds(env: Env, now = Date.now()): Promise
   for (const r of results) {
     try {
       reversed += await reverseUnreversedChunks(env, r.id, r.workspace_id, 'system', now);
-      await env.DB.prepare('UPDATE refund_requests SET swept_at = ? WHERE id = ? AND swept_at IS NULL').bind(now, r.id).run();
+      // A run whose lease ran out may still post a chunk shortly after the abandon: mark clean only after twice its lease.
+      await env.DB.prepare('UPDATE refund_requests SET swept_at = ? WHERE id = ? AND swept_at IS NULL AND abandoned_at < ?').bind(now, r.id, now - 2 * APPROVAL_LEASE_MS).run();
     } catch (err) {
       console.error(JSON.stringify({ alert: 'refund_abandon_sweep_failed', severity: 'P1', requestId: r.id, error: err instanceof Error ? err.name : 'error' }));
     }

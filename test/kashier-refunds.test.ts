@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KashierProvider, configurePayments, type PaymentProvider } from '../src/core/billing/payments';
 import { abandonRefundRequest, linkDashboardRefund, reverseUnreversedChunks, sweepAbandonedRefunds, matchHeldRefund, reconcileCardRefunds } from '../src/core/billing/card-refunds';
-import { createRefundRequest, decideRefund } from '../src/core/billing/refunds';
+import { APPROVAL_LEASE_MS, createRefundRequest, decideRefund } from '../src/core/billing/refunds';
 import { handleProviderWebhook } from '../src/core/billing/topups';
 import { dailyBilling } from '../src/index';
 import { configureSessionCheck } from '../src/core/identity/session';
@@ -1061,6 +1061,19 @@ describe('abandoning a partly debited refund request (two operators, money back 
     await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', abandoned_at = 1 WHERE id = ?").bind(a.id).run();
     await env.DB.prepare("UPDATE card_refunds SET state = 'failed', note = ? WHERE request_id = ?").bind(`abandoned:${a.id}`, a.id).run();
     expect(await sweepAbandonedRefunds(env)).toMatchObject({ reversed: 1 }); // once abandoned, the sweep returns it
+  });
+
+  it('MEDIUM: a sweep right after an abandon does not mark it clean: a debit from a run whose lease ran out can still land, and the next pass returns it', async () => {
+    const a = await partlyDebited(118);
+    await abandon(a.id, OP1);
+    expect(await abandon(a.id, OP2)).toEqual({ ok: true });
+    expect(await sweepAbandonedRefunds(env)).toMatchObject({ reversed: 0 });
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    await real.postWallet({ kind: 'refund', netMinor: -5000, ref: `refund:${a.id}:2`, actor: OP1, note: 'stale run, late chunk' });
+    expect(await sweepAbandonedRefunds(env)).toMatchObject({ reversed: 1 });
+    const later = Date.now() + 2 * APPROVAL_LEASE_MS + 1;
+    await sweepAbandonedRefunds(env, later);
+    expect((await env.DB.prepare('SELECT swept_at FROM refund_requests WHERE id = ?').bind(a.id).first<{ swept_at: number | null }>())?.swept_at).toBe(later); // marked once no run can still post
   });
 
   it('MEDIUM: 250 abandoned requests are all swept across passes: the sweep marks what it finished, so older rows cannot starve behind newer ones', async () => {
