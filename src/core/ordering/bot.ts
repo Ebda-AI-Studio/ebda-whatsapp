@@ -72,7 +72,7 @@ type Session = { state: State; locale: Locale; data: Data; fresh: boolean };
 
 // ---- outbound messages -------------------------------------------------------------------------------------------------
 
-type BotMsg =
+export type BotMsg =
   | { kind: 'text'; text: string }
   | { kind: 'image'; link: string; caption: string }
   | { kind: 'buttons'; body: string; buttons: { id: string; title: string }[] }
@@ -80,7 +80,7 @@ type BotMsg =
 
 const cut = (s: string, n: number) => (Array.from(s).length <= n ? s : `${Array.from(s).slice(0, n - 1).join('')}…`);
 
-function toJob(host: LinkHost, to: string, pn: string, key: string, m: BotMsg): { job: SendJob; type: string; preview: string } {
+export function toJob(host: LinkHost, to: string, pn: string, key: string, m: BotMsg): { job: SendJob; type: string; preview: string } {
   const base = { workspaceId: host.workspaceId, phoneNumberId: pn, to, idempotencyKey: key };
   switch (m.kind) {
     case 'text': return { job: { ...base, kind: 'text', text: cut(m.text, 4096) }, type: 'text', preview: m.text };

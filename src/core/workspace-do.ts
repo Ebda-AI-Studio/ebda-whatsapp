@@ -46,6 +46,7 @@ import { storeLink } from './store-link';
 import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
 import { agentActive } from './ai/agent';
 import { runTurn } from './ai/router';
+import { frontDeskActive } from './front-desk';
 import { testConnector } from './connectors/registry';
 import { connectorDto, deleteConnector, listConnectors, planConnectorPut, writeConnector, type PutRefusal } from './connectors/store';
 import type { ConnectorDto, ConnectorPut } from './api/contract';
@@ -194,7 +195,8 @@ export class WorkspaceDO extends DurableObject<Env> {
     // While the ordering bot is on it owns the conversation: the generic auto reply would talk over it.
     const ordering = orderingActive(this.host());
     const agent = agentActive(this.host());
-    if (ordering || agent) config = { ...config, autoReplyText: undefined };
+    const front = frontDeskActive(this.host());
+    if (ordering || agent || front) config = { ...config, autoReplyText: undefined };
     // Large bodies go to R2 first (outside the transaction); skipped for a wamid we already stored, so redelivery writes nothing.
     const bodies = new Map<string, string>();
     for (const m of batch.inbound) {
@@ -254,7 +256,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
         const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
         if (wasCodReply) linkWork = true;
-        else if ((ordering || agent) && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image' || (agent && (m.type === 'audio' || m.type === 'video' || m.type === 'document')))) {
+        else if ((ordering || agent || front) && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image' || (agent && (m.type === 'audio' || m.type === 'video' || m.type === 'document')))) {
           addTask(this.sql, 'bot_turn', now, botInputFrom(m, inserted.id, batch.phoneNumberId));
           linkWork = true;
         }

@@ -23,6 +23,18 @@ export type OrderingCopy = {
   codConfirmTitles: readonly string[];
   codRefuseTitles: readonly string[];
   customerName: Localised;
+  /** The service menu (see core/front-desk): the words that open it and its fixed rows. Row titles are at most 24 characters, the button 20. */
+  menu: {
+    menuWords: readonly string[];
+    greetingWords: readonly string[];
+    locationWords: readonly string[];
+    body: Localised;
+    button: Localised;
+    orderRow: Localised;
+    locationRow: Localised;
+    humanRow: Localised;
+    handedOff: Localised;
+  };
   money: (minor: number, currency: string, locale: Locale) => string;
   shipmentPhrase: (status: string, locale: Locale) => string | null;
   t: {
