@@ -5,10 +5,11 @@ import { feeFor, handleProviderWebhook, repairTopups, startTopup } from '../src/
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import { fund, ledger } from './helpers/billing';
 import { rows, seedNumber, workspace } from './helpers/workspace';
+import { kashierLedger, testKashier } from './helpers/kashier';
 
 useApiKey();
 const KEY = 'test-payment-api-key';
-const kashier = new KashierProvider('MID-1', KEY);
+const kashier = testKashier();
 afterEach(() => configurePayments((e) => (e.KASHIER_MERCHANT_ID && e.KASHIER_API_KEY ? new KashierProvider(e.KASHIER_MERCHANT_ID, e.KASHIER_API_KEY) : null)));
 const useKashier = (extra: Partial<PaymentProvider> = {}) => configurePayments(() => Object.assign(Object.create(kashier) as PaymentProvider, extra));
 
@@ -17,9 +18,10 @@ async function hmac(text: string, key = KEY): Promise<string> {
   return [...new Uint8Array(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 /** A webhook signed the documented way: sorted signatureKeys, URL-encoded values joined with &, HMAC-SHA256 hex. */
-async function signed(data: Record<string, string | number>, event = 'pay', key = KEY) {
+async function signed(data: Record<string, string | number>, event = 'pay', key = KEY, genuine?: string) {
   const keys = ['amount', 'channel', 'currency', 'kashierOrderId', 'merchantOrderId', 'method', 'orderReference', 'status', 'transactionId', 'transactionResponseCode'];
   const full = { kashierOrderId: 'ko-1', orderReference: 'ref-1', method: 'card', channel: 'online | e-commerce', transactionResponseCode: '00', currency: 'EGP', status: 'SUCCESS', ...data, signatureKeys: [...keys].reverse() };
+  kashierLedger.set(String((full as Record<string, unknown>).transactionId), { operation: genuine ?? event, status: String((full as Record<string, unknown>).status), orderId: String((full as Record<string, unknown>).merchantOrderId) });
   const str = [...keys].sort().map((k) => `${k}=${encodeURIComponent(String((full as Record<string, unknown>)[k]))}`).join('&');
   return { body: JSON.stringify({ event, data: full }), sig: await hmac(str, key) };
 }
@@ -32,7 +34,7 @@ const pending = async (orderId: string, ws: string, amount = 5000, fee = 150) =>
 describe('Kashier webhook signature (documented scheme)', () => {
   it('accepts the documented construction and returns the fields the money logic uses', async () => {
     const { body, sig } = await signed({ merchantOrderId: 'o1', transactionId: 'TX-1', amount: '51.50' });
-    expect(await kashier.verifyWebhook(body, sig)).toEqual({ event: 'pay', status: 'SUCCESS', orderId: 'o1', transactionId: 'TX-1', amountMinor: 5150, currency: 'EGP' });
+    expect(await kashier.verifyWebhook(body, sig)).toEqual({ event: 'pay', status: 'SUCCESS', orderId: 'o1', transactionId: 'TX-1', amountMinor: 5150, currency: 'EGP', eventKey: 'kashier:TX-1:SUCCESS' });
     expect(await kashier.verifyWebhook(body, sig.toUpperCase())).not.toBeNull(); // hex compared case-insensitively
   });
   it('pins the documented example string: values URL-encoded ("online | e-commerce" -> online%20%7C%20e-commerce)', async () => {
@@ -206,19 +208,20 @@ describe('crediting', () => {
     const spy = vi.spyOn(console, 'error');
     const ws = W(919);
     await pending('ord-919', ws, 1000, 0);
-    await fund(ws, 200);
-    const { body, sig } = await signed({ merchantOrderId: 'ord-919', transactionId: 'TX-R1', amount: '10.00' }, 'refund');
+    const paid = await signed({ merchantOrderId: 'ord-919', transactionId: 'TX-P919', amount: '10.00' });
+    await handleProviderWebhook(env, paid.body, paid.sig, kashier);
+    const { body, sig } = await signed({ merchantOrderId: 'ord-919', transactionId: 'TX-R1', amount: '20.00' }, 'refund');
     await handleProviderWebhook(env, body, sig, kashier);
     await handleProviderWebhook(env, body, sig, kashier);
-    expect((await ledger(ws)).map((r) => [r.kind, r.amount_minor, r.balance_after])).toEqual([['topup', 200, 200], ['chargeback', -1000, -800]]);
+    expect((await ledger(ws)).map((r) => [r.kind, r.amount_minor, r.balance_after])).toEqual([['topup', 1000, 1000], ['chargeback', -2000, -1000]]);
     expect(spy.mock.calls.some((c) => String(c[0]).includes('topup_refunded_by_provider'))).toBe(true);
-    expect((await workspace(ws).walletView()).debtMinor).toBe(800);
+    expect((await workspace(ws).walletView()).debtMinor).toBe(1000);
   });
 });
 
 describe('the daily repair of lost webhooks', () => {
   /** Answers `q` for `order` only (the file shares one D1, so other tests' pending orders must stay untouched). */
-  const fake = (q: Inquiry | 'unsupported' | 'unavailable', order?: string): PaymentProvider => ({ ...kashier, name: 'fake', inquire: async (o: string) => (order && o !== order ? 'unavailable' : q), refund: async (): Promise<RefundResult> => ({ ok: false, reason: 'unsupported' }), verifyWebhook: async () => null, createSession: async () => ({ checkoutUrl: 'https://x' }) });
+  const fake = (q: Inquiry | 'unsupported' | 'unavailable', order?: string): PaymentProvider => ({ ...kashier, name: 'fake', inquire: async (o: string) => (order && o !== order ? 'unavailable' : q), refund: async (): Promise<RefundResult> => ({ ok: false, reason: 'unsupported' }), verifyWebhook: async () => null, confirm: async (e) => e, createSession: async () => ({ checkoutUrl: 'https://x' }) });
   it('credits a paid order whose webhook never came, closes a failed one, expires a week-old one, and alerts when the provider cannot be asked', async () => {
     const ws = W(920);
     await pending('ord-920a', ws, 1000, 0);

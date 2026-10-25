@@ -126,7 +126,7 @@ describe('WA-REFUND-1: the refund queue', () => {
     await fund(ws, balance, `kashier:TX-${n}`);
     return ws;
   }
-  const provider = (ok: boolean): PaymentProvider => ({ name: 'fake', createSession: async () => ({ checkoutUrl: 'https://x' }), verifyWebhook: async () => null, inquire: async () => 'unsupported', refund: async () => (ok ? { ok: true, refundId: 'R1' } : { ok: false, reason: 'unsupported' }) });
+  const provider = (ok: boolean): PaymentProvider => ({ name: 'fake', createSession: async () => ({ checkoutUrl: 'https://x' }), verifyWebhook: async () => null, confirm: async (e: unknown) => e as never, inquire: async () => 'unsupported', refund: async () => (ok ? { ok: true, refundId: 'R1' } : { ok: false, reason: 'unsupported' }) });
 
   it('the owner can ask only after the plan period ended and within 12 months, for at least 50 EGP and no more than the balance', async () => {
     const active = await cancelledWorkspace(1030, 20_000, { status: 'active', periodEndedDaysAgo: -5 });

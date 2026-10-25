@@ -8,12 +8,13 @@ import { handleProviderWebhook } from '../src/core/billing/topups';
 import { configureSessionCheck } from '../src/core/identity/session';
 import { apiFor, operatorCall, OP1, storeId as W0, useApiKey } from './helpers/api';
 import { iso, storeEvent, useStoreLink } from './helpers/store-link';
+import { kashierLedger, testKashier } from './helpers/kashier';
 import { rows, seedNumber, workspace } from './helpers/workspace';
 
 useApiKey();
 const link = useStoreLink();
 const KEY = 'test-payment-api-key';
-const kashier = new KashierProvider('MID-1', KEY);
+const kashier = testKashier();
 const DAY = 86_400_000;
 const W = (n: number) => W0(8500 + n);
 beforeEach(async () => {
@@ -30,9 +31,10 @@ async function hmac(text: string): Promise<string> {
   const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(KEY), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return [...new Uint8Array(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
-async function signed(data: Record<string, string | number>, event = 'pay') {
+async function signed(data: Record<string, string | number>, event = 'pay', genuine?: string) {
   const keys = ['amount', 'channel', 'currency', 'kashierOrderId', 'merchantOrderId', 'method', 'orderReference', 'status', 'transactionId', 'transactionResponseCode'];
   const full = { kashierOrderId: 'ko-1', orderReference: 'ref-1', method: 'card', channel: 'online', transactionResponseCode: '00', currency: 'EGP', status: 'SUCCESS', ...data, signatureKeys: keys };
+  kashierLedger.set(String((full as Record<string, unknown>).transactionId), { operation: genuine ?? event, status: String((full as Record<string, unknown>).status), orderId: String((full as Record<string, unknown>).merchantOrderId) });
   const str = keys.map((k) => `${k}=${encodeURIComponent(String((full as Record<string, unknown>)[k]))}`).join('&');
   return { body: JSON.stringify({ event, data: full }), sig: await hmac(str) };
 }
@@ -42,8 +44,8 @@ async function start(ws: string, packageId = 'gold', now = Date.now()) {
   if (!r.ok) throw new Error(r.reason);
   return r;
 }
-const hook = async (orderId: string, tx: string, amount: string, o: { event?: string; status?: string; now?: number; e?: typeof env } = {}) => {
-  const { body, sig } = await signed({ merchantOrderId: orderId, transactionId: tx, amount, ...(o.status ? { status: o.status } : {}) }, o.event ?? 'pay');
+const hook = async (orderId: string, tx: string, amount: string, o: { event?: string; genuine?: string; status?: string; now?: number; e?: typeof env } = {}) => {
+  const { body, sig } = await signed({ merchantOrderId: orderId, transactionId: tx, amount, ...(o.status ? { status: o.status } : {}) }, o.event ?? 'pay', o.genuine);
   return handleProviderWebhook(o.e ?? env, body, sig, kashier, o.now ?? Date.now());
 };
 const order = (id: string) => env.DB.prepare('SELECT status, provider_ref, granted_at, queued FROM package_orders WHERE order_id = ?').bind(id).first<{ status: string; provider_ref: string | null; granted_at: number | null; queued: number }>();
@@ -172,7 +174,7 @@ describe('I5: a provider refund or chargeback revokes the package', () => {
     const o2 = await start(ws);
     await hook(o2.orderId, 'TX-Q', '500.00');
     const before = (await sub(ws))!;
-    await hook(o2.orderId, 'TX-Q', '500.00', { event: 'refund' });
+    await hook(o2.orderId, 'TX-Q-REF', '500.00', { event: 'refund' });
     expect(await sub(ws)).toMatchObject({ status: 'active', queued_periods: 0, period_end: before.period_end, version: before.version + 1 });
     expect(await credits(ws)).toBe(300);
   });
@@ -196,7 +198,7 @@ describe('I5: a provider refund or chargeback revokes the package', () => {
     expect((await hook(o.orderId, 'TX-TWO', '500.00')).status).toBe(200);
     expect(await sub(ws)).toMatchObject({ version: 1 });
     expect(await order(o.orderId)).toMatchObject({ provider_ref: 'TX-ONE' });
-    expect(err.mock.calls.some((c) => String(c[0]).includes('package_duplicate_payment'))).toBe(true);
+    expect(err.mock.calls.some((c) => String(c[0]).includes('duplicate_success'))).toBe(true);
     expect(await audits(ws, 'package_duplicate_payment')).toBe(1);
   });
 });

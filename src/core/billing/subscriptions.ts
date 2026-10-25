@@ -12,7 +12,7 @@ import { uuidFromKey } from '../store-link/orders';
 import type { EntitlementEvent } from './entitlements';
 
 export const STORE_INCLUDED = 'store-included';
-const MONTH_SQL = (col: string) => `CAST(strftime('%s', ${col} / 1000, 'unixepoch', '+1 month') AS INTEGER) * 1000`;
+export const MONTH_SQL = (col: string) => `CAST(strftime('%s', ${col} / 1000, 'unixepoch', '+1 month') AS INTEGER) * 1000`;
 
 type SubRow = { workspace_id: string; package_id: string; status: EntitlementEvent['status']; period_start: number; period_end: number; cancelled_at: number | null; version: number; ai_credits: number | null };
 
@@ -136,12 +136,17 @@ export async function cancelSubscription(env: Env, a: { workspaceId: string; act
 export async function rollRenewals(env: Env, workspaceId: string, now: number): Promise<number> {
   let rolled = 0;
   for (let i = 0; i < 12; i++) {
+    // Which order owns the running period moves with the roll (decided by the same predicate the roll uses, evaluated before it).
+    const due = { sql: "EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND queued_periods > 0 AND period_end <= ? AND status IN ('active', 'trialing'))", binds: [workspaceId, now] };
     const res = await env.DB.batch([
+      env.DB.prepare(`UPDATE package_orders SET owns_running = 0 WHERE workspace_id = ? AND owns_running = 1 AND ${due.sql}`).bind(workspaceId, ...due.binds),
+      env.DB.prepare(`UPDATE package_orders SET owns_running = 1, queued_seq = NULL WHERE order_id = (SELECT order_id FROM package_orders WHERE workspace_id = ? AND queued_seq IS NOT NULL ORDER BY queued_seq LIMIT 1) AND ${due.sql}`).bind(workspaceId, ...due.binds),
+      env.DB.prepare(`UPDATE package_orders SET queued_seq = queued_seq - 1 WHERE workspace_id = ? AND queued_seq IS NOT NULL AND ${due.sql}`).bind(workspaceId, ...due.binds),
       env.DB.prepare(`UPDATE workspace_subscriptions SET period_start = period_end, period_end = ${MONTH_SQL('period_end')}, queued_periods = queued_periods - 1,
           version = version + 1, updated_at = ? WHERE workspace_id = ? AND queued_periods > 0 AND period_end <= ? AND status IN ('active', 'trialing') RETURNING version`).bind(now, workspaceId, now),
       auditStmt(env, { actor: 'purchase', workspaceId, ref: 'queued_period_started', after: { rolledAt: now } }, now),
     ]);
-    if ((res[0]!.results[0] as { version: number } | undefined) === undefined) break;
+    if ((res[3]!.results[0] as { version: number } | undefined) === undefined) break;
     rolled++;
   }
   if (rolled > 0) {

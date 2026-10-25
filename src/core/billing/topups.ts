@@ -12,7 +12,7 @@ import type { Env } from '../../env';
 import { sessionState } from '../identity/session';
 import { roundHalfEvenDiv } from './money';
 import { applyPackageWebhook, findPackageOrder } from './package-orders';
-import { packagesEnabled, paymentProvider, topupsEnabled, type PaymentProvider } from './payments';
+import { packagesEnabled, paymentProvider, topupsEnabled, type ParsedWebhook, type PaymentProvider } from './payments';
 
 export const MIN_TOPUP_MINOR = 1000;
 export const MAX_TOPUP_MINOR = 5_000_000;
@@ -64,56 +64,83 @@ export async function getTopup(env: Env, workspaceId: string, orderId: string): 
   return env.DB.prepare(`SELECT ${COLS} FROM topups WHERE order_id = ? AND workspace_id = ?`).bind(orderId, workspaceId).first<TopupRow>();
 }
 
-/** Credits the exact top-up amount once for this provider transaction, then marks the row paid. Throws if the workspace could not be reached (the caller answers 5xx so the provider retries). */
-async function credit(env: Env, row: TopupRow, transactionId: string, now: number): Promise<'credited' | 'duplicate'> {
+/**
+ * Credits the exact top-up amount once for this order. The order is first bound to ONE provider transaction (`transaction_id`, set only
+ * while empty): a second SUCCESS carrying another transaction id is `conflict` and credits nothing, so two different payments (or a refund
+ * relabelled as a payment) can never both credit one order. Throws if the workspace could not be reached (the caller answers 5xx).
+ */
+async function credit(env: Env, row: TopupRow, transactionId: string, now: number): Promise<'credited' | 'duplicate' | 'conflict'> {
+  const claim = await env.DB.prepare('UPDATE topups SET transaction_id = ? WHERE order_id = ? AND transaction_id IS NULL').bind(transactionId, row.order_id).run();
+  if (claim.meta.changes !== 1) {
+    const cur = await env.DB.prepare('SELECT transaction_id FROM topups WHERE order_id = ?').bind(row.order_id).first<{ transaction_id: string | null }>();
+    if (cur?.transaction_id !== transactionId) return 'conflict';
+  }
   const r = await stubOf(env, row.workspace_id).postWallet({ kind: 'topup', netMinor: row.amount_minor, ref: `kashier:${transactionId}`, note: `top-up ${row.order_id}` }, now);
   if (!r.ok && r.reason !== 'duplicate') throw new Error(`top-up credit refused: ${r.reason}`);
-  await env.DB.prepare("UPDATE topups SET state = 'paid', transaction_id = coalesce(transaction_id, ?), paid_at = coalesce(paid_at, ?) WHERE order_id = ? AND state IN ('pending', 'expired', 'failed')").bind(transactionId, now, row.order_id).run();
+  await env.DB.prepare("UPDATE topups SET state = 'paid', paid_at = coalesce(paid_at, ?) WHERE order_id = ? AND state IN ('pending', 'expired', 'failed')").bind(now, row.order_id).run();
   return r.ok ? 'credited' : 'duplicate';
 }
 
 export type WebhookOutcome = { status: 200 | 401 | 404 | 500 | 503; body: string };
 
-/** The provider webhook. 401 = signature/structure invalid (nothing read from the payload). 200 = acknowledged (including ignored events). 5xx = retry me. */
+/**
+ * The provider webhook. 401 = signature/structure invalid (nothing read from the payload). 200 = acknowledged (including ignored events).
+ * 5xx = retry me. Money facts come from the SIGNED fields; the unsigned `event` label is never applied: for an order of ours the signed
+ * transaction is confirmed with the provider first (`provider.confirm`), and the kind and status the provider reports are what is acted on.
+ * If the provider cannot be asked, or its answer does not match, the answer is 503 and nothing happens (the provider retries).
+ */
 export async function handleProviderWebhook(env: Env, raw: string, signature: string | null, provider: PaymentProvider | null = paymentProvider(env), now = Date.now()): Promise<WebhookOutcome> {
   if (!topupsEnabled(env) && !packagesEnabled(env)) return { status: 404, body: 'not found' };
   if (!provider) return { status: 503, body: 'unavailable' };
-  const ev = await provider.verifyWebhook(raw, signature);
-  if (!ev) return { status: 401, body: 'unauthorized' };
-  const row = await env.DB.prepare(`SELECT ${COLS} FROM topups WHERE order_id = ?`).bind(ev.orderId).first<TopupRow>();
-  if (!row) {
-    // Not a top-up: it may be a package order (the order id is a UUID we generated for exactly one of the two kinds).
-    const pkg = await findPackageOrder(env, ev.orderId);
-    if (pkg) {
-      try {
-        await applyPackageWebhook(env, pkg, ev, now);
-      } catch (err) {
-        alert('package_webhook_failed', { error: err instanceof Error ? err.name : 'error' });
-        return { status: 500, body: 'retry' };
-      }
-      return { status: 200, body: 'ok' };
-    }
+  const signed = await provider.verifyWebhook(raw, signature);
+  if (!signed) return { status: 401, body: 'unauthorized' };
+  const row = await env.DB.prepare(`SELECT ${COLS} FROM topups WHERE order_id = ?`).bind(signed.orderId).first<TopupRow>();
+  const pkg = row ? null : await findPackageOrder(env, signed.orderId);
+  if (!row && !pkg) {
     alert('topup_unknown_order');
     return { status: 200, body: 'ok' };
   }
-  if (!topupsEnabled(env)) return { status: 404, body: 'not found' };
+  if (row && !topupsEnabled(env)) return { status: 404, body: 'not found' };
+  if (signed.status === 'PENDING') return { status: 200, body: 'ok' }; // nothing to apply yet; the final status arrives as its own delivery
+  let ev: ParsedWebhook;
+  try {
+    ev = await provider.confirm(signed);
+  } catch (err) {
+    alert('webhook_unconfirmed', { eventKey: signed.eventKey, reason: err instanceof Error ? err.message.slice(0, 80) : 'error' });
+    return { status: 503, body: 'unconfirmed' };
+  }
+  if (pkg) {
+    try {
+      await applyPackageWebhook(env, pkg, ev, now);
+    } catch (err) {
+      alert('package_webhook_failed', { error: err instanceof Error ? err.name : 'error' });
+      return { status: 500, body: 'retry' };
+    }
+    return { status: 200, body: 'ok' };
+  }
+  const t = row!;
   try {
     if (ev.event === 'pay') {
       if (ev.status === 'FAILURE') {
-        await env.DB.prepare("UPDATE topups SET state = 'failed' WHERE order_id = ? AND state = 'pending'").bind(row.order_id).run();
+        await env.DB.prepare("UPDATE topups SET state = 'failed' WHERE order_id = ? AND state = 'pending'").bind(t.order_id).run();
         return { status: 200, body: 'ok' };
       }
       if (ev.status !== 'SUCCESS') return { status: 200, body: 'ok' };
-      if (ev.currency !== row.currency || ev.amountMinor !== row.total_minor) {
-        alert('topup_amount_mismatch', { workspace: row.workspace_id });
+      if (ev.currency !== t.currency || ev.amountMinor !== t.total_minor) {
+        alert('topup_amount_mismatch', { workspace: t.workspace_id });
         return { status: 200, body: 'ok' };
       }
-      await credit(env, row, ev.transactionId, now);
+      if ((await credit(env, t, ev.transactionId, now)) === 'conflict') alert('duplicate_success', { kind: 'topup', workspace: t.workspace_id, eventKey: ev.eventKey });
     } else if (ev.event === 'refund' && ev.status === 'SUCCESS') {
-      const r = await stubOf(env, row.workspace_id).postWallet({ kind: 'chargeback', netMinor: -ev.amountMinor, ref: `chargeback:${ev.transactionId}`, note: `provider refund of ${row.order_id}: operator review` }, now);
+      // A refund is a DIFFERENT transaction from the payment it returns, and the order must have been paid.
+      if (!t.transaction_id || t.transaction_id === ev.transactionId) {
+        alert('refund_refused', { kind: 'topup', workspace: t.workspace_id, eventKey: ev.eventKey });
+        return { status: 200, body: 'ok' };
+      }
+      const r = await stubOf(env, t.workspace_id).postWallet({ kind: 'chargeback', netMinor: -ev.amountMinor, ref: `chargeback:${ev.transactionId}`, note: `provider refund of ${t.order_id}: operator review` }, now);
       if (r.ok) {
-        await env.DB.prepare('UPDATE topups SET refunded_minor = min(total_minor, refunded_minor + ?) WHERE order_id = ?').bind(ev.amountMinor, row.order_id).run();
-        alert('topup_refunded_by_provider', { workspace: row.workspace_id, orderId: row.order_id });
+        await env.DB.prepare('UPDATE topups SET refunded_minor = min(total_minor, refunded_minor + ?) WHERE order_id = ?').bind(ev.amountMinor, t.order_id).run();
+        alert('topup_refunded_by_provider', { workspace: t.workspace_id, orderId: t.order_id });
       }
     }
   } catch (err) {
@@ -141,7 +168,9 @@ export async function repairTopups(env: Env, provider: PaymentProvider | null = 
       await env.DB.prepare("UPDATE topups SET state = 'failed' WHERE order_id = ? AND state = 'pending'").bind(row.order_id).run();
     } else if (q.status === 'SUCCESS' && q.transactionId && q.amountMinor === row.total_minor && q.currency === row.currency) {
       try {
-        if ((await credit(env, row, q.transactionId, now)) === 'credited') credited++;
+        const c = await credit(env, row, q.transactionId, now);
+        if (c === 'credited') credited++;
+        else if (c === 'conflict') alert('duplicate_success', { kind: 'topup', workspace: row.workspace_id });
       } catch (err) {
         alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' });
       }

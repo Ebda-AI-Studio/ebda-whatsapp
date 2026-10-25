@@ -6,13 +6,14 @@ import { handleProviderWebhook } from '../src/core/billing/topups';
 import { configureSessionCheck } from '../src/core/identity/session';
 import worker from '../src/index';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
+import { kashierLedger, testKashier } from './helpers/kashier';
 import { useStoreLink } from './helpers/store-link';
 import { seedNumber, workspace } from './helpers/workspace';
 
 useApiKey();
 const link = useStoreLink();
 const KEY = 'test-payment-api-key';
-const kashier = new KashierProvider('MID-1', KEY);
+const kashier = testKashier();
 const DAY = 86_400_000;
 beforeEach(async () => {
   configurePayments(() => Object.assign(Object.create(kashier) as PaymentProvider, {}));
@@ -31,6 +32,7 @@ async function hmac(text: string): Promise<string> {
 async function signed(data: Record<string, string | number>, sigOverride?: string) {
   const keys = ['amount', 'channel', 'currency', 'kashierOrderId', 'merchantOrderId', 'method', 'orderReference', 'status', 'transactionId', 'transactionResponseCode'];
   const full = { kashierOrderId: 'ko-1', orderReference: 'ref-1', method: 'card', channel: 'online', transactionResponseCode: '00', currency: 'EGP', status: 'SUCCESS', ...data, signatureKeys: keys };
+  kashierLedger.set(String((full as Record<string, unknown>).transactionId), { operation: 'pay', status: String((full as Record<string, unknown>).status), orderId: String((full as Record<string, unknown>).merchantOrderId) });
   const str = keys.map((k) => `${k}=${encodeURIComponent(String((full as Record<string, unknown>)[k]))}`).join('&');
   return { body: JSON.stringify({ event: 'pay', data: full }), sig: sigOverride ?? (await hmac(str)) };
 }
