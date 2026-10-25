@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/cloudflare';
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { selectVerifier } from './identity-select';
+import { configureAgent } from './core/ai/config';
 import { signupEnabled } from './core/numbers/numbers';
 import { verifyMetaSignature } from './core/meta/signature';
 import { extractCoexistence, extractEvents, extractNameUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
@@ -9,6 +10,7 @@ import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } fro
 import { mark } from './core/timing';
 import { scrubEvent } from './core/observability';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
+import { EBDA_AGENT_COPY } from './addons/ebda/agent-copy';
 import { EBDA_COPY } from './addons/ebda/copy';
 import { EBDA_OPT_IN_KEYWORDS } from './addons/ebda/consent';
 import { requireStoreAccess, type AuthVars } from './core/identity/middleware';
@@ -43,6 +45,8 @@ import { numbersRoutes } from './routes/numbers';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY });
+// Without the copy the agent reports itself inactive for every workspace (agentActive), however its settings are.
+configureAgent({ copy: EBDA_AGENT_COPY });
 const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 
 export { WorkspaceDO } from './core/workspace-do';
