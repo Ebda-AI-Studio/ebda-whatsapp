@@ -34,3 +34,23 @@ it('user-facing copy never says a bare "Ebda": always Ebda AI Studio or Ebda <Pr
   const hits = scopes.flatMap((s) => [...findMatches(BARE_EN, s), ...findMatches(BARE_AR, s)]).filter((m) => !/\.test\.tsx?:/.test(m));
   expect(hits).toEqual([]);
 });
+
+// The Store publishes docs/legal on ebda.app from a vendored snapshot and cannot see this repo: a change here must be sent to the
+// Store session (commit id) so it re-imports. Changing a file means updating its pin, which is the reminder.
+const LEGAL_PINS: Record<string, string> = {
+  'docs/legal/README.md': '3e2ac6be2d00104de0be887baab908784ba2468e0e97761579646c2640b8cf31',
+  'docs/legal/ar/whatsapp-dpa.md': '43dfa98c3dc681bc047ff7f04738279a326d6e71d80d9c1afbb75bb2c0975e51',
+  'docs/legal/ar/whatsapp-privacy.md': '93cc40cde3913d7f0c31bcbe5c93a1b63e5676250528b282b8ff45a9f4e59cc8',
+  'docs/legal/ar/whatsapp-terms.md': 'bea85fd51b4c49636cab89503a631c66685c9d0a7ba79264132a5fb8b4942b44',
+  'docs/legal/en/whatsapp-dpa.md': '8cfe9328d4478c1150c2c445835b0761c4a7f90849301d69dbe4e777b7f4a65a',
+  'docs/legal/en/whatsapp-privacy.md': '139b5484f759014a0245ebbbf90b3a504aebf324717f98bbd3426397ade7008a',
+  'docs/legal/en/whatsapp-terms.md': '0dbca59f8db45f4ff7ea573b47c9038ac6a71114ec2f6cb304ce504c30adf9fb',
+};
+it('legal pages are pinned: a change needs a new pin AND a message to the Store session, which publishes them', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const root = new URL('../', import.meta.url);
+  const files = ['docs/legal/README.md', ...['ar', 'en'].flatMap((l) => readdirSync(new URL(`docs/legal/${l}/`, root)).map((f) => `docs/legal/${l}/${f}`))];
+  expect(files.sort()).toEqual(Object.keys(LEGAL_PINS).sort());
+  for (const f of files) expect(createHash('sha256').update(readFileSync(new URL(f, root))).digest('hex'), f).toBe(LEGAL_PINS[f]);
+});
