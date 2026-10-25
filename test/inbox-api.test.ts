@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { conversationDto, getMessagesResponse, listConversationsResponse, noteDto, searchResponse, type ConversationDto } from '../src/core/api/contract';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
@@ -159,7 +160,9 @@ it('long bodies are served from /messages/:id/body', async () => {
   expect((await api.call('GET', '/messages/99999/body')).status).toBe(404);
 });
 
-it('speed: listing 50 of 5,000 conversations and opening a chat stay under the 150 ms p95 budget', async () => {
+// Opt-in like test/perf.test.ts (BENCH=1, scripts/bench-local.mjs): a wall-clock budget only means something on a quiet, known machine;
+// on the shared CI runner (7-12x slower) it measures the runner, not the code.
+it.runIf(env.BENCH === '1')('speed: listing 50 of 5,000 conversations and opening a chat stay under the 150 ms p95 budget', async () => {
   const ws = W(210);
   const api = await apiFor(ws);
   await seedConversations(ws);

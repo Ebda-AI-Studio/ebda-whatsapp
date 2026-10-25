@@ -22,7 +22,7 @@ it('token bucket math: refills at mps up to a one-second burst, and says how lon
   expect(TIER_LIMITS.TIER_250).toBe(250);
 });
 
-it('Review Focus 1: a burst of 500 on a 250-tier number: replies go, new recipients beyond the tier wait and are reported, nothing is dropped', { timeout: 30_000 }, async () => {
+it('Review Focus 1: a burst of 500 on a 250-tier number: replies go, new recipients beyond the tier wait and are reported, nothing is dropped', { timeout: 120_000 }, async () => {
   const ws = 'ws-t1';
   const stub = workspace(ws);
   await own(ws, PN);

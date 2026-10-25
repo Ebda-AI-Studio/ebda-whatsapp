@@ -72,10 +72,14 @@ export async function deliver(events: unknown[], attempts = 1) {
 
 export const sentJobs = (): SendJob[] => vi.mocked(env.SEND_QUEUE.sendBatch).mock.calls.flatMap((c) => (c[0] as { body: SendJob }[]).map((m) => m.body));
 
-/** Runs the workspace's due tasks (the hand-over of stored messages to the send queue) and returns what was queued. */
+/**
+ * Runs the workspace's due tasks (the hand-over of stored messages to the send queue) and returns what this workspace queued.
+ * The look-ahead covers hand-overs due at an event time a few ms ahead (tests stamp `updatedAt: now + 5`): on a slow machine the clock
+ * has not reached them yet and the workspace's own alarm would hand them over during a later test. One second fires no retry or timeout.
+ */
 export async function flush(ws: string): Promise<SendJob[]> {
-  await workspace(ws).runDueTasks();
-  return sentJobs();
+  await workspace(ws).runDueTasks(Date.now() + 1_000);
+  return sentJobs().filter((j) => j.workspaceId === ws);
 }
 
 export const COPY = EBDA_ORDERING_COPY;
