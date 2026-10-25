@@ -2,7 +2,7 @@ import { Download, Wallet } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { StatementDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
-import type { RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/billing';
+import type { PackageDto, RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -17,6 +17,7 @@ const MIN_TOPUP_MINOR = 1000;
 const MAX_TOPUP_MINOR = 5_000_000;
 const MIN_REFUND_MINOR = 5000;
 const PENDING_KEY = 'wallet.pendingTopup';
+const PACKAGE_PENDING_KEY = 'wallet.pendingPackage';
 const PENDING_TTL_MS = 3 * 3_600_000;
 const POLL_MS = 8000;
 
@@ -154,6 +155,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
           <TopupCard t={t} lang={lang} api={api} wallet={wallet} pending={pending} note={topupNote} go={go} now={now}
             onStarted={(p) => { writePending(p); setPending(p); setTopupNote('waiting'); }} cardOnly={cardOnly} />
         )}
+        {owner && <PackagesCard t={t} lang={lang} api={api} go={go} now={now} onActivated={() => void api.wallet().then(setWallet, () => undefined)} />}
         {canSeeStatement && <StatementCard t={t} lang={lang} api={api} now={now} />}
         {owner && <RefundCard t={t} lang={lang} api={api} />}
       </div>
@@ -215,6 +217,97 @@ function TopupCard({ t, lang, api, wallet, pending, note, go, now, onStarted, ca
       {note === 'waiting' && pending && <p role="status" className="muted">{t.wTopupWaiting}</p>}
       {note === 'arrived' && <p role="status" className="wallet-ok">{t.wTopupArrived}</p>}
       {note === 'failed' && <p role="alert" className="error-text">{t.wTopupFailed}</p>}
+    </section>
+  );
+}
+
+type PendingPackage = { orderId: string; at: number };
+const readPendingPackage = (now: number): PendingPackage | null => {
+  try {
+    const p = JSON.parse(localStorage.getItem(PACKAGE_PENDING_KEY) ?? 'null') as PendingPackage | null;
+    return p && typeof p.orderId === 'string' && now - p.at < PENDING_TTL_MS ? p : null;
+  } catch { return null; }
+};
+const writePendingPackage = (p: PendingPackage | null) => {
+  try { if (p) localStorage.setItem(PACKAGE_PENDING_KEY, JSON.stringify(p)); else localStorage.removeItem(PACKAGE_PENDING_KEY); } catch { /* storage blocked */ }
+};
+
+/** Self-serve packages (owner). Hidden while the server has the switch off (404). The order's own state decides when the package is active, never the return from the card form. */
+function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang: Lang; api: WalletApi; go: (url: string) => void; now: () => number; onActivated: () => void }) {
+  const [list, setList] = useState<PackageDto[] | 'loading' | 'off' | 'error'>('loading');
+  const [pending, setPending] = useState<PendingPackage | null>(() => readPendingPackage(now()));
+  const [note, setNote] = useState<'waiting' | 'activated' | 'failed' | null>(() => (readPendingPackage(now()) ? 'waiting' : null));
+  const [error, setError] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+
+  const load = useCallback(() => {
+    setList('loading');
+    api.packages().then(setList, (e: unknown) => setList(e instanceof ApiError && e.status === 404 ? 'off' : 'error'));
+  }, [api]);
+  useEffect(load, [load]);
+
+  const check = useCallback(async () => {
+    const p = pendingRef.current;
+    if (!p) return;
+    try {
+      const s = await api.packageOrderState(p.orderId);
+      const verdict = s.state === 'paid' ? 'activated' : s.state === 'failed' || s.state === 'expired' ? 'failed' : null;
+      if (verdict) { writePendingPackage(null); setPending(null); setNote(verdict); if (verdict === 'activated') onActivated(); }
+    } catch { /* keep waiting; the next poll asks again */ }
+  }, [api, onActivated]);
+  useEffect(() => { void check(); }, [check]);
+  useEffect(() => {
+    if (!pending) return;
+    const id = setInterval(() => void check(), POLL_MS);
+    const on = () => void check();
+    window.addEventListener('focus', on);
+    document.addEventListener('visibilitychange', on);
+    return () => { clearInterval(id); window.removeEventListener('focus', on); document.removeEventListener('visibilitychange', on); };
+  }, [pending, check]);
+
+  if (list === 'off') return null;
+
+  const buy = async (id: string) => {
+    setBusy(id);
+    setError(false);
+    try {
+      const o = await api.buyPackage(id);
+      // Only an https checkout page is ever opened; anything else from the server is refused, never followed.
+      let ok = false;
+      try { ok = !!o.checkoutUrl && new URL(o.checkoutUrl).protocol === 'https:'; } catch { ok = false; }
+      if (!ok || !o.checkoutUrl) { setError(true); return; }
+      const p = { orderId: o.orderId, at: now() };
+      writePendingPackage(p);
+      setPending(p);
+      setNote('waiting');
+      go(o.checkoutUrl);
+    } catch { setError(true); } finally { setBusy(null); }
+  };
+
+  return (
+    <section className="wallet-card" aria-labelledby="w-packages-title">
+      <h2 id="w-packages-title">{t.wPackagesTitle}</h2>
+      <p className="muted">{t.wPackagesIntro}</p>
+      {list === 'loading' ? <p className="muted">…</p>
+        : list === 'error' ? <p role="alert" className="error-text">{t.wPackagesError} <button type="button" className="btn ghost" onClick={load}>{t.retry}</button></p>
+        : list.length === 0 ? <p className="muted">{t.wPackagesEmpty}</p> : (
+          <ul className="wallet-list">
+            {list.map((p) => (
+              <li key={p.id}>
+                <b dir="auto">{p.name}</b> <span>{money(p.priceMinor)}</span>
+                <p className="muted">{t.wPackageCredits(num(p.aiCredits, lang))}</p>
+                <button type="button" className="btn gold" disabled={busy !== null || pending !== null} onClick={() => void buy(p.id)}>{t.wPackageBuy}</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      {error && <p role="alert" className="error-text">{t.wPackageError}</p>}
+      {note === 'waiting' && pending && <p role="status" className="muted">{t.wPackageWaiting}</p>}
+      {note === 'activated' && <p role="status" className="wallet-ok">{t.wPackageActivated}</p>}
+      {note === 'failed' && <p role="alert" className="error-text">{t.wPackageFailed}</p>}
     </section>
   );
 }

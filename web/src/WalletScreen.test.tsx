@@ -6,8 +6,9 @@ import { ApiError } from './data/api';
 import type { WalletDto } from './data/billing';
 import { createSampleSource } from './data/sample';
 import type { InboxSource } from './data/source';
-import { STRINGS } from './i18n';
+import { STRINGS, num } from './i18n';
 import { formatMoney } from './lib/format';
+import { dateTime } from './components/CampaignsScreen';
 
 // Node 25 ships a half-working global localStorage; tests get a plain in-memory one.
 const store = new Map<string, string>();
@@ -312,5 +313,99 @@ describe('wallet: low balance banner in the inbox', () => {
     await inbox(withWallet({ availableMinor: 0, balanceMinor: 0, lowBalance: true, funding: [{ phoneNumberId: 'p', displayPhone: '+20 100', funding: 'merchant_card' }] }));
     expect(await screen.findByText(t.wBannerLow)).toBeTruthy();
     expect(screen.queryByText(t.wMarketingPaused)).toBeNull();
+  });
+});
+
+describe('wallet: packages (owner)', () => {
+  const props = (source: InboxSource, go = vi.fn()) => ({ t, lang: 'ar' as const, source, api: source.wallet!, now, go });
+
+  it('lists the packages with price and AI credits and sends only the package id; redirects only to https', async () => {
+    const source = createSampleSource();
+    const go = vi.fn();
+    const buy = vi.spyOn(source.wallet!, 'buyPackage');
+    render(<WalletScreen {...props(source, go)} />);
+    const card = await screen.findByRole('region', { name: t.wPackagesTitle });
+    const gold = (await within(card).findByText('Gold')).closest('li')!;
+    expect(within(gold).getByText(egp(50000))).toBeTruthy();
+    expect(within(gold).getByText(t.wPackageCredits(num(300, 'ar')))).toBeTruthy();
+    await act(async () => fireEvent.click(within(gold).getByRole('button', { name: t.wPackageBuy })));
+    expect(buy).toHaveBeenCalledWith('gold');
+    expect(go).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\//));
+    expect(screen.queryByText(t.wPackageActivated)).toBeNull(); // paying has not been confirmed yet
+  });
+
+  it('refuses a non-https checkout url and says so', async () => {
+    const source = createSampleSource();
+    source.wallet!.buyPackage = async (id) => ({ orderId: 'P-9', state: 'pending', packageId: id, amountMinor: 50000, checkoutUrl: 'javascript:alert(1)' });
+    const go = vi.fn();
+    render(<WalletScreen {...props(source, go)} />);
+    const card = await screen.findByRole('region', { name: t.wPackagesTitle });
+    await act(async () => fireEvent.click((await within(card).findAllByRole('button', { name: t.wPackageBuy }))[0]!));
+    expect(go).not.toHaveBeenCalled();
+    expect(within(card).getByRole('alert').textContent).toBe(t.wPackageError);
+  });
+
+  it('after the card form, a waiting order polls and turns into "activated" when the server says paid', async () => {
+    const source = createSampleSource();
+    render(<WalletScreen {...props(source)} />);
+    const card = await screen.findByRole('region', { name: t.wPackagesTitle });
+    await act(async () => fireEvent.click((await within(card).findAllByRole('button', { name: t.wPackageBuy }))[0]!));
+    expect(await within(card).findByText(t.wPackageWaiting)).toBeTruthy();
+    cleanup();
+    source.wallet!.packageOrderState = async (orderId) => ({ orderId, state: 'paid', packageId: 'gold', amountMinor: 50000 });
+    render(<WalletScreen {...props(source)} />); // coming back from the card form: the pending order survived in storage
+    expect(await screen.findByText(t.wPackageActivated)).toBeTruthy();
+    expect(store.get('wallet.pendingPackage')).toBeUndefined();
+  });
+
+  it('staff do not see the section; a switched-off server (404) hides it; a failure offers retry; no packages says so', async () => {
+    const staff = createSampleSource();
+    staff.role = 'staff';
+    const a = render(<WalletScreen {...props(staff)} />);
+    await screen.findByRole('heading', { name: t.walletTitle, level: 1 });
+    expect(screen.queryByRole('region', { name: t.wPackagesTitle })).toBeNull();
+    a.unmount();
+
+    const off = createSampleSource();
+    off.wallet!.packages = async () => { throw new ApiError('not_found', 404); };
+    const b = render(<WalletScreen {...props(off)} />);
+    await screen.findByRole('heading', { name: t.walletTitle, level: 1 });
+    await act(async () => undefined);
+    expect(screen.queryByRole('region', { name: t.wPackagesTitle })).toBeNull();
+    b.unmount();
+
+    const broken = createSampleSource();
+    broken.wallet!.packages = async () => { throw new ApiError('x', 500); };
+    const c = render(<WalletScreen {...props(broken)} />);
+    expect((await screen.findByRole('region', { name: t.wPackagesTitle })).textContent).toContain(t.wPackagesError);
+    c.unmount();
+
+    const none = createSampleSource();
+    none.wallet!.packages = async () => [];
+    render(<WalletScreen {...props(none)} />);
+    expect(await screen.findByText(t.wPackagesEmpty)).toBeTruthy();
+  });
+});
+
+describe('wallet: renew reminder in the inbox', () => {
+  const DAY_MS = 86_400_000;
+  async function inbox(source: InboxSource) {
+    render(<App source={source} now={now} />);
+    await screen.findByRole('list', { name: 'المحادثات' });
+  }
+  const plan = (packageId: string, days: number) => ({ plan: { packageId, status: 'active' as const, periodEnd: now() + days * DAY_MS, cancelledAt: null } });
+
+  it('a bought package ending within 7 days shows a renew line with the wallet link', async () => {
+    await inbox(withWallet(plan('gold', 3)));
+    expect(await screen.findByText(t.wBannerRenew(dateTime(now() + 3 * DAY_MS, 'ar')))).toBeTruthy();
+  });
+  it('nothing for a package with more than 7 days left, or for the store-included one (the Store renews it)', async () => {
+    await inbox(withWallet(plan('gold', 18)));
+    await act(async () => undefined);
+    expect(document.querySelector('[data-banner="wallet"]')).toBeNull();
+    cleanup();
+    await inbox(withWallet(plan('store-included', 2)));
+    await act(async () => undefined);
+    expect(document.querySelector('[data-banner="wallet"]')).toBeNull();
   });
 });

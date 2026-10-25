@@ -80,6 +80,15 @@ export function createSampleWallet(): WalletApi {
       return { orderId: `T-${id}`, state: 'pending', amountMinor, feeMinor, totalMinor: amountMinor + feeMinor, checkoutUrl: `https://pay.example.test/checkout/T-${id}` };
     },
     topupState: async (orderId) => ({ orderId, state: 'pending', amountMinor: 0, feeMinor: 0, totalMinor: 0 }),
+    packages: async () => [
+      { id: 'basic', name: 'Basic', priceMinor: 25000, aiCredits: 100 },
+      { id: 'gold', name: 'Gold', priceMinor: 50000, aiCredits: 300 },
+    ],
+    async buyPackage(packageId) {
+      const id = nextId++;
+      return { orderId: `P-${id}`, state: 'pending', packageId, amountMinor: packageId === 'basic' ? 25000 : 50000, checkoutUrl: `https://pay.example.test/checkout/P-${id}` };
+    },
+    packageOrderState: async (orderId) => ({ orderId, state: 'pending', packageId: 'gold', amountMinor: 50000 }),
     refundRequests: async () => refunds.map((r) => ({ ...r })).sort((a, b) => b.createdAt - a.createdAt),
     async requestRefund(amountMinor, note) {
       if (amountMinor < 5000) throw new ApiError('invalid_request', 409, 'below_minimum');

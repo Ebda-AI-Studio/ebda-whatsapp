@@ -40,6 +40,7 @@ import { trackRoutes } from './routes/track';
 import { numbersRoutes } from './routes/numbers';
 import { reconcileEntitlements } from './core/billing/subscriptions';
 import { handleProviderWebhook, repairTopups } from './core/billing/topups';
+import { packageRoutes } from './routes/packages';
 import { walletRoutes } from './routes/wallet';
 import { sharedNumberRoutes } from './routes/shared-number';
 import { handleSharedEvent, sharedEnabled, sharedNumberById, sweepShared } from './core/shared/shared-number';
@@ -136,6 +137,7 @@ api.route('/', segmentsRoutes);
 api.route('/', campaignsRoutes);
 api.route('/', numbersRoutes);
 api.route('/', walletRoutes);
+api.route('/', packageRoutes);
 api.route('/', sharedNumberRoutes);
 app.route('/api/v1', api);
 

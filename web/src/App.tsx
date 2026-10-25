@@ -6,7 +6,7 @@ import { OrderPane } from './components/OrderPane';
 import { Rail, type View } from './components/Rail';
 import { BRAND } from '@brand';
 import { AgentScreen } from './components/AgentScreen';
-import { CampaignsScreen } from './components/CampaignsScreen';
+import { CampaignsScreen, dateTime } from './components/CampaignsScreen';
 import { ContactsScreen } from './components/ContactsScreen';
 import { NumbersScreen } from './components/NumbersScreen';
 import { OperatorScreen } from './components/OperatorScreen';
@@ -80,14 +80,21 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     return () => { live = false; };
   }, [source, view]);
   const walletNotice = useMemo(() => {
-    if (!walletDto || !(walletDto.lowBalance || walletDto.debtMinor > 0)) return [];
+    if (!walletDto) return [];
     const lines: string[] = [];
-    if (walletDto.debtMinor > 0) lines.push(t.wBannerDebt(formatMoney(walletDto.debtMinor, 'EGP', lang)));
-    // Marketing only stops on the wallet when the wallet is what pays for a number; with cards paying Meta the claim would be false.
-    if (walletDto.availableMinor <= 0 && walletDto.funding.some((f) => f.funding === 'platform_line')) lines.push(t.wMarketingPaused);
-    if (lines.length === 0) lines.push(t.wBannerLow);
+    // A bought package does not renew itself: a week before it ends the owner is reminded (the Store-included one is renewed by the Store).
+    const plan = walletDto.plan;
+    if (plan && plan.packageId !== 'store-included' && (plan.status === 'active' || plan.status === 'trialing') && plan.periodEnd > now() && plan.periodEnd - now() <= 7 * 86_400_000) lines.push(t.wBannerRenew(dateTime(plan.periodEnd, lang)));
+    if (walletDto.lowBalance || walletDto.debtMinor > 0) {
+      const money: string[] = [];
+      if (walletDto.debtMinor > 0) money.push(t.wBannerDebt(formatMoney(walletDto.debtMinor, 'EGP', lang)));
+      // Marketing only stops on the wallet when the wallet is what pays for a number; with cards paying Meta the claim would be false.
+      if (walletDto.availableMinor <= 0 && walletDto.funding.some((f) => f.funding === 'platform_line')) money.push(t.wMarketingPaused);
+      if (money.length === 0) money.push(t.wBannerLow);
+      lines.push(...money);
+    }
     return lines;
-  }, [walletDto, t, lang]);
+  }, [walletDto, t, lang, now]);
 
   const selected = useMemo(() => items.find((c) => c.id === selectedId) ?? null, [items, selectedId]);
 

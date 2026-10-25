@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import type { StatementDto, WalletDto } from '../../../src/core/api/contract';
-import { changeLogItemDto, costEstimateDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
+import { changeLogItemDto, costEstimateDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
 
 export type { StatementDto, WalletDto };
 export type CostEstimateDto = z.infer<typeof costEstimateDto>;
 export type TopupDto = z.infer<typeof topupDto>;
+export type PackageDto = z.infer<typeof packageDto>;
+export type PackageOrderDto = z.infer<typeof packageOrderDto>;
 export type RefundRequest = z.infer<typeof refundRequestDto>;
 export type PricingSettings = z.infer<typeof pricingSettingsDto>;
 export type ChangeLogItem = z.infer<typeof changeLogItemDto>;
@@ -36,6 +38,11 @@ export interface WalletApi {
   /** Starts a top-up: returns the pending order with the card fee and the hosted checkout URL. The wallet is only credited by the server's webhook. */
   topup(amountMinor: number): Promise<TopupDto>;
   topupState(orderId: string): Promise<TopupDto>;
+  /** Packages on sale. Rejects with a 404 ApiError while the server has package checkout switched off. Owner and staff may read. */
+  packages(): Promise<PackageDto[]>;
+  /** Starts a checkout for a package (owner only). Only the id goes up: the server owns the price. The plan changes only when the server's webhook says paid. */
+  buyPackage(packageId: string): Promise<PackageOrderDto>;
+  packageOrderState(orderId: string): Promise<PackageOrderDto>;
   refundRequests(): Promise<RefundRequest[]>;
   requestRefund(amountMinor: number, note: string): Promise<RefundRequest>;
 }

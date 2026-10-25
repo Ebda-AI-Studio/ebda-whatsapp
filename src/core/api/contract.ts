@@ -409,6 +409,9 @@ export const topupDto = z.object({
   orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired']), amountMinor: z.number().int(), feeMinor: z.number().int(), totalMinor: z.number().int(),
   checkoutUrl: z.string().url().optional(),
 });
+/** Packages a merchant can buy (PACKAGE_CHECKOUT_ENABLED). The amount is the server's price; the client never sends one. */
+export const packageDto = z.object({ id: z.string(), name: z.string(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative() });
+export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
 export const refundRequestCreate = z.object({ amountMinor: z.number().int().min(5000), note: z.string().trim().max(500).optional() });
 export const refundRequestDto = z.object({
   id: z.string(), workspaceId: z.string(), amountMinor: z.number().int(), note: z.string().nullable(), state: z.enum(['pending', 'rejected', 'processing', 'paid', 'manual_payout', 'failed']),
@@ -491,7 +494,10 @@ export const ROUTES = {
   walletTopups: 'POST /wallet/topups',
   walletTopup: 'GET /wallet/topups/:orderId',
   walletRefundRequests: 'GET|POST /wallet/refund-requests',
-  operator: 'GET|POST /api/v1/operator/{pricing-settings,pricing-overrides/:workspaceId,rate-cards,fx-rates,numbers/:phoneNumberId/funding,refund-requests,adjustments,trueups,change-log}',
+  packages: 'GET /packages',
+  packageCheckout: 'POST /packages/:packageId/checkout',
+  packageOrder: 'GET /packages/orders/:orderId',
+  operator: 'GET|POST /api/v1/operator/{pricing-settings,pricing-overrides/:workspaceId,rate-cards,fx-rates,numbers/:phoneNumberId/funding,workspaces/:workspaceId/subscription,refund-requests,adjustments,trueups,change-log}',
 } as const;
 
 // ---- Phase 8.1: connecting a merchant's own number (Embedded Signup) -------------------------------------------------

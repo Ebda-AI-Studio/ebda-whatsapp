@@ -2,7 +2,7 @@ import { z } from 'zod';
 import {
   agentSettingsDto, apiError, campaignDto, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
-  pricingSettingsDto, realtimeEvent, refundRequestDto, searchResponse, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
+  packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, searchResponse, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
 import type { InboxSource } from './source';
@@ -162,6 +162,9 @@ export function createApiSource(o: Opts): LiveSource {
       estimate: (category, count) => call(`/wallet/estimate?category=${category}&count=${count}`, costEstimateDto),
       topup: (amountMinor) => call('/wallet/topups', topupDto, post({ amountMinor })),
       topupState: (orderId) => call(`/wallet/topups/${encodeURIComponent(orderId)}`, topupDto),
+      packages: async () => (await call('/packages', items(packageDto))).items,
+      buyPackage: (packageId) => call(`/packages/${encodeURIComponent(packageId)}/checkout`, packageOrderDto, post({})),
+      packageOrderState: (orderId) => call(`/packages/orders/${encodeURIComponent(orderId)}`, packageOrderDto),
       refundRequests: async () => (await call('/wallet/refund-requests', items(refundRequestDto))).items,
       requestRefund: (amountMinor, note) => call('/wallet/refund-requests', refundRequestDto, post({ amountMinor, ...(note.trim() ? { note: note.trim() } : {}) })),
     },

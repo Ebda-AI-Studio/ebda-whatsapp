@@ -11,7 +11,8 @@
 import type { Env } from '../../env';
 import { sessionState } from '../identity/session';
 import { roundHalfEvenDiv } from './money';
-import { paymentProvider, topupsEnabled, type PaymentProvider } from './payments';
+import { applyPackageWebhook, findPackageOrder } from './package-orders';
+import { packagesEnabled, paymentProvider, topupsEnabled, type PaymentProvider } from './payments';
 
 export const MIN_TOPUP_MINOR = 1000;
 export const MAX_TOPUP_MINOR = 5_000_000;
@@ -75,15 +76,27 @@ export type WebhookOutcome = { status: 200 | 401 | 404 | 500 | 503; body: string
 
 /** The provider webhook. 401 = signature/structure invalid (nothing read from the payload). 200 = acknowledged (including ignored events). 5xx = retry me. */
 export async function handleProviderWebhook(env: Env, raw: string, signature: string | null, provider: PaymentProvider | null = paymentProvider(env), now = Date.now()): Promise<WebhookOutcome> {
-  if (!topupsEnabled(env)) return { status: 404, body: 'not found' };
+  if (!topupsEnabled(env) && !packagesEnabled(env)) return { status: 404, body: 'not found' };
   if (!provider) return { status: 503, body: 'unavailable' };
   const ev = await provider.verifyWebhook(raw, signature);
   if (!ev) return { status: 401, body: 'unauthorized' };
   const row = await env.DB.prepare(`SELECT ${COLS} FROM topups WHERE order_id = ?`).bind(ev.orderId).first<TopupRow>();
   if (!row) {
+    // Not a top-up: it may be a package order (the order id is a UUID we generated for exactly one of the two kinds).
+    const pkg = await findPackageOrder(env, ev.orderId);
+    if (pkg) {
+      try {
+        await applyPackageWebhook(env, pkg, ev, now);
+      } catch (err) {
+        alert('package_webhook_failed', { error: err instanceof Error ? err.name : 'error' });
+        return { status: 500, body: 'retry' };
+      }
+      return { status: 200, body: 'ok' };
+    }
     alert('topup_unknown_order');
     return { status: 200, body: 'ok' };
   }
+  if (!topupsEnabled(env)) return { status: 404, body: 'not found' };
   try {
     if (ev.event === 'pay') {
       if (ev.status === 'FAILURE') {

@@ -31,6 +31,7 @@ let factory: (env: Env) => PaymentProvider | null = (env) => (env.KASHIER_MERCHA
 export const configurePayments = (f: (env: Env) => PaymentProvider | null): void => { factory = f; };
 export const paymentProvider = (env: Env): PaymentProvider | null => factory(env);
 export const topupsEnabled = (env: Env): boolean => env.TOPUPS_ENABLED === 'true';
+export const packagesEnabled = (env: Env): boolean => env.PACKAGE_CHECKOUT_ENABLED === 'true';
 
 const enc = new TextEncoder();
 async function hmacHex(key: string, text: string): Promise<string> {
