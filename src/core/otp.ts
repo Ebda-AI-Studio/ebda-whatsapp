@@ -29,7 +29,8 @@ export async function sendOtp(env: Env, input: unknown): Promise<OtpResult> {
     const known = await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(storeId).first();
     if (!known) return { ok: false, reason: 'not_found' };
     const number = await senderNumberFor(env, storeId);
-    if (!number) return { ok: false, reason: 'no_number' };
+    // A code goes to an arbitrary phone: on the shared number that would claim a shared route for it (cross-store hijack), so OTP needs the store's own number.
+    if (!number || number.shared) return { ok: false, reason: 'no_number' };
     return await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(storeId)).queueOtp(e164.slice(1), number.phoneNumberId, code);
   } catch (err) {
     console.error(JSON.stringify({ alert: 'otp_failed', storeId, error: errClass(err) }));

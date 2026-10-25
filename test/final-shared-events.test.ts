@@ -62,16 +62,16 @@ describe('Final review: shared-only members', () => {
     expect(await rows(ws, "SELECT count(*) AS n FROM messages WHERE idempotency_key = 'cart:c9'")).toEqual([{ n: 0 }]);
   });
 
-  it('a one-time code for a shared-only store is sent from the platform number', async () => {
+  it('a one-time code is never sent on the shared number: refused, nothing queued, no shared route written', async () => {
     const ws = await sharedOnlyStore(3);
     await workspace(ws).setStoreLinkSettings({ otpViaWhatsApp: true });
-    // OTP is delivered inside the workspace, whose env must carry the switch too (production sets it for the whole Worker).
     await runInDurableObject(workspace(ws), (inst) => { (inst as unknown as { env: { SHARED_NUMBER_ENABLED?: string } }).env.SHARED_NUMBER_ENABLED = 'true'; });
     const g = stubGraph();
     try {
-      const res = await new WhatsAppOtp(createExecutionContext(), on).sendOtp(ws, '+201001234567', 'K7Q93X');
-      expect(res).toEqual({ ok: true });
-      expect(g.calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual([expect.stringContaining(`/${PLAT}/messages`)]);
+      expect(await new WhatsAppOtp(createExecutionContext(), on).sendOtp(ws, '+201001234567', 'K7Q93X')).toEqual({ ok: false, reason: 'no_number' });
+      expect(g.calls.filter((c) => c.method === 'POST')).toEqual([]);
     } finally { g.restore(); }
+    expect(await rows(ws, 'SELECT 1 FROM messages')).toEqual([]);
+    expect((await env.DB.prepare('SELECT count(*) AS n FROM shared_routes WHERE workspace_id = ?').bind(ws).first<{ n: number }>())!.n).toBe(0);
   });
 });
