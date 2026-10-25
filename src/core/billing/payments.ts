@@ -16,7 +16,7 @@ import type { Env } from '../../env';
 import { KashierUnconfirmedError, TRANSACTION_ID, classifyKashierTransaction, kashierTransactionDetailsPath } from './kashier-confirm';
 
 export type ProviderEvent = 'pay' | 'refund' | 'other';
-export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string; /** A chargeback (Kashier's `reversal` operation). Only ever set by `confirm`, from Kashier's own record. */ chargeback?: true; /** `kashier:<transactionId>:<status>`: built from SIGNED values only, never from the unsigned `event` label. */ eventKey?: string };
+export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string; /** A chargeback (Kashier's `reversal` operation). Only ever set by `confirm`, from Kashier's own record. */ chargeback?: true; /** Kashier's own operation for the transaction (refund, partial_refund, void, reversal, pay...), set only by `confirm`. */ operation?: string; /** `kashier:<transactionId>:<status>`: built from SIGNED values only, never from the unsigned `event` label. */ eventKey?: string };
 export type Inquiry = { status: 'SUCCESS' | 'FAILURE' | 'PENDING'; transactionId: string | null; amountMinor: number | null; currency: string | null };
 /**
  * `ok` = Kashier took the refund (`status` SUCCESS, default; PENDING = initiated, the processor has not answered).
@@ -24,7 +24,7 @@ export type Inquiry = { status: 'SUCCESS' | 'FAILURE' | 'PENDING'; transactionId
  * `uncertain` = the request may have been processed (timeout, 5xx, an answer we cannot read): never retried, reconciled instead.
  */
 export type RefundResult = { ok: true; refundId: string; status?: 'SUCCESS' | 'PENDING' } | { ok: false; reason: 'unsupported' | 'rejected' | 'unavailable' | 'uncertain' };
-export type ProviderRefund = { refundId: string; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; amountMinor: number | null };
+export type ProviderRefund = { refundId: string; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; amountMinor: number | null; /** Kashier's operation for it: only `refund` / `partial_refund` is a card refund; `reversal` / `void` are not. */ operation: string };
 
 export interface PaymentProvider {
   readonly name: string;
@@ -108,7 +108,7 @@ export class KashierProvider implements PaymentProvider {
     const txn = classifyKashierTransaction(answer, { transactionId: ev.transactionId, merchantOrderId: ev.orderId });
     if (txn.status !== ev.status) throw new KashierUnconfirmedError('Kashier reports a different status than the signed body');
     const { chargeback: _drop, ...rest } = ev;
-    return { ...rest, event: txn.kind === 'refund' ? 'refund' : txn.kind === 'payment' ? 'pay' : 'other', ...(txn.operation === 'reversal' ? { chargeback: true as const } : {}) };
+    return { ...rest, event: txn.kind === 'refund' ? 'refund' : txn.kind === 'payment' ? 'pay' : 'other', operation: txn.operation, ...(txn.operation === 'reversal' ? { chargeback: true as const } : {}) };
   }
 
   async createSession(a: { orderId: string; totalMinor: number; currency: string; returnUrl?: string }): Promise<{ checkoutUrl: string }> {
@@ -212,7 +212,7 @@ export class KashierProvider implements PaymentProvider {
       const out: ProviderRefund[] = [];
       for (const [refundId, row] of await this.listCandidates(orderId, 'refund')) {
         const txn = classifyKashierTransaction(await this.getJson(`${this.apiBase}${kashierTransactionDetailsPath(refundId)}`), { transactionId: refundId, merchantOrderId: orderId });
-        if (txn.kind === 'refund') out.push({ refundId, status: txn.status, amountMinor: row.amountMinor });
+        if (txn.kind === 'refund') out.push({ refundId, status: txn.status, amountMinor: row.amountMinor, operation: txn.operation });
       }
       return out;
     } catch {

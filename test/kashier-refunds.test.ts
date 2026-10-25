@@ -5,9 +5,10 @@ import { linkDashboardRefund, reconcileCardRefunds } from '../src/core/billing/c
 import { createRefundRequest, decideRefund } from '../src/core/billing/refunds';
 import { handleProviderWebhook } from '../src/core/billing/topups';
 import { configureSessionCheck } from '../src/core/identity/session';
-import { OP1, operatorCall, storeId as W0, useApiKey } from './helpers/api';
+import { OP1, OP2, operatorCall, storeId as W0, useApiKey } from './helpers/api';
 import { fund, ledger } from './helpers/billing';
-import { detailsFetch, kashierLedger, testKashier } from './helpers/kashier';
+import { decideAdjustment } from '../src/core/billing/operator';
+import { detailsFetch, kashierLedger, kashierRefunds, testKashier } from './helpers/kashier';
 import { signedWebhook } from './helpers/kashier-webhook';
 import { seedNumber, workspace } from './helpers/workspace';
 
@@ -49,8 +50,8 @@ async function setup(n: number, ask = 15000, o: { amount?: number; fee?: number 
   if (!r.ok) throw new Error(r.reason);
   return { ws, order: `o-kr${n}`, tx: `TX-KR${n}`, id: r.request.id };
 }
-const hookRefund = async (order: string, refundTx: string, amountEgp: string, status = 'SUCCESS') => {
-  const { body, sig } = await signedWebhook({ merchantOrderId: order, transactionId: refundTx, amount: amountEgp, status }, 'refund');
+const hookRefund = async (order: string, refundTx: string, amountEgp: string, status = 'SUCCESS', genuine?: string) => {
+  const { body, sig } = await signedWebhook({ merchantOrderId: order, transactionId: refundTx, amount: amountEgp, status }, 'refund', genuine);
   return handleProviderWebhook(env, body, sig, kashier);
 };
 const kinds = async (ws: string) => (await ledger(ws)).map((r) => [r.kind, r.amount_minor]);
@@ -182,24 +183,48 @@ describe('approval with KASHIER_REFUNDS_ENABLED', () => {
   });
 });
 
+/** Kashier lists this refund for the order and its details say what it really is (the proof the relink asks for). */
+const kashierHasRefund = (order: string, refundId: string, amount: string, operation = 'refund') => {
+  kashierRefunds.set(order, [...(kashierRefunds.get(order) ?? []), { transactionId: refundId, amount }]);
+  kashierLedger.set(refundId, { operation, status: 'SUCCESS', orderId: order });
+};
+const link = (id: string, refundId: string, amountMinor: number, extra: Record<string, unknown> = {}, e: typeof env = env) => linkDashboardRefund(e, { requestId: id, kashierRefundId: refundId, amountMinor, actor: OP1, ...extra }, Date.now(), kashier);
+const alertsOf = (spy: { mock: { calls: unknown[][] } }, what: string) => spy.mock.calls.filter((c) => String(c[0]).includes(what));
+
 describe('the refund webhook never debits money already debited at approval', () => {
-  it('a manual payout the operator refunded in Kashier\'s dashboard and linked: its webhook (and replay) debits nothing more', async () => {
+  it('a manual payout the operator refunded in Kashier\'s dashboard and linked (Kashier confirms it): its webhook (and replay) debits nothing more', async () => {
     const { ws, id, order } = await setup(10);
     await decideRefund(OFF, { id, decision: 'approve', actor: OP1 });
-    expect(await linkDashboardRefund(env, { requestId: id, kashierRefundId: 'DASH-10', amountMinor: 15000, actor: OP1 })).toEqual({ ok: true });
+    kashierHasRefund(order, 'DASH-10', '150.00');
+    expect(await link(id, 'DASH-10', 15000)).toMatchObject({ ok: true });
     expect(await req(id)).toEqual({ state: 'paid', card_refunded_minor: 15000, manual_minor: 0 });
     await hookRefund(order, 'DASH-10', '150.00');
     await hookRefund(order, 'DASH-10', '150.00');
     expect(await kinds(ws)).toEqual([['topup', 20000], ['refund', -15000]]);
     expect(await refunded(order)).toBe(15000);
-    expect(await linkDashboardRefund(env, { requestId: id, kashierRefundId: 'DASH-10', amountMinor: 15000, actor: OP1 })).toMatchObject({ ok: false });
+    expect(await link(id, 'DASH-10', 15000)).toMatchObject({ ok: false });
   });
-  it('the webhook arrived BEFORE the link: the duplicate debit is returned, net one debit, and the link is refused to be replayed', async () => {
+  it('the relink first asks Kashier: an id Kashier does not list, a reversal, or another amount is refused and records nothing', async () => {
+    const { id, order } = await setup(16);
+    await decideRefund(OFF, { id, decision: 'approve', actor: OP1 });
+    expect(await link(id, 'GHOST-16', 15000)).toMatchObject({ ok: false, reason: 'refund_not_verified' });
+    kashierHasRefund(order, 'REV-16', '150.00', 'reversal');
+    expect(await link(id, 'REV-16', 15000)).toMatchObject({ ok: false, reason: 'refund_not_verified' });
+    kashierHasRefund(order, 'AMT-16', '99.00');
+    expect(await link(id, 'AMT-16', 15000)).toMatchObject({ ok: false, reason: 'refund_not_verified' });
+    expect(await rowsOf(id)).toEqual([]);
+    const noList = Object.assign(Object.create(kashier) as PaymentProvider, { listRefunds: async () => 'unavailable' as const });
+    kashierHasRefund(order, 'OK-16', '150.00');
+    expect(await linkDashboardRefund(env, { requestId: id, kashierRefundId: 'OK-16', amountMinor: 15000, actor: OP1 }, Date.now(), noList)).toMatchObject({ ok: false, reason: 'provider_unavailable' });
+    expect(await req(id)).toMatchObject({ state: 'manual_payout' });
+  });
+  it('the webhook arrived BEFORE the link: the duplicate debit comes back only through the adjustment flow (self-approved below the threshold)', async () => {
     const { ws, id, order } = await setup(11);
     await decideRefund(OFF, { id, decision: 'approve', actor: OP1 });
     await hookRefund(order, 'DASH-11', '150.00'); // unknown at this point: debits
     expect((await kinds(ws)).map((k) => k[0])).toEqual(['topup', 'refund', 'chargeback']);
-    expect(await linkDashboardRefund(env, { requestId: id, kashierRefundId: 'DASH-11', amountMinor: 15000, actor: OP1 })).toEqual({ ok: true });
+    kashierHasRefund(order, 'DASH-11', '150.00');
+    expect(await link(id, 'DASH-11', 15000)).toMatchObject({ ok: true });
     expect(await kinds(ws)).toEqual([['topup', 20000], ['refund', -15000], ['chargeback', -15000], ['adjustment', 15000]]);
     expect((await workspace(ws).walletView()).balanceMinor).toBe(5000);
     await hookRefund(order, 'DASH-11', '150.00');
@@ -207,41 +232,80 @@ describe('the refund webhook never debits money already debited at approval', ()
     expect(await refunded(order)).toBe(15000);
     expect(await req(id)).toEqual({ state: 'paid', card_refunded_minor: 15000, manual_minor: 0 });
   });
-  it('link validation: only a manual payout, not more than is owed manually, a plain provider id; and it is reachable by the operator API', async () => {
-    const { id } = await setup(12);
-    expect(await linkDashboardRefund(env, { requestId: id, kashierRefundId: 'X-1', amountMinor: 100, actor: OP1 })).toMatchObject({ reason: 'not_manual_payout' });
+  it('above ADJUSTMENT_APPROVAL_MINOR the credit waits for a SECOND operator: the requester cannot approve their own link', async () => {
+    const { ws, id, order } = await setup(17);
     await decideRefund(OFF, { id, decision: 'approve', actor: OP1 });
-    expect(await linkDashboardRefund(env, { requestId: id, kashierRefundId: 'x/../y', amountMinor: 100, actor: OP1 })).toMatchObject({ reason: 'invalid_refund_id' });
-    expect(await linkDashboardRefund(env, { requestId: id, kashierRefundId: 'X-2', amountMinor: 15001, actor: OP1 })).toMatchObject({ reason: 'exceeds_manual' });
-    expect(await linkDashboardRefund(env, { requestId: 'nope', kashierRefundId: 'X-3', amountMinor: 100, actor: OP1 })).toMatchObject({ reason: 'not_found' });
+    await hookRefund(order, 'DASH-17', '150.00');
+    kashierHasRefund(order, 'DASH-17', '150.00');
+    const low = { ...env, ADJUSTMENT_APPROVAL_MINOR: '10000' } as typeof env;
+    const r = await link(id, 'DASH-17', 15000, {}, low);
+    expect(r).toMatchObject({ ok: true, adjustment: { state: 'pending' } });
+    expect((await kinds(ws)).map((k) => k[0])).toEqual(['topup', 'refund', 'chargeback']); // nothing credited yet
+    const adjId = (r as { adjustment: { id: string } }).adjustment.id;
+    expect(await decideAdjustment(env, { actor: OP1, id: adjId, decision: 'approve' })).toMatchObject({ ok: false, reason: 'second_approver_required' });
+    expect(await decideAdjustment(env, { actor: OP2, id: adjId, decision: 'approve' })).toMatchObject({ ok: true });
+    expect(await kinds(ws)).toEqual([['topup', 20000], ['refund', -15000], ['chargeback', -15000], ['adjustment', 15000]]);
+  });
+  it('link validation: only a manual payout, not more than is owed manually, a plain provider id; and it is reachable by the operator API', async () => {
+    const { id, order } = await setup(12);
+    expect(await link(id, 'X-1', 100)).toMatchObject({ reason: 'not_manual_payout' });
+    await decideRefund(OFF, { id, decision: 'approve', actor: OP1 });
+    expect(await link(id, 'x/../y', 100)).toMatchObject({ reason: 'invalid_refund_id' });
+    expect(await link(id, 'X-2', 15001)).toMatchObject({ reason: 'exceeds_manual' });
+    expect(await link('nope', 'X-3', 100)).toMatchObject({ reason: 'not_found' });
+    kashierHasRefund(order, 'X-4', '50.00');
+    configurePayments(() => kashier);
     const res = await operatorCall(OP1, 'POST', `/refund-requests/${id}/link-dashboard-refund`, { kashierRefundId: 'X-4', amountMinor: 5000 });
     expect(res.status).toBe(200);
     expect(await req(id)).toEqual({ state: 'manual_payout', card_refunded_minor: 5000, manual_minor: 10000 });
   });
-  it('an unknown chargeback debits once, capped at what the top-up credited (not the card amount), and a replay changes nothing', async () => {
-    const { ws, order } = await setup(13, 5000);
-    await hookRefund(order, 'CB-13', '999.00');
-    await hookRefund(order, 'CB-13', '999.00');
-    expect(await kinds(ws)).toEqual([['topup', 20000], ['chargeback', -20000]]);
-    expect(await refunded(order)).toBe(20000);
+  it('an unknown chargeback debits its FULL amount up to what the top-up credited (even past the cap that used to drop it), the excess goes to a person with a P1 alert, and a replay changes nothing', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    await hookRefund(order, 'CB-13b', '10.00'); // nothing left to take back
+    const { ws, order } = await setup(13, 5000);
+    await hookRefund(order, 'CB-13', '999.00', 'SUCCESS', 'reversal');
+    await hookRefund(order, 'CB-13', '999.00', 'SUCCESS', 'reversal');
     expect(await kinds(ws)).toEqual([['topup', 20000], ['chargeback', -20000]]);
-    await hookRefund(order, 'CB-13b', '10.00');
-    expect(spy.mock.calls.filter((c) => String(c[0]).includes('refund_unmatched'))).toHaveLength(1);
+    expect(alertsOf(spy, 'refund_excess_for_review')).toHaveLength(1);
+    expect(String(alertsOf(spy, 'refund_excess_for_review')[0]![0])).toContain('"severity":"P1"');
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_excess_review' AND reason = 'CB-13'").first()).toEqual({ n: 1 });
+    await hookRefund(order, 'CB-13b', '10.00', 'SUCCESS', 'reversal'); // a second one is not silently dropped because the first used the cap
+    expect(await kinds(ws)).toEqual([['topup', 20000], ['chargeback', -20000], ['chargeback', -1000]]);
   });
-  it('a full refund of a payment that carried a card fee never debits the fee (it was never in the wallet)', async () => {
+  it('a full refund of a payment that carried a card fee never debits the fee, and the fee is not an "excess" for review', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { ws, order } = await setup(14, 5000, { amount: 20000, fee: 300 });
     await hookRefund(order, 'FULL-14', '203.00');
     expect(await kinds(ws)).toEqual([['topup', 20000], ['chargeback', -20000]]);
-    expect(await refunded(order)).toBe(20000);
+    expect(alertsOf(spy, 'refund_excess_for_review')).toHaveLength(0);
   });
-  it('a partial unknown refund debits exactly its amount and the next one is capped by what is left (one unit)', async () => {
+  it('unknown partial refunds each debit their own amount (never shrunk by what earlier ones or our own refunds used)', async () => {
     const { ws, order } = await setup(15, 5000);
     await hookRefund(order, 'P-15a', '120.00');
-    await hookRefund(order, 'P-15b', '120.00');
-    expect(await kinds(ws)).toEqual([['topup', 20000], ['chargeback', -12000], ['chargeback', -8000]]);
-    expect(await refunded(order)).toBe(20000);
+    await hookRefund(order, 'P-15b', '60.00');
+    expect(await kinds(ws)).toEqual([['topup', 20000], ['chargeback', -12000], ['chargeback', -6000]]);
+  });
+  it('a chargeback is never reduced by an open card refund\'s reservation, and never settles that open refund', async () => {
+    const { ws, id, order } = await setup(30);
+    refundAnswer = async () => { throw new Error('timeout'); };
+    await decideRefund(env, { id, decision: 'approve', actor: OP1 });
+    await hookRefund(order, 'CB-30', '150.00', 'SUCCESS', 'reversal'); // same amount as our open refund
+    expect(await kinds(ws)).toEqual([['topup', 20000], ['refund', -15000], ['chargeback', -15000]]);
+    expect((await rowsOf(id))[0]).toMatchObject({ state: 'uncertain', kashier_refund_id: null });
+    expect(await req(id)).toMatchObject({ state: 'processing' });
+  });
+  it('only a real refund operation may settle an open card refund: a void with the same amount, or a refund while our row already has another id, books as unknown instead', async () => {
+    const a = await setup(31);
+    refundAnswer = async () => { throw new Error('timeout'); };
+    await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 });
+    await hookRefund(a.order, 'VOID-31', '150.00', 'SUCCESS', 'void');
+    expect((await rowsOf(a.id))[0]).toMatchObject({ state: 'uncertain', kashier_refund_id: null });
+    expect((await kinds(a.ws)).map((k) => k[0])).toEqual(['topup', 'refund', 'chargeback']);
+    const b = await setup(32);
+    refundAnswer = async () => refundOk('TX-RF32', 15000, 'PENDING');
+    await decideRefund(env, { id: b.id, decision: 'approve', actor: OP1 });
+    await hookRefund(b.order, 'OTHER-32', '150.00'); // a refund with another id: ours has its own id and is not guessed
+    expect((await rowsOf(b.id))[0]).toMatchObject({ state: 'pending', kashier_refund_id: 'TX-RF32' });
+    expect((await kinds(b.ws)).map((k) => k[0])).toEqual(['topup', 'refund', 'chargeback']);
   });
 });
 

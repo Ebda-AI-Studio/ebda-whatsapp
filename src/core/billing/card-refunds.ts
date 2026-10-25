@@ -5,17 +5,21 @@
  * refund the provider later reports (our own API call, or an operator refunding the card in the provider's dashboard) must be recognised as
  * that same money, not booked again. So every refund transaction we know of has a row here BEFORE the provider is asked, the provider's
  * refund id is stored when it is known, and the refund webhook is matched against the rows:
- *   1. by the provider's refund id                                            -> ours: reconcile the row, no wallet movement
- *   2. else an open API row for the same top-up with the same amount          -> ours: bind the id, reconcile, no wallet movement
- *   3. else it is a refund or chargeback we did not start                     -> the wallet is debited, once, capped at what the top-up
- *      credited the wallet (`amount_minor - refunded_minor`, one unit: the card fee was never in the wallet), and recorded here.
+ *   1. by the provider's refund id (only for a real refund operation, never a chargeback / reversal)     -> ours: reconcile, no wallet movement
+ *   2. else, for a real refund (`refund` / `partial_refund`, not a chargeback, reversal or void), an API row of the same top-up with the same
+ *      amount that has NO provider id yet                                                                -> ours: bind the id, no wallet movement
+ *   3. else it is a refund or chargeback we did not start -> the wallet is debited, once (ref `chargeback:<id>`), its FULL amount in wallet
+ *      units up to what the top-up credited (the card fee was never in the wallet); the wallet may go into debt. Nothing already used by
+ *      other refunds or open card refunds shrinks it. An amount beyond the credited amount (and beyond the card fee) is never dropped
+ *      silently: it is recorded and raised as a P1 alert for an operator.
  * Kashier documents no idempotency key, so the provider's refund API is called at most once per recorded row; a timeout or an unreadable
  * answer leaves the row `uncertain` and is reconciled (webhook, refund status, refund list), never repeated.
  */
 import type { Env } from '../../env';
 import { TRANSACTION_ID } from './kashier-confirm';
+import { requestAdjustment } from './operator';
 import { auditOnce } from './package-orders';
-import type { ParsedWebhook, PaymentProvider } from './payments';
+import { paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 
 export const OPEN = "('sending', 'pending', 'uncertain')";
 const STUCK_AFTER_MS = 3 * 86_400_000;
@@ -82,44 +86,57 @@ export async function settleCardRefund(env: Env, id: string, o: Outcome, now: nu
 
 type TopupLite = { order_id: string; workspace_id: string };
 
+/** Only these Kashier operations are a card refund of a payment; `reversal` (chargeback) and `void` are not what an API refund of ours looks like. */
+const CARD_REFUND_OPS = new Set(['refund', 'partial_refund']);
+
 /**
  * A confirmed refund webhook for one of our top-ups (SUCCESS or FAILURE). Returns the resolution word. Throws only when something could
  * not be written (the caller answers 5xx and the delivery is retried; every step is idempotent).
  */
 export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebhook, now: number): Promise<string> {
+  const isCardRefund = !ev.chargeback && ev.operation !== undefined && CARD_REFUND_OPS.has(ev.operation);
   const byId = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(ev.transactionId).first<CardRefundRow>();
   if (byId && byId.source !== 'webhook') {
-    // Ours (an API refund, or one linked from the provider's dashboard).
+    if (!isCardRefund) {
+      // A chargeback / reversal / void carrying the id of a refund we recorded is not that refund: nothing is settled, a person looks.
+      alert('refund_id_conflict', { severity: 'P1', workspace: t.workspace_id, orderId: t.order_id });
+      return 'refund_unmatched';
+    }
     if (byId.state === 'sending' || byId.state === 'pending' || byId.state === 'uncertain') {
       await settleCardRefund(env, byId.id, { to: ev.status === 'SUCCESS' ? 'succeeded' : 'failed' }, now);
     }
     return 'refund_reconciled';
   }
   if (ev.status !== 'SUCCESS') return 'ignored';
-  if (!byId) {
-    const open = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE order_id = ? AND source = 'api' AND state IN ${OPEN} AND amount_minor = ? ORDER BY (kashier_refund_id IS NULL) DESC, created_at LIMIT 1`).bind(t.order_id, ev.amountMinor).first<CardRefundRow>();
+  if (!byId && isCardRefund) {
+    // Kashier's own details (confirm) say this is a refund of this order; the signed amount must equal ours, and our row must not have an id yet.
+    const open = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE order_id = ? AND source = 'api' AND state IN ${OPEN} AND kashier_refund_id IS NULL AND amount_minor = ? ORDER BY created_at LIMIT 1`).bind(t.order_id, ev.amountMinor).first<CardRefundRow>();
     if (open) {
-      if (await settleCardRefund(env, open.id, { to: 'succeeded', refundId: ev.transactionId }, now, { overrideId: true })) return 'refund_reconciled';
-      return 'refund_reconciled'; // another path settled it first
+      await settleCardRefund(env, open.id, { to: 'succeeded', refundId: ev.transactionId }, now); // false = another path settled it first
+      return 'refund_reconciled';
     }
   }
-  // A refund or chargeback we did not start. The wallet only ever held `amount_minor` of this top-up (the card fee never was in it), and
-  // `refunded_minor` counts the same unit, so the debit is capped by what is left, in that one unit.
+  // A refund or chargeback we did not start. The wallet only ever held `amount_minor` of this top-up (the card fee never was in it): debit the
+  // event's full amount up to that, once, whatever else happened to the top-up (a chargeback is never shrunk by refunds already made or open).
   let row = byId;
+  let excess = 0;
   if (!row) {
-    const reserved = await env.DB.prepare(`SELECT coalesce(sum(amount_minor), 0) AS n FROM card_refunds WHERE order_id = ? AND state IN ${OPEN}`).bind(t.order_id).first<{ n: number }>();
-    const fresh = await env.DB.prepare('SELECT amount_minor, refunded_minor FROM topups WHERE order_id = ?').bind(t.order_id).first<{ amount_minor: number; refunded_minor: number }>();
-    const debit = Math.min(ev.amountMinor, (fresh?.amount_minor ?? 0) - (fresh?.refunded_minor ?? 0) - (reserved?.n ?? 0));
-    if (debit <= 0) {
-      if (await auditOnce(env, 'refund_unmatched', t.workspace_id, ev.transactionId, now)) alert('refund_unmatched', { workspace: t.workspace_id, orderId: t.order_id });
-      return 'refund_unmatched';
-    }
+    const top = await env.DB.prepare('SELECT amount_minor, fee_minor FROM topups WHERE order_id = ?').bind(t.order_id).first<{ amount_minor: number; fee_minor: number }>();
+    const credited = top?.amount_minor ?? 0;
+    const debit = Math.min(ev.amountMinor, credited);
+    if (debit <= 0) throw new Error('refund of a top-up that credited nothing');
+    excess = ev.amountMinor - debit;
     await env.DB.batch([
-      env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, 'webhook', 'succeeded', ?, ?, ?)")
-        .bind(`wh:${ev.transactionId}`, t.order_id, t.workspace_id, debit, ev.transactionId, now, now),
+      env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, note) VALUES (?, NULL, ?, ?, ?, 'webhook', 'succeeded', ?, ?, ?, ?)")
+        .bind(`wh:${ev.transactionId}`, t.order_id, t.workspace_id, debit, ev.transactionId, now, now, excess > 0 ? `excess_minor=${excess};fee_minor=${top?.fee_minor ?? 0}` : null),
       env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(debit, t.order_id),
     ]);
     row = (await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(ev.transactionId).first<CardRefundRow>())!;
+    // Beyond the credited amount the card fee explains up to `fee_minor`; anything past that is money we cannot place: a person decides.
+    const unexplained = excess - Math.min(excess, top?.fee_minor ?? 0);
+    if (unexplained > 0 && (await auditOnce(env, 'refund_excess_review', t.workspace_id, ev.transactionId, now))) {
+      alert('refund_excess_for_review', { severity: 'P1', workspace: t.workspace_id, orderId: t.order_id, refundId: ev.transactionId, excessMinor: unexplained, chargeback: !!ev.chargeback });
+    }
   }
   // Same ref on every path and replay: a second delivery posts nothing.
   const r = await stubOf(env, t.workspace_id).postWallet({ kind: 'chargeback', netMinor: -row.amount_minor, ref: `chargeback:${ev.transactionId}`, note: `provider refund of ${t.order_id}: operator review` }, now);
@@ -128,40 +145,69 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
   return 'refunded';
 }
 
-export type LinkResult = { ok: true } | { ok: false; reason: 'not_found' | 'not_manual_payout' | 'invalid_refund_id' | 'invalid_order' | 'exceeds_manual' | 'exceeds_order' | 'amount_mismatch' | 'already_linked' };
+export type LinkResult =
+  | { ok: true; adjustment?: { id: string; state: 'pending' | 'approved' | 'rejected' } }
+  | { ok: false; reason: 'not_found' | 'not_manual_payout' | 'invalid_refund_id' | 'invalid_order' | 'exceeds_manual' | 'exceeds_order' | 'amount_mismatch' | 'already_linked' | 'refund_not_verified' | 'provider_unavailable' };
 
 /**
  * "Refunded in the provider's dashboard": an operator paid a manual payout by refunding the card in Kashier's dashboard and links that
- * refund to the request. The wallet was already debited at approval, so the provider's webhook for it must not debit again. If that webhook
- * already arrived first (booked as an unknown refund and debited), the duplicate debit is returned by an offsetting adjustment.
+ * refund to the request. The wallet was already debited at approval, so the provider's webhook for it must not debit again.
+ *  - The link first asks Kashier: the id must be listed for this top-up's order as a card refund (`refund` / `partial_refund`, never a
+ *    reversal or void), SUCCESS, for exactly this amount. Anything else is refused and records nothing.
+ *  - The link itself moves no money. If the refund's webhook already arrived first (booked as an unknown refund and debited a second time),
+ *    giving that debit back is a wallet CREDIT, and it goes through the normal adjustment flow (`requestAdjustment`: above
+ *    ADJUSTMENT_APPROVAL_MINOR a DIFFERENT super admin must approve; the requester cannot approve their own).
  */
-export async function linkDashboardRefund(env: Env, a: { requestId: string; kashierRefundId: string; amountMinor: number; orderId?: string; actor: string }, now = Date.now()): Promise<LinkResult> {
+export async function linkDashboardRefund(env: Env, a: { requestId: string; kashierRefundId: string; amountMinor: number; orderId?: string; actor: string }, now = Date.now(), provider: PaymentProvider | null = paymentProvider(env)): Promise<LinkResult> {
   if (!TRANSACTION_ID.test(a.kashierRefundId)) return { ok: false, reason: 'invalid_refund_id' };
   const req = await env.DB.prepare('SELECT id, workspace_id, state, manual_minor FROM refund_requests WHERE id = ?').bind(a.requestId).first<{ id: string; workspace_id: string; state: string; manual_minor: number }>();
   if (!req) return { ok: false, reason: 'not_found' };
   if (req.state !== 'manual_payout') return { ok: false, reason: 'not_manual_payout' };
   if (!Number.isSafeInteger(a.amountMinor) || a.amountMinor <= 0 || a.amountMinor > req.manual_minor) return { ok: false, reason: 'exceeds_manual' };
   const existing = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(a.kashierRefundId).first<CardRefundRow>();
+  if (existing && (existing.source !== 'webhook' || existing.workspace_id !== req.workspace_id)) return { ok: false, reason: 'already_linked' };
+  if (existing && existing.amount_minor !== a.amountMinor) return { ok: false, reason: 'amount_mismatch' };
+  // Which top-up the refund belongs to.
+  let topup: { order_id: string; amount_minor: number; refunded_minor: number } | null;
   if (existing) {
-    if (existing.source !== 'webhook' || existing.workspace_id !== req.workspace_id) return { ok: false, reason: 'already_linked' };
-    if (existing.amount_minor !== a.amountMinor) return { ok: false, reason: 'amount_mismatch' };
-    // The refund webhook came first and debited the wallet a second time: give that debit back, then link.
-    const back = await stubOf(env, req.workspace_id).postWallet({ kind: 'adjustment', netMinor: existing.amount_minor, ref: `relink:${a.kashierRefundId}`, actor: a.actor, note: `refund ${a.kashierRefundId} linked to request ${a.requestId}: duplicate debit returned` }, now);
-    if (!back.ok && back.reason !== 'duplicate') throw new Error(`relink refused: ${back.reason}`);
-    await env.DB.prepare("UPDATE card_refunds SET source = 'dashboard', state = 'linked', request_id = ?, updated_at = ? WHERE id = ? AND source = 'webhook'").bind(a.requestId, now, existing.id).run();
+    topup = await env.DB.prepare('SELECT order_id, amount_minor, refunded_minor FROM topups WHERE order_id = ?').bind(existing.order_id).first();
+  } else if (a.orderId) {
+    topup = await env.DB.prepare("SELECT order_id, amount_minor, refunded_minor FROM topups WHERE workspace_id = ? AND state = 'paid' AND order_id = ?").bind(req.workspace_id, a.orderId).first();
   } else {
-    const q = a.orderId
-      ? env.DB.prepare("SELECT order_id, amount_minor, refunded_minor FROM topups WHERE workspace_id = ? AND state = 'paid' AND order_id = ?").bind(req.workspace_id, a.orderId)
-      : env.DB.prepare("SELECT order_id, amount_minor, refunded_minor FROM topups WHERE workspace_id = ? AND state = 'paid' AND transaction_id IS NOT NULL AND amount_minor - refunded_minor >= ? ORDER BY paid_at, order_id LIMIT 1").bind(req.workspace_id, a.amountMinor);
-    const t = await q.first<{ order_id: string; amount_minor: number; refunded_minor: number }>();
-    if (!t) return { ok: false, reason: a.orderId ? 'invalid_order' : 'exceeds_order' };
-    const reserved = await env.DB.prepare(`SELECT coalesce(sum(amount_minor), 0) AS n FROM card_refunds WHERE order_id = ? AND state IN ${OPEN}`).bind(t.order_id).first<{ n: number }>();
-    if (a.amountMinor > t.amount_minor - t.refunded_minor - (reserved?.n ?? 0)) return { ok: false, reason: 'exceeds_order' };
+    topup = await env.DB.prepare("SELECT order_id, amount_minor, refunded_minor FROM topups WHERE workspace_id = ? AND state = 'paid' AND transaction_id IS NOT NULL AND amount_minor - refunded_minor >= ? ORDER BY paid_at, order_id LIMIT 1").bind(req.workspace_id, a.amountMinor).first();
+  }
+  if (!topup) return { ok: false, reason: a.orderId ? 'invalid_order' : 'exceeds_order' };
+  if (!existing) {
+    const reserved = await env.DB.prepare(`SELECT coalesce(sum(amount_minor), 0) AS n FROM card_refunds WHERE order_id = ? AND state IN ${OPEN}`).bind(topup.order_id).first<{ n: number }>();
+    if (a.amountMinor > topup.amount_minor - topup.refunded_minor - (reserved?.n ?? 0)) return { ok: false, reason: 'exceeds_order' };
+  }
+  // Ask Kashier before anything is written.
+  if (!provider?.listRefunds) return { ok: false, reason: 'provider_unavailable' };
+  const listed = await provider.listRefunds(topup.order_id);
+  if (listed === 'unavailable') return { ok: false, reason: 'provider_unavailable' };
+  const real = listed.find((r) => r.refundId === a.kashierRefundId);
+  if (!real || real.status !== 'SUCCESS' || !CARD_REFUND_OPS.has(real.operation) || real.amountMinor !== a.amountMinor) return { ok: false, reason: 'refund_not_verified' };
+
+  let adjustment: { id: string; state: 'pending' | 'approved' | 'rejected' } | undefined;
+  if (existing) {
+    // The refund webhook came first and debited the wallet a second time. Claim the row for this request, then ask for the credit through the
+    // adjustment flow; if asking fails the claim is undone so a retry starts clean.
+    const claim = await env.DB.prepare("UPDATE card_refunds SET source = 'dashboard', state = 'linked', request_id = ?, updated_at = ? WHERE id = ? AND source = 'webhook'").bind(a.requestId, now, existing.id).run();
+    if (!claim.meta.changes) return { ok: false, reason: 'already_linked' };
+    try {
+      const adj = await requestAdjustment(env, { actor: a.actor, workspaceId: req.workspace_id, amountMinor: existing.amount_minor, reason: `refund ${a.kashierRefundId} linked to request ${a.requestId}: duplicate debit returned` }, now);
+      if (!adj.ok) throw new Error(adj.reason);
+      adjustment = { id: adj.adjustment.id, state: adj.adjustment.state };
+    } catch (err) {
+      await env.DB.prepare("UPDATE card_refunds SET source = 'webhook', state = 'succeeded', request_id = NULL, updated_at = ? WHERE id = ? AND source = 'dashboard' AND request_id = ?").bind(now, existing.id, a.requestId).run();
+      throw err;
+    }
+  } else {
     try {
       await env.DB.batch([
         env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'dashboard', 'linked', ?, ?, ?)")
-          .bind(`dash:${a.kashierRefundId}`, a.requestId, t.order_id, req.workspace_id, a.amountMinor, a.kashierRefundId, now, now),
-        env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(a.amountMinor, t.order_id),
+          .bind(`dash:${a.kashierRefundId}`, a.requestId, topup.order_id, req.workspace_id, a.amountMinor, a.kashierRefundId, now, now),
+        env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(a.amountMinor, topup.order_id),
       ]);
     } catch {
       return { ok: false, reason: 'already_linked' }; // the provider's refund id is unique
@@ -169,8 +215,8 @@ export async function linkDashboardRefund(env: Env, a: { requestId: string; kash
   }
   await refreshRequest(env, a.requestId);
   await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_dashboard_linked', ?, NULL, ?, ?)")
-    .bind(now, a.actor, req.workspace_id, JSON.stringify({ amountMinor: a.amountMinor }), `${a.requestId}:${a.kashierRefundId}`).run();
-  return { ok: true };
+    .bind(now, a.actor, req.workspace_id, JSON.stringify({ amountMinor: a.amountMinor, ...(adjustment ? { adjustmentId: adjustment.id } : {}) }), `${a.requestId}:${a.kashierRefundId}`).run();
+  return { ok: true, ...(adjustment ? { adjustment } : {}) };
 }
 
 /**
