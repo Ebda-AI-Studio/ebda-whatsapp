@@ -49,6 +49,7 @@ import { walletRoutes } from './routes/wallet';
 import { instapayProofRoutes, instapayRoutes } from './routes/instapay';
 import { sharedNumberRoutes } from './routes/shared-number';
 import { handleSharedEvent, sharedEnabled, sharedNumberById, sweepShared } from './core/shared/shared-number';
+import { applySharedTemplateEvent } from './core/shared/shared-templates';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 // The brand pack (BRAND var; unset = the suite brand) is chosen once per isolate, before any request: copy, templates, agent words,
@@ -185,11 +186,13 @@ app.post('/meta/webhook', async (c) => {
     return c.text('ok'); // a 5xx would make Meta retry a body that can never parse
   }
   for (const t of extractTemplateStatuses(payload)) {
+    await applySharedTemplateEvent(c.env, t.wabaId, t.name, t.language, { status: t.status, reason: t.reason }); // the platform WABA's own catalog (no workspace owns it)
     for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
       await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
     }
   }
   for (const t of extractTemplateCategoryUpdates(payload)) {
+    await applySharedTemplateEvent(c.env, t.wabaId, t.name, t.language, { category: t.newCategory });
     for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
       await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateCategory(t.name, t.language, t.newCategory);
     }

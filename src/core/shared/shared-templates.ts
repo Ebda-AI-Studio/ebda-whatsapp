@@ -66,15 +66,33 @@ export async function submitSharedTemplate(env: Env, t: { name: string; language
   if (!token) return { ok: false, reason: 'token_unavailable' };
   const res = await submitTemplate({ token, graphVersion: env.META_GRAPH_VERSION, wabaId: number.waba_id }, t);
   if (!res.ok) return { ok: false, reason: res.retryable ? 'meta_unavailable' : 'meta_rejected', message: res.message };
+  // Store what META answered, not what we asked for: Meta may recategorise (utility -> marketing). An answer that states no category is kept
+  // as UNCONFIRMED, which is never sendable until a sync or a Meta event says what the template is.
+  const category = res.value.categoryConfirmed ? res.value.category.toUpperCase() : 'UNCONFIRMED';
+  const status = res.value.status.toUpperCase();
   await env.DB.prepare(
     `INSERT INTO shared_templates (phone_number_id, name, language, category, status, components, rejected_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
      ON CONFLICT(phone_number_id, name, language) DO UPDATE SET category = excluded.category, status = excluded.status, components = excluded.components, rejected_reason = NULL, updated_at = excluded.updated_at`,
-  ).bind(number.phone_number_id, t.name, t.language, t.category, res.value.status, JSON.stringify(t.components), Date.now()).run();
-  return { ok: true, status: res.value.status };
+  ).bind(number.phone_number_id, t.name, t.language, category, status, JSON.stringify(t.components), Date.now()).run();
+  return { ok: true, status };
+}
+
+/**
+ * Meta's template events for the platform WABA. The catalog row follows Meta's LATEST word; an unknown template or another WABA changes nothing
+ * (the next sync brings it). Returns whether a row changed.
+ */
+export async function applySharedTemplateEvent(env: Db, wabaId: string, name: string, language: string, change: { status: string; reason: string | null } | { category: string }): Promise<boolean> {
+  const number = await env.DB.prepare('SELECT phone_number_id FROM shared_numbers WHERE waba_id = ?').bind(wabaId).first<{ phone_number_id: string }>();
+  if (!number) return false;
+  const r = 'category' in change
+    ? await env.DB.prepare('UPDATE shared_templates SET category = ?, updated_at = ? WHERE phone_number_id = ? AND name = ? AND language = ?').bind(change.category.toUpperCase(), Date.now(), number.phone_number_id, name, language).run()
+    : await env.DB.prepare('UPDATE shared_templates SET status = ?, rejected_reason = ?, updated_at = ? WHERE phone_number_id = ? AND name = ? AND language = ?').bind(change.status.toUpperCase(), change.reason, Date.now(), number.phone_number_id, name, language).run();
+  return (r.meta.changes ?? 0) > 0;
 }
 
 /** May a store send this template from the shared number? Fail closed: anything not found, not approved or not UTILITY/AUTHENTICATION is no. */
 export async function sharedTemplateSendable(env: Db, phoneNumberId: string, name: string, language: string): Promise<boolean> {
   const t = await env.DB.prepare('SELECT category, status FROM shared_templates WHERE phone_number_id = ? AND name = ? AND language = ?').bind(phoneNumberId, name, language).first<{ category: string; status: string }>();
-  return !!t && t.status === 'APPROVED' && SENDABLE_CATEGORIES.includes(t.category);
+  // Both values are Meta's latest (sync, event or submit answer), upper-cased on write; compared upper-cased again so a stray value never passes.
+  return !!t && t.status.toUpperCase() === 'APPROVED' && SENDABLE_CATEGORIES.includes(t.category.toUpperCase());
 }

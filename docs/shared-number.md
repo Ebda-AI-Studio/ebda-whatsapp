@@ -23,7 +23,16 @@ Every send through a platform-token number looks the number up in `shared_number
 - Store events and one-time codes use the same sender as the inbox (`senderNumberFor`): a shared-only member's COD confirmation, order-created and shipment templates go out on the platform number (with `orderRef`), but one-time codes do NOT: an OTP goes to an arbitrary phone, and sending it on the shared number would claim a shared route for that phone (a cross-store hijack), so OTP for a shared-only store answers `no_number` (it needs its own number). Store events can only target that store's own order customer (the phone comes from the Store's event for that `storeId`, queued by the Store). Cart recovery is marketing and is NEVER sent on the shared number (WA-SHARED-NOCAMP-1): the event is skipped with `shared_number_no_marketing`.
 - `order_ref` comes from `SendJob.orderRef` (set for the order-created, COD-confirmation and shipment templates).
 - Billing is the existing path: funding `platform_line` → the wallet pays Meta's cost; service replies are charged at the service rate and rebated pro-rata at month close (WA-SHARED-FREE-1, `billing.md`). No funding row → `funding_unknown`, nothing sent (fail closed).
-- Templates: the platform WABA's templates are shared infrastructure. A template that carries the store's name ("on behalf of <store>") is an approved variant created in Meta by the operator/merchant; the display name is passed as a template parameter by the caller. This code does not create or approve templates.
+- Templates: see "Platform templates" below. A template that carries the store's name ("on behalf of <store>") is an approved variant created in Meta by the operator; the display name is passed as a template parameter by the caller.
+
+## Platform templates (operator)
+The platform WABA's templates are platform-owned: a store cannot list, sync or submit them. The catalog is D1 `shared_templates` (migration `0013_shared_templates.sql`; definitions only, no message content). Super admin routes (switch off or no platform number registered: 404; writes re-check the session like every operator write, fail closed):
+- `GET /api/v1/operator/shared-templates` → `{ items }` (name, language, category, status, body text, parameter count, rejection reason).
+- `POST /api/v1/operator/shared-templates/sync` → `{ upserted, removed }`: fetches every page from Meta with the PLATFORM token (`META_SYSTEM_TOKEN`) on the shared number's WABA and replaces the catalog in one batch; a failed page changes nothing (503).
+- `POST /api/v1/operator/shared-templates` `{ name, language, category: UTILITY|AUTHENTICATION, components }` → submits to Meta with the platform token and stores META'S answer (category and status as Meta returned them, upper-cased; an answer with no category is kept as `UNCONFIRMED`). MARKETING is refused with 400 before Meta.
+- The operator console has a "Shared number templates" tab (ar+en) with the same three actions.
+
+Send rule (WA-SHARED-NOCAMP-1, tested): a template goes out from the shared number only if the catalog row, at SEND time, is `APPROVED` and `UTILITY` or `AUTHENTICATION`. A store's own copy of a template decides nothing. The row follows Meta's latest word: submit answer, sync, `template_category_update` and `message_template_status_update` webhooks for the platform WABA (so a utility template that Meta recategorises to marketing stops going out, and so does one that is paused or disabled). Enforced twice: the inbox API answers `409 template_not_approved`, and the single send chokepoint (`sendToMeta`) refuses with `shared_template_not_allowed` (the message is marked failed, nothing reaches Meta). Own-number sends are untouched. Until the operator has synced, no template can be sent from the shared number (fail closed).
 
 ## Inbound routing (`handleSharedEvent`)
 Only for the number found in `shared_numbers` while the switch is on. Per message:
@@ -47,6 +56,7 @@ A failing platform send (list, generic reply) that Meta marks retryable fails th
 `shared_sent_not_recorded`, `shared_sweep_failed`; warnings `shared_status_unknown_message`, `shared_platform_send_failed`, `shared_parked_unreadable`.
 
 ## Not done / residual
-- Per-store templates on the platform WABA: template status webhooks are NOT broadcast to members (the names of one store's templates would reach the others) and members cannot sync templates from it. Until the operator provisions approved variants into a member's workspace, a member can answer inside the 24-hour window and send only templates already stored for it.
+- Template status webhooks for the platform WABA update the platform catalog only; they are NOT broadcast to members (the names of one store's templates would reach the others). A member still needs the template stored in its own workspace to render it; the platform catalog decides whether it may go out.
+- Not verified against real Meta traffic: the `template_category_update` payload field names (see `extractTemplateCategoryUpdates`).
 - Campaigns on the shared number are not enabled (one store's broadcast quality would be every store's).
 - Not verified against real Meta traffic (list message shape, `recipient_id`-less statuses).

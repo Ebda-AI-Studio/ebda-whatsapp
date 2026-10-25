@@ -6,6 +6,8 @@ import { adminToken, apiFor, graphStub, storeId as W, useApiKey } from './helper
 import { setupBilling, fund } from './helpers/billing';
 import { exec, rows } from './helpers/workspace';
 import { seedTemplate } from './helpers/campaigns';
+import { sign } from './helpers/meta';
+import { templateCategoryPayload, templateStatusPayload } from './helpers/payload';
 
 // Item e: the platform WABA's templates are platform-owned. Operators (super admins) list / sync / submit them with the PLATFORM token;
 // stores sending from the shared number may only use APPROVED UTILITY or AUTHENTICATION templates of that catalog (WA-SHARED-NOCAMP-1).
@@ -213,5 +215,63 @@ describe('what a store may send from the shared number', () => {
     const conv = (await rows<{ id: number }>(ws, 'SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id'))[0]!.id;
     const res = await api.call('POST', `/conversations/${conv}/messages`, { type: 'template', clientId: crypto.randomUUID(), name: 'mine_u', language: 'ar', params: [] });
     expect(res.status).toBe(202);
+  });
+});
+
+
+describe('the category and status that count are Meta\'s latest answer (WA-SHARED-NOCAMP-1 cannot be bypassed by recategorisation)', () => {
+  const body = { name: 'order_ready', language: 'ar', category: 'UTILITY', components: [{ type: 'BODY', text: 'طلبك {{1}} جاهز' }] };
+  const submitAnswering = (answer: Record<string, unknown>) => {
+    graph!.restore();
+    graph = graphStub((c) => (c.url.endsWith('/message_templates') && c.method === 'POST' ? { status: 200, json: { id: 'n1', ...answer } } : { status: 200, json: { messages: [{ id: `wamid.${Math.random()}` }] } }));
+  };
+  const sendable = (name = 'order_ready') => import('../src/core/shared/shared-templates').then((m) => m.sharedTemplateSendable(env, PLAT, name, 'ar'));
+  const hook = async (raw: string) => fetchWith()('https://x/meta/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': await sign(raw) }, body: raw });
+
+  it('Meta answers MARKETING to a UTILITY request: the row stores MARKETING and it is not sendable, even once approved', async () => {
+    submitAnswering({ status: 'APPROVED', category: 'MARKETING' });
+    expect((await op('POST', '', body)).status).toBe(201);
+    expect(await catalog()).toEqual([{ name: 'order_ready', language: 'ar', category: 'MARKETING', status: 'APPROVED' }]);
+    expect(await sendable()).toBe(false);
+  });
+  it('the answer is stored upper-cased as Meta gave it; a lower-case answer cannot slip a marketing template through', async () => {
+    submitAnswering({ status: 'approved', category: 'marketing' });
+    await op('POST', '', body);
+    expect(await catalog()).toEqual([{ name: 'order_ready', language: 'ar', category: 'MARKETING', status: 'APPROVED' }]);
+    expect(await sendable()).toBe(false);
+  });
+  it('an answer that does not state a category is stored as unconfirmed (not our request) and is not sendable until a sync says what it is', async () => {
+    submitAnswering({ status: 'APPROVED' });
+    await op('POST', '', body);
+    expect((await catalog())[0]!.category).toBe('UNCONFIRMED');
+    expect(await sendable()).toBe(false);
+  });
+  it('a UTILITY template that a later sync reports as MARKETING stops going out at send time', async () => {
+    submitAnswering({ status: 'APPROVED', category: 'UTILITY' });
+    await op('POST', '', body);
+    expect(await sendable()).toBe(true);
+    graph!.restore();
+    graph = graphStub((c) => (c.method === 'GET' ? { status: 200, json: { data: [metaTpl('order_ready', 'MARKETING')] } } : { status: 200, json: {} }));
+    await op('POST', '/sync', {});
+    expect(await sendable()).toBe(false);
+  });
+  it('a category-update webhook for the platform WABA flips the row, and so does a status update (paused / disabled)', async () => {
+    submitAnswering({ status: 'APPROVED', category: 'UTILITY' });
+    await op('POST', '', body);
+    expect(await hook(templateCategoryPayload(WABA, { name: 'order_ready', language: 'ar', previous: 'UTILITY', next: 'MARKETING' }))).toHaveProperty('status', 200);
+    expect((await catalog())[0]!.category).toBe('MARKETING');
+    expect(await sendable()).toBe(false);
+    await hook(templateCategoryPayload(WABA, { name: 'order_ready', language: 'ar', previous: 'MARKETING', next: 'UTILITY' }));
+    expect(await sendable()).toBe(true);
+    await hook(templateStatusPayload(WABA, { event: 'PAUSED', name: 'order_ready', language: 'ar' }));
+    expect((await catalog())[0]!.status).toBe('PAUSED');
+    expect(await sendable()).toBe(false);
+  });
+  it('a webhook for another WABA or an unknown template changes nothing', async () => {
+    submitAnswering({ status: 'APPROVED', category: 'UTILITY' });
+    await op('POST', '', body);
+    await hook(templateCategoryPayload('other-waba', { name: 'order_ready', language: 'ar', previous: 'UTILITY', next: 'MARKETING' }));
+    await hook(templateCategoryPayload(WABA, { name: 'unknown_tpl', language: 'ar', previous: 'UTILITY', next: 'MARKETING' }));
+    expect(await catalog()).toEqual([{ name: 'order_ready', language: 'ar', category: 'UTILITY', status: 'APPROVED' }]);
   });
 });

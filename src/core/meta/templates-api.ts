@@ -41,7 +41,7 @@ export async function fetchTemplates(a: Auth): Promise<TemplatesApiResult<MetaTe
   return { ok: true, value: out };
 }
 
-export async function submitTemplate(a: Auth, body: { name: string; language: string; category: string; components: unknown[] }): Promise<TemplatesApiResult<{ status: string; category: string }>> {
+export async function submitTemplate(a: Auth, body: { name: string; language: string; category: string; components: unknown[] }): Promise<TemplatesApiResult<{ status: string; category: string; categoryConfirmed: boolean }>> {
   let res: Response;
   try {
     res = await fetch(`https://graph.facebook.com/${a.graphVersion}/${a.wabaId}/message_templates`, {
@@ -54,6 +54,7 @@ export async function submitTemplate(a: Auth, body: { name: string; language: st
     return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
   }
   const json = (await res.json().catch(() => null)) as { id?: string; status?: string; category?: string; error?: { message?: string; error_user_msg?: string } } | null;
-  if (res.ok && json?.id) return { ok: true, value: { status: json.status ?? 'PENDING', category: json.category ?? body.category } };
+  // `categoryConfirmed` = Meta itself stated the category (it may differ from the requested one); when absent, `category` is only what we asked for.
+  if (res.ok && json?.id) return { ok: true, value: { status: json.status ?? 'PENDING', category: json.category ?? body.category, categoryConfirmed: typeof json.category === 'string' } };
   return { ok: false, message: json?.error?.error_user_msg ?? json?.error?.message ?? `http ${res.status}`, retryable: res.status >= 500 || res.status === 429 };
 }
