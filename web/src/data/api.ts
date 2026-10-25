@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, customerOrdersResponse, eventsResponse, getMessagesResponse, listConversationsResponse, listTemplatesResponse,
-  messageDto, realtimeEvent, searchResponse, type RealtimeEvent, type SendMessageRequest,
+  agentSettingsDto, apiError, campaignDto, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  listContactsResponse, listConversationsResponse, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
+  realtimeEvent, searchResponse, segmentPreviewDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import type { InboxSource } from './source';
 
 export class ApiError extends Error {
-  constructor(public readonly code: string, public readonly status: number) {
+  /** `detail` = the server's machine reason for a 409 (e.g. `empty_audience`), when it sends one. */
+  constructor(public readonly code: string, public readonly status: number, public readonly detail?: string) {
     super(code);
   }
 }
@@ -31,7 +33,7 @@ export function createApiSource(o: Opts): LiveSource {
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       const err = apiError.safeParse(json);
-      throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status);
+      throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined);
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) throw new Error(`response does not match the contract: ${path}`);
@@ -45,6 +47,8 @@ export function createApiSource(o: Opts): LiveSource {
     kind: 'live',
     // Off until the server says the store link is bound (GET /me → capabilities): never offer an action that would 404.
     capabilities: { codOutcome: false },
+    // Least privilege until GET /me answers: spending actions stay hidden.
+    role: 'staff',
     currentUserId: o.currentUserId,
     userNames: o.userNames,
     async listConversations(filter, q) {
@@ -96,6 +100,39 @@ export function createApiSource(o: Opts): LiveSource {
     async assign(id, userId) {
       await call(`/conversations/${id}/assign`, z.unknown(), { method: 'POST', body: JSON.stringify({ userId }) });
     },
+    campaigns: {
+      list: async () => (await call('/campaigns?limit=50', listCampaignsResponse)).items,
+      get: (id) => call(`/campaigns/${encodeURIComponent(id)}`, campaignDto),
+      create: (req) => call('/campaigns', campaignDto, { method: 'POST', body: JSON.stringify(req) }),
+      send: (id, scheduledAt) => call(`/campaigns/${encodeURIComponent(id)}/send`, campaignDto, { method: 'POST', body: JSON.stringify(scheduledAt ? { scheduledAt } : {}) }),
+      pause: (id) => call(`/campaigns/${encodeURIComponent(id)}/pause`, campaignDto, { method: 'POST' }),
+      resume: (id) => call(`/campaigns/${encodeURIComponent(id)}/resume`, campaignDto, { method: 'POST' }),
+      cancel: (id) => call(`/campaigns/${encodeURIComponent(id)}/cancel`, campaignDto, { method: 'POST' }),
+      async remove(id) {
+        const res = await f(`${root}/campaigns/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
+      },
+      segments: async () => (await call('/segments', listSegmentsResponse)).items,
+      preview: (criteria) => call('/segments/preview', segmentPreviewDto, { method: 'POST', body: JSON.stringify({ criteria }) }),
+    },
+    contacts: {
+      async list(q) {
+        const p = new URLSearchParams({ limit: '50' });
+        if (q.q?.trim()) p.set('q', q.q.trim());
+        if (q.tag) p.set('tag', q.tag);
+        if (q.optedOut !== undefined) p.set('optedOut', String(q.optedOut));
+        if (q.cursor) p.set('cursor', q.cursor);
+        return call(`/contacts?${p}`, listContactsResponse);
+      },
+      async importCsv(file, consented) {
+        const form = new FormData();
+        form.set('file', file);
+        form.set('consented', consented ? 'true' : 'false');
+        return (await call('/imports', z.object({ id: z.string() }).loose(), { method: 'POST', body: form })).id;
+      },
+      imports: async () => (await call('/imports', listImportsResponse)).items,
+      rejects: async (id) => (await call(`/imports/${encodeURIComponent(id)}/rejects`, importRejectsResponse)).items,
+    },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });
       if (!res.ok) throw new ApiError('not_found', res.status);
@@ -124,8 +161,9 @@ export function createApiSource(o: Opts): LiveSource {
     reload: () => reloaders.forEach((r) => r()),
     async loadCapabilities() {
       try {
-        const me = await call('/me', z.object({ capabilities: z.object({ codOutcome: z.boolean() }).optional() }).loose());
+        const me = await call('/me', meResponse.partial().loose());
         source.capabilities = { codOutcome: me.capabilities?.codOutcome === true };
+        if (me.role) source.role = me.role;
       } catch {
         source.capabilities = { codOutcome: false };
       }

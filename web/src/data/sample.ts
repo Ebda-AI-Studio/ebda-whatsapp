@@ -1,4 +1,6 @@
-import type { AgentSettingsDto, ConversationDto, MessageDto, OrderSummaryDto, RealtimeEvent, TemplateDto } from '../../../src/core/api/contract';
+import type {
+  AgentSettingsDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+} from '../../../src/core/api/contract';
 import type { InboxSource } from './source';
 
 // Sample data for preview only (labelled in the UI). Names and orders are invented; no real customers.
@@ -48,7 +50,49 @@ const TEMPLATES: TemplateDto[] = [
   { name: 'cod_confirmation', language: 'ar', category: 'UTILITY', status: 'APPROVED', bodyText: 'أهلًا {{1}}، عندك طلب رقم {{2}} بإجمالي {{3}}. تحب نأكده؟', paramCount: 3, rejectedReason: null },
   { name: 'shipping_update', language: 'ar', category: 'UTILITY', status: 'APPROVED', bodyText: 'طلبك {{1}} اتشحن، وتقدر تتابعه من هنا: {{2}}', paramCount: 2, rejectedReason: null },
   { name: 'order_confirmation', language: 'ar', category: 'UTILITY', status: 'APPROVED', bodyText: 'شكرًا يا {{1}}، طلبك {{2}} اتأكد وهيوصلك خلال {{3}} أيام.', paramCount: 3, rejectedReason: null },
+  { name: 'eid_offer', language: 'ar', category: 'MARKETING', status: 'APPROVED', bodyText: 'كل سنة وانت طيب يا {{1}}! خصم ٢٠٪ على كل حاجة لحد آخر الأسبوع: {{2}}', paramCount: 2, rejectedReason: null },
+  { name: 'back_in_stock', language: 'ar', category: 'MARKETING', status: 'APPROVED', bodyText: 'المنتج اللي كنت مستنيه رجع تاني يا {{1}}.', paramCount: 1, rejectedReason: null },
 ];
+
+// Extra sample contacts for the contacts screen and audience counts (invented).
+const MORE_CONTACTS: ContactDto[] = [
+  { waId: '201007778899', name: 'نورا حسن', optedOut: false, tags: ['vip'], consent: { source: 'import:customers.csv', at: BASE - 40 * 24 * H }, lastInboundAt: BASE - 3 * 24 * H },
+  { waId: '201008889900', name: 'مصطفى عادل', optedOut: true, tags: [], consent: { source: 'import:customers.csv', at: BASE - 40 * 24 * H }, lastInboundAt: BASE - 50 * 24 * H },
+  { waId: '201009990011', name: null, optedOut: false, tags: ['vip'], consent: null, lastInboundAt: null },
+];
+
+const D = 24 * H;
+const counts0 = { queued: 0, claimed: 0, retry: 0, accepted: 0, sent: 0, delivered: 0, read: 0, failed: 0, skipped: 0 };
+function sampleCampaign(p: Partial<CampaignDto> & Pick<CampaignDto, 'id' | 'name' | 'status'>, t: CampaignDto['totals']): CampaignDto {
+  return {
+    pauseReason: null, template: { name: 'eid_offer', language: 'ar' }, category: 'MARKETING', params: [{ kind: 'name', fallback: 'يا فندم' }, { kind: 'link' }],
+    audience: { segmentId: 1, criteria: { tags: { any: ['vip'] } } }, scheduledAt: null, dailySendLimit: null, linkUrl: 'https://example.com/eid',
+    clicks: { unique: Math.round(t.read * 0.31), total: Math.round(t.read * 0.42) }, createdAt: BASE - 3 * D, startedAt: BASE - 2 * D, finishedAt: null,
+    counts: { ...counts0, delivered: t.delivered - t.read, read: t.read, failed: t.failed, skipped: t.skipped, queued: t.pending },
+    totals: t, ...p,
+  };
+}
+const CAMPAIGNS: CampaignDto[] = [
+  sampleCampaign({ id: 'c-1', name: 'عروض العيد', status: 'running' }, { recipients: 1240, pending: 380, sent: 860, delivered: 812, read: 534, failed: 31, skipped: 17 }),
+  sampleCampaign({ id: 'c-2', name: 'رجوع المقاسات', status: 'scheduled', template: { name: 'back_in_stock', language: 'ar' }, params: [{ kind: 'name', fallback: 'يا فندم' }], linkUrl: null, scheduledAt: BASE + 18 * H, startedAt: null }, { recipients: 320, pending: 320, sent: 0, delivered: 0, read: 0, failed: 0, skipped: 0 }),
+  sampleCampaign({ id: 'c-3', name: 'تخفيضات نص الشهر', status: 'paused', pauseReason: 'wallet_empty' }, { recipients: 2100, pending: 1500, sent: 600, delivered: 571, read: 290, failed: 12, skipped: 8 }),
+  sampleCampaign({ id: 'c-4', name: 'العملاء الجداد', status: 'completed', finishedAt: BASE - 9 * D, createdAt: BASE - 12 * D, startedAt: BASE - 11 * D }, { recipients: 410, pending: 0, sent: 402, delivered: 396, read: 301, failed: 6, skipped: 8 }),
+];
+const SEGMENTS: SegmentDto[] = [
+  { id: 1, name: 'عملاء VIP', criteria: { tags: { any: ['vip'] } }, createdAt: BASE - 30 * D, updatedAt: BASE - 30 * D },
+  { id: 2, name: 'كلمونا آخر ٣٠ يوم', criteria: { lastInboundAfter: BASE - 30 * D }, createdAt: BASE - 20 * D, updatedAt: BASE - 20 * D },
+];
+// Illustrative per-message cost for the sample estimate (piasters); the live figure comes from the wallet.
+const SAMPLE_PER_MESSAGE_MINOR = 250;
+
+function matches(c: ContactDto, k: SegmentCriteria): boolean {
+  const tags = c.tags ?? [];
+  if (k.tags?.any?.length && !k.tags.any.some((t) => tags.includes(t))) return false;
+  if (k.tags?.all?.length && !k.tags.all.every((t) => tags.includes(t))) return false;
+  if (k.lastInboundAfter !== undefined && !(c.lastInboundAt != null && c.lastInboundAt > k.lastInboundAfter)) return false;
+  if (k.lastInboundBefore !== undefined && !(c.lastInboundAt != null && c.lastInboundAt < k.lastInboundBefore)) return false;
+  return true;
+}
 
 export function createSampleSource(): InboxSource {
   const threads = structuredClone(THREADS);
@@ -63,12 +107,31 @@ export function createSampleSource(): InboxSource {
     windowOpenUntil: s.windowH === null ? null : BASE + s.windowH * H,
   }));
   let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', provider: 'workers-ai', model: null, baseUrl: null, hasApiKey: false, credits: 500, knowledgeReady: false };
+  const contacts: ContactDto[] = [
+    ...SEEDS.map((x): ContactDto => ({ waId: x.waId, name: x.name, optedOut: false, tags: x.tags.filter((t) => t !== 'needs_human' && t !== 'cod_pending'), consent: x.id % 2 ? { source: 'keyword_start', at: BASE - 10 * D } : null, lastInboundAt: BASE - x.ago })),
+    ...structuredClone(MORE_CONTACTS),
+  ];
+  const campaigns = structuredClone(CAMPAIGNS);
+  const imports: ImportDto[] = [{ id: 'i-1', filename: 'customers.csv', status: 'done', consented: true, total: 214, created: 198, updated: 9, rejected: 7, error: null, createdAt: BASE - 40 * D, finishedAt: BASE - 40 * D + 40_000 }];
+  const preview = (k: SegmentCriteria) => {
+    const hit = k.everyone ? contacts : contacts.filter((c) => matches(c, k));
+    const optedOut = hit.filter((c) => c.optedOut).length;
+    const noConsent = hit.filter((c) => !c.optedOut && !c.consent).length;
+    // Sample counts are scaled up so the screens show realistic numbers; the live API counts real contacts.
+    return { count: (hit.length - optedOut - noConsent) * 100, excluded: { optedOut: optedOut * 100, noConsent: noConsent * 100 } };
+  };
+  const find = (id: string) => {
+    const c = campaigns.find((x) => x.id === id);
+    if (!c) throw new Error('not_found');
+    return c;
+  };
   const listeners = new Set<(e: RealtimeEvent) => void>();
   let seq = 0;
   let nextId = 1000;
   return {
     kind: 'sample',
     capabilities: { codOutcome: true },
+    role: 'owner',
     currentUserId: 'u-me',
     userNames: { 'u-me': 'أنا', 'u-dina': 'دينا' },
     async listConversations(filter, q) {
@@ -121,6 +184,54 @@ export function createSampleSource(): InboxSource {
         c.assigneeUserId = userId;
         c.tags = c.tags.filter((t) => t !== 'needs_human');
       }
+    },
+    campaigns: {
+      list: async () => campaigns.map((c) => ({ ...c })).sort((a, b) => b.createdAt - a.createdAt),
+      get: async (id) => ({ ...find(id) }),
+      async create(req) {
+        const criteria = 'segmentId' in req.audience ? SEGMENTS.find((x) => x.id === (req.audience as { segmentId: number }).segmentId)!.criteria : req.audience.criteria;
+        const audience = preview(criteria).count;
+        const c = sampleCampaign({
+          id: `c-${nextId++}`, name: req.name, status: 'draft', template: req.template, params: req.params ?? [], linkUrl: req.linkUrl ?? null,
+          category: TEMPLATES.find((x) => x.name === req.template.name)?.category ?? 'MARKETING', dailySendLimit: req.dailySendLimit ?? null,
+          audience: { segmentId: 'segmentId' in req.audience ? req.audience.segmentId : null, criteria }, createdAt: Date.now(), startedAt: null,
+          estimate: { audience, perMessageMinor: SAMPLE_PER_MESSAGE_MINOR, totalMinor: audience * SAMPLE_PER_MESSAGE_MINOR },
+        }, { recipients: 0, pending: 0, sent: 0, delivered: 0, read: 0, failed: 0, skipped: 0 });
+        c.clicks = { unique: 0, total: 0 };
+        campaigns.push(c);
+        return { ...c };
+      },
+      async send(id, scheduledAt) {
+        const c = find(id);
+        const n = c.estimate?.audience ?? 0;
+        Object.assign(c, { status: scheduledAt ? 'scheduled' : 'running', scheduledAt: scheduledAt ?? null, startedAt: scheduledAt ? null : Date.now(), estimate: undefined, totals: { recipients: n, pending: n, sent: 0, delivered: 0, read: 0, failed: 0, skipped: 0 } });
+        return { ...c };
+      },
+      async pause(id) { return { ...Object.assign(find(id), { status: 'paused', pauseReason: 'manual' }) }; },
+      async resume(id) { return { ...Object.assign(find(id), { status: 'running', pauseReason: null }) }; },
+      async cancel(id) { return { ...Object.assign(find(id), { status: 'cancelled', pauseReason: null, finishedAt: Date.now() }) }; },
+      async remove(id) { campaigns.splice(campaigns.findIndex((x) => x.id === id), 1); },
+      segments: async () => SEGMENTS,
+      preview: async (k) => preview(k),
+    },
+    contacts: {
+      async list(q) {
+        const query = q.q?.trim() ?? '';
+        const items = contacts
+          .filter((c) => !query || (c.name ?? '').includes(query) || c.waId.includes(query.replace(/\D/g, '') || '\u0000'))
+          .filter((c) => !q.tag || (c.tags ?? []).includes(q.tag))
+          .filter((c) => q.optedOut === undefined || c.optedOut === q.optedOut);
+        return { items: items.map((c) => ({ ...c })), nextCursor: null };
+      },
+      async importCsv(file, consented) {
+        const id = `i-${nextId++}`;
+        const imp: ImportDto = { id, filename: file.name, status: 'running', consented, total: 0, created: 0, updated: 0, rejected: 0, error: null, createdAt: Date.now(), finishedAt: null };
+        imports.unshift(imp);
+        setTimeout(() => Object.assign(imp, { status: 'done', total: 52, created: 48, updated: 2, rejected: 2, finishedAt: Date.now() }), 1500);
+        return id;
+      },
+      imports: async () => imports.map((i) => ({ ...i })),
+      rejects: async () => [{ line: 14, reason: 'invalid_phone' }, { line: 37, reason: 'duplicate_in_file' }],
     },
     subscribe(onEvent) {
       listeners.add(onEvent);

@@ -15,6 +15,20 @@ A campaign is a marketing message sent with an approved template to a group of y
 5. Send now or **schedule** a time.
 6. Follow progress on the Campaigns screen. You can pause, resume or cancel.
 
+## Consent when you import
+- On the **Contacts** screen, under the file upload, there is a box: "These customers agreed to receive offers from me on WhatsApp, and I can prove it."
+- Tick it only if you really have their consent. Left unticked, the contacts are added but **will not receive campaigns** until they agree.
+- An import never undoes a customer's opt-out and never overwrites consent already on record.
+- Before you send, the screen shows how many customers the campaign reaches, and how many it skips and why (opted out, or no consent on record).
+
+## Tracked links
+- Choose "Tracked link" for a template variable and each customer gets their own link to the page you set (it must start with https).
+- The Campaigns screen shows how many customers opened the link and how many opens there were. WhatsApp's automatic link previews are not counted.
+
+## Who can do what
+- Only the store owner can create and send a campaign, or resume a paused one, because it spends money.
+- Anyone on the team can pause or cancel a campaign.
+
 ## Opt-out
 - If a customer writes **STOP**, **إلغاء** or **وقف**, marketing to them stops immediately and the choice is recorded.
 - Order and service messages (like an order confirmation) are not affected, because they are not marketing.
