@@ -214,11 +214,11 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     return;
   }
   if (turnGone(host, input)) return;
+  if (!windowOpen(host, input.from, now)) return; // AI replies (the text-only note included) only inside the 24 h window
   if (input.type !== 'text' || !input.text) {
     if (await sayNow(host, input, 'textonly', copy.t.textOnly[locale], now)) host.storage.transactionSync(() => recordTurn(host, input, 'text_only', now));
     return;
   }
-  if (!windowOpen(host, input.from, now)) return; // AI replies only inside the 24 h window
 
   try {
     const real = await providerFor(host.env, host.workspaceId, host.sql, settings);
@@ -231,6 +231,11 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
       if (held === 'insufficient') {
         console.error(JSON.stringify({ alert: 'agent_no_credits', workspace: host.workspaceId }));
         return await handoff(host, input, 'no_credits', locale, now);
+      }
+      if (held === 'already_charged') {
+        // An earlier run answered and was charged, then died before its replies were stored: never ask (and pay for) the model again.
+        // Whatever it stored is handed over again; with nothing stored the customer simply writes again.
+        return await deliverStored(host, input);
       }
     }
     let answered = 0;

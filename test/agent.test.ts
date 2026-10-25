@@ -347,3 +347,61 @@ describe('failures end in a handoff, never silence', () => {
     expect(m.callCount).toBe(0);
   });
 });
+
+describe('a retried turn after a crash', () => {
+  const replayInput = async (ws: string, pn: string, over: Record<string, unknown> = {}) => {
+    const id = (await rows<{ id: number }>(ws, "SELECT id FROM messages WHERE direction = 'in' ORDER BY id LIMIT 1"))[0]!.id;
+    return { id, json: JSON.stringify({ messageId: id, wamid: 'x', from: WA_1, phoneNumberId: pn, profileName: null, type: 'text', text: 'hi', reply: null, order: null, ...over }) };
+  };
+
+  it('a turn retried after the 24 h window closed sends nothing, not even the text-only note', async () => {
+    const ws = W(43);
+    const pn = await agentWs(ws);
+    model([]);
+    const g = stubGraph();
+    await say(ws, pn, audio(), g);
+    expect(sendCount(g)).toBe(1);
+    const { id, json } = await replayInput(ws, pn, { type: 'audio', text: null });
+    await exec(ws, 'DELETE FROM agent_turns');
+    await exec(ws, "DELETE FROM messages WHERE idempotency_key LIKE ?", `agent:${id}:%`);
+    await exec(ws, 'UPDATE contacts SET last_inbound_at = ?', Math.floor(Date.now() / 1000) - 25 * 3600);
+    await exec(ws, "INSERT INTO scheduled_tasks (kind, due_at, payload) VALUES ('bot_turn', 0, ?)", json);
+    const errs = vi.spyOn(console, 'error');
+    await workspace(ws).runDueTasks();
+    expect(errs.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('bot_turn_failed'))).toEqual([]); // the late turn ends quietly instead of failing and retrying
+    expect(sendCount(g)).toBe(1);
+    expect(await rows(ws, 'SELECT 1 FROM messages WHERE idempotency_key LIKE ?', `agent:${id}:%`)).toEqual([]); // not even stored for sending
+  });
+
+  it('a turn whose credit was charged but whose replies were never stored does not call the model again', async () => {
+    const ws = W(44);
+    const pn = await agentWs(ws);
+    const m = model([{ text: 'مرة واحدة' }, { text: 'مجاناً؟ لا' }]);
+    const g = stubGraph();
+    await say(ws, pn, text('hi'), g);
+    const { id, json } = await replayInput(ws, pn);
+    await exec(ws, 'DELETE FROM agent_turns'); // the crash: charged, then lost before the replies were stored
+    await exec(ws, 'DELETE FROM messages WHERE idempotency_key LIKE ?', `agent:${id}:%`);
+    const balance = (await workspace(ws).aiCredits()).balance;
+    await exec(ws, "INSERT INTO scheduled_tasks (kind, due_at, payload) VALUES ('bot_turn', 0, ?)", json);
+    await workspace(ws).runDueTasks();
+    expect(m.callCount).toBe(1);
+    expect(sendCount(g)).toBe(1);
+    expect((await workspace(ws).aiCredits()).balance).toBe(balance);
+  });
+
+  it('a turn whose replies were stored but not yet turn-recorded redelivers them without calling the model', async () => {
+    const ws = W(45);
+    const pn = await agentWs(ws);
+    const m = model([{ text: 'مرة واحدة' }, { text: 'مجاناً؟ لا' }]);
+    const g = stubGraph();
+    await say(ws, pn, text('hi'), g);
+    const { json } = await replayInput(ws, pn);
+    await exec(ws, 'DELETE FROM agent_turns');
+    await exec(ws, "INSERT INTO scheduled_tasks (kind, due_at, payload) VALUES ('bot_turn', 0, ?)", json);
+    await workspace(ws).runDueTasks();
+    expect(m.callCount).toBe(1);
+    expect(sendCount(g)).toBe(1); // already sent: the claim finds it done
+  });
+});
+

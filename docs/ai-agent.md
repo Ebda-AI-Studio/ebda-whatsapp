@@ -22,6 +22,8 @@ Same rules as the ordering bot: the customer must still be there (not erased, no
 
 Connectors (Phase 9.3, `docs/connectors.md`) add the tools of the workspace's enabled webhook/Odoo connectors, named `<connector>__<tool>`; they count in the same 3x3 call cap and are never called for a customer who is gone.
 
+Replay rules: the 24 h window is checked first (a late retried turn sends nothing, not even the text-only note). A retried turn whose credit was already charged never calls the model again; it redelivers whatever replies it stored (none = the customer writes again).
+
 ## Handoff
 `handoff_to_human`, a words match, no credits, no usable model, model failure or unusable output: the customer gets `copy.t.handoffAck`, the conversation is tagged `needs_human` (inbox lights up through the usual `conversation.updated` event, which carries the tags) and the bot is silent for `handoffMinutes` (default 120). A staff reply (API, or an echo from the Business app) or assigning the conversation to a person clears the tag and restarts the silence for a fresh window counted from that reply; with no open handoff the reply opens one (reason `staff`, no badge), so the agent is silent "until staff replies" and then for the window. After the window the bot resumes and the tag is cleared on the next message. The reason is stored as a code (`asked | model | no_credits | misconfigured | provider_error | bad_output | no_answer | staff`), never free text.
 
