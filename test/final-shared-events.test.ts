@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import worker, { WhatsAppOtp } from '../src/index';
 import { EBDA_DEFAULT_TEMPLATES } from '../src/addons/ebda/templates';
 import { fundingStatement } from '../src/core/billing/funding';
-import { joinShared } from '../src/core/shared/shared-number';
+import { afterSharedSend, joinShared } from '../src/core/shared/shared-number';
 import { fund, setupBilling } from './helpers/billing';
 import { stubGraph } from './helpers/graph';
 import { BUYER_KEY_1, PHONE_1, sentJobs, storeEvent, useStoreLink } from './helpers/store-link';
@@ -73,5 +73,38 @@ describe('Final review: shared-only members', () => {
     } finally { g.restore(); }
     expect(await rows(ws, 'SELECT 1 FROM messages')).toEqual([]);
     expect((await env.DB.prepare('SELECT count(*) AS n FROM shared_routes WHERE workspace_id = ?').bind(ws).first<{ n: number }>())!.n).toBe(0);
+  });
+});
+
+describe('Final review: the route is written after Meta accepts', () => {
+  const flaky = (failures: number) => {
+    let left = failures;
+    const calls = { batch: 0 };
+    const DB = new Proxy(env.DB, {
+      get: (t, k) => (k === 'batch' ? async (...a: Parameters<D1Database['batch']>) => { calls.batch++; if (left-- > 0) throw new Error('D1 unavailable'); return t.batch(...a); } : Reflect.get(t, k).bind?.(t) ?? Reflect.get(t, k)),
+    });
+    return { e: { ...env, DB } as typeof env, calls };
+  };
+  const job = (ws: string) => ({ workspaceId: ws, phoneNumberId: PLAT, to: '201001234567', orderRef: 'o1' });
+  const routeCount = async (ws: string) => (await env.DB.prepare('SELECT count(*) AS n FROM shared_routes WHERE workspace_id = ?').bind(ws).first<{ n: number }>())!.n;
+
+  it('a failed first D1 write is retried and the route exists afterwards', async () => {
+    const ws = W(10);
+    const { e, calls } = flaky(1);
+    await afterSharedSend(e, job(ws), 'wamid.retry.1');
+    expect(calls.batch).toBe(2);
+    expect(await routeCount(ws)).toBe(1);
+    expect(await env.DB.prepare('SELECT 1 FROM shared_sent WHERE wamid = ?').bind('wamid.retry.1').first()).not.toBeNull();
+  });
+
+  it('gives up after a bounded number of attempts and alerts', async () => {
+    const ws = W(11);
+    const { e, calls } = flaky(99);
+    const err = vi.spyOn(console, 'error');
+    await afterSharedSend(e, job(ws), 'wamid.retry.2');
+    expect(calls.batch).toBe(3);
+    expect(err.mock.calls.some((c) => String(c[0]).includes('shared_sent_not_recorded'))).toBe(true);
+    err.mockRestore();
+    expect(await routeCount(ws)).toBe(0);
   });
 });
