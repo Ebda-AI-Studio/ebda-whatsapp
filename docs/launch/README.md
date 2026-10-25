@@ -63,7 +63,7 @@ Generate random keys locally: `node -e "console.log(crypto.randomBytes(32).toStr
 Plain vars, not secrets (set in `wrangler.jsonc` or the dashboard): `META_APP_ID`, `EMBEDDED_SIGNUP_CONFIG_ID`, `KASHIER_MERCHANT_ID`, `KASHIER_FEE_BPS`, `KASHIER_FEE_FIXED_MINOR`, `ADJUSTMENT_APPROVAL_MINOR`, `ADJUSTMENT_DAILY_CAP`, and the switches in §8. `IDENTITY_OIDC_CONFIG` is only for white-label tenants on their own identity provider (`deploy/white-label`).
 
 ## 8. Switches (Claude, one at a time, each verified before the next)
-`EMBEDDED_SIGNUP_ENABLED` → `SHARED_NUMBER_ENABLED` → `TOPUPS_ENABLED`. Each stays off until the Meta/Kashier step it depends on is done.
+`EMBEDDED_SIGNUP_ENABLED` → `SHARED_NUMBER_ENABLED` → `TOPUPS_ENABLED` → `PACKAGE_CHECKOUT_ENABLED`. Each stays off until the Meta/Kashier step it depends on is done. `PACKAGE_CHECKOUT_ENABLED` (self-serve package purchase) needs the same Kashier steps as top-ups: set `KASHIER_MERCHANT_ID` + `KASHIER_API_KEY`, point the Kashier webhook at `/kashier/webhook` (one webhook serves both kinds), bind `ACCOUNTS`, apply D1 migration `0008_packages.sql` first (it seeds the `store-included` package), and insert the sellable `packages` rows (`price_minor`, `ai_credits`, `active = 1`). Verify with a real small payment before announcing.
 
 ## 9. CI back on (Ahmad decides, Claude sets up)
 CI is paused by Ahmad's instruction. To resume: bring the Umbra runner for this repo online, set repo variable `EBDA_RUNS_ON` to `["self-hosted","umbra-ebda"]` (JSON), and confirm the remote Actions cache stays off on the self-hosted runner. Branch protection: require `ci` + `gitleaks` on `main`.
