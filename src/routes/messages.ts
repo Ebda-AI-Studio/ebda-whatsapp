@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { sendMessageRequest } from '../core/api/contract';
-import { activeNumber, apiError, intParam, workspaceStub, type ApiEnv } from './shared';
+import { senderNumber, apiError, intParam, workspaceStub, type ApiEnv } from './shared';
 
 export const messagesRoutes = new Hono<ApiEnv>();
 
@@ -10,7 +10,7 @@ messagesRoutes.post('/stores/:storeId/conversations/:conversationId/messages', a
   if (!conversationId || !parsed.success) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
-  const number = await activeNumber(c);
+  const number = await senderNumber(c);
   if (!number) return apiError(c, 409, 'invalid_request', 'no_active_number');
   const r = await ws.queueOutbound(conversationId, number.phoneNumberId, parsed.data);
   if (!r.ok) {
@@ -37,7 +37,7 @@ messagesRoutes.post('/stores/:storeId/conversations/:conversationId/messages', a
 /** How much of the number's Meta tier is used and how many sends are waiting for a slot. */
 messagesRoutes.get('/stores/:storeId/throttle', async (c) => {
   const ws = await workspaceStub(c);
-  const number = await activeNumber(c);
+  const number = await senderNumber(c);
   if (!ws || !number) return apiError(c, 404, 'not_found');
   return c.json(await ws.throttleReport(number.phoneNumberId));
 });

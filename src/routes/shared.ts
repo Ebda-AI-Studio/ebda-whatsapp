@@ -3,6 +3,7 @@ import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
 import type { WorkspaceDO } from '../core/workspace-do';
 import type { ApiError } from '../core/api/contract';
+import { senderNumberFor } from '../core/shared/shared-number';
 import { graphTokenFor, TokenUnavailable } from '../core/numbers/token';
 
 export type ApiEnv = { Bindings: Env; Variables: AuthVars };
@@ -42,6 +43,11 @@ export async function activeNumber(c: ApiContext): Promise<{ phoneNumberId: stri
     .bind(c.req.param('storeId')!)
     .first<{ phone_number_id: string; waba_id: string }>();
   return row ? { phoneNumberId: row.phone_number_id, wabaId: row.waba_id } : null;
+}
+
+/** Where this request's workspace sends from: its own active number, else the shared platform number while it is a member (switch on). */
+export async function senderNumber(c: ApiContext): Promise<{ phoneNumberId: string; wabaId: string; shared: boolean } | null> {
+  return senderNumberFor(c.env, c.req.param('storeId')!);
 }
 
 /** The Graph token for a WABA or number of this request's workspace, or null when an own number's credential is unusable (answer 503 token_unavailable). */

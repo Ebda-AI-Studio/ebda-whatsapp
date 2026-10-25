@@ -43,4 +43,10 @@ export const DEMO_PACK: BrandPack = {
     },
   ],
   agentCopy,
+  sharedNumber: {
+    pickBody: 'Hi! More than one business has written to you on this number. Pick the one you want to continue with and we will pass your message on. / أكتر من نشاط كلمك على الرقم ده، اختار اللي عايز تكمل معاه.',
+    pickButton: 'Choose / اختار',
+    pickFooter: 'Your message is kept until you choose',
+    noRoute: 'Hi! This number answers customers of the businesses that wrote to them first. To reach a business, message it from its own page and it will contact you here. / الرقم ده بيرد على عملاء الأنشطة اللي كلمتهم الأول.',
+  },
 };

@@ -26,6 +26,8 @@ export const sendJobSchema = z.object({
   imageLink: z.object({ link: z.string().regex(/^https:\/\/[^\s]+$/).max(2000), caption: z.string().max(1024).optional() }).optional(),
   media: z.object({ kind: mediaKind, mediaId: z.string().min(1), caption: z.string().max(1024).optional(), filename: z.string().max(255).optional() }).optional(),
   idempotencyKey: z.string().min(1),
+  /** The order this message is about (kept on the shared number's route; never shown to the customer). */
+  orderRef: z.string().min(1).max(64).optional(),
   inboundAt: z.number().optional(),
   receivedAt: z.number().optional(),
   /** How many times Meta's marketing frequency cap (131049) already pushed this job back 24 h. */
@@ -44,6 +46,7 @@ import { mark } from './timing';
 import { workspaceForPhoneNumber } from './routing';
 import { graphTokenFor, TokenUnavailable } from './numbers/token';
 import { STALE_CLAIM_MS } from './workspace-do';
+import { afterSharedSend, beforeSharedSend, isActiveMember, sharedEnabled } from './shared/shared-number';
 
 const MAX_RETRY_DELAY_S = 300;
 
@@ -57,15 +60,27 @@ export async function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>):
     console.error(JSON.stringify({ alert: 'business_token_unavailable', workspace: job.workspaceId, reason: err.reason }));
     return { ok: false, code: 0, retryable: false, message: 'token_unavailable' };
   }
-  const base = { token, graphVersion: env.META_GRAPH_VERSION, phoneNumberId: job.phoneNumberId, to: job.to };
-  switch (jobKind(job)) {
-    case 'template': return sendTemplate({ ...base, ...job.template! });
-    case 'interactive': return sendInteractive({ ...base, ...job.interactive! });
-    case 'media': return sendMedia({ ...base, ...job.media! });
-    case 'list': return sendList({ ...base, ...job.list! });
-    case 'image_link': return sendImageLink({ ...base, ...job.imageLink! });
-    default: return sendText({ ...base, text: job.text! });
+  // The platform number answers to no single store: a send through it records the route first (a reply can never beat it) and is refused
+  // unless the switch is on and the store is an active member. Only platform-token numbers can be it, so own numbers skip the lookup.
+  let shared = false;
+  if (token === env.META_SYSTEM_TOKEN) {
+    const gate = await beforeSharedSend(env, job);
+    if (gate === 'refused') return { ok: false, code: 0, retryable: false, message: 'shared_number_unavailable' };
+    shared = gate === 'shared';
   }
+  const base = { token, graphVersion: env.META_GRAPH_VERSION, phoneNumberId: job.phoneNumberId, to: job.to };
+  const sent = await (() => {
+    switch (jobKind(job)) {
+      case 'template': return sendTemplate({ ...base, ...job.template! });
+      case 'interactive': return sendInteractive({ ...base, ...job.interactive! });
+      case 'media': return sendMedia({ ...base, ...job.media! });
+      case 'list': return sendList({ ...base, ...job.list! });
+      case 'image_link': return sendImageLink({ ...base, ...job.imageLink! });
+      default: return sendText({ ...base, text: job.text! });
+    }
+  })();
+  if (shared && sent.ok) await afterSharedSend(env, job, sent.wamid);
+  return sent;
 }
 /** Must match max_retries in wrangler.jsonc: the last attempt marks the message failed instead of leaving it in 'retry'. */
 export const MAX_SEND_ATTEMPTS = 5;
@@ -81,7 +96,9 @@ export async function consumeSendBatch(batch: MessageBatch<unknown>, env: Env): 
     }
     const job = parsed.data;
     // Only send from a number this workspace still owns and that is active.
-    if ((await workspaceForPhoneNumber(env.DB, job.phoneNumberId)) !== job.workspaceId) {
+    const mayUse = (await workspaceForPhoneNumber(env.DB, job.phoneNumberId)) === job.workspaceId
+      || (sharedEnabled(env) && (await isActiveMember(env, job.workspaceId, job.phoneNumberId)));
+    if (!mayUse) {
       console.warn('send queue: sender number not owned by workspace or inactive; dropped');
       msg.ack();
       continue;

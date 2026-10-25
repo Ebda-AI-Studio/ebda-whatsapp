@@ -28,6 +28,8 @@ export type TemplateSend = {
   fallbackLanguage?: string;
   params: string[];
   idempotencyKey: string;
+  /** The order the message is about (the shared number remembers it on the route). */
+  orderRef?: string;
   /** Appended after the rendered components (e.g. quick-reply payloads). */
   extraComponents?: TemplateComponent[];
   /** Marketing sends need a recorded opt-in, not just the absence of an opt-out. */
@@ -70,7 +72,7 @@ export function queueTemplate(host: LinkHost, a: TemplateSend): QueueResult {
   if (!rendered.ok) return { ok: false, reason: 'invalid_request', message: rendered.message };
   const shown = a.maskText ?? rendered.text;
   const job: SendJob = {
-    workspaceId: host.workspaceId, phoneNumberId: a.phoneNumberId, to: a.waId, idempotencyKey: a.idempotencyKey, kind: 'template',
+    workspaceId: host.workspaceId, phoneNumberId: a.phoneNumberId, to: a.waId, idempotencyKey: a.idempotencyKey, kind: 'template', ...(a.orderRef ? { orderRef: a.orderRef.slice(0, 64) } : {}),
     template: { name: a.name, language: t.language, components: [...rendered.components, ...(a.extraComponents ?? [])] },
   };
   // The wallet speaks first (a campaign message draws from its page's reservation at claim instead). A refusal writes nothing.

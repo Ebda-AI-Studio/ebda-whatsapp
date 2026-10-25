@@ -15,5 +15,6 @@ export const EBDA_PACK: BrandPack = {
   optInKeywords: EBDA_OPT_IN_KEYWORDS,
   templates: EBDA_DEFAULT_TEMPLATES,
   agentCopy: EBDA_AGENT_COPY,
+  sharedNumber: { pickBody: EBDA_COPY.sharedPickBody, pickButton: EBDA_COPY.sharedPickButton, pickFooter: EBDA_COPY.sharedPickFooter, noRoute: EBDA_COPY.sharedNoRoute },
   storeLink: { bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY },
 };
