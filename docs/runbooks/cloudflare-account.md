@@ -20,8 +20,7 @@ create the bucket and lifecycle as above, then Dashboard → Analytics & Logs �
 Dashboard → Notifications → Add → *Usage Based Billing* for Workers requests, Durable Objects (requests + duration + storage), D1 (rows read/written), R2 (Class A/B ops + storage), Queues operations. Thresholds: start at 2× the spike's measured monthly projection (Task 0.6 report). Ahmad clicks.
 
 ## Sentry
-Create project `ebda-whatsapp` in org `whisky11` (the Sentry CLI on this Mac is logged into another org), then
-`npx wrangler secret put SENTRY_DSN`. Until then the worker logs `sentry: SENTRY_DSN not set` once per isolate and sends nothing.
+Project `whisky11/ebda-whatsapp` (platform node-cloudflare-workers) created 2026-10-24 with the signed-in `sentry` CLI; its DSN is stored as the worker secret `SENTRY_DSN` (never in the repo). Reporting starts with the first deploy that includes Phase 1's `withSentry` wrapper. Without the secret the worker logs `sentry: SENTRY_DSN not set` once per isolate and sends nothing.
 
 ## Secrets
-`META_APP_SECRET`, `META_VERIFY_TOKEN` (set), `META_SYSTEM_TOKEN`, `SUITE_BUYER_KEY_SECRET` (same value as Ebda Store's), `SENTRY_DSN`.
+`META_APP_SECRET`, `META_VERIFY_TOKEN` (set), `META_SYSTEM_TOKEN`, `SUITE_BUYER_KEY_SECRET` (same value as Ebda Store's), `SENTRY_DSN` (set).
