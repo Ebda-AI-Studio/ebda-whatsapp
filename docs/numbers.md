@@ -10,6 +10,7 @@ Switch: `EMBEDDED_SIGNUP_ENABLED` (`1` or `true`). Off or unset, every `/api/v1/
 | `META_APP_SECRET` | secret | already used for webhook signatures; also the `client_secret` of the exchange |
 | `TOKEN_ENC_KEY` | secret | base64 of 32 random bytes. Encrypts business tokens and registration PINs (AES-GCM, the workspace id is the associated data, so a value copied into another workspace does not open) |
 | `META_SYSTEM_TOKEN` | secret | the platform token. Still used for the shared number and platform-level calls |
+| `SHARED_NUMBER_ENABLED` | var | the switch of the shared platform number; see `shared-number.md` (the platform number is not a `phone_numbers` row) |
 | `META_GRAPH_VERSION` | var | latest is v26.0 |
 
 With the switch on and a key missing or malformed, a request answers `503 signup_unavailable` (`signup_not_configured`) and logs one `signup_not_configured` alert naming the missing keys (never values).

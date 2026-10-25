@@ -3,8 +3,9 @@
 The shared number is one WhatsApp number run by the Ebda AI Studio team that you can use without verification or connecting your own. It suits you if you want to start quickly.
 
 ## How it works
-- Your messages go out from the shared number and carry the phrase **"on behalf of your store"**, so customers know the message comes from your store.
-- Customer replies reach your store in the inbox. If a customer talks to more than one store on the same number, we ask **"which store do you mean?"** so the reply goes to the right place. No store ever sees another store's conversations.
+- Your messages go out from the shared number under your **store name**, so customers know the message comes from your store.
+- A customer's reply reaches the store that wrote to them last. If more than one store wrote to the same customer within 24 hours, the customer gets a short list asking **"which store do you want to continue with?"**, and their message waits until they choose. If nobody wrote to them first, they get one polite note and nothing reaches any store. No store ever sees another store's conversations or customers.
+- If a customer sends **STOP**, they are opted out of your store (and of every store that wrote to them, if we cannot tell which one they meant).
 - It is a **paid add-on** that you switch on from Packages. Its price is set by the Ebda AI Studio team.
 
 ## What you need before you start
@@ -12,10 +13,10 @@ The shared number is one WhatsApp number run by the Ebda AI Studio team that you
 - Wallet balance (see [Wallet](09-wallet-top-ups-and-refunds.md)). On the shared number **the wallet pays Meta's cost**.
 
 ## Steps
-1. Open **Numbers** and choose **Turn on the shared number**.
+1. Open **Numbers** and choose **Turn on the shared number**, then confirm the store name customers will see.
 2. Accept the add-on terms.
 3. Top up the wallet if the balance is zero.
-4. Check the ready-made templates (they include "on behalf of") and wait for Meta's approval if still pending.
+4. Check the templates available for the shared number and wait for Meta's approval if still pending. Inside the 24 hours after a customer writes, you can reply freely.
 5. Send a test message to your own phone.
 
 ## Cost
@@ -24,7 +25,8 @@ The shared number is one WhatsApp number run by the Ebda AI Studio team that you
 
 ## Troubleshooting
 - **A message was not sent and shows "insufficient balance":** top up the wallet. Marketing messages stop at zero. Urgent service messages may go down to the overdraft limit (50 EGP), then you must top up.
-- **A customer replied and I cannot find it:** they may have written to another store on the same number; we ask them which store before it reaches you.
+- **A customer replied and I cannot find it:** they may have written to another store on the same number; we ask them which store before it reaches you. Their message is kept until they choose.
+- **I want to stop using it:** choose **Turn off the shared number** in Numbers. Replies stop reaching your store after that.
 - **I want my own number instead:** follow [Connect your own number](02-connect-your-own-number.md). You can keep the shared number alongside it or switch it off.
 
 ---
