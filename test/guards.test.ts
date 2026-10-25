@@ -5,6 +5,10 @@ it('repo carries no legacy brand strings', () => {
   expect(findMatches(/force|fwb|\bwbs\b|forcemediakw/i)).toEqual([]);
 });
 
+it('money code never uses INSERT OR IGNORE (it also swallows CHECK violations: a row with a bad state would vanish); use ON CONFLICT DO NOTHING', () => {
+  expect(findMatches(/INSERT OR IGNORE/i, 'src/core/billing')).toEqual([]);
+});
+
 it('core never names the Ebda brand', () => {
   expect(findMatches(/ebda|إبدأ|ابدأ/i, 'src/core')).toEqual([]);
 });

@@ -91,7 +91,7 @@ const markConfirmed = (env: Env, id: string, now: number) => env.DB.prepare('UPD
  * and this flips it to `sending` with a guarded UPDATE. A re-run finds it already `sending` or later and changes nothing.
  */
 export async function openCardRefund(env: Env, r: { id: string; requestId: string; orderId: string; workspaceId: string; amountMinor: number }, now: number): Promise<CardRefundRow> {
-  await env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'api', 'planned', ?, ?)")
+  await env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'api', 'planned', ?, ?) ON CONFLICT DO NOTHING")
     .bind(r.id, r.requestId, r.orderId, r.workspaceId, r.amountMinor, now, now).run();
   await env.DB.prepare("UPDATE card_refunds SET state = 'sending', updated_at = ? WHERE id = ? AND state = 'planned'").bind(now, r.id).run();
   return (await getCardRefund(env, r.id))!;
@@ -171,7 +171,7 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
       const cand = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE order_id = ? AND source IN ('api', 'dashboard') AND amount_minor = ? AND created_at > ? AND kashier_refund_id IS NOT NULL AND kashier_refund_id != ? AND confirmed_at IS NULL AND state IN ('succeeded', 'pending', 'linked') ORDER BY created_at LIMIT 1`)
         .bind(t.order_id, ev.amountMinor, now - 7 * 86_400_000, ev.transactionId).first<CardRefundRow>();
       if (cand) {
-        await env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, candidate_id) VALUES (?, NULL, ?, ?, ?, 'held', 'held', ?, ?, ?, ?)")
+        await env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, candidate_id) VALUES (?, NULL, ?, ?, ?, 'held', 'held', ?, ?, ?, ?) ON CONFLICT DO NOTHING")
           .bind(`held:${ev.transactionId}`, t.order_id, t.workspace_id, ev.amountMinor, ev.transactionId, now, now, cand.id).run();
         if (await auditOnce(env, 'refund_held', t.workspace_id, ev.transactionId, now)) alert('refund_held', { severity: 'P1', workspace: t.workspace_id, orderId: t.order_id, refundId: ev.transactionId, candidate: cand.id, candidateRefundId: cand.kashier_refund_id });
         return 'refund_held';
@@ -187,7 +187,7 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
     }
     excess = ev.amountMinor - debit;
     const res = await env.DB.batch([
-      env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, note) VALUES (?, NULL, ?, ?, ?, 'webhook', 'succeeded', ?, ?, ?, ?)")
+      env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, note) VALUES (?, NULL, ?, ?, ?, 'webhook', 'succeeded', ?, ?, ?, ?) ON CONFLICT DO NOTHING")
         .bind(`wh:${ev.transactionId}`, t.order_id, t.workspace_id, debit, ev.transactionId, now, now, excess > 0 ? `excess_minor=${excess};fee_minor=${top?.fee_minor ?? 0}` : null),
       env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(debit, t.order_id),
     ]);

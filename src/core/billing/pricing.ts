@@ -130,10 +130,10 @@ export async function pullPricing(env: Env, workspaceId: string, cur: ReturnType
 
 /** Copies a snapshot in (synchronous; call inside a transaction). Versions are immutable, so a repeat is ignored. */
 export function applyPricing(sql: Sql, s: PricingSnapshot): void {
-  for (const r of s.rates) sql.exec('INSERT OR IGNORE INTO pricing_rates (src_id, ver, effective_from, country, category, usd_micros) VALUES (?, ?, ?, ?, ?, ?)', r.id, r.ver, r.effective_from, r.country, r.category, r.usd_micros);
-  for (const r of s.fx) sql.exec('INSERT OR IGNORE INTO pricing_fx (src_id, ver, effective_from, egp_per_usd_micros, buffer_bps) VALUES (?, ?, ?, ?, ?)', r.id, r.ver, r.effective_from, r.egp_per_usd_micros, r.buffer_bps);
-  for (const r of s.settings) sql.exec('INSERT OR IGNORE INTO pricing_settings (src_id, ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps) VALUES (?, ?, ?, ?, ?, ?, ?)', r.id, r.ver, r.effective_from, r.margin_bps, r.credit_limit_minor, r.fx_buffer_bps, r.vat_bps);
-  for (const r of s.overrides) sql.exec('INSERT OR IGNORE INTO pricing_overrides (src_id, ver, effective_from, margin_bps) VALUES (?, ?, ?, ?)', r.id, r.ver, r.effective_from, r.margin_bps);
+  for (const r of s.rates) sql.exec('INSERT INTO pricing_rates (src_id, ver, effective_from, country, category, usd_micros) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING', r.id, r.ver, r.effective_from, r.country, r.category, r.usd_micros);
+  for (const r of s.fx) sql.exec('INSERT INTO pricing_fx (src_id, ver, effective_from, egp_per_usd_micros, buffer_bps) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING', r.id, r.ver, r.effective_from, r.egp_per_usd_micros, r.buffer_bps);
+  for (const r of s.settings) sql.exec('INSERT INTO pricing_settings (src_id, ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING', r.id, r.ver, r.effective_from, r.margin_bps, r.credit_limit_minor, r.fx_buffer_bps, r.vat_bps);
+  for (const r of s.overrides) sql.exec('INSERT INTO pricing_overrides (src_id, ver, effective_from, margin_bps) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING', r.id, r.ver, r.effective_from, r.margin_bps);
   sql.exec('DELETE FROM number_funding');
   for (const f of s.funding) if (f.funding) sql.exec('INSERT INTO number_funding (phone_number_id, funding) VALUES (?, ?)', f.phone_number_id, f.funding); // a number without a row stays unknown
   sql.exec("INSERT INTO store_state (key, value) VALUES ('pricing.pulled_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(Date.now()));

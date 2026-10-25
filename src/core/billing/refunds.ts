@@ -118,8 +118,8 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     if (left > 0) plan.push({ n: n + 1, kind: 'manual', order_id: null, transaction_id: null, amount_minor: left }); // beyond the card top-ups (bank/InstaPay)
     // The card refund rows of the whole plan are written in the SAME batch as the plan (as `planned`: reservations only, invisible to matchers until their wallet chunk is posted).
     await env.DB.batch(plan.flatMap((c) => [
-      env.DB.prepare('INSERT OR IGNORE INTO refund_chunks (request_id, n, kind, order_id, transaction_id, amount_minor) VALUES (?, ?, ?, ?, ?, ?)').bind(a.id, c.n, c.kind, c.order_id, c.transaction_id, c.amount_minor),
-      ...(c.kind === 'card' ? [env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'api', 'planned', ?, ?)").bind(`cr:${a.id}:${c.n}`, a.id, c.order_id, req.workspace_id, c.amount_minor, now, now)] : []),
+      env.DB.prepare('INSERT INTO refund_chunks (request_id, n, kind, order_id, transaction_id, amount_minor) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING').bind(a.id, c.n, c.kind, c.order_id, c.transaction_id, c.amount_minor),
+      ...(c.kind === 'card' ? [env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'api', 'planned', ?, ?) ON CONFLICT DO NOTHING").bind(`cr:${a.id}:${c.n}`, a.id, c.order_id, req.workspace_id, c.amount_minor, now, now)] : []),
     ]));
     chunks = (await env.DB.prepare('SELECT n, kind, order_id, transaction_id, amount_minor FROM refund_chunks WHERE request_id = ? ORDER BY n').bind(a.id).all<Chunk>()).results;
   }

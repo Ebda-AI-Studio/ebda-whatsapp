@@ -824,5 +824,14 @@ describe('round 5: an approval is run by exactly one run at a time, and a resume
     const sent = puts().map((c) => Math.round((c.body as { transaction: { amount: number } }).transaction.amount * 100));
     expect(sent.reduce((n, v) => n + v, 0)).toBeLessThanOrEqual(5000);
   });
+
+  it('an insert with a state outside the CHECK fails loudly (a duplicate id is still a quiet no-op): nothing is lost silently', async () => {
+    const a = await setup(86, 5000);
+    const ins = (id: string, state: string) => env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, created_at, updated_at) VALUES (?, ?, ?, ?, 100, 'api', ?, 1, 1) ON CONFLICT DO NOTHING").bind(id, a.id, a.order, a.ws, state).run();
+    await expect(ins('cr:bad86', 'bogus')).rejects.toThrow(/CHECK/i);
+    expect((await ins('cr:ok86', 'planned')).meta.changes).toBe(1);
+    expect((await ins('cr:ok86', 'planned')).meta.changes).toBe(0);
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM card_refunds WHERE id IN ('cr:bad86', 'cr:ok86')").first()).toEqual({ n: 1 });
+  });
 });
 

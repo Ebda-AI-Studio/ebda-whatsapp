@@ -19,7 +19,7 @@ export async function drainOutbox(env: Env, sql: Sql, workspaceId: string, now: 
     if (!rows.length) break;
     await env.DB.batch(rows.map((r) => {
       const j = JSON.parse(r.row_json) as { at: number; kind: string; amount: number; balance_after: number };
-      return env.DB.prepare('INSERT OR IGNORE INTO ledger_mirror (workspace_id, ledger, ref, at, kind, amount, balance_after) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      return env.DB.prepare('INSERT INTO ledger_mirror (workspace_id, ledger, ref, at, kind, amount, balance_after) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
         .bind(workspaceId, r.ledger, r.ref, j.at, j.kind, j.amount, j.balance_after);
     }));
     for (const r of rows) sql.exec('UPDATE ledger_outbox SET drained_at = ? WHERE ledger = ? AND ref = ? AND drained_at IS NULL', now, r.ledger, r.ref);

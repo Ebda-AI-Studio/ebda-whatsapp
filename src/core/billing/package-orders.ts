@@ -207,9 +207,9 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
     // decision was made on: a refund that committed in between makes the insert a no-op, and the loop decides again.
     const stmts: D1PreparedStatement[] = [
       env.DB.prepare(
-        `INSERT OR IGNORE INTO package_refunds (refund_ref, order_id, amount_minor, at, period_start, applied, frac_num, frac_den)
+        `INSERT INTO package_refunds (refund_ref, order_id, amount_minor, at, period_start, applied, frac_num, frac_den)
          SELECT ?, ?, ?, ?, (SELECT period_start FROM workspace_subscriptions WHERE workspace_id = ?), 0, ?, ?
-         WHERE EXISTS (SELECT 1 FROM package_orders WHERE order_id = ? AND status = 'paid' AND refunded_minor = ?)`,
+         WHERE EXISTS (SELECT 1 FROM package_orders WHERE order_id = ? AND status = 'paid' AND refunded_minor = ?) ON CONFLICT DO NOTHING`,
       ).bind(refundRef, oid, r, now, ws, r, remainingBefore, oid, before),
     ];
     const audit = (note: string) => env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, 'provider', 'subscription_set', ?, NULL, ?, ? WHERE changes() > 0").bind(now, ws, JSON.stringify({ note }), oid);
