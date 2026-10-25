@@ -1,10 +1,10 @@
-import { Megaphone, MessagesSquare, Phone, Sparkles, Users } from 'lucide-react';
+import { Megaphone, MessagesSquare, Phone, ShieldCheck, Sparkles, Users, Wallet } from 'lucide-react';
 import { BRAND } from '@brand';
 import type { ReactNode } from 'react';
 import type { Strings } from '../i18n';
 
 // Only sections that exist are listed: templates and settings join the rail when their screens ship.
-export type View = 'inbox' | 'campaigns' | 'contacts' | 'agent' | 'numbers';
+export type View = 'inbox' | 'campaigns' | 'contacts' | 'agent' | 'numbers' | 'wallet' | 'operator';
 
 export function Rail({ t, view, onNavigate, show }: { t: Strings; view: View; onNavigate: (v: View) => void; show: Record<Exclude<View, 'inbox'>, boolean> }) {
   const item = (v: View, icon: ReactNode, label: string) => (
@@ -18,6 +18,8 @@ export function Rail({ t, view, onNavigate, show }: { t: Strings; view: View; on
       {show.contacts && item('contacts', <Users size={20} aria-hidden />, t.contacts)}
       {show.agent && item('agent', <Sparkles size={20} aria-hidden />, t.agent)}
       {show.numbers && item('numbers', <Phone size={20} aria-hidden />, t.numbersNav)}
+      {show.wallet && item('wallet', <Wallet size={20} aria-hidden />, t.walletNav)}
+      {show.operator && item('operator', <ShieldCheck size={20} aria-hidden />, t.opNav)}
     </nav>
   );
 }

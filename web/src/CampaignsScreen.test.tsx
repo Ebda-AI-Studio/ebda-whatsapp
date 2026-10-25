@@ -52,6 +52,33 @@ describe('campaigns', () => {
     expect(created.audience.criteria).toEqual({ tags: { any: ['vip'] } });
   });
 
+  async function reviewWithZeroCost(funding: 'merchant_card' | 'platform_line') {
+    const source = createSampleSource();
+    const create = source.campaigns!.create;
+    source.campaigns!.create = async (req) => ({ ...(await create(req)), estimate: { audience: 500, perMessageMinor: 0, totalMinor: 0 } });
+    const wallet = source.wallet!.wallet;
+    source.wallet!.wallet = async () => ({ ...(await wallet()), funding: [{ phoneNumberId: 'pn-sample-1', displayPhone: '+20 100 555 0101', funding }] });
+    await openCampaigns(source);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حملة جديدة' })));
+    fireEvent.change(screen.getByLabelText('اسم الحملة (ليك إنت بس)'), { target: { value: 'x' } });
+    await act(async () => fireEvent.change(screen.getByLabelText('اختار قالب معتمد'), { target: { value: 'back_in_stock|ar' } }));
+    fireEvent.change(screen.getByLabelText('نوع المتغير ١'), { target: { value: 'text' } });
+    fireEvent.change(screen.getByLabelText('النص'), { target: { value: 'أهلًا' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'راجع التكلفة' })));
+    await screen.findByRole('heading', { name: 'راجع وابعت' });
+  }
+
+  it('a zero cost on a number whose card Meta bills says so, instead of waiting for the wallet', async () => {
+    await reviewWithZeroCost('merchant_card');
+    expect(screen.getByText('واتساب بيحاسب كارتك مباشرة على الرسايل دي، ومفيش حاجة هتتخصم من المحفظة.')).toBeTruthy();
+    expect(screen.queryByText('التكلفة هتظهر هنا لما المحفظة تتفعّل.')).toBeNull();
+  });
+
+  it('a zero cost on a wallet-paid number still says the price is not ready', async () => {
+    await reviewWithZeroCost('platform_line');
+    expect(screen.getByText('التكلفة هتظهر هنا لما المحفظة تتفعّل.')).toBeTruthy();
+  });
+
   it('refuses to review a tracked link that is not https', async () => {
     await openCampaigns();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حملة جديدة' })));

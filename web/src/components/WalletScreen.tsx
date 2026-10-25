@@ -1,0 +1,355 @@
+import { Download, Wallet } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import type { StatementDto } from '../../../src/core/api/contract';
+import { ApiError } from '../data/api';
+import type { RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/billing';
+import type { InboxSource } from '../data/source';
+import { num, type Lang, type Strings } from '../i18n';
+import { formatMoney } from '../lib/format';
+import { dateTime } from './CampaignsScreen';
+
+type Props = { t: Strings; lang: Lang; source: InboxSource; api: WalletApi; now: () => number; go?: (url: string) => void };
+
+const MIN_TOPUP_MINOR = 1000;
+const MAX_TOPUP_MINOR = 5_000_000;
+const MIN_REFUND_MINOR = 5000;
+const PENDING_KEY = 'wallet.pendingTopup';
+const PENDING_TTL_MS = 3 * 3_600_000;
+const POLL_MS = 8000;
+
+type Pending = { orderId: string; amountMinor: number; before: number; at: number };
+
+// A top-up leaves the page for the card form, so the order being waited on has to survive the round trip. Storage may be blocked: then we just wait less well.
+const readPending = (now: number): Pending | null => {
+  try {
+    const p = JSON.parse(localStorage.getItem(PENDING_KEY) ?? 'null') as Pending | null;
+    return p && typeof p.orderId === 'string' && now - p.at < PENDING_TTL_MS ? p : null;
+  } catch { return null; }
+};
+const writePending = (p: Pending | null) => {
+  try { if (p) localStorage.setItem(PENDING_KEY, JSON.stringify(p)); else localStorage.removeItem(PENDING_KEY); } catch { /* storage blocked */ }
+};
+
+/** "120.5" → 12050 piasters. Strings only: no float touches money. Arabic-Indic digits are accepted. */
+export function egpToMinor(text: string): number | null {
+  const ascii = text.trim().replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace('٫', '.');
+  const m = /^(\d{1,7})(?:\.(\d{1,2}))?$/.exec(ascii);
+  return m ? Number(m[1]) * 100 + Number((m[2] ?? '').padEnd(2, '0')) : null;
+}
+
+export function monthOptions(now: number, count = 12): string[] {
+  const d = new Date(now);
+  return Array.from({ length: count }, (_v, i) => {
+    const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1));
+    return `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, '0')}`;
+  });
+}
+
+const monthLabel = (month: string, lang: Lang) =>
+  new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG' : 'en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)) - 1, 1));
+
+export function WalletScreen({ t, lang, source, api, now, go = (u) => window.location.assign(u) }: Props) {
+  const [wallet, setWallet] = useState<WalletDto | null | 'error'>(null);
+  const owner = source.role === 'owner';
+  const canSeeStatement = source.role !== 'staff';
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+
+  const [pending, setPending] = useState<Pending | null>(() => readPending(now()));
+  const [topupNote, setTopupNote] = useState<'waiting' | 'arrived' | 'failed' | null>(() => (readPending(now()) ? 'waiting' : null));
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+
+  const load = useCallback(async () => {
+    try { setWallet(await api.wallet()); } catch { setWallet((w) => w ?? 'error'); }
+  }, [api]);
+
+  // One check settles a waiting top-up: the order is `paid` (the server credits before it marks paid) or the balance itself grew by the amount.
+  const check = useCallback(async () => {
+    let w: WalletDto;
+    try { w = await api.wallet(); setWallet(w); } catch { return; }
+    const p = pendingRef.current;
+    if (!p) return;
+    let verdict: 'arrived' | 'failed' | null = w.balanceMinor >= p.before + p.amountMinor ? 'arrived' : null;
+    if (!verdict) {
+      try {
+        const s = await api.topupState(p.orderId);
+        if (s.state === 'paid') { verdict = 'arrived'; setWallet(await api.wallet()); }
+        else if (s.state === 'failed' || s.state === 'expired') verdict = 'failed';
+      } catch { /* still waiting */ }
+    }
+    if (verdict) { writePending(null); setPending(null); setTopupNote(verdict); }
+  }, [api]);
+
+  useEffect(() => { void check(); }, [check]);
+  useEffect(() => {
+    if (!pending) return;
+    const id = setInterval(() => void check(), POLL_MS);
+    const on = () => void check();
+    window.addEventListener('focus', on);
+    document.addEventListener('visibilitychange', on);
+    return () => { clearInterval(id); window.removeEventListener('focus', on); document.removeEventListener('visibilitychange', on); };
+  }, [pending, check]);
+
+  if (wallet === null) return <main className="screen"><div className="placeholder">…</div></main>;
+  if (wallet === 'error') return <main className="screen"><div className="placeholder"><p role="alert">{t.walletLoadError} <button type="button" className="btn ghost" onClick={() => void load()}>{t.retry}</button></p></div></main>;
+
+  const cardOnly = wallet.funding.length > 0 && wallet.funding.every((f) => f.funding === 'merchant_card');
+  const walletPays = wallet.funding.some((f) => f.funding === 'platform_line');
+  const paused = wallet.availableMinor <= 0 && walletPays;
+
+  return (
+    <main className="screen" aria-labelledby="wallet-title">
+      <header className="screen-head">
+        <Wallet size={20} aria-hidden style={{ color: 'var(--gold-ink)' }} />
+        <h1 id="wallet-title">{t.walletTitle}</h1>
+      </header>
+      <div className="settings wide wallet-layout">
+        <p className="muted intro">{t.walletIntro}</p>
+
+        <section className="wallet-balance" aria-labelledby="w-balance-title">
+          <h2 id="w-balance-title">{t.wBalanceTitle}</h2>
+          <p className="wallet-available"><span className="wallet-label">{t.wAvailable}</span><b>{money(wallet.availableMinor)}</b></p>
+          <dl className="wallet-figures">
+            <div><dt>{t.wBalance}</dt><dd>{money(wallet.balanceMinor)}</dd></div>
+            <div><dt>{t.wHeld}</dt><dd>{money(wallet.heldMinor)}</dd></div>
+            <div><dt>{t.wAiCredits}</dt><dd>{num(wallet.aiCredits.available, lang)}</dd></div>
+          </dl>
+          {wallet.debtMinor > 0 && <p className="wallet-debt">{t.wDebtLine(money(wallet.debtMinor))}</p>}
+          {paused && <p className="wallet-debt">{t.wMarketingPaused}</p>}
+          <p className="muted">{t.wOverdraft(money(wallet.creditLimitMinor))}</p>
+        </section>
+
+        <div className="wallet-cols">
+          <section className="wallet-card" aria-labelledby="w-funding-title">
+            <h2 id="w-funding-title">{t.wFundingTitle}</h2>
+            {wallet.funding.length === 0 ? <p className="muted">{t.wFundingNone}</p> : (
+              <ul className="wallet-list">
+                {wallet.funding.map((f) => (
+                  <li key={f.phoneNumberId}>
+                    <b><bdi dir="ltr">{f.displayPhone ?? f.phoneNumberId}</bdi></b>
+                    <span className="flag" data-ok={f.funding === 'merchant_card'}>{f.funding === 'merchant_card' ? t.opFundingCard : t.opFundingWallet}</span>
+                    <p className="muted">{f.funding === 'merchant_card' ? t.wFundingCard : t.wFundingWallet}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="wallet-card" aria-labelledby="w-plan-title">
+            <h2 id="w-plan-title">{t.wPlanTitle}</h2>
+            {wallet.plan === null ? <p className="muted">{t.wPlanNone}</p> : (
+              <>
+                <p><b><bdi dir="ltr">{wallet.plan.packageId}</bdi></b> <span className="status-chip" data-status={wallet.plan.status === 'active' ? 'running' : wallet.plan.status === 'trialing' ? 'scheduled' : wallet.plan.status === 'past_due' ? 'paused' : 'cancelled'}>{t.planStatus[wallet.plan.status]}</span></p>
+                <p className="muted">{t.wPlanEnds(dateTime(wallet.plan.periodEnd, lang))}</p>
+                {wallet.plan.status === 'past_due' && <p className="campaign-reason">{t.wPlanPastDue}</p>}
+              </>
+            )}
+          </section>
+        </div>
+
+        {owner && (
+          <TopupCard t={t} lang={lang} api={api} wallet={wallet} pending={pending} note={topupNote} go={go} now={now}
+            onStarted={(p) => { writePending(p); setPending(p); setTopupNote('waiting'); }} cardOnly={cardOnly} />
+        )}
+        {canSeeStatement && <StatementCard t={t} lang={lang} api={api} now={now} />}
+        {owner && <RefundCard t={t} lang={lang} api={api} />}
+      </div>
+    </main>
+  );
+}
+
+function TopupCard({ t, lang, api, wallet, pending, note, go, now, onStarted, cardOnly }: {
+  t: Strings; lang: Lang; api: WalletApi; wallet: WalletDto; pending: Pending | null; note: 'waiting' | 'arrived' | 'failed' | null;
+  go: (url: string) => void; now: () => number; onStarted: (p: Pending) => void; cardOnly: boolean;
+}) {
+  const [amount, setAmount] = useState('');
+  const [order, setOrder] = useState<TopupDto | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+
+  if (!wallet.topupsEnabled) {
+    return <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2><p className="muted">{t.wTopupOff}</p></section>;
+  }
+
+  const start = async (e: FormEvent) => {
+    e.preventDefault();
+    const minor = egpToMinor(amount);
+    if (minor === null || minor < MIN_TOPUP_MINOR || minor > MAX_TOPUP_MINOR) { setError(t.wTopupBadAmount); return; }
+    setBusy(true);
+    setError(null);
+    try { setOrder(await api.topup(minor)); } catch { setError(t.wTopupError); } finally { setBusy(false); }
+  };
+  const pay = () => {
+    // Only an https checkout page is ever opened; anything else from the server is refused, never followed.
+    let ok = false;
+    try { ok = !!order?.checkoutUrl && new URL(order.checkoutUrl).protocol === 'https:'; } catch { ok = false; }
+    if (!order || !order.checkoutUrl || !ok) { setError(t.wTopupError); return; }
+    onStarted({ orderId: order.orderId, amountMinor: order.amountMinor, before: wallet.balanceMinor, at: now() });
+    go(order.checkoutUrl);
+  };
+
+  return (
+    <section className="wallet-card" aria-labelledby="w-topup-title">
+      <h2 id="w-topup-title">{t.wTopupTitle}</h2>
+      {cardOnly && <p className="muted">{t.wFundingCard}</p>}
+      <form className="wallet-form" onSubmit={(e) => void start(e)} noValidate>
+        <label className="field">
+          <span>{t.wTopupAmount}</span>
+          <input inputMode="decimal" dir="ltr" value={amount} aria-describedby="w-topup-hint" onChange={(e) => { setAmount(e.target.value); setOrder(null); setError(null); }} />
+        </label>
+        <small id="w-topup-hint" className="muted"><span>{t.wTopupHint}</span> <span>{t.wTopupRange(money(MIN_TOPUP_MINOR), money(MAX_TOPUP_MINOR))}</span></small>
+        {!order && <div className="settings-actions"><button type="submit" className="btn primary" disabled={busy}>{t.wTopupContinue}</button></div>}
+      </form>
+      {order && (
+        <div className="wallet-summary">
+          <p>{t.wTopupSummary(money(order.amountMinor), money(order.feeMinor), money(order.totalMinor))}</p>
+          <button type="button" className="btn gold" onClick={pay}>{t.wTopupPay}</button>
+        </div>
+      )}
+      {error && <p role="alert" className="error-text">{error}</p>}
+      {note === 'waiting' && pending && <p role="status" className="muted">{t.wTopupWaiting}</p>}
+      {note === 'arrived' && <p role="status" className="wallet-ok">{t.wTopupArrived}</p>}
+      {note === 'failed' && <p role="alert" className="error-text">{t.wTopupFailed}</p>}
+    </section>
+  );
+}
+
+function StatementCard({ t, lang, api, now }: { t: Strings; lang: Lang; api: WalletApi; now: () => number }) {
+  const months = useMemo(() => monthOptions(now()), [now]);
+  const [month, setMonth] = useState(months[0]!);
+  const [st, setSt] = useState<StatementDto | null | 'error'>(null);
+  const [csvError, setCsvError] = useState(false);
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+
+  useEffect(() => {
+    let live = true;
+    setSt(null);
+    api.statement(month).then((s) => { if (live) setSt(s); }, () => { if (live) setSt('error'); });
+    return () => { live = false; };
+  }, [api, month]);
+
+  const download = async () => {
+    setCsvError(false);
+    try {
+      const url = await api.statementCsv(month);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `statement-${month}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      if (url.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch { setCsvError(true); }
+  };
+
+  const totalLine = (label: string, v: { count: number; amountMinor: number }) => (
+    <li key={label}><span>{label}</span><span className="wallet-count">{t.wCount(num(v.count, lang))}</span><b><bdi dir="ltr">{money(v.amountMinor)}</bdi></b></li>
+  );
+
+  return (
+    <section className="wallet-card" aria-labelledby="w-statement-title">
+      <div className="wallet-card-head">
+        <h2 id="w-statement-title">{t.wStatementTitle}</h2>
+        <label className="field wallet-month"><span className="vh">{t.wMonth}</span>
+          <select aria-label={t.wMonth} value={month} onChange={(e) => setMonth(e.target.value)}>{months.map((m) => <option key={m} value={m}>{monthLabel(m, lang)}</option>)}</select>
+        </label>
+        <button type="button" className="btn" onClick={() => void download()}><Download size={16} aria-hidden />{t.wCsv}</button>
+      </div>
+      {csvError && <p role="alert" className="error-text">{t.wCsvError}</p>}
+      {st === null ? <p className="muted">…</p> : st === 'error' ? <p role="alert" className="error-text">{t.wStatementError}</p> : (
+        <>
+          <dl className="wallet-figures">
+            <div><dt>{t.wOpening}</dt><dd>{money(st.openingMinor)}</dd></div>
+            <div><dt>{t.wClosing}</dt><dd>{money(st.closingMinor)}</dd></div>
+          </dl>
+          {st.rows.length === 0 ? <p className="muted">{t.wNoRows}</p> : (
+            <>
+              <div className="wallet-cols">
+                <div>
+                  <h3 className="pane-sub">{t.wByKind}</h3>
+                  <ul className="wallet-totals" aria-label={t.wByKind}>{Object.entries(st.totalsByKind).map(([k, v]) => totalLine(t.ledgerKinds[k] ?? k, v))}</ul>
+                </div>
+                <div>
+                  <h3 className="pane-sub">{t.wByCategory}</h3>
+                  <ul className="wallet-totals" aria-label={t.wByCategory}>{Object.entries(st.totalsByCategory).map(([k, v]) => totalLine(t.billCategories[k] ?? k, v))}</ul>
+                </div>
+              </div>
+              <h3 className="pane-sub">{t.wRows}</h3>
+              <ul className="wallet-rows" aria-label={t.wRows}>
+                {st.rows.map((r) => (
+                  <li key={r.ref}>
+                    <span className="wallet-row-main"><b>{t.ledgerKinds[r.kind] ?? r.kind}</b>{r.category && <span className="muted"> · {t.billCategories[r.category] ?? r.category}</span>}{r.note && <span className="muted" dir="auto"> · {r.note}</span>}</span>
+                    <span className="muted wallet-row-date">{dateTime(r.at, lang)}</span>
+                    <b className="wallet-amount" data-sign={r.amountMinor < 0 ? 'out' : 'in'}><bdi dir="ltr">{money(r.amountMinor)}</bdi></b>
+                  </li>
+                ))}
+              </ul>
+              {st.truncated && <p className="muted">{t.wTruncated}</p>}
+            </>
+          )}
+          {st.cardCosts.length > 0 && (
+            <>
+              <h3 className="pane-sub">{t.wCardCosts}</h3>
+              <ul className="wallet-totals">
+                {st.cardCosts.map((c) => <li key={c.category}>{t.wCardCostLine(t.billCategories[c.category] ?? c.category, num(c.count, lang), new Intl.NumberFormat(lang === 'ar' ? 'ar-EG' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(c.usdMicros / 1_000_000))}</li>)}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function RefundCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }) {
+  const [items, setItems] = useState<RefundRequest[] | null>(null);
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [msg, setMsg] = useState<{ kind: 'alert' | 'status'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+
+  useEffect(() => { void api.refundRequests().then(setItems, () => setItems([])); }, [api]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const minor = egpToMinor(amount);
+    if (minor === null || minor < MIN_REFUND_MINOR) { setMsg({ kind: 'alert', text: t.wRefundBelowMin }); return; }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api.requestRefund(minor, note);
+      setItems((xs) => [r, ...(xs ?? [])]);
+      setAmount(''); setNote('');
+      setMsg({ kind: 'status', text: t.wRefundSent });
+    } catch (err) {
+      setMsg({ kind: 'alert', text: (err instanceof ApiError && err.detail && t.refundReasons[err.detail]) || t.opFailed });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <section className="wallet-card" aria-labelledby="w-refund-title">
+      <h2 id="w-refund-title">{t.wRefundTitle}</h2>
+      <p className="muted">{t.wRefundRules}</p>
+      <form className="wallet-form" onSubmit={(e) => void submit(e)} noValidate>
+        <label className="field"><span>{t.wRefundAmount}</span><input inputMode="decimal" dir="ltr" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+        <label className="field"><span>{t.wRefundNote}</span><textarea dir="auto" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+        <div className="settings-actions"><button type="submit" className="btn primary" disabled={busy}>{t.wRefundSend}</button></div>
+      </form>
+      {msg && <p role={msg.kind} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
+      <h3 className="pane-sub">{t.wRefundPast}</h3>
+      {items === null ? <p className="muted">…</p> : items.length === 0 ? <p className="muted">{t.wRefundEmpty}</p> : (
+        <ul className="wallet-rows" aria-label={t.wRefundPast}>
+          {items.map((r) => (
+            <li key={r.id}>
+              <span className="wallet-row-main"><b><bdi dir="ltr">{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={r.state === 'paid' ? 'done' : r.state === 'rejected' || r.state === 'failed' ? 'failed' : 'pending'}>{t.refundStates[r.state] ?? r.state}</span>
+                {r.decisionNote && <span className="muted op-line" dir="auto">{r.decisionNote}</span>}</span>
+              <span className="muted wallet-row-date">{dateTime(r.createdAt, lang)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}

@@ -3,6 +3,8 @@ import type {
   RealtimeEvent, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, TemplateDto,
 } from '../../../src/core/api/contract';
 
+import type { OperatorApi, WalletApi } from './billing';
+
 export type ConversationFilter = 'all' | 'unread' | 'mine' | 'unassigned';
 export type Role = 'owner' | 'staff' | 'super_admin';
 
@@ -76,6 +78,10 @@ export interface InboxSource {
   campaigns?: CampaignsApi;
   numbers?: NumbersApi;
   contacts?: ContactsApi;
+  /** Wallet, statement, top-ups and refunds (Phase 7). */
+  wallet?: WalletApi;
+  /** Super-admin console; only offered when `role` is super_admin. */
+  operator?: OperatorApi;
   /** Called when events were missed beyond repair; the app reloads its list and open chat. */
   onReload?(cb: () => void): () => void;
   /** Realtime events; returns an unsubscribe function. */

@@ -19,6 +19,9 @@ async function boot(): Promise<void> {
   if (import.meta.env.DEV && chooseMode({ dev: true }, location.search) === 'sample') {
     const { createSampleSource } = await import('./data/sample');
     source = createSampleSource();
+    // Preview only: `?role=super_admin` (or staff) shows what that role sees. Production bundles drop this branch with the sample module.
+    const role = new URLSearchParams(location.search).get('role');
+    if (role === 'super_admin' || role === 'staff' || role === 'owner') source.role = role;
   } else {
     const tokens = createTokenProvider({ accountsUrl: ACCOUNTS_URL });
     const token = await tokens.getToken(); // redirects to sign-in when signed out

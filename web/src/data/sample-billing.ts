@@ -1,0 +1,178 @@
+import type { ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, WalletDto } from './billing';
+import { ApiError } from './api';
+
+// Sample billing data for preview only (the app labels the whole source as sample). Amounts are invented; nothing here is real money.
+const BASE = Date.UTC(2026, 9, 24, 17, 0);
+const H = 3_600_000;
+const D = 24 * H;
+
+const OCT = (day: number, hour = 10) => Date.UTC(2026, 9, day, hour, 0);
+type Row = StatementDto['rows'][number];
+const RAW: { at: number; kind: string; amount: number; category: string | null; note: string | null }[] = [
+  { at: OCT(2), kind: 'topup', amount: 10000, category: null, note: null },
+  { at: OCT(6), kind: 'meta_charge', amount: -340, category: 'utility', note: null },
+  { at: OCT(8), kind: 'meta_charge', amount: -170, category: 'service', note: null },
+  { at: OCT(12), kind: 'ai_charge', amount: -800, category: null, note: null },
+  { at: OCT(18), kind: 'meta_charge', amount: -18150, category: 'marketing', note: null },
+  { at: OCT(21), kind: 'meta_charge', amount: -2040, category: 'marketing', note: null },
+];
+const OPENING = 30000;
+
+function octoberRows(): Row[] {
+  let balance = OPENING;
+  return RAW.map((r, i) => {
+    balance += r.amount;
+    return { at: r.at, kind: r.kind, netMinor: r.amount, vatMinor: 0, amountMinor: r.amount, balanceAfterMinor: balance, ref: `sample:${i}`, wamid: null, category: r.category, note: r.note };
+  });
+}
+
+function totals(rows: Row[], key: (r: Row) => string | null) {
+  const out: StatementDto['totalsByKind'] = {};
+  for (const r of rows) {
+    const k = key(r);
+    if (!k) continue;
+    const t = (out[k] ??= { count: 0, netMinor: 0, vatMinor: 0, amountMinor: 0 });
+    t.count += 1; t.netMinor += r.netMinor; t.vatMinor += r.vatMinor; t.amountMinor += r.amountMinor;
+  }
+  return out;
+}
+
+function sampleStatement(month: string): StatementDto {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const from = Date.UTC(y, m - 1, 1);
+  const to = Date.UTC(y, m, 1);
+  if (month !== '2026-10') {
+    const level = month < '2026-10' ? OPENING : 18500;
+    return { month, from, to, openingMinor: level, closingMinor: level, rows: [], truncated: false, totalsByKind: {}, totalsByCategory: {}, cardCosts: [] };
+  }
+  const rows = octoberRows();
+  return {
+    month, from, to, openingMinor: OPENING, closingMinor: rows[rows.length - 1]!.balanceAfterMinor, rows, truncated: false,
+    totalsByKind: totals(rows, (r) => r.kind), totalsByCategory: totals(rows, (r) => (r.kind === 'meta_charge' ? r.category : null)),
+    cardCosts: [{ category: 'marketing', count: 120, usdMicros: 1_800_000 }, { category: 'utility', count: 45, usdMicros: 135_000 }],
+  };
+}
+
+export function createSampleWallet(): WalletApi {
+  let nextId = 1;
+  const refunds: RefundRequest[] = [
+    { id: 'r-1', workspaceId: 'ws-sample', amountMinor: 20000, note: 'نهاية الاشتراك', state: 'rejected', requestedBy: 'u-me', createdAt: BASE - 20 * D, decidedBy: 'u-root', decidedAt: BASE - 19 * D, decisionNote: 'الرصيد اتصرف على حملة قبل الطلب.', cardRefundedMinor: 0, manualMinor: 0 },
+    { id: 'r-2', workspaceId: 'ws-sample', amountMinor: 5000, note: null, state: 'paid', requestedBy: 'u-me', createdAt: BASE - 60 * D, decidedBy: 'u-root', decidedAt: BASE - 58 * D, decisionNote: null, cardRefundedMinor: 5000, manualMinor: 0 },
+  ];
+  const wallet: WalletDto = {
+    balanceMinor: 18500, heldMinor: 2500, availableMinor: 16000, debtMinor: 0, creditLimitMinor: 5000, currency: 'EGP',
+    funding: [{ phoneNumberId: 'pn-sample-1', displayPhone: '+20 100 555 0101', funding: 'merchant_card' }, { phoneNumberId: 'pn-sample-shared', displayPhone: '+20 100 555 0900', funding: 'platform_line' }],
+    topupsEnabled: true, lowBalance: false, aiCredits: { balance: 500, available: 480 },
+    plan: { packageId: 'growth', status: 'active', periodEnd: BASE + 18 * D, cancelledAt: null },
+  };
+  return {
+    wallet: async () => structuredClone(wallet),
+    statement: async (month) => sampleStatement(month),
+    async statementCsv(month) {
+      const s = sampleStatement(month);
+      const csv = ['date,kind,category,net,vat,amount,balance_after', ...s.rows.map((r) => [new Date(r.at).toISOString(), r.kind, r.category ?? '', r.netMinor, r.vatMinor, r.amountMinor, r.balanceAfterMinor].join(','))].join('\n');
+      return `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
+    },
+    estimate: async () => ({ funding: 'merchant_card', paidBy: 'merchant_card', perMessageMinor: 0, totalMinor: 0, priced: true, currency: 'EGP' }),
+    async topup(amountMinor) {
+      const feeMinor = Math.round(amountMinor * 0.025) + 300;
+      const id = nextId++;
+      return { orderId: `T-${id}`, state: 'pending', amountMinor, feeMinor, totalMinor: amountMinor + feeMinor, checkoutUrl: `https://pay.example.test/checkout/T-${id}` };
+    },
+    topupState: async (orderId) => ({ orderId, state: 'pending', amountMinor: 0, feeMinor: 0, totalMinor: 0 }),
+    refundRequests: async () => refunds.map((r) => ({ ...r })).sort((a, b) => b.createdAt - a.createdAt),
+    async requestRefund(amountMinor, note) {
+      if (amountMinor < 5000) throw new ApiError('invalid_request', 409, 'below_minimum');
+      const r: RefundRequest = { id: `r-new-${nextId++}`, workspaceId: 'ws-sample', amountMinor, note: note.trim() || null, state: 'pending', requestedBy: 'u-me', createdAt: Date.now(), decidedBy: null, decidedAt: null, decisionNote: null, cardRefundedMinor: 0, manualMinor: 0 };
+      refunds.push(r);
+      return { ...r };
+    },
+  };
+}
+
+export function createSampleOperator(currentUserId: string): OperatorApi {
+  let n = 100;
+  const settings: PricingSettings[] = [
+    { ver: 3, effectiveFrom: BASE + 3 * D, marginBps: 1800, creditLimitMinor: 5000, fxBufferBps: 200, vatBps: 0, actor: 'u-root', reason: 'رفع الهامش بعد زيادة أسعار ميتا' },
+    { ver: 2, effectiveFrom: BASE - 10 * D, marginBps: 1500, creditLimitMinor: 5000, fxBufferBps: 200, vatBps: 0, actor: 'u-root', reason: 'تحديث هامش الربع الأخير' },
+    { ver: 1, effectiveFrom: BASE - 60 * D, marginBps: 0, creditLimitMinor: 5000, fxBufferBps: 0, vatBps: 0, actor: 'u-root', reason: 'الإعداد الأولي' },
+  ];
+  const rateCards: RateCardVersion[] = [
+    { ver: 2, effectiveFrom: BASE + 2 * D, rows: 240, publishedAt: BASE - D, actor: 'u-root' },
+    { ver: 1, effectiveFrom: BASE - 30 * D, rows: 238, publishedAt: BASE - 31 * D, actor: 'u-root' },
+  ];
+  const fx: FxRate[] = [
+    { ver: 2, effectiveFrom: BASE - 2 * D, egpPerUsdMicros: 49_250_000, bufferBps: 100, publishedAt: BASE - 3 * D, actor: 'u-root' },
+    { ver: 1, effectiveFrom: BASE - 30 * D, egpPerUsdMicros: 48_500_000, bufferBps: 100, publishedAt: BASE - 31 * D, actor: 'u-root' },
+  ];
+  const overrides: Record<string, MarginOverride[]> = { 'ws-sample': [{ ver: 1, effectiveFrom: BASE - 5 * D, marginBps: 1000, actor: 'u-root', reason: 'اتفاق خاص مع العميل' }] };
+  const refunds: RefundRequest[] = [
+    { id: 'q-1', workspaceId: 'ws-sample', amountMinor: 20000, note: 'ألغيت الاشتراك وعايز باقي الرصيد', state: 'pending', requestedBy: 'u-merchant', createdAt: BASE - 2 * D, decidedBy: null, decidedAt: null, decisionNote: null, cardRefundedMinor: 0, manualMinor: 0 },
+    { id: 'q-2', workspaceId: 'ws-demo-2', amountMinor: 7500, note: null, state: 'manual_payout', requestedBy: 'u-merchant-2', createdAt: BASE - 9 * D, decidedBy: 'u-root', decidedAt: BASE - 8 * D, decisionNote: null, cardRefundedMinor: 0, manualMinor: 7500 },
+  ];
+  const adjustments: Adjustment[] = [
+    { id: 'a-1', workspaceId: 'ws-sample', amountMinor: 250000, reason: 'تعويض عن عطل في إرسال حملة', requestedBy: currentUserId, state: 'pending', approvedBy: null, createdAt: BASE - 3 * H, decidedAt: null },
+    { id: 'a-2', workspaceId: 'ws-demo-2', amountMinor: -50000, reason: 'شحنة اتسجلت مرتين', requestedBy: 'u-root', state: 'pending', approvedBy: null, createdAt: BASE - 5 * H, decidedAt: null },
+    { id: 'a-3', workspaceId: 'ws-sample', amountMinor: 1500, reason: 'رصيد ترحيب', requestedBy: 'u-root', state: 'approved', approvedBy: 'u-root', createdAt: BASE - 12 * D, decidedAt: BASE - 12 * D },
+  ];
+  const log: ChangeLogItem[] = [
+    { id: 3, at: BASE - 3 * D, actor: 'u-root', action: 'settings_published', workspaceId: null, before: { marginBps: 1500, fxBufferBps: 200 }, after: { marginBps: 1800, fxBufferBps: 200 }, reason: 'رفع الهامش بعد زيادة أسعار ميتا' },
+    { id: 2, at: BASE - 5 * D, actor: 'u-root', action: 'override_published', workspaceId: 'ws-sample', before: null, after: { marginBps: 1000 }, reason: 'اتفاق خاص مع العميل' },
+    { id: 1, at: BASE - 12 * D, actor: 'u-root', action: 'adjustment_applied', workspaceId: 'ws-sample', before: null, after: { amountMinor: 1500 }, reason: 'رصيد ترحيب' },
+  ];
+  const record = (action: string, workspaceId: string | null, before: unknown, after: unknown, reason: string) =>
+    log.unshift({ id: ++n, at: Date.now(), actor: currentUserId, action, workspaceId, before: before ?? null, after: after ?? null, reason });
+  const find = <T extends { id: string }>(xs: T[], id: string): T => {
+    const x = xs.find((y) => y.id === id);
+    if (!x) throw new ApiError('not_found', 404);
+    return x;
+  };
+  return {
+    pricingSettings: async () => structuredClone(settings),
+    async publishPricingSettings(input) {
+      const row: PricingSettings = { ver: settings.length + 1, ...input, actor: currentUserId };
+      settings.unshift(row);
+      record('settings_published', null, settings[1] ?? null, row, input.reason);
+      return { ...row };
+    },
+    rateCards: async () => structuredClone(rateCards),
+    async publishRateCard(input) {
+      rateCards.unshift({ ver: rateCards.length + 1, effectiveFrom: input.effectiveFrom, rows: input.rates.length, publishedAt: Date.now(), actor: currentUserId });
+      record('rate_card_published', null, null, { rows: input.rates.length }, input.reason);
+    },
+    fxRates: async () => structuredClone(fx),
+    async publishFx(input) {
+      fx.unshift({ ver: fx.length + 1, effectiveFrom: input.effectiveFrom, egpPerUsdMicros: input.egpPerUsdMicros, bufferBps: input.bufferBps, publishedAt: Date.now(), actor: currentUserId });
+      record('fx_published', null, null, { egpPerUsdMicros: input.egpPerUsdMicros }, input.reason);
+    },
+    overrides: async (workspaceId) => structuredClone(overrides[workspaceId] ?? []),
+    async publishOverride(workspaceId, input) {
+      (overrides[workspaceId] ??= []).unshift({ ver: (overrides[workspaceId]?.length ?? 0) + 1, effectiveFrom: input.effectiveFrom, marginBps: input.marginBps, actor: currentUserId, reason: input.reason });
+      record('override_published', workspaceId, null, { marginBps: input.marginBps }, input.reason);
+    },
+    async setFunding(phoneNumberId, funding, reason) { record('funding_set', null, null, { phoneNumberId, funding }, reason); },
+    refundQueue: async () => structuredClone(refunds),
+    async decideRefund(id, decision, note) {
+      const r = find(refunds, id);
+      Object.assign(r, decision === 'approve' ? { state: 'processing', cardRefundedMinor: r.amountMinor } : { state: 'rejected' }, { decidedBy: currentUserId, decidedAt: Date.now(), decisionNote: note.trim() || null });
+      record(`refund_${decision}`, r.workspaceId, { state: 'pending' }, { state: r.state }, note.trim() || '—');
+      return { ...r };
+    },
+    async markRefundPaid(id) { Object.assign(find(refunds, id), { state: 'paid' }); },
+    adjustments: async () => structuredClone(adjustments),
+    async createAdjustment(workspaceId, amountMinor, reason) {
+      const a: Adjustment = { id: `a-${n++}`, workspaceId, amountMinor, reason, requestedBy: currentUserId, state: 'pending', approvedBy: null, createdAt: Date.now(), decidedAt: null };
+      adjustments.unshift(a);
+      record('adjustment_requested', workspaceId, null, { amountMinor }, reason);
+      return { ...a };
+    },
+    async decideAdjustment(id, decision) {
+      const a = find(adjustments, id);
+      if (a.requestedBy === currentUserId) throw new ApiError('forbidden', 403, 'second_approver_required');
+      Object.assign(a, { state: decision === 'approve' ? 'approved' : 'rejected', approvedBy: currentUserId, decidedAt: Date.now() });
+      record(`adjustment_${decision}d`, a.workspaceId, { state: 'pending' }, { state: a.state }, a.reason);
+      return { ...a };
+    },
+    changeLog: async () => structuredClone(log),
+  };
+}
