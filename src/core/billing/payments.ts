@@ -140,15 +140,20 @@ export class KashierProvider implements PaymentProvider {
       return res.json();
     };
     try {
-      const listed = await get(`${this.apiBase}/v2/aggregator/transactions?search=${encodeURIComponent(orderId)}&type=payment&limit=20`);
-      const rows = listed && typeof listed === 'object' ? (listed as { body?: unknown }).body : undefined;
-      if (!Array.isArray(rows)) return 'unavailable';
       const candidates = new Map<string, { amountMinor: number | null; currency: string | null }>();
-      for (const r of rows) {
-        if (!r || typeof r !== 'object') continue;
-        const row = r as Record<string, unknown>;
-        if (row.merchantOrderId !== orderId || typeof row.transactionId !== 'string' || (typeof row.type === 'string' && row.type.toUpperCase() !== 'PAYMENT')) continue;
-        if (!candidates.has(row.transactionId)) candidates.set(row.transactionId, { amountMinor: egpToMinor(row.amount ?? row.totalAuthorizedAmount), currency: typeof row.currency === 'string' ? row.currency : null });
+      const PAGE = 20;
+      for (let page = 1; ; page++) {
+        const listed = await get(`${this.apiBase}/v2/aggregator/transactions?search=${encodeURIComponent(orderId)}&type=payment&limit=${PAGE}&page=${page}`);
+        const rows = listed && typeof listed === 'object' ? (listed as { body?: unknown }).body : undefined;
+        if (!Array.isArray(rows)) return 'unavailable';
+        for (const r of rows) {
+          if (!r || typeof r !== 'object') continue;
+          const row = r as Record<string, unknown>;
+          if (row.merchantOrderId !== orderId || typeof row.transactionId !== 'string' || (typeof row.type === 'string' && row.type.toUpperCase() !== 'PAYMENT')) continue;
+          if (!candidates.has(row.transactionId)) candidates.set(row.transactionId, { amountMinor: egpToMinor(row.amount ?? row.totalAuthorizedAmount), currency: typeof row.currency === 'string' ? row.currency : null });
+        }
+        if (rows.length < PAGE) break;
+        if (page >= 5) return 'unavailable'; // an order with 100+ payment rows is not guessed at
       }
       const confirmed: { transactionId: string; status: Inquiry['status']; amountMinor: number | null; currency: string | null }[] = [];
       for (const [transactionId, listedRow] of candidates) {

@@ -11,7 +11,7 @@
 import type { Env } from '../../env';
 import { sessionState } from '../identity/session';
 import { roundHalfEvenDiv } from './money';
-import { RefundContention, applyPackageWebhook, findPackageOrder } from './package-orders';
+import { RefundContention, applyPackageWebhook, auditOnce, findPackageOrder } from './package-orders';
 import { packagesEnabled, paymentProvider, topupsEnabled, type ParsedWebhook, type PaymentProvider } from './payments';
 
 export const MIN_TOPUP_MINOR = 1000;
@@ -120,14 +120,16 @@ async function applyTopupWebhook(env: Env, t: TopupRow, ev: ParsedWebhook, now: 
     }
     if (ev.status !== 'SUCCESS') return 'ignored';
     if (ev.currency !== t.currency || ev.amountMinor !== t.total_minor) {
-      alert('topup_amount_mismatch', { workspace: t.workspace_id });
+      if (await auditOnce(env, 'topup_amount_mismatch', t.workspace_id, t.order_id, now)) alert('topup_amount_mismatch', { workspace: t.workspace_id });
       return 'amount_mismatch';
     }
-    if ((await credit(env, t, ev.transactionId, now)) === 'conflict') {
+    const c = await credit(env, t, ev.transactionId, now);
+    if (c === 'conflict') {
       alert('duplicate_success', { kind: 'topup', workspace: t.workspace_id, eventKey: ev.eventKey });
       return 'duplicate_success';
     }
-    return 'credited';
+    // Another path (the webhook or a repair) already credited this transaction: nothing was credited now, so nothing follows from it.
+    return c === 'duplicate' ? 'duplicate' : 'credited';
   }
   if (ev.event === 'refund' && ev.status === 'SUCCESS') {
     // A refund is a DIFFERENT transaction from the payment it returns.

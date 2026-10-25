@@ -45,7 +45,7 @@ describe('KashierProvider.inquire: lookup by OUR order id, confirmed with the tr
     const p = new KashierProvider('MID-1', 'k', undefined, { secretKey: 'sk-test', fetch: async (url, init) => { seen.push({ url, auth: new Headers(init.headers).get('Authorization') }); return detailsFetch(url); } });
     paidAtKashier('ord-ki-2', 'TX-KI2', '10.00');
     await p.inquire('ord-ki-2');
-    expect(seen[0]).toEqual({ url: 'https://api.kashier.io/v2/aggregator/transactions?search=ord-ki-2&type=payment&limit=20', auth: 'sk-test' });
+    expect(seen[0]).toEqual({ url: 'https://api.kashier.io/v2/aggregator/transactions?search=ord-ki-2&type=payment&limit=20&page=1', auth: 'sk-test' });
     expect(seen[1]!.url).toBe('https://api.kashier.io/v2/aggregator/transactions/TX-KI2');
   });
   it('no payment found yet is PENDING (the customer has not paid), not a failure', async () => {
@@ -191,6 +191,66 @@ describe('repair of stuck package orders', () => {
     const off = { ...env, PACKAGE_CHECKOUT_ENABLED: undefined } as typeof env;
     await repairPackageOrders(off, Date.now(), kashier);
     expect(await order(id)).toMatchObject({ status: 'pending' });
+  });
+});
+
+describe('review follow-ups (m1 m2 m3)', () => {
+  it('m1: when the webhook already credited the order, the repair reports a duplicate (not credited) and does not run held refunds', async () => {
+    const ws = W(20);
+    await stuckTopup('ord-ki-m1', ws);
+    paidAtKashier('ord-ki-m1', 'TX-M1', '51.50');
+    // the webhook won the race: wallet credited and transaction bound, state still pending when the repair read the row
+    await env.DB.prepare("UPDATE topups SET transaction_id = 'TX-M1' WHERE order_id = 'ord-ki-m1'").run();
+    await workspace(ws).postWallet({ kind: 'topup', netMinor: 5000, ref: 'kashier:TX-M1', note: 'top-up ord-ki-m1' }, Date.now());
+    expect(await repairTopups(env, kashier)).toMatchObject({ credited: 0 });
+    expect((await ledger(ws)).map((r) => r.ref)).toEqual(['kashier:TX-M1']);
+  });
+  it('m1: a duplicate payment delivery does not re-run held refunds', async () => {
+    const ws = W(21);
+    await stuckTopup('ord-ki-m1b', ws);
+    const { signedWebhook } = await import('./helpers/kashier-webhook');
+    const refund = await signedWebhook({ merchantOrderId: 'ord-ki-m1b', transactionId: 'TX-M1b-R', amount: '10.00' }, 'refund');
+    await handleProviderWebhook(env, refund.body, refund.sig, kashier); // payment not credited yet: held (payment_pending)
+    await env.DB.prepare("UPDATE topups SET transaction_id = 'TX-M1b', state = 'paid' WHERE order_id = 'ord-ki-m1b'").run();
+    await workspace(ws).postWallet({ kind: 'topup', netMinor: 5000, ref: 'kashier:TX-M1b', note: 'x' }, Date.now());
+    await env.DB.prepare("UPDATE topups SET state = 'pending' WHERE order_id = 'ord-ki-m1b'").run();
+    const pay = await signedWebhook({ merchantOrderId: 'ord-ki-m1b', transactionId: 'TX-M1b', amount: '51.50' });
+    expect((await handleProviderWebhook(env, pay.body, pay.sig, kashier)).status).toBe(200);
+    expect((await ledger(ws)).map((r) => r.kind)).toEqual(['topup']); // the held refund was NOT run by a duplicate
+  });
+  it('m2: a success beyond the first 20 rows is found, and the multiple-success alert looks at every page', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ transactionId: `TX-M2-${i}`, amount: '10.00' }));
+    kashierOrders.set('ord-ki-m2', many);
+    for (const m of many) kashierLedger.set(m.transactionId, { operation: 'pay', status: 'FAILURE', orderId: 'ord-ki-m2' });
+    kashierLedger.set('TX-M2-23', { operation: 'pay', status: 'SUCCESS', orderId: 'ord-ki-m2' });
+    expect(await kashier.inquire('ord-ki-m2')).toEqual({ status: 'SUCCESS', transactionId: 'TX-M2-23', amountMinor: 1000, currency: 'EGP' });
+    const spy = alerts();
+    kashierLedger.set('TX-M2-24', { operation: 'pay', status: 'SUCCESS', orderId: 'ord-ki-m2' });
+    expect(await kashier.inquire('ord-ki-m2')).toBe('unavailable');
+    expect(said(spy, 'inquiry_multiple_success')).toBe(true);
+  });
+  it('m2: more than 5 full pages is not guessed at: unavailable', async () => {
+    const rows = Array.from({ length: 120 }, (_, i) => ({ transactionId: `TX-M2b-${i}`, amount: '1.00' }));
+    kashierOrders.set('ord-ki-m2b', rows);
+    for (const r of rows) kashierLedger.set(r.transactionId, { operation: 'pay', status: 'FAILURE', orderId: 'ord-ki-m2b' });
+    expect(await kashier.inquire('ord-ki-m2b')).toBe('unavailable');
+  });
+  it('m3: a mismatch alerts once per order, not on every daily pass (top-up and package)', async () => {
+    const spy = alerts();
+    const ws = W(22);
+    await stuckTopup('ord-ki-m3', ws);
+    paidAtKashier('ord-ki-m3', 'TX-M3', '10.00');
+    await repairTopups(env, kashier);
+    await repairTopups(env, kashier);
+    expect(spy.mock.calls.filter((c) => String(c[0]).includes('topup_amount_mismatch'))).toHaveLength(1);
+    const wsp = W(23);
+    await seedNumber('pn-km3', wsp);
+    const r = await startPackageCheckout(env, { workspaceId: wsp, userId: 'u1', sessionId: 's1', packageId: 'gold' }, Date.now() - 20 * 60_000);
+    if (!r.ok) throw new Error(r.reason);
+    paidAtKashier(r.orderId, 'TX-M3p', '5.00');
+    await repairPackageOrders(env, Date.now(), kashier);
+    await repairPackageOrders(env, Date.now(), kashier);
+    expect(spy.mock.calls.filter((c) => String(c[0]).includes('package_amount_mismatch'))).toHaveLength(1);
   });
 });
 

@@ -115,9 +115,14 @@ async function grantOrder(env: Env, row: PackageOrderRow, ref: string, now: numb
   return 'replay';
 }
 
+/** Appends the audit row only if no row with this action + reason exists. True when this call wrote it (the caller alerts only then). */
+export async function auditOnce(env: Env, action: string, workspaceId: string, reason: string, now: number): Promise<boolean> {
+  const r = await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, ?, ?, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = ? AND reason = ?)')
+    .bind(now, 'provider', action, workspaceId, JSON.stringify({ orderId: reason }), reason, action, reason).run();
+  return r.meta.changes > 0;
+}
 async function recordOnce(env: Env, action: string, row: PackageOrderRow, reason: string, now: number): Promise<void> {
-  await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, ?, ?, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = ? AND reason = ?)')
-    .bind(now, 'provider', action, row.workspace_id, JSON.stringify({ orderId: row.order_id }), reason, action, reason).run();
+  await auditOnce(env, action, row.workspace_id, reason, now);
 }
 
 /**
@@ -141,7 +146,8 @@ export async function applyPackageWebhook(env: Env, row: PackageOrderRow, ev: Pa
   }
   if (ev.status !== 'SUCCESS') return 'ignored';
   if (ev.currency !== row.currency || ev.amountMinor !== row.amount_minor) {
-    alert('package_amount_mismatch', { workspace: row.workspace_id });
+    // Once per order: the daily repair would otherwise repeat it every pass.
+    if (await auditOnce(env, 'package_amount_mismatch', row.workspace_id, row.order_id, now)) alert('package_amount_mismatch', { workspace: row.workspace_id });
     return 'amount_mismatch';
   }
   const granted = await grantOrder(env, row, ev.transactionId, now, { claim: true });
