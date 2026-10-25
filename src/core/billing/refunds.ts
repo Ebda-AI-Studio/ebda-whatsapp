@@ -135,7 +135,8 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     // abandoned request. Give it back (idempotent ref) and stop. The abandon's own sweep and the daily pass are the other two sides of the same net.
     if (posted.ok && !(await holdsRequest(env, a.id, token))) {
       const cur = await env.DB.prepare('SELECT state FROM refund_requests WHERE id = ?').bind(a.id).first<{ state: string }>();
-      if (cur?.state === 'abandoning' || cur?.state === 'abandoned') await reverseUnreversedChunks(env, a.id, req.workspace_id, 'system', now);
+      // Only once the request is `abandoned`: while it is `abandoning` the abandon itself owns the reversal (and the sweep picks it up after).
+      if (cur?.state === 'abandoned') await reverseUnreversedChunks(env, a.id, req.workspace_id, 'system', now);
       return { ok: false, reason: 'not_pending' };
     }
     if (!posted.ok && posted.reason !== 'duplicate') {

@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KashierProvider, configurePayments, type PaymentProvider } from '../src/core/billing/payments';
-import { abandonRefundRequest, linkDashboardRefund, sweepAbandonedRefunds, matchHeldRefund, reconcileCardRefunds } from '../src/core/billing/card-refunds';
+import { abandonRefundRequest, linkDashboardRefund, reverseUnreversedChunks, sweepAbandonedRefunds, matchHeldRefund, reconcileCardRefunds } from '../src/core/billing/card-refunds';
 import { createRefundRequest, decideRefund } from '../src/core/billing/refunds';
 import { handleProviderWebhook } from '../src/core/billing/topups';
 import { dailyBilling } from '../src/index';
@@ -1023,6 +1023,66 @@ describe('abandoning a partly debited refund request (two operators, money back 
     await dailyBilling(env);
     expect((await ledger(a.ws)).filter((r) => r.ref.startsWith('refund-reversal:')).map((r) => r.ref).sort()).toEqual([`refund-reversal:${a.id}:1`, `refund-reversal:${a.id}:2`]);
     expect((await workspace(a.ws).walletView()).balanceMinor).toBe(30000);
+  });
+
+  it('HIGH: a chunk whose card refund row may have sent money (succeeded, calling, pending, uncertain, linked) is never reversed by any path; the sweep raises a P1 instead', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    for (const [i, state] of ['succeeded', 'calling', 'pending', 'uncertain', 'linked'].entries()) {
+      const a = await partlyDebited(110 + i);
+      await env.DB.prepare('UPDATE card_refunds SET state = ? WHERE request_id = ?').bind(state, a.id).run();
+      await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', abandoned_at = ? WHERE id = ?").bind(Date.now(), a.id).run(); // however it got there
+      expect(await reverseUnreversedChunks(env, a.id, a.ws, 'system', Date.now())).toBe(0);
+      await sweepAbandonedRefunds(env);
+      expect((await kinds(a.ws)).filter((k) => k[0] === 'adjustment')).toEqual([]);
+      expect(spy.mock.calls.some((c) => String(c[0]).includes('refund_reversal_blocked') && String(c[0]).includes(a.id))).toBe(true);
+    }
+  });
+
+  it('HIGH: only a row this abandon closed (or no row at all) makes a chunk reversible: a row that was already failed for another reason is left alone', async () => {
+    const a = await partlyDebited(115);
+    await env.DB.prepare("UPDATE card_refunds SET state = 'failed', note = NULL WHERE request_id = ?").bind(a.id).run(); // failed earlier, a manual payout is owed
+    await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', abandoned_at = ? WHERE id = ?").bind(Date.now(), a.id).run();
+    expect(await reverseUnreversedChunks(env, a.id, a.ws, 'system', Date.now())).toBe(0);
+  });
+
+  it('HIGH: a run that sees the request `abandoning` stops without reversing: that reversal belongs to the abandon (or the sweep once it is abandoned)', async () => {
+    const a = await setup(116, 15000);
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    const racing = { ...env, WORKSPACE_DO: { idFromName: (x: string) => env.WORKSPACE_DO.idFromName(x), get: () => ({
+      walletView: (n?: number) => real.walletView(n),
+      walletRefsPresent: (r: string[]) => real.walletRefsPresent(r),
+      postWallet: async (x: Parameters<typeof real.postWallet>[0], n?: number) => {
+        if (x.kind === 'refund') await env.DB.prepare("UPDATE refund_requests SET state = 'abandoning', claimed_by = 'the-abandon' WHERE id = ?").bind(a.id).run();
+        return real.postWallet(x, n);
+      },
+    }) } } as unknown as typeof env;
+    expect((await decideRefund(racing, { id: a.id, decision: 'approve', actor: OP1 })).ok).toBe(false);
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['refund', -15000]]); // the run did not reverse
+    await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', abandoned_at = 1 WHERE id = ?").bind(a.id).run();
+    await env.DB.prepare("UPDATE card_refunds SET state = 'failed', note = ? WHERE request_id = ?").bind(`abandoned:${a.id}`, a.id).run();
+    expect(await sweepAbandonedRefunds(env)).toMatchObject({ reversed: 1 }); // once abandoned, the sweep returns it
+  });
+
+  it('MEDIUM: 250 abandoned requests are all swept across passes: the sweep marks what it finished, so older rows cannot starve behind newer ones', async () => {
+    const a = await setup(117, 5000);
+    await fund(a.ws, 1_000_000, 'kashier:big-117');
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    const base = Date.now() - 3 * 86_400_000;
+    for (let i = 0; i < 250; i++) {
+      const id = `ab-${i}`;
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO refund_requests (id, workspace_id, amount_minor, state, requested_by, created_at, decided_at, abandoned_at) VALUES (?, ?, 100, 'abandoned', 'u', 1, ?, ?)").bind(id, a.ws, base + i, base + i),
+        env.DB.prepare("INSERT INTO refund_chunks (request_id, n, kind, order_id, transaction_id, amount_minor) VALUES (?, 1, 'manual', NULL, NULL, 100)").bind(id),
+      ]);
+      await real.postWallet({ kind: 'refund', netMinor: -100, ref: `refund:${id}:1`, actor: 'u', note: 'x' });
+    }
+    const first = await sweepAbandonedRefunds(env);
+    const second = await sweepAbandonedRefunds(env);
+    const third = await sweepAbandonedRefunds(env);
+    expect(first.reversed + second.reversed + third.reversed).toBe(250);
+    expect(first.reversed).toBeLessThanOrEqual(200);
+    expect(third.reversed).toBe(0);
+    expect((await ledger(a.ws)).filter((r) => r.ref.startsWith('refund-reversal:ab-'))).toHaveLength(250);
   });
 });
 

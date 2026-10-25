@@ -416,12 +416,29 @@ export async function markCardRefundFailed(env: Env, a: { requestId: string; car
 }
 
 /**
- * Gives back every wallet chunk of an ABANDONED request that is still on the ledger without its reversal. The ref `refund-reversal:<id>:<n>` is
- * idempotent, so this can be run by the run that noticed the abandon, by the abandon itself and by the daily pass, in any order: a chunk is
- * credited back once. Returns how many reversals were newly posted.
+ * THE eligibility rule for giving a request's wallet chunks back, shared by the abandon, a run noticing the abandon and every sweep. A chunk is
+ * reversible only if it has NO card refund row, or its row is `failed` and was closed by the abandon (`note = abandoned:<id>`). If ANY row of
+ * the request is in a state where money may have left (calling, succeeded, uncertain, pending, linked), NOTHING is reversible (`blocked`).
+ */
+export async function reversibleChunks(env: Env, requestId: string): Promise<{ blocked: boolean; chunks: { n: number; amount_minor: number }[] }> {
+  const { results: rows } = await env.DB.prepare('SELECT id, state, note FROM card_refunds WHERE request_id = ?').bind(requestId).all<{ id: string; state: string; note: string | null }>();
+  if (rows.some((r) => !['planned', 'sending', 'failed'].includes(r.state))) return { blocked: true, chunks: [] };
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const { results: chunks } = await env.DB.prepare('SELECT n, amount_minor FROM refund_chunks WHERE request_id = ? ORDER BY n').bind(requestId).all<{ n: number; amount_minor: number }>();
+  return { blocked: false, chunks: chunks.filter((c) => { const r = byId.get(`cr:${requestId}:${c.n}`); return !r || (r.state === 'failed' && r.note === `abandoned:${requestId}`); }) };
+}
+
+/**
+ * Gives back the eligible wallet chunks of a request that are on the ledger without their reversal. The ref `refund-reversal:<id>:<n>` is
+ * idempotent, so the abandon, a run and the daily sweep can all call it in any order: a chunk is credited back once. Returns how many reversals
+ * were newly posted, and whether the request was blocked (a row may have sent money: nothing is reversed and a P1 is raised once).
  */
 export async function reverseUnreversedChunks(env: Env, requestId: string, workspaceId: string, actor: string, now: number): Promise<number> {
-  const { results: chunks } = await env.DB.prepare('SELECT n, amount_minor FROM refund_chunks WHERE request_id = ? ORDER BY n').bind(requestId).all<{ n: number; amount_minor: number }>();
+  const { blocked, chunks } = await reversibleChunks(env, requestId);
+  if (blocked) {
+    if (await auditOnce(env, 'refund_reversal_blocked', workspaceId, requestId, now)) alert('refund_reversal_blocked', { severity: 'P1', requestId, workspace: workspaceId });
+    return 0;
+  }
   if (chunks.length === 0) return 0;
   const stub = stubOf(env, workspaceId);
   const present = new Set(await stub.walletRefsPresent(chunks.flatMap((c) => [`refund:${requestId}:${c.n}`, `refund-reversal:${requestId}:${c.n}`])));
@@ -435,12 +452,19 @@ export async function reverseUnreversedChunks(env: Env, requestId: string, works
   return posted;
 }
 
-/** The daily backstop for the race between a run's wallet post and an abandon: sweeps every recently abandoned request. */
+/**
+ * The daily backstop for the race between a run's wallet post and an abandon. Takes the oldest abandoned requests not yet marked clean
+ * (`swept_at`), reverses what is eligible and marks each one it finished (clean or blocked-and-alerted), so a backlog is worked off across
+ * passes and older requests never starve behind newer ones.
+ */
 export async function sweepAbandonedRefunds(env: Env, now = Date.now()): Promise<{ checked: number; reversed: number }> {
-  const { results } = await env.DB.prepare("SELECT id, workspace_id FROM refund_requests WHERE state = 'abandoned' AND decided_at > ? ORDER BY decided_at DESC LIMIT 200").bind(now - 30 * 86_400_000).all<{ id: string; workspace_id: string }>();
+  const { results } = await env.DB.prepare("SELECT id, workspace_id FROM refund_requests WHERE state = 'abandoned' AND swept_at IS NULL ORDER BY abandoned_at ASC, id ASC LIMIT 200").all<{ id: string; workspace_id: string }>();
   let reversed = 0;
   for (const r of results) {
-    try { reversed += await reverseUnreversedChunks(env, r.id, r.workspace_id, 'system', now); } catch (err) {
+    try {
+      reversed += await reverseUnreversedChunks(env, r.id, r.workspace_id, 'system', now);
+      await env.DB.prepare('UPDATE refund_requests SET swept_at = ? WHERE id = ? AND swept_at IS NULL').bind(now, r.id).run();
+    } catch (err) {
       console.error(JSON.stringify({ alert: 'refund_abandon_sweep_failed', severity: 'P1', requestId: r.id, error: err instanceof Error ? err.name : 'error' }));
     }
   }
@@ -498,23 +522,12 @@ export async function abandonRefundRequest(env: Env, a: { id: string; actor: str
     const moved = await env.DB.prepare("UPDATE card_refunds SET state = 'failed', note = ?, updated_at = ? WHERE id = ? AND state IN ('planned', 'sending')").bind(mine, now, r.id).run();
     if (moved.meta.changes !== 1) return back('money_may_have_left');
   }
-  // 4. reverse only what was posted and whose row this abandon closed (or that never had one)
-  const closed = new Set((await env.DB.prepare('SELECT id FROM card_refunds WHERE request_id = ? AND note = ?').bind(a.id, mine).all<{ id: string }>()).results.map((r) => r.id));
-  const hasRow = new Set(rows.map((r) => r.id));
-  const { results: chunks } = await env.DB.prepare('SELECT n, amount_minor FROM refund_chunks WHERE request_id = ? ORDER BY n').bind(a.id).all<{ n: number; amount_minor: number }>();
-  const stub = stubOf(env, req.workspace_id);
-  const posted = new Set(await stub.walletRefsPresent(chunks.map((c) => `refund:${a.id}:${c.n}`)));
-  let reversed = 0;
-  for (const c of chunks) {
-    if (!posted.has(`refund:${a.id}:${c.n}`)) continue; // never debited: nothing to give back
-    const rowId = `cr:${a.id}:${c.n}`;
-    if (hasRow.has(rowId) && !closed.has(rowId)) continue; // a row this abandon did not close is not ours to reverse
-    const r = await stub.postWallet({ kind: 'adjustment', netMinor: c.amount_minor, ref: `refund-reversal:${a.id}:${c.n}`, actor: a.actor, note: `refund request ${a.id} abandoned: chunk ${c.n} returned` }, now);
-    if (!r.ok && r.reason !== 'duplicate') throw new Error(`refund reversal refused: ${r.reason}`);
-    reversed++;
-  }
+  // 4. reverse what is eligible (the one shared rule): the chunks that were really posted and whose rows this abandon closed, or that never had a row
+  const before = await reversibleChunks(env, a.id);
+  if (before.blocked) return back('money_may_have_left');
+  const reversed = await reverseUnreversedChunks(env, a.id, req.workspace_id, a.actor, now);
   // 5. finish
-  const done = await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', card_refunded_minor = 0, manual_minor = 0, claimed_by = NULL, lease_until = NULL WHERE id = ? AND state = 'abandoning' AND claimed_by = ?").bind(a.id, token).run();
+  const done = await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', abandoned_at = ?, card_refunded_minor = 0, manual_minor = 0, claimed_by = NULL, lease_until = NULL WHERE id = ? AND state = 'abandoning' AND claimed_by = ?").bind(now, a.id, token).run();
   if (done.meta.changes) {
     await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_abandoned', ?, ?, ?, ?)")
       .bind(now, a.actor, req.workspace_id, JSON.stringify({ requestedBy: req.abandon_requested_by }), JSON.stringify({ reversedChunks: reversed }), a.id).run();

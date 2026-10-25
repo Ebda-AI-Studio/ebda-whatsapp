@@ -42,6 +42,10 @@ ALTER TABLE refund_requests ADD COLUMN lease_until INTEGER;
 -- Abandoning a partly debited request takes two operators: the first one asks (recorded here), a DIFFERENT one confirms.
 ALTER TABLE refund_requests ADD COLUMN abandon_requested_by TEXT;
 ALTER TABLE refund_requests ADD COLUMN abandon_requested_at INTEGER;
+-- When the abandon finished, and when the reversal sweep last found the request clean (it is then no longer selected: older requests cannot starve).
+ALTER TABLE refund_requests ADD COLUMN abandoned_at INTEGER;
+ALTER TABLE refund_requests ADD COLUMN swept_at INTEGER;
+CREATE INDEX refund_requests_unswept ON refund_requests (abandoned_at) WHERE state = 'abandoned' AND swept_at IS NULL;
 
 -- The plan of an approval, recorded once BEFORE any money moves: a resume replays exactly these amounts, refs and transactions, whatever the
 -- top-ups look like by then. kind 'card' = asks the provider; 'manual' = a manual payout (no card, switch off, or beyond the card top-ups).
