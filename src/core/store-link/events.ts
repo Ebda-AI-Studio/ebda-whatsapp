@@ -74,7 +74,7 @@ async function findWaId(host: LinkHost, key: string): Promise<string | null> {
  * every write (state, message row, the task that hands the message to the send queue, the dedupe marker) in ONE
  * transaction, so a redelivered event can neither double-send nor lose a message.
  */
-export async function applyStoreEvent(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string | null; now?: number }): Promise<StoreEventOutcome> {
+export async function applyStoreEvent(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string | null; shared?: boolean; now?: number }): Promise<StoreEventOutcome> {
   const now = opts.now ?? Date.now();
   if (event.storeId !== host.workspaceId) return { status: 'skipped', detail: 'wrong_workspace' };
   if (host.sql.exec('SELECT 1 FROM processed_events WHERE event_id = ?', event.id).toArray().length) return { status: 'duplicate' };
@@ -121,7 +121,7 @@ function sendOutcome(host: LinkHost, r: QueueResult, what: string): StoreEventOu
   return { status: 'skipped', detail: r.reason };
 }
 
-function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string | null; now: number }, pre: { codLookup: LookedUp | null }): StoreEventOutcome {
+function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string | null; shared?: boolean; now: number }, pre: { codLookup: LookedUp | null }): StoreEventOutcome {
   const { now } = opts;
   const copy = storeLink().copy;
   const at = (iso: string) => Date.parse(iso);
@@ -257,6 +257,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
     case 'cart.abandoned': {
       const d = event.data;
       if (!copy || !opts.phoneNumberId) return { status: 'skipped', detail: copy ? 'no_number' : 'no_copy' };
+      if (opts.shared) return { status: 'skipped', detail: 'shared_number_no_marketing' }; // WA-SHARED-NOCAMP-1
       const waId = d.phoneE164.slice(1);
       const loc = locale(d.locale);
       // Marketing: needs a recorded opt-in and no opt-out. (Phase 7 adds the wallet check here: fail closed at zero.)

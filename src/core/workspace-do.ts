@@ -931,9 +931,9 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /**
    * One event from the Store queue. Expected outcomes (duplicate, stale, skipped) come back as data; a thrown error means
-   * "retry this message". `phoneNumberId` is the workspace's active sender, or null when it has none.
+   * "retry this message". `phoneNumberId` is the workspace's sender (its own active number, else the shared platform number with `shared` set), or null when it has none.
    */
-  async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null }): Promise<StoreEventOutcome> {
+  async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null; shared?: boolean }): Promise<StoreEventOutcome> {
     await this.ensurePricing();
     if (opts.phoneNumberId) await this.repullIfUnknown(opts.phoneNumberId, Date.now());
     return applyStoreEvent(this.host(), event, opts);

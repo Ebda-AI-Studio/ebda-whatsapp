@@ -34,7 +34,7 @@ Schemas: `src/core/api/store-events.ts` (envelope `{id, type, v:1, storeId, occu
 | `order.cod_confirmation_requested` | COD template with Confirm/Refuse quick replies (payload `cod:y|n:<orderId>`), tag `cod_pending`, order row `cod_state=pending`, 24 h `cod_no_reply` task; one request per order however many envelopes |
 | `order.status_changed` | status; any cancel/refund closes the COD state; `paid` tells an InstaPay/link customer inside the window |
 | `shipment.updated` | tracking template (with URL) or status template; only announced statuses, once per shipment+status |
-| `cart.abandoned` | marketing template; needs a recorded opt-in and no opt-out, a plan that is not past due, and (on a platform-paid number) wallet funds; see `docs/billing.md` |
+| `cart.abandoned` | marketing template, never on the shared platform number (skipped `shared_number_no_marketing`); needs a recorded opt-in and no opt-out, a plan that is not past due, and (on a platform-paid number) wallet funds; see `docs/billing.md` |
 | `customer.erased` | deletes the customer's contact, messages, orders, bot session; **never gated by link state; recorded as processed only after the erase succeeded** |
 
 ## COD confirmation and outcomes
