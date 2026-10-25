@@ -2,7 +2,7 @@ import { z } from 'zod';
 import {
   agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
-  instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, searchResponse, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
+  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, searchResponse, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
 import type { InboxSource } from './source';
@@ -147,6 +147,11 @@ export function createApiSource(o: Opts): LiveSource {
       refresh: async (id) => (await call(`/numbers/${encodeURIComponent(id)}/refresh`, z.object({ number: numberDto }).loose(), { method: 'POST' })).number,
       register: async (id) => (await call(`/numbers/${encodeURIComponent(id)}/register`, z.object({ number: numberDto }).loose(), { method: 'POST' })).number,
       disconnect: async (id) => (await call(`/numbers/${encodeURIComponent(id)}/disconnect`, z.object({ number: numberDto }).loose(), { method: 'POST' })).number,
+      shared: {
+        status: () => call('/shared-number', sharedNumberDto),
+        join: (displayName) => call('/shared-number/join', sharedNumberDto, post(displayName ? { displayName } : {})),
+        leave: () => call('/shared-number/leave', sharedNumberDto, post({})),
+      },
     },
     contacts: {
       async list(q) {

@@ -1,7 +1,7 @@
 import { Check, Circle, Phone, Plus } from 'lucide-react';
 import { BRAND } from '@brand';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NumberDto } from '../../../src/core/api/contract';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import type { NumberDto, SharedNumberDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
 import type { InboxSource, NumbersApi } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
@@ -114,6 +114,7 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
             : items.length === 0 ? <p className="empty-note">{t.numbersEmpty}</p>
             : items.map((n) => <NumberCard key={n.phoneNumberId} n={n} focus={n.phoneNumberId === addedId} t={t} lang={lang} owner={owner} api={api} onChange={replace} onError={(e) => setNote(explain(e))} />)}
         </section>
+        {owner && <SharedCard t={t} api={api} />}
         <aside className="checklist" aria-labelledby="checklist-title">
           <h2 id="checklist-title">{t.checklistTitle}</h2>
           <ol aria-labelledby="checklist-title">
@@ -179,5 +180,47 @@ function NumberCard({ n, focus, t, lang, owner, api, onChange, onError }: { n: N
         )}
       </div>
     </article>
+  );
+}
+
+
+/** The shared platform number (owner). Hidden while the server has it off (404). A plan that does not include it is explained, never silently ignored. */
+function SharedCard({ t, api }: { t: Strings; api: NumbersApi }) {
+  const [st, setSt] = useState<SharedNumberDto | 'off' | 'loading'>('loading');
+  const [name, setName] = useState('');
+  const [msg, setMsg] = useState<{ kind: 'alert' | 'status'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!api.shared) { setSt('off'); return; }
+    api.shared.status().then(setSt, () => setSt('off'));
+  }, [api]);
+  if (st === 'loading' || st === 'off' || !api.shared || !st.available) return null;
+  const shared = api.shared;
+  const act = async (fn: () => Promise<SharedNumberDto>) => {
+    setBusy(true);
+    setMsg(null);
+    try { setSt(await fn()); } catch (e) {
+      setMsg({ kind: 'alert', text: e instanceof ApiError && e.code === 'package_required' ? t.sharedPackageRequired : e instanceof ApiError && e.detail === 'display_name_taken' ? t.sharedNameTaken : t.sharedError });
+    } finally { setBusy(false); }
+  };
+  const join = (e: FormEvent) => { e.preventDefault(); void act(() => shared.join(name.trim() || undefined)); };
+  return (
+    <section className="numbers-main" aria-labelledby="shared-title">
+      <h2 id="shared-title">{t.sharedTitle}</h2>
+      <p className="muted">{t.sharedIntro}</p>
+      {st.member ? (
+        <>
+          <p>{t.sharedMember(st.displayName ?? '')}</p>
+          <button type="button" className="btn quiet" disabled={busy} onClick={() => void act(() => shared.leave())}>{t.sharedLeave}</button>
+        </>
+      ) : (
+        <form className="wallet-form" onSubmit={join} noValidate>
+          {st.packageRequired && <p className="campaign-reason" role="note">{t.sharedPackageRequired}</p>}
+          <label className="field"><span>{t.sharedNameLabel}</span><input dir="auto" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} /></label>
+          <div className="settings-actions"><button type="submit" className="btn primary" disabled={busy}>{t.sharedJoin}</button></div>
+        </form>
+      )}
+      {msg && <p role={msg.kind === 'alert' ? 'alert' : 'status'} className={msg.kind === 'alert' ? 'error-text' : 'muted'}>{msg.text}</p>}
+    </section>
   );
 }

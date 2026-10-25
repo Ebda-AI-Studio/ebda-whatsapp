@@ -113,7 +113,7 @@ describe('setup', () => {
     const s = await store(703);
     const staff = await store(703, 'staff');
     expect((await staff.call('POST', '/shared-number/join', {})).status).toBe(403);
-    expect(await (await s.call('GET', '/shared-number')).json()).toEqual({ available: true, member: false, displayName: null, displayPhone: '+20 100 555 0001' });
+    expect(await (await s.call('GET', '/shared-number')).json()).toEqual({ available: true, member: false, displayName: null, displayPhone: '+20 100 555 0001', packageRequired: false });
     expect((await s.call('POST', '/shared-number/join', { displayName: 'x' })).status).toBe(400);
     expect((await s.call('POST', '/shared-number/join', { displayName: 'متجر النور' })).status).toBe(200);
     expect(await (await s.call('GET', '/shared-number')).json()).toMatchObject({ member: true, displayName: 'متجر النور' });

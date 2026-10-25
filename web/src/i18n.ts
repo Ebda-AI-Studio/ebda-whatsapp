@@ -192,6 +192,9 @@ const ar = {
   instapayStates: { awaiting_proof: 'مستني الإيصال', under_review: 'بيتراجع', confirmed: 'اتأكد', rejected: 'اترفض', expired: 'انتهى' } as Record<string, string>,
   opIpTitle: 'تحويلات إنستاباي', opIpSla: 'المراجعة خلال ٤ ساعات عمل (الأحد–الخميس، ٩ص–٥م بتوقيت القاهرة).', opIpEmpty: 'مفيش إيصالات مستنية.', opIpView: 'اعرض الإيصال', opIpConfirm: 'أكّد التحويل', opIpReject: 'ارفض التحويل',
   opIpReason: 'سبب الرفض (يوصل للتاجر)', opIpSecond: 'محتاج موافقة مشرف تاني', opIpOwn: 'الطلب ده طلبك، لازم مشرف تاني يراجعه.', opIpFirstBy: (w: string) => `وافق أول: ${w}`, opIpLine: (k: string, ref: string) => `${k} • ${ref}`, opIpKinds: { package: 'باقة', topup: 'شحن رصيد' } as Record<string, string>,
+  
+  sharedTitle: 'الرقم المشترك', sharedIntro: 'ابعت واستقبل رسايل العملاء من رقم المنصة المشترك من غير ما توصّل رقمك.', sharedNameLabel: 'اسمك اللي العميل هيشوفه', sharedJoin: 'انضم للرقم المشترك', sharedLeave: 'سيب الرقم المشترك',
+  sharedMember: (n: string) => `انت على الرقم المشترك باسم ${n}`, sharedPackageRequired: 'باقتك الحالية مش بتشمل الرقم المشترك. فعّل باقة بتشمله وجرّب تاني.', sharedNameTaken: 'الاسم ده شبه اسم متجر تاني على الرقم. اختار اسم مختلف.', sharedError: 'حصلت مشكلة، جرّب تاني.',
   opManualPaid: 'اتحوّل يدوي', opLinkLabel: 'رقم الاسترداد من لوحة كاشير', opLinkButton: 'اتردّت من لوحة كاشير', opRefundLine: (c: string, m: string) => `اترد على الكارت ${c} • يدوي ${m}`, opRequestedBy: (a: string) => `طلبه ${a}`,
   opAdjList: 'التسويات', opAdjEmpty: 'مفيش تسويات.', adjStates: { pending: 'مستنية موافقة', approved: 'اتنفّذت', rejected: 'اترفضت' } as Record<string, string>,
   opOwnRequest: 'ده طلبك، ولازم مشرف تاني يوافق عليه أو يرفضه.', opSecondApprover: 'لازم مشرف تاني يوافق على الطلب ده.',
@@ -373,6 +376,9 @@ const en: typeof ar = {
   instapayStates: { awaiting_proof: 'Waiting for the proof', under_review: 'Under review', confirmed: 'Confirmed', rejected: 'Rejected', expired: 'Expired' } as Record<string, string>,
   opIpTitle: 'InstaPay transfers', opIpSla: 'Review within 4 business hours (Sunday to Thursday, 9:00-17:00 Cairo time).', opIpEmpty: 'No proofs waiting.', opIpView: 'View the proof', opIpConfirm: 'Confirm the transfer', opIpReject: 'Reject the transfer',
   opIpReason: 'Reason for the rejection (the merchant sees it)', opIpSecond: 'Needs a second operator', opIpOwn: 'This is your own request: another operator must review it.', opIpFirstBy: (w: string) => `First approval: ${w}`, opIpLine: (k: string, ref: string) => `${k} • ${ref}`, opIpKinds: { package: 'Package', topup: 'Top up' } as Record<string, string>,
+  
+  sharedTitle: 'Shared number', sharedIntro: 'Send and receive customer messages through the shared platform number without connecting your own.', sharedNameLabel: 'The name customers see', sharedJoin: 'Join the shared number', sharedLeave: 'Leave the shared number',
+  sharedMember: (n: string) => `You are on the shared number as ${n}`, sharedPackageRequired: 'Your current package does not include the shared number. Activate a package that does, then try again.', sharedNameTaken: 'This name looks like another store on the number. Choose a different one.', sharedError: 'Something went wrong, try again.',
   opManualPaid: 'Paid out by hand', opLinkLabel: 'Refund id from the Kashier dashboard', opLinkButton: 'Refunded in the Kashier dashboard', opRefundLine: (c, m) => `Refunded to card ${c} • by hand ${m}`, opRequestedBy: (a) => `Requested by ${a}`,
   opAdjList: 'Adjustments', opAdjEmpty: 'No adjustments.', adjStates: { pending: 'Waiting for approval', approved: 'Applied', rejected: 'Rejected' } as Record<string, string>,
   opOwnRequest: 'This is your request; another super admin has to approve or reject it.', opSecondApprover: 'Another super admin has to approve this request.',

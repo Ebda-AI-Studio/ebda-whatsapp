@@ -273,6 +273,14 @@ export function createSampleSource(): InboxSource {
       refresh: async (id) => ({ ...Object.assign(num(id), { lastStatusSyncAt: Date.now() }) }),
       register: async (id) => ({ ...Object.assign(num(id), { status: 'active', registration: 'registered', qualityRating: 'GREEN', messagingLimitTier: 'TIER_250' }) }),
       disconnect: async (id) => ({ ...Object.assign(num(id), { status: 'disconnected' }) }),
+      shared: (() => {
+        let st = { available: true, member: false, displayName: null as string | null, displayPhone: '+20 100 555 0900', packageRequired: false };
+        return {
+          status: async () => ({ ...st }),
+          async join(displayName?: string) { st = { ...st, member: true, displayName: displayName?.trim() || 'Sample Shop' }; return { ...st }; },
+          async leave() { st = { ...st, member: false, displayName: null }; return { ...st }; },
+        };
+      })(),
     },
     wallet: createSampleWallet(),
     operator: createSampleOperator('u-me'),

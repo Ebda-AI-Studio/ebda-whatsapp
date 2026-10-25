@@ -67,6 +67,7 @@ export async function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>):
   if (token === env.META_SYSTEM_TOKEN) {
     const gate = await beforeSharedSend(env, job);
     if (gate === 'refused') return { ok: false, code: 0, retryable: false, message: 'shared_number_unavailable' };
+    if (gate === 'lapsed') return { ok: false, code: 0, retryable: false, message: 'package_required' };
     shared = gate === 'shared';
   }
   const base = { token, graphVersion: env.META_GRAPH_VERSION, phoneNumberId: job.phoneNumberId, to: job.to };

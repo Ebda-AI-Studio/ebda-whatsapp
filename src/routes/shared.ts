@@ -27,7 +27,7 @@ export async function workspaceStub(c: ApiContext): Promise<DurableObjectStub<Wo
   return c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId));
 }
 
-export function apiError(c: ApiContext, status: 400 | 401 | 403 | 404 | 409 | 411 | 413 | 415 | 429 | 503, error: ApiError['error'], message?: string): Response {
+export function apiError(c: ApiContext, status: 400 | 401 | 402 | 403 | 404 | 409 | 411 | 413 | 415 | 429 | 503, error: ApiError['error'], message?: string): Response {
   return c.json({ error, ...(message ? { message } : {}) }, status);
 }
 

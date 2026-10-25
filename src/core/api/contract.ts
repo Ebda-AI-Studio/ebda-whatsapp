@@ -77,7 +77,7 @@ export const apiError = z.object({
   error: z.enum([
     'unauthorized', 'forbidden', 'not_found', 'invalid_request',
     'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited', 'plan_blocked', 'funding_unknown', 'rate_unavailable',
-    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable',
+    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable', 'package_required',
   ]),
   message: z.string().optional(),
 });
@@ -608,6 +608,8 @@ export const sharedNumberDto = z.object({
   member: z.boolean(),
   displayName: z.string().nullable(),
   displayPhone: z.string().nullable(),
+  /** Additive: true when the store is not a member and its plan does not include the shared number (joining answers 402 package_required). */
+  packageRequired: z.boolean().optional(),
 });
 export type SharedNumberDto = z.infer<typeof sharedNumberDto>;
 /** POST /operator/shared-numbers (super admin). Registers the platform number and records its funding (platform_line) in the same write. */

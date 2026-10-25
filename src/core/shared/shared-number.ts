@@ -81,13 +81,13 @@ export async function registerPlatformNumber(env: Env, a: { phoneNumberId: strin
   return 'ok';
 }
 
-export type SharedStatus = { available: boolean; member: boolean; displayName: string | null; displayPhone: string | null };
+export type SharedStatus = { available: boolean; member: boolean; displayName: string | null; displayPhone: string | null; /** True when the store is not a member and its plan does not include the shared number (joining would be refused 402). */ packageRequired: boolean };
 
 export async function sharedStatus(env: Env, workspaceId: string): Promise<SharedStatus> {
   const num = await currentSharedNumber(env);
-  if (!num) return { available: false, member: false, displayName: null, displayPhone: null };
+  if (!num) return { available: false, member: false, displayName: null, displayPhone: null, packageRequired: false };
   const m = await env.DB.prepare("SELECT display_name FROM shared_number_members WHERE workspace_id = ? AND phone_number_id = ? AND status = 'active'").bind(workspaceId, num.phone_number_id).first<{ display_name: string }>();
-  return { available: true, member: !!m, displayName: m?.display_name ?? null, displayPhone: num.display_phone };
+  return { available: true, member: !!m, displayName: m?.display_name ?? null, displayPhone: num.display_phone, packageRequired: !m && !(await sharedPackageAllowed(env, workspaceId)) };
 }
 
 // Every entry maps straight to its final letter (i → l, so і/ї/ι → l too): one pass is the whole skeleton.
@@ -114,12 +114,25 @@ export function displayNameKey(name: string): string {
   return Array.from(folded, (ch) => LOOKALIKE[ch] ?? ch).join('').replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
-export async function joinShared(env: Env, workspaceId: string, displayName?: string, now = Date.now()): Promise<SharedStatus | null | 'name_taken'> {
+/**
+ * The package gate: the workspace's plan must be active or trialing, not past its period, and its package must include the shared number
+ * (`packages.shared_number = 1`). The plan is the workspace's own copy (event-pushed, never-stale for status); a package the control plane
+ * does not know, or no plan on record, is refused (fail closed).
+ */
+export async function sharedPackageAllowed(env: Env, workspaceId: string, now = Date.now()): Promise<boolean> {
+  const e = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId)).getEntitlement();
+  if (!e || (e.status !== 'active' && e.status !== 'trialing') || e.periodEnd <= now) return false;
+  const p = await env.DB.prepare('SELECT shared_number FROM packages WHERE id = ?').bind(e.packageId).first<{ shared_number: number }>();
+  return p?.shared_number === 1;
+}
+
+export async function joinShared(env: Env, workspaceId: string, displayName?: string, now = Date.now()): Promise<SharedStatus | null | 'name_taken' | 'package_required'> {
   const num = await currentSharedNumber(env);
   if (!num) return null;
   const raw = displayName ?? (await env.DB.prepare('SELECT name FROM workspaces WHERE id = ?').bind(workspaceId).first<{ name: string }>())?.name;
   const name = raw === undefined ? undefined : canonicalDisplayName(raw);
   if (!name) return null;
+  if (!(await sharedPackageAllowed(env, workspaceId, now))) return 'package_required';
   try {
     await env.DB.prepare(
       `INSERT INTO shared_number_members (workspace_id, phone_number_id, display_name, name_key, status, joined_at) VALUES (?, ?, ?, ?, 'active', ?)
@@ -165,7 +178,7 @@ export async function senderNumberFor(env: Env, workspaceId: string): Promise<{ 
  * the store is not an active member, or the message carries the platform's own "which store?" ids (a store could otherwise forge the
  * customer's choice); 'shared' = the caller sends and then calls `afterSharedSend` with Meta's message id.
  */
-export async function beforeSharedSend(env: Env, job: Pick<SendJob, 'workspaceId' | 'phoneNumberId' | 'to' | 'list' | 'interactive'>): Promise<'not_shared' | 'refused' | 'shared'> {
+export async function beforeSharedSend(env: Env, job: Pick<SendJob, 'workspaceId' | 'phoneNumberId' | 'to' | 'list' | 'interactive' | 'kind'>): Promise<'not_shared' | 'refused' | 'lapsed' | 'shared'> {
   if (!(await sharedNumberById(env, job.phoneNumberId))) return 'not_shared';
   if (!sharedEnabled(env) || !(await isActiveMember(env, job.workspaceId, job.phoneNumberId))) return 'refused';
   const ids = [...(job.list?.rows ?? []).map((r) => r.id), ...(job.interactive?.buttons ?? []).map((b) => b.id)];
@@ -173,6 +186,9 @@ export async function beforeSharedSend(env: Env, job: Pick<SendJob, 'workspaceId
     console.warn(JSON.stringify({ alert: 'shared_pick_id_refused', workspace: job.workspaceId }));
     return 'refused';
   }
+  // A member whose plan lapsed (or never included the number) keeps receiving and may answer, but cannot START a conversation: a template is
+  // how a conversation is started outside the 24 h window, so it is refused. Free-form replies stay allowed (marketing is gated elsewhere).
+  if ((job.kind ?? 'text') === 'template' && !(await sharedPackageAllowed(env, job.workspaceId))) return 'lapsed';
   return 'shared';
 }
 
