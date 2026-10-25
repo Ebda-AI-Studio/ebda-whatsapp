@@ -2,6 +2,7 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import { PARAMS, seedContacts, seedTemplate } from './helpers/campaigns';
 import { chat, fund, holdOf, jobOf, ledger, nowS, pn, pricing, queueTemplate, queueText, sendOut, setupBilling, status, wamidOf } from './helpers/billing';
+import { recordNumberFunding } from '../src/core/billing/funding';
 import { exec, openChat, rows, workspace } from './helpers/workspace';
 
 const W = (n: number) => `00000000-0000-4000-8000-0000000076${String(n).padStart(2, '0')}`;
@@ -46,6 +47,24 @@ describe('funding must be KNOWN: a missing row is never "free"', () => {
     await exec(ws, 'DELETE FROM number_funding');
     expect(await workspace(ws).campaignPage(c.campaign.id, 1, 0)).toEqual({ state: 'stop', reason: 'funding_unknown' });
     expect(await rows(ws, 'SELECT status, pause_reason FROM campaigns')).toEqual([{ status: 'paused', pause_reason: 'funding_unknown' }]);
+  });
+});
+
+describe('connecting a number does not stamp its funding', () => {
+  it('a phone_numbers row inserted without a funding write stays unknown: its sends are refused (no trigger, no backfill)', async () => {
+    const ws = W(10);
+    await env.DB.batch([
+      env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, 0)').bind(ws, ws),
+      env.DB.prepare("INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status) VALUES ('pn-raw-10', 'waba-1', ?, 'active')").bind(ws),
+    ]);
+    expect(await env.DB.prepare("SELECT 1 FROM number_funding WHERE phone_number_id = 'pn-raw-10'").first()).toBeNull();
+    const conv = await chat(ws);
+    expect(await workspace(ws).queueOutbound(conv, 'pn-raw-10', { type: 'text', clientId: '00000000-0000-4000-8000-000000001010', text: 'x' })).toMatchObject({ ok: false, reason: 'funding_unknown' });
+    // recording the funding is what makes it sendable
+    await recordNumberFunding(env, 'pn-raw-10', 'merchant_card');
+    await workspace(ws).refreshPricing();
+    expect(await workspace(ws).queueOutbound(conv, 'pn-raw-10', { type: 'text', clientId: '00000000-0000-4000-8000-000000001011', text: 'x' })).toMatchObject({ ok: true });
+    expect(await env.DB.prepare("SELECT funding FROM number_funding WHERE phone_number_id = 'pn-raw-10'").first()).toEqual({ funding: 'merchant_card' });
   });
 });
 
@@ -98,18 +117,24 @@ describe('platform-paid numbers need a rate in effect', () => {
     expect(await sendOut(ws, jobOf(q), wamidOf('de'))).toBe('sent');
   });
 
-  it('a billable delivery whose rate cannot be found is pending_rate, not free: it is charged exactly once after the rate is published', async () => {
+  async function pendingDelivery(ws: string, n: string, wa = '966501234567', country = 'SA') {
+    await setupBilling(ws, { rates: [{ country, category: 'utility', usd: 100_000, ver: 1 }] });
+    await fund(ws, 5000);
+    const conv = await openChat(ws, wa);
+    await seedTemplate(ws, { name: 'tpl-u', category: 'UTILITY', components: JSON.stringify([{ type: 'BODY', text: 'hi' }]) });
+    const j = jobOf(await workspace(ws).queueOutbound(conv, pn(ws), { type: 'template', clientId: `00000000-0000-4000-8000-0000000007${n}`, name: 'tpl-u', language: 'ar', params: [] }));
+    await sendOut(ws, j, wamidOf(`pr${n}`));
+    await status(ws, wamidOf(`pr${n}`), 'delivered', nowS(), pricing('marketing')); // Meta bills it as marketing: no SA marketing rate yet
+    return j;
+  }
+
+  it('a billable delivery whose rate cannot be found keeps its hold (pending_rate); a rate effective from the past charges it exactly once', async () => {
     const spy = spyAlerts();
     const ws = W(7);
-    await setupBilling(ws, { rates: [{ country: 'SA', category: 'utility', usd: 100_000, ver: 1 }] });
-    await fund(ws, 5000);
-    const conv = await openChat(ws, '966501234567');
-    await seedTemplate(ws, { name: 'tpl-u', category: 'UTILITY', components: JSON.stringify([{ type: 'BODY', text: 'hi' }]) });
-    const j = jobOf(await workspace(ws).queueOutbound(conv, pn(ws), { type: 'template', clientId: '00000000-0000-4000-8000-000000000771', name: 'tpl-u', language: 'ar', params: [] }));
-    await sendOut(ws, j, wamidOf('pr'));
-    await status(ws, wamidOf('pr'), 'delivered', nowS(), pricing('marketing')); // Meta bills it as marketing: no SA marketing rate yet
+    const j = await pendingDelivery(ws, '71');
     expect((await ledger(ws)).map((r) => r.kind)).toEqual(['topup']);
     expect(await rows(ws, 'SELECT pending_rate, unpriced FROM billable_sends')).toEqual([{ pending_rate: 1, unpriced: 0 }]);
+    expect(await holdOf(ws, j)).toMatchObject({ state: 'held', amount_minor: 500 }); // still reserved: not free while we wait
     expect(names(spy)).toContain('rate_missing_pending');
     await env.DB.prepare("INSERT INTO rate_cards (ver, effective_from, country, category, usd_micros, published_at, actor) VALUES (2, 0, 'SA', 'marketing', 200000, 0, 'op')").run();
     await workspace(ws).refreshPricing();
@@ -117,9 +142,36 @@ describe('platform-paid numbers need a rate in effect', () => {
     await workspace(ws).runDueTasks(Date.now() + 2 * 3_600_000);
     const charges = (await ledger(ws)).filter((r) => r.kind === 'meta_charge');
     expect(charges).toHaveLength(1);
-    expect(charges[0]).toMatchObject({ amount_minor: -1000, ref: `meta:${wamidOf('pr')}`, rate_ver: 2 });
+    expect(charges[0]).toMatchObject({ amount_minor: -1000, ref: `meta:${wamidOf('pr71')}`, rate_ver: 2 });
     expect(await rows(ws, 'SELECT pending_rate FROM billable_sends')).toEqual([{ pending_rate: 0 }]);
-    expect(await holdOf(ws, j)).toMatchObject({ state: 'released' }); // released while pending; the charge never needed it
-    void queueText;
+    expect(await holdOf(ws, j)).toMatchObject({ state: 'charged' });
+  });
+
+  it('a rate that only takes effect AFTER the delivery (published 24 h ahead) still prices it: the earliest later version is used and recorded', async () => {
+    const ws = W(8);
+    const j = await pendingDelivery(ws, '81', '971501234567', 'AE');
+    const later = Date.now() + 30 * 86_400_000;
+    await env.DB.prepare("INSERT INTO rate_cards (ver, effective_from, country, category, usd_micros, published_at, actor) VALUES (3, ?, 'AE', 'marketing', 300000, 0, 'op')").bind(later).run();
+    await env.DB.prepare("INSERT INTO rate_cards (ver, effective_from, country, category, usd_micros, published_at, actor) VALUES (4, ?, 'AE', 'marketing', 900000, 0, 'op')").bind(later + 86_400_000).run();
+    await workspace(ws).refreshPricing();
+    await workspace(ws).refreshPricing();
+    const charges = (await ledger(ws)).filter((r) => r.kind === 'meta_charge');
+    expect(charges).toHaveLength(1); // charged as soon as the version is known, once
+    expect(charges[0]).toMatchObject({ amount_minor: -1500, rate_ver: 3 }); // 300000 usd micros x 50 EGP = 15 EGP; not the dearer v4
+    expect(await holdOf(ws, j)).toMatchObject({ state: 'charged' });
+    await workspace(ws).runDueTasks(Date.now() + 2 * 3_600_000);
+    expect((await ledger(ws)).filter((r) => r.kind === 'meta_charge')).toHaveLength(1);
+  });
+
+  it('no rate ever: after 7 days the sweep charges the held estimate and alerts, so the send is never free', async () => {
+    const spy = spyAlerts();
+    const ws = W(9);
+    const j = await pendingDelivery(ws, '91', '96550000001', 'KW');
+    await workspace(ws).runDueTasks(Date.now() + 8 * 86_400_000);
+    const charges = (await ledger(ws)).filter((r) => r.kind === 'meta_charge');
+    expect(charges).toHaveLength(1);
+    expect(charges[0]).toMatchObject({ amount_minor: -500, ref: `meta:${wamidOf('pr91')}` });
+    expect(await holdOf(ws, j)).toMatchObject({ state: 'charged' });
+    expect(names(spy)).toContain('rate_missing_estimate_charged');
   });
 });

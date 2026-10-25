@@ -46,10 +46,3 @@ CREATE TABLE wallet_adjustments (
   decided_at INTEGER
 );
 
--- Funding must be KNOWN for every number (a missing row means "unknown", and an unknown number cannot send). Connecting a number writes
--- merchant_card here, in the same statement; the shared (platform-paid) number is then set to platform_line by the operator.
-INSERT OR IGNORE INTO number_funding (phone_number_id, funding, updated_at) SELECT phone_number_id, 'merchant_card', 0 FROM phone_numbers;
-CREATE TRIGGER phone_numbers_default_funding AFTER INSERT ON phone_numbers
-BEGIN
-  INSERT OR IGNORE INTO number_funding (phone_number_id, funding, updated_at) VALUES (NEW.phone_number_id, 'merchant_card', 0);
-END;

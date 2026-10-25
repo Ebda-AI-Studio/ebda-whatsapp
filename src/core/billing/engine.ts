@@ -25,6 +25,8 @@ export const WAIT_MAX_MS = 48 * HOUR;
 /** A message with no status this long after the send is presumed lost: Meta's retry horizon (30 d) plus a day. */
 export const HOLD_TTL_MS = 31 * DAY;
 export const AUTH_HOLD_TTL_MS = 2 * DAY;
+/** A billable delivery that still has no rate this long after delivery is charged at its held estimate (and alerted): never free. */
+export const PENDING_RATE_MAX_MS = 7 * DAY;
 export const PARENT_HOLD_TTL_MS = 60 * DAY;
 export const LOW_BALANCE_MINOR = 2000;
 const DRAIN_DELAY_MS = 1000;
@@ -48,7 +50,7 @@ export type BillingStatus = { wamid: string; status: 'sent' | 'delivered' | 'rea
 type HoldRow = { ref: string; parent_ref: string | null; amount_minor: number; category_est: string | null; state: 'held' | 'charged' | 'released' | 'expired'; wait_until: number | null; expires_at: number; number_id: string | null; country: string | null; funding: Funding | null };
 type SendRow = {
   wamid: string; hold_ref: string | null; number_id: string | null; country: string | null; category_est: string | null; category_meta: string | null; pricing_model: string | null;
-  billable: number | null; funding: Funding; delivered_at: number | null; charged_ref: string | null; charged_category: string | null; charged_minor: number | null; unpriced: number;
+  billable: number | null; funding: Funding; delivered_at: number | null; charged_ref: string | null; charged_category: string | null; charged_minor: number | null; unpriced: number; pending_rate: number;
 };
 
 const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
@@ -315,7 +317,7 @@ export class Billing {
 
   private send(wamid: string): SendRow | undefined {
     return this.sql.exec<SendRow>(
-      `SELECT wamid, hold_ref, number_id, country, category_est, category_meta, pricing_model, billable, funding, delivered_at, charged_ref, charged_category, charged_minor, unpriced
+      `SELECT wamid, hold_ref, number_id, country, category_est, category_meta, pricing_model, billable, funding, delivered_at, charged_ref, charged_category, charged_minor, unpriced, pending_rate
          FROM billable_sends WHERE wamid = ?`, wamid,
     ).toArray()[0];
   }
@@ -357,7 +359,7 @@ export class Billing {
    * released. A late billable event still charges even if the hold expired (the charge never needs the hold). Service messages on an
    * `platform_line` number are charged at the normal service rate whatever Meta billed (WA-SHARED-FREE-1; trued up at month close).
    */
-  private settleDelivered(wamid: string, now: number): void {
+  private settleDelivered(wamid: string, now: number, late = false): void {
     const bs = this.send(wamid);
     if (!bs || bs.charged_ref || bs.delivered_at === null || bs.unpriced) return;
     const category = bs.category_meta ?? bs.category_est ?? 'service';
@@ -375,12 +377,12 @@ export class Billing {
       alert('billing_unpriced_model', { workspace: this.workspaceId, model: bs.pricing_model.slice(0, 16) });
       return;
     }
-    const price = priceAt(this.sql, { country: bs.country ?? 'ROW', category, t: bs.delivered_at });
+    const price = priceAt(this.sql, { country: bs.country ?? 'ROW', category, t: bs.delivered_at, ...(late ? { later: true } : {}) });
     if (!price) {
       if (bs.funding === 'platform_line') {
         // Meta billed us and we cannot price it yet: never free. Kept as pending_rate and charged when a rate appears (retryPendingRates).
+        // The hold STAYS (the money stays reserved) until a rate prices it or the estimate is charged in the end.
         this.sql.exec('UPDATE billable_sends SET pending_rate = 1 WHERE wamid = ?', wamid);
-        releaseHold('pending_rate');
         alert('rate_missing_pending', { workspace: this.workspaceId, country: bs.country, category });
         addTask(this.sql, 'wallet_sweep', now + HOUR);
         this.touch();
@@ -412,11 +414,28 @@ export class Billing {
 
   /** A rate (or FX) version arrived: every billable delivery that waited for one is priced now. Idempotent (the charge ref is meta:<wamid>). Returns how many are still waiting. */
   retryPendingRates(now: number): number {
-    for (const r of this.sql.exec<{ wamid: string }>('SELECT wamid FROM billable_sends WHERE pending_rate = 1 ORDER BY delivered_at').toArray()) {
+    for (const r of this.sql.exec<{ wamid: string; delivered_at: number }>('SELECT wamid, delivered_at FROM billable_sends WHERE pending_rate = 1 ORDER BY delivered_at').toArray()) {
       this.sql.exec('UPDATE billable_sends SET pending_rate = 0 WHERE wamid = ?', r.wamid);
-      this.settleDelivered(r.wamid, now); // puts it back to pending_rate if the rate is still missing
+      // The version in effect at delivery, else the earliest one published after it (versions are published ahead, so none may "predate" a past delivery).
+      this.settleDelivered(r.wamid, now, true);
+      const still = this.send(r.wamid);
+      if (still?.pending_rate && now - r.delivered_at >= PENDING_RATE_MAX_MS) this.chargeEstimate(r.wamid, now);
     }
     return this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM billable_sends WHERE pending_rate = 1').one().n;
+  }
+
+  /** No rate ever arrived: the held estimate is charged so a billed message is not free, with an alert for the operator to publish the rate and reconcile. */
+  private chargeEstimate(wamid: string, now: number): void {
+    const bs = this.send(wamid);
+    const h = bs?.hold_ref ? this.hold(bs.hold_ref) : undefined;
+    if (!bs || !h || h.amount_minor <= 0) {
+      alert('rate_missing_no_estimate', { workspace: this.workspaceId, country: bs?.country });
+      return;
+    }
+    this.post({ kind: 'meta_charge', netMinor: -h.amount_minor, ref: `meta:${wamid}`, now, wamid, category: bs.category_meta ?? bs.category_est ?? 'service', note: 'estimate: no rate published' });
+    this.sql.exec('UPDATE billable_sends SET pending_rate = 0, charged_ref = ?, charged_category = ?, charged_minor = ? WHERE wamid = ?', `meta:${wamid}`, bs.category_meta ?? bs.category_est, h.amount_minor, wamid);
+    if (bs.hold_ref) this.close(bs.hold_ref, 'charged', null, now);
+    alert('rate_missing_estimate_charged', { workspace: this.workspaceId, country: bs.country });
   }
 
   /** Meta's billed category wins: a later status that names another category than the one we charged posts the difference as meta_adjust. */

@@ -57,26 +57,35 @@ export function settingsAt(sql: Sql, t: number): Settings {
 
 type RateRow = { ver: number; usd_micros: number };
 /** The rate in effect at `t` for a market and category; falls back to the rest-of-world row of the same card. */
-export function rateAt(sql: Sql, country: string, category: string, t: number): RateRow | null {
+export function rateAt(sql: Sql, country: string, category: string, t: number, later = false): RateRow | null {
   const q = 'SELECT ver, usd_micros FROM pricing_rates WHERE country = ? AND category = ? AND effective_from <= ? ORDER BY effective_from DESC, ver DESC LIMIT 1';
+  // `later`: nothing was in effect at t (a delivery that predates the first published version): the EARLIEST version after t.
+  const after = 'SELECT ver, usd_micros FROM pricing_rates WHERE country = ? AND category = ? AND effective_from > ? ORDER BY effective_from ASC, ver ASC LIMIT 1';
   const fallbacks = category === 'authentication_international' ? ['authentication_international', 'authentication'] : [category];
   for (const c of fallbacks) {
     const hit = sql.exec<RateRow>(q, country, c, t).toArray()[0] ?? (country === 'ROW' ? undefined : sql.exec<RateRow>(q, 'ROW', c, t).toArray()[0]);
     if (hit) return hit;
   }
+  if (later) {
+    for (const c of fallbacks) {
+      const hit = sql.exec<RateRow>(after, country, c, t).toArray()[0] ?? (country === 'ROW' ? undefined : sql.exec<RateRow>(after, 'ROW', c, t).toArray()[0]);
+      if (hit) return hit;
+    }
+  }
   return null;
 }
 
-export function fxAt(sql: Sql, t: number): { ver: number; micros: number; bufferBps: number } | null {
-  const r = sql.exec<{ ver: number; egp_per_usd_micros: number; buffer_bps: number }>('SELECT ver, egp_per_usd_micros, buffer_bps FROM pricing_fx WHERE effective_from <= ? ORDER BY effective_from DESC, ver DESC LIMIT 1', t).toArray()[0];
+export function fxAt(sql: Sql, t: number, later = false): { ver: number; micros: number; bufferBps: number } | null {
+  const r = sql.exec<{ ver: number; egp_per_usd_micros: number; buffer_bps: number }>('SELECT ver, egp_per_usd_micros, buffer_bps FROM pricing_fx WHERE effective_from <= ? ORDER BY effective_from DESC, ver DESC LIMIT 1', t).toArray()[0]
+    ?? (later ? sql.exec<{ ver: number; egp_per_usd_micros: number; buffer_bps: number }>('SELECT ver, egp_per_usd_micros, buffer_bps FROM pricing_fx WHERE effective_from > ? ORDER BY effective_from ASC, ver ASC LIMIT 1', t).toArray()[0] : undefined);
   return r ? { ver: r.ver, micros: r.egp_per_usd_micros, bufferBps: r.buffer_bps } : null;
 }
 
 /** Price of one message at time `t`, or null when the rate card or FX has nothing in effect (the caller alerts; it never guesses). */
-export function priceAt(sql: Sql, a: { country: string; category: string; t: number }): Priced | null {
+export function priceAt(sql: Sql, a: { country: string; category: string; t: number; later?: boolean }): Priced | null {
   const category = normaliseCategory(a.category);
-  const rate = rateAt(sql, a.country, category, a.t);
-  const fx = fxAt(sql, a.t);
+  const rate = rateAt(sql, a.country, category, a.t, a.later);
+  const fx = fxAt(sql, a.t, a.later);
   if (!rate || !fx) return null;
   const st = settingsAt(sql, a.t);
   const net = priceMinor({ usdMicros: rate.usd_micros, fxMicros: fx.micros, marginBps: st.marginBps, fxBufferBps: st.fxBufferBps + fx.bufferBps });

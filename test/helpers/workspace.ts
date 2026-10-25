@@ -4,6 +4,8 @@ export async function seedNumber(phoneNumberId: string, workspaceId: string, sta
   await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(workspaceId, workspaceId, Date.now()),
     env.DB.prepare('INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status, display_phone) VALUES (?, ?, ?, ?, ?)').bind(phoneNumberId, wabaId, workspaceId, status, displayPhone),
+    // what connecting an own number does (the connect hook records the funding explicitly)
+    env.DB.prepare("INSERT OR IGNORE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, 'merchant_card', 0)").bind(phoneNumberId),
   ]);
 }
 
