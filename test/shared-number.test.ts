@@ -2,7 +2,7 @@ import { createExecutionContext, createMessageBatch, env, getQueueResult } from 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import worker from '../src/index';
 import { brandPack } from '../src/brand';
-import { customerKey } from '../src/core/shared/shared-number';
+import { customerKey, displayNameKey } from '../src/core/shared/shared-number';
 import type { SendJob } from '../src/core/send-queue';
 import { adminToken, apiFor, graphStub, storeId as W, useApiKey } from './helpers/api';
 import { sign } from './helpers/meta';
@@ -468,6 +468,18 @@ describe('security review fixes (2026-10-25)', () => {
       const r = await c.call('POST', '/shared-number/join', { displayName: name });
       expect(r.status, name).toBe(409);
     }
+  });
+
+  it('the look-alike skeleton is one step: a key never changes when folded again', () => {
+    for (const name of ['Cаirо', 'ії ιι 11 ii ll', 'کریم ۲', 'Ａｌｉ']) expect(displayNameKey(displayNameKey(name)), name).toBe(displayNameKey(name));
+    expect(displayNameKey('Kіm')).toBe(displayNameKey('Kim'));
+  });
+
+  it('a name is stored as the customer will see it: outer spaces and invisible format marks are removed, inner runs of space collapse', async () => {
+    await operatorRegister();
+    const c = await store(784);
+    expect((await c.call('POST', '/shared-number/join', { displayName: '   \u200f\u200dDelta   Shop  ' })).status).toBe(200);
+    expect((await env.DB.prepare('SELECT display_name FROM shared_number_members WHERE workspace_id = ?').bind(c.ws).first<{ display_name: string }>())?.display_name).toBe('Delta Shop');
   });
 
   it('uniqueness is judged on the name the customer sees in the list, not the full stored name', async () => {

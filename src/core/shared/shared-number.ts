@@ -11,6 +11,7 @@
 import type { Env } from '../../env';
 import type { SharedNumberCopy } from '../../brand';
 import { z } from 'zod';
+import { canonicalDisplayName } from '../api/contract';
 import { fundingStatement } from '../billing/funding';
 import { detectOptOut } from '../consent';
 import { sendList, sendText } from '../meta/client';
@@ -89,10 +90,11 @@ export async function sharedStatus(env: Env, workspaceId: string): Promise<Share
   return { available: true, member: !!m, displayName: m?.display_name ?? null, displayPhone: num.display_phone };
 }
 
+// Every entry maps straight to its final letter (i → l, so і/ї/ι → l too): one pass is the whole skeleton.
 // Letters from other scripts that render like a Latin or Arabic letter, and characters that read as one another (a TR39-style skeleton, kept small).
 const LOOKALIKE: Record<string, string> = {
-  'а': 'a', 'в': 'b', 'е': 'e', 'ё': 'e', 'к': 'k', 'м': 'm', 'н': 'h', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', 'у': 'y', 'х': 'x', 'і': 'i', 'ї': 'i', 'ј': 'j', 'ѕ': 's', 'ԁ': 'd', 'ԛ': 'q', 'ԝ': 'w',
-  'α': 'a', 'β': 'b', 'ε': 'e', 'η': 'n', 'ι': 'i', 'κ': 'k', 'ν': 'v', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'u', 'χ': 'x', 'ς': 's',
+  'а': 'a', 'в': 'b', 'е': 'e', 'ё': 'e', 'к': 'k', 'м': 'm', 'н': 'h', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', 'у': 'y', 'х': 'x', 'і': 'l', 'ї': 'l', 'ј': 'j', 'ѕ': 's', 'ԁ': 'd', 'ԛ': 'q', 'ԝ': 'w',
+  'α': 'a', 'β': 'b', 'ε': 'e', 'η': 'n', 'ι': 'l', 'κ': 'k', 'ν': 'v', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'u', 'χ': 'x', 'ς': 's',
   '0': 'o', '1': 'l', 'i': 'l',
   'ی': 'ي', 'ې': 'ي', 'ک': 'ك', 'ڪ': 'ك', 'ہ': 'ه', 'ۀ': 'ه', 'ۃ': 'ه', 'ھ': 'ه',
 };
@@ -104,7 +106,7 @@ const LOOKALIKE: Record<string, string> = {
  * Two names with one key look the same to a customer.
  */
 export function displayNameKey(name: string): string {
-  const folded = clip(name.trim(), ROW_TITLE_MAX).normalize('NFKC').toLowerCase()
+  const folded = clip(canonicalDisplayName(name), ROW_TITLE_MAX).normalize('NFKC').toLowerCase()
     .replace(/[ً-ٰٟـ]/g, '')
     .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
     .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
@@ -115,7 +117,8 @@ export function displayNameKey(name: string): string {
 export async function joinShared(env: Env, workspaceId: string, displayName?: string, now = Date.now()): Promise<SharedStatus | null | 'name_taken'> {
   const num = await currentSharedNumber(env);
   if (!num) return null;
-  const name = displayName ?? (await env.DB.prepare('SELECT name FROM workspaces WHERE id = ?').bind(workspaceId).first<{ name: string }>())?.name;
+  const raw = displayName ?? (await env.DB.prepare('SELECT name FROM workspaces WHERE id = ?').bind(workspaceId).first<{ name: string }>())?.name;
+  const name = raw === undefined ? undefined : canonicalDisplayName(raw);
   if (!name) return null;
   try {
     await env.DB.prepare(
