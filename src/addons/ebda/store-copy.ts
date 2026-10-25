@@ -38,6 +38,17 @@ export const EBDA_ORDERING_COPY: OrderingCopy = {
   codConfirmTitles: ['أيوه، أكّد الطلب'],
   codRefuseTitles: ['إلغاء الطلب'],
   customerName: L('عميلنا العزيز', 'there'),
+  menu: {
+    menuWords: ['menu', 'القائمة', 'القايمة'],
+    greetingWords: ['hi', 'hello', 'hey', 'good morning', 'good evening', 'السلام عليكم', 'سلام', 'اهلا', 'أهلاً', 'مرحبا', 'هلا', 'صباح الخير', 'مساء الخير'],
+    locationWords: ['location', 'address', 'where are you', 'العنوان', 'فين', 'مكانكم', 'موقعكم', 'لوكيشن'],
+    body: L('أهلاً بيك 👋 اختار من القايمة اللي محتاج تعرفه، أو اطلب مباشرة من هنا.', 'Welcome 👋 Pick what you would like to know from the list, or order right here.'),
+    button: L('القايمة', 'Menu'),
+    orderRow: L('اطلب دلوقتي', 'Order now'),
+    locationRow: L('عنواننا', 'Our location'),
+    humanRow: L('كلّم حد مننا', 'Talk to a person'),
+    handedOff: L('تمام، حد من فريقنا هيرد عليك هنا في أقرب وقت.', 'Okay, someone from our team will reply to you here shortly.'),
+  },
   money: (minor, currency, locale) => (currency === 'EGP' ? (locale === 'ar' ? `${plainAmount(minor)} جنيه` : `EGP ${plainAmount(minor)}`) : `${plainAmount(minor)} ${currency}`),
   shipmentPhrase: (status, locale) => SHIPMENT[status]?.[locale] ?? null,
   t: {

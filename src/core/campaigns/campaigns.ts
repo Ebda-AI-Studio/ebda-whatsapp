@@ -391,7 +391,7 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
       const code = baseUrl ? linkCodeFor(host, id, r.id, now) : null;
       const q = queueTemplate(host, {
         waId: r.waId, phoneNumberId: c.phone_number_id, name: c.template_name, language: c.template_language,
-        params: resolveParams(specs, r.name, baseUrl && code ? { baseUrl, code } : undefined), idempotencyKey: idem, requireConsent: true, profileName: r.name, now,
+        params: resolveParams(specs, r.name, baseUrl && code ? { baseUrl, code } : undefined), idempotencyKey: idem, requireConsent: true, campaign: true, profileName: r.name, now,
       });
       const skipped = !q.ok;
       if (skipped && code) host.sql.exec('DELETE FROM campaign_links WHERE code = ?', code);

@@ -42,10 +42,12 @@ import { OTP_RATE_WINDOW_MS } from './otp-policy';
 import { OTP_MASK } from './templates';
 import type { OtpResult } from './otp';
 import { queueTemplate } from './store-link/outbound';
+import { forgetBuyer, noteOptOutChange, pushOptOut } from './store-link/consent';
 import { storeLink } from './store-link';
 import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
 import { agentActive } from './ai/agent';
 import { runTurn } from './ai/router';
+import { frontDeskActive, frontDeskOwnsReplies } from './front-desk';
 import { testConnector } from './connectors/registry';
 import { connectorDto, deleteConnector, listConnectors, planConnectorPut, writeConnector, type PutRefusal } from './connectors/store';
 import type { ConnectorDto, ConnectorPut } from './api/contract';
@@ -194,7 +196,8 @@ export class WorkspaceDO extends DurableObject<Env> {
     // While the ordering bot is on it owns the conversation: the generic auto reply would talk over it.
     const ordering = orderingActive(this.host());
     const agent = agentActive(this.host());
-    if (ordering || agent) config = { ...config, autoReplyText: undefined };
+    const front = frontDeskActive(this.host());
+    if (ordering || agent || frontDeskOwnsReplies(this.host(), Date.now())) config = { ...config, autoReplyText: undefined };
     // Large bodies go to R2 first (outside the transaction); skipped for a wamid we already stored, so redelivery writes nothing.
     const bodies = new Map<string, string>();
     for (const m of batch.inbound) {
@@ -248,13 +251,16 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.sql.exec('UPDATE conversations SET unread = unread + 1 WHERE id = ?', conversationId);
         if (optOut) {
           // A reply to STOP is optional under Meta's rules and we send none: the opt-out is silent and immediate.
+          const wasOptedOut = this.sql.exec<{ o: number | null }>('SELECT opted_out_at AS o FROM contacts WHERE id = ?', contactId).one().o != null;
           this.sql.exec("UPDATE contacts SET opted_out_at = max(coalesce(opted_out_at, 0), ?), consent_source = 'keyword_stop', consent_at = ? WHERE id = ?", m.ts * 1000, now, contactId);
+          if (!wasOptedOut && noteOptOutChange(this.host(), m.from, true, m.ts * 1000, now)) linkWork = true;
         } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
-          this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId);
+          const cleared = this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId).rowsWritten > 0;
+          if (cleared && noteOptOutChange(this.host(), m.from, false, now, now)) linkWork = true;
         }
         const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
         if (wasCodReply) linkWork = true;
-        else if ((ordering || agent) && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image' || (agent && (m.type === 'audio' || m.type === 'video' || m.type === 'document')))) {
+        else if ((ordering || agent || front) && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image' || (agent && (m.type === 'audio' || m.type === 'video' || m.type === 'document')))) {
           addTask(this.sql, 'bot_turn', now, botInputFrom(m, inserted.id, batch.phoneNumberId));
           linkWork = true;
         }
@@ -1678,15 +1684,35 @@ export class WorkspaceDO extends DurableObject<Env> {
     await this.arm();
   }
 
+  /** The alarm's run while it is in flight: a direct caller of runDueTasks waits for it (see there). */
+  private alarmRun: Promise<unknown> | null = null;
+
   async alarm(): Promise<void> {
-    await this.runDueTasks(Date.now());
+    const run = this.drainDueTasks(Date.now());
+    this.alarmRun = run;
+    try {
+      await run;
+    } finally {
+      if (this.alarmRun === run) this.alarmRun = null;
+    }
+  }
+
+  /**
+   * Runs every due task, then waits for an alarm run that was already in flight. A task the alarm had claimed (leased) is skipped by
+   * our own pass, so without the wait a caller could return while that task's work (e.g. a hand-over to the send queue) was still
+   * underway, and see a state that is about to change.
+   */
+  async runDueTasks(now = Date.now()): Promise<{ ran: number; failed: number }> {
+    const r = await this.drainDueTasks(now);
+    if (this.alarmRun) await this.alarmRun.catch(() => undefined);
+    return r;
   }
 
   /**
    * Runs every due task, each in isolation: a failure is recorded with exponential backoff and never stops the others.
    * A handler may return the next due time (daily tasks reschedule themselves) or nothing (the task is done).
    */
-  async runDueTasks(now = Date.now()): Promise<{ ran: number; failed: number }> {
+  private async drainDueTasks(now: number): Promise<{ ran: number; failed: number }> {
     let ran = 0;
     let failed = 0;
     for (;;) {
@@ -1754,6 +1780,9 @@ export class WorkspaceDO extends DurableObject<Env> {
         if (typeof orderId === 'string') await pushCodOutcome(this.host(), orderId, now);
         return undefined;
       }
+      case 'opt_out_push':
+        await pushOptOut(this.host(), payload);
+        return undefined;
       case 'erased_order_notify':
         await pushErasedOrders(this.host());
         return undefined;
@@ -1902,8 +1931,9 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   async eraseContact(waId: string): Promise<EraseResult> {
     const found = this.ctx.storage.transactionSync(() => {
-      const contact = this.sql.exec<{ id: number }>('SELECT id FROM contacts WHERE wa_id = ?', waId).toArray()[0];
+      const contact = this.sql.exec<{ id: number; buyer_key: string | null }>('SELECT id, buyer_key FROM contacts WHERE wa_id = ?', waId).toArray()[0];
       if (!contact) return { found: false, keys: 0, messages: 0, statusEvents: 0 };
+      forgetBuyer(this.host(), contact.buyer_key);
       const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
       const msgs = conv
         ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null; media_r2_key: string | null; idempotency_key: string | null; direction: string }>('SELECT wamid, body_r2_key, media_r2_key, idempotency_key, direction FROM messages WHERE conversation_id = ?', conv.id).toArray()
@@ -1937,6 +1967,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM agent_handoffs WHERE wa_id = ?', waId);
+      this.sql.exec('DELETE FROM store_state WHERE key = ?', `away:${waId}`);
       if (conv) this.sql.exec('DELETE FROM agent_turns WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
       this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       if (conv) {
