@@ -40,6 +40,7 @@ Check `npx wrangler whoami` first; never deploy to any other account.
 | Vectorize index (AI knowledge base) | `npx wrangler vectorize create ebda-wa-kb --dimensions=<model dims> --metric=cosine`, then uncomment the binding | `VECTORIZE` |
 | Store events queues | `npx wrangler queues create ebda-wa-events` (+ `-dlq`), `ebda-store-events`; uncomment bindings | `STORE_EVENTS`, consumer |
 | Store service binding | uncomment once the Store Worker exists | `STORE_BRIDGE` |
+| Accounts revocation binding | uncomment the `services` line in `wrangler.jsonc` once `ebda-accounts` (entrypoint `Accounts`, RPC `isRevoked(sid)`) is deployed; top-ups and operator writes answer 503 until then | `ACCOUNTS` |
 | Billing alerts (Ahmad clicks) | `docs/runbooks/cloudflare-account.md` § Billing alerts | n/a |
 
 ## 7. Secrets (Ahmad pastes values, Claude runs the commands)
@@ -54,9 +55,8 @@ Generate random keys locally: `node -e "console.log(crypto.randomBytes(32).toStr
 CI is paused by Ahmad's instruction. To resume: bring the Umbra runner for this repo online, set repo variable `EBDA_RUNS_ON` to `["self-hosted","umbra-ebda"]` (JSON), and confirm the remote Actions cache stays off on the self-hosted runner. Branch protection: require `ci` + `gitleaks` on `main`.
 
 ## 10. Merge order (Claude, after Ahmad's go)
-1. `feat/phase4-7` (store link, AI agent, campaigns, billing, UI) → `main`
-2. Phase 8 branches (own numbers, shared number, operator console, onboarding)
-3. Phase 9 (white-label kit) when the first white-label client is signed
+1. `feat/phase4-7` → `main` in one PR: it already carries Phases 4-9 (store link, AI agent, campaigns, billing and its screens, own numbers, shared number, operator console, connectors, brand packs, white-label kit) and the final whole-branch review fixes.
+2. Launch is joint with Ebda Store (LAUNCH-SUITE-1): accounts.ebda.app live first, then this deploy; the Store session holds the launch gate.
 Each merge: full suite green twice locally, CI green, then deploy.
 
 ## 11. Migrations (Claude)

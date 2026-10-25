@@ -2,10 +2,10 @@ import { SELF } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { brandPack } from '../src/brand';
 
-it('GET /health returns ok and the commit', async () => {
+it('GET /health returns ok and the commit, in the suite status page\'s shape ("status": "ok")', async () => {
   const res = await SELF.fetch('https://x/health');
   expect(res.status).toBe(200);
-  expect(await res.json()).toMatchObject({ ok: true, service: 'ebda-wa', commit: 'dev' });
+  expect(await res.json()).toMatchObject({ ok: true, status: 'ok', service: 'ebda-wa', commit: 'dev' });
 });
 
 it('/health names the service from the brand pack (the deployment\'s BRAND), and no pack leaves it empty', async () => {

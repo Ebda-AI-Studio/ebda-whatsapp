@@ -7,6 +7,6 @@ export const BRAND: WebBrand = {
   mark: { src: '/brand/demo-mark.svg', alt: 'Demo Company', width: 30, height: 30 },
   appleTouchIcon: null,
   accountsUrl: null,
-  helpBase: null,
+  helpUrl: null,
   storeName: null,
 };

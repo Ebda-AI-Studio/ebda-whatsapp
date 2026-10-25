@@ -112,7 +112,7 @@ api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   const e164 = normaliseE164(c.req.param('waId'));
   if (!e164) return c.json({ error: 'invalid phone number' }, 400);
   const storeId = c.req.param('storeId');
-  // For Ebda stores the workspace id is the store id (Phase 1 ruling). Never touch a DO for an unregistered workspace.
+  // For Ebda Store stores the workspace id is the store id (Phase 1 ruling). Never touch a DO for an unregistered workspace.
   const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(storeId).first();
   if (!known) return c.json({ error: 'workspace not found' }, 404);
   const result = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId)).eraseContact(e164.slice(1));
@@ -153,7 +153,7 @@ app.post('/kashier/webhook', async (c) => {
   return c.text(out.body, out.status);
 });
 
-app.get('/health', (c) => c.json({ ok: true, service: PACK.service, commit: c.env.COMMIT_SHA || 'dev' }));
+app.get('/health', (c) => c.json({ ok: true, status: 'ok', service: PACK.service, commit: c.env.COMMIT_SHA || 'dev' }));
 
 app.get('/meta/webhook', (c) => {
   const mode = c.req.query('hub.mode');
