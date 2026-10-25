@@ -3,7 +3,9 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CampaignDto } from '../../../src/core/api/contract';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { useLoad } from '../lib/useLoad';
 import { CampaignForm } from './CampaignForm';
+import { LoadError } from './LoadError';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number };
 
@@ -12,21 +14,19 @@ export function dateTime(at: number, lang: Lang): string {
 }
 
 export function CampaignsScreen({ t, lang, source, api, now }: Props) {
-  const [items, setItems] = useState<CampaignDto[] | null>(null);
+  const list = useCallback(() => api.list(), [api]);
+  const { data: items, setData: setItems, error: loadFailed, reload: load } = useLoad<CampaignDto[]>(list);
   const [mode, setMode] = useState<'list' | 'new'>('list');
   const owner = source.role !== 'staff';
-  const load = useCallback(() => api.list().then(setItems, () => setItems([])), [api]);
-
-  useEffect(() => { void load(); }, [load]);
   // Running campaigns move on their own: refresh while one is in flight.
   useEffect(() => {
     if (!items?.some((c) => c.status === 'running' || c.status === 'scheduled')) return;
-    const id = setInterval(() => void load(), 15_000);
+    const id = setInterval(load, 15_000);
     return () => clearInterval(id);
   }, [items, load]);
 
   if (mode === 'new') {
-    return <CampaignForm t={t} lang={lang} source={source} api={api} now={now} onClose={() => { setMode('list'); void load(); }} />;
+    return <CampaignForm t={t} lang={lang} source={source} api={api} now={now} onClose={() => { setMode('list'); load(); }} />;
   }
 
   const replace = (c: CampaignDto) => setItems((xs) => xs?.map((x) => (x.id === c.id ? c : x)) ?? null);
@@ -39,9 +39,10 @@ export function CampaignsScreen({ t, lang, source, api, now }: Props) {
         {owner && <button type="button" className="btn primary head-action" onClick={() => setMode('new')}><Plus size={18} aria-hidden />{t.newCampaign}</button>}
       </header>
       <div className="settings wide">
-        {items === null ? <div className="placeholder">…</div>
+        {loadFailed ? <LoadError t={t} onRetry={load} />
+          : items === null ? <div className="placeholder">…</div>
           : items.length === 0 ? <p className="empty-note">{t.campaignsEmpty}</p>
-          : items.map((c) => <CampaignRow key={c.id} c={c} t={t} lang={lang} owner={owner} api={api} onChange={replace} onRemoved={() => void load()} />)}
+          : items.map((c) => <CampaignRow key={c.id} c={c} t={t} lang={lang} owner={owner} api={api} onChange={replace} onRemoved={load} />)}
       </div>
     </main>
   );

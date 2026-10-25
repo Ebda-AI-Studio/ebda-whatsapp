@@ -6,7 +6,9 @@ import { ApiError } from '../data/api';
 import type { InboxSource, NumbersApi } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { SignupStopped, launchEmbeddedSignup } from '../lib/embedded-signup';
+import { useLoad } from '../lib/useLoad';
 import { dateTime } from './CampaignsScreen';
+import { LoadError } from './LoadError';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: NumbersApi };
 type Note = { kind: 'status' | 'alert'; text: string } | null;
@@ -21,14 +23,12 @@ function stateOf(n: NumberDto): 'active' | 'pending' | 'failed' | 'locked' | 'di
 }
 
 export function NumbersScreen({ t, lang, source, api }: Props) {
-  const [items, setItems] = useState<NumberDto[] | null>(null);
+  const list = useCallback(() => api.list(), [api]);
+  const { data: items, setData: setItems, error: loadFailed, reload: load } = useLoad<NumberDto[]>(list);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note>(null);
   const [checks, setChecks] = useState({ templates: false, agent: false });
   const owner = source.role !== 'staff';
-  const load = useCallback(() => api.list().then(setItems, () => setItems([])), [api]);
-
-  useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     void source.templates().then((ts) => setChecks((c) => ({ ...c, templates: ts.some((x) => x.status === 'APPROVED') })), () => undefined);
     void source.agentSettings?.().then((a) => setChecks((c) => ({ ...c, agent: !!a?.enabled })), () => undefined);
@@ -55,7 +55,7 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
       setItems((xs) => [...(xs ?? []).filter((x) => x.phoneNumberId !== added.phoneNumberId), added]);
     } catch (e) {
       setNote(explain(e));
-      void load(); // a half-finished connect still shows its number and what is left to do
+      load(); // a half-finished connect still shows its number and what is left to do
     } finally {
       setBusy(false);
     }
@@ -86,7 +86,8 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
           <p className="muted intro">{t.numbersIntro}</p>
           {busy && <p className="muted" role="status">{t.connecting}</p>}
           {note && <p role={note.kind} className={note.kind === 'alert' ? 'error-text' : 'muted'}>{note.text}</p>}
-          {items === null ? <div className="placeholder">…</div>
+          {loadFailed ? <LoadError t={t} onRetry={load} />
+            : items === null ? <div className="placeholder">…</div>
             : items.length === 0 ? <p className="empty-note">{t.numbersEmpty}</p>
             : items.map((n) => <NumberCard key={n.phoneNumberId} n={n} t={t} lang={lang} owner={owner} api={api} onChange={replace} onError={(e) => setNote(explain(e))} />)}
         </section>
