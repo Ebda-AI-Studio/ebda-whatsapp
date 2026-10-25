@@ -1,5 +1,6 @@
 import { SELF, env, listDurableObjectIds } from 'cloudflare:test';
 import { expect, it } from 'vitest';
+import { stubGraph } from './helpers/graph';
 import { postWebhook } from './helpers/meta';
 import { inboundPayload } from './helpers/payload';
 import { rows, seedNumber, workspace } from './helpers/workspace';
@@ -67,8 +68,11 @@ it('moves a body over 1 KB to R2 and keeps a 280-character preview', async () =>
 });
 
 it('stores a non-text message by type', async () => {
+  // The image schedules a media download: answer it here and run it now, so it cannot fire (unstubbed) during a later test.
+  stubGraph((c) => c.url.includes('lookaside') ? { status: 200, body: 'img' } : { status: 200, json: { url: 'https://lookaside.fbsbx.com/m1', mime_type: 'image/jpeg', file_size: 3 } });
   await seedNumber('pn-img', 'ws-img');
   await postWebhook(SELF, inboundPayload('pn-img', [{ id: 'wamid.img1', type: 'image' }]));
+  await workspace('ws-img').runDueTasks();
   expect(await rows('ws-img', 'SELECT type FROM messages')).toEqual([{ type: 'image' }]);
 });
 

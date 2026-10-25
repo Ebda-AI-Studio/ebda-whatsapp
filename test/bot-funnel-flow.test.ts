@@ -1,5 +1,5 @@
 import { SELF, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { stubGraph } from './helpers/graph';
 import { postWebhook } from './helpers/meta';
 import { buttonReply, catalogOrder, listReply, rawMessagePayload } from './helpers/payload';
@@ -38,7 +38,7 @@ async function orderCod(ws: string, pn: string, from = WA_1) {
 }
 
 describe('bot funnel at the bot\'s transitions', () => {
-  stubGraph();
+  beforeEach(() => { stubGraph(); }); // per test: setup.ts restores every mock after each test
 
   it('each transition records its step once: conversation, browse, cart, checkout, order', async () => {
     const { ws, pn } = await setup(1);
@@ -110,7 +110,7 @@ describe('bot funnel at the bot\'s transitions', () => {
 });
 
 describe('side steps: menu and handoff', () => {
-  stubGraph();
+  beforeEach(() => { stubGraph(); }); // per test: setup.ts restores every mock after each test
   const MENU = { enabled: true, items: [{ id: 'hours', title: { ar: 'مواعيد', en: 'Hours' }, answer: { ar: 'كل يوم', en: 'Daily' } }] };
 
   it('a service menu sent counts as menu, Talk to a person as handoff', async () => {
