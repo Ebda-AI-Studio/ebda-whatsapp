@@ -35,5 +35,6 @@ jobs:
           cache: ${{ vars.EBDA_RUNS_ON == '' && 'npm' || '' }}
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      # CI-only: 2 workers (the shared 4.9 GB VM ran out of memory and time with the default pool); local runs keep the default.
+      - run: npm test -- --maxWorkers=2
       - run: npm audit --audit-level=low
