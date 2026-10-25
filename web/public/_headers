@@ -1,0 +1,10 @@
+# Security headers for the inbox SPA (Cloudflare static assets). The Worker sets its own for /api, /meta, /health, /t.
+# connect-src: the API is same-origin (incl. the WebSocket); accounts.ebda.app issues the access token.
+# Meta's Embedded Signup script/frame hosts are added here when the onboarding screen ships (Phase 8.4), not before.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' https://accounts.ebda.app; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()

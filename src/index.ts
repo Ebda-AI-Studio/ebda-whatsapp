@@ -57,6 +57,31 @@ export class WhatsAppOtp extends WorkerEntrypoint<Env> {
 }
 
 const app = new Hono<{ Bindings: Env }>();
+// Everything the Worker answers itself (API, webhook, health, tracked links) is JSON, text or a redirect: nothing may load or
+// frame it. The SPA's own policy lives in web/public/_headers (served by static assets).
+const SECURITY_HEADERS: Record<string, string> = {
+  'strict-transport-security': 'max-age=63072000; includeSubDomains',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+};
+// Defaults only: a route that chose its own (tracked links: no-referrer; media: a sandboxing CSP) keeps it.
+// A WebSocket upgrade answers 101 from the Durable Object with immutable headers; page headers mean nothing on a protocol switch.
+app.use('*', async (c, next) => {
+  await next();
+  if (c.res.status === 101) return;
+  const missing = Object.entries(SECURITY_HEADERS).filter(([k]) => !c.res.headers.has(k));
+  if (!missing.length) return;
+  // Response.redirect() and passed-through fetch() responses have immutable headers: copy before setting.
+  try {
+    for (const [k, v] of missing) c.res.headers.set(k, v);
+  } catch {
+    const res = new Response(c.res.body, c.res);
+    for (const [k, v] of missing) res.headers.set(k, v);
+    c.res = res;
+  }
+});
 
 // One verifier per isolate so the JWKS cache survives across requests.
 let verifier: IdentityVerifier | undefined;
