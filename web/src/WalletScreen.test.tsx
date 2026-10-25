@@ -53,6 +53,17 @@ describe('wallet: balance and who pays Meta', () => {
     expect(within(shared).getByText(t.wFundingWallet)).toBeTruthy();
   });
 
+  it('a number whose payer is not set says it is not ready, and never claims Meta bills the card', async () => {
+    await openWallet(withWallet({ funding: [{ phoneNumberId: 'pn-x', displayPhone: '+20 100 555 0777', funding: 'unknown' }] }));
+    const funding = screen.getByRole('region', { name: t.wFundingTitle });
+    const li = within(funding).getByText(/\+20 100 555 0777/).closest('li')!;
+    expect(within(li).getByText(t.wFundingUnknown)).toBeTruthy();
+    expect(within(li).getByText(t.opFundingUnknown)).toBeTruthy();
+    expect(within(li).queryByText(t.wFundingCard)).toBeNull();
+    expect(within(li).queryByText(t.wFundingWallet)).toBeNull();
+    expect(screen.queryByText(t.wFundingCard)).toBeNull(); // the top-up card does not claim card billing either
+  });
+
   it('debt is stated and says the next top-up pays it first', async () => {
     await openWallet(withWallet({ debtMinor: 3000, balanceMinor: -3000, availableMinor: -5500 }));
     expect(screen.getAllByText(t.wDebtLine(egp(3000))).length).toBeGreaterThan(0);

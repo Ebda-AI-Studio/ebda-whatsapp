@@ -1,6 +1,7 @@
 import { ArrowRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CampaignDto, CampaignParam, SegmentCriteria, SegmentDto, SegmentPreviewDto, TemplateDto } from '../../../src/core/api/contract';
+import type { WalletDto } from '../data/billing';
 import { ApiError } from '../data/api';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
@@ -85,7 +86,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
     && (timing === 'now' || (scheduledAt !== undefined && Number.isFinite(scheduledAt) && scheduledAt > now()))
     && (dailyLimit === '' || Number(dailyLimit) >= 1);
 
-  const [funding, setFunding] = useState<{ funding: 'merchant_card' | 'platform_line' }[] | null>(null);
+  const [funding, setFunding] = useState<{ funding: WalletDto['funding'][number]['funding'] }[] | null>(null);
   useEffect(() => {
     void source.wallet?.wallet().then((w) => setFunding(w.funding), () => undefined);
   }, [source]);

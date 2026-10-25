@@ -21,7 +21,7 @@ walletRoutes.get('/stores/:storeId/wallet', async (c) => {
     .bind(c.req.param('storeId')!).all<{ phone_number_id: string; display_phone: string | null; funding: 'merchant_card' | 'platform_line' | null }>();
   const dto: WalletDto = {
     balanceMinor: v.balanceMinor, heldMinor: v.heldMinor, availableMinor: v.availableMinor, debtMinor: v.debtMinor, creditLimitMinor: v.creditLimitMinor, currency: 'EGP',
-    funding: results.map((r) => ({ phoneNumberId: r.phone_number_id, displayPhone: r.display_phone, funding: r.funding ?? 'merchant_card' })),
+    funding: results.map((r) => ({ phoneNumberId: r.phone_number_id, displayPhone: r.display_phone, funding: r.funding ?? 'unknown' })),
     topupsEnabled: topupsEnabled(c.env), lowBalance: v.lowBalance, aiCredits: v.aiCredits, plan: v.plan as WalletDto['plan'],
   };
   return c.json(dto);

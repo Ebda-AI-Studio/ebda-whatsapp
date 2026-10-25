@@ -127,8 +127,8 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
                 {wallet.funding.map((f) => (
                   <li key={f.phoneNumberId}>
                     <b><bdi dir="ltr">{f.displayPhone ?? f.phoneNumberId}</bdi></b>
-                    <span className="flag" data-ok={f.funding === 'merchant_card'}>{f.funding === 'merchant_card' ? t.opFundingCard : t.opFundingWallet}</span>
-                    <p className="muted">{f.funding === 'merchant_card' ? t.wFundingCard : t.wFundingWallet}</p>
+                    <span className="flag" data-ok={f.funding === 'merchant_card'}>{f.funding === 'merchant_card' ? t.opFundingCard : f.funding === 'unknown' ? t.opFundingUnknown : t.opFundingWallet}</span>
+                    <p className="muted">{f.funding === 'merchant_card' ? t.wFundingCard : f.funding === 'unknown' ? t.wFundingUnknown : t.wFundingWallet}</p>
                   </li>
                 ))}
               </ul>

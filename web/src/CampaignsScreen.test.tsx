@@ -52,7 +52,7 @@ describe('campaigns', () => {
     expect(created.audience.criteria).toEqual({ tags: { any: ['vip'] } });
   });
 
-  async function reviewWithZeroCost(funding: 'merchant_card' | 'platform_line') {
+  async function reviewWithZeroCost(funding: 'merchant_card' | 'platform_line' | 'unknown') {
     const source = createSampleSource();
     const create = source.campaigns!.create;
     source.campaigns!.create = async (req) => ({ ...(await create(req)), estimate: { audience: 500, perMessageMinor: 0, totalMinor: 0 } });
@@ -77,6 +77,12 @@ describe('campaigns', () => {
   it('a zero cost on a wallet-paid number still says the price is not ready', async () => {
     await reviewWithZeroCost('platform_line');
     expect(screen.getByText('التكلفة هتظهر هنا لما المحفظة تتفعّل.')).toBeTruthy();
+  });
+
+  it('a zero cost on a number whose payer is unknown is not claimed as card billing', async () => {
+    await reviewWithZeroCost('unknown');
+    expect(screen.getByText('التكلفة هتظهر هنا لما المحفظة تتفعّل.')).toBeTruthy();
+    expect(screen.queryByText('واتساب بيحاسب كارتك مباشرة على الرسايل دي، ومفيش حاجة هتتخصم من المحفظة.')).toBeNull();
   });
 
   it('refuses to review a tracked link that is not https', async () => {

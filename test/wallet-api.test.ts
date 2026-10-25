@@ -35,6 +35,14 @@ describe('GET /wallet', () => {
     expect(walletDto.parse(await (await api.call('GET', '/wallet')).json()).funding).toEqual([{ phoneNumberId: pn(ws), displayPhone: null, funding: 'merchant_card' }]);
   });
 
+  it('a number with no funding row is reported unknown, never as a card payer (the server refuses sends for it)', async () => {
+    const ws = W(1103);
+    const api = await apiFor(ws, 'owner', pn(ws));
+    await setupBilling(ws, { funding: null });
+    await env.DB.prepare('DELETE FROM number_funding WHERE phone_number_id = ?').bind(pn(ws)).run(); // seedNumber adds a card row; this number has none
+    expect(walletDto.parse(await (await api.call('GET', '/wallet')).json()).funding).toEqual([{ phoneNumberId: pn(ws), displayPhone: null, funding: 'unknown' }]);
+  });
+
   it('debt and the low-balance flag: a chargeback below zero is debt; one alert a day, not one per row', async () => {
     const spy = vi.spyOn(console, 'error');
     const ws = W(1102);
