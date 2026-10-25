@@ -6,6 +6,7 @@ import type { RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/bill
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
+import { useFocusOn } from '../lib/useFocusOn';
 import { useLoad } from '../lib/useLoad';
 import { dateTime } from './CampaignsScreen';
 import { LoadError } from './LoadError';
@@ -313,6 +314,7 @@ function RefundCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }
   const [note, setNote] = useState('');
   const [msg, setMsg] = useState<{ kind: 'alert' | 'status'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const msgRef = useFocusOn<HTMLParagraphElement>(msg);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
   const signed = (m: number) => formatSigned(m, lang);
 
@@ -341,7 +343,7 @@ function RefundCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }
         <label className="field"><span>{t.wRefundNote}</span><textarea dir="auto" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
         <div className="settings-actions"><button type="submit" className="btn primary" disabled={busy}>{t.wRefundSend}</button></div>
       </form>
-      {msg && <p role={msg.kind} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
+      {msg && <p ref={msgRef} tabIndex={-1} role={msg.kind} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
       <h3 className="pane-sub">{t.wRefundPast}</h3>
       {loadFailed ? <LoadError t={t} onRetry={reload} />
         : items === null ? <p className="muted">…</p> : items.length === 0 ? <p className="muted">{t.wRefundEmpty}</p> : (

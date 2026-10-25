@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CampaignDto } from '../../../src/core/api/contract';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { useFocusOn } from '../lib/useFocusOn';
 import { useLoad } from '../lib/useLoad';
 import { CampaignForm } from './CampaignForm';
 import { LoadError } from './LoadError';
@@ -51,13 +52,15 @@ export function CampaignsScreen({ t, lang, source, api, now }: Props) {
 function CampaignRow({ c, t, lang, owner, api, onChange, onRemoved }: { c: CampaignDto; t: Strings; lang: Lang; owner: boolean; api: CampaignsApi; onChange: (c: CampaignDto) => void; onRemoved: () => void }) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [acted, setActed] = useState(0);
+  const ref = useFocusOn<HTMLElement>(acted);
   const titleId = `camp-${c.id}`;
   const n = (v: number) => num(v, lang);
   const total = c.totals.recipients;
   const pct = (v: number) => (total > 0 ? `${Math.min(100, (v / total) * 100)}%` : '0%');
   const act = (fn: () => Promise<CampaignDto>) => async () => {
     setBusy(true);
-    try { onChange(await fn()); } catch { /* the list refresh shows the true state */ } finally { setBusy(false); setAsking(false); }
+    try { onChange(await fn()); setActed((k) => k + 1); } catch { /* the list refresh shows the true state */ } finally { setBusy(false); setAsking(false); }
   };
   const live = c.status === 'running' || c.status === 'scheduled' || c.status === 'paused';
   const when = c.status === 'scheduled' && c.scheduledAt ? t.scheduledFor(dateTime(c.scheduledAt, lang))
@@ -65,7 +68,7 @@ function CampaignRow({ c, t, lang, owner, api, onChange, onRemoved }: { c: Campa
     : c.startedAt ? t.startedAt(dateTime(c.startedAt, lang)) : null;
 
   return (
-    <article className="campaign" aria-labelledby={titleId} data-status={c.status}>
+    <article ref={ref} tabIndex={-1} className="campaign" aria-labelledby={titleId} data-status={c.status}>
       <div className="campaign-top">
         <h2 id={titleId}>{c.name}</h2>
         <span className="status-chip" data-status={c.status}>{t.campaignStatus[c.status]}</span>
