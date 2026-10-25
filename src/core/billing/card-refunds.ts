@@ -21,7 +21,7 @@ import { ensureAdjustmentApplied, requestAdjustment } from './operator';
 import { auditOnce } from './package-orders';
 import { isCardRefundOperation, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 
-export const OPEN = "('sending', 'pending', 'uncertain')";
+export const OPEN = "('sending', 'calling', 'pending', 'uncertain')";
 const STUCK_AFTER_MS = 3 * 86_400_000;
 const RECONCILE_AFTER_MS = 15 * 60_000;
 const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
@@ -29,7 +29,7 @@ const stubOf = (env: Env, workspaceId: string) => env.WORKSPACE_DO.get(env.WORKS
 
 export type CardRefundRow = {
   id: string; request_id: string | null; order_id: string; workspace_id: string; amount_minor: number; source: 'api' | 'dashboard' | 'webhook' | 'held';
-  state: 'sending' | 'pending' | 'uncertain' | 'succeeded' | 'failed' | 'linked' | 'held' | 'matched'; kashier_refund_id: string | null; created_at: number; updated_at: number; confirmed_at: number | null; candidate_id: string | null; note: string | null;
+  state: 'sending' | 'calling' | 'pending' | 'uncertain' | 'succeeded' | 'failed' | 'linked' | 'held' | 'matched'; kashier_refund_id: string | null; created_at: number; updated_at: number; confirmed_at: number | null; candidate_id: string | null; note: string | null;
 };
 const COLS = 'id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, confirmed_at, candidate_id, note';
 export const getCardRefund = (env: Env, id: string) => env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE id = ?`).bind(id).first<CardRefundRow>();
@@ -54,6 +54,12 @@ export async function refreshRequest(env: Env, requestId: string): Promise<void>
          ELSE 'paid' END
      WHERE id = ? AND state IN ('processing', 'manual_payout')`,
   ).bind(requestId).run();
+}
+
+/** The guarded flip that lets exactly one run send a row to the provider: true only for the run whose UPDATE changed the row. */
+export async function claimForCall(env: Env, id: string, now: number): Promise<boolean> {
+  const r = await env.DB.prepare("UPDATE card_refunds SET state = 'calling', updated_at = ? WHERE id = ? AND state = 'sending'").bind(now, id).run();
+  return r.meta.changes === 1;
 }
 
 /** Marks the approval's debit phase finished (every wallet chunk posted and every card refund row written). */
@@ -107,7 +113,7 @@ async function reconcileOwned(env: Env, t: TopupLite, ev: ParsedWebhook, owner: 
     if (await auditOnce(env, 'refund_id_conflict', t.workspace_id, ev.transactionId, now)) alert('refund_id_conflict', { severity: 'P1', workspace: t.workspace_id, orderId: t.order_id, refundId: ev.transactionId, operation: ev.operation ?? null, chargeback: !!ev.chargeback });
     return 'refund_unmatched';
   }
-  if (owner.state === 'sending' || owner.state === 'pending' || owner.state === 'uncertain') {
+  if (owner.state === 'sending' || owner.state === 'calling' || owner.state === 'pending' || owner.state === 'uncertain') {
     await settleCardRefund(env, owner.id, { to: ev.status === 'SUCCESS' ? 'succeeded' : 'failed' }, now); // false = another path settled it first
   }
   if (ev.status === 'SUCCESS') await markConfirmed(env, owner.id, now); // a signed, confirmed webhook named this refund by its id
@@ -365,7 +371,7 @@ export type MarkFailedResult = { ok: true } | { ok: false; reason: 'not_found' |
 export async function markCardRefundFailed(env: Env, a: { requestId: string; cardRefundId: string; actor: string }, now = Date.now(), provider: PaymentProvider | null = paymentProvider(env)): Promise<MarkFailedResult> {
   const row = await getCardRefund(env, a.cardRefundId);
   if (!row || row.request_id !== a.requestId || row.source !== 'api') return { ok: false, reason: 'not_found' };
-  if (row.state !== 'sending' && row.state !== 'uncertain') return { ok: false, reason: 'not_open' };
+  if (row.state !== 'sending' && row.state !== 'calling' && row.state !== 'uncertain') return { ok: false, reason: 'not_open' };
   if (!provider?.listRefunds) return { ok: false, reason: 'provider_unavailable' };
   const listed = await provider.listRefunds(row.order_id);
   if (listed === 'unavailable') return { ok: false, reason: 'provider_unavailable' };

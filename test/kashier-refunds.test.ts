@@ -649,3 +649,74 @@ describe('round 4 (Opus check)', () => {
   });
 });
 
+describe('round 5: an approval is run by exactly one run at a time, and a resume replays the recorded plan', () => {
+  /** Two top-ups (20000 + 10000), a 25000 request, and a first run whose second wallet debit is refused: chunks 20000 + 5000 are planned, only the first is debited. */
+  async function aborted(n: number) {
+    const a = await setup(n, 15000);
+    await env.DB.prepare('UPDATE refund_requests SET amount_minor = 25000 WHERE id = ?').bind(a.id).run();
+    await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, transaction_id, paid_at) VALUES (?, ?, 10000, 0, 10000, 'EGP', 'paid', 'u', 1, ?, 6)").bind(`o-kr${n}b`, a.ws, `TX-KR${n}b`).run();
+    kashierLedger.set(`TX-KR${n}b`, { operation: 'pay', status: 'SUCCESS', orderId: `o-kr${n}b` });
+    await fund(a.ws, 10000, `kashier:TX-KR${n}b`);
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    let posts = 0;
+    const shrinking = { ...env, WORKSPACE_DO: { idFromName: (x: string) => env.WORKSPACE_DO.idFromName(x), get: () => ({
+      walletView: (t?: number) => real.walletView(t),
+      postWallet: async (x: Parameters<typeof real.postWallet>[0], t?: number) => (x.kind === 'refund' && ++posts === 2 ? { ok: false as const, reason: 'insufficient' as never } : real.postWallet(x, t)),
+    }) } } as unknown as typeof env;
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await decideRefund(shrinking, { id: a.id, decision: 'approve', actor: OP1 })).toEqual({ ok: false, reason: 'insufficient_balance' });
+    const byAmount = (calls: Call[]) => calls.map((c) => (c.body as { transaction: { amount: number } }).transaction.amount);
+    return { ...a, byAmount };
+  }
+  const answerByCall = () => { refundAnswer = async () => refundOk(`TX-RF-${puts().length}`, puts().length === 1 ? 20000 : 5000); };
+
+  it('HIGH: two concurrent resumes (and two concurrent first approvals) send each card refund row to Kashier exactly once', async () => {
+    const a = await aborted(70);
+    answerByCall();
+    const [x, y] = await Promise.all([decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 }), decideRefund(env, { id: a.id, decision: 'approve', actor: OP2 })]);
+    expect([x.ok, y.ok].filter(Boolean)).toHaveLength(1);
+    expect(puts()).toHaveLength(2); // one call per row, not four
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['topup', 10000], ['refund', -20000], ['refund', -5000]]);
+    const b = await setup(71);
+    refundAnswer = async () => refundOk('TX-RF71', 15000);
+    const before = puts().length;
+    const [p, q] = await Promise.all([decideRefund(env, { id: b.id, decision: 'approve', actor: OP1 }), decideRefund(env, { id: b.id, decision: 'approve', actor: OP2 })]);
+    expect([p.ok, q.ok].filter(Boolean)).toHaveLength(1);
+    expect(puts().length - before).toBe(1);
+  });
+
+  it('HIGH: a live lease blocks a resume; once it has expired a resume may run; a row already `calling` is never sent again whatever the request says', async () => {
+    const a = await aborted(72);
+    answerByCall();
+    await env.DB.prepare("UPDATE refund_requests SET claimed_by = 'other-run', lease_until = ? WHERE id = ?").bind(Date.now() + 60_000, a.id).run();
+    expect(await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 })).toEqual({ ok: false, reason: 'not_pending' });
+    expect(puts()).toEqual([]);
+    await env.DB.prepare('UPDATE refund_requests SET lease_until = ? WHERE id = ?').bind(Date.now() - 1000, a.id).run();
+    await env.DB.prepare("UPDATE card_refunds SET state = 'calling' WHERE id = ?").bind(`cr:${a.id}:1`).run(); // another run is mid-call on row 1
+    expect(await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 })).toMatchObject({ ok: true });
+    expect(a.byAmount(puts())).toEqual([50]); // only row 2; row 1 was not sent a second time
+    expect((await rowsOf(a.id))[0]).toMatchObject({ state: 'calling' });
+  });
+
+  it('HIGH: a reject can never close a request whose wallet was already partly debited', async () => {
+    const a = await aborted(73);
+    expect(await decideRefund(env, { id: a.id, decision: 'reject', actor: OP2, note: 'no' })).toEqual({ ok: false, reason: 'not_pending' });
+    expect(await req(a.id)).toMatchObject({ state: 'processing' });
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['topup', 10000], ['refund', -20000]]);
+    const fresh = await setup(74);
+    expect(await decideRefund(env, { id: fresh.id, decision: 'reject', actor: OP2 })).toMatchObject({ ok: true, request: { state: 'rejected' } });
+    expect(await decideRefund(env, { id: fresh.id, decision: 'approve', actor: OP1 })).toEqual({ ok: false, reason: 'not_pending' });
+  });
+
+  it('MEDIUM: totals that changed between the first attempt and the resume change nothing: the recorded plan decides every amount, ref and provider call', async () => {
+    const a = await aborted(75);
+    answerByCall();
+    await env.DB.prepare('UPDATE topups SET refunded_minor = 7000 WHERE workspace_id = ?').bind(a.ws).run(); // totals moved under it
+    await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, transaction_id, paid_at) VALUES ('o-new75', ?, 99999, 0, 99999, 'EGP', 'paid', 'u', 1, 'TX-NEW75', 1)").bind(a.ws).run();
+    expect(await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 })).toMatchObject({ ok: true });
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['topup', 10000], ['refund', -20000], ['refund', -5000]]);
+    expect(a.byAmount(puts())).toEqual([200, 50]);
+    expect(await env.DB.prepare('SELECT order_id, amount_minor FROM card_refunds WHERE request_id = ? ORDER BY id').bind(a.id).all().then((x) => x.results)).toEqual([{ order_id: `o-kr75`, amount_minor: 20000 }, { order_id: `o-kr75b`, amount_minor: 5000 }]);
+  });
+});
+
