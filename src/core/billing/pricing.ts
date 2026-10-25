@@ -119,7 +119,8 @@ export async function pullPricing(env: Env, workspaceId: string, cur: ReturnType
     env.DB.prepare('SELECT id, ver, effective_from, egp_per_usd_micros, buffer_bps FROM fx_rates WHERE id > ? ORDER BY id').bind(cur.fx),
     env.DB.prepare('SELECT id, ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps FROM pricing_settings WHERE id > ? ORDER BY id').bind(cur.settings),
     env.DB.prepare('SELECT id, ver, effective_from, margin_bps FROM workspace_pricing_overrides WHERE workspace_id = ? AND id > ? ORDER BY id').bind(workspaceId, cur.overrides),
-    env.DB.prepare('SELECT pn.phone_number_id AS phone_number_id, nf.funding AS funding FROM phone_numbers pn LEFT JOIN number_funding nf ON nf.phone_number_id = pn.phone_number_id WHERE pn.workspace_id = ?').bind(workspaceId),
+    // Own numbers plus the shared platform number while the workspace is an active member; a number without a funding row stays unknown.
+    env.DB.prepare("SELECT x.phone_number_id AS phone_number_id, nf.funding AS funding FROM (SELECT phone_number_id FROM phone_numbers WHERE workspace_id = ?1 UNION SELECT phone_number_id FROM shared_number_members WHERE workspace_id = ?1 AND status = 'active') x LEFT JOIN number_funding nf ON nf.phone_number_id = x.phone_number_id").bind(workspaceId),
   ]);
   return {
     rates: rates!.results as PricingSnapshot['rates'], fx: fx!.results as PricingSnapshot['fx'], settings: settings!.results as PricingSnapshot['settings'],

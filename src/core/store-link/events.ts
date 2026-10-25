@@ -177,7 +177,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       const loc = locale(d.locale);
       const r = queueTemplate(host, {
         waId, phoneNumberId: opts.phoneNumberId, name: copy.templates.orderConfirmation, language: loc, fallbackLanguage: 'ar',
-        params: [displayName(host, waId, loc), cleanParam(d.orderNumber, d.orderNumber, 40)], idempotencyKey: `order:${d.orderId}:created`, now,
+        params: [displayName(host, waId, loc), cleanParam(d.orderNumber, d.orderNumber, 40)], idempotencyKey: `order:${d.orderId}:created`, orderRef: d.orderId, now,
       });
       rememberBuyerKey(host, waId, d.buyerKey);
       return sendOutcome(host, r, 'order_confirmation');
@@ -202,7 +202,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       const r = queueTemplate(host, {
         waId, phoneNumberId: opts.phoneNumberId, name: copy.templates.codConfirmation, language: loc, fallbackLanguage: 'ar',
         params: [displayName(host, waId, loc), cleanParam(orderNumber, orderNumber, 40), plainAmount(totalMinor)],
-        idempotencyKey: `cod:${d.orderId}`, extraComponents: [quick(0, 'y'), quick(1, 'n')], now,
+        idempotencyKey: `cod:${d.orderId}`, orderRef: d.orderId, extraComponents: [quick(0, 'y'), quick(1, 'n')], now,
       });
       if (!r.ok) return sendOutcome(host, r, 'cod_confirmation');
       upsertOrder(host, { orderId: d.orderId, orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: 'cod', totalMinor, currency, codState: 'pending', codRequestedAt: now, locale: loc }, now);
@@ -249,7 +249,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       const r = queueTemplate(host, {
         waId, phoneNumberId: opts.phoneNumberId, name: d.trackingUrl ? copy.templates.shippingTracking : copy.templates.shippingStatus, language: loc, fallbackLanguage: 'ar',
         params: d.trackingUrl ? [name, cleanParam(orderNumber, orderNumber, 40), phrase, d.trackingUrl] : [name, cleanParam(orderNumber, orderNumber, 40), phrase],
-        idempotencyKey: `ship:${d.shipmentId}:${d.status}`, now,
+        idempotencyKey: `ship:${d.shipmentId}:${d.status}`, orderRef: d.orderId, now,
       });
       return sendOutcome(host, r, 'shipping');
     }

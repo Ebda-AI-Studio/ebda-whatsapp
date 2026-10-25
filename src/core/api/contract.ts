@@ -533,3 +533,23 @@ export const listNumbersResponse = z.object({ items: z.array(numberDto) });
 /** GET /numbers/signup-config: public Meta ids for launching Embedded Signup in the page. */
 export const signupConfigDto = z.object({ appId: z.string(), configId: z.string(), graphVersion: z.string() });
 export type NumberDto = z.infer<typeof numberDto>;
+
+// ---- Phase 8.2: the shared platform number. ----
+const sharedDisplayName = z.string().trim().min(2).max(60);
+/** POST /shared-number/join. The display name is what customers read in the "which store?" list; absent = the workspace name. */
+export const sharedNumberJoin = z.object({ displayName: sharedDisplayName.optional() });
+/** GET /shared-number. `available` = the operator has registered a platform number; `member` = this store sends and receives through it. */
+export const sharedNumberDto = z.object({
+  available: z.boolean(),
+  member: z.boolean(),
+  displayName: z.string().nullable(),
+  displayPhone: z.string().nullable(),
+});
+export type SharedNumberDto = z.infer<typeof sharedNumberDto>;
+/** POST /operator/shared-numbers (super admin). Registers the platform number and records its funding (platform_line) in the same write. */
+export const sharedNumberRegister = z.object({
+  phoneNumberId: z.string().regex(/^[0-9]{1,30}$/),
+  wabaId: z.string().regex(/^[0-9]{1,30}$/),
+  displayPhone: z.string().trim().min(5).max(30).optional(),
+  reason: z.string().trim().min(5).max(500),
+});

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import {
-  fxPublish, operatorAdjustmentCreate, operatorDecision, operatorFundingSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
+  fxPublish, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, operatorFundingSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -9,6 +9,7 @@ import {
   changeLog, decideAdjustment, listAdjustments, listFx, listOverrides, listRateCards, listSettings, publishFx, publishOverride, publishRateCard, publishSettings, publishTrueup,
   requestAdjustment, setFunding,
 } from '../core/billing/operator';
+import { registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -66,6 +67,15 @@ operatorRoutes.put('/numbers/:phoneNumberId/funding', async (c) => {
   if (!b.success) return bad(c, b.error.issues[0]?.message);
   const r = await setFunding(c.env, { actor: actor(c), phoneNumberId: c.req.param('phoneNumberId'), funding: b.data.funding, reason: b.data.reason });
   return r === 'ok' ? c.json({ phoneNumberId: c.req.param('phoneNumberId'), funding: b.data.funding }) : c.json({ error: 'not_found' }, 404);
+});
+
+// Phase 8.2: the platform number. Funding (platform_line) is written in the same batch, never defaulted. Off = 404.
+operatorRoutes.post('/shared-numbers', async (c) => {
+  if (!sharedEnabled(c.env)) return c.json({ error: 'not_found' }, 404);
+  const b = sharedNumberRegister.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, b.error.issues[0]?.message);
+  const r = await registerPlatformNumber(c.env, { ...b.data, actor: actor(c) });
+  return r === 'ok' ? c.json({ phoneNumberId: b.data.phoneNumberId, funding: 'platform_line' }, 201) : c.json({ error: 'number_conflict', message: 'number_belongs_to_a_workspace' }, 409);
 });
 
 operatorRoutes.get('/refund-requests', async (c) => c.json({ items: await listRefundRequests(c.env, { ...(c.req.query('state') ? { state: c.req.query('state')! } : {}) }) }));

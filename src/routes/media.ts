@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { MAX_DOCUMENT_BYTES, UPLOAD_OVERHEAD_BYTES, canonicalMime, outboundMediaFor, safeFilename } from '../core/media';
-import { activeNumber, apiError, bizToken, intParam, workspaceStub, type ApiEnv } from './shared';
+import { senderNumber, apiError, bizToken, intParam, workspaceStub, type ApiEnv } from './shared';
 
 export const mediaRoutes = new Hono<ApiEnv>();
 
@@ -58,7 +58,7 @@ mediaRoutes.post('/stores/:storeId/media', async (c) => {
   if (file.size === 0) return apiError(c, 400, 'invalid_request');
   if (file.size > allowed.maxBytes) return apiError(c, 413, 'invalid_request', 'file_too_large');
   const ws = await workspaceStub(c);
-  const number = await activeNumber(c);
+  const number = await senderNumber(c);
   if (!ws || !number) return apiError(c, 404, 'not_found');
   const token = await bizToken(c, { phoneNumberId: number.phoneNumberId });
   if (!token) return apiError(c, 503, 'rate_limited', 'token_unavailable');

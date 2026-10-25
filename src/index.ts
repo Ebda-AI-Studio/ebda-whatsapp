@@ -41,6 +41,8 @@ import { numbersRoutes } from './routes/numbers';
 import { reconcileEntitlements } from './core/billing/subscriptions';
 import { handleProviderWebhook, repairTopups } from './core/billing/topups';
 import { walletRoutes } from './routes/wallet';
+import { sharedNumberRoutes } from './routes/shared-number';
+import { handleSharedEvent, sharedEnabled, sharedNumberById, sweepShared } from './core/shared/shared-number';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 // The brand pack (BRAND var; unset = the suite brand) is chosen once per isolate, before any request: copy, templates, agent words,
@@ -101,7 +103,7 @@ api.use('/operator/*', requireSuperAdmin(getVerifier));
 api.route('/operator', operatorRoutes);
 api.get('/stores/:storeId/me', (c) => {
   const p = c.get('principal');
-  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env) } });
+  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env) } });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   const role = c.get('storeRole');
@@ -134,6 +136,7 @@ api.route('/', segmentsRoutes);
 api.route('/', campaignsRoutes);
 api.route('/', numbersRoutes);
 api.route('/', walletRoutes);
+api.route('/', sharedNumberRoutes);
 app.route('/api/v1', api);
 
 function sameString(a: string, b: string): boolean {
@@ -217,6 +220,12 @@ app.post('/meta/webhook', async (c) => {
   const replies: SendJob[] = [];
   let firstMetaTs = 0;
   for (const ev of events) {
+    // The platform number belongs to no one store: routed by who last wrote to the customer. Off = it is an unknown number below.
+    if (sharedEnabled(c.env) && (await sharedNumberById(c.env, ev.phoneNumberId))) {
+      replies.push(...(await handleSharedEvent(c.env, ev, { receivedAt, copy: PACK.sharedNumber, config: { autoReplyText: PACK.autoReply, optInKeywords: [...PACK.optInKeywords] } })));
+      mark(c.env, 'do_stored', 0, Date.now() - receivedAt);
+      continue;
+    }
     const workspaceId = await workspaceForPhoneNumber(c.env.DB, ev.phoneNumberId);
     if (!workspaceId) {
       console.warn('meta webhook: unrouted phone_number_id');
@@ -243,6 +252,7 @@ app.post('/meta/webhook', async (c) => {
 export async function dailyBilling(env: Env): Promise<void> {
   await reconcileEntitlements(env).catch((err) => console.error(JSON.stringify({ alert: 'entitlement_reconcile_failed', error: err instanceof Error ? err.name : 'error' })));
   await repairTopups(env).catch((err) => console.error(JSON.stringify({ alert: 'topup_repair_failed', error: err instanceof Error ? err.name : 'error' })));
+  await sweepShared(env).catch((err) => console.error(JSON.stringify({ alert: 'shared_sweep_failed', error: err instanceof Error ? err.name : 'error' })));
 }
 
 let warnedNoDsn = false;

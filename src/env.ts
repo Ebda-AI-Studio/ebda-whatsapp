@@ -49,6 +49,8 @@ export type Env = {
   ADJUSTMENT_APPROVAL_MINOR?: string;
   /** Most adjustments one operator may approve for themselves in a rolling day. Default 20. */
   ADJUSTMENT_DAILY_CAP?: string;
+  /** Phase 8.2 switch: "1" or "true" turns on the shared platform number (membership routes, inbound routing by last sender). Unset = the routes answer 404 and the number is unknown to the webhook. */
+  SHARED_NUMBER_ENABLED?: string;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
   /** The platform's own token: the shared number and platform-level calls. A merchant's own number uses its business token (see core/numbers/token.ts). */

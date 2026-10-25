@@ -4,7 +4,7 @@ import { statementCsv } from '../core/billing/statement';
 import { topupsEnabled } from '../core/billing/payments';
 import { getTopup, startTopup } from '../core/billing/topups';
 import { createRefundRequest, listRefundRequests } from '../core/billing/refunds';
-import { apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
+import { apiError, senderNumber, workspaceStub, type ApiContext, type ApiEnv } from './shared';
 
 export const walletRoutes = new Hono<ApiEnv>();
 const owner = (c: ApiContext) => c.get('storeRole') === 'owner';
@@ -13,7 +13,11 @@ walletRoutes.get('/stores/:storeId/wallet', async (c) => {
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
   const v = await ws.walletView();
-  const { results } = await c.env.DB.prepare("SELECT pn.phone_number_id, pn.display_phone, nf.funding FROM phone_numbers pn LEFT JOIN number_funding nf ON nf.phone_number_id = pn.phone_number_id WHERE pn.workspace_id = ? AND pn.status = 'active' ORDER BY pn.rowid")
+  const { results } = await c.env.DB.prepare(`SELECT phone_number_id, display_phone, funding FROM (
+      SELECT pn.phone_number_id, pn.display_phone, nf.funding, 0 AS grp, pn.rowid AS ord FROM phone_numbers pn LEFT JOIN number_funding nf ON nf.phone_number_id = pn.phone_number_id WHERE pn.workspace_id = ?1 AND pn.status = 'active'
+      UNION ALL
+      SELECT sn.phone_number_id, sn.display_phone, nf.funding, 1, sn.rowid FROM shared_number_members m JOIN shared_numbers sn ON sn.phone_number_id = m.phone_number_id LEFT JOIN number_funding nf ON nf.phone_number_id = sn.phone_number_id WHERE m.workspace_id = ?1 AND m.status = 'active'
+    ) ORDER BY grp, ord`)
     .bind(c.req.param('storeId')!).all<{ phone_number_id: string; display_phone: string | null; funding: 'merchant_card' | 'platform_line' | null }>();
   const dto: WalletDto = {
     balanceMinor: v.balanceMinor, heldMinor: v.heldMinor, availableMinor: v.availableMinor, debtMinor: v.debtMinor, creditLimitMinor: v.creditLimitMinor, currency: 'EGP',
@@ -42,9 +46,9 @@ walletRoutes.get('/stores/:storeId/wallet/estimate', async (c) => {
   const q = costEstimateQuery.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
   if (!q.success) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
-  const number = await c.env.DB.prepare("SELECT phone_number_id FROM phone_numbers WHERE workspace_id = ? AND status = 'active' ORDER BY rowid LIMIT 1").bind(c.req.param('storeId')!).first<{ phone_number_id: string }>();
+  const number = await senderNumber(c);
   if (!ws || !number) return apiError(c, 404, 'not_found');
-  const e = await ws.estimateCost({ phoneNumberId: number.phone_number_id, category: q.data.category, count: q.data.count, ...(q.data.country ? { country: q.data.country } : {}) });
+  const e = await ws.estimateCost({ phoneNumberId: number.phoneNumberId, category: q.data.category, count: q.data.count, ...(q.data.country ? { country: q.data.country } : {}) });
   return c.json({ funding: e.funding, paidBy: e.paidBy, perMessageMinor: e.perMessageMinor, totalMinor: e.totalMinor, priced: e.priced, currency: 'EGP' });
 });
 
