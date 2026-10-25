@@ -44,6 +44,8 @@ import { storeLink } from './store-link';
 import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
 import { agentActive } from './ai/agent';
 import { runTurn } from './ai/router';
+import { connectorDto, deleteConnector, listConnectors, planConnectorPut, writeConnector, type PutRefusal } from './connectors/store';
+import type { ConnectorDto, ConnectorPut } from './api/contract';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
@@ -998,6 +1000,23 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
     await this.arm();
     return { ok: true, settings: this.agentDto() };
+  }
+
+  // ---- Connectors (Phase 9.3): owner-only settings; the secret never leaves the DO ---------------------------------------
+
+  async listConnectors(): Promise<ConnectorDto[]> {
+    return listConnectors(this.sql).map(connectorDto);
+  }
+
+  async putConnector(id: string, body: ConnectorPut, actor: string | null): Promise<{ ok: true; connector: ConnectorDto } | { ok: false; reason: PutRefusal }> {
+    const plan = await planConnectorPut(this.env, this.workspaceId, this.sql, id, body, actor, Date.now());
+    if (!plan.ok) return plan;
+    this.ctx.storage.transactionSync(() => writeConnector(this.sql, plan.row, plan.secretEnc));
+    return { ok: true, connector: connectorDto(plan.row) };
+  }
+
+  async deleteConnector(id: string): Promise<boolean> {
+    return this.ctx.storage.transactionSync(() => deleteConnector(this.sql, id));
   }
 
   // AI credits (Phase 7 hooks: packages call these; there is no public route). All answers are result objects.

@@ -312,6 +312,16 @@ export const DO_MIGRATIONS: readonly string[] = [
    ) WITHOUT ROWID;
    CREATE UNIQUE INDEX campaign_links_recipient ON campaign_links (campaign_id, contact_id);
    CREATE INDEX campaign_links_contact ON campaign_links (contact_id);`,
+  // v25 (Phase 9.3, connectors): the agent's tools into a client's own systems. `secret_enc` is AES-GCM (workspace id as AD), never returned by any API.
+  `CREATE TABLE connectors (
+     id TEXT PRIMARY KEY,
+     kind TEXT NOT NULL CHECK (kind IN ('webhook', 'odoo')),
+     enabled INTEGER NOT NULL DEFAULT 0,
+     config_json TEXT NOT NULL,
+     secret_enc TEXT,
+     updated_at INTEGER NOT NULL,
+     updated_by TEXT
+   ) WITHOUT ROWID;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
