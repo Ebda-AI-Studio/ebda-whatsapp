@@ -183,3 +183,130 @@ export function extractTierUpdates(payload: unknown): TierUpdateEvent[] {
   }
   return out;
 }
+
+// ---- Coexistence (a number kept on the WhatsApp Business app): echoes, contact sync, history, name decisions ------------
+
+/** A message that was not received through the Cloud API: typed in the merchant's app (an echo) or read from its chat history. */
+export type CoexMessage = {
+  wamid: string;
+  /** The customer's WhatsApp id (digits). */
+  customer: string;
+  ts: number;
+  direction: 'in' | 'out';
+  type: MessageType;
+  text?: string;
+  caption?: string;
+  media?: InboundMedia;
+  /** History only: how far an outgoing message got. */
+  status?: StatusEvent['status'];
+};
+export type SyncedContact = { waId: string; name?: string };
+export type CoexEvents = {
+  phoneNumberId: string;
+  /** Sent from the Business app just now (smb_message_echoes). */
+  echoes: CoexMessage[];
+  contacts: SyncedContact[];
+  /** Past messages (history), original timestamps. */
+  history: CoexMessage[];
+  /** The merchant refused to share their chat history (error 2593109). */
+  historyDeclined: boolean;
+};
+
+const digitsOf = (s: string) => s.replace(/\D/g, '');
+const coexValueSchema = z.object({
+  metadata: z.object({ phone_number_id: z.string() }).loose(),
+  message_echoes: z.array(z.unknown()).optional(),
+  state_sync: z.array(z.unknown()).optional(),
+  history: z.array(z.unknown()).optional(),
+}).loose();
+const echoSchema = z.object({ to: z.string().min(1), id: z.string().min(1), timestamp: unixSeconds, type: z.string() }).loose();
+const stateSyncSchema = z.object({
+  type: z.string(),
+  action: z.string(),
+  contact: z.object({ full_name: z.string().optional(), first_name: z.string().optional(), phone_number: z.string() }).loose().optional(),
+}).loose();
+const historyChunkSchema = z.object({
+  threads: z.array(z.object({ id: z.string().min(1), messages: z.array(z.unknown()).default([]) }).loose()).optional(),
+  errors: z.array(z.object({ code: z.number() }).loose()).optional(),
+}).loose();
+const historyMessageSchema = z.object({ from: z.string(), id: z.string().min(1), timestamp: unixSeconds, type: z.string(), history_context: z.object({ status: z.string() }).loose().optional() }).loose();
+const HISTORY_STATUS: Record<string, StatusEvent['status']> = { SENT: 'sent', PENDING: 'sent', DELIVERED: 'delivered', READ: 'read', PLAYED: 'read', ERROR: 'failed' };
+const HISTORY_DECLINED = 2593109;
+
+function coexMessage(raw: Record<string, unknown>, base: { wamid: string; customer: string; ts: number; direction: 'in' | 'out'; status?: StatusEvent['status'] }): CoexMessage {
+  const type = toType(String(raw.type));
+  const textBody = (raw.text as { body?: unknown } | undefined)?.body;
+  const body = (MEDIA_MESSAGE_TYPES as readonly string[]).includes(type) ? mediaBodySchema.safeParse(raw[type]) : null;
+  return {
+    ...base,
+    type,
+    ...(typeof textBody === 'string' ? { text: textBody } : {}),
+    ...(body?.success ? { media: { id: body.data.id, mime: body.data.mime_type ?? 'application/octet-stream', ...(body.data.filename ? { filename: body.data.filename } : {}) }, ...(body.data.caption ? { caption: body.data.caption } : {}) } : {}),
+  };
+}
+
+/** `smb_message_echoes`, `smb_app_state_sync` and `history` changes, per phone number. One bad item never drops its siblings. */
+export function extractCoexistence(payload: unknown): CoexEvents[] {
+  const parsed = payloadSchema.safeParse(payload);
+  if (!parsed.success) return [];
+  const byNumber = new Map<string, CoexEvents>();
+  for (const entry of parsed.data.entry) {
+    for (const change of entry.changes) {
+      if (change.field !== 'smb_message_echoes' && change.field !== 'smb_app_state_sync' && change.field !== 'history') continue;
+      const v = coexValueSchema.safeParse(change.value);
+      if (!v.success) continue;
+      const pn = v.data.metadata.phone_number_id;
+      const ev = byNumber.get(pn) ?? { phoneNumberId: pn, echoes: [], contacts: [], history: [], historyDeclined: false };
+      byNumber.set(pn, ev);
+      for (const item of v.data.message_echoes ?? []) {
+        const e = echoSchema.safeParse(item);
+        if (!e.success) continue;
+        ev.echoes.push(coexMessage(e.data as Record<string, unknown>, { wamid: e.data.id, customer: digitsOf(e.data.to), ts: Number(e.data.timestamp), direction: 'out' }));
+      }
+      for (const item of v.data.state_sync ?? []) {
+        const s = stateSyncSchema.safeParse(item);
+        if (!s.success || s.data.type !== 'contact' || s.data.action !== 'add' || !s.data.contact) continue;
+        const waId = digitsOf(s.data.contact.phone_number);
+        if (waId.length < 8 || waId.length > 15) continue;
+        const name = s.data.contact.full_name ?? s.data.contact.first_name;
+        ev.contacts.push({ waId, ...(name ? { name } : {}) });
+      }
+      for (const item of v.data.history ?? []) {
+        const chunk = historyChunkSchema.safeParse(item);
+        if (!chunk.success) continue;
+        if (chunk.data.errors?.some((e) => e.code === HISTORY_DECLINED)) ev.historyDeclined = true;
+        for (const thread of chunk.data.threads ?? []) {
+          const customer = digitsOf(thread.id);
+          for (const m of thread.messages) {
+            const h = historyMessageSchema.safeParse(m);
+            if (!h.success || !customer) continue;
+            const inbound = digitsOf(h.data.from) === customer;
+            const status = h.data.history_context ? HISTORY_STATUS[h.data.history_context.status] : undefined;
+            ev.history.push(coexMessage(h.data as Record<string, unknown>, { wamid: h.data.id, customer, ts: Number(h.data.timestamp), direction: inbound ? 'in' : 'out', ...(!inbound && status ? { status } : {}) }));
+          }
+        }
+      }
+    }
+  }
+  return [...byNumber.values()];
+}
+
+export type NameUpdateEvent = { wabaId: string; displayPhone: string; decision: 'APPROVED' | 'REJECTED' | 'PENDING' | 'DEFERRED'; requestedName: string | null };
+const nameChangeSchema = z.object({
+  field: z.literal('phone_number_name_update'),
+  value: z.object({ display_phone_number: z.string(), decision: z.enum(['APPROVED', 'REJECTED', 'PENDING', 'DEFERRED']), requested_verified_name: z.string().nullish() }).loose(),
+}).loose();
+
+/** `phone_number_name_update`: Meta decided on a display name. */
+export function extractNameUpdates(payload: unknown): NameUpdateEvent[] {
+  const parsed = payloadSchema.extend({ entry: z.array(z.object({ id: z.string(), changes: z.array(z.unknown()) }).loose()) }).safeParse(payload);
+  if (!parsed.success) return [];
+  const out: NameUpdateEvent[] = [];
+  for (const entry of parsed.data.entry) {
+    for (const ch of entry.changes) {
+      const c = nameChangeSchema.safeParse(ch);
+      if (c.success) out.push({ wabaId: entry.id, displayPhone: c.data.value.display_phone_number, decision: c.data.value.decision, requestedName: c.data.value.requested_verified_name ?? null });
+    }
+  }
+  return out;
+}
