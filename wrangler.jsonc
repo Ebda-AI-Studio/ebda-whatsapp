@@ -50,7 +50,7 @@
   ]
   // ---- Billing (Phase 7). Switches and secrets (see docs/billing.md). TOPUPS_ENABLED stays off until Kashier is configured:
   //   vars: TOPUPS_ENABLED ("true"), PACKAGE_CHECKOUT_ENABLED ("true", self-serve packages, default off), KASHIER_MERCHANT_ID, KASHIER_FEE_BPS, KASHIER_FEE_FIXED_MINOR, ADJUSTMENT_APPROVAL_MINOR, ADJUSTMENT_DAILY_CAP
-  //   secret: KASHIER_API_KEY (`wrangler secret put`); service binding ACCOUNTS is required for top-ups and operator writes (fail closed
+  //   secret: KASHIER_API_KEY and KASHIER_SECRET_KEY (`wrangler secret put`; the Secret key confirms webhooks, vars KASHIER_API_URL optional); service binding ACCOUNTS is required for top-ups and operator writes (fail closed
   //   with 503 until it exists). The accounts Worker must be deployed first; then uncomment (RPC: isRevoked(sid) → true for unknown sid):
   //   "services": [{ "binding": "ACCOUNTS", "service": "ebda-accounts", "entrypoint": "Accounts" }],
   // Before a platform-paid number sends: publish a rate card + FX through /api/v1/operator and set the number's funding.
