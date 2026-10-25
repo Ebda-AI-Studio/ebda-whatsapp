@@ -415,6 +415,38 @@ export async function markCardRefundFailed(env: Env, a: { requestId: string; car
   return { ok: true };
 }
 
+/**
+ * Gives back every wallet chunk of an ABANDONED request that is still on the ledger without its reversal. The ref `refund-reversal:<id>:<n>` is
+ * idempotent, so this can be run by the run that noticed the abandon, by the abandon itself and by the daily pass, in any order: a chunk is
+ * credited back once. Returns how many reversals were newly posted.
+ */
+export async function reverseUnreversedChunks(env: Env, requestId: string, workspaceId: string, actor: string, now: number): Promise<number> {
+  const { results: chunks } = await env.DB.prepare('SELECT n, amount_minor FROM refund_chunks WHERE request_id = ? ORDER BY n').bind(requestId).all<{ n: number; amount_minor: number }>();
+  if (chunks.length === 0) return 0;
+  const stub = stubOf(env, workspaceId);
+  const present = new Set(await stub.walletRefsPresent(chunks.flatMap((c) => [`refund:${requestId}:${c.n}`, `refund-reversal:${requestId}:${c.n}`])));
+  let posted = 0;
+  for (const c of chunks) {
+    if (!present.has(`refund:${requestId}:${c.n}`) || present.has(`refund-reversal:${requestId}:${c.n}`)) continue;
+    const r = await stub.postWallet({ kind: 'adjustment', netMinor: c.amount_minor, ref: `refund-reversal:${requestId}:${c.n}`, actor, note: `refund request ${requestId} abandoned: chunk ${c.n} returned` }, now);
+    if (r.ok) posted++;
+    else if (r.reason !== 'duplicate') throw new Error(`refund reversal refused: ${r.reason}`);
+  }
+  return posted;
+}
+
+/** The daily backstop for the race between a run's wallet post and an abandon: sweeps every recently abandoned request. */
+export async function sweepAbandonedRefunds(env: Env, now = Date.now()): Promise<{ checked: number; reversed: number }> {
+  const { results } = await env.DB.prepare("SELECT id, workspace_id FROM refund_requests WHERE state = 'abandoned' AND decided_at > ? ORDER BY decided_at DESC LIMIT 200").bind(now - 30 * 86_400_000).all<{ id: string; workspace_id: string }>();
+  let reversed = 0;
+  for (const r of results) {
+    try { reversed += await reverseUnreversedChunks(env, r.id, r.workspace_id, 'system', now); } catch (err) {
+      console.error(JSON.stringify({ alert: 'refund_abandon_sweep_failed', severity: 'P1', requestId: r.id, error: err instanceof Error ? err.name : 'error' }));
+    }
+  }
+  return { checked: results.length, reversed };
+}
+
 export type AbandonResult =
   | { ok: true; needsSecond?: true; already?: true }
   | { ok: false; reason: 'not_found' | 'not_abandonable' | 'second_approver_required' | 'money_may_have_left' | 'in_progress' };
@@ -486,6 +518,8 @@ export async function abandonRefundRequest(env: Env, a: { id: string; actor: str
   if (done.meta.changes) {
     await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_abandoned', ?, ?, ?, ?)")
       .bind(now, a.actor, req.workspace_id, JSON.stringify({ requestedBy: req.abandon_requested_by }), JSON.stringify({ reversedChunks: reversed }), a.id).run();
+    // A debit that was in flight in a run when the swap happened lands after the checks above: sweep once more now that the request is closed.
+    await reverseUnreversedChunks(env, a.id, req.workspace_id, a.actor, now);
   }
   return { ok: true };
 }

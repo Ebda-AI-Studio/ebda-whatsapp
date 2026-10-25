@@ -14,7 +14,7 @@
 import type { Env } from '../../env';
 import type { z } from 'zod';
 import type { refundRequestDto } from '../api/contract';
-import { claimForCall, completeDebitPhase, holdsRequest, openCardRefund, refreshRequest, settleCardRefund } from './card-refunds';
+import { claimForCall, completeDebitPhase, holdsRequest, openCardRefund, refreshRequest, reverseUnreversedChunks, settleCardRefund } from './card-refunds';
 import { paymentProvider, refundsEnabled } from './payments';
 
 export type RefundRequestDto = z.infer<typeof refundRequestDto>;
@@ -131,6 +131,13 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     // A run whose lease was taken over (or whose request was abandoned) must not post anything.
     if (!(await holdsRequest(env, a.id, token))) return { ok: false, reason: 'not_pending' };
     const posted = await stub.postWallet({ kind: 'refund', netMinor: -c.amount_minor, ref: `refund:${a.id}:${c.n}`, actor: a.actor, note: c.order_id ? `refund of top-up ${c.order_id}` : 'refund beyond card top-ups (bank/InstaPay)' }, now);
+    // The post and the lease check are in different stores, so check again AFTER posting: if an abandon took over in between, this debit landed on an
+    // abandoned request. Give it back (idempotent ref) and stop. The abandon's own sweep and the daily pass are the other two sides of the same net.
+    if (posted.ok && !(await holdsRequest(env, a.id, token))) {
+      const cur = await env.DB.prepare('SELECT state FROM refund_requests WHERE id = ?').bind(a.id).first<{ state: string }>();
+      if (cur?.state === 'abandoning' || cur?.state === 'abandoned') await reverseUnreversedChunks(env, a.id, req.workspace_id, 'system', now);
+      return { ok: false, reason: 'not_pending' };
+    }
     if (!posted.ok && posted.reason !== 'duplicate') {
       await release();
       console.error(JSON.stringify({ alert: 'refund_debit_incomplete', severity: 'P1', requestId: a.id, workspace: req.workspace_id }));

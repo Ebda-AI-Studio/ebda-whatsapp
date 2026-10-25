@@ -40,7 +40,7 @@ import { trackRoutes } from './routes/track';
 import { numbersRoutes } from './routes/numbers';
 import { reconcileEntitlements } from './core/billing/subscriptions';
 import { repairPackageOrders } from './core/billing/package-orders';
-import { reconcileCardRefunds } from './core/billing/card-refunds';
+import { reconcileCardRefunds, sweepAbandonedRefunds } from './core/billing/card-refunds';
 import { expireInstapay, overdueInstapay, repairInstapay } from './core/billing/instapay';
 import { paymentProvider } from './core/billing/payments';
 import { handleProviderWebhook, reconfirmUnconfirmed, repairTopups } from './core/billing/topups';
@@ -263,6 +263,7 @@ export async function dailyBilling(env: Env): Promise<void> {
   await repairTopups(env).catch((err) => console.error(JSON.stringify({ alert: 'topup_repair_failed', error: err instanceof Error ? err.name : 'error' })));
   await reconfirmUnconfirmed(env).catch((err) => console.error(JSON.stringify({ alert: 'webhook_reconfirm_failed', error: err instanceof Error ? err.name : 'error' })));
   await reconcileCardRefunds(env, paymentProvider(env)).catch((err) => console.error(JSON.stringify({ alert: 'card_refund_reconcile_failed', error: err instanceof Error ? err.name : 'error' })));
+  await sweepAbandonedRefunds(env).catch((err) => console.error(JSON.stringify({ alert: 'refund_abandon_sweep_failed', error: err instanceof Error ? err.name : 'error' })));
   await expireInstapay(env).catch((err) => console.error(JSON.stringify({ alert: 'instapay_expiry_failed', error: err instanceof Error ? err.name : 'error' })));
   await repairInstapay(env).catch((err) => console.error(JSON.stringify({ alert: 'instapay_repair_failed', error: err instanceof Error ? err.name : 'error' })));
   await overdueInstapay(env).catch((err) => console.error(JSON.stringify({ alert: 'instapay_overdue_check_failed', error: err instanceof Error ? err.name : 'error' })));

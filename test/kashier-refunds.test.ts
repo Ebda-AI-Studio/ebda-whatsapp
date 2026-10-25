@@ -1,9 +1,10 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KashierProvider, configurePayments, type PaymentProvider } from '../src/core/billing/payments';
-import { abandonRefundRequest, linkDashboardRefund, matchHeldRefund, reconcileCardRefunds } from '../src/core/billing/card-refunds';
+import { abandonRefundRequest, linkDashboardRefund, sweepAbandonedRefunds, matchHeldRefund, reconcileCardRefunds } from '../src/core/billing/card-refunds';
 import { createRefundRequest, decideRefund } from '../src/core/billing/refunds';
 import { handleProviderWebhook } from '../src/core/billing/topups';
+import { dailyBilling } from '../src/index';
 import { configureSessionCheck } from '../src/core/identity/session';
 import { OP1, OP2, operatorCall, storeId as W0, useApiKey } from './helpers/api';
 import { fund, ledger } from './helpers/billing';
@@ -980,6 +981,48 @@ describe('abandoning a partly debited refund request (two operators, money back 
     expect(await abandon(a.id, OP2, racing)).toEqual({ ok: false, reason: 'money_may_have_left' });
     expect((await kinds(a.ws)).filter((k) => k[0] === 'adjustment')).toEqual([]);
     expect(await req(a.id)).toMatchObject({ state: 'processing' });
+  });
+
+  it('HIGH: a debit that lands after the abandon took over is reversed exactly once, by the run itself (it re-checks right after posting)', async () => {
+    const a = await setup(103, 15000);
+    // the request is mid-approval: planned, lease taken by a run that is about to post its first chunk
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    let abandonedInBetween = false;
+    const racing = { ...env, WORKSPACE_DO: { idFromName: (x: string) => env.WORKSPACE_DO.idFromName(x), get: () => ({
+      walletView: (n?: number) => real.walletView(n),
+      walletRefsPresent: (refs: string[]) => real.walletRefsPresent(refs),
+      postWallet: async (x: Parameters<typeof real.postWallet>[0], n?: number) => {
+        if (x.kind === 'refund' && !abandonedInBetween) {
+          abandonedInBetween = true;
+          // the run passed its lease check; its lease then ran out and two operators abandon the request before the debit lands
+          await env.DB.prepare('UPDATE refund_requests SET lease_until = 1 WHERE id = ?').bind(a.id).run();
+          await abandon(a.id, OP1);
+          expect(await abandon(a.id, OP2)).toEqual({ ok: true });
+        }
+        return real.postWallet(x, n);
+      },
+    }) } } as unknown as typeof env;
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const out = await decideRefund(racing, { id: a.id, decision: 'approve', actor: OP1 });
+    expect(out.ok).toBe(false);
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['refund', -15000], ['adjustment', 15000]]); // debited, then given back once
+    expect((await workspace(a.ws).walletView()).balanceMinor).toBe(20000);
+    expect(await sweepAbandonedRefunds(env)).toMatchObject({ reversed: 0 }); // the sweep finds nothing left to do
+    expect((await kinds(a.ws)).filter((k) => k[0] === 'adjustment')).toHaveLength(1);
+    expect(puts()).toEqual([]);
+  });
+
+  it('HIGH: the abandon sweep and the daily pass reverse a debit that slipped in after the abandoned flip, once, whichever runs first', async () => {
+    const a = await partlyDebited(104);
+    await abandon(a.id, OP1);
+    expect(await abandon(a.id, OP2)).toEqual({ ok: true });
+    const real = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(a.ws));
+    await real.postWallet({ kind: 'refund', netMinor: -5000, ref: `refund:${a.id}:2`, actor: OP1, note: 'late chunk' }); // lands after everything
+    expect(await sweepAbandonedRefunds(env)).toMatchObject({ reversed: 1 });
+    expect(await sweepAbandonedRefunds(env)).toMatchObject({ reversed: 0 });
+    await dailyBilling(env);
+    expect((await ledger(a.ws)).filter((r) => r.ref.startsWith('refund-reversal:')).map((r) => r.ref).sort()).toEqual([`refund-reversal:${a.id}:1`, `refund-reversal:${a.id}:2`]);
+    expect((await workspace(a.ws).walletView()).balanceMinor).toBe(30000);
   });
 });
 
