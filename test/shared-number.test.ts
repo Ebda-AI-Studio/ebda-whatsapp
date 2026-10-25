@@ -482,6 +482,14 @@ describe('security review fixes (2026-10-25)', () => {
     expect((await env.DB.prepare('SELECT display_name FROM shared_number_members WHERE workspace_id = ?').bind(c.ws).first<{ display_name: string }>())?.display_name).toBe('Delta Shop');
   });
 
+  it('blank-looking letters (Hangul fillers, braille blank, variation selectors) are not a name and do not tell two names apart', async () => {
+    await operatorRegister();
+    await member(785, 'Delta');
+    const c = await store(786);
+    expect((await c.call('POST', '/shared-number/join', { displayName: '\u3164\u2800\u115F' })).status).toBe(400);
+    expect((await c.call('POST', '/shared-number/join', { displayName: 'Del\uFE0Fta\u3164' })).status).toBe(409);
+  });
+
   it('uniqueness is judged on the name the customer sees in the list, not the full stored name', async () => {
     await operatorRegister();
     await member(782, 'Nile Fashion House Downtown Branch');

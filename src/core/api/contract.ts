@@ -535,8 +535,11 @@ export const signupConfigDto = z.object({ appId: z.string(), configId: z.string(
 export type NumberDto = z.infer<typeof numberDto>;
 
 // ---- Phase 8.2: the shared platform number. ----
-/** A display name as customers will see it: invisible format marks (bidi, joiners) removed, space runs collapsed, outer space trimmed. */
-export const canonicalDisplayName = (s: string): string => s.replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
+/**
+ * A display name as customers will see it: invisible marks (bidi, joiners, variation selectors, Hangul fillers and every other
+ * default-ignorable code point, plus the braille blank) removed, space runs collapsed, outer space trimmed.
+ */
+export const canonicalDisplayName = (s: string): string => s.replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu, '').replace(/\s+/g, ' ').trim();
 const sharedDisplayName = z.string().transform(canonicalDisplayName).pipe(z.string().min(2).max(60));
 /** POST /shared-number/join. The display name is what customers read in the "which store?" list; absent = the workspace name. */
 export const sharedNumberJoin = z.object({ displayName: sharedDisplayName.optional() });
