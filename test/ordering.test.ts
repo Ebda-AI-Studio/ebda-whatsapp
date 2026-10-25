@@ -519,12 +519,16 @@ describe('opt-out and erasure', () => {
     const g = stubGraph();
     await toCheckout(ws, pn, g);
     await say(ws, pn, tapBtn('pay:cod'), g);
+    // Hold the Store call open until the erasure is in: a sleep cannot promise that under load (plain flags, polled on each side's timer).
+    let entered = false;
+    let released = false;
     const real = link.fake.saveCustomerAddress.bind(link.fake);
-    vi.spyOn(link.fake, 'saveCustomerAddress').mockImplementation(async (...a) => { await new Promise((r) => setTimeout(r, 80)); return real(...a); });
+    vi.spyOn(link.fake, 'saveCustomerAddress').mockImplementation(async (...a) => { entered = true; while (!released) await new Promise((r) => setTimeout(r, 5)); return real(...a); });
     await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 30)); // inside saveCustomerAddress
+    await vi.waitFor(() => expect(entered).toBe(true)); // inside saveCustomerAddress
     await workspace(ws).eraseContact(WA_1);
+    released = true;
     await turn;
     expect(link.fake.count('createOrderFromChat')).toBe(0);
     expect(link.fake.orders.size).toBe(0);
@@ -536,14 +540,17 @@ describe('opt-out and erasure', () => {
     const g = stubGraph();
     await toCheckout(ws, pn, g);
     await say(ws, pn, tapBtn('pay:cod'), g);
+    let entered = false;
+    let released = false;
     const real = link.fake.createOrderFromChat.bind(link.fake);
-    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { await new Promise((r) => setTimeout(r, 80)); return real(...a); });
+    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { entered = true; while (!released) await new Promise((r) => setTimeout(r, 5)); return real(...a); });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     link.sink.failNext = 1;
     await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 40));
+    await vi.waitFor(() => expect(entered).toBe(true));
     await workspace(ws).eraseContact(WA_1);
+    released = true;
     await turn;
     expect(link.sink.sent).toEqual([]);
     expect(await rows(ws, 'SELECT order_id FROM store_orders_after_erase')).toEqual([{ order_id: 'ord-1001' }]); // kept while pending
@@ -560,12 +567,15 @@ describe('opt-out and erasure', () => {
     const g = stubGraph();
     await toCheckout(ws, pn, g);
     await say(ws, pn, tapBtn('pay:cod'), g);
+    let entered = false;
+    let released = false;
     const real = link.fake.createOrderFromChat.bind(link.fake);
-    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { await new Promise((r) => setTimeout(r, 80)); return real(...a); });
+    vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (...a) => { entered = true; while (!released) await new Promise((r) => setTimeout(r, 5)); return real(...a); });
     await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 40)); // the Store call is in flight
+    await vi.waitFor(() => expect(entered).toBe(true)); // the Store call is in flight
     await workspace(ws).eraseContact(WA_1);
+    released = true;
     await turn;
     expect(link.fake.orders.size).toBe(1);
     // no personal data stays: no contact, session, messages, order row with a phone
@@ -579,25 +589,41 @@ describe('opt-out and erasure', () => {
 
   it('erasing a customer while a bot turn is waiting on the Store writes nothing back', async () => {
     const { ws, pn } = await setup(53);
-    link.fake.latencyMs = 80;
+    // Hold the Store call open until the erasure is in: a sleep cannot promise that under load (plain flags, polled on each side's timer).
+    let released = false;
+    link.fake.holdUntil = () => released;
     const g = stubGraph();
     await postWebhook(SELF, rawMessagePayload(pn, text('hi')));
+    const before = link.fake.calls.length;
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 30)); // the turn is inside listCatalog
+    await vi.waitFor(() => expect(link.fake.calls.length).toBeGreaterThan(before)); // the turn is inside listCatalog
     await workspace(ws).eraseContact(WA_1);
+    released = true;
     await turn;
+    link.fake.holdUntil = undefined;
     for (const t of ['contacts', 'conversations', 'messages', 'bot_sessions', 'store_orders']) expect(await rows(ws, `SELECT 1 FROM ${t}`), t).toEqual([]);
     expect(sentOf(g)).toEqual([]);
   });
 
   it('erasing a customer in the middle of a burst stops it: nothing is sent or stored after the erase', async () => {
     const { ws, pn } = await setup(54);
-    const g = stubGraph(undefined, { delayMs: 40 });
+    // Hold the second Graph call open (the first already went out) and erase while it is in flight; a sleep cannot promise that under load.
+    let inSecond = false;
+    let released = false;
+    let n = 0;
+    const g = stubGraph(undefined, {
+      before: async () => {
+        if (++n < 2) return;
+        inSecond = true;
+        while (!released) await new Promise((r) => setTimeout(r, 5));
+      },
+    });
     await postWebhook(SELF, rawMessagePayload(pn, text('hi')));
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 130));
+    await vi.waitFor(() => expect(inSecond).toBe(true));
     await workspace(ws).eraseContact(WA_1);
     const sentAtErase = sentOf(g).length;
+    released = true;
     await turn;
     expect(sentAtErase).toBeGreaterThan(0);
     expect(sentOf(g).length).toBeLessThanOrEqual(sentAtErase + 1); // at most the one call already in flight
@@ -610,12 +636,16 @@ describe('opt-out and erasure', () => {
     const g = stubGraph();
     await toCheckout(ws, pn, g);
     await say(ws, pn, tapBtn('pay:cod'), g);
-    link.fake.latencyMs = 80;
+    let released = false;
+    link.fake.holdUntil = () => released;
     await postWebhook(SELF, rawMessagePayload(pn, text('المعادي، شارع 9')));
+    const before = link.fake.calls.length;
     const turn = workspace(ws).runDueTasks();
-    await new Promise((r) => setTimeout(r, 30));
+    await vi.waitFor(() => expect(link.fake.calls.length).toBeGreaterThan(before));
     await workspace(ws).eraseContact(WA_1);
+    released = true;
     await turn;
+    link.fake.holdUntil = undefined;
     expect(await rows(ws, 'SELECT 1 FROM store_orders')).toEqual([]);
     expect(await rows(ws, 'SELECT 1 FROM bot_sessions')).toEqual([]);
     expect(await rows(ws, 'SELECT 1 FROM contacts')).toEqual([]);
