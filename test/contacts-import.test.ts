@@ -253,3 +253,9 @@ it('contact tags and import history survive a backup and restore', async () => {
   expect(await rows(W(615), 'SELECT tag FROM contact_tags')).toEqual([{ tag: 'vip' }]);
   expect(await rows(W(615), 'SELECT status, created_count FROM imports')).toEqual([{ status: 'done', created_count: 1 }]);
 });
+
+it('a file name is stored without control characters', async () => {
+  const ws = workspace(W(616));
+  await ws.createImport({ id: 'names', filename: 'a\u0001b\n.csv', r2Key: 'imports/names.csv', size: 1, consented: false, mapping: null, actor: 'u' });
+  expect((await ws.getImport('names'))?.filename).toBe('ab.csv');
+});

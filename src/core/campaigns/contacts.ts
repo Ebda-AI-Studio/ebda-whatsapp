@@ -33,7 +33,7 @@ export function createImport(host: LinkHost, a: { id: string; filename: string; 
     if (host.sql.exec("SELECT 1 FROM imports WHERE status IN ('pending', 'running')").toArray().length) return { ok: false, reason: 'import_in_progress' } as const;
     host.sql.exec(
       "INSERT INTO imports (id, filename, r2_key, size, consented, mapping, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
-      a.id, a.filename.slice(0, 120), a.r2Key, a.size, a.consented ? 1 : 0, a.mapping ? JSON.stringify(a.mapping) : null, a.actor, a.now,
+      a.id, a.filename.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120), a.r2Key, a.size, a.consented ? 1 : 0, a.mapping ? JSON.stringify(a.mapping) : null, a.actor, a.now,
     );
     return { ok: true } as const;
   });
