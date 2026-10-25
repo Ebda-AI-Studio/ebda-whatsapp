@@ -36,8 +36,8 @@ export function messageDto(r: MessageRow, workspaceId: string): MessageDto {
     status: (r.status as MessageDto['status']) ?? null,
     errorCode: r.error_code,
     at: r.created_at,
-    // Only set for the AI agent, the ordering bot and staff; a system message or a customer's keeps the Phase 2 shape.
-    ...(r.author === 'agent' || r.author === 'bot' || r.author === 'staff' ? { author: r.author } : {}),
+    // Only set for the AI agent, the ordering bot, staff and the merchant's WhatsApp Business app; a system message or a customer's keeps the Phase 2 shape.
+    ...(r.author === 'agent' || r.author === 'bot' || r.author === 'staff' || r.author === 'app' ? { author: r.author } : {}),
   };
 }
 
