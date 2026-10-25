@@ -65,10 +65,11 @@ export function buildStatement(sql: Sql, month: string, cap = STATEMENT_ROW_CAP)
   };
 }
 
-/** A cell that a spreadsheet would run as a formula is defused with a leading quote (CSV injection), then quoted when needed. */
+const MONEY = /^-?\d+\.\d{2}$/;
+/** A cell that a spreadsheet would run as a formula is defused with a leading quote (CSV injection), then quoted when needed. A plain amount such as -0.80 is a number, not a formula: quoting it would turn charges into text. */
 const cell = (v: string | number | null): string => {
   let s = v === null ? '' : String(v);
-  if (/^[=+\-@\t\r]/.test(s) && typeof v === 'string') s = `'${s}`;
+  if (/^[=+\-@\t\r]/.test(s) && typeof v === 'string' && !MONEY.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
