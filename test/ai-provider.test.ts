@@ -117,7 +117,14 @@ describe('secrets', () => {
   });
   it('refuses tampering, another key, junk and a short master key', async () => {
     const a = await encryptSecret('sk-live-abcdef', TEST_SECRETS_KEY, 'ws-1');
-    const flipped = `${a.slice(0, -2)}${a.endsWith('A') ? 'B' : 'A'}${a.slice(-1)}`;
+    // Flip one bit of the first ciphertext byte (not a base64 character: near the padding a changed character can decode to the same
+    // bytes, and the old version sometimes "changed" A to A — a 1-in-64 flake).
+    const [v, iv, ct] = a.split('.');
+    const std = ct!.replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(std + '='.repeat((4 - (std.length % 4)) % 4)), (c) => c.charCodeAt(0));
+    bytes[0] = bytes[0]! ^ 0x01;
+    const flipped = `${v}.${iv}.${btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
+    expect(flipped).not.toBe(a);
     expect(await decryptSecret(flipped, TEST_SECRETS_KEY, 'ws-1')).toBeNull();
     expect(await decryptSecret(a, btoa('x'.repeat(32)), 'ws-1')).toBeNull();
     expect(await decryptSecret('garbage', TEST_SECRETS_KEY, 'ws-1')).toBeNull();
