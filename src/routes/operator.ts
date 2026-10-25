@@ -11,7 +11,7 @@ import {
 } from '../core/billing/operator';
 import { setSubscription } from '../core/billing/subscriptions';
 import { registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
-import { linkDashboardRefund } from '../core/billing/card-refunds';
+import { linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
@@ -94,6 +94,18 @@ operatorRoutes.post('/refund-requests/:id/link-dashboard-refund', async (c) => {
   if (!b.success) return bad(c);
   const r = await linkDashboardRefund(c.env, { requestId: c.req.param('id'), actor: actor(c), ...b.data });
   if (r.ok) return c.json({ ok: true, ...(r.adjustment ? { adjustment: r.adjustment } : {}) });
+  if (r.reason === 'provider_unavailable') return c.json({ error: 'rate_limited', message: r.reason }, 503);
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
+});
+operatorRoutes.post('/card-refunds/held/:refundId/match', async (c) => {
+  const r = await matchHeldRefund(c.env, { refundId: c.req.param('refundId'), actor: actor(c) });
+  if (r.ok) return c.json({ ok: true });
+  if (r.reason === 'provider_unavailable') return c.json({ error: 'rate_limited', message: r.reason }, 503);
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
+});
+operatorRoutes.post('/refund-requests/:id/card-refunds/:cardRefundId/mark-failed', async (c) => {
+  const r = await markCardRefundFailed(c.env, { requestId: c.req.param('id'), cardRefundId: decodeURIComponent(c.req.param('cardRefundId')), actor: actor(c) });
+  if (r.ok) return c.json({ ok: true });
   if (r.reason === 'provider_unavailable') return c.json({ error: 'rate_limited', message: r.reason }, 503);
   return c.json({ error: r.reason === 'not_found' ? 'not_found' : 'invalid_request', message: r.reason }, r.reason === 'not_found' ? 404 : 409);
 });

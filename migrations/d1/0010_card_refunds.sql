@@ -4,6 +4,8 @@
 --   source 'api'     we asked the provider to refund (state sending -> pending | succeeded | failed | uncertain)
 --   source 'dashboard' an operator refunded in the provider's dashboard and linked it to a manual payout (state linked)
 --   source 'webhook' a refund/chargeback we did not start (state succeeded); amount_minor is what the wallet was debited
+--   source 'held'    a refund webhook whose id differs from an unconfirmed refund of ours for the same top-up and amount: NO wallet movement
+--                    until an operator matches it to that refund (state held -> matched)
 -- sending / pending / uncertain are OPEN: they reserve the top-up's refundable amount and keep the request in `processing`.
 CREATE TABLE card_refunds (
   id TEXT PRIMARY KEY,
@@ -11,14 +13,20 @@ CREATE TABLE card_refunds (
   order_id TEXT NOT NULL REFERENCES topups(order_id),
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),
   amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
-  source TEXT NOT NULL CHECK (source IN ('api', 'dashboard', 'webhook')),
-  state TEXT NOT NULL CHECK (state IN ('sending', 'pending', 'uncertain', 'succeeded', 'failed', 'linked')),
+  source TEXT NOT NULL CHECK (source IN ('api', 'dashboard', 'webhook', 'held')),
+  state TEXT NOT NULL CHECK (state IN ('sending', 'pending', 'uncertain', 'succeeded', 'failed', 'linked', 'held', 'matched')),
   kashier_refund_id TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  -- Set when a signed, confirmed refund webhook named this refund (by its id): until then a refund of ours is still "unconfirmed".
+  confirmed_at INTEGER,
   note TEXT
 );
 CREATE UNIQUE INDEX card_refunds_provider_id ON card_refunds (kashier_refund_id) WHERE kashier_refund_id IS NOT NULL;
 CREATE INDEX card_refunds_open ON card_refunds (state, created_at) WHERE state IN ('sending', 'pending', 'uncertain');
 CREATE INDEX card_refunds_order ON card_refunds (order_id);
 CREATE INDEX card_refunds_request ON card_refunds (request_id);
+
+-- A request's wallet debits are posted in one phase BEFORE any provider call; only when that phase is complete may the request be promoted to
+-- a manual payout. Requests that existed before this column are final, so they default to complete.
+ALTER TABLE refund_requests ADD COLUMN debit_complete INTEGER NOT NULL DEFAULT 1;

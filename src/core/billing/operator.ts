@@ -125,7 +125,7 @@ async function applyAdjustment(env: Env, r: Adj, now: number): Promise<void> {
 }
 
 /** `id` makes the request idempotent (e.g. `relink:<refund id>`): the primary key allows it once. */
-export async function requestAdjustment(env: Env, a: { actor: string; workspaceId: string; amountMinor: number; reason: string; id?: string }, now = Date.now()) {
+export async function requestAdjustment(env: Env, a: { actor: string; workspaceId: string; amountMinor: number; reason: string; id?: string; secondApproverAlways?: boolean }, now = Date.now()) {
   const known = await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(a.workspaceId).first();
   if (!known) return { ok: false as const, reason: 'not_found' as const };
   const id = a.id ?? crypto.randomUUID();
@@ -137,9 +137,10 @@ export async function requestAdjustment(env: Env, a: { actor: string; workspaceI
   const promoted = await env.DB.prepare(
     `UPDATE wallet_adjustments SET state = 'approved', approved_by = requested_by, decided_at = ?1
       WHERE id = ?2 AND state = 'pending'
+        AND ?8 = 0
         AND (SELECT coalesce(sum(abs(w.amount_minor)), 0) FROM wallet_adjustments w WHERE w.requested_by = ?3 AND w.approved_by = w.requested_by AND w.state = 'approved' AND w.created_at > ?4) + abs(?5) <= ?6
         AND (SELECT count(*) FROM wallet_adjustments w WHERE w.requested_by = ?3 AND w.approved_by = w.requested_by AND w.state = 'approved' AND w.created_at > ?4) < ?7`,
-  ).bind(now, id, a.actor, now - SELF_APPROVE_WINDOW_MS, a.amountMinor, adjustmentThreshold(env), adjustmentDailyCap(env)).run();
+  ).bind(now, id, a.actor, now - SELF_APPROVE_WINDOW_MS, a.amountMinor, adjustmentThreshold(env), adjustmentDailyCap(env), a.secondApproverAlways ? 1 : 0).run();
   const small = promoted.meta.changes === 1;
   const row = (await env.DB.prepare(`SELECT ${ADJ_COLS} FROM wallet_adjustments WHERE id = ?`).bind(id).first<Adj>())!;
   await audit(env, { actor: a.actor, action: small ? 'adjustment_applied' : 'adjustment_requested', workspaceId: a.workspaceId, after: adjDto(row), reason: a.reason }, now);

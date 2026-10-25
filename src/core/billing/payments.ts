@@ -93,12 +93,12 @@ export class KashierProvider implements PaymentProvider {
   }
 
   confirmationReady(): boolean {
-    return !!this.secretKey;
+    return this.ready();
   }
 
   async confirm(ev: ParsedWebhook): Promise<ParsedWebhook> {
     if (!this.secretKey) throw new KashierUnconfirmedError('the Kashier secret key is not configured');
-    if (!/^https:\/\//i.test(this.apiBase)) throw new KashierUnconfirmedError('the Kashier API origin is not https');
+    if (!KashierProvider.pinned(this.apiBase)) throw new KashierUnconfirmedError('the Kashier API origin is not https on kashier.io');
     let answer: unknown;
     try {
       const res = await this.fetchImpl(`${this.apiBase}${kashierTransactionDetailsPath(ev.transactionId)}`, { method: 'GET', headers: { Authorization: this.secretKey, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000) });
@@ -144,8 +144,20 @@ export class KashierProvider implements PaymentProvider {
     if (!res.ok) throw new KashierUnconfirmedError(`answered ${res.status}`);
     return res.json();
   }
+  /**
+   * The secret key is only ever sent to Kashier: the API origin must be https on kashier.io or a subdomain of it (api., test-api.), whatever
+   * KASHIER_API_URL says. Anything else is refused before a request is made.
+   */
   private ready(): boolean {
-    return !!this.secretKey && /^https:\/\//i.test(this.apiBase);
+    return !!this.secretKey && KashierProvider.pinned(this.apiBase);
+  }
+  static pinned(base: string): boolean {
+    try {
+      const u = new URL(base);
+      return u.protocol === 'https:' && !u.username && !u.password && (u.hostname === 'kashier.io' || u.hostname.endsWith('.kashier.io'));
+    } catch {
+      return false;
+    }
   }
 
   /** Rows of the documented list call whose `merchantOrderId` is exactly ours, over up to 5 pages. Throws when the answer cannot be trusted. */
@@ -266,7 +278,7 @@ export class KashierProvider implements PaymentProvider {
     const innerStatus = typeof inner.status === 'string' ? inner.status.toUpperCase() : '';
     if (innerStatus === 'FAILURE' || top.status === 'FAILURE') return { ok: false, reason: 'rejected' };
     const asked = egpToMinor(inner.amount);
-    if (top.status === 'SUCCESS' && (innerStatus === 'SUCCESS' || innerStatus === 'PENDING') && String(inner.operation).toLowerCase() === 'refund' && TRANSACTION_ID.test(refundId) && asked === a.amountMinor) {
+    if (top.status === 'SUCCESS' && (innerStatus === 'SUCCESS' || innerStatus === 'PENDING') && isCardRefundOperation(String(inner.operation).toLowerCase()) && TRANSACTION_ID.test(refundId) && asked === a.amountMinor) {
       return { ok: true, refundId, status: innerStatus };
     }
     return { ok: false, reason: 'uncertain' };
