@@ -67,7 +67,7 @@ Each merge: full suite green twice locally, CI green, then deploy.
 
 ## 13. Verify production (Claude) — after EVERY deploy
 ```
-META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://<host> --expect "$(git rev-parse --short origin/main)"
+META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://<host> --expect "$(git rev-parse --short origin/main)" --brand ebda
 ```
 It checks the running commit, the security headers on the API and the page, Meta's webhook handshake, that unsigned/badly-signed webhooks are refused, and that a correctly signed empty webhook is accepted. Anything it could not check prints as SKIP and must be reported as not verified. Then, by hand:
 1. Send a WhatsApp message to the connected number from the owner's phone; it appears in the inbox in real time; reply from the inbox; the owner receives it.

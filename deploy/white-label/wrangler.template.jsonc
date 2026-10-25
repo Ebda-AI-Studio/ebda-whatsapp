@@ -1,6 +1,7 @@
 // White-label deployment of the WhatsApp product into a CLIENT's own Cloudflare account. Rendered by bootstrap.sh into
 // wrangler.<prefix>.jsonc; never edit the rendered file by hand, re-render it. Placeholders: __ACCOUNT_ID__, __PREFIX__,
-// __D1_ID__, __BRAND__, __IDENTITY_MODE__, __PUBLIC_BASE_URL__.
+// __D1_ID__, __BRAND__, __IDENTITY_MODE__, __PUBLIC_BASE_URL__, __IDENTITY_ISSUER__, __IDENTITY_JWKS_URL__, __IDENTITY_AUDIENCE__.
+// deploy.sh refuses to deploy unless web/dist/brand.json names __BRAND__.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "__PREFIX__",
@@ -21,10 +22,10 @@
     "BRAND": "__BRAND__",
     "IDENTITY_MODE": "__IDENTITY_MODE__",
     "PUBLIC_BASE_URL": "__PUBLIC_BASE_URL__",
-    // Used only when IDENTITY_MODE=ebda; an oidc tenant sets the IDENTITY_OIDC_CONFIG secret instead.
-    "IDENTITY_ISSUER": "https://accounts.ebda.app",
-    "IDENTITY_JWKS_URL": "https://accounts.ebda.app/.well-known/jwks.json",
-    "IDENTITY_AUDIENCE": "whatsapp"
+    // Filled by bootstrap.sh for the suite identity service only; empty for an oidc tenant, which sets the IDENTITY_OIDC_CONFIG secret instead.
+    "IDENTITY_ISSUER": "__IDENTITY_ISSUER__",
+    "IDENTITY_JWKS_URL": "__IDENTITY_JWKS_URL__",
+    "IDENTITY_AUDIENCE": "__IDENTITY_AUDIENCE__"
   },
   "durable_objects": { "bindings": [{ "name": "WORKSPACE_DO", "class_name": "WorkspaceDO" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],

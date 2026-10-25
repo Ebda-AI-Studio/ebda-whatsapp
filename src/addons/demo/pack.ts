@@ -32,6 +32,7 @@ const agentCopy: AgentCopy = {
 
 export const DEMO_PACK: BrandPack = {
   id: 'demo',
+  service: 'whatsapp-demo',
   autoReply: 'Thanks for your message! We will reply shortly. / شكرًا لرسالتك، بنرد عليك قريبًا.',
   optInKeywords: ['START', 'اشتراك'],
   templates: [

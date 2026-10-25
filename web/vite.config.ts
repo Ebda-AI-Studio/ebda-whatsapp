@@ -13,6 +13,11 @@ export default defineConfig({
   plugins: [
     react(),
     {
+      // Stamps which brand this build is for: the white-label deploy and scripts/verify-prod.mjs refuse a page built for another one.
+      name: 'brand-stamp',
+      generateBundle() { this.emitFile({ type: 'asset', fileName: 'brand.json', source: JSON.stringify({ brand }) }); },
+    },
+    {
       name: 'brand-html',
       async transformIndexHtml(html) {
         const { BRAND } = (await import(join(brandDir, 'brand.ts'))) as { BRAND: { productName: string; appleTouchIcon: string | null } };

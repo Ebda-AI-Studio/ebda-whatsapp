@@ -19,6 +19,8 @@ export type SharedNumberCopy = {
 /** Everything brand-specific the Worker needs: copy, starter templates, opt-in words, the AI agent's words, and an optional Store link. */
 export type BrandPack = {
   id: string;
+  /** The service name `/health` reports (lowercase, dashes). */
+  service: string;
   /** The first reply a new customer gets while the inbox has no other answer configured. */
   autoReply: string;
   optInKeywords: readonly string[];
