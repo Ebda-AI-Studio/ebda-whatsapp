@@ -11,7 +11,7 @@
 import type { Env } from '../../env';
 import { sessionState } from '../identity/session';
 import { roundHalfEvenDiv } from './money';
-import { applyPackageWebhook, findPackageOrder } from './package-orders';
+import { RefundContention, applyPackageWebhook, findPackageOrder } from './package-orders';
 import { packagesEnabled, paymentProvider, topupsEnabled, type ParsedWebhook, type PaymentProvider } from './payments';
 
 export const MIN_TOPUP_MINOR = 1000;
@@ -83,25 +83,82 @@ async function credit(env: Env, row: TopupRow, transactionId: string, now: numbe
 }
 
 const AGED_AFTER_MS = 24 * 3_600_000;
-const KEEP_RESOLVED_MS = 30 * 86_400_000;
+const RETRY_EVERY_MS = 24 * 3_600_000;
+const MAX_ATTEMPTS = 14;
+const KEEP_CLOSED_MS = 30 * 86_400_000;
+const PASS_LIMIT = 300;
 
-/** Keeps a delivery that could not be confirmed, so the daily pass can re-confirm it even if the provider never retries. */
-async function recordUnconfirmed(env: Env, eventKey: string, raw: string, signature: string | null, reason: string, now: number): Promise<void> {
-  await env.DB.prepare(
-    `INSERT INTO unconfirmed_webhooks (event_key, raw_body, signature, first_seen, last_seen, attempts, last_reason) VALUES (?, ?, ?, ?, ?, 1, ?)
-     ON CONFLICT(event_key) DO UPDATE SET last_seen = excluded.last_seen, attempts = attempts + 1, last_reason = excluded.last_reason WHERE resolved_at IS NULL`,
-  ).bind(eventKey, raw, signature ?? '', now, now, reason).run();
+/** Only what re-verification needs: the signed fields (named by `signatureKeys`) and `signatureKeys` itself. */
+function reducedBody(raw: string): string {
+  const d = ((JSON.parse(raw) as { data?: Record<string, unknown> }).data ?? {}) as Record<string, unknown>;
+  const keys = Array.isArray(d.signatureKeys) ? d.signatureKeys.filter((k): k is string => typeof k === 'string') : [];
+  const data: Record<string, unknown> = {};
+  for (const k of keys) data[k] = d[k];
+  data.signatureKeys = d.signatureKeys;
+  return JSON.stringify({ data });
 }
-const resolveUnconfirmed = (env: Env, eventKey: string | undefined, now: number) =>
-  eventKey ? env.DB.prepare('UPDATE unconfirmed_webhooks SET resolved_at = ? WHERE event_key = ? AND resolved_at IS NULL').bind(now, eventKey).run() : Promise.resolve();
+
+/** Keeps a delivery that must be run again (not confirmable yet, or held until its payment is credited). */
+async function recordUnconfirmed(env: Env, signed: ParsedWebhook, raw: string, signature: string | null, reason: string, now: number): Promise<void> {
+  if (!signed.eventKey) return;
+  await env.DB.prepare(
+    `INSERT INTO unconfirmed_webhooks (event_key, order_id, raw_body, signature, first_seen, last_seen, attempts, next_attempt_at, last_reason) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+     ON CONFLICT(event_key) DO UPDATE SET last_seen = excluded.last_seen, last_reason = excluded.last_reason WHERE status = 'open'`,
+  ).bind(signed.eventKey, signed.orderId, reducedBody(raw), signature ?? '', now, now, now, reason).run();
+}
+const closeUnconfirmed = (env: Env, eventKey: string | undefined, status: 'resolved' | 'abandoned', resolution: string, now: number) =>
+  eventKey ? env.DB.prepare("UPDATE unconfirmed_webhooks SET status = ?, resolution = ?, resolved_at = ? WHERE event_key = ? AND status = 'open'").bind(status, resolution, now, eventKey).run() : Promise.resolve();
 
 export type WebhookOutcome = { status: 200 | 401 | 404 | 500 | 503; body: string };
+
+/** What a confirmed webhook did to a top-up, as a resolution word. Throws only if something could not be written. */
+async function applyTopupWebhook(env: Env, t: TopupRow, ev: ParsedWebhook, now: number): Promise<string> {
+  if (ev.event === 'pay') {
+    if (ev.status === 'FAILURE') {
+      await env.DB.prepare("UPDATE topups SET state = 'failed' WHERE order_id = ? AND state = 'pending'").bind(t.order_id).run();
+      return 'failed';
+    }
+    if (ev.status !== 'SUCCESS') return 'ignored';
+    if (ev.currency !== t.currency || ev.amountMinor !== t.total_minor) {
+      alert('topup_amount_mismatch', { workspace: t.workspace_id });
+      return 'amount_mismatch';
+    }
+    if ((await credit(env, t, ev.transactionId, now)) === 'conflict') {
+      alert('duplicate_success', { kind: 'topup', workspace: t.workspace_id, eventKey: ev.eventKey });
+      return 'duplicate_success';
+    }
+    return 'credited';
+  }
+  if (ev.event === 'refund' && ev.status === 'SUCCESS') {
+    // A refund is a DIFFERENT transaction from the payment it returns.
+    if (t.transaction_id === ev.transactionId) {
+      alert('refund_refused', { kind: 'topup', workspace: t.workspace_id, eventKey: ev.eventKey });
+      return 'refund_refused';
+    }
+    // The payment is not credited (yet): the refund is held and applied once it is, whichever path credits it.
+    if (t.state !== 'paid' || !t.transaction_id) return 'payment_pending';
+    const r = await stubOf(env, t.workspace_id).postWallet({ kind: 'chargeback', netMinor: -ev.amountMinor, ref: `chargeback:${ev.transactionId}`, note: `provider refund of ${t.order_id}: operator review` }, now);
+    if (r.ok) {
+      await env.DB.prepare('UPDATE topups SET refunded_minor = min(total_minor, refunded_minor + ?) WHERE order_id = ?').bind(ev.amountMinor, t.order_id).run();
+      alert('topup_refunded_by_provider', { workspace: t.workspace_id, orderId: t.order_id });
+    }
+    return 'refunded';
+  }
+  return 'ignored';
+}
+
+/** Runs the refunds that were held for this order's payment (their payment is credited now). */
+async function rerunHeldRefunds(env: Env, orderId: string, provider: PaymentProvider, now: number): Promise<void> {
+  const { results } = await env.DB.prepare("SELECT raw_body, signature FROM unconfirmed_webhooks WHERE status = 'open' AND order_id = ? AND last_reason = 'payment_pending'").bind(orderId).all<{ raw_body: string; signature: string }>();
+  for (const r of results) await handleProviderWebhook(env, r.raw_body, r.signature, provider, now).catch(() => undefined);
+}
 
 /**
  * The provider webhook. 401 = signature/structure invalid (nothing read from the payload). 200 = acknowledged (including ignored events).
  * 5xx = retry me. Money facts come from the SIGNED fields; the unsigned `event` label is never applied: for an order of ours the signed
  * transaction is confirmed with the provider first (`provider.confirm`), and the kind and status the provider reports are what is acted on.
- * If the provider cannot be asked, or its answer does not match, the answer is 503 and nothing happens (the provider retries).
+ * If the provider cannot be asked, or its answer does not match, the answer is 503 and nothing happens, and the delivery is kept for the
+ * daily pass. Every terminal outcome closes the kept row with its reason; a refund whose payment is not credited yet stays open until it is.
  */
 export async function handleProviderWebhook(env: Env, raw: string, signature: string | null, provider: PaymentProvider | null = paymentProvider(env), now = Date.now()): Promise<WebhookOutcome> {
   if (!topupsEnabled(env) && !packagesEnabled(env)) return { status: 404, body: 'not found' };
@@ -122,74 +179,59 @@ export async function handleProviderWebhook(env: Env, raw: string, signature: st
   } catch (err) {
     const reason = err instanceof Error ? err.message.slice(0, 80) : 'error';
     alert('webhook_unconfirmed', { eventKey: signed.eventKey, reason });
-    if (signed.eventKey) await recordUnconfirmed(env, signed.eventKey, raw, signature, reason, now).catch(() => undefined);
+    await recordUnconfirmed(env, signed, raw, signature, reason, now).catch(() => undefined);
     return { status: 503, body: 'unconfirmed' };
   }
-  if (pkg) {
-    try {
-      await applyPackageWebhook(env, pkg, ev, now);
-    } catch (err) {
-      alert('package_webhook_failed', { error: err instanceof Error ? err.name : 'error' });
-      return { status: 500, body: 'retry' };
-    }
-    await resolveUnconfirmed(env, signed.eventKey, now);
-    return { status: 200, body: 'ok' };
-  }
-  const t = row!;
+  let resolution: string;
   try {
-    if (ev.event === 'pay') {
-      if (ev.status === 'FAILURE') {
-        await env.DB.prepare("UPDATE topups SET state = 'failed' WHERE order_id = ? AND state = 'pending'").bind(t.order_id).run();
-        return { status: 200, body: 'ok' };
-      }
-      if (ev.status !== 'SUCCESS') return { status: 200, body: 'ok' };
-      if (ev.currency !== t.currency || ev.amountMinor !== t.total_minor) {
-        alert('topup_amount_mismatch', { workspace: t.workspace_id });
-        return { status: 200, body: 'ok' };
-      }
-      if ((await credit(env, t, ev.transactionId, now)) === 'conflict') alert('duplicate_success', { kind: 'topup', workspace: t.workspace_id, eventKey: ev.eventKey });
-    } else if (ev.event === 'refund' && ev.status === 'SUCCESS') {
-      // A refund is a DIFFERENT transaction from the payment it returns, and the order must have been paid.
-      if (t.state !== 'paid' || !t.transaction_id || t.transaction_id === ev.transactionId) {
-        alert('refund_refused', { kind: 'topup', workspace: t.workspace_id, eventKey: ev.eventKey });
-        return { status: 200, body: 'ok' };
-      }
-      const r = await stubOf(env, t.workspace_id).postWallet({ kind: 'chargeback', netMinor: -ev.amountMinor, ref: `chargeback:${ev.transactionId}`, note: `provider refund of ${t.order_id}: operator review` }, now);
-      if (r.ok) {
-        await env.DB.prepare('UPDATE topups SET refunded_minor = min(total_minor, refunded_minor + ?) WHERE order_id = ?').bind(ev.amountMinor, t.order_id).run();
-        alert('topup_refunded_by_provider', { workspace: t.workspace_id, orderId: t.order_id });
-      }
-    }
+    resolution = pkg ? await applyPackageWebhook(env, pkg, ev, now) : await applyTopupWebhook(env, row!, ev, now);
   } catch (err) {
-    alert('topup_webhook_failed', { error: err instanceof Error ? err.name : 'error' });
+    if (err instanceof RefundContention) {
+      alert('package_refund_contention', { eventKey: signed.eventKey });
+      await recordUnconfirmed(env, signed, raw, signature, 'refund_contention', now).catch(() => undefined);
+    } else {
+      alert(pkg ? 'package_webhook_failed' : 'topup_webhook_failed', { error: err instanceof Error ? err.name : 'error' });
+    }
     return { status: 500, body: 'retry' };
   }
-  await resolveUnconfirmed(env, signed.eventKey, now);
+  if (resolution === 'payment_pending') {
+    await recordUnconfirmed(env, signed, raw, signature, 'payment_pending', now);
+    return { status: 200, body: 'ok' };
+  }
+  await closeUnconfirmed(env, signed.eventKey, 'resolved', resolution, now);
+  if (resolution === 'credited' || resolution === 'granted' || resolution === 'replay') await rerunHeldRefunds(env, signed.orderId, provider, now);
   return { status: 200, body: 'ok' };
 }
 
 /**
- * Daily: deliveries that could not be confirmed are run through the SAME path as a live webhook (so whichever confirms first, the claim on the
- * transaction id makes it one effect). One that is still unconfirmed 24 h after it first arrived alerts `webhook_unconfirmed_aged` (the
- * structured alert line the alert bridge turns into a notice, like every other money alert here).
+ * Daily: kept deliveries that are due are run through the SAME path as a live webhook (so whichever confirms first, the claim on the
+ * transaction id makes it one effect). One attempt a day; one still open 24 h after it first arrived alerts `webhook_unconfirmed_aged` once;
+ * after 14 attempts it is `abandoned` and alerts `webhook_unconfirmed_abandoned` once (the structured alert line the alert bridge turns into
+ * a notice, like every other money alert here). Only open, due rows are read, so finished or abandoned rows never take a slot.
  */
-export async function reconfirmUnconfirmed(env: Env, provider: PaymentProvider | null = paymentProvider(env), now = Date.now()): Promise<{ resolved: number; pending: number; aged: number }> {
-  if (!provider) return { resolved: 0, pending: 0, aged: 0 };
-  const { results } = await env.DB.prepare('SELECT event_key, raw_body, signature, first_seen FROM unconfirmed_webhooks WHERE resolved_at IS NULL ORDER BY first_seen LIMIT 100').all<{ event_key: string; raw_body: string; signature: string; first_seen: number }>();
-  let resolved = 0;
-  let pending = 0;
-  let aged = 0;
+export async function reconfirmUnconfirmed(env: Env, provider: PaymentProvider | null = paymentProvider(env), now = Date.now()): Promise<{ resolved: number; pending: number; aged: number; abandoned: number }> {
+  const out = { resolved: 0, pending: 0, aged: 0, abandoned: 0 };
+  if (!provider) return out;
+  const { results } = await env.DB.prepare("SELECT event_key, raw_body, signature, first_seen, attempts, aged_alerted FROM unconfirmed_webhooks WHERE status = 'open' AND next_attempt_at <= ? ORDER BY next_attempt_at LIMIT ?").bind(now, PASS_LIMIT).all<{ event_key: string; raw_body: string; signature: string; first_seen: number; attempts: number; aged_alerted: number }>();
   for (const r of results) {
-    const out = await handleProviderWebhook(env, r.raw_body, r.signature, provider, now).catch(() => ({ status: 500 as const, body: 'error' }));
-    if (out.status === 200) { resolved++; continue; }
-    pending++;
-    if (now - r.first_seen > AGED_AFTER_MS) {
-      aged++;
-      alert('webhook_unconfirmed_aged', { eventKey: r.event_key, firstSeen: r.first_seen, lastStatus: out.status });
+    const res = await handleProviderWebhook(env, r.raw_body, r.signature, provider, now).catch(() => ({ status: 500 as const, body: 'error' }));
+    const cur = await env.DB.prepare('SELECT status FROM unconfirmed_webhooks WHERE event_key = ?').bind(r.event_key).first<{ status: string }>();
+    if (cur?.status !== 'open') { out.resolved++; continue; }
+    const attempts = r.attempts + 1;
+    if (attempts >= MAX_ATTEMPTS || res.status === 401) {
+      await closeUnconfirmed(env, r.event_key, 'abandoned', 'abandoned', now);
+      await env.DB.prepare('UPDATE unconfirmed_webhooks SET attempts = ? WHERE event_key = ?').bind(attempts, r.event_key).run();
+      alert('webhook_unconfirmed_abandoned', { eventKey: r.event_key, firstSeen: r.first_seen, attempts });
+      out.abandoned++;
+      continue;
     }
+    const aged = r.aged_alerted === 0 && now - r.first_seen > AGED_AFTER_MS;
+    if (aged) { alert('webhook_unconfirmed_aged', { eventKey: r.event_key, firstSeen: r.first_seen, lastStatus: res.status }); out.aged++; }
+    await env.DB.prepare('UPDATE unconfirmed_webhooks SET attempts = ?, next_attempt_at = ?, aged_alerted = ? WHERE event_key = ?').bind(attempts, now + RETRY_EVERY_MS, aged ? 1 : r.aged_alerted, r.event_key).run();
+    out.pending++;
   }
-  await env.DB.prepare('DELETE FROM unconfirmed_webhooks WHERE resolved_at IS NOT NULL AND resolved_at < ?').bind(now - KEEP_RESOLVED_MS).run();
-  return { resolved, pending, aged };
+  await env.DB.prepare("DELETE FROM unconfirmed_webhooks WHERE status != 'open' AND resolved_at < ?").bind(now - KEEP_CLOSED_MS).run();
+  return out;
 }
 
 /** Daily: ask the provider about top-ups still pending after REPAIR_AFTER_MS; credit what was paid, close what failed or is a week old. */
@@ -211,7 +253,7 @@ export async function repairTopups(env: Env, provider: PaymentProvider | null = 
     } else if (q.status === 'SUCCESS' && q.transactionId && q.amountMinor === row.total_minor && q.currency === row.currency) {
       try {
         const c = await credit(env, row, q.transactionId, now);
-        if (c === 'credited') credited++;
+        if (c === 'credited') { credited++; await rerunHeldRefunds(env, row.order_id, provider, now); }
         else if (c === 'conflict') alert('duplicate_success', { kind: 'topup', workspace: row.workspace_id });
       } catch (err) {
         alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' });

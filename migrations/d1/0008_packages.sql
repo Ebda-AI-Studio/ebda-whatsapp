@@ -65,17 +65,24 @@ CREATE TABLE package_refunds (
   frac_den INTEGER
 );
 
--- Provider deliveries that could not be confirmed with the provider yet (details not queryable, outage). Kept so the daily pass can
--- re-confirm them through the same path as a live webhook even if the provider never retries. The signed body is the same data the
--- provider already sent us; rows are deleted 30 days after they resolve.
+-- Provider deliveries the provider has not confirmed yet, or that are held for a reason (a refund that arrived before its payment was credited).
+-- Kept so the daily pass can run them again through the same path as a live webhook even if the provider never retries. Only what
+-- re-verification needs is stored (the signed fields, the signature, our order id). One attempt a day, at most 14, then `abandoned` (alerted once).
+-- `resolution` says how a row ended (credited, granted, failed, amount_mismatch, refund_refused, ...). Closed rows are deleted after 30 days.
 CREATE TABLE unconfirmed_webhooks (
   event_key TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL,
   raw_body TEXT NOT NULL,
   signature TEXT NOT NULL,
   first_seen INTEGER NOT NULL,
   last_seen INTEGER NOT NULL,
-  attempts INTEGER NOT NULL DEFAULT 1,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at INTEGER NOT NULL,
   last_reason TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved', 'abandoned')),
+  resolution TEXT,
+  aged_alerted INTEGER NOT NULL DEFAULT 0,
   resolved_at INTEGER
 );
-CREATE INDEX unconfirmed_webhooks_open ON unconfirmed_webhooks (first_seen) WHERE resolved_at IS NULL;
+CREATE INDEX unconfirmed_webhooks_due ON unconfirmed_webhooks (next_attempt_at) WHERE status = 'open';
+CREATE INDEX unconfirmed_webhooks_order ON unconfirmed_webhooks (order_id) WHERE status = 'open';

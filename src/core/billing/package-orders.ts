@@ -124,28 +124,35 @@ async function recordOnce(env: Env, action: string, row: PackageOrderRow, reason
  * A CONFIRMED webhook for one of our package orders (the caller has already asked the provider what the signed transaction really is, so
  * `ev.event` is the provider's own kind, never the unsigned label). Throws only when something could not be written (the caller answers 5xx).
  */
-export async function applyPackageWebhook(env: Env, row: PackageOrderRow, ev: ParsedWebhook, now: number): Promise<void> {
-  if (ev.event === 'refund') {
-    if (ev.status === 'SUCCESS') await refundOrder(env, row, ev, now);
-    return;
+export class RefundContention extends Error {
+  constructor() {
+    super('refund_contention');
+    this.name = 'RefundContention';
   }
-  if (ev.event !== 'pay') return;
+}
+
+/** Returns how the delivery ended (a resolution word), or `payment_pending` when a refund must wait for its payment to be granted. */
+export async function applyPackageWebhook(env: Env, row: PackageOrderRow, ev: ParsedWebhook, now: number): Promise<string> {
+  if (ev.event === 'refund') return ev.status === 'SUCCESS' ? refundOrder(env, row, ev, now) : 'ignored';
+  if (ev.event !== 'pay') return 'ignored';
   if (ev.status === 'FAILURE') {
     await env.DB.prepare("UPDATE package_orders SET status = 'failed' WHERE order_id = ? AND status = 'pending'").bind(row.order_id).run();
-    return;
+    return 'failed';
   }
-  if (ev.status !== 'SUCCESS') return;
+  if (ev.status !== 'SUCCESS') return 'ignored';
   if (ev.currency !== row.currency || ev.amountMinor !== row.amount_minor) {
     alert('package_amount_mismatch', { workspace: row.workspace_id });
-    return;
+    return 'amount_mismatch';
   }
-  await grantOrder(env, row, ev.transactionId, now, { claim: true });
+  const granted = await grantOrder(env, row, ev.transactionId, now, { claim: true });
   const after = await findPackageOrder(env, row.order_id);
   if (after && after.status !== 'pending' && after.provider_ref !== null && after.provider_ref !== ev.transactionId) {
     // The order is already bound to another transaction: a second success. Nothing is granted; a person must look at it.
     alert('duplicate_success', { kind: 'package', workspace: row.workspace_id, orderId: row.order_id, eventKey: ev.eventKey });
     await recordOnce(env, 'package_duplicate_payment', row, ev.transactionId, now);
+    return 'duplicate_success';
   }
+  return granted;
 }
 
 const G = (refundRef: string) => ({ sql: 'EXISTS (SELECT 1 FROM package_refunds WHERE refund_ref = ? AND applied = 0)', binds: [refundRef] });
@@ -158,23 +165,29 @@ const G = (refundRef: string) => ({ sql: 'EXISTS (SELECT 1 FROM package_refunds 
  *    queued period, only that period is removed (later ones move up). If its period already ended, the plan is untouched.
  *  - Partial: the running period it owns is shortened by the refunded fraction and the same fraction of its unused credits expires.
  */
-async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, now: number): Promise<void> {
+async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, now: number): Promise<string> {
   const refundRef = ev.transactionId;
   const r = ev.amountMinor;
+  let outcome = 'refunded';
+  let settled = false;
   for (let attempt = 0; attempt < 6; attempt++) {
     const row = (await findPackageOrder(env, row0.order_id)) ?? row0;
+    // The payment is not granted (yet): hold the refund until it is, whichever path grants it.
+    if (row.status === 'pending' || row.status === 'failed' || row.status === 'expired') return 'payment_pending';
     if (!row.provider_ref || row.provider_ref === refundRef) {
       alert('refund_refused', { kind: 'package', workspace: row.workspace_id, eventKey: ev.eventKey });
-      return;
+      return 'refund_refused';
     }
     const known = await env.DB.prepare('SELECT applied FROM package_refunds WHERE refund_ref = ?').bind(refundRef).first<{ applied: number }>();
     if (known) {
       if (row.status === 'refunded' || row.status === 'charged_back') await announceSubscription(env, row.workspace_id, now); // a replay: make sure the push and the Store event happened
+      outcome = 'replay';
+      settled = true;
       break;
     }
     if (row.status !== 'paid' || r <= 0) {
       alert('package_refund_unmatched', { workspace: row.workspace_id, orderId: row.order_id });
-      return;
+      return 'unmatched';
     }
     const subBefore = await env.DB.prepare('SELECT version FROM workspace_subscriptions WHERE workspace_id = ?').bind(row.workspace_id).first<{ version: number }>();
     const amount = row.amount_minor;
@@ -235,9 +248,14 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
     alert(full ? (ev.chargeback ? 'package_chargeback' : 'package_refunded') : 'package_partial_refund', { workspace: ws, orderId: oid, amountMinor: r, eventKey: ev.eventKey });
     const subAfter = await env.DB.prepare('SELECT version FROM workspace_subscriptions WHERE workspace_id = ?').bind(ws).first<{ version: number }>();
     if (subAfter && subAfter.version !== subBefore?.version) await announceSubscription(env, ws, now);
+    outcome = full ? 'refunded' : 'partial_refund';
+    settled = true;
     break;
   }
+  // Losing every race must not look like success: the provider is answered 5xx and the delivery is kept for the daily pass.
+  if (!settled) throw new RefundContention();
   await finishRefund(env, row0.order_id, refundRef, now);
+  return outcome;
 }
 
 /** The steps after a refund's batch, each idempotent and retried by the provider's redelivery: zero the unused credits, hand back to the Store plan. */

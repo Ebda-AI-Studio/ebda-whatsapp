@@ -79,7 +79,8 @@ describe('1. a refund only acts on a top-up that was really credited', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect((await hook('t3-1', 'TX-REFUND-1', '51.50', { label: 'refund' })).status).toBe(200);
     expect(await ledger(ws)).toEqual([]);
-    expect(alerts(spy, 'refund_refused')).toBe(1);
+    expect(alerts(spy, 'refund_refused')).toBe(0); // not a refusal: the refund is held until the payment is credited
+    expect((await env.DB.prepare("SELECT last_reason FROM unconfirmed_webhooks WHERE event_key = 'kashier:TX-REFUND-1:SUCCESS'").first<{ last_reason: string }>())?.last_reason).toBe('payment_pending');
   });
 });
 
@@ -138,9 +139,9 @@ describe('4. a delivery that cannot be confirmed is kept and re-confirmed by the
     expect((await env.DB.prepare("SELECT count(*) AS n FROM unconfirmed_webhooks WHERE resolved_at IS NULL AND event_key = 'kashier:TX-30:SUCCESS'").first<{ n: number }>())!.n).toBe(1);
     expect(await reconfirmUnconfirmed(env, provider)).toMatchObject({ resolved: 0 }); // still not queryable
     ready = true;
-    expect(await reconfirmUnconfirmed(env, provider)).toMatchObject({ resolved: 1 });
+    expect(await reconfirmUnconfirmed(env, provider, Date.now() + 2 * DAY)).toMatchObject({ resolved: 1 }); // one attempt a day: due again tomorrow
     expect((await ledger(ws)).filter((r) => r.kind === 'topup')).toHaveLength(1);
-    expect(await reconfirmUnconfirmed(env, provider)).toMatchObject({ resolved: 0 });
+    expect(await reconfirmUnconfirmed(env, provider, Date.now() + 2 * DAY)).toMatchObject({ resolved: 0 });
     expect((await ledger(ws)).filter((r) => r.kind === 'topup')).toHaveLength(1);
 
     const ws2 = W(31);
