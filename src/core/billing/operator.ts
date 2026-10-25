@@ -102,6 +102,12 @@ export async function setFunding(env: Env, a: { actor: string; phoneNumberId: st
 
 // ---- adjustments: actor + reason always; above the threshold a SECOND super admin approves ------------------------------------
 
+/** Self-approved adjustments per actor per rolling day: their absolute amounts together may not pass the threshold, nor their number the cap. */
+export const SELF_APPROVE_WINDOW_MS = 24 * 3_600_000;
+export const adjustmentDailyCap = (env: Env): number => {
+  const n = Number(env.ADJUSTMENT_DAILY_CAP ?? 20);
+  return Number.isSafeInteger(n) && n >= 0 ? n : 20;
+};
 export const adjustmentThreshold = (env: Env): number => {
   const n = Number(env.ADJUSTMENT_APPROVAL_MINOR ?? 100_000);
   return Number.isSafeInteger(n) && n >= 0 ? n : 100_000;
@@ -120,7 +126,11 @@ export async function requestAdjustment(env: Env, a: { actor: string; workspaceI
   const known = await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(a.workspaceId).first();
   if (!known) return { ok: false as const, reason: 'not_found' as const };
   const id = crypto.randomUUID();
-  const small = Math.abs(a.amountMinor) <= adjustmentThreshold(env);
+  // The threshold is cumulative per actor (absolute values, all workspaces, rolling 24 h, this request included): splitting a large
+  // adjustment into small ones never avoids the second approver. Only what the actor approved for themselves counts.
+  const used = (await env.DB.prepare("SELECT coalesce(sum(abs(amount_minor)), 0) AS total, count(*) AS n FROM wallet_adjustments WHERE requested_by = ? AND approved_by = ? AND state = 'approved' AND created_at > ?")
+    .bind(a.actor, a.actor, now - SELF_APPROVE_WINDOW_MS).first<{ total: number; n: number }>()) ?? { total: 0, n: 0 };
+  const small = used.total + Math.abs(a.amountMinor) <= adjustmentThreshold(env) && used.n < adjustmentDailyCap(env);
   await env.DB.prepare('INSERT INTO wallet_adjustments (id, workspace_id, amount_minor, reason, requested_by, state, approved_by, created_at, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(id, a.workspaceId, a.amountMinor, a.reason, a.actor, small ? 'approved' : 'pending', small ? a.actor : null, now, small ? now : null).run();
   const row = (await env.DB.prepare(`SELECT ${ADJ_COLS} FROM wallet_adjustments WHERE id = ?`).bind(id).first<Adj>())!;

@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:test';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { configureSessionCheck } from '../src/core/identity/session';
 import { configurePayments, type PaymentProvider } from '../src/core/billing/payments';
 import { OP1, OP2, apiFor, operatorCall, storeId as W, useApiKey } from './helpers/api';
 import { fund, ledger } from './helpers/billing';
@@ -9,6 +10,8 @@ useApiKey();
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const json = async (r: Response) => (await r.json()) as Record<string, unknown> & { items?: Record<string, unknown>[] };
+beforeEach(() => configureSessionCheck(async () => false)); // healthy accounts service: no session is revoked
+afterEach(() => configureSessionCheck(null));
 afterEach(() => configurePayments((e) => (e.KASHIER_MERCHANT_ID && e.KASHIER_API_KEY ? null : null)));
 
 describe('operator access', () => {
@@ -199,5 +202,79 @@ describe('shared-number true-up', () => {
     expect(ok.status).toBe(201);
     expect(await ok.json()).toEqual({ month: '2020-01', phoneNumberId: 'pn-s', actualMinor: 80, totalChargedMinor: 200, totalCount: 4, rebateMinor: 120 });
     expect(await (await operatorCall(OP2, 'POST', '/trueups', { month: '2020-01', phoneNumberId: 'pn-s', actualMinor: 10 })).json()).toMatchObject({ message: 'already_published' });
+  });
+});
+
+describe('adjustments: the threshold is cumulative per actor (no splitting)', () => {
+  const OPX = '33333333-3333-4333-8333-333333333333';
+  const OPY = '44444444-4444-4444-8444-444444444444';
+  it('10 x half the threshold by one operator: the first two self-approve, the third crosses the 24 h total and waits for someone else', async () => {
+    const ws = W(1060);
+    await seedNumber('pn-op1060', ws);
+    const half = 50_000; // the default threshold is 100,000
+    const out: string[] = [];
+    const ids: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const r = await json(await operatorCall(OPX, 'POST', `/workspaces/${ws}/adjustments`, { amountMinor: i % 2 ? -half : half, reason: `split ${i} of a big one` }));
+      out.push(r.state as string);
+      ids.push(r.id as string);
+    }
+    expect(out).toEqual(['approved', 'approved', ...Array(8).fill('pending')]); // signs do not cancel out: absolute values add up
+    expect((await ledger(ws)).length).toBe(2);
+    expect((await operatorCall(OPX, 'POST', `/adjustments/${ids[2]}/decision`, { decision: 'approve' })).status).toBe(403); // not their own
+    expect((await operatorCall(OPY, 'POST', `/adjustments/${ids[2]}/decision`, { decision: 'approve' })).status).toBe(200);
+    expect((await ledger(ws)).length).toBe(3);
+    // a pending one approved by someone else is NOT the requester's self-approved total
+    const next = await json(await operatorCall(OPY, 'POST', `/workspaces/${ws}/adjustments`, { amountMinor: 10, reason: 'tiny one by another operator' }));
+    expect(next.state).toBe('approved');
+  });
+
+  it('the total spans workspaces, and a day-count cap stops many small ones', async () => {
+    const a = W(1061);
+    const b = W(1062);
+    await seedNumber('pn-op1061', a);
+    await seedNumber('pn-op1062', b);
+    const OPZ = '55555555-5555-4555-8555-555555555555';
+    expect((await json(await operatorCall(OPZ, 'POST', `/workspaces/${a}/adjustments`, { amountMinor: 60_000, reason: 'first half' }))).state).toBe('approved');
+    expect((await json(await operatorCall(OPZ, 'POST', `/workspaces/${b}/adjustments`, { amountMinor: 60_000, reason: 'second half elsewhere' }))).state).toBe('pending');
+    const OPW = '66666666-6666-4666-8666-666666666666';
+    const states: string[] = [];
+    for (let i = 0; i < 22; i++) states.push((await json(await operatorCall(OPW, 'POST', `/workspaces/${a}/adjustments`, { amountMinor: 1, reason: `one piaster ${i}` }))).state as string);
+    expect(states.filter((x) => x === 'approved')).toHaveLength(20);
+    expect(states.slice(20)).toEqual(['pending', 'pending']);
+  });
+});
+
+describe('state-changing operator routes check the session (fail closed)', () => {
+  const writes: [string, string, unknown][] = [
+    ['POST', '/pricing-settings', { marginBps: 0, creditLimitMinor: 5000, fxBufferBps: 0, vatBps: 0, reason: 'session check' }],
+    ['POST', `/pricing-overrides/${W(1070)}`, { marginBps: 0, reason: 'session check' }],
+    ['POST', '/rate-cards', { effectiveFrom: Date.now() + 30 * HOUR, rates: [{ country: 'EG', category: 'marketing', usdMicros: 1 }], reason: 'session check' }],
+    ['POST', '/fx-rates', { effectiveFrom: Date.now() + 30 * HOUR, egpPerUsdMicros: 50_000_000, reason: 'session check' }],
+    ['PUT', '/numbers/pn-x/funding', { funding: 'merchant_card', reason: 'session check' }],
+    ['POST', `/workspaces/${W(1070)}/adjustments`, { amountMinor: 5, reason: 'session check' }],
+    ['POST', '/adjustments/x/decision', { decision: 'approve' }],
+    ['POST', '/refund-requests/x/decision', { decision: 'approve' }],
+    ['POST', '/refund-requests/x/manual-paid', undefined],
+    ['POST', '/trueups', { month: '2020-01', phoneNumberId: 'p', actualMinor: 0 }],
+  ];
+  it.each(writes)('%s %s: a revoked session is refused (403), nothing is written', async (method, path, body) => {
+    configureSessionCheck(async () => true);
+    const before = await env.DB.prepare('SELECT count(*) AS n FROM billing_audit').first<{ n: number }>();
+    expect((await operatorCall(OP1, method, path, body)).status).toBe(403);
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM billing_audit').first<{ n: number }>()).toEqual(before);
+  });
+  it.each(writes)('%s %s: an accounts service that errors or is missing refuses (503)', async (method, path, body) => {
+    configureSessionCheck(async () => { throw new Error('accounts down'); });
+    expect((await operatorCall(OP1, method, path, body)).status).toBe(503);
+    configureSessionCheck(null); // no override and no ACCOUNTS binding in this environment
+    expect((await operatorCall(OP1, method, path, body)).status).toBe(503);
+  });
+  it('reads need no session check; a healthy session passes the check', async () => {
+    configureSessionCheck(null);
+    expect((await operatorCall(OP1, 'GET', '/pricing-settings')).status).toBe(200);
+    expect((await operatorCall(OP1, 'GET', '/change-log')).status).toBe(200);
+    configureSessionCheck(async () => false);
+    expect((await operatorCall(OP1, 'PUT', '/numbers/pn-nobody/funding', { funding: 'merchant_card', reason: 'session check' })).status).toBe(404); // past the check, then the normal answer
   });
 });

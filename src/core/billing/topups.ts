@@ -9,6 +9,7 @@
  * credited the exact amount. A provider refund or chargeback becomes a negative `chargeback` row (debt) and an alert for the operator.
  */
 import type { Env } from '../../env';
+import { sessionState } from '../identity/session';
 import { roundHalfEvenDiv } from './money';
 import { paymentProvider, topupsEnabled, type PaymentProvider } from './payments';
 
@@ -41,12 +42,9 @@ export async function startTopup(env: Env, a: { workspaceId: string; userId: str
   if (!provider) return { ok: false, reason: 'unavailable' };
   if (!Number.isSafeInteger(a.amountMinor) || a.amountMinor < MIN_TOPUP_MINOR || a.amountMinor > MAX_TOPUP_MINOR) return { ok: false, reason: 'invalid_amount' };
   // Spending the merchant's money: a revoked session must not be able to start it. No accounts binding = cannot check = refuse.
-  if (!env.ACCOUNTS) return { ok: false, reason: 'unavailable' };
-  try {
-    if (await env.ACCOUNTS.isRevoked(a.sessionId)) return { ok: false, reason: 'session_revoked' };
-  } catch {
-    return { ok: false, reason: 'unavailable' };
-  }
+  const session = await sessionState(env, a.sessionId);
+  if (session === 'revoked') return { ok: false, reason: 'session_revoked' };
+  if (session === 'unavailable') return { ok: false, reason: 'unavailable' };
   const orderId = crypto.randomUUID();
   const fee = feeFor(env, a.amountMinor);
   const total = a.amountMinor + fee;

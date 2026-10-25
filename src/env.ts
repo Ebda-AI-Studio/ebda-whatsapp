@@ -47,6 +47,8 @@ export type Env = {
   ACCOUNTS?: { isRevoked(sessionId: string): Promise<boolean> };
   /** An operator adjustment above this many piasters waits for a second super admin. Default 100000 (1,000 EGP). */
   ADJUSTMENT_APPROVAL_MINOR?: string;
+  /** Most adjustments one operator may approve for themselves in a rolling day. Default 20. */
+  ADJUSTMENT_DAILY_CAP?: string;
   META_APP_SECRET: string;
   META_VERIFY_TOKEN: string;
   META_SYSTEM_TOKEN: string;

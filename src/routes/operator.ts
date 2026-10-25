@@ -4,6 +4,7 @@ import {
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
+import { sessionState } from '../core/identity/session';
 import {
   changeLog, decideAdjustment, listAdjustments, listFx, listOverrides, listRateCards, listSettings, publishFx, publishOverride, publishRateCard, publishSettings, publishTrueup,
   requestAdjustment, setFunding,
@@ -13,6 +14,14 @@ import { decideRefund, listRefundRequests, markManualPaid } from '../core/billin
 type E = { Bindings: Env; Variables: AuthVars };
 /** /api/v1/operator/*, mounted behind requireSuperAdmin. Errors are {error, message?}. */
 export const operatorRoutes = new Hono<E>();
+// Every state-changing operator action re-checks that the session was not revoked, and fails closed (accounts binding missing or erroring = refused).
+operatorRoutes.use('*', async (c, next) => {
+  if (c.req.method === 'GET' || c.req.method === 'HEAD') return next();
+  const s = await sessionState(c.env, c.get('principal').sessionId);
+  if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
+  if (s === 'unavailable') return c.json({ error: 'rate_limited', message: 'session_check_unavailable' }, 503);
+  return next();
+});
 const actor = (c: { get(k: 'principal'): { userId: string } }) => c.get('principal').userId;
 const bad = (c: { json(b: unknown, s: 400): Response }, message?: string) => c.json({ error: 'invalid_request', ...(message ? { message } : {}) }, 400);
 
