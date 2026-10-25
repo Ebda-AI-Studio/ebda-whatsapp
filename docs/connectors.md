@@ -53,3 +53,10 @@ Odoo faults map to: `AccessDenied` > `auth_failed`, `AccessError` > `access_deni
 - Backup: the `connectors` table (with the encrypted secrets) is in the nightly backup. After a restore into a deployment with a different `AGENT_SECRETS_KEY` the secrets cannot be opened: enter them again.
 - Erasing a customer never touches connector settings (they are the workspace's, not the customer's). What the client's system stored on its side is the client's to erase.
 - Migration v25 (`connectors`).
+
+## Residual risk: a public name that resolves to a private address
+The host checks work on the name (https, no IP literal, no internal names, optional allowlist); they do not resolve DNS. A public
+name pointing at a private or loopback address would pass them. On Cloudflare Workers this reaches nothing internal: Workers'
+outbound `fetch` runs on Cloudflare's network, not inside the client's or our private network, so there is no internal service
+behind such an address to hit. Operators who want a hard list set `AGENT_ALLOWED_HOSTS`. Revisit if connectors ever run anywhere
+other than Workers.

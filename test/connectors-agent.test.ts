@@ -161,6 +161,21 @@ describe('the agent and connectors', () => {
     expect(sendCount(c.graph)).toBe(0);
   });
 
+  it('a customer who sends STOP while the first call of a round is in flight: the second is never made', async () => {
+    const ws = W(91);
+    const pn = await setup(ws);
+    const gate = holdPoint();
+    const c = stubClient(async () => { await gate.hold(); return { json: { ok: true } }; });
+    model([{ tools: [call('A'), call('B')] }, { text: 'لا' }]);
+    const turn = say(ws, pn, text('hi'), c.graph);
+    await gate.reached();
+    await exec(ws, 'UPDATE contacts SET opted_out_at = ?', Date.now() + 1000);
+    gate.release();
+    await turn;
+    expect(c.calls.map((x) => x.json.args.reference)).toEqual(['A']);
+    expect(sendCount(c.graph)).toBe(0);
+  });
+
   it('a customer who sent STOP while the model was deciding makes no connector call either', async () => {
     const ws = W(12);
     const pn = await setup(ws);
