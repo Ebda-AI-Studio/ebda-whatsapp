@@ -83,7 +83,7 @@ describe('who may manage the platform templates', () => {
 
 describe('sync, list and submit use the platform token on the platform WABA', () => {
   it('sync fetches the shared WABA with the platform token, replaces the catalog, and drops what Meta no longer has', async () => {
-    await env.DB.prepare("INSERT INTO shared_templates (phone_number_id, name, language, category, status, components, rejected_reason, updated_at) VALUES (?, 'gone', 'ar', 'UTILITY', 'APPROVED', '[]', NULL, 1)").bind(PLAT).run();
+    await env.DB.prepare("INSERT INTO shared_templates (waba_id, name, language, category, status, components, rejected_reason, updated_at) VALUES (?, 'gone', 'ar', 'UTILITY', 'APPROVED', '[]', NULL, 1)").bind(WABA).run();
     const r = await op('POST', '/sync', {});
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ upserted: 3, removed: 1 });
@@ -176,6 +176,14 @@ describe('what a store may send from the shared number', () => {
     const { ws, api } = await member(); await join(api, ws);
     expect(await send(ws, 'tpl_u', ['x'])).toEqual({ status: 'accepted', sent: 1 });
     expect(await send(ws, 'tpl_a', ['123456'])).toEqual({ status: 'accepted', sent: 1 });
+  });
+  it('a pause event for the platform WABA blocks the real send, with a second shared number on the same WABA', async () => {
+    await env.DB.prepare("INSERT INTO shared_numbers (phone_number_id, waba_id, display_phone, created_at) VALUES ('5550002', ?, '+20 100 555 0002', 2)").bind(WABA).run();
+    const { ws, api } = await member(); await join(api, ws);
+    expect(await send(ws, 'tpl_u', ['x'])).toEqual({ status: 'accepted', sent: 1 });
+    const raw = templateStatusPayload(WABA, { event: 'PAUSED', name: 'tpl_u', language: 'ar' });
+    await fetchWith()('https://x/meta/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': await sign(raw) }, body: raw });
+    expect(await send(ws, 'tpl_u', ['x'])).toEqual({ status: 'failed', sent: 0 });
   });
   it('a MARKETING template is refused on the shared number (WA-SHARED-NOCAMP-1): failed, and nothing reaches Meta', async () => {
     const { ws, api } = await member(); await join(api, ws);
@@ -270,8 +278,8 @@ describe('the category and status that count are Meta\'s latest answer (WA-SHARE
   });
 
   // ---- direction of Meta's events: tighten at once, loosen only from a fresh Graph read ----------------------------------------------
-  /** Moves the recorded tightening 1 s into the past (no sleeping): a read that starts now is newer than it. */
-  const ageTightening = () => env.DB.prepare("UPDATE shared_templates SET tightened_at = tightened_at - 1000 WHERE name = 'order_ready'").run();
+  /** Moves the recorded tightening 5 s into the past (no sleeping): a read that starts now is newer than it. */
+  const ageTightening = () => env.DB.prepare("UPDATE shared_templates SET tightened_at = tightened_at - 5 WHERE name = 'order_ready'").run();
   const rowOf = () => env.DB.prepare("SELECT category, status FROM shared_templates WHERE name = 'order_ready'").first<{ category: string; status: string }>();
   const statusEv = (event: string) => hook(templateStatusPayload(WABA, { event, name: 'order_ready', language: 'ar' }));
   const categoryEv = (previous: string, next: string) => hook(templateCategoryPayload(WABA, { name: 'order_ready', language: 'ar', previous, next }));
@@ -382,5 +390,26 @@ describe('the category and status that count are Meta\'s latest answer (WA-SHARE
     const r = await op('POST', '/sync', {});
     expect(await r.json()).toEqual({ upserted: 0, removed: 1 });
     expect(await rowOf()).toMatchObject({ status: 'DISABLED' });
+  });
+
+  it('the tightening and the read start are stamped with the DATABASE clock (seconds), not an isolate\'s Date.now()', async () => {
+    await seeded();
+    const t0 = (await env.DB.prepare("SELECT unixepoch('subsec') AS t").first<{ t: number }>())!.t;
+    await statusEv('PAUSED');
+    const t1 = (await env.DB.prepare("SELECT unixepoch('subsec') AS t").first<{ t: number }>())!.t;
+    const at = (await env.DB.prepare("SELECT tightened_at AS t FROM shared_templates WHERE name = 'order_ready'").first<{ t: number }>())!.t;
+    expect(at).toBeGreaterThanOrEqual(t0 - 0.001);
+    expect(at).toBeLessThanOrEqual(t1 + 0.001);
+  });
+
+  it('two shared numbers on ONE WABA share one catalog: a pause blocks both at send, and a sync does not double the rows', async () => {
+    const PLAT2 = '5550002';
+    await env.DB.prepare("INSERT INTO shared_numbers (phone_number_id, waba_id, display_phone, created_at) VALUES (?, ?, '+20 100 555 0002', 2)").bind(PLAT2, WABA).run();
+    await seeded();
+    expect(await catalog()).toHaveLength(1);
+    const ok = (num: string) => import('../src/core/shared/shared-templates').then((m) => m.sharedTemplateSendable(env, num, 'order_ready', 'ar'));
+    expect([await ok(PLAT), await ok(PLAT2)]).toEqual([true, true]);
+    await statusEv('PAUSED');
+    expect([await ok(PLAT), await ok(PLAT2)]).toEqual([false, false]);
   });
 });

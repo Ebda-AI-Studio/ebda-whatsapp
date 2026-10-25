@@ -95,6 +95,6 @@ export const registerWorkspace = (ws: string) => env.DB.prepare('INSERT OR IGNOR
 
 /** An APPROVED entry of the platform WABA's template catalog (shared_templates): what a store may send from the shared number. The shared number must exist. */
 export async function seedSharedTemplate(phoneNumberId: string, o: { name: string; language?: string; category?: string; status?: string; components?: unknown[] }) {
-  await env.DB.prepare('INSERT OR REPLACE INTO shared_templates (phone_number_id, name, language, category, status, components, rejected_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, 1)')
-    .bind(phoneNumberId, o.name, o.language ?? 'ar', o.category ?? 'UTILITY', o.status ?? 'APPROVED', JSON.stringify(o.components ?? [{ type: 'BODY', text: 'hi' }])).run();
+  await env.DB.prepare('INSERT OR REPLACE INTO shared_templates (waba_id, name, language, category, status, components, rejected_reason, updated_at) SELECT waba_id, ?, ?, ?, ?, ?, NULL, 1 FROM shared_numbers WHERE phone_number_id = ?')
+    .bind( o.name, o.language ?? 'ar', o.category ?? 'UTILITY', o.status ?? 'APPROVED', JSON.stringify(o.components ?? [{ type: 'BODY', text: 'hi' }]), phoneNumberId).run();
 }
