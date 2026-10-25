@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
   RealtimeEvent, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, TemplateDto,
 } from '../../../src/core/api/contract';
 
@@ -80,6 +80,8 @@ export interface InboxSource {
   saveBotSettings?(update: BotSettingsDto): Promise<BotSettingsDto>;
   /** The merchant's Meta catalog. `provision` rejects with an error carrying `detail` = missing_permission | no_business | business_mismatch | catalog_already_set | meta_error. */
   catalog?: { status(): Promise<CatalogStatusDto>; provision(name?: string): Promise<{ catalogId: string }> };
+  /** Bot results: customers per step over the last 7, 30 or 90 days (Cairo calendar days, today included). Counts only; owner and staff read. */
+  botFunnel?(days: 7 | 30 | 90): Promise<BotFunnelDto>;
   /** Assign a conversation (null = unassign). */
   assign?(conversationId: number, userId: string | null): Promise<void>;
   campaigns?: CampaignsApi;

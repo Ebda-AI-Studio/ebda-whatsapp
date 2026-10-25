@@ -34,7 +34,7 @@ import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, canc
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
 import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
-import type { AgentSettingsDto, CatalogStatusDto } from './api/contract';
+import type { AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
 import { creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, postCredit, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
@@ -45,7 +45,7 @@ import type { OtpResult } from './otp';
 import { queueTemplate } from './store-link/outbound';
 import { forgetBuyer, noteOptOutChange, pushOptOut } from './store-link/consent';
 import { storeLink } from './store-link';
-import { eraseFunnelMarkers, funnelRollup } from './bot-funnel';
+import { eraseFunnelMarkers, funnelRollup, readFunnel } from './bot-funnel';
 import { botInputFrom, botInputSchema, orderingActive } from './ordering/bot';
 import { agentActive } from './ai/agent';
 import { runTurn } from './ai/router';
@@ -1037,6 +1037,11 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
     await this.arm();
     return { ok: true, settings };
+  }
+
+  /** Bot results for a range of Cairo days (validated at the route). Counts only. */
+  async getBotFunnel(from: string, to: string): Promise<BotFunnelDto> {
+    return readFunnel(this.sql, from, to);
   }
 
   async getCatalogStatus(): Promise<CatalogStatusDto> {

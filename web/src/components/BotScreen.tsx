@@ -1,7 +1,7 @@
 import { Bot } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { BRAND } from '@brand';
-import type { BotSettingsDto, CatalogStatusDto } from '../../../src/core/api/contract';
+import type { BotFunnelDto, BotSettingsDto, CatalogStatusDto } from '../../../src/core/api/contract';
 import { hoursSchema, locationSchema, MENU_ANSWER_MAX, MENU_MAX_ITEMS, MENU_TITLE_MAX, menuSchema, HOURS_AWAY_MAX } from '../../../src/core/store-link/bot-settings';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
@@ -74,6 +74,63 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
       {busy && <p role="status" className="muted">{t.catCreating}</p>}
       {created && !busy && <p role="status" className="muted">{t.catCreated}</p>}
       {error && <p role="alert" className="error-text">{error}</p>}
+    </section>
+  );
+}
+
+const MAIN_STEPS = ['conversation', 'browse', 'cart', 'checkout', 'order'] as const;
+const SIDE_STEPS = ['menu', 'handoff'] as const;
+const RANGES = [7, 30, 90] as const;
+
+/** Bot results: customers per step of the ordering flow. Numbers first; the bar only repeats the number (never the sole carrier of it). */
+function FunnelSection({ t, lang, source }: { t: Strings; lang: Lang; source: InboxSource }) {
+  const [days, setDays] = useState<(typeof RANGES)[number]>(7);
+  const [data, setData] = useState<BotFunnelDto | undefined | 'error'>(undefined);
+  const load = useCallback(() => {
+    setData(undefined);
+    let live = true;
+    void source.botFunnel!(days).then((d) => { if (live) setData(d); }, () => { if (live) setData('error'); });
+    return () => { live = false; };
+  }, [source, days]);
+  useEffect(load, [load]);
+
+  const total = (step: string) => (data && data !== 'error' ? data.steps.find((s) => s.step === step)?.total ?? 0 : 0);
+  const widest = Math.max(1, ...MAIN_STEPS.map(total));
+  const empty = data !== undefined && data !== 'error' && [...MAIN_STEPS, ...SIDE_STEPS].every((s) => total(s) === 0);
+  return (
+    <section className="settings" aria-labelledby="bot-funnel-title">
+      <h2 id="bot-funnel-title">{t.fnTitle}</h2>
+      <p className="muted">{t.fnIntro}</p>
+      <div role="group" aria-label={t.fnRange} className="settings-actions">
+        {RANGES.map((d) => <button key={d} type="button" className={d === days ? 'btn primary' : 'btn'} aria-pressed={d === days} onClick={() => setDays(d)}>{t.fnDays(num(d, lang))}</button>)}
+      </div>
+      {data === undefined && <p role="status" aria-label={t.fnLoading} className="muted">…</p>}
+      {data === 'error' && <LoadError t={t} onRetry={load} />}
+      {empty && <p className="muted">{t.fnEmpty}</p>}
+      {data && data !== 'error' && !empty && (
+        <>
+          <ol className="funnel" aria-label={t.fnListLabel}>
+            {MAIN_STEPS.map((step, i) => {
+              const n = total(step);
+              const before = i > 0 ? total(MAIN_STEPS[i - 1]!) : 0;
+              const share = i > 0 && before > 0 ? `${num(Math.round((100 * n) / before), lang)}${lang === 'ar' ? '٪' : '%'}` : null;
+              return (
+                <li key={step} aria-label={`${t.fnSteps[step]}: ${num(n, lang)}`}>
+                  <span className="funnel-label">{t.fnSteps[step]}</span>
+                  <b className="funnel-n">{num(n, lang)}</b>
+                  {share && <span className="muted funnel-share">{t.fnShare(share)}</span>}
+                  <span className="funnel-track" aria-hidden><span style={{ width: `${Math.max(n > 0 ? 1 : 0, Math.round((100 * n) / widest))}%` }} /></span>
+                </li>
+              );
+            })}
+          </ol>
+          <p className="muted">{t.fnSide}</p>
+          <ul className="funnel-side">
+            {SIDE_STEPS.map((step) => <li key={step}>{t.fnSteps[step]}: <b>{num(total(step), lang)}</b></li>)}
+          </ul>
+          <small className="muted">{t.fnNote}</small>
+        </>
+      )}
     </section>
   );
 }
@@ -152,6 +209,7 @@ export function BotScreen({ t, lang, source }: { t: Strings; lang: Lang; source:
         <h1 id="bot-title">{t.botTitle}</h1>
         {guide && <a className="muted" href={guide} target="_blank" rel="noopener">{t.botGuide}</a>}
       </header>
+      {source.botFunnel && <FunnelSection t={t} lang={lang} source={source} />}
       {source.catalog && <CatalogSection t={t} lang={lang} source={source} readOnly={readOnly} />}
       <form className="settings" onSubmit={(e) => { e.preventDefault(); void save(); }}>
         <p className="muted">{t.botIntro}</p>

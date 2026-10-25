@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { codOutcomeRequest, storeLinkSettingsPatch, type OrderSummaryDto } from '../core/api/contract';
+import { botFunnelQuery, codOutcomeRequest, storeLinkSettingsPatch, type OrderSummaryDto } from '../core/api/contract';
 import { buyerKey } from '../core/buyer-key';
 import { normaliseE164 } from '../core/phone';
 import type { BridgeOrderSummary } from '../core/store-bridge';
@@ -69,6 +69,14 @@ ordersRoutes.get('/stores/:storeId/store-link/settings', async (c) => {
 ordersRoutes.get('/stores/:storeId/store-link/catalog', async (c) => {
   const ws = await workspaceStub(c);
   return ws ? c.json(await ws.getCatalogStatus()) : apiError(c, 404, 'not_found');
+});
+
+/** Bot results: funnel counts per step and day (owner and staff read; there is no write). */
+ordersRoutes.get('/stores/:storeId/bot/funnel', async (c) => {
+  const q = botFunnelQuery.safeParse({ from: c.req.query('from'), to: c.req.query('to') });
+  if (!q.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  return ws ? c.json(await ws.getBotFunnel(q.data.from, q.data.to)) : apiError(c, 404, 'not_found');
 });
 
 ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {

@@ -7,10 +7,11 @@
  * primary key, so a replayed turn or a Meta redelivery can never count twice. Erasing a customer deletes their unrolled markers.
  */
 import { nextLocalHour } from './backup';
+import { FUNNEL_STEPS, type BotFunnelDto } from './api/contract';
 import { addTask } from './scheduler';
 import type { LinkHost } from './store-link/host';
 
-export const FUNNEL_STEPS = ['conversation', 'browse', 'cart', 'checkout', 'order', 'menu', 'handoff'] as const;
+export { FUNNEL_STEPS };
 export type FunnelStep = (typeof FUNNEL_STEPS)[number];
 /** Funnel steps in the order of the flow (the side steps are reported apart). */
 export const FUNNEL_MAIN: readonly FunnelStep[] = ['conversation', 'browse', 'cart', 'checkout', 'order'];
@@ -78,4 +79,20 @@ export async function eraseFunnelMarkers(sql: SqlStorage, waId: string): Promise
   for (const { day, salt } of sql.exec<{ day: string; salt: string }>('SELECT day, salt FROM bot_funnel_salt').toArray()) {
     sql.exec('DELETE FROM bot_funnel_markers WHERE day = ? AND token = ?', day, await tokenOf(salt, waId));
   }
+}
+
+/** Counts per step and day for `from`..`to` (Cairo days, inclusive): the rolled-up days plus the markers not yet rolled up (today, and any day awaiting its rollup). */
+export function readFunnel(sql: SqlStorage, from: string, to: string): BotFunnelDto {
+  const days: string[] = [];
+  for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`); t += 86_400_000) days.push(new Date(t).toISOString().slice(0, 10));
+  const at = new Map(days.map((d, i) => [d, i]));
+  const series = new Map<string, number[]>(FUNNEL_STEPS.map((s) => [s, days.map(() => 0)]));
+  const add = (r: { day: string; step: string; n: number }) => {
+    const i = at.get(r.day);
+    const row = series.get(r.step);
+    if (i !== undefined && row) row[i]! += r.n;
+  };
+  for (const r of sql.exec<{ day: string; step: string; n: number }>('SELECT day, step, customers AS n FROM bot_funnel_daily WHERE day BETWEEN ? AND ?', from, to).toArray()) add(r);
+  for (const r of sql.exec<{ day: string; step: string; n: number }>('SELECT day, step, count(*) AS n FROM bot_funnel_markers WHERE day BETWEEN ? AND ? GROUP BY day, step', from, to).toArray()) add(r);
+  return { from, to, days, steps: FUNNEL_STEPS.map((step) => ({ step, series: series.get(step)!, total: series.get(step)!.reduce((a, b) => a + b, 0) })) };
 }
