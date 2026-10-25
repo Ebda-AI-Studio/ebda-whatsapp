@@ -299,6 +299,19 @@ export const DO_MIGRATIONS: readonly string[] = [
    CREATE INDEX campaign_recipients_at ON campaign_recipients (campaign_id, at);
    CREATE INDEX campaign_recipients_contact ON campaign_recipients (contact_id);
    CREATE INDEX messages_pending ON messages (idempotency_key) WHERE status IN ('queued', 'claimed', 'retry') AND direction = 'out';`,
+  // v24 (Phase 6.4, link tracking): the merchant's destination per campaign, and one short link per recipient. The code is the key
+  // (128 random bits, see campaigns/links.ts); a click bumps the counters. Erasing a contact deletes its links, so they stop working.
+  `ALTER TABLE campaigns ADD COLUMN link_url TEXT;
+   CREATE TABLE campaign_links (
+     code TEXT PRIMARY KEY,
+     campaign_id TEXT NOT NULL,
+     contact_id INTEGER NOT NULL,
+     clicks INTEGER NOT NULL DEFAULT 0,
+     first_click_at INTEGER,
+     created_at INTEGER NOT NULL
+   ) WITHOUT ROWID;
+   CREATE UNIQUE INDEX campaign_links_recipient ON campaign_links (campaign_id, contact_id);
+   CREATE INDEX campaign_links_contact ON campaign_links (contact_id);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

@@ -238,6 +238,10 @@ export const campaignParam = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), value: z.string().min(1).max(1000) }),
   /** The contact's name; `fallback` when we have none. */
   z.object({ kind: z.literal('name'), fallback: z.string().min(1).max(60) }),
+  /** The recipient's own tracked short link (the full https URL), for a text parameter. Needs the campaign's `linkUrl`. */
+  z.object({ kind: z.literal('link') }),
+  /** Only the recipient's link code, for a template URL button written `https://<this service>/t/{{1}}`. Needs `linkUrl`. */
+  z.object({ kind: z.literal('link_code') }),
 ]);
 export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled']);
 export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error']);
@@ -248,6 +252,8 @@ export const campaignCreate = z.object({
   audience: z.union([z.strictObject({ segmentId: z.number().int().positive() }), z.strictObject({ criteria: segmentCriteria })]),
   /** At most this many recipients are queued per rolling 24 h; the rest wait for the next day. */
   dailySendLimit: z.number().int().min(1).max(1_000_000).optional(),
+  /** Where the tracked links lead: https, a real host. Required with a `link` / `link_code` parameter, refused without one. */
+  linkUrl: z.string().trim().min(1).max(2000).optional(),
 });
 export type CampaignCreate = z.input<typeof campaignCreate>;
 /** `scheduledAt` (epoch ms, at most a year ahead) = start then; absent = start now. */
@@ -267,6 +273,9 @@ export const campaignDto = z.object({
   audience: z.object({ segmentId: z.number().int().nullable(), criteria: segmentCriteria }),
   scheduledAt: z.number().int().nullable(),
   dailySendLimit: z.number().int().nullable(),
+  linkUrl: z.string().nullable(),
+  /** Recipients who opened their link at least once, and all opens. Link-preview fetches are not counted. */
+  clicks: z.object({ unique: z.number().int(), total: z.number().int() }),
   createdAt: z.number().int(),
   startedAt: z.number().int().nullable(),
   finishedAt: z.number().int().nullable(),

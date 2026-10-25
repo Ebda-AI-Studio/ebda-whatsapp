@@ -33,3 +33,6 @@ v5 outbound foundation (message template/media columns, contact consent, `templa
 
 ## Phase 4 additions to the messaging core
 Send jobs gained two kinds, `list` (interactive list) and `image_link` (image by https link), and template parameters may carry a quick-reply `payload`. Inbound parsing now exposes button/list replies and template quick-replies (`type: interactive`, text = the tapped title) and Meta carts (`type: order`). Commerce behaviour: `docs/store-link.md`.
+
+## Campaigns
+Broadcasts reuse this pipeline unchanged (queueTemplate, claim, tier, MPS, 131049, opt-out re-check at claim time); see `docs/campaigns.md`. Campaign message keys are `camp:<campaignId>:<contactId>`; `scheduled_tasks.send_release` rows with reason `campaign_paused` are a paused campaign's parked sends.

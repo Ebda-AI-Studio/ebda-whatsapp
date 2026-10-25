@@ -10,7 +10,7 @@
     "directory": "web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/meta/*", "/health"]
+    "run_worker_first": ["/api/*", "/meta/*", "/health", "/t/*"]
   },
   "observability": { "enabled": true },
   "vars": {
@@ -34,7 +34,8 @@
   "ai": { "binding": "AI" },
   "analytics_engine_datasets": [
     { "binding": "USAGE", "dataset": "ebda_wa_usage" },
-    { "binding": "CI_OUTCOMES", "dataset": "ebda_ci_outcomes" }
+    { "binding": "CI_OUTCOMES", "dataset": "ebda_ci_outcomes" },
+    { "binding": "LINK_CLICKS", "dataset": "ebda_wa_link_clicks" }
   ],
   // Phase 6: contact imports (parsed in steps) and campaign broadcasts (paged, paced against the number's tier) run as Workflows.
   "workflows": [

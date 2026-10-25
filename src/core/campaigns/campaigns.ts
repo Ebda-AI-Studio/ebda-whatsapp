@@ -5,6 +5,8 @@ import { cleanParam, queueTemplate } from '../store-link/outbound';
 import type { LinkHost } from '../store-link/host';
 import { componentsSchema, renderTemplate } from '../templates';
 import { DEFAULT_TIER, TIER_WINDOW_MS } from '../throttle';
+import { buyerKey } from '../buyer-key';
+import { campaignLinks, newCode, validateTrackedUrl, withUtm } from './links';
 import { audiencePage, getSegment, previewAudience } from './segments';
 import { campaignWallet } from './wallet';
 
@@ -22,10 +24,10 @@ export type CampaignStatus = CampaignDto['status'];
 export type PauseReason = NonNullable<CampaignDto['pauseReason']>;
 type Row = {
   id: string; name: string; template_name: string; template_language: string; category: string; params: string; criteria: string; segment_id: number | null;
-  phone_number_id: string; status: CampaignStatus; pause_reason: PauseReason | null; scheduled_at: number | null; daily_send_limit: number | null;
+  phone_number_id: string; link_url: string | null; status: CampaignStatus; pause_reason: PauseReason | null; scheduled_at: number | null; daily_send_limit: number | null;
   attempt: number; next_page: number; cursor: number; created_by: string | null; created_at: number; updated_at: number; started_at: number | null; finished_at: number | null;
 };
-const COLS = 'id, name, template_name, template_language, category, params, criteria, segment_id, phone_number_id, status, pause_reason, scheduled_at, daily_send_limit, attempt, next_page, cursor, created_by, created_at, updated_at, started_at, finished_at';
+const COLS = 'id, name, template_name, template_language, category, params, criteria, segment_id, phone_number_id, link_url, status, pause_reason, scheduled_at, daily_send_limit, attempt, next_page, cursor, created_by, created_at, updated_at, started_at, finished_at';
 
 const read = (host: LinkHost, id: string): Row | null => host.sql.exec<Row>(`SELECT ${COLS} FROM campaigns WHERE id = ?`, id).toArray()[0] ?? null;
 
@@ -43,10 +45,22 @@ export function parentHoldRef(host: LinkHost, idempotencyKey: string): string | 
   return r ? pageRef(r.campaign_id, r.page) : null;
 }
 
+/** One recipient's tracked link: this service's origin and the recipient's code. */
+export type RecipientLink = { baseUrl: string; code: string };
+
 /** The template parameters for one contact. */
-export function resolveParams(specs: CampaignParam[], name: string | null): string[] {
-  return specs.map((s) => (s.kind === 'text' ? s.value : cleanParam(name, s.fallback)));
+export function resolveParams(specs: CampaignParam[], name: string | null, link?: RecipientLink): string[] {
+  return specs.map((s) => {
+    switch (s.kind) {
+      case 'text': return s.value;
+      case 'name': return cleanParam(name, s.fallback);
+      case 'link': return link ? `${link.baseUrl}/t/${link.code}` : '';
+      case 'link_code': return link ? link.code : '';
+    }
+  });
 }
+
+const isLinkParam = (p: CampaignParam) => p.kind === 'link' || p.kind === 'link_code';
 
 const ZERO_COUNTS = { queued: 0, claimed: 0, retry: 0, accepted: 0, sent: 0, delivered: 0, read: 0, failed: 0, skipped: 0 };
 
@@ -67,12 +81,18 @@ export function totalsOf(c: CampaignDto['counts']): CampaignDto['totals'] {
   };
 }
 
+function clicks(host: LinkHost, id: string): CampaignDto['clicks'] {
+  const r = host.sql.exec<{ unique_clicks: number; total: number | null }>('SELECT count(*) AS unique_clicks, sum(clicks) AS total FROM campaign_links WHERE campaign_id = ? AND clicks > 0', id).one();
+  return { unique: r.unique_clicks, total: r.total ?? 0 };
+}
+
 async function view(host: LinkHost, r: Row, withEstimate: boolean): Promise<CampaignDto> {
   const c = counts(host, r.id);
   const criteria = segmentCriteria.parse(JSON.parse(r.criteria));
   const dto: CampaignDto = {
     id: r.id, name: r.name, status: r.status, pauseReason: r.pause_reason, template: { name: r.template_name, language: r.template_language }, category: r.category,
     params: JSON.parse(r.params) as CampaignParam[], audience: { segmentId: r.segment_id, criteria }, scheduledAt: r.scheduled_at, dailySendLimit: r.daily_send_limit,
+    linkUrl: r.link_url, clicks: clicks(host, r.id),
     createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at, counts: c, totals: totalsOf(c),
   };
   if (withEstimate && (r.status === 'draft' || r.status === 'scheduled')) {
@@ -104,9 +124,10 @@ const templateOf = (host: LinkHost, name: string, language: string): TemplateRow
 
 export type CreateArgs = {
   name: string; template: { name: string; language: string }; params: CampaignParam[]; audience: { segmentId: number } | { criteria: SegmentCriteria };
-  dailySendLimit?: number | undefined; phoneNumberId: string; actor: string; now: number;
+  dailySendLimit?: number | undefined; linkUrl?: string | undefined; phoneNumberId: string; actor: string; now: number;
 };
 export type CreateResult = { ok: true; campaign: CampaignDto } | { ok: false; reason: 'segment_not_found' | 'template_not_approved' | 'wrong_category' | 'invalid_params' | 'empty_audience'; message?: string };
+const SAMPLE_LINK: RecipientLink = { baseUrl: 'https://example.invalid', code: 'x'.repeat(30) };
 
 /** Saves a draft after checking, now, everything that can be checked: the audience exists and is not empty, the template is approved and the parameters fit it. */
 export async function createCampaign(host: LinkHost, a: CreateArgs): Promise<CreateResult> {
@@ -125,14 +146,25 @@ export async function createCampaign(host: LinkHost, a: CreateArgs): Promise<Cre
   if (t.category === 'AUTHENTICATION') return { ok: false, reason: 'wrong_category' };
   const stored = componentsSchema.safeParse(JSON.parse(t.components));
   if (!stored.success) return { ok: false, reason: 'invalid_params', message: 'stored template is malformed' };
-  const dry = renderTemplate(stored.data, resolveParams(a.params, 'Sample'), t.category);
+  // Tracked links: a destination and a link parameter go together, the destination must be safe, and this service must know its own origin.
+  const wantsLink = a.params.some(isLinkParam);
+  let linkUrl: string | null = null;
+  if (wantsLink && a.linkUrl === undefined) return { ok: false, reason: 'invalid_params', message: 'link_url_required' };
+  if (!wantsLink && a.linkUrl !== undefined) return { ok: false, reason: 'invalid_params', message: 'link_param_required' };
+  if (a.linkUrl !== undefined) {
+    const base = campaignLinks().baseUrl(host.env);
+    if (!base) return { ok: false, reason: 'invalid_params', message: 'tracking_unavailable' };
+    linkUrl = validateTrackedUrl(a.linkUrl, base);
+    if (!linkUrl) return { ok: false, reason: 'invalid_params', message: 'link_url_invalid' };
+  }
+  const dry = renderTemplate(stored.data, resolveParams(a.params, 'Sample', SAMPLE_LINK), t.category);
   if (!dry.ok) return { ok: false, reason: 'invalid_params', message: dry.message };
   if (previewAudience(host, criteria).count === 0) return { ok: false, reason: 'empty_audience' };
   const id = crypto.randomUUID();
   host.sql.exec(
-    `INSERT INTO campaigns (id, name, template_name, template_language, category, params, criteria, segment_id, phone_number_id, status, daily_send_limit, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)`,
-    id, a.name, a.template.name, a.template.language, t.category, JSON.stringify(a.params), JSON.stringify(criteria), segmentId, a.phoneNumberId, a.dailySendLimit ?? null, a.actor, a.now, a.now,
+    `INSERT INTO campaigns (id, name, template_name, template_language, category, params, criteria, segment_id, phone_number_id, link_url, status, daily_send_limit, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)`,
+    id, a.name, a.template.name, a.template.language, t.category, JSON.stringify(a.params), JSON.stringify(criteria), segmentId, a.phoneNumberId, linkUrl, a.dailySendLimit ?? null, a.actor, a.now, a.now,
   );
   return { ok: true, campaign: await view(host, read(host, id)!, true) };
 }
@@ -302,6 +334,9 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
     host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'template_unavailable', updated_at = ? WHERE id = ?", now, id);
     return stop('template_unavailable');
   }
+  // The origin was known when the campaign was made; if it is gone the deployment is misconfigured. Nothing is touched: ask again later.
+  const baseUrl = c.link_url ? campaignLinks().baseUrl(host.env) : null;
+  if (c.link_url && !baseUrl) return { state: 'retry', reason: 'tracking_unavailable' };
   const cap = capacity(host, c, now);
   if (cap.room <= 0) return { state: 'wait', until: cap.until };
   const limit = Math.min(pageSize, cap.room);
@@ -339,11 +374,13 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
     let queued = 0;
     for (const r of rows) {
       const idem = recipientKey(id, r.id);
+      const code = baseUrl ? linkCodeFor(host, id, r.id, now) : null;
       const q = queueTemplate(host, {
-        waId: r.waId, phoneNumberId: c.phone_number_id, name: c.template_name, language: c.template_language, params: resolveParams(specs, r.name),
-        idempotencyKey: idem, requireConsent: true, profileName: r.name, now,
+        waId: r.waId, phoneNumberId: c.phone_number_id, name: c.template_name, language: c.template_language,
+        params: resolveParams(specs, r.name, baseUrl && code ? { baseUrl, code } : undefined), idempotencyKey: idem, requireConsent: true, profileName: r.name, now,
       });
       const skipped = !q.ok;
+      if (skipped && code) host.sql.exec('DELETE FROM campaign_links WHERE code = ?', code);
       host.sql.exec(
         'INSERT OR IGNORE INTO campaign_recipients (campaign_id, contact_id, page, idem, state, skip_reason, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
         id, r.id, page, idem, skipped ? 'skipped' : 'queued', skipped ? (q.reason === 'invalid_request' ? 'invalid_params' : q.reason) : null, now,
@@ -364,6 +401,15 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
     await settleWallet(host, id).catch((err) => console.error(JSON.stringify({ alert: 'campaign_wallet_settle_failed', workspace: host.workspaceId, error: errClass(err) })));
   }
   return result;
+}
+
+/** The recipient's link code: the one already made for this campaign and contact, else a new one. Call inside a transaction. */
+function linkCodeFor(host: LinkHost, campaignId: string, contactId: number, now: number): string {
+  const have = host.sql.exec<{ code: string }>('SELECT code FROM campaign_links WHERE campaign_id = ? AND contact_id = ?', campaignId, contactId).toArray()[0];
+  if (have) return have.code;
+  const code = newCode(host.workspaceId);
+  host.sql.exec('INSERT INTO campaign_links (code, campaign_id, contact_id, created_at) VALUES (?, ?, ?, ?)', code, campaignId, contactId, now);
+  return code;
 }
 
 /** Tells the wallet which page reservations are finished with. Idempotent per page; a failure is retried by the sweep. */
@@ -437,4 +483,26 @@ export async function sweepCampaigns(host: LinkHost, now: number): Promise<numbe
   const stillActive = host.sql.exec<{ n: number }>("SELECT count(*) AS n FROM campaigns WHERE status IN ('scheduled', 'running')").one().n;
   const unsettled = host.sql.exec<{ n: number }>("SELECT count(*) AS n FROM campaign_pages p JOIN campaigns c ON c.id = p.campaign_id WHERE p.settled = 0 AND c.status IN ('completed', 'cancelled')").one().n;
   return stillActive || unsettled ? now + SWEEP_MS : undefined;
+}
+
+// ---- Link tracking ----------------------------------------------------------------------------------------------------
+
+/**
+ * A click on a recipient's link. Returns the merchant's destination with UTM, and (when it is a person, not a preview bot) bumps the
+ * counters and writes one Analytics Engine point: campaign and buyerKey, never the phone number or the code. Unknown code = null.
+ */
+export async function recordClick(host: LinkHost, code: string, count: boolean, now: number): Promise<{ url: string } | null> {
+  const r = host.sql.exec<{ campaign_id: string; name: string; link_url: string | null; wa_id: string }>(
+    `SELECT l.campaign_id, c.name, c.link_url, ct.wa_id FROM campaign_links l
+       JOIN campaigns c ON c.id = l.campaign_id JOIN contacts ct ON ct.id = l.contact_id WHERE l.code = ?`, code,
+  ).toArray()[0];
+  if (!r || !r.link_url) return null;
+  if (count) {
+    host.sql.exec('UPDATE campaign_links SET clicks = clicks + 1, first_click_at = coalesce(first_click_at, ?) WHERE code = ?', now, code);
+    const secret = campaignLinks().buyerSecret(host.env);
+    let key = '';
+    if (secret) key = await buyerKey(secret, `+${r.wa_id}`).catch(() => '');
+    host.env.LINK_CLICKS?.writeDataPoint({ indexes: [host.workspaceId], blobs: ['click', r.campaign_id, key, host.workspaceId], doubles: [1] });
+  }
+  return { url: withUtm(r.link_url, r.name, r.campaign_id) };
 }

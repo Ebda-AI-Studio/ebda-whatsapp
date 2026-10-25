@@ -24,6 +24,7 @@ import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { errClass, safeMessage } from './observability';
+import { recordClick } from './campaigns/campaigns';
 import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, cancelCampaign, createCampaign, deleteDraft, endInstance, gateFor, getCampaign, launchCampaign, listCampaigns, pauseCampaign, resumeCampaign, sendCampaign, settleWallet, sweepCampaigns, type CreateArgs } from './campaigns/campaigns';
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
 import type { SegmentCriteria } from './api/contract';
@@ -877,6 +878,11 @@ export class WorkspaceDO extends DurableObject<Env> {
     return r;
   }
 
+  /** A recipient opened their tracked link: where to send them (UTM added), or null when the link is unknown or its contact was erased. `count` false = a preview bot or HEAD. */
+  async recordClick(code: string, count: boolean) {
+    return recordClick(this.host(), code, count, Date.now());
+  }
+
   private campaignAttempt(id: string): number {
     return this.sql.exec<{ attempt: number }>('SELECT attempt FROM campaigns WHERE id = ?', id).toArray()[0]?.attempt ?? 0;
   }
@@ -1474,6 +1480,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM contact_tags WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM campaign_recipients WHERE contact_id = ?', contact.id);
+      this.sql.exec('DELETE FROM campaign_links WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', waId);
       this.sql.exec('DELETE FROM agent_handoffs WHERE wa_id = ?', waId);

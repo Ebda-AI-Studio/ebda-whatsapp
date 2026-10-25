@@ -7,6 +7,8 @@ export type Env = {
   MEDIA: R2Bucket;
   BACKUPS: R2Bucket;
   USAGE: AnalyticsEngineDataset;
+  /** Phase 6.4: one point per tracked-link click (campaign id + buyerKey, no phone). Best effort: absent or failing never blocks the redirect. */
+  LINK_CLICKS?: AnalyticsEngineDataset;
   /** Customer Intelligence outcomes (CI-1). Best effort: absent or failing never blocks an order. */
   CI_OUTCOMES?: AnalyticsEngineDataset;
   /** Service Binding to the Store API Worker (RPC entrypoint WhatsAppBridge). Unbound = the Store link is off. */

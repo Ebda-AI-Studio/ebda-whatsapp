@@ -37,6 +37,7 @@ import { contactsRoutes } from './routes/contacts';
 import { importsRoutes } from './routes/imports';
 import { segmentsRoutes } from './routes/segments';
 import { campaignsRoutes } from './routes/campaigns';
+import { trackRoutes } from './routes/track';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY });
@@ -103,6 +104,8 @@ function sameString(a: string, b: string): boolean {
   const y = new TextEncoder().encode(b);
   return x.byteLength === y.byteLength && crypto.subtle.timingSafeEqual(x, y);
 }
+
+app.route('/', trackRoutes);
 
 app.get('/health', (c) => c.json({ ok: true, service: 'ebda-wa', commit: c.env.COMMIT_SHA ?? 'dev' }));
 

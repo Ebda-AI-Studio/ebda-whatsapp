@@ -1,4 +1,4 @@
-import { runInDurableObject } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { configureCampaignWallet, NO_WALLET, type CampaignWallet, type WalletSettleOutcome } from '../../src/core/campaigns/wallet';
 import type { CampaignSteps } from '../../src/core/campaigns/workflows';
 import { exec, rows, workspace } from './workspace';
@@ -85,3 +85,6 @@ export function fakeStep(o: { replay?: string[]; onSleep?: (name: string, ts: nu
 }
 
 export const stepsOf = (ws: string): CampaignSteps => workspace(ws) as unknown as CampaignSteps;
+
+/** Registers the workspace in the control plane (public routes check it before touching a Durable Object). */
+export const registerWorkspace = (ws: string) => env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(ws, ws, Date.now()).run();
