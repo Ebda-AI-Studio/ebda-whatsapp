@@ -116,11 +116,12 @@ describe('wallet: top-up', () => {
     expect((await screen.findByRole('alert')).textContent).toContain(t.wTopupError);
   });
 
-  it('keeps waiting after the return trip and only says "arrived" when the wallet itself grew', async () => {
+  it('keeps waiting after the return trip; when the order cannot be asked, "arrived" needs the wallet itself to have grown', async () => {
     const source = createSampleSource();
     let balance = 18500;
     const real = source.wallet!.wallet;
     source.wallet!.wallet = async () => ({ ...(await real()), balanceMinor: balance, availableMinor: balance - 2500 });
+    source.wallet!.topupState = async () => { throw new Error('order lookup down'); };
     const go = vi.fn();
     const props = { t, lang: 'ar' as const, source, api: source.wallet!, now, go };
     const first = render(<WalletScreen {...props} />);
@@ -135,6 +136,30 @@ describe('wallet: top-up', () => {
     await act(async () => { window.dispatchEvent(new Event('focus')); });
     expect(screen.queryByText(t.wTopupArrived)).toBeNull();
     balance += 10000;
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain(t.wTopupArrived));
+  });
+
+  it('the order\'s own state wins: an unrelated credit while the order is still pending does not say "arrived"', async () => {
+    const source = createSampleSource();
+    let balance = 18500;
+    let state: 'pending' | 'paid' = 'pending';
+    const real = source.wallet!.wallet;
+    source.wallet!.wallet = async () => ({ ...(await real()), balanceMinor: balance, availableMinor: balance - 2500 });
+    source.wallet!.topupState = async (orderId) => ({ orderId, state, amountMinor: 10000, feeMinor: 0, totalMinor: 10000 });
+    const props = { t, lang: 'ar' as const, source, api: source.wallet!, now, go: vi.fn() };
+    const first = render(<WalletScreen {...props} />);
+    const card = await screen.findByRole('region', { name: t.wTopupTitle });
+    fireEvent.change(within(card).getByLabelText(t.wTopupAmount), { target: { value: '100' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wTopupContinue })));
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: t.wTopupPay })));
+    first.unmount();
+    render(<WalletScreen {...props} />);
+    balance += 10000; // a refund or an adjustment lands; the card payment has not
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    expect(screen.getByRole('status').textContent).toContain(t.wTopupWaiting);
+    expect(screen.queryByText(t.wTopupArrived)).toBeNull();
+    state = 'paid';
     await act(async () => { window.dispatchEvent(new Event('focus')); });
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain(t.wTopupArrived));
   });

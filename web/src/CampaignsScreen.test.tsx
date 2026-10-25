@@ -101,6 +101,26 @@ describe('campaigns', () => {
     expect(texts[3]).toBe(STRINGS.ar.pauseUnknown);
   });
 
+  it('an audience count that could not be computed says so, never "0 recipients"', async () => {
+    const source = createSampleSource();
+    source.campaigns!.preview = vi.fn().mockRejectedValue(new Error('network'));
+    const create = source.campaigns!.create;
+    source.campaigns!.create = async (req) => ({ ...(await create(req)), estimate: undefined });
+    await openCampaigns(source);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حملة جديدة' })));
+    await act(async () => fireEvent.click(screen.getByLabelText('كل العملاء اللي وافقوا')));
+    expect((await screen.findByText(STRINGS.ar.audienceUnknown))).toBeTruthy();
+    expect(screen.queryByText(/^هتوصل لـ/)).toBeNull();
+    fireEvent.change(screen.getByLabelText('اسم الحملة (ليك إنت بس)'), { target: { value: 'x' } });
+    await act(async () => fireEvent.change(screen.getByLabelText('اختار قالب معتمد'), { target: { value: 'back_in_stock|ar' } }));
+    fireEvent.change(screen.getByLabelText('نوع المتغير ١'), { target: { value: 'text' } });
+    fireEvent.change(screen.getByLabelText('النص'), { target: { value: 'أهلًا' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'راجع التكلفة' })));
+    const review = (await screen.findByRole('heading', { name: 'راجع وابعت' })).closest('section')!;
+    expect(within(review).getByText(STRINGS.ar.audienceUnknown)).toBeTruthy();
+    expect(within(review).queryByText(/^هتوصل لـ/)).toBeNull();
+  });
+
   it('refuses to review a tracked link that is not https', async () => {
     await openCampaigns();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حملة جديدة' })));

@@ -62,22 +62,24 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
 
-  // One check settles a waiting top-up: the order is `paid` (the server credits before it marks paid) or the balance itself grew by the amount.
+  // One check settles a waiting top-up. The order's own state decides (`paid`: the server credits before it marks paid; `failed`/`expired`: nothing taken).
+  // Only when the order cannot be asked does the balance growing by the amount stand in for it: other credits (a refund, an adjustment) also move it.
   const check = useCallback(async () => {
     let w: WalletDto;
     // A failed first load is an error with Retry; a failed later poll keeps the wallet already on screen.
     try { w = await api.wallet(); setWallet(w); } catch { setWallet((cur) => cur ?? 'error'); return; }
     const p = pendingRef.current;
     if (!p) return;
-    let verdict: 'arrived' | 'failed' | null = w.balanceMinor >= p.before + p.amountMinor ? 'arrived' : null;
-    if (!verdict) {
-      try {
-        const s = await api.topupState(p.orderId);
-        if (s.state === 'paid') { verdict = 'arrived'; setWallet(await api.wallet()); }
-        else if (s.state === 'failed' || s.state === 'expired') verdict = 'failed';
-      } catch { /* still waiting */ }
+    let verdict: 'arrived' | 'failed' | null = null;
+    try {
+      const s = await api.topupState(p.orderId);
+      if (s.state === 'paid') verdict = 'arrived';
+      else if (s.state === 'failed' || s.state === 'expired') verdict = 'failed';
+    } catch {
+      if (w.balanceMinor >= p.before + p.amountMinor) verdict = 'arrived';
     }
     if (verdict) { writePending(null); setPending(null); setTopupNote(verdict); }
+    if (verdict === 'arrived') void api.wallet().then(setWallet, () => undefined); // show the credited balance
   }, [api]);
 
   useEffect(() => { void check(); }, [check]);

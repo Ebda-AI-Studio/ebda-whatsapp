@@ -40,7 +40,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
   const [timing, setTiming] = useState<'now' | 'later'>('now');
   const [at, setAt] = useState('');
   const [dailyLimit, setDailyLimit] = useState('');
-  const [preview, setPreview] = useState<SegmentPreviewDto | null | 'loading'>(null);
+  const [preview, setPreview] = useState<SegmentPreviewDto | null | 'loading' | 'error'>(null);
   const [draft, setDraft] = useState<CampaignDto | null>(null);
   const [phase, setPhase] = useState<'edit' | 'creating' | 'sending'>('edit');
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
     if (!criteria) { setPreview(null); return; }
     let stale = false;
     setPreview('loading');
-    const id = setTimeout(() => void api.preview(criteria).then((p) => { if (!stale) setPreview(p); }, () => { if (!stale) setPreview(null); }), 250);
+    const id = setTimeout(() => void api.preview(criteria).then((p) => { if (!stale) setPreview(p); }, () => { if (!stale) setPreview('error'); }), 250);
     return () => { stale = true; clearTimeout(id); };
   }, [api, criteria]);
 
@@ -176,6 +176,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
           <label className="radio"><input type="radio" name="aud" checked={mode === 'everyone'} onChange={() => setMode('everyone')} />{t.audienceEveryone}</label>
           <div className="audience-count" aria-live="polite">
             {preview === 'loading' ? <span className="muted">{t.audienceCounting}</span>
+              : preview === 'error' ? <span className="error-text">{t.audienceUnknown}</span>
               : preview && (
                 <>
                   <b>{t.audienceCount(n(preview.count))}</b>
@@ -249,7 +250,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
         {draft && (
           <section className="estimate" aria-labelledby="estimate-title">
             <h2 id="estimate-title">{t.stepReview}</h2>
-            <p><b>{t.audienceCount(n(est?.audience ?? 0))}</b></p>
+            <p><b>{est ? t.audienceCount(n(est.audience)) : t.audienceUnknown}</b></p>
             {est && est.perMessageMinor > 0 ? (
               <>
                 <p className="estimate-total">{t.costLine(formatMoney(est.totalMinor, 'EGP', lang))}</p>
