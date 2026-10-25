@@ -358,6 +358,15 @@ describe('wallet: packages (owner)', () => {
     expect(store.get('wallet.pendingPackage')).toBeUndefined();
   });
 
+  it.each(['expired', 'failed', 'refunded'] as const)('a waiting order that turns %s stops the polling and says the payment was not confirmed', async (state) => {
+    const source = createSampleSource();
+    source.wallet!.packageOrderState = async (orderId) => ({ orderId, state, packageId: 'gold', amountMinor: 50000 });
+    store.set('wallet.pendingPackage', JSON.stringify({ orderId: 'P-1', at: now() }));
+    render(<WalletScreen {...props(source)} />);
+    expect(await screen.findByText(t.wPackageFailed)).toBeTruthy();
+    expect(store.get('wallet.pendingPackage')).toBeUndefined();
+  });
+
   it('staff do not see the section; a switched-off server (404) hides it; a failure offers retry; no packages says so', async () => {
     const staff = createSampleSource();
     staff.role = 'staff';
@@ -377,7 +386,7 @@ describe('wallet: packages (owner)', () => {
     const broken = createSampleSource();
     broken.wallet!.packages = async () => { throw new ApiError('x', 500); };
     const c = render(<WalletScreen {...props(broken)} />);
-    expect((await screen.findByRole('region', { name: t.wPackagesTitle })).textContent).toContain(t.wPackagesError);
+    expect(await within(await screen.findByRole('region', { name: t.wPackagesTitle })).findByText(t.wPackagesError, { exact: false })).toBeTruthy();
     c.unmount();
 
     const none = createSampleSource();

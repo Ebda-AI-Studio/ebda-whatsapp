@@ -84,7 +84,9 @@ describe('the webhook grants a paid package', () => {
     expect((sub!.period_end as number) - t0).toBeLessThan(32 * DAY);
     expect(await workspace(ws).getEntitlement()).toMatchObject({ packageId: 'gold', status: 'active', aiCredits: 300 });
     expect(await grants(ws)).toBe(1);
-    expect(link.sink.sent.filter((e) => e.storeId === ws).map((e) => e.type)).toEqual(['whatsapp.entitlement_changed']);
+    const events = link.sink.sent.filter((e) => e.storeId === ws);
+    expect(events.map((e) => e.type)).toEqual(['whatsapp.entitlement_changed', 'whatsapp.entitlement_changed']);
+    expect(new Set(events.map((e) => e.id)).size).toBe(1); // the replay re-announces under the SAME id: the Store dedupes it
   });
 
   it('two concurrent identical webhooks grant exactly once', async () => {
@@ -115,22 +117,13 @@ describe('the webhook grants a paid package', () => {
     expect(await grants(ws)).toBe(0);
   });
 
-  it('a FAILURE closes the order without a grant; renewing a running package of the same kind keeps the days left', async () => {
+  it('a FAILURE closes the order without a grant', async () => {
     const ws = W(8414);
     const o = await start(ws);
     const f = await signed({ merchantOrderId: o.orderId, transactionId: 'TX-5', amount: '500.00', status: 'FAILURE' });
     await handleProviderWebhook(env, f.body, f.sig, kashier);
     expect(await order(o.orderId)).toMatchObject({ status: 'failed' });
-    const o1 = await start(ws);
-    const p1 = await signed({ merchantOrderId: o1.orderId, transactionId: 'TX-6', amount: '500.00' });
-    await handleProviderWebhook(env, p1.body, p1.sig, kashier);
-    const first = await env.DB.prepare('SELECT period_end FROM workspace_subscriptions WHERE workspace_id = ?').bind(ws).first<{ period_end: number }>();
-    const o2 = await start(ws);
-    const p2 = await signed({ merchantOrderId: o2.orderId, transactionId: 'TX-7', amount: '500.00' });
-    await handleProviderWebhook(env, p2.body, p2.sig, kashier);
-    const second = await env.DB.prepare('SELECT period_end, version FROM workspace_subscriptions WHERE workspace_id = ?').bind(ws).first<{ period_end: number; version: number }>();
-    expect(second!.version).toBe(2);
-    expect(second!.period_end - first!.period_end).toBeGreaterThan(27 * DAY);
+    expect(await grants(ws)).toBe(0);
   });
 });
 

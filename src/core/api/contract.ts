@@ -76,7 +76,7 @@ export const apiError = z.object({
   error: z.enum([
     'unauthorized', 'forbidden', 'not_found', 'invalid_request',
     'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited', 'plan_blocked', 'funding_unknown', 'rate_unavailable',
-    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable',
+    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable',
   ]),
   message: z.string().optional(),
 });
@@ -411,7 +411,7 @@ export const topupDto = z.object({
 });
 /** Packages a merchant can buy (PACKAGE_CHECKOUT_ENABLED). The amount is the server's price; the client never sends one. */
 export const packageDto = z.object({ id: z.string(), name: z.string(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative() });
-export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
+export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired', 'refunded']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
 export const refundRequestCreate = z.object({ amountMinor: z.number().int().min(5000), note: z.string().trim().max(500).optional() });
 export const refundRequestDto = z.object({
   id: z.string(), workspaceId: z.string(), amountMinor: z.number().int(), note: z.string().nullable(), state: z.enum(['pending', 'rejected', 'processing', 'paid', 'manual_payout', 'failed']),

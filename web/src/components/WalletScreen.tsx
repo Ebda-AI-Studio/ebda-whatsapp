@@ -254,7 +254,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
     if (!p) return;
     try {
       const s = await api.packageOrderState(p.orderId);
-      const verdict = s.state === 'paid' ? 'activated' : s.state === 'failed' || s.state === 'expired' ? 'failed' : null;
+      const verdict = s.state === 'paid' ? 'activated' : s.state === 'failed' || s.state === 'expired' || s.state === 'refunded' ? 'failed' : null;
       if (verdict) { writePendingPackage(null); setPending(null); setNote(verdict); if (verdict === 'activated') onActivated(); }
     } catch { /* keep waiting; the next poll asks again */ }
   }, [api, onActivated]);

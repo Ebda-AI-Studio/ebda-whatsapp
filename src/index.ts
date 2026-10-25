@@ -39,6 +39,7 @@ import { campaignsRoutes } from './routes/campaigns';
 import { trackRoutes } from './routes/track';
 import { numbersRoutes } from './routes/numbers';
 import { reconcileEntitlements } from './core/billing/subscriptions';
+import { repairPackageOrders } from './core/billing/package-orders';
 import { handleProviderWebhook, repairTopups } from './core/billing/topups';
 import { packageRoutes } from './routes/packages';
 import { walletRoutes } from './routes/wallet';
@@ -254,6 +255,7 @@ app.post('/meta/webhook', async (c) => {
 export async function dailyBilling(env: Env): Promise<void> {
   await reconcileEntitlements(env).catch((err) => console.error(JSON.stringify({ alert: 'entitlement_reconcile_failed', error: err instanceof Error ? err.name : 'error' })));
   await repairTopups(env).catch((err) => console.error(JSON.stringify({ alert: 'topup_repair_failed', error: err instanceof Error ? err.name : 'error' })));
+  await repairPackageOrders(env).catch((err) => console.error(JSON.stringify({ alert: 'package_repair_failed', error: err instanceof Error ? err.name : 'error' })));
   await sweepShared(env).catch((err) => console.error(JSON.stringify({ alert: 'shared_sweep_failed', error: err instanceof Error ? err.name : 'error' })));
 }
 

@@ -57,6 +57,7 @@ import { countryToDigits } from './billing/country';
 import type { WalletPosted } from './billing/engine';
 import { PRICING_MAX_AGE_MS, applyPricing, copyCursor, fundingOf, pullPricing } from './billing/pricing';
 import { parentHoldRef } from './campaigns/campaigns';
+import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { applyEntitlement, expireSubscription, marketingBlocked, readEntitlement, type EntitlementEvent } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
@@ -1799,8 +1800,19 @@ export class WorkspaceDO extends DurableObject<Env> {
         const again = await runTrueup(this.env, this.sql, this.billing, (f) => this.ctx.storage.transactionSync(f), this.workspaceId, month, now);
         return again ?? undefined;
       }
-      case 'subscription_expire':
+      case 'subscription_expire': {
+        // A paid early renewal queued behind this period starts now instead of the plan expiring (the control plane owns the queue).
+        try {
+          if ((await rollRenewals(this.env, this.workspaceId, now)) > 0) {
+            const ev = await currentEvent(this.env, this.workspaceId);
+            if (ev) await this.applyEntitlement(ev, now);
+          }
+        } catch (err) {
+          console.error(JSON.stringify({ alert: 'queued_period_roll_failed', workspace: this.workspaceId, error: errClass(err) }));
+          return now + 60_000; // never expire a renewal that was paid for because D1 blinked
+        }
         return this.ctx.storage.transactionSync(() => expireSubscription(this.sql, now)) ?? undefined;
+      }
       default:
         return undefined;
     }

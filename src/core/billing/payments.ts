@@ -13,7 +13,7 @@
 import type { Env } from '../../env';
 
 export type ProviderEvent = 'pay' | 'refund' | 'other';
-export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string };
+export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string; /** The provider's `reversal` event (a chargeback). Taken from the UNSIGNED top-level `event` label; see docs/billing.md. */ chargeback?: true };
 export type Inquiry = { status: 'SUCCESS' | 'FAILURE' | 'PENDING'; transactionId: string | null; amountMinor: number | null; currency: string | null };
 export type RefundResult = { ok: true; refundId: string } | { ok: false; reason: 'unsupported' | 'rejected' | 'unavailable' };
 
@@ -82,7 +82,7 @@ export class KashierProvider implements PaymentProvider {
     const amountMinor = egpToMinor(data.amount);
     if (!status || amountMinor === null || typeof data.merchantOrderId !== 'string' || typeof data.transactionId !== 'string' || typeof data.currency !== 'string') return null;
     const ev = root.event === 'pay' ? 'pay' : root.event === 'refund' || root.event === 'partial_refund' || root.event === 'reversal' ? 'refund' : 'other';
-    return { event: ev, status, orderId: data.merchantOrderId, transactionId: data.transactionId, amountMinor, currency: data.currency };
+    return { event: ev, status, orderId: data.merchantOrderId, transactionId: data.transactionId, amountMinor, currency: data.currency, ...(root.event === 'reversal' ? { chargeback: true as const } : {}) };
   }
 
   async inquire(): Promise<'unsupported'> {

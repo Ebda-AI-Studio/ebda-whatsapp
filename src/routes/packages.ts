@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { packageDto, packageOrderDto } from '../core/api/contract';
-import { getPackageOrder, listPackages, startPackageCheckout } from '../core/billing/package-orders';
+import { getPackageOrder, listPackages, publicState, startPackageCheckout } from '../core/billing/package-orders';
 import { packagesEnabled } from '../core/billing/payments';
 import { apiError, type ApiContext, type ApiEnv } from './shared';
 
@@ -20,12 +20,13 @@ packageRoutes.post('/stores/:storeId/packages/:packageId/checkout', async (c) =>
   if (r.ok) return c.json(packageOrderDto.parse({ orderId: r.orderId, state: 'pending', packageId: c.req.param('packageId'), amountMinor: r.amountMinor, checkoutUrl: r.checkoutUrl }), 201);
   if (r.reason === 'unknown_package') return apiError(c, 404, 'not_found');
   if (r.reason === 'session_revoked') return apiError(c, 401, 'unauthorized');
-  return apiError(c, 503, 'rate_limited', r.reason);
+  if (r.reason === 'disabled') return apiError(c, 404, 'not_found');
+  return apiError(c, 503, 'unavailable');
 });
 
 /** Read only: where the browser lands after paying. It grants nothing; the webhook does. */
 packageRoutes.get('/stores/:storeId/packages/orders/:orderId', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
   const o = await getPackageOrder(c.env, c.req.param('storeId')!, c.req.param('orderId')!);
-  return o ? c.json(packageOrderDto.parse({ orderId: o.order_id, state: o.status, packageId: o.package_id, amountMinor: o.amount_minor })) : apiError(c, 404, 'not_found');
+  return o ? c.json(packageOrderDto.parse({ orderId: o.order_id, state: publicState(o), packageId: o.package_id, amountMinor: o.amount_minor })) : apiError(c, 404, 'not_found');
 });
