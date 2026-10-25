@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isMetaOrigin, launchEmbeddedSignup } from './embedded-signup';
+import { isMetaOrigin, launchEmbeddedSignup, loadSdk } from './embedded-signup';
 
 type LoginCb = (r: { authResponse?: { code?: string } | null }) => void;
 
@@ -10,7 +10,10 @@ function fakeFb(onLogin: (cb: LoginCb, opts: Record<string, unknown>) => void) {
 }
 const post = (data: unknown, origin = 'https://www.facebook.com') => window.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(data), origin }));
 
-afterEach(() => { delete (window as unknown as { FB?: unknown }).FB; });
+afterEach(() => { delete (window as unknown as { FB?: unknown }).FB; vi.useRealTimers(); });
+const CFG = { appId: 'a', configId: 'c', graphVersion: 'v25.0' };
+/** Settles a promise into a label so a never-settling one is a failed assertion, not a hung test. */
+const watch = (p: Promise<unknown>) => { const w = { state: 'pending' as string }; p.then(() => { w.state = 'resolved'; }, (e: { reason?: string }) => { w.state = `rejected:${e.reason}`; }); return w; };
 
 describe('Embedded Signup launcher', () => {
   it('opens Meta login with the v4 configuration and returns the code with the session ids', async () => {
@@ -56,5 +59,47 @@ describe('Embedded Signup launcher', () => {
   it('a WABA without a phone number (FINISH_ONLY_WABA) is not something the inbox can connect', async () => {
     fakeFb((cb) => { post({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH_ONLY_WABA', data: { waba_id: '9004' } }); cb({ authResponse: { code: 'c4' } }); });
     await expect(launchEmbeddedSignup({ appId: 'a', configId: 'c', graphVersion: 'v25.0' })).rejects.toMatchObject({ reason: 'no_number' });
+  });
+
+  it('a code with no session message ends in an error after 25 seconds instead of hanging (the code expires at 30)', async () => {
+    vi.useFakeTimers();
+    fakeFb((cb) => cb({ authResponse: { code: 'late' } }));
+    const w = watch(launchEmbeddedSignup(CFG));
+    await vi.advanceTimersByTimeAsync(24_000);
+    expect(w.state).toBe('pending');
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(w.state).toBe('rejected:error');
+  });
+
+  it('a Meta SDK that never loads is sdk_unavailable after 15 seconds, and a later try can load it again', async () => {
+    vi.useFakeTimers();
+    const w = watch(loadSdk('a', 'v25.0'));
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(w.state).toBe('pending');
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(w.state).toBe('rejected:sdk_unavailable');
+    const w2 = watch(loadSdk('a', 'v25.0')); // not stuck on the failed promise
+    window.FB = { init: vi.fn(), login: vi.fn() };
+    window.fbAsyncInit?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w2.state).toBe('resolved');
+  });
+
+  it('a popup closed after FINISH with no code is an error, not a cancel', async () => {
+    vi.useFakeTimers();
+    fakeFb((cb) => { post({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH', data: { phone_number_id: '8005', waba_id: '9005' } }); cb({ authResponse: null }); });
+    const w = watch(launchEmbeddedSignup(CFG));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(w.state).toBe('rejected:error');
+    fakeFb((cb) => cb({ authResponse: null }));
+    const w2 = watch(launchEmbeddedSignup(CFG));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(w2.state).toBe('rejected:cancelled'); // closed with nothing done = cancel
+  });
+
+  it('with the SDK already loaded, FB.login is called synchronously (a browser only opens the popup inside the click)', () => {
+    const fb = fakeFb(() => undefined);
+    void launchEmbeddedSignup(CFG).catch(() => undefined);
+    expect(fb.login).toHaveBeenCalledTimes(1);
   });
 });

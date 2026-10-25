@@ -234,6 +234,7 @@ export function createSampleSource(): InboxSource {
     numbers: {
       list: async () => numbers.map((n) => ({ ...n })),
       signupConfig: async () => ({ appId: 'sample', configId: 'sample', graphVersion: 'v25.0' }),
+      prepare: async () => undefined,
       // The sample popup "finishes" with an existing WhatsApp Business app number, the most common case for merchants.
       launch: async () => ({ code: 'sample-code', event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING', wabaId: 'waba-sample-3', phoneNumberId: 'pn-sample-3' }),
       async connect(req) {

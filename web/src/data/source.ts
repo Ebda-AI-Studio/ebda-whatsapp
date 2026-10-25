@@ -32,6 +32,8 @@ export interface NumbersApi {
   refresh(phoneNumberId: string): Promise<NumberDto>;
   register(phoneNumberId: string): Promise<NumberDto>;
   disconnect(phoneNumberId: string): Promise<NumberDto>;
+  /** Loads what the popup needs ahead of the click (sample data and tests replace it); absent = Meta's SDK. */
+  prepare?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<void>;
   /** Replaces Meta's popup (sample data and tests only); absent = the real Embedded Signup. */
   launch?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<{ code: string; event: ConnectNumberRequest['event']; wabaId: string; phoneNumberId: string; businessId?: string }>;
 }

@@ -1,11 +1,11 @@
 import { Check, Circle, Phone, Plus } from 'lucide-react';
 import { BRAND } from '@brand';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NumberDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
 import type { InboxSource, NumbersApi } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
-import { SignupStopped, launchEmbeddedSignup } from '../lib/embedded-signup';
+import { SignupStopped, launchEmbeddedSignup, prepareEmbeddedSignup } from '../lib/embedded-signup';
 import { useLoad } from '../lib/useLoad';
 import { dateTime } from './CampaignsScreen';
 import { LoadError } from './LoadError';
@@ -29,6 +29,18 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
   const [note, setNote] = useState<Note>(null);
   const [checks, setChecks] = useState({ templates: false, agent: false });
   const owner = source.role !== 'staff';
+  // Config and Meta's SDK are fetched when the screen opens: the click then calls FB.login with nothing awaited before it (a popup opened after an await is blocked).
+  type SignupCfg = Awaited<ReturnType<NumbersApi['signupConfig']>>;
+  const cfgRef = useRef<SignupCfg | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    api.signupConfig().then((cfg) => {
+      if (!live) return;
+      cfgRef.current = cfg;
+      if (cfg) void (api.prepare ?? prepareEmbeddedSignup)(cfg).catch(() => undefined);
+    }, () => undefined);
+    return () => { live = false; };
+  }, [api]);
   useEffect(() => {
     void source.templates().then((ts) => setChecks((c) => ({ ...c, templates: ts.some((x) => x.status === 'APPROVED') })), () => undefined);
     void source.agentSettings?.().then((a) => setChecks((c) => ({ ...c, agent: !!a?.enabled })), () => undefined);
@@ -47,9 +59,16 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
     setBusy(true);
     setNote(null);
     try {
-      const cfg = await api.signupConfig();
-      if (!cfg) { setNote({ kind: 'alert', text: t.signupUnavailable }); return; }
-      const r = await (api.launch ?? launchEmbeddedSignup)(cfg);
+      const launch = api.launch ?? launchEmbeddedSignup;
+      let cfg = cfgRef.current;
+      let popup = cfg ? launch(cfg) : null; // synchronous inside the click when the config is ready
+      if (cfg === undefined) { // the config has not arrived yet: wait for it, then open
+        cfg = await api.signupConfig();
+        cfgRef.current = cfg;
+        popup = cfg ? launch(cfg) : null;
+      }
+      if (!cfg || !popup) { setNote({ kind: 'alert', text: t.signupUnavailable }); return; }
+      const r = await popup;
       // The code expires 30 seconds after Meta issues it: send it before anything else.
       const added = await api.connect({ code: r.code, event: r.event, wabaId: r.wabaId, phoneNumberId: r.phoneNumberId, ...(r.businessId ? { businessId: r.businessId } : {}) });
       setItems((xs) => [...(xs ?? []).filter((x) => x.phoneNumberId !== added.phoneNumberId), added]);
