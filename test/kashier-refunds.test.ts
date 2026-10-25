@@ -546,5 +546,44 @@ describe('round 4 (Opus check)', () => {
     expect(await ok.inquire('ord-1')).not.toBe('unavailable');
     expect(sent[0]!.startsWith('https://test-api.kashier.io/')).toBe(true);
   });
+
+  it('HIGH: a held refund is matched only to a real, unconfirmed candidate of the same order and amount; a missing or already-confirmed candidate changes nothing', async () => {
+    const a = await setup(61);
+    refundAnswer = async () => refundOk('TX-R61', 15000);
+    await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 });
+    await hookRefund(a.order, 'TX-W61', '150.00');
+    kashierHasRefund(a.order, 'TX-W61', '150.00');
+    configurePayments(() => kashier);
+    const url = '/card-refunds/held/TX-W61/match';
+    await env.DB.prepare("UPDATE card_refunds SET confirmed_at = 1 WHERE kashier_refund_id = 'TX-R61'").run();
+    expect(await (await operatorCall(OP1, 'POST', url, {})).json()).toMatchObject({ message: 'not_verified' }); // already confirmed by a webhook
+    await env.DB.prepare("UPDATE card_refunds SET confirmed_at = NULL WHERE kashier_refund_id = 'TX-R61'").run();
+    await env.DB.prepare("UPDATE card_refunds SET candidate_id = 'gone' WHERE kashier_refund_id = 'TX-W61'").run();
+    expect((await operatorCall(OP1, 'POST', url, {})).status).toBe(409); // the candidate does not exist
+    expect(await env.DB.prepare("SELECT state FROM card_refunds WHERE kashier_refund_id = 'TX-W61'").first()).toEqual({ state: 'held' });
+    await env.DB.prepare("UPDATE card_refunds SET candidate_id = (SELECT id FROM card_refunds WHERE kashier_refund_id = 'TX-R61') WHERE kashier_refund_id = 'TX-W61'").run();
+    expect((await operatorCall(OP1, 'POST', url, {})).status).toBe(200); // now valid
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM card_refunds WHERE confirmed_at IS NOT NULL AND request_id = ?").bind(a.id).first()).toEqual({ n: 1 });
+    expect(await kinds(a.ws)).toEqual([['topup', 20000], ['refund', -15000]]);
+  });
+  it('HIGH: Kashier lists BOTH the held id and our refund id as separate successful refunds: the match is refused and the held refund is debited as the unknown refund it is (P1)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const a = await setup(62, 5000, { amount: 40000 });
+    refundAnswer = async () => refundOk('TX-R62', 5000);
+    await decideRefund(env, { id: a.id, decision: 'approve', actor: OP1 });
+    await hookRefund(a.order, 'TX-W62', '50.00');
+    expect(await env.DB.prepare("SELECT source FROM card_refunds WHERE kashier_refund_id = 'TX-W62'").first()).toEqual({ source: 'held' });
+    kashierHasRefund(a.order, 'TX-W62', '50.00');
+    kashierHasRefund(a.order, 'TX-R62', '50.00');
+    configurePayments(() => kashier);
+    const res = await operatorCall(OP1, 'POST', '/card-refunds/held/TX-W62/match', {});
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ message: 'separate_refund_debited' });
+    expect(await kinds(a.ws)).toEqual([['topup', 40000], ['refund', -5000], ['chargeback', -5000]]);
+    expect(alertsOf(spy, 'refund_held_debited').length).toBeGreaterThanOrEqual(1);
+    expect(String(alertsOf(spy, 'refund_held_debited')[0]![0])).toContain('"severity":"P1"');
+    expect((await hookRefund(a.order, 'TX-W62', '50.00')).status).toBe(200); // a replay posts nothing more
+    expect(await kinds(a.ws)).toEqual([['topup', 40000], ['refund', -5000], ['chargeback', -5000]]);
+  });
 });
 

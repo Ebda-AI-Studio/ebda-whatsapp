@@ -29,9 +29,9 @@ const stubOf = (env: Env, workspaceId: string) => env.WORKSPACE_DO.get(env.WORKS
 
 export type CardRefundRow = {
   id: string; request_id: string | null; order_id: string; workspace_id: string; amount_minor: number; source: 'api' | 'dashboard' | 'webhook' | 'held';
-  state: 'sending' | 'pending' | 'uncertain' | 'succeeded' | 'failed' | 'linked' | 'held' | 'matched'; kashier_refund_id: string | null; created_at: number; updated_at: number; confirmed_at: number | null; note: string | null;
+  state: 'sending' | 'pending' | 'uncertain' | 'succeeded' | 'failed' | 'linked' | 'held' | 'matched'; kashier_refund_id: string | null; created_at: number; updated_at: number; confirmed_at: number | null; candidate_id: string | null; note: string | null;
 };
-const COLS = 'id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, confirmed_at, note';
+const COLS = 'id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, confirmed_at, candidate_id, note';
 export const getCardRefund = (env: Env, id: string) => env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE id = ?`).bind(id).first<CardRefundRow>();
 
 /**
@@ -144,8 +144,8 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
       const cand = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE order_id = ? AND source IN ('api', 'dashboard') AND amount_minor = ? AND created_at > ? AND kashier_refund_id IS NOT NULL AND kashier_refund_id != ? AND confirmed_at IS NULL AND state IN ('succeeded', 'pending', 'linked') ORDER BY created_at LIMIT 1`)
         .bind(t.order_id, ev.amountMinor, now - 7 * 86_400_000, ev.transactionId).first<CardRefundRow>();
       if (cand) {
-        await env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, note) VALUES (?, NULL, ?, ?, ?, 'held', 'held', ?, ?, ?, ?)")
-          .bind(`held:${ev.transactionId}`, t.order_id, t.workspace_id, ev.amountMinor, ev.transactionId, now, now, `candidate=${cand.id}`).run();
+        await env.DB.prepare("INSERT OR IGNORE INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, candidate_id) VALUES (?, NULL, ?, ?, ?, 'held', 'held', ?, ?, ?, ?)")
+          .bind(`held:${ev.transactionId}`, t.order_id, t.workspace_id, ev.amountMinor, ev.transactionId, now, now, cand.id).run();
         if (await auditOnce(env, 'refund_held', t.workspace_id, ev.transactionId, now)) alert('refund_held', { severity: 'P1', workspace: t.workspace_id, orderId: t.order_id, refundId: ev.transactionId, candidate: cand.id, candidateRefundId: cand.kashier_refund_id });
         return 'refund_held';
       }
@@ -302,30 +302,55 @@ export async function reconcileCardRefunds(env: Env, provider: PaymentProvider |
   return out;
 }
 
-export type HeldResult = { ok: true } | { ok: false; reason: 'not_found' | 'not_held' | 'refund_not_verified' | 'provider_unavailable' };
+export type HeldResult = { ok: true } | { ok: false; reason: 'not_found' | 'not_held' | 'not_verified' | 'refund_not_verified' | 'separate_refund_debited' | 'provider_unavailable' };
 
 /**
  * A held refund (its id differs from the id Kashier gave our own refund for the same top-up and amount) matched to that refund by an operator.
- * Kashier must list the held id as a successful card refund of the order for exactly that amount. No wallet movement: the wallet was debited at
- * approval and the held refund was never debited. Idempotent.
+ *  - The candidate (`candidate_id`, its own column) must exist, be unconfirmed, in succeeded / pending / linked, on the same order and amount. The
+ *    match is ONE guarded batch: the candidate is confirmed only if that statement changed exactly one row, and the held row is marked `matched`
+ *    only if it did. Otherwise nothing changes (`not_verified`).
+ *  - Kashier must list the held id as a successful card refund of the order for exactly that amount.
+ *  - If Kashier lists BOTH the held id and the candidate's id as separate successful refunds, money left Kashier twice: the match is refused and
+ *    the held refund is debited as the unknown refund it is (capped at what the top-up credited, P1 alert).
+ * No wallet movement on a match: the wallet was debited at approval and the held refund was never debited. Idempotent.
  */
 export async function matchHeldRefund(env: Env, a: { refundId: string; actor: string }, now = Date.now(), provider: PaymentProvider | null = paymentProvider(env)): Promise<HeldResult> {
   const held = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ? AND source = 'held'`).bind(a.refundId).first<CardRefundRow>();
   if (!held) return { ok: false, reason: 'not_found' };
   if (held.state === 'matched') return { ok: true };
   if (held.state !== 'held') return { ok: false, reason: 'not_held' };
+  const cand = held.candidate_id ? await getCardRefund(env, held.candidate_id) : null;
+  if (!cand || (cand.source !== 'api' && cand.source !== 'dashboard') || cand.confirmed_at !== null || !['succeeded', 'pending', 'linked'].includes(cand.state) || cand.order_id !== held.order_id || cand.amount_minor !== held.amount_minor) {
+    return { ok: false, reason: 'not_verified' };
+  }
   if (!provider?.listRefunds) return { ok: false, reason: 'provider_unavailable' };
   const listed = await provider.listRefunds(held.order_id);
   if (listed === 'unavailable') return { ok: false, reason: 'provider_unavailable' };
   const real = listed.find((r) => r.refundId === a.refundId);
   if (!real || real.status !== 'SUCCESS' || !isCardRefundOperation(real.operation) || real.amountMinor !== held.amount_minor) return { ok: false, reason: 'refund_not_verified' };
-  const cand = /candidate=(\S+)/.exec(held.note ?? '')?.[1];
-  await env.DB.batch([
-    ...(cand ? [env.DB.prepare('UPDATE card_refunds SET confirmed_at = ? WHERE id = ? AND confirmed_at IS NULL').bind(now, cand)] : []),
-    env.DB.prepare("UPDATE card_refunds SET state = 'matched', updated_at = ? WHERE id = ? AND state = 'held'").bind(now, held.id),
+  const both = cand.kashier_refund_id !== null && listed.some((r) => r.refundId === cand.kashier_refund_id && r.status === 'SUCCESS' && isCardRefundOperation(r.operation));
+  if (both) {
+    // A real second refund. Debit it as the unknown refund it is: held row -> webhook row (in one guarded batch), then the wallet (idempotent ref).
+    const top = await env.DB.prepare('SELECT amount_minor FROM topups WHERE order_id = ?').bind(held.order_id).first<{ amount_minor: number }>();
+    const debit = Math.min(held.amount_minor, top?.amount_minor ?? 0);
+    if (debit > 0) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE card_refunds SET source = 'webhook', state = 'succeeded', amount_minor = ?, updated_at = ? WHERE id = ? AND source = 'held' AND state = 'held'").bind(debit, now, held.id),
+        env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(debit, held.order_id),
+      ]);
+      const r = await stubOf(env, held.workspace_id).postWallet({ kind: 'chargeback', netMinor: -debit, ref: `chargeback:${a.refundId}`, note: `provider refund of ${held.order_id}: operator review` }, now);
+      if (!r.ok && r.reason !== 'duplicate') throw new Error(`refund debit refused: ${r.reason}`);
+    }
+    alert('refund_held_debited', { severity: 'P1', workspace: held.workspace_id, orderId: held.order_id, refundId: a.refundId, candidate: cand.id, debitedMinor: debit });
+    return { ok: false, reason: 'separate_refund_debited' };
+  }
+  const res = await env.DB.batch([
+    env.DB.prepare("UPDATE card_refunds SET confirmed_at = ? WHERE id = ? AND confirmed_at IS NULL AND state IN ('succeeded', 'pending', 'linked') AND order_id = ? AND amount_minor = ?").bind(now, cand.id, held.order_id, held.amount_minor),
+    env.DB.prepare("UPDATE card_refunds SET state = 'matched', updated_at = ? WHERE id = ? AND state = 'held' AND changes() > 0").bind(now, held.id),
   ]);
+  if ((res[0]?.meta.changes ?? 0) !== 1 || (res[1]?.meta.changes ?? 0) !== 1) return { ok: false, reason: 'not_verified' };
   await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_held_matched', ?, NULL, ?, ?)")
-    .bind(now, a.actor, held.workspace_id, JSON.stringify({ candidate: cand ?? null, amountMinor: held.amount_minor }), a.refundId).run();
+    .bind(now, a.actor, held.workspace_id, JSON.stringify({ candidate: cand.id, amountMinor: held.amount_minor }), a.refundId).run();
   return { ok: true };
 }
 

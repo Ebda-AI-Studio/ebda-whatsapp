@@ -20,6 +20,8 @@ CREATE TABLE card_refunds (
   updated_at INTEGER NOT NULL,
   -- Set when a signed, confirmed refund webhook named this refund (by its id): until then a refund of ours is still "unconfirmed".
   confirmed_at INTEGER,
+  -- A held refund (source 'held'): the unconfirmed refund of ours it may be.
+  candidate_id TEXT,
   note TEXT
 );
 CREATE UNIQUE INDEX card_refunds_provider_id ON card_refunds (kashier_refund_id) WHERE kashier_refund_id IS NOT NULL;
