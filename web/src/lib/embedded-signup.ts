@@ -29,7 +29,7 @@ export function isMetaOrigin(origin: string): boolean {
 }
 
 let sdk: Promise<Fb> | null = null;
-/** Loads Meta's SDK once (CSP allows connect.facebook.net and *.facebook.com frames, see web/public/_headers). */
+/** Loads Meta's SDK once (CSP allows connect.facebook.net and *.facebook.com frames, see web/brands/<brand>/public/_headers). */
 export function loadSdk(appId: string, graphVersion: string): Promise<Fb> {
   if (window.FB) return Promise.resolve(window.FB);
   sdk ??= new Promise<Fb>((resolve, reject) => {

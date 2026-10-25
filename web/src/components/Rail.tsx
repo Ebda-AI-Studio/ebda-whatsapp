@@ -1,4 +1,5 @@
 import { Megaphone, MessagesSquare, Phone, Sparkles, Users } from 'lucide-react';
+import { BRAND } from '@brand';
 import type { ReactNode } from 'react';
 import type { Strings } from '../i18n';
 
@@ -11,7 +12,7 @@ export function Rail({ t, view, onNavigate, show }: { t: Strings; view: View; on
   );
   return (
     <nav className="rail" aria-label={t.nav}>
-      <img className="rail-mark" src="/brand/symbol-gold.svg" alt="Ebda AI Studio" width={30} height={36} />
+      <img className="rail-mark" src={BRAND.mark.src} alt={BRAND.mark.alt} width={BRAND.mark.width} height={BRAND.mark.height} />
       {item('inbox', <MessagesSquare size={20} aria-hidden />, t.inbox)}
       {show.campaigns && item('campaigns', <Megaphone size={20} aria-hidden />, t.campaigns)}
       {show.contacts && item('contacts', <Users size={20} aria-hidden />, t.contacts)}

@@ -1,5 +1,7 @@
 import * as Sentry from '@sentry/cloudflare';
+import { env as workerEnv } from 'cloudflare:workers';
 import { Hono } from 'hono';
+import { brandPack } from './brand';
 import type { Env } from './env';
 import { selectVerifier } from './identity-select';
 import { configureAgent } from './core/ai/config';
@@ -10,9 +12,6 @@ import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } fro
 import { mark } from './core/timing';
 import { scrubEvent } from './core/observability';
 import { consumeSendBatch, type SendJob } from './core/send-queue';
-import { EBDA_AGENT_COPY } from './addons/ebda/agent-copy';
-import { EBDA_COPY } from './addons/ebda/copy';
-import { EBDA_OPT_IN_KEYWORDS } from './addons/ebda/consent';
 import { requireStoreAccess, type AuthVars } from './core/identity/middleware';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
@@ -23,15 +22,10 @@ import { conversationsRoutes } from './routes/conversations';
 import { mediaRoutes } from './routes/media';
 import { realtimeRoutes } from './routes/ws';
 import { templatesRoutes } from './routes/templates';
-import { EBDA_DEFAULT_TEMPLATES } from './addons/ebda/templates';
-import { EBDA_ORDERING_COPY } from './addons/ebda/store-copy';
-import { EBDA_OTP_POLICY } from './addons/ebda/otp-policy';
-import { createServiceBindingBridge } from './addons/ebda/store-bridge';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
 import { sendOtp, type OtpResult } from './core/otp';
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { createStoreEventSink } from './addons/ebda/store-events';
 import { bridgeFor } from './core/store-link';
 import { ordersRoutes } from './routes/orders';
 import { proofRoutes } from './routes/proof';
@@ -44,9 +38,12 @@ import { trackRoutes } from './routes/track';
 import { numbersRoutes } from './routes/numbers';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
-configureStoreLink({ bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY });
+// The brand pack (BRAND var; unset = the suite brand) is chosen once per isolate, before any request: copy, templates, agent words,
+// and the Store link when the brand has one. An unknown BRAND throws here, so a misconfigured deploy fails instead of showing another brand.
+const PACK = brandPack((workerEnv as { BRAND?: string }).BRAND);
+if (PACK.storeLink) configureStoreLink(PACK.storeLink);
 // Without the copy the agent reports itself inactive for every workspace (agentActive), however its settings are.
-configureAgent({ copy: EBDA_AGENT_COPY });
+configureAgent({ copy: PACK.agentCopy });
 const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 
 export { WorkspaceDO } from './core/workspace-do';
@@ -64,7 +61,7 @@ export class WhatsAppOtp extends WorkerEntrypoint<Env> {
 
 const app = new Hono<{ Bindings: Env }>();
 // Everything the Worker answers itself (API, webhook, health, tracked links) is JSON, text or a redirect: nothing may load or
-// frame it. The SPA's own policy lives in web/public/_headers (served by static assets).
+// frame it. The page policy lives in web/brands/<brand>/public/_headers (served by static assets, one per brand).
 const SECURITY_HEADERS: Record<string, string> = {
   'strict-transport-security': 'max-age=63072000; includeSubDomains',
   'x-content-type-options': 'nosniff',
@@ -120,7 +117,7 @@ api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
-api.route('/', templatesRoutes(EBDA_DEFAULT_TEMPLATES));
+api.route('/', templatesRoutes(PACK.templates));
 api.route('/', proofRoutes);
 api.route('/', agentRoutes);
 api.route('/', contactsRoutes);
@@ -208,7 +205,7 @@ app.post('/meta/webhook', async (c) => {
     }
     const stub = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId));
     // Awaited before the 200: if the DO write fails we answer 5xx and Meta redelivers (ingest is idempotent on wamid).
-    const res = await stub.ingest({ ...ev, receivedAt }, { autoReplyText: EBDA_COPY.spikeAutoReply, optInKeywords: [...EBDA_OPT_IN_KEYWORDS] });
+    const res = await stub.ingest({ ...ev, receivedAt }, { autoReplyText: PACK.autoReply, optInKeywords: [...PACK.optInKeywords] });
     const metaTs = Math.min(...ev.inbound.map((m) => m.ts * 1000));
     if (Number.isFinite(metaTs)) firstMetaTs ||= metaTs;
     mark(c.env, 'do_stored', Number.isFinite(metaTs) ? Date.now() - metaTs : 0, Date.now() - receivedAt, workspaceId);

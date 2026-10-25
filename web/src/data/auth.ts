@@ -1,4 +1,4 @@
-// Identity contract v1: access tokens come from accounts.ebda.app (refresh cookie lives there), audience "whatsapp".
+// Identity contract v1: access tokens come from the brand's accounts service (refresh cookie lives there), audience "whatsapp".
 const REFRESH_EARLY_MS = 60_000;
 
 type Opts = {

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 
@@ -14,7 +14,7 @@ it('keeps the API, Meta webhook, health and tracked links (/t/*) on the Worker',
 });
 
 it('serves the SPA with security headers: CSP limited to itself and the identity host, no framing, HSTS, nosniff', () => {
-  const headers = readFileSync(join(import.meta.dirname, '..', 'web', 'public', '_headers'), 'utf8');
+  const headers = readFileSync(join(import.meta.dirname, '..', 'web', 'brands', 'ebda', 'public', '_headers'), 'utf8');
   expect(headers).toMatch(/^\/\*$/m);
   const csp = /Content-Security-Policy: (.+)$/m.exec(headers)?.[1] ?? '';
   expect(csp).toContain("default-src 'self'");
@@ -28,4 +28,16 @@ it('serves the SPA with security headers: CSP limited to itself and the identity
   expect(headers).toMatch(/Strict-Transport-Security: max-age=\d{8,}/);
   expect(headers).toContain('X-Content-Type-Options: nosniff');
   expect(headers).toContain('Referrer-Policy: strict-origin-when-cross-origin');
+});
+
+it('every brand ships its own _headers with the same base policy, and only the suite brand names its accounts host', () => {
+  const brands = readdirSync(join(import.meta.dirname, '..', 'web', 'brands'), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  expect(brands).toEqual(expect.arrayContaining(['ebda', 'demo']));
+  for (const b of brands) {
+    const h = readFileSync(join(import.meta.dirname, '..', 'web', 'brands', b, 'public', '_headers'), 'utf8');
+    const csp = /Content-Security-Policy: (.+)$/m.exec(h)?.[1] ?? '';
+    for (const part of ["default-src 'self'", "frame-ancestors 'none'", "object-src 'none'"]) expect(csp, b).toContain(part);
+    expect(h, b).toMatch(/Strict-Transport-Security: max-age=\d{8,}/);
+    if (b !== 'ebda') expect(h, b).not.toMatch(/ebda/i);
+  }
 });

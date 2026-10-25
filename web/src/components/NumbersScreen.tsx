@@ -1,4 +1,5 @@
 import { Check, Circle, Phone, Plus } from 'lucide-react';
+import { BRAND } from '@brand';
 import { useCallback, useEffect, useState } from 'react';
 import type { NumberDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
@@ -10,8 +11,6 @@ import { dateTime } from './CampaignsScreen';
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: NumbersApi };
 type Note = { kind: 'status' | 'alert'; text: string } | null;
 
-// Guides live on help.ebda.app (published from docs/help by the Store session); one slug per guide file.
-const HELP = 'https://help.ebda.app/whatsapp';
 const TIERS: Record<string, number> = { TIER_250: 250, TIER_1K: 1000, TIER_2K: 2000, TIER_10K: 10000, TIER_100K: 100000 };
 
 function stateOf(n: NumberDto): 'active' | 'pending' | 'failed' | 'locked' | 'disconnected' {
@@ -67,7 +66,7 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
   const steps = [
     { label: t.stepNumber, done: anyActive, guide: 'connect-your-own-number' },
     { label: t.stepTemplates, done: checks.templates, guide: 'templates-and-the-24-hour-window' },
-    { label: t.stepStore, done: source.capabilities.codOutcome, guide: 'cod-confirmations' },
+    ...(BRAND.storeName ? [{ label: t.stepStore(BRAND.storeName), done: source.capabilities.codOutcome, guide: 'cod-confirmations' }] : []),
     { label: t.stepAgent, done: checks.agent, guide: 'ai-agent' },
   ];
 
@@ -99,7 +98,7 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
                 {s.done ? <Check size={18} aria-hidden className="step-icon" /> : <Circle size={18} aria-hidden className="step-icon" />}
                 <span className="step-label">{s.label}</span>
                 <span className="vh">{s.done ? t.stepDone : t.stepTodo}</span>
-                <a href={`${HELP}/${s.guide}`} target="_blank" rel="noopener">{t.howTo}</a>
+                {BRAND.helpBase ? <a href={`${BRAND.helpBase}/${s.guide}`} target="_blank" rel="noopener">{t.howTo}</a> : <span />}
               </li>
             ))}
           </ol>

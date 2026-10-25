@@ -50,6 +50,8 @@ export type Env = {
   IDENTITY_ISSUER: string;
   IDENTITY_JWKS_URL: string;
   IDENTITY_AUDIENCE: string;
+  /** Which brand pack this deployment runs (src/brand.ts); unset = the suite brand. */
+  BRAND?: string;
   /** `ebda` (default) or `oidc` for a white-label tenant's own identity provider. */
   IDENTITY_MODE?: string;
   /** JSON, see src/core/identity/oidc.ts; required when IDENTITY_MODE=oidc. */

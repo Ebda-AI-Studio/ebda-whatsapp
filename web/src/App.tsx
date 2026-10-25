@@ -4,6 +4,7 @@ import { ChatPane } from './components/ChatPane';
 import { ConversationList } from './components/ConversationList';
 import { OrderPane } from './components/OrderPane';
 import { Rail, type View } from './components/Rail';
+import { BRAND } from '@brand';
 import { AgentScreen } from './components/AgentScreen';
 import { CampaignsScreen } from './components/CampaignsScreen';
 import { ContactsScreen } from './components/ContactsScreen';
@@ -37,7 +38,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-    document.title = lang === 'ar' ? 'Ebda WhatsApp · المحادثات' : 'Ebda WhatsApp · Inbox';
+    document.title = `${BRAND.productName} · ${lang === 'ar' ? 'المحادثات' : 'Inbox'}`;
   }, [lang]);
 
   useEffect(() => {

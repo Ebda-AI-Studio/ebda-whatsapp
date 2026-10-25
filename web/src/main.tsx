@@ -5,9 +5,12 @@ import { chooseMode, pickStore } from './boot';
 import { connectRealtime, createApiSource } from './data/api';
 import { createTokenProvider, decodeStores, decodeSub } from './data/auth';
 import type { InboxSource } from './data/source';
+import { BRAND } from '@brand';
 import './styles.css';
+import '@brand-tokens';
 
-const ACCOUNTS_URL = (import.meta.env.VITE_ACCOUNTS_URL as string | undefined) ?? 'https://accounts.ebda.app';
+// A brand on its own identity provider has no accounts service here (accountsUrl null): its portal signs users in.
+const ACCOUNTS_URL = (import.meta.env.VITE_ACCOUNTS_URL as string | undefined) ?? BRAND.accountsUrl ?? '';
 const root = createRoot(document.getElementById('root')!);
 
 async function boot(): Promise<void> {

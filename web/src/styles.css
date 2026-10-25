@@ -1,7 +1,7 @@
 @import '@fontsource-variable/readex-pro';
 
 :root {
-  /* Ebda AI Studio brand tokens (business/brand/logo-2026-10-22/brand-tokens.json) */
+  /* Default brand tokens; a brand overrides them in web/brands/<brand>/tokens.css (loaded after this file). */
   --night: #0a0b0c;
   --night-2: #1a1916;
   --night-line: #2c2a26;

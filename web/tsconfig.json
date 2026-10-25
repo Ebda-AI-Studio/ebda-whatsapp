@@ -10,7 +10,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "isolatedModules": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "paths": { "@brand": ["./brands/ebda/brand.ts"] }
   },
-  "include": ["src", "../src/core/api/contract.ts"]
+  "include": ["src", "brands", "../src/core/api/contract.ts"]
 }

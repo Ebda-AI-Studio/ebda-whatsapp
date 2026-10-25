@@ -89,7 +89,7 @@ const ar = {
   numberErrors: { number_conflict: 'الرقم ده مربوط بحساب تاني عندنا.', registration_locked: 'واتساب قافل تسجيل الرقم ده ٧٢ ساعة بعد ١٠ محاولات. جرّب بعد المدة دي.', signup_unavailable: 'ربط الأرقام مش متاح دلوقتي. جرّب كمان شوية.', signup_failed: 'واتساب رفض الربط. ابدأ من الأول.' } as Record<string, string>,
   numberFailed: 'مقدرناش نكمّل. جرّب تاني.',
   checklistTitle: 'خطوات البداية', stepNumber: 'اربط رقم واتساب', stepTemplates: 'خلّي واتساب يوافق على قالب واحد على الأقل',
-  stepStore: 'اربط متجرك على Ebda Store', stepAgent: 'شغّل المساعد الذكي (اختياري)', stepDone: 'خلصت', stepTodo: 'لسه', howTo: 'إزاي؟',
+  stepStore: (store: string) => `اربط متجرك على ${store}`, stepAgent: 'شغّل المساعد الذكي (اختياري)', stepDone: 'خلصت', stepTodo: 'لسه', howTo: 'إزاي؟',
 };
 
 const en: typeof ar = {
@@ -181,7 +181,7 @@ const en: typeof ar = {
   numberErrors: { number_conflict: 'This number is connected to another account with us.', registration_locked: 'WhatsApp locks this number’s registration for 72 hours after 10 attempts. Try again after that.', signup_unavailable: 'Connecting numbers is not available right now. Try again shortly.', signup_failed: 'WhatsApp refused the connection. Start again.' } as Record<string, string>,
   numberFailed: 'That did not work. Try again.',
   checklistTitle: 'Getting started', stepNumber: 'Connect a WhatsApp number', stepTemplates: 'Get at least one template approved by WhatsApp',
-  stepStore: 'Link your Ebda Store', stepAgent: 'Switch on the AI agent (optional)', stepDone: 'Done', stepTodo: 'To do', howTo: 'How?',
+  stepStore: (store: string) => `Link your ${store}`, stepAgent: 'Switch on the AI agent (optional)', stepDone: 'Done', stepTodo: 'To do', howTo: 'How?',
 };
 
 export const STRINGS = { ar, en };

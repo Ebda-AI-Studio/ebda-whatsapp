@@ -29,7 +29,13 @@ there is no self-serve checkout.
 4. Build and deploy, then verify with `scripts/verify-prod.mjs` (all printed by the script). Then the manual checks in `docs/launch/README.md` § 13.
 5. Route the hostname to the Worker (Cloudflare dashboard → Workers → the Worker → Domains & Routes) and point the client's Meta webhook to `https://<host>/meta/webhook`.
 
+## Adding a client brand
+1. **Server pack** `src/addons/<brand>/pack.ts` (copy `src/addons/demo/pack.ts`): auto reply, opt-in words, starter templates, the AI agent's persona and words; no `storeLink` unless the client runs Ebda Store. Register it in `src/brand.ts` (`BRANDS`). The deployment's `BRAND` var selects it; an unknown name stops the Worker.
+2. **Web brand** `web/brands/<brand>/` (copy `web/brands/demo/`): `brand.ts` (product name, mark, apple icon, accounts URL or null, help base or null, store name or null), `tokens.css` (colour overrides of the default tokens), `public/` (its mark, favicon and `_headers`; keep the base CSP and add only the client's own hosts). `BRAND=<brand> npm run build:web` builds it; an unknown brand fails the build.
+3. Guards keep the seam honest: shared web code and `src/core` name no brand, `src/index.ts` reaches brand code only through `src/brand.ts`, every brand's `_headers` keeps the base policy, and the demo build contains no suite name.
+
 ## Status (2026-10-25)
-- Built and checked: the template, the bootstrap script in `--dry-run` (renders valid config with no leftover placeholders; refuses bad input), the generic OIDC verifier (tested).
-- Not yet built: **brand packs** (Phase 9.1). `BRAND` is passed through as a var, but the web build and the copy do not read it yet, so every deployment shows the default brand until 9.1 lands. Connectors to the client's systems (webhook, Odoo) are Phase 9.3.
+- Built and checked: brand packs (server registry + web build per brand; the demo build carries no suite name), the template, the bootstrap script in `--dry-run` (renders valid config with no leftover placeholders; refuses bad input), the generic OIDC verifier (tested).
+- In progress: connectors to the client's systems (webhook, Odoo), Phase 9.3.
+- Not built: sign-in for a brand on its own identity provider is verified on the API side (OIDC), but the page has no login screen for it yet; such a tenant's portal must hand the page a token (to design with the first client).
 - Not yet run for real: the resource creation and the D1-id lookup (`wrangler d1 info --json`) have only run in dry-run; the first real tenant setup verifies them.
