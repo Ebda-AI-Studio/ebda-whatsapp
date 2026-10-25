@@ -17,10 +17,16 @@ const oidcConfig = z.object({
   jwksUrl: https,
   audience: z.string().min(1),
   algorithms: z.array(z.enum(ASYMMETRIC)).min(1).default(['RS256', 'ES256']),
+  /** Expected JOSE `typ` header (e.g. `at+jwt` for RFC 9068 providers). ID tokens are always refused, set or not. */
+  tokenType: z.string().min(1).max(40).optional(),
   userIdClaim: claimPath.default('sub'),
   /** Providers without `sid` fall back to the token id. */
   sessionIdClaim: claimPath.default('sid'),
-  /** One workspace for the whole tenant (the usual white-label case), or the workspace ids carried in a claim. */
+  /**
+   * One workspace for the whole tenant (the usual white-label case), or the workspaces carried in a claim. In claim mode each entry
+   * carries its own role (`[{ id, role }]`, role = a provider role name mapped below); a plain list of ids takes the global role
+   * claim only when it names exactly one workspace, so an owner of one workspace never becomes owner of another.
+   */
   stores: z.union([z.object({ fixed: z.string().regex(UUID) }), z.object({ claim: claimPath })]),
   /** The provider's role names that mean owner / staff; the claim may hold a string or an array. Owner wins over staff. */
   role: z.object({ claim: claimPath, owner: z.array(z.string().min(1)).max(20), staff: z.array(z.string().min(1)).max(20) })
@@ -74,19 +80,39 @@ export function createOidcVerifier(cfg: OidcConfig, opts: { fetchJwks?: typeof f
           clockTolerance: CLOCK_SKEW_S,
           requiredClaims: ['exp', 'iat'],
           maxTokenAge: cfg.maxTokenAge,
+          ...(cfg.tokenType ? { typ: cfg.tokenType } : {}),
         }));
       } catch {
         throw new IdentityError(401, 'invalid token');
       }
+      // An ID token (meant for the browser) is not an API credential, even when its audience matches.
+      if (payload.nonce !== undefined || payload.at_hash !== undefined) throw new IdentityError(401, 'id token');
       const userId = claimAt(payload, cfg.userIdClaim);
       const sessionId = claimAt(payload, cfg.sessionIdClaim) ?? payload.jti;
       if (typeof userId !== 'string' || !userId || typeof sessionId !== 'string' || !sessionId) throw new IdentityError(401, 'invalid claims');
 
-      const held = asStrings(claimAt(payload, cfg.role.claim));
-      const role = held.some((r) => cfg.role.owner.includes(r)) ? 'owner' : held.some((r) => cfg.role.staff.includes(r)) ? 'staff' : null;
-      const ids = 'fixed' in cfg.stores ? [cfg.stores.fixed] : asStrings(claimAt(payload, cfg.stores.claim)).filter((id) => UUID.test(id));
+      const mapRole = (names: string[]): 'owner' | 'staff' | null =>
+        names.some((r) => cfg.role.owner.includes(r)) ? 'owner' : names.some((r) => cfg.role.staff.includes(r)) ? 'staff' : null;
+      const globalRole = mapRole(asStrings(claimAt(payload, cfg.role.claim)));
+      const stores: Principal['stores'] = [];
+      if ('fixed' in cfg.stores) {
+        if (globalRole) stores.push({ id: cfg.stores.fixed.toLowerCase(), role: globalRole });
+      } else {
+        const raw = claimAt(payload, cfg.stores.claim);
+        const entries = Array.isArray(raw) ? raw : [];
+        if (entries.length === 1 && typeof entries[0] === 'string') {
+          if (UUID.test(entries[0]) && globalRole) stores.push({ id: entries[0].toLowerCase(), role: globalRole });
+        } else {
+          for (const e of entries) {
+            if (e === null || typeof e !== 'object') continue; // a bare id among several has no role of its own: ignored
+            const { id, role } = e as { id?: unknown; role?: unknown };
+            const r = mapRole(asStrings(role));
+            if (typeof id === 'string' && UUID.test(id) && r) stores.push({ id: id.toLowerCase(), role: r });
+          }
+        }
+      }
       const superAdmin = cfg.superAdmin ? asStrings(claimAt(payload, cfg.superAdmin.claim)).includes(cfg.superAdmin.value) : false;
-      return { userId, sessionId, stores: role ? ids.map((id) => ({ id: id.toLowerCase(), role })) : [], superAdmin, expiresAt: Number(payload.exp) };
+      return { userId, sessionId, stores, superAdmin, expiresAt: Number(payload.exp) };
     },
   };
 }

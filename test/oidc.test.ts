@@ -93,9 +93,26 @@ describe('generic OIDC verifier', () => {
     expect(parseOidcConfig(JSON.stringify(base)).algorithms).toEqual(['RS256', 'ES256']);
   });
 
-  it('reads workspaces from a claim when the provider carries them', async () => {
-    const cfg = parseOidcConfig(JSON.stringify({ issuer: ISS, jwksUrl: JWKS, audience: 'wa-client', stores: { claim: 'tenants' }, role: { claim: 'roles', owner: ['manager'], staff: [] } }));
-    const p = await createOidcVerifier(cfg, { fetchJwks }).verify(await token({ tenants: [WS, 'not-a-uuid'], roles: 'manager' }));
-    expect(p.stores).toEqual([{ id: WS, role: 'owner' }]);
+  const WS2 = '33333333-3333-4333-8333-333333333333';
+  const claimCfg = () => parseOidcConfig(JSON.stringify({ issuer: ISS, jwksUrl: JWKS, audience: 'wa-client', stores: { claim: 'tenants' }, role: { claim: 'roles', owner: ['manager'], staff: ['agent'] } }));
+
+  it('claim mode: a role per workspace, so an owner of one is not an owner of another', async () => {
+    const p = await createOidcVerifier(claimCfg(), { fetchJwks }).verify(await token({ tenants: [{ id: WS, role: 'manager' }, { id: WS2, role: 'agent' }, { id: 'not-a-uuid', role: 'manager' }, { id: WS2.replace('3333', '4444'), role: 'guest' }] }));
+    expect(p.stores).toEqual([{ id: WS, role: 'owner' }, { id: WS2, role: 'staff' }]);
+  });
+
+  it('claim mode: a plain list with the global role only when it names exactly one workspace', async () => {
+    const one = await createOidcVerifier(claimCfg(), { fetchJwks }).verify(await token({ tenants: [WS], roles: 'manager' }));
+    expect(one.stores).toEqual([{ id: WS, role: 'owner' }]);
+    const many = await createOidcVerifier(claimCfg(), { fetchJwks }).verify(await token({ tenants: [WS, WS2], roles: 'manager' }));
+    expect(many.stores).toEqual([]);
+  });
+
+  it('refuses an ID token presented as an access token, and checks typ when configured', async () => {
+    const roles = { realm_access: { roles: ['manager'] } };
+    expect(await status(v().verify(await token({ ...roles, nonce: 'n-1' })))).toBe(401);
+    expect(await status(v().verify(await token({ ...roles, at_hash: 'h' })))).toBe(401);
+    const typed = createOidcVerifier(parseOidcConfig(JSON.stringify({ issuer: ISS, jwksUrl: JWKS, audience: 'wa-client', tokenType: 'at+jwt', stores: { fixed: WS }, role: { claim: 'realm_access.roles', owner: ['manager'], staff: [] } })), { fetchJwks });
+    expect(await status(typed.verify(await token(roles)))).toBe(401); // no typ header
   });
 });
