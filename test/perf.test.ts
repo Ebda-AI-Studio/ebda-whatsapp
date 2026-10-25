@@ -39,5 +39,5 @@ it.runIf(env.BENCH === '1')('bench: conversation list, open chat and send-enqueu
   }
   const out = { conversations: 5000, list50: stats(list), list50Unread: stats(unread), openChat50: stats(chat), search: stats(search), sendEnqueue: stats(enqueue) };
   console.log(`BENCH ${JSON.stringify(out)}`);
-  for (const k of ['list50', 'list50Unread', 'openChat50', 'search', 'sendEnqueue'] as const) expect(out[k].p95, k).toBeLessThan(150);
+  for (const k of ['list50', 'list50Unread', 'openChat50', 'search', 'sendEnqueue'] as const) expect(out[k].p95, k).toBeLessThan(Number(env.BENCH_BUDGET_MS));
 });

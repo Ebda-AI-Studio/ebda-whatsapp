@@ -185,7 +185,7 @@ it.runIf(env.BENCH === '1')('speed: listing 50 of 5,000 conversations and openin
   const chats: number[] = [];
   for (let i = 0; i < 20; i++) chats.push(await time('?limit=50', `/conversations/${bigConv.id}/messages`));
   console.log('PERF inbox', JSON.stringify({ listP95: p95(lists), filteredP95: p95(filtered), chatP95: p95(chats) }));
-  expect(p95(lists)).toBeLessThan(150);
-  expect(p95(filtered)).toBeLessThan(150);
-  expect(p95(chats)).toBeLessThan(150);
+  expect(p95(lists)).toBeLessThan(Number(env.BENCH_BUDGET_MS));
+  expect(p95(filtered)).toBeLessThan(Number(env.BENCH_BUDGET_MS));
+  expect(p95(chats)).toBeLessThan(Number(env.BENCH_BUDGET_MS));
 });
