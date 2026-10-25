@@ -24,7 +24,8 @@ jobs:
     # Umbra self-hosted runner when the repo variable EBDA_RUNS_ON is set, else GitHub-hosted.
     # EBDA_RUNS_ON must be a JSON value, e.g. ["self-hosted","umbra-ebda"], not a bare label.
     runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-latest"') }}
-    timeout-minutes: 15
+    # The suite takes ~7 min on the shared VM, up to ~15 under load from other products' jobs (PR #7 run at 9eae554 was cut at 15).
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Node.js
@@ -37,5 +38,14 @@ jobs:
       - run: npm run typecheck
       # CI-only: 2 workers (the shared 4.9 GB VM ran out of memory and time with the default pool); local runs keep the default.
       # scripts/ci-test.mjs: vitest's own verdict, plus a guard for a pool that never exits AFTER printing its summary (PR #7 run 40190537795).
-      - run: npm run test:ci -- --maxWorkers=2
+      - name: Tests (suite duration reported, to see creep)
+        shell: bash
+        run: |
+          start=$(date +%s)
+          rc=0
+          npm run test:ci -- --maxWorkers=2 || rc=$?  # the step runs with bash -e: capture, report the duration, then exit with it
+          secs=$(( $(date +%s) - start ))
+          echo "::notice title=Suite duration::${secs}s"
+          echo "### Test suite: ${secs}s" >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
       - run: npm audit --audit-level=low
