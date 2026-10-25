@@ -76,3 +76,13 @@ export async function graphTokenFor(env: Env, ref: { wabaId: string } | { phoneN
   if ('phoneNumberId' in ref) throw new TokenUnavailable('no_credential');
   return env.META_SYSTEM_TOKEN;
 }
+
+/**
+ * The merchant's OWN business token for a WABA, for calls that act on the merchant's assets (creating their catalog).
+ * Unlike graphTokenFor it never falls back to the platform token: no credential row = TokenUnavailable('no_credential').
+ */
+export async function ownGraphTokenFor(env: Env, wabaId: string): Promise<string> {
+  const own = await ownTokenOfWaba(env, wabaId);
+  if (own === null) throw new TokenUnavailable('no_credential');
+  return own;
+}

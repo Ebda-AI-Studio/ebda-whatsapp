@@ -27,7 +27,7 @@ The Meta app dashboard must subscribe the app-level webhook fields `messages`, `
    1. Refuses (409 `number_conflict`) a number or WABA that belongs to another workspace. Only fast D1 reads happen before the exchange: **the code lives 30 seconds**.
    2. Exchanges the code: `GET /<v>/oauth/access_token?client_id&client_secret&code` returns the business token. There is no second long-lived exchange (that is for user tokens).
    3. Reads `GET /<WABA>/phone_numbers` with the new token and requires the claimed number in it. The token's own access is the authority for the ids the browser sent; nothing is stored before this passes.
-   4. Stores the token encrypted per WABA (`waba_credentials`) and the number row (`phone_numbers`, `kind = own`), still `disconnected`.
+   4. Stores the token encrypted per WABA (`waba_credentials`, with the `business_id` the browser reported only if `GET /{business_id}/owned_whatsapp_business_accounts` (merchant token) lists this WABA, else NULL and an `business_id_unverified` alert, the connect never fails on it; kept on a reconnect that omits it; used to create the merchant's catalog, see `store-link.md`) and the number row (`phone_numbers`, `kind = own`), still `disconnected`.
    5. `POST /<WABA>/subscribed_apps`. A failure is a hard, retryable failure (`503 signup_unavailable`): a number without webhooks is deaf.
    6. `FINISH`: registers with a PIN (see below). `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING`: no `/register`; requests the two one-time syncs.
    7. Marks the number `active`, pulls status (name, quality, tier, throughput) and calls `onNumberConnected` (billing records `merchant_card` funding there, Ruling WA-FUND-1; it must be idempotent because completing a half-finished connect calls it again).

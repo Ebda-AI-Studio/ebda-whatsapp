@@ -147,6 +147,12 @@ export const storeLinkSettingsResponse = z.object({
   location: locationSchema,
 });
 /** The merchant-written part of the settings (service menu, business hours, location): what the Bot screen edits. */
+/** The Meta catalog of the store link: its id (null = none yet) and when a sync last succeeded. */
+export const catalogStatusDto = z.object({ catalogId: z.string().nullable(), lastSyncAt: z.number().int().nullable() });
+export type CatalogStatusDto = z.infer<typeof catalogStatusDto>;
+/** Strict on purpose: the business is never taken from the client (a business id in the body is a 400). */
+export const provisionCatalogRequest = z.object({ name: z.string().trim().min(1).max(100).optional() }).strict();
+export const provisionCatalogResponse = z.object({ catalogId: z.string() });
 export const botSettingsDto = storeLinkSettingsResponse.pick({ menu: true, hours: true, location: true });
 export type BotSettingsDto = z.infer<typeof botSettingsDto>;
 export const storeLinkSettingsPatch = z.object({
@@ -473,6 +479,8 @@ export const ROUTES = {
   codOutcome: 'POST /contacts/:waId/orders/:orderNumber/cod-outcome',
   me: 'GET /me',
   storeLinkSettings: 'GET|PATCH /store-link/settings',
+  storeLinkCatalog: 'GET /store-link/catalog',
+  provisionCatalog: 'POST /store-link/catalog/provision',
   agent: 'GET|PUT /agent',
   connectors: 'GET /connectors',
   connector: 'PUT|DELETE /connectors/:connectorId',

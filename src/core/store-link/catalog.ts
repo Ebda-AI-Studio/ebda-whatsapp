@@ -7,7 +7,7 @@ import { bridgeFor } from '../store-link';
 import type { Env } from '../../env';
 import { graphTokenFor, TokenUnavailable } from '../numbers/token';
 import type { LinkHost } from './host';
-import { getState, readSettings } from './settings';
+import { getState, putState, readSettings } from './settings';
 
 /** Nightly full reconcile runs after the 02:00 backup. */
 export const RECONCILE_HOUR_LOCAL = 3;
@@ -17,6 +17,8 @@ const ITEMS_PER_BATCH = 100;
 const CATALOG_PAGE = 100;
 const MAX_CATALOG_PAGES = 200;
 export const CATALOG_RETRY_MS = 30_000;
+/** store_state key: epoch ms of the last run that Meta accepted (event sync or reconcile). */
+export const LAST_SYNC_KEY = 'catalog.last_sync';
 
 /** Meta's feed price: decimal amount, a space, the currency. */
 const feedPrice = (minor: number, currency: string) => `${Math.floor(minor / 100)}.${String(minor % 100).padStart(2, '0')} ${currency}`;
@@ -123,6 +125,7 @@ export async function runCatalogSync(host: LinkHost, now: number): Promise<numbe
   host.storage.transactionSync(() => {
     for (const d of dirty) host.sql.exec('DELETE FROM catalog_dirty WHERE product_id = ? AND updated_at = ?', d.product_id, d.updated_at);
   });
+  putState(host, LAST_SYNC_KEY, String(now));
   console.log(JSON.stringify({ audit: 'catalog_sync', workspace: host.workspaceId, sent: requests.length, skipped }));
   return host.sql.exec('SELECT 1 FROM catalog_dirty LIMIT 1').toArray().length ? now + CATALOG_RETRY_MS : undefined;
 }
@@ -171,6 +174,7 @@ export async function runCatalogReconcile(host: LinkHost, now: number, opts: { a
   host.storage.transactionSync(() => {
     for (const d of covered) host.sql.exec('DELETE FROM catalog_dirty WHERE product_id = ? AND updated_at = ?', d.product_id, d.updated_at);
   });
+  putState(host, LAST_SYNC_KEY, String(now));
   console.log(JSON.stringify({ audit: 'catalog_reconcile', workspace: host.workspaceId, sent: requests.length, archived: extras.length, skipped }));
   return nextLocalHour(now + 3_600_000, RECONCILE_HOUR_LOCAL, BACKUP_TIME_ZONE);
 }

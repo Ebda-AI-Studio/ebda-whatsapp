@@ -25,15 +25,16 @@ import type { StoreEvent } from './api/store-events';
 import type { z } from 'zod';
 import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
-import { putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
-import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
+import { getState, putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
+import { ensureCatalogReconcile, LAST_SYNC_KEY, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
+import { provisionCatalog, type ProvisionResult } from './store-link/catalog-provision';
 import { errClass, safeMessage } from './observability';
 import { recordClick } from './campaigns/campaigns';
 import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, cancelCampaign, createCampaign, deleteDraft, endInstance, gateFor, getCampaign, launchCampaign, listCampaigns, pauseCampaign, resumeCampaign, sendCampaign, settleWallet, sweepCampaigns, type CreateArgs } from './campaigns/campaigns';
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
 import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
-import type { AgentSettingsDto } from './api/contract';
+import type { AgentSettingsDto, CatalogStatusDto } from './api/contract';
 import { creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, postCredit, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
@@ -1035,6 +1036,33 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
     await this.arm();
     return { ok: true, settings };
+  }
+
+  async getCatalogStatus(): Promise<CatalogStatusDto> {
+    const last = getState(this.host(), LAST_SYNC_KEY);
+    return { catalogId: readSettings(this.host()).catalogId, lastSyncAt: last ? Number(last) : null };
+  }
+
+  private provisioningCatalog = false;
+
+  /** Creates and connects a Meta catalog for this workspace's WABA, then saves it (full sync scheduled). Idempotent across retries; one run at a time. */
+  async provisionCatalog(a: { name?: string; wabaId: string; businessId: string }): Promise<ProvisionResult> {
+    // Every Meta call is an await that opens the input gate: a second request must not interleave with a running one.
+    if (this.provisioningCatalog) return { ok: false, code: 'meta_error', retryable: true };
+    this.provisioningCatalog = true;
+    try {
+      const res = await provisionCatalog(this.host(), a, (catalogId, wabaId) => {
+        this.ctx.storage.transactionSync(() => {
+          writeSettings(this.host(), { catalogId });
+          putState(this.host(), 'catalog.waba', wabaId);
+          ensureCatalogReconcile(this.host(), Date.now(), true);
+        });
+      });
+      await this.arm();
+      return res;
+    } finally {
+      this.provisioningCatalog = false;
+    }
   }
 
   // ---- Campaigns (Phase 6): contacts + imports -------------------------------------------------------------------

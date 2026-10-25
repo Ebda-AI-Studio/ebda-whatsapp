@@ -5,7 +5,7 @@ const MAX_PAGES = 200;
 const GRAPH = 'https://graph.facebook.com/';
 
 type Auth = { token: string; graphVersion: string; catalogId: string };
-export type CatalogApiResult<T> = { ok: true; value: T } | { ok: false; message: string; retryable: boolean };
+export type CatalogApiResult<T> = { ok: true; value: T } | { ok: false; message: string; retryable: boolean; code?: number };
 
 export type CatalogRequest = { method: 'UPDATE' | 'DELETE'; data: Record<string, unknown> };
 
@@ -74,6 +74,68 @@ export async function listWabaCatalogs(a: { token: string; graphVersion: string;
     for (const c of json.data) if (c.id) out.push(c.id);
     const next = json.paging?.next ?? null;
     url = next && next.startsWith(GRAPH) ? next : null;
+  }
+  return { ok: true, value: out };
+}
+
+type Edge = { token: string; graphVersion: string };
+const numericId = z.string().regex(/^\d{5,25}$/);
+
+/** One Graph call that answers JSON; the error code Meta reports travels with the failure so callers can tell a missing permission from an outage. */
+async function graph<T>(a: Edge, path: string, schema: z.ZodType<T>, init: { method: 'GET' } | { method: 'POST'; body: unknown } = { method: 'GET' }): Promise<CatalogApiResult<T>> {
+  let res: Response;
+  try {
+    res = await fetch(`${GRAPH}${a.graphVersion}/${path}`, {
+      method: init.method,
+      headers: { authorization: `Bearer ${a.token}`, ...(init.method === 'POST' ? { 'content-type': 'application/json' } : {}) },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      ...(init.method === 'POST' ? { body: JSON.stringify(init.body) } : {}),
+    });
+  } catch (err) {
+    return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
+  }
+  const json = (await res.json().catch(() => null)) as { error?: { code?: number; message?: string } } | null;
+  if (!res.ok) return { ok: false, message: json?.error?.message ?? `http ${res.status}`, retryable: res.status >= 500 || res.status === 429, ...(json?.error?.code !== undefined ? { code: json.error.code } : {}) };
+  const parsed = schema.safeParse(json);
+  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, message: 'unexpected answer', retryable: false };
+}
+
+/** Creates a commerce catalog owned by a business (`POST /{business_id}/owned_product_catalogs`, `name` required, `vertical` default commerce). */
+export const createCatalog = (a: Edge & { businessId: string; name: string }): Promise<CatalogApiResult<{ id: string }>> =>
+  graph(a, `${a.businessId}/owned_product_catalogs`, z.object({ id: numericId }).loose(), { method: 'POST', body: { name: a.name, vertical: 'commerce' } });
+
+/** The catalogs a business owns, by id and name (used to find one whose create answer was lost). */
+export async function listOwnedCatalogs(a: Edge & { businessId: string }): Promise<CatalogApiResult<{ id: string; name: string }[]>> {
+  const out: { id: string; name: string }[] = [];
+  let url: string | null = `${a.businessId}/owned_product_catalogs?fields=id,name&limit=100`;
+  for (let page = 0; url && page < 20; page++) {
+    const res: CatalogApiResult<{ data: { id: string; name?: string }[]; paging?: { next?: string } }> = await graph(a, url, z.object({ data: z.array(z.object({ id: z.string(), name: z.string().optional() }).loose()), paging: z.object({ next: z.string().optional() }).loose().optional() }).loose());
+    if (!res.ok) return res;
+    for (const c of res.value.data) out.push({ id: c.id, name: c.name ?? '' });
+    const next: string | undefined = res.value.paging?.next;
+    // the cursor URL is absolute; keep only the part after the version, and only if it points at Graph
+    url = next && next.startsWith(GRAPH) ? next.slice(GRAPH.length).replace(/^v[\d.]+\//, '') : null;
+  }
+  return { ok: true, value: out };
+}
+
+/** Connects a catalog to a WhatsApp Business Account (`POST /{waba_id}/product_catalogs`, `catalog_id` required; answer `{ success }`). */
+export async function connectCatalogToWaba(a: Edge & { wabaId: string; catalogId: string }): Promise<CatalogApiResult<true>> {
+  const res = await graph(a, `${a.wabaId}/product_catalogs`, z.object({ success: z.boolean() }).loose(), { method: 'POST', body: { catalog_id: a.catalogId } });
+  if (!res.ok) return res;
+  return res.value.success ? { ok: true, value: true } : { ok: false, message: 'Meta did not confirm the connection', retryable: true };
+}
+
+/** The WhatsApp Business Accounts a business owns (`GET /{business_id}/owned_whatsapp_business_accounts`): proves which business a WABA belongs to. */
+export async function listOwnedWabas(a: Edge & { businessId: string }): Promise<CatalogApiResult<string[]>> {
+  const out: string[] = [];
+  let url: string | null = `${a.businessId}/owned_whatsapp_business_accounts?fields=id&limit=100`;
+  for (let page = 0; url && page < 20; page++) {
+    const res: CatalogApiResult<{ data: { id: string }[]; paging?: { next?: string } }> = await graph(a, url, z.object({ data: z.array(z.object({ id: z.string() }).loose()), paging: z.object({ next: z.string().optional() }).loose().optional() }).loose());
+    if (!res.ok) return res;
+    for (const w of res.value.data) out.push(w.id);
+    const next: string | undefined = res.value.paging?.next;
+    url = next && next.startsWith(GRAPH) ? next.slice(GRAPH.length).replace(/^v[\d.]+\//, '') : null;
   }
   return { ok: true, value: out };
 }
