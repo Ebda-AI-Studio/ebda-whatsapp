@@ -42,7 +42,8 @@ export type StartPackageResult =
 export async function startPackageCheckout(env: Env, a: { workspaceId: string; userId: string; sessionId: string; packageId: string }, now = Date.now()): Promise<StartPackageResult> {
   if (!packagesEnabled(env)) return { ok: false, reason: 'disabled' };
   const provider = paymentProvider(env);
-  if (!provider) return { ok: false, reason: 'unavailable' };
+  // Without the Kashier secret key every webhook would be refused: do not let customers pay for something that can never be granted.
+  if (!provider || !provider.confirmationReady()) return { ok: false, reason: 'unavailable' };
   const pkg = await env.DB.prepare('SELECT price_minor FROM packages WHERE id = ? AND active = 1 AND price_minor > 0').bind(a.packageId).first<{ price_minor: number }>();
   if (!pkg) return { ok: false, reason: 'unknown_package' };
   const session = await sessionState(env, a.sessionId);
@@ -158,29 +159,39 @@ const G = (refundRef: string) => ({ sql: 'EXISTS (SELECT 1 FROM package_refunds 
  *  - Partial: the running period it owns is shortened by the refunded fraction and the same fraction of its unused credits expires.
  */
 async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, now: number): Promise<void> {
-  const row = (await findPackageOrder(env, row0.order_id)) ?? row0;
   const refundRef = ev.transactionId;
-  if (!row.provider_ref || row.provider_ref === refundRef) {
-    alert('refund_refused', { kind: 'package', workspace: row.workspace_id, eventKey: ev.eventKey });
-    return;
-  }
-  const known = await env.DB.prepare('SELECT applied FROM package_refunds WHERE refund_ref = ?').bind(refundRef).first<{ applied: number }>();
-  const amount = row.amount_minor;
-  const before = row.refunded_minor;
   const r = ev.amountMinor;
-  const closed = row.status === 'refunded' || row.status === 'charged_back';
-  if (!known) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const row = (await findPackageOrder(env, row0.order_id)) ?? row0;
+    if (!row.provider_ref || row.provider_ref === refundRef) {
+      alert('refund_refused', { kind: 'package', workspace: row.workspace_id, eventKey: ev.eventKey });
+      return;
+    }
+    const known = await env.DB.prepare('SELECT applied FROM package_refunds WHERE refund_ref = ?').bind(refundRef).first<{ applied: number }>();
+    if (known) {
+      if (row.status === 'refunded' || row.status === 'charged_back') await announceSubscription(env, row.workspace_id, now); // a replay: make sure the push and the Store event happened
+      break;
+    }
     if (row.status !== 'paid' || r <= 0) {
       alert('package_refund_unmatched', { workspace: row.workspace_id, orderId: row.order_id });
       return;
     }
     const subBefore = await env.DB.prepare('SELECT version FROM workspace_subscriptions WHERE workspace_id = ?').bind(row.workspace_id).first<{ version: number }>();
+    const amount = row.amount_minor;
+    const before = row.refunded_minor;
+    const remainingBefore = amount - before;
     const full = before + r >= amount;
     const g = G(refundRef);
     const ws = row.workspace_id;
     const oid = row.order_id;
+    // The refund row is the gate of everything below, and it is only written if the order still has exactly the refunded amount this
+    // decision was made on: a refund that committed in between makes the insert a no-op, and the loop decides again.
     const stmts: D1PreparedStatement[] = [
-      env.DB.prepare('INSERT OR IGNORE INTO package_refunds (refund_ref, order_id, amount_minor, at, period_start, applied) VALUES (?, ?, ?, ?, (SELECT period_start FROM workspace_subscriptions WHERE workspace_id = ?), 0)').bind(refundRef, oid, r, now, ws),
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO package_refunds (refund_ref, order_id, amount_minor, at, period_start, applied, frac_num, frac_den)
+         SELECT ?, ?, ?, ?, (SELECT period_start FROM workspace_subscriptions WHERE workspace_id = ?), 0, ?, ?
+         WHERE EXISTS (SELECT 1 FROM package_orders WHERE order_id = ? AND status = 'paid' AND refunded_minor = ?)`,
+      ).bind(refundRef, oid, r, now, ws, r, remainingBefore, oid, before),
     ];
     const audit = (note: string) => env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, 'provider', 'subscription_set', ?, NULL, ?, ? WHERE changes() > 0").bind(now, ws, JSON.stringify({ note }), oid);
     const owner = '(SELECT owns_running FROM package_orders WHERE order_id = ?) = 1';
@@ -209,7 +220,6 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
         env.DB.prepare(`UPDATE package_orders SET owns_running = 0 WHERE order_id = ? AND ${g.sql}`).bind(oid, ...g.binds),
       );
     } else {
-      const remainingBefore = amount - before;
       const remainingAfter = remainingBefore - r;
       stmts.push(
         env.DB.prepare(`UPDATE package_orders SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND ${g.sql}`).bind(r, oid, ...g.binds),
@@ -220,14 +230,14 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
       );
     }
     stmts.push(env.DB.prepare('UPDATE package_refunds SET applied = 1 WHERE refund_ref = ?').bind(refundRef));
-    await env.DB.batch(stmts);
+    const res = await env.DB.batch(stmts);
+    if (res[0]!.meta.changes === 0) continue; // another refund of this order committed first: decide again on the new total
     alert(full ? (ev.chargeback ? 'package_chargeback' : 'package_refunded') : 'package_partial_refund', { workspace: ws, orderId: oid, amountMinor: r, eventKey: ev.eventKey });
     const subAfter = await env.DB.prepare('SELECT version FROM workspace_subscriptions WHERE workspace_id = ?').bind(ws).first<{ version: number }>();
     if (subAfter && subAfter.version !== subBefore?.version) await announceSubscription(env, ws, now);
-  } else if (closed) {
-    await announceSubscription(env, row.workspace_id, now); // a replay: make sure the push and the Store event happened
+    break;
   }
-  await finishRefund(env, row.order_id, refundRef, now);
+  await finishRefund(env, row0.order_id, refundRef, now);
 }
 
 /** The steps after a refund's batch, each idempotent and retried by the provider's redelivery: zero the unused credits, hand back to the Store plan. */
@@ -241,11 +251,10 @@ async function finishRefund(env: Env, orderId: string, refundRef: string, now: n
     await stub.expireAiCredits(cancelled, now, `expire:refund:${orderId}`);
     await fallbackToStorePlan(env, o.workspace_id, now).catch((err) => alert('store_plan_fallback_failed', { workspace: o.workspace_id, error: errName(err) }));
   }
-  const ref = await env.DB.prepare('SELECT amount_minor, period_start, shortened FROM package_refunds WHERE refund_ref = ?').bind(refundRef).first<{ amount_minor: number; period_start: number | null; shortened: number }>();
-  if (ref && ref.shortened === 1 && ref.period_start !== null) {
-    // Partial refund: the same fraction of the unused credits. `den` is what was still unrefunded when this refund came.
-    const den = o.amount_minor - (o.refunded_minor - ref.amount_minor);
-    await stub.expireAiCreditsFraction({ periodStart: ref.period_start, num: ref.amount_minor, den, ref: `expire:partial:${refundRef}` }, now);
+  const ref = await env.DB.prepare('SELECT period_start, shortened, frac_num, frac_den FROM package_refunds WHERE refund_ref = ?').bind(refundRef).first<{ period_start: number | null; shortened: number; frac_num: number | null; frac_den: number | null }>();
+  if (ref && ref.shortened === 1 && ref.period_start !== null && ref.frac_num && ref.frac_den) {
+    // Partial refund: the fraction fixed when THIS refund was decided (refunded / still-unrefunded), never recomputed from today's totals.
+    await stub.expireAiCreditsFraction({ periodStart: ref.period_start, num: ref.frac_num, den: ref.frac_den, ref: `expire:partial:${refundRef}` }, now);
   }
 }
 

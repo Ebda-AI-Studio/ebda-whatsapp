@@ -221,7 +221,7 @@ describe('crediting', () => {
 
 describe('the daily repair of lost webhooks', () => {
   /** Answers `q` for `order` only (the file shares one D1, so other tests' pending orders must stay untouched). */
-  const fake = (q: Inquiry | 'unsupported' | 'unavailable', order?: string): PaymentProvider => ({ ...kashier, name: 'fake', inquire: async (o: string) => (order && o !== order ? 'unavailable' : q), refund: async (): Promise<RefundResult> => ({ ok: false, reason: 'unsupported' }), verifyWebhook: async () => null, confirm: async (e) => e, createSession: async () => ({ checkoutUrl: 'https://x' }) });
+  const fake = (q: Inquiry | 'unsupported' | 'unavailable', order?: string): PaymentProvider => ({ ...kashier, name: 'fake', inquire: async (o: string) => (order && o !== order ? 'unavailable' : q), refund: async (): Promise<RefundResult> => ({ ok: false, reason: 'unsupported' }), verifyWebhook: async () => null, confirm: async (e) => e, confirmationReady: () => true, createSession: async () => ({ checkoutUrl: 'https://x' }) });
   it('credits a paid order whose webhook never came, closes a failed one, expires a week-old one, and alerts when the provider cannot be asked', async () => {
     const ws = W(920);
     await pending('ord-920a', ws, 1000, 0);

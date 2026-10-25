@@ -29,6 +29,8 @@ export interface PaymentProvider {
    * match the signed body (the caller answers 5xx and nothing is applied).
    */
   confirm(ev: ParsedWebhook): Promise<ParsedWebhook>;
+  /** False when webhooks for this provider could not be confirmed (no secret key): checkout must not open, or customers would pay while every webhook is refused. */
+  confirmationReady(): boolean;
   inquire(orderId: string): Promise<Inquiry | 'unsupported' | 'unavailable'>;
   refund(a: { transactionId: string; amountMinor: number }): Promise<RefundResult>;
 }
@@ -73,8 +75,13 @@ export class KashierProvider implements PaymentProvider {
     this.fetchImpl = opts.fetch ?? ((url, init) => fetch(url, init));
   }
 
+  confirmationReady(): boolean {
+    return !!this.secretKey;
+  }
+
   async confirm(ev: ParsedWebhook): Promise<ParsedWebhook> {
     if (!this.secretKey) throw new KashierUnconfirmedError('the Kashier secret key is not configured');
+    if (!/^https:\/\//i.test(this.apiBase)) throw new KashierUnconfirmedError('the Kashier API origin is not https');
     let answer: unknown;
     try {
       const res = await this.fetchImpl(`${this.apiBase}${kashierTransactionDetailsPath(ev.transactionId)}`, { method: 'GET', headers: { Authorization: this.secretKey, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000) });

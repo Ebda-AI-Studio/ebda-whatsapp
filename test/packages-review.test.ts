@@ -59,7 +59,7 @@ const interleave = (before: () => Promise<void>): typeof env => {
   return { ...env, DB: new Proxy(env.DB, { get(t, p) { if (p === 'batch') return async (s: D1PreparedStatement[]) => { if (!done) { done = true; await before(); } return t.batch(s); }; const v = Reflect.get(t, p) as unknown; return typeof v === 'function' ? v.bind(t) : v; } }) } as typeof env;
 };
 const planEv = (ws: string, includes: boolean, t: number, extra: Record<string, unknown> = {}) => storeEvent(ws, 'store.plan_changed', { planCode: 'business', includesWhatsApp: includes, ownerUserId: 'u', effectiveAt: iso(t), ...extra }, { occurredAt: iso(t) }) as Parameters<typeof applyStorePlan>[1];
-const buyGold = async (ws: string, now = Date.now(), tx = `TX-${Math.random()}`) => { const o = await start(ws, 'gold', now); await hook(o.orderId, tx, '500.00', { now }); return o; };
+const buyGold = async (ws: string, now = Date.now(), tx = `TX-${crypto.randomUUID()}`) => { const o = await start(ws, 'gold', now); await hook(o.orderId, tx, '500.00', { now }); return o; };
 
 describe('C1/C2: a paid order is granted exactly once, in one batch, and a lost grant is repaired', () => {
   it('the batch commits and then the call throws: the retry adds nothing (one month, one audit row) and still pushes and tells the Store', async () => {

@@ -59,5 +59,23 @@ CREATE TABLE package_refunds (
   at INTEGER NOT NULL,
   period_start INTEGER,
   applied INTEGER NOT NULL DEFAULT 0,
-  shortened INTEGER NOT NULL DEFAULT 0
+  shortened INTEGER NOT NULL DEFAULT 0,
+  -- The fraction of the period's unused credits this refund takes back (refunded / still-unrefunded), fixed when the refund was decided.
+  frac_num INTEGER,
+  frac_den INTEGER
 );
+
+-- Provider deliveries that could not be confirmed with the provider yet (details not queryable, outage). Kept so the daily pass can
+-- re-confirm them through the same path as a live webhook even if the provider never retries. The signed body is the same data the
+-- provider already sent us; rows are deleted 30 days after they resolve.
+CREATE TABLE unconfirmed_webhooks (
+  event_key TEXT PRIMARY KEY,
+  raw_body TEXT NOT NULL,
+  signature TEXT NOT NULL,
+  first_seen INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 1,
+  last_reason TEXT,
+  resolved_at INTEGER
+);
+CREATE INDEX unconfirmed_webhooks_open ON unconfirmed_webhooks (first_seen) WHERE resolved_at IS NULL;

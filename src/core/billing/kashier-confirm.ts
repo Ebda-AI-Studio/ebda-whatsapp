@@ -14,7 +14,12 @@
  * webhook arrives (a 404 is "not confirmable yet", retried like an outage). Anything unclear is NOT a confirmation: the caller answers
  * 5xx so Kashier retries, and nothing is applied.
  */
-export const kashierTransactionDetailsPath = (transactionId: string): string => `/v2/aggregator/transactions/${encodeURIComponent(transactionId)}`;
+/** A transaction id is put in a URL path only if it is plain (no separators, dots or query characters). */
+export const TRANSACTION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+export const kashierTransactionDetailsPath = (transactionId: string): string => {
+  if (!TRANSACTION_ID.test(transactionId)) throw new KashierUnconfirmedError('the transaction id is not a plain id');
+  return `/v2/aggregator/transactions/${transactionId}`;
+};
 
 export type KashierTxnKind = 'payment' | 'authorize' | 'refund';
 export type KashierTxnStatus = 'SUCCESS' | 'FAILURE' | 'PENDING';
