@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../data/api';
-import type { Adjustment, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest } from '../data/billing';
+import type { Adjustment, ChangeLogItem, FxRate, MarginOverride, OperatorApi, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -317,7 +317,7 @@ function AccountPanel({ t, lang, api, now, run, fail }: PanelProps) {
 
 const chip = (state: string) => (state === 'paid' || state === 'approved' ? 'done' : state === 'rejected' || state === 'failed' ? 'failed' : 'pending');
 
-function QueuesPanel({ t, lang, api, source, run }: PanelProps) {
+function QueuesPanel({ t, lang, api, source, run, now, fail }: PanelProps) {
   const refunds = useList<RefundRequest>(api.refundQueue);
   const adjustments = useList<Adjustment>(api.adjustments);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
@@ -384,6 +384,7 @@ function QueuesPanel({ t, lang, api, source, run }: PanelProps) {
           })}
         </ul>
       </Card>
+      <InstapayReview t={t} lang={lang} api={api} source={source} run={run} now={now} fail={fail} />
       <Card id="op-adjlist" title={t.opAdjList}>
         {adjustments.error && <p className="error-text">{t.opLoadError}</p>}
         {adjustments.items?.length === 0 && <p className="muted">{t.opAdjEmpty}</p>}
@@ -435,6 +436,56 @@ function LogPanel({ t, lang, api }: PanelProps) {
             {l.reason && <p className="muted" dir="auto">{l.reason}</p>}
           </li>
         ))}
+      </ul>
+    </Card>
+  );
+}
+
+// ---- InstaPay transfers: review the proof, confirm or reject --------------------------------------------------------------------
+
+function InstapayReview({ t, lang, api, source, run }: PanelProps) {
+  const list = useList<OperatorInstapay>(api.instapayQueue);
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const view = (r: OperatorInstapay) => async () => {
+    await run(async () => { const link = await api.instapayProofLink(r.id); window.open(link.url, '_blank', 'noopener,noreferrer'); });
+  };
+  const confirm = (r: OperatorInstapay) => async () => {
+    await run(async () => { const next = await api.confirmInstapay(r.id); setNotes((n) => ({ ...n, [r.id]: next.needsSecond ? t.opIpSecond : '' })); list.reload(); });
+  };
+  const reject = (r: OperatorInstapay) => async () => {
+    await run(async () => { await api.rejectInstapay(r.id, (reasons[r.id] ?? '').trim()); list.reload(); });
+  };
+  return (
+    <Card id="op-instapay" title={t.opIpTitle}>
+      <p className="muted" role="note">{t.opIpSla}</p>
+      {list.error && <p className="error-text">{t.opLoadError}</p>}
+      {list.items?.length === 0 && <p className="muted">{t.opIpEmpty}</p>}
+      <ul className="wallet-rows op-rows">
+        {list.items?.map((r) => {
+          const mine = r.createdBy === source.currentUserId;
+          return (
+            <li key={r.id}>
+              <span className="wallet-row-main">
+                <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status="pending">{t.instapayStates[r.state] ?? r.state}</span>
+                <span className="muted op-line"><bdi dir="ltr">{r.workspaceId}</bdi> • {t.opIpLine(t.opIpKinds[r.kind] ?? r.kind, r.reference)} • {r.proofAt ? dateTime(r.proofAt, lang) : ''}</span>
+                {r.firstApprover && <span className="muted op-line">{t.opIpFirstBy(r.firstApprover)}</span>}
+                {notes[r.id] && <span className="campaign-reason">{notes[r.id]}</span>}
+              </span>
+              {mine ? <p className="muted">{t.opIpOwn}</p> : (
+                <div className="op-actions">
+                  <label className="field"><span>{t.opIpReason}</span><input dir="auto" maxLength={300} value={reasons[r.id] ?? ''} onChange={(e) => setReasons({ ...reasons, [r.id]: e.target.value })} /></label>
+                  <div className="campaign-actions">
+                    <button type="button" className="btn" onClick={() => void view(r)()}>{t.opIpView}</button>
+                    <button type="button" className="btn primary" onClick={() => void confirm(r)()}>{t.opIpConfirm}</button>
+                    <button type="button" className="btn quiet" disabled={(reasons[r.id] ?? '').trim().length < 3} onClick={() => void reject(r)()}>{t.opIpReject}</button>
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </Card>
   );

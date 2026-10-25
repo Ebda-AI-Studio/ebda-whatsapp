@@ -270,3 +270,23 @@ describe('operator: change log', () => {
     expect(within(item).getByText(/"marginBps":1800/)).toBeTruthy();
   });
 });
+
+describe('operator: InstaPay transfers', () => {
+  it('shows the review SLA, lists the proofs under review, and confirms or rejects (a reason is needed to reject)', async () => {
+    const source = createSampleSource();
+    const confirm = vi.spyOn(source.operator!, 'confirmInstapay');
+    const reject = vi.spyOn(source.operator!, 'rejectInstapay');
+    await openOperator(source, 'queues');
+    const card = await screen.findByRole('region', { name: t.opIpTitle });
+    expect(within(card).getByText(t.opIpSla)).toBeTruthy();
+    expect(within(card).getByText(egp(20000))).toBeTruthy();
+    const rejectBtn = within(card).getByRole('button', { name: t.opIpReject }) as HTMLButtonElement;
+    expect(rejectBtn.disabled).toBe(true);
+    fireEvent.change(within(card).getByLabelText(t.opIpReason), { target: { value: 'المبلغ غلط' } });
+    expect(rejectBtn.disabled).toBe(false);
+    await act(async () => fireEvent.click(rejectBtn));
+    expect(reject).toHaveBeenCalledWith('ip-op-1', 'المبلغ غلط');
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.opIpConfirm })));
+    expect(confirm).toHaveBeenCalledWith('ip-op-1');
+  });
+});

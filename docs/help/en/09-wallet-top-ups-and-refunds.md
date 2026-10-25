@@ -14,6 +14,16 @@ The wallet is a prepaid balance in Egyptian pounds. It pays Meta's cost on the *
 
 *Note:* if the wallet is in debt, your first top-up pays the debt and the rest is added to the balance.
 
+## Pay with InstaPay
+While card payment is not switched on for your account, you pay by InstaPay transfer. It works for top-ups and for packages.
+1. Open **Wallet**, find **Pay with InstaPay**, choose **Package** or **Top up** (for a top-up, enter the amount).
+2. You will see our InstaPay address (and a QR code), the **exact amount** and a **reference** that starts with `WA-`. The amount is set by us; you cannot change it.
+3. In your banking app, send exactly that amount to the address and **write the reference in the transfer note**.
+4. Take a screenshot or save the receipt, and **upload it** on the same card (an image, JPG, PNG or WebP, or a PDF, up to 5 MB).
+5. Our team reviews it **within 4 business hours** (Sunday to Thursday, 9:00 to 17:00 Cairo time). Nothing is added to your account before it is confirmed. The request shows **under review**, then **confirmed** (the package starts or the balance grows by the amount) or **rejected** with the reason (make a new request with the right receipt).
+
+*Notes:* the reference is valid for **48 hours**; after that the request expires and you start a new one. A receipt uploaded after it expired is refused. One reference is used for one payment only. Only the owner can pay.
+
 ## Buy a package
 1. Open **Wallet** and find the **Packages** card (the owner sees it; it appears once package purchase is switched on for your account).
 2. Pick a package. The price and the monthly AI credits are shown; the price is set by us and is exactly what the card is charged (no extra card fee, unlike a top-up).

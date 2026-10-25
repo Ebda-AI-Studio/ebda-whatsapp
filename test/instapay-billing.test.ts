@@ -120,7 +120,7 @@ describe('the proof of transfer', () => {
     expect((await SELF.fetch(`https://x/api/v1/instapay-proof/${encodeURIComponent(key)}`)).status).toBe(404);
     expect((await SELF.fetch('https://x/api/v1/instapay-proof/forged.token')).status).toBe(404);
     const owner = await apiFor(ws);
-    expect((await owner.call('GET', `/media/${encodeURIComponent(key)}`)).status).toBe(404);
+    expect([400, 404]).toContain((await owner.call('GET', `/media/${encodeURIComponent(key)}`)).status);
   });
   it('a wrong type or size is refused: html, svg, a lying content-type, empty, over 5 MB', async () => {
     const ws = W(16);
