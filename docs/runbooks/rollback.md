@@ -1,17 +1,11 @@
 # Deploy, rollback and the forward-only migration rule
 
-## Deploying (the normal path)
-Actions → **cf-deploy** → *Run workflow* on `main` (a human go; nothing deploys by itself). It refuses any commit that is not on `main` and any Cloudflare account except the personal one (`69188202efc4df480140dd76545aa3ab`), then: typecheck → `wrangler d1 migrations list` → `apply --remote` (D1 first) → `wrangler deploy --var COMMIT_SHA:<sha>` → `scripts/verify-prod.mjs --expect <sha>` (fails the job if `/health` reports another commit, and prints the live cron schedule). A failed run sends a Telegram message with the commit and the run link.
+## Deploying (Ruling WA-DEPLOY-1)
+**Deploys run from Ahmad's Mac: `bash scripts/deploy.sh` (see `docs/launch/README.md` section 12).** Do NOT add `CLOUDFLARE_API_TOKEN` to GitHub secrets until the repo has environment protection (required reviewer + main-only deployment branches on `production`). Whisky-11 is on the Free plan with a private repo, where those rules do not exist: a dispatch from a branch that edits the workflow could exfiltrate any secret it references. Cost if wrong: a leaked token = arbitrary code on the live Worker plus D1/R2/queue access; keeping it Mac-only costs one manual command per deploy.
 
-Secrets the workflow needs (repo → Settings → Secrets; Ahmad creates them, nothing here creates them):
-| Secret | Purpose |
-|---|---|
-| `CLOUDFLARE_API_TOKEN` | API token with Workers Scripts: Edit and D1: Edit on the personal account (deploy, migrations, reading the cron schedule) |
-| `CLOUDFLARE_ACCOUNT_ID` (secret or variable) | must equal `69188202efc4df480140dd76545aa3ab`, or the job stops |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_ID` | the failure notice (same bot and chat as the runtime alerts) |
-| `META_VERIFY_TOKEN`, `META_APP_SECRET` | optional: lets verify-prod also run the webhook handshake and signed-webhook checks (otherwise they print SKIP) |
+The script refuses any commit that is not on `origin/main`, any Cloudflare account except the personal one (`69188202efc4df480140dd76545aa3ab`) and an unclean tree, then: D1 `migrations list` → `apply --remote` (D1 first) → `wrangler deploy --var COMMIT_SHA:<sha>` → `scripts/verify-prod.mjs --expect <sha>` (fails if `/health` reports another commit; prints the live cron schedule). The `cf-deploy` workflow (dispatch-only, environment `production`, step-scoped secrets, `npm ci --ignore-scripts`) calls the same script and is inert/fail-closed without the token; it sends a Telegram message with the commit and run link if it fails.
 
-The first deploy (GO-1) is done by hand from Ahmad's Mac with OAuth wrangler: see `docs/launch/README.md` section 12.
+If protection is ever available, the secrets (set on the `production` environment, not the repo) are: `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit and D1: Edit on the personal account), `CLOUDFLARE_ACCOUNT_ID` (must equal the id above), `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALERT_CHAT_ID`, optional `META_VERIFY_TOKEN` + `META_APP_SECRET`.
 
 ## Rolling back the code
 1. `npx wrangler versions list` → pick the last good version id (the Worker keeps recent versions).

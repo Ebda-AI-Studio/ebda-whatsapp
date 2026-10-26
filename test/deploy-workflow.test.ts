@@ -19,16 +19,42 @@ it('one deploy at a time and never cancelled halfway; bounded; same runner rule 
   expect(wf).toContain("runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '\"ubuntu-latest\"') }}");
   expect(wf).toContain("cache: ${{ vars.EBDA_RUNS_ON == '' && 'npm' || '' }}");
 });
-it('refuses the wrong Cloudflare account, a missing token and a commit that is not on main, before anything runs', () => {
-  expect(wf).toContain('EXPECTED_ACCOUNT_ID: 69188202efc4df480140dd76545aa3ab');
-  expect(wf).toContain('"${CLOUDFLARE_ACCOUNT_ID}" != "${EXPECTED_ACCOUNT_ID}"');
-  expect(wf).toContain('merge-base --is-ancestor');
-  expect(at('Guards (account')).toBeLessThan(at('npm ci'));
+const script = readFileSync(new URL('../scripts/deploy.sh', import.meta.url), 'utf8');
+
+it('the deploy logic lives in scripts/deploy.sh, which the workflow calls (one path for the Mac and for Actions)', () => {
+  expect(wf).toContain('bash scripts/deploy.sh');
+  for (const logic of ['wrangler d1 migrations', 'wrangler deploy', 'verify-prod.mjs', 'merge-base --is-ancestor']) expect(wf, `${logic} must not be inlined in the workflow`).not.toContain(logic);
 });
-it('orders the steps: typecheck, D1 list, D1 apply, deploy with the commit, verify with the same commit, then failure notice', () => {
-  const order = ['npm run typecheck', 'wrangler d1 migrations list ebda-wa-platform --remote', 'wrangler d1 migrations apply ebda-wa-platform --remote', 'wrangler deploy --var "COMMIT_SHA:${SHORT_SHA}"', 'verify-prod.mjs --base https://wa.ebda.app --expect "${SHORT_SHA}"', 'if: failure()'].map(at);
-  expect(order).toEqual([...order].sort((a, b) => a - b));
-  expect(wf).toContain('--cron "17 1 * * *"');
+it('the script refuses the wrong Cloudflare account and a commit that is not on origin/main, before any wrangler call', () => {
+  expect(script).toContain('69188202efc4df480140dd76545aa3ab');
+  expect(script).toContain('merge-base --is-ancestor');
+  const firstWrangler = script.search(/npx wrangler (d1|deploy)/);
+  expect(script.indexOf('merge-base --is-ancestor')).toBeLessThan(firstWrangler);
+  expect(script.indexOf('69188202efc4df480140dd76545aa3ab')).toBeLessThan(firstWrangler);
+  expect(script).toMatch(/^set -euo pipefail/m);
+});
+it('the script orders D1 list, D1 apply, deploy with the commit, then verify with the same commit and the cron', () => {
+  const order = ['wrangler d1 migrations list ebda-wa-platform --remote', 'wrangler d1 migrations apply ebda-wa-platform --remote', 'wrangler deploy --var "COMMIT_SHA:${SHORT_SHA}"', 'verify-prod.mjs --base https://wa.ebda.app --expect "${SHORT_SHA}"'].map((n) => {
+    const i = script.indexOf(n);
+    expect(i, `missing in deploy.sh: ${n}`).toBeGreaterThan(-1);
+    return i;
+  });
+  expect(order).toEqual([...order].sort((x, y) => x - y));
+  expect(script).toContain('--cron "17 1 * * *"');
+});
+it('the job runs in the `production` environment (inert until the plan supports protection) and installs without lifecycle scripts', () => {
+  expect(wf).toMatch(/^\s+environment: production$/m);
+  expect(wf).toContain('npm ci --ignore-scripts');
+});
+it('secrets are scoped to the single step that needs them: none at workflow or job level, and the checkout / install steps never see them', () => {
+  const jobHead = wf.slice(at('jobs:'), at('steps:'));
+  const workflowHead = wf.slice(0, at('jobs:'));
+  expect(jobHead).not.toMatch(/secrets\./);
+  expect(workflowHead).not.toMatch(/secrets\./);
+  const beforeDeploy = wf.slice(0, at('name: Deploy'));
+  expect(beforeDeploy).not.toMatch(/secrets\./);
+  const deployStep = wf.slice(at('name: Deploy'), at('name: Notify failure'));
+  expect(deployStep).toContain('CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}');
 });
 it('the failure notice carries the commit and the run link only: no secret, phone or message content in its text', () => {
   const notice = wf.slice(at('Notify failure (Telegram)'));

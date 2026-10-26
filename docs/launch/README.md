@@ -88,15 +88,14 @@ Each merge: full suite green twice locally, CI green, then deploy.
 `npx wrangler d1 migrations apply ebda-wa-platform --remote` before the deploy that needs them. Durable Object SQLite migrates itself on first access (versioned in code).
 
 ## 12. Deploy
-**Normal path (every deploy after the first): the `cf-deploy` workflow.** Actions → cf-deploy → Run workflow on `main`. It checks the Cloudflare account and that the commit is on `main`, applies the D1 migrations, deploys with `COMMIT_SHA`, then runs `verify-prod --expect <sha>` (including the live cron schedule) and messages Telegram if anything fails. Secrets it needs and the rollback procedure: `docs/runbooks/rollback.md`.
+**Ruling WA-DEPLOY-1: deploys run from Ahmad's Mac with `bash scripts/deploy.sh` until the repo has environment protection. Do NOT add `CLOUDFLARE_API_TOKEN` to GitHub secrets until then** (required reviewer + main-only deployment branches on the `production` environment). Why: Whisky-11 is on the GitHub Free plan with a private repo, where environment protection does not exist, so a dispatch from a branch with an edited workflow could read any secret it can reference. Cost if wrong: a leaked Cloudflare token lets someone deploy arbitrary code to the live Worker and read/write D1, R2 and the queues; treating the token as Mac-only costs one manual command per deploy. The `cf-deploy` workflow (environment `production`, step-scoped secrets, `npm ci --ignore-scripts`, dispatch-only) is kept ready and fails closed without the secret; it calls the very same script.
 
-**First deploy (GO-1) runs from Ahmad's Mac with OAuth wrangler** (the Actions secrets do not exist yet): from a clean checkout of `main`, after `npx wrangler whoami` shows the personal account (`69188202efc4df480140dd76545aa3ab`):
+`scripts/deploy.sh` is the one path (Mac and workflow): it refuses a wrong Cloudflare account (`69188202efc4df480140dd76545aa3ab`), a commit that is not an ancestor of `origin/main` and an unclean tree; applies the D1 migrations (list, then `apply --remote`); `wrangler deploy --var COMMIT_SHA:<sha>`; then `verify-prod --expect <sha>` including the live cron schedule. From a clean checkout of `main`, after `npx wrangler whoami` shows the personal account:
 ```
-npm ci && npm run typecheck && npm run build:web
-npx wrangler d1 migrations apply ebda-wa-platform --remote
-npx wrangler deploy --var COMMIT_SHA:$(git rev-parse --short HEAD)
+git pull --ff-only && npm ci --ignore-scripts && npm run typecheck && npm run build:web
+META_VERIFY_TOKEN=… META_APP_SECRET=… CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=69188202efc4df480140dd76545aa3ab bash scripts/deploy.sh
 ```
-then the same verification as the workflow (section 13), with `--cron "17 1 * * *" --worker ebda-wa` and `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` set so the live cron schedule is printed.
+(`CLOUDFLARE_API_TOKEN` here only lets verify-prod read the live cron schedule; wrangler itself uses the OAuth login, and the token can be read-only on Workers Scripts. Without them the cron and webhook checks print SKIP, which means NOT verified.) This is also the first deploy (GO-1). Rollback: `docs/runbooks/rollback.md`.
 
 ## 13. Verify production (Claude) — after EVERY deploy
 ```
