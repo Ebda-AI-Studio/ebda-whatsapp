@@ -431,6 +431,13 @@ export const DO_MIGRATIONS: readonly string[] = [
   // v31 (search as you type): contact names, normalised with normaliseText, rowid = contacts.id. Filled by the DO (reindexContactsIfEmpty) because
   // normalisation is JS; kept current by indexContactName on every write of contacts.profile_name and by the contact erasure.
   `CREATE VIRTUAL TABLE contacts_fts USING fts5(name);`,
+  // v32 (WA-PRICE-1, package limits): the limits the entitlement event carries, kept in the workspace's own copy. The defaults are the DENY shape
+  // (1 member, no feature), so a row written before this migration grants nothing until the next event or the daily reconcile re-sends it.
+  `ALTER TABLE entitlements ADD COLUMN max_members INTEGER NOT NULL DEFAULT 1;
+   ALTER TABLE entitlements ADD COLUMN lim_campaigns INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE entitlements ADD COLUMN lim_order_in_chat INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE entitlements ADD COLUMN lim_api INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE entitlements ADD COLUMN lim_priority_support INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

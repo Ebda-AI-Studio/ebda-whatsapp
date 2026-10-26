@@ -19,7 +19,8 @@ export async function seedNumber(phoneNumberId: string, workspaceId: string, sta
 export async function seedPlan(workspaceId: string): Promise<void> {
   await env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('test-plan', 'Test plan', 0, 0, 1, 0)").run(); // the control plane knows the baseline package (it includes the shared number)
   await runInDurableObject(workspace(workspaceId), (_i, state) => {
-    state.storage.sql.exec("INSERT OR IGNORE INTO entitlements (id, version, package_id, status, period_start, period_end, ai_credits, cancelled_at, updated_at) VALUES (1, 0, 'test-plan', 'active', 0, 8640000000000000, 0, NULL, 0)");
+    // The baseline test plan allows every feature (limits are deny-by-default, so a fixture that needs a gate OFF uses grantPlan / DELETE FROM entitlements).
+    state.storage.sql.exec("INSERT OR IGNORE INTO entitlements (id, version, package_id, status, period_start, period_end, ai_credits, cancelled_at, updated_at, max_members, lim_campaigns, lim_order_in_chat, lim_api, lim_priority_support) VALUES (1, 0, 'test-plan', 'active', 0, 8640000000000000, 0, NULL, 0, 15, 1, 1, 1, 1)");
   });
 }
 
@@ -64,4 +65,21 @@ export async function own(workspaceId: string, phoneNumberId = 'pn-x', funding: 
   ]);
   await seedPlan(workspaceId);
   await workspace(workspaceId).refreshPricing();
+}
+
+/** The limits each seeded package carries (migration 0014), as the entitlement event sends them. */
+export const PLAN_LIMITS = {
+  none: { maxMembers: 1, campaigns: false, orderInChat: false, api: false, prioritySupport: false },
+  starter: { maxMembers: 2, campaigns: false, orderInChat: false, api: false, prioritySupport: false },
+  growth: { maxMembers: 5, campaigns: true, orderInChat: true, api: false, prioritySupport: false },
+  pro: { maxMembers: 15, campaigns: true, orderInChat: true, api: true, prioritySupport: true },
+} as const;
+
+/** Pushes a (newer-version) active entitlement for `plan` to the workspace, the way the control plane does on a purchase or a downgrade. */
+export async function grantPlan(workspaceId: string, plan: keyof typeof PLAN_LIMITS, status: 'active' | 'past_due' = 'active'): Promise<void> {
+  const cur = await workspace(workspaceId).getEntitlement();
+  const r = await workspace(workspaceId).applyEntitlement({
+    version: (cur?.version ?? 0) + 1, packageId: plan, status, periodStart: Date.now() - 86_400_000, periodEnd: Date.now() + 29 * 86_400_000, aiCredits: 0, limits: PLAN_LIMITS[plan],
+  });
+  if (r !== 'applied') throw new Error(`plan not applied: ${r}`);
 }

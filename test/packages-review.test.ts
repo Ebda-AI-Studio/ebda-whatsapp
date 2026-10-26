@@ -22,7 +22,7 @@ beforeEach(async () => {
   configureSessionCheck(async () => false);
   await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('gold', 'Gold', 50000, 300, 1, 1)"),
-    env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('pro', 'Pro', 90000, 900, 1, 1)"),
+    env.DB.prepare("INSERT OR REPLACE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('pro', 'Pro', 90000, 900, 1, 1)"),
   ]);
 });
 afterEach(() => { configurePayments((e) => (e.KASHIER_MERCHANT_ID && e.KASHIER_API_KEY ? new KashierProvider(e.KASHIER_MERCHANT_ID, e.KASHIER_API_KEY) : null)); configureSessionCheck(null); vi.restoreAllMocks(); });

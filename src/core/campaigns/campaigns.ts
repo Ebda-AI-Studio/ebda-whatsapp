@@ -8,7 +8,7 @@ import { DEFAULT_TIER, TIER_WINDOW_MS } from '../throttle';
 import { buyerKey } from '../buyer-key';
 import { campaignLinks, newCode, validateTrackedUrl, withUtm } from './links';
 import { audiencePage, getSegment, previewAudience } from './segments';
-import { marketingBlocked } from '../billing/entitlements';
+import { featureAllowed, marketingBlocked } from '../billing/entitlements';
 import { countryOf } from '../billing/country';
 import { pricingReady } from '../billing/pricing';
 import { campaignWallet, type WalletCtx } from './wallet';
@@ -340,7 +340,7 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
     host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'template_unavailable', updated_at = ? WHERE id = ?", now, id);
     return stop('template_unavailable');
   }
-  if (c.category === 'MARKETING' && marketingBlocked(host.sql)) {
+  if (c.category === 'MARKETING' && (marketingBlocked(host.sql) || !featureAllowed(host.sql, 'campaigns'))) {
     // A plan that is past due, cancelled or expired may not spend on marketing; the merchant resumes after fixing the plan.
     host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'plan_blocked', updated_at = ? WHERE id = ? AND status = 'running'", now, id);
     return stop('plan_blocked');

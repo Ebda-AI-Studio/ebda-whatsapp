@@ -4,6 +4,11 @@ import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv, ma
 
 export const campaignsRoutes = new Hono<ApiEnv>();
 
+/** 403 plan_feature when the workspace's plan lacks campaigns (no entitlement = lacks). Read from the workspace's own copy on every call. */
+async function campaignsDenied(c: ApiContext, ws: { planAllows(f: 'campaigns'): Promise<boolean> }): Promise<Response | null> {
+  return (await ws.planAllows('campaigns')) ? null : c.json({ error: 'plan_feature', feature: 'campaigns' }, 403);
+}
+
 const owner = managesStore;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const idOf = (c: ApiContext): string | null => (UUID.test(c.req.param('campaignId') ?? '') ? c.req.param('campaignId')! : null);
@@ -32,6 +37,8 @@ campaignsRoutes.post('/stores/:storeId/campaigns', async (c) => {
   const number = await activeNumber(c);
   if (!ws) return apiError(c, 404, 'not_found');
   if (!number) return apiError(c, 409, 'invalid_request', 'no_active_number');
+  const denied = await campaignsDenied(c, ws);
+  if (denied) return denied;
   const r = await ws.createCampaign({ ...body.data, phoneNumberId: number.phoneNumberId, actor: c.get('principal').userId });
   if (r.ok) return c.json(r.campaign, 201);
   if (r.reason === 'segment_not_found') return apiError(c, 404, 'not_found', r.reason);
@@ -63,6 +70,8 @@ campaignsRoutes.post('/stores/:storeId/campaigns/:campaignId/send', async (c) =>
   if (!id || !body.success) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
+  const denied = await campaignsDenied(c, ws);
+  if (denied) return denied;
   const r = await ws.sendCampaign(id, body.data.scheduledAt);
   return r.ok ? c.json(r.campaign, 202) : refuse(c, r.reason);
 });
@@ -81,6 +90,8 @@ campaignsRoutes.post('/stores/:storeId/campaigns/:campaignId/resume', async (c) 
   const id = idOf(c);
   const ws = await workspaceStub(c);
   if (!id || !ws) return apiError(c, 404, 'not_found');
+  const denied = await campaignsDenied(c, ws);
+  if (denied) return denied;
   const r = await ws.resumeCampaign(id);
   return r.ok ? c.json(r.campaign) : refuse(c, r.reason);
 });

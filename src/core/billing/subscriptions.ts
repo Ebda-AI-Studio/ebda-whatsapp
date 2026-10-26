@@ -14,13 +14,15 @@ import type { EntitlementEvent } from './entitlements';
 export const STORE_INCLUDED = 'store-included';
 export const MONTH_SQL = (col: string) => `CAST(strftime('%s', ${col} / 1000, 'unixepoch', '+1 month') AS INTEGER) * 1000`;
 
-type SubRow = { workspace_id: string; package_id: string; status: EntitlementEvent['status']; period_start: number; period_end: number; cancelled_at: number | null; version: number; ai_credits: number | null };
+type SubRow = { workspace_id: string; package_id: string; status: EntitlementEvent['status']; period_start: number; period_end: number; cancelled_at: number | null; version: number; ai_credits: number | null; max_members: number | null; feat_campaigns: number | null; feat_order_in_chat: number | null; feat_api: number | null; priority_support: number | null };
 
+/** A package row that is missing (LEFT JOIN null) yields the DENY limits, never a feature. */
 export const toEvent = (r: SubRow): EntitlementEvent => ({
   version: r.version, packageId: r.package_id, status: r.status, periodStart: r.period_start, periodEnd: r.period_end, aiCredits: r.ai_credits ?? 0, cancelledAt: r.cancelled_at,
+  limits: { maxMembers: Math.max(1, r.max_members ?? 1), campaigns: r.feat_campaigns === 1, orderInChat: r.feat_order_in_chat === 1, api: r.feat_api === 1, prioritySupport: r.priority_support === 1 },
 });
 
-const SELECT = `SELECT s.workspace_id, s.package_id, s.status, s.period_start, s.period_end, s.cancelled_at, s.version, p.ai_credits
+const SELECT = `SELECT s.workspace_id, s.package_id, s.status, s.period_start, s.period_end, s.cancelled_at, s.version, p.ai_credits, p.max_members, p.feat_campaigns, p.feat_order_in_chat, p.feat_api, p.priority_support
   FROM workspace_subscriptions s LEFT JOIN packages p ON p.id = s.package_id`;
 
 const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));

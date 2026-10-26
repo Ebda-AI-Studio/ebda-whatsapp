@@ -42,6 +42,13 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
         console.log(JSON.stringify({ audit: 'integration_write', clientId: principal.integration.clientId, jti: principal.integration.jti, storeId, scope: gate }));
       }
     }
+    // A merchant's server needs the `api` feature in the plan (deny by default: no entitlement = no API). Checked on EVERY route, GET /me included,
+    // from the workspace's own copy; an unregistered workspace has no copy, so it is refused without creating a Durable Object.
+    if (principal.integration && !principal.superAdmin) {
+      const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(storeId).first();
+      const allowed = known ? await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId!)).planAllows('api') : false;
+      if (!allowed) return c.json({ error: 'plan_feature', feature: 'api' }, 403);
+    }
     c.set('principal', principal);
     c.set('storeRole', principal.superAdmin ? 'super_admin' : membership!.role);
     await next();

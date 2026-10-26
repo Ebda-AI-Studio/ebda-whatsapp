@@ -13,6 +13,7 @@
  * The daily `repairPackageOrders` grants any `paid` + `granted_at IS NULL` row anyway and alerts. No card fee is added to a package price.
  */
 import type { Env } from '../../env';
+import { PACKAGE_FEATURE_KEYS } from '../api/contract';
 import { sessionState } from '../identity/session';
 import { packagesEnabled, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { MONTH_SQL, announceSubscription, fallbackToStorePlan, setSubscription } from './subscriptions';
@@ -21,7 +22,7 @@ const alert = (what: string, extra: Record<string, unknown> = {}) => console.err
 const errName = (err: unknown) => (err instanceof Error ? err.name : 'error');
 export const PENDING_EXPIRES_AFTER_MS = 24 * 3_600_000;
 
-export type PackageDto = { id: string; name: string; priceMinor: number; aiCredits: number };
+export type PackageDto = { id: string; name: string; priceMinor: number; aiCredits: number; maxMembers: number; features: (typeof PACKAGE_FEATURE_KEYS)[number][]; periodMonths: number };
 export type OrderStatus = 'pending' | 'paid' | 'failed' | 'expired' | 'refunded' | 'charged_back';
 export type PackageOrderRow = {
   order_id: string; workspace_id: string; package_id: string; amount_minor: number; currency: string; status: OrderStatus; created_at: number;
@@ -31,8 +32,15 @@ export const ORDER_COLS = 'order_id, workspace_id, package_id, amount_minor, cur
 
 /** Active packages a merchant can buy (a free package, like the one a Store plan includes, is not for sale). */
 export async function listPackages(env: Env): Promise<PackageDto[]> {
-  const { results } = await env.DB.prepare('SELECT id, name, price_minor, ai_credits FROM packages WHERE active = 1 AND price_minor > 0 ORDER BY price_minor, id').all<{ id: string; name: string; price_minor: number; ai_credits: number }>();
-  return results.map((r) => ({ id: r.id, name: r.name, priceMinor: r.price_minor, aiCredits: r.ai_credits }));
+  const { results } = await env.DB.prepare('SELECT id, name, price_minor, ai_credits, max_members, feat_campaigns, feat_order_in_chat, feat_api, priority_support FROM packages WHERE active = 1 AND price_minor > 0 ORDER BY price_minor, id')
+    .all<{ id: string; name: string; price_minor: number; ai_credits: number; max_members: number; feat_campaigns: number; feat_order_in_chat: number; feat_api: number; priority_support: number }>();
+  return results.map((r) => {
+    const on: Record<(typeof PACKAGE_FEATURE_KEYS)[number], boolean> = {
+      members: true, shared_inbox: true, order_confirmations: true, templates: true, campaigns: r.feat_campaigns === 1, order_in_chat: r.feat_order_in_chat === 1,
+      api: r.feat_api === 1, priority_support: r.priority_support === 1, ai_credits: r.ai_credits > 0,
+    };
+    return { id: r.id, name: r.name, priceMinor: r.price_minor, aiCredits: r.ai_credits, maxMembers: r.max_members, features: PACKAGE_FEATURE_KEYS.filter((k) => on[k]), periodMonths: 1 };
+  });
 }
 
 export type StartPackageResult =

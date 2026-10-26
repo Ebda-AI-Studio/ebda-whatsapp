@@ -79,9 +79,11 @@ export const apiError = z.object({
   error: z.enum([
     'unauthorized', 'forbidden', 'not_found', 'invalid_request',
     'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited', 'plan_blocked', 'funding_unknown', 'rate_unavailable',
-    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable', 'package_required',
+    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable', 'package_required', 'plan_feature',
   ]),
   message: z.string().optional(),
+  /** plan_feature: which plan feature the package lacks (the client shows the upgrade CTA for it). */
+  feature: z.enum(['campaigns', 'order_in_chat', 'api']).optional(),
 });
 
 export const templateDto = z.object({
@@ -430,7 +432,12 @@ export const topupDto = z.object({
   checkoutUrl: z.string().url().optional(),
 });
 /** Packages a merchant can buy (PACKAGE_CHECKOUT_ENABLED). The amount is the server's price; the client never sends one. */
-export const packageDto = z.object({ id: z.string(), name: z.string(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative() });
+/** Feature keys in display order (shared with marketing and the Store plan comparison). */
+export const PACKAGE_FEATURE_KEYS = ['members', 'shared_inbox', 'order_confirmations', 'templates', 'campaigns', 'order_in_chat', 'api', 'priority_support', 'ai_credits'] as const;
+export const packageDto = z.object({
+  id: z.string(), name: z.string(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative(),
+  maxMembers: z.number().int().min(1), features: z.array(z.enum(PACKAGE_FEATURE_KEYS)), periodMonths: z.number().int().positive(),
+});
 export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired', 'refunded']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
 // ---- InstaPay billing (INSTAPAY_BILLING_ENABLED). Additive. The amount is the server's: a package's price, or a top-up within the card top-up bounds. ----
 export const instapayState = z.enum(['awaiting_proof', 'under_review', 'confirmed', 'rejected', 'expired']);
