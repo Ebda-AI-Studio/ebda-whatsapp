@@ -13,7 +13,7 @@ import type { SharedNumberCopy } from '../../brand';
 import { z } from 'zod';
 import { canonicalDisplayName } from '../api/contract';
 import { fundingStatement } from '../billing/funding';
-import { detectOptOut } from '../consent';
+import { detectOptOutMessage } from '../consent';
 import { sendList, sendText } from '../meta/client';
 import type { InboundMessage, StatusEvent, WebhookEvents } from '../meta/webhook-schema';
 import type { SendJob } from '../send-queue';
@@ -217,9 +217,29 @@ export async function afterSharedSend(env: Env, job: Pick<SendJob, 'workspaceId'
 }
 const AFTER_SEND_ATTEMPTS = 3;
 
-/** Erasure of one contact in one store: its routes and sent-message map go (other stores' rows stay). */
-export async function eraseSharedFor(env: Env, workspaceId: string, waId: string): Promise<void> {
+/**
+ * Erasure of one contact in one store: its routes and sent-message map go (other stores' rows stay). Dropping this store's routes also
+ * removes it from the customer's candidate / pick list, so the customer can never be routed back to it. The sender's parked messages in R2
+ * (`shared-parked/<number>/<customer_key>/`, raw text) are shared by every candidate store, so they are deleted ONLY for a number where this
+ * store is the sole candidate; where another store is still a candidate they stay for it. The parked keys are handed to `owe` BEFORE anything
+ * is deleted (the caller records them in its r2_pending_deletes, which retries until R2 confirms).
+ */
+export async function eraseSharedFor(env: Env, workspaceId: string, waId: string, owe: (keys: string[]) => void = () => {}): Promise<void> {
   const key = await customerKey(env, waId);
+  const numbers = await env.DB.prepare(
+    `SELECT DISTINCT r.phone_number_id FROM shared_routes r WHERE r.customer_key = ? AND r.workspace_id = ?
+       AND NOT EXISTS (SELECT 1 FROM shared_routes o WHERE o.phone_number_id = r.phone_number_id AND o.customer_key = r.customer_key AND o.workspace_id <> r.workspace_id)`,
+  ).bind(key, workspaceId).all<{ phone_number_id: string }>();
+  const keys: string[] = [];
+  for (const { phone_number_id: pn } of numbers.results) {
+    let cursor: string | undefined;
+    do {
+      const page = await env.MEDIA.list({ prefix: parkedPrefix(pn, key), ...(cursor ? { cursor } : {}) });
+      keys.push(...page.objects.map((o) => o.key));
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  }
+  if (keys.length) owe(keys);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM shared_routes WHERE workspace_id = ? AND customer_key = ?').bind(workspaceId, key),
     env.DB.prepare('DELETE FROM shared_sent WHERE workspace_id = ? AND customer_key = ?').bind(workspaceId, key),
@@ -354,7 +374,7 @@ export async function handleSharedEvent(env: Env, ev: WebhookEvents, ctx: Shared
   for (const m of ev.inbound) {
     const key = await customerKey(env, m.from);
     const cands = await candidatesFor(env, pn, key);
-    const stop = m.type === 'text' && !!m.text && detectOptOut(m.text);
+    const stop = detectOptOutMessage(m);
 
     // a tap on the "which store?" list
     if (m.reply?.kind === 'list' && m.reply.id.startsWith(PICK_PREFIX)) {

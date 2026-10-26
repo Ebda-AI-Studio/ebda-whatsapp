@@ -12,7 +12,7 @@ import { activeNumberFor } from './routing';
 import { eraseSharedFor } from './shared/shared-number';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
-import { detectOptIn, detectOptOut } from './consent';
+import { detectOptIn, detectOptOutMessage } from './consent';
 import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText, phoneDigits } from './text-normalise';
@@ -233,7 +233,7 @@ export class WorkspaceDO extends DurableObject<Env> {
            RETURNING id`,
           contactId, m.ts,
         ).one().id;
-        const optOut = m.type === 'text' && !!m.text && detectOptOut(m.text);
+        const optOut = detectOptOutMessage(m);
         const cols = this.bodyColumns(m.text ?? m.caption, bodies.get(m.wamid));
         const inserted = this.sql.exec<{ id: number }>(
           `INSERT INTO messages (wamid, conversation_id, direction, type, preview, body, body_r2_key, media_mime, created_at, updated_at)
@@ -2097,7 +2097,9 @@ export class WorkspaceDO extends DurableObject<Env> {
     // After the delete (a turn recording a step checks the message still exists, so nothing new can land): their unrolled analytics markers go too.
     await eraseFunnelMarkers(this.sql, waId);
     // The shared platform number keeps (in D1) which store wrote to this customer: that is this store's record too, so it goes with the contact.
-    await eraseSharedFor(this.env, this.workspaceId, waId);
+    await eraseSharedFor(this.env, this.workspaceId, waId, (keys) => this.ctx.storage.transactionSync(() => { for (const k of keys) this.sql.exec('INSERT OR IGNORE INTO r2_pending_deletes (key) VALUES (?)', k); }));
+    // An import still running holds this phone in its uploaded file: end it and delete the file (a finished one was deleted already).
+    for (const imp of this.sql.exec<{ id: string }>("SELECT id FROM imports WHERE status IN ('pending', 'running')").toArray()) failImport(this.host(), imp.id, 'contact_erased', Date.now());
     const r2Pending = await this.drainR2Deletes();
     if (r2Pending > 0) await this.schedule('r2_drain', Date.now() + 3_600_000); // R2 refused some deletes: try again within the hour
     return { found: found.found, messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys, r2Pending };

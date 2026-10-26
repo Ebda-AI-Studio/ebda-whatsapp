@@ -30,7 +30,8 @@ A campaign is a marketing message sent with an approved template to a group of y
 - Anyone on the team can pause or cancel a campaign.
 
 ## Opt-out
-- If a customer writes **STOP**, **إلغاء** or **وقف**, marketing to them stops immediately and the choice is recorded.
+- If a customer writes **STOP**, **STOP ALL**, **UNSUBSCRIBE**, **CANCEL**, **OPTOUT**, **إلغاء**, **وقف**, **توقف**, **ايقاف** or **بطل**, or taps a button that says Stop, Stop all, Stop promotions or Unsubscribe, marketing to them stops immediately and the choice is recorded. Only the whole message counts: "please cancel my order" is an order question and does not opt anyone out. A button that just says "Cancel" is never an opt-out, so you can use it freely in your own templates (for example "cancel appointment").
+- Your uploaded CSV is deleted from our storage as soon as the import ends (a 7-day expiry backs this up). If you erase a customer while an import is still running, that import is stopped and its file deleted; upload it again without that customer.
 - Opting out on WhatsApp is also recorded at your store, so the customer is not marketed to there either.
 - Order and service messages (like an order confirmation) are not affected, because they are not marketing.
 - Do not add someone who opted out again without new consent from them.
