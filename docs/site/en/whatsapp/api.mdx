@@ -98,11 +98,12 @@ Every error uses one envelope:
 | `window_closed` | 409 | The 24-hour window is closed: only templates can be sent |
 | `opted_out` | 409 | The customer opted out |
 | `template_not_approved` | 409 | The template is not approved yet |
-| `unsupported_media` | 415 | The media type is not supported |
+| `unsupported_media` | 415 | The media type is not supported, or the request body is not `application/json` (uploads take `multipart/form-data`; an InstaPay proof takes its own image or PDF type) |
+| `payload_too_large` | 413 | The body is over the limit: 1 MB for JSON requests. Uploads keep their own larger limits (media 50 MB, contact imports 10 MB, transfer proofs 5 MB). Checked before the body is read, also for requests sent without a length |
 | `wallet_empty` | 409 | The wallet cannot cover the send |
 | `plan_blocked`, `funding_unknown`, `rate_unavailable` | 409 | The send is refused for plan, funding or pricing reasons |
 | `plan_feature` | 403 | The package does not include this feature. The body carries `feature` (`campaigns`, `order_in_chat` or `api`); upgrade the package. A store with no package on record is refused too |
-| `rate_limited` | 503 (429 on the connector test) | A temporary condition, such as Meta being unavailable or a send that could not be queued. Retry later |
+| `rate_limited` | 503 (429 on the connector test and on a flood to a public route) | A temporary condition, such as Meta being unavailable or a send that could not be queued. Retry later |
 | `registration_locked`, `number_conflict`, `signup_failed`, `signup_unavailable` | varies | Number connection problems |
 
 Not every code is returned by every endpoint. Treat the `error` string as the contract and the status as a guide.
