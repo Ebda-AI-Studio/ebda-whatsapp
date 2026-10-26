@@ -92,3 +92,9 @@ it('a run with a file still unreported is never stopped before the summary (a te
   expect(Date.now() - t0).toBeGreaterThanOrEqual(2_500);
   expect(r.stderr).not.toContain('vitest_pool_close_hang');
 }, 30_000);
+
+it('the workers project keeps console lines off the worker -> runner RPC (a line in flight at teardown failed main 44c28fe)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const config = readFileSync(join(__dirname, '..', 'vitest.config.mts'), 'utf8');
+  expect(config).toMatch(/name: 'workers', disableConsoleIntercept: true/);
+});
