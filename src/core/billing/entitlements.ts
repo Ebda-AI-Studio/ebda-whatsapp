@@ -94,6 +94,9 @@ export function applyEntitlement(sql: Sql, raw: EntitlementEvent, now: number): 
   if (cur && ev.version === cur.version) {
     // The daily reconcile re-sends the current version. It changes nothing about the period or the grants, but it is how a copy written before
     // limits existed (deny shape) picks them up, so the limits (and only the limits) are refreshed when the event really carries them.
+    // Ruling P1a-3: no code path edits a package's limit columns after the seed (migration 0014 is the only writer; the operator route only writes
+    // subscriptions). If one is ever added, it MUST bump the version of every affected workspace_subscriptions row in the same batch, otherwise a delayed
+    // same-version push (carrying the old limits) could restore them through this refresh.
     const sent = (raw as { limits?: unknown }).limits !== undefined;
     if (sent && ev.packageId === cur.packageId) {
       const l = ev.limits;

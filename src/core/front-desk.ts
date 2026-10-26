@@ -189,9 +189,10 @@ export async function runFrontDesk(host: LinkHost, input: BotInput, now: number,
   const open = (): Promise<'handled'> => sendMenu(localeOfText(host, input)).then(() => 'handled' as const);
   if (menuOn && normIn(copy.menu.menuWords).has(word)) return open();
   if (hasLocation && !awaitingAddress(host, input.from, now) && normIn(copy.menu.locationWords).has(word)) { await send(host, input, now, locationMessages(host)); return 'handled'; }
-  if (!menuOn || midOrder(host, input.from, now)) return 'pass';
+  // A half-finished order only passes to the ordering bot while ordering is on; otherwise the plain menu path below answers.
+  if (!menuOn || (midOrder(host, input.from, now) && orderingActive(host))) return 'pass';
   if (normIn(copy.menu.greetingWords).has(word)) return open();
   // Anything else while idle: the menu answers unless the agent can (it answers free text) or the text is an ordering keyword.
-  if (!ctx.agentOn && !orderingEngaged(host, input, now)) return open();
+  if (!ctx.agentOn && !(orderingActive(host) && orderingEngaged(host, input, now))) return open();
   return 'pass';
 }
