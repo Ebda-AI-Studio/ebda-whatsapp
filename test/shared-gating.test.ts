@@ -32,25 +32,25 @@ beforeEach(async () => {
 });
 
 describe('joining the shared number needs a package that includes it', () => {
-  it('no entitlement on record: 402 package_required, nothing written', async () => {
+  it('no entitlement on record: 403 plan_required (WA-NOFREE-1, ahead of the shared-number check), nothing written', async () => {
     const ws = W(1);
     await apiFor(ws);
     await noPlan(ws);
     const res = await call(ws, 'owner', 'POST', '/shared-number/join', { displayName: 'Gating One' });
-    expect(res.status).toBe(402);
-    expect(await res.json()).toMatchObject({ error: 'package_required' });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: 'plan_required' });
     expect(await members(ws)).toEqual([]);
   });
 
   it.each([
-    ['active', 'gold', 200], ['trialing', 'gold', 200], ['past_due', 'gold', 402], ['cancelled', 'gold', 402], ['expired', 'gold', 402],
+    ['active', 'gold', 200], ['trialing', 'gold', 200], ['past_due', 'gold', 402], ['cancelled', 'gold', 403], ['expired', 'gold', 403],
   ] as const)('a %s plan on %s answers %i', async (status, packageId, want) => {
     const ws = W(10 + ['active', 'trialing', 'past_due', 'cancelled', 'expired'].indexOf(status));
     await apiFor(ws);
     await plan(ws, { status, packageId });
     const res = await call(ws, 'owner', 'POST', '/shared-number/join', { displayName: `Plan ${status}` });
     expect(res.status).toBe(want);
-    if (want === 402) expect(await members(ws)).toEqual([]);
+    if (want === 402 || want === 403) expect(await members(ws)).toEqual([]);
   });
 
   it('a plan whose period has ended, a package without the flag, and a package the control plane does not know are all refused', async () => {
@@ -94,7 +94,7 @@ describe('joining the shared number needs a package that includes it', () => {
     expect((await call(ws, 'owner', 'POST', '/shared-number/join', { displayName: 'Comes Back' })).status).toBe(200);
     expect((await call(ws, 'owner', 'POST', '/shared-number/leave')).status).toBe(200);
     await plan(ws, { status: 'cancelled' });
-    expect((await call(ws, 'owner', 'POST', '/shared-number/join', { displayName: 'Comes Back' })).status).toBe(402);
+    expect((await call(ws, 'owner', 'POST', '/shared-number/join', { displayName: 'Comes Back' })).status).toBe(403); // plan_required: a cancelled plan may not connect at all
     expect(await sharedPackageAllowed(envOn, ws)).toBe(false);
     expect(await joinShared(envOn, ws, 'Comes Back')).toBe('package_required');
   });

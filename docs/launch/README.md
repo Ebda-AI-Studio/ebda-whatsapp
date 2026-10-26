@@ -83,7 +83,7 @@ CI is paused by Ahmad's instruction. To resume: bring the Umbra runner for this 
 Each merge: full suite green twice locally, CI green, then deploy.
 
 ## 11. Migrations (Claude)
-`npx wrangler d1 migrations apply ebda-wa-platform --remote` before the deploy that needs them. Durable Object SQLite migrates itself on first access (versioned in code).
+`npx wrangler d1 migrations apply ebda-wa-platform --remote` before the deploy that needs them. Durable Object SQLite migrates itself on first access (versioned in code). Packages: `0014_package_limits.sql` seeds starter / growth / pro and `0015_past_due_since.sql` adds the grace clock. **There is no free plan (WA-NOFREE-1):** a store with no package, or a cancelled / expired one, can read and buy but cannot send ANY message, run the AI agent or connect a number (`403 plan_required`); `past_due` keeps service sends for at most 7 days (WA-GRACE-1). So before the first merchant, make sure they either have a Store plan that includes WhatsApp (`store-included`, set only by the Store plan event) or buy / are assigned a paid package.
 
 ## 12. Deploy (Claude)
 `npx wrangler deploy --var COMMIT_SHA:$(git rev-parse --short HEAD)` from a clean checkout of `main` (so `/health` reports the commit).
@@ -100,4 +100,4 @@ It checks the running commit, the security headers on the API and the page, Meta
 4. **First real refund** (only once `KASHIER_REFUNDS_ENABLED` is on; leave it off until Kashier is live): refund the smallest card top-up through an approved request, then **verify the live response shape**: the `card_refunds` row must end `succeeded` with Kashier's refund id, `refunded_minor` must move by exactly that amount, the wallet must show ONE `refund` row and no `chargeback` row after Kashier's refund webhook, and Kashier's dashboard must show the refund. If the row ends `uncertain` or the webhook books a `chargeback`, switch the flag off and read `docs/billing.md` (Card refunds). Also confirm the refund webhook carries our merchant order id and the refund's own transaction id, and **verify that the refund id in the API answer (R) equals the webhook's `transactionId` (W)** before leaving the switch on: if they differ, the webhook is held (`refund_held`, P1) instead of debiting, and an operator must match it.
 
 ## 14. Go live checklist for the first merchant
-Business verified · number connected and registered (or coexistence synced within 24 h) · templates approved · store linked (if Ebda Store) · AI agent configured (optional) · wallet funded (shared number only) · help guides published at help.ebda.app.
+Business verified · a package on record (Store plan with WhatsApp, a purchase or an operator-assigned paid package; no package = no sending) · number connected and registered (or coexistence synced within 24 h) · templates approved · store linked (if Ebda Store) · AI agent configured (optional) · wallet funded (shared number only) · help guides published at help.ebda.app.

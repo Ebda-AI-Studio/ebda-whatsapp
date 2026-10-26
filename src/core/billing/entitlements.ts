@@ -25,6 +25,8 @@ export const entitlementEvent = z.object({
   /** AI credits the package grants per period. */
   aiCredits: z.number().int().nonnegative().default(0),
   cancelledAt: z.number().int().positive().nullable().default(null),
+  /** When the subscription first became past_due (epoch ms), set by the control plane; null otherwise. Bounds the WA-GRACE-1 grace. */
+  pastDueSince: z.number().int().positive().nullable().default(null),
   /** What the package allows. The default is the DENY shape: an event from before limits existed grants no feature and one seat. */
   limits: z.object({
     maxMembers: z.number().int().min(1),
@@ -76,6 +78,24 @@ export function marketingBlocked(sql: Sql): boolean {
   return e === null || e.status === 'past_due' || e.status === 'cancelled' || e.status === 'expired';
 }
 
+/** WA-GRACE-1: how long after the first failed renewal a past_due workspace may still send service messages. */
+export const PAST_DUE_GRACE_MS = 7 * 86_400_000;
+
+/**
+ * WA-NOFREE-1 + WA-GRACE-1, THE gate for service: every send path (API, template, bot, agent replies, store-link outbound incl. OTP and order / COD
+ * confirmations, campaigns), the AI agent turn and number setup ask this and nothing else. True only with an entitlement row that is trialing or
+ * active, or past_due INSIDE its bounded grace (now < min(period_end, past_due_since + 7 days)). No row, cancelled or expired = false: there is no
+ * free plan. A past_due copy that never learned its start (past_due_since null) is bounded from the moment the copy was written. Marketing has its
+ * own, stricter gate (`marketingBlocked`, unchanged: past_due blocks it at once). Read per call from the workspace copy; never cached.
+ */
+export function serviceAllowed(sql: Sql, now: number): boolean {
+  const r = sql.exec<{ status: EntitlementStatus; period_end: number; past_due_since: number | null; updated_at: number }>('SELECT status, period_end, past_due_since, updated_at FROM entitlements WHERE id = 1').toArray()[0];
+  if (!r) return false;
+  if (r.status === 'trialing' || r.status === 'active') return true;
+  if (r.status === 'past_due') return now < Math.min(r.period_end, (r.past_due_since ?? r.updated_at) + PAST_DUE_GRACE_MS);
+  return false;
+}
+
 const GRANTING: ReadonlySet<EntitlementStatus> = new Set(['trialing', 'active']);
 
 /** Replaces the pending expiry task with one at `periodEnd`. */
@@ -106,12 +126,12 @@ export function applyEntitlement(sql: Sql, raw: EntitlementEvent, now: number): 
   }
   const l = ev.limits;
   sql.exec(
-    `INSERT INTO entitlements (id, version, package_id, status, period_start, period_end, ai_credits, cancelled_at, updated_at, max_members, lim_campaigns, lim_order_in_chat, lim_api, lim_priority_support)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO entitlements (id, version, package_id, status, period_start, period_end, ai_credits, cancelled_at, updated_at, max_members, lim_campaigns, lim_order_in_chat, lim_api, lim_priority_support, past_due_since)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET version = excluded.version, package_id = excluded.package_id, status = excluded.status, period_start = excluded.period_start,
        period_end = excluded.period_end, ai_credits = excluded.ai_credits, cancelled_at = excluded.cancelled_at, updated_at = excluded.updated_at,
-       max_members = excluded.max_members, lim_campaigns = excluded.lim_campaigns, lim_order_in_chat = excluded.lim_order_in_chat, lim_api = excluded.lim_api, lim_priority_support = excluded.lim_priority_support`,
-    ev.version, ev.packageId, ev.status, ev.periodStart, ev.periodEnd, ev.aiCredits, ev.cancelledAt, now, l.maxMembers, l.campaigns ? 1 : 0, l.orderInChat ? 1 : 0, l.api ? 1 : 0, l.prioritySupport ? 1 : 0,
+       max_members = excluded.max_members, lim_campaigns = excluded.lim_campaigns, lim_order_in_chat = excluded.lim_order_in_chat, lim_api = excluded.lim_api, lim_priority_support = excluded.lim_priority_support, past_due_since = excluded.past_due_since`,
+    ev.version, ev.packageId, ev.status, ev.periodStart, ev.periodEnd, ev.aiCredits, ev.cancelledAt, now, l.maxMembers, l.campaigns ? 1 : 0, l.orderInChat ? 1 : 0, l.api ? 1 : 0, l.prioritySupport ? 1 : 0, ev.pastDueSince,
   );
   if (!cur || ev.periodStart > cur.periodStart) {
     // A new period: what the last one granted and nobody used expires (purchased credits roll over), then the new grant lands.

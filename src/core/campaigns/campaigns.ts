@@ -8,7 +8,7 @@ import { DEFAULT_TIER, TIER_WINDOW_MS } from '../throttle';
 import { buyerKey } from '../buyer-key';
 import { campaignLinks, newCode, validateTrackedUrl, withUtm } from './links';
 import { audiencePage, getSegment, previewAudience } from './segments';
-import { featureAllowed, marketingBlocked } from '../billing/entitlements';
+import { featureAllowed, marketingBlocked, serviceAllowed } from '../billing/entitlements';
 import { countryOf } from '../billing/country';
 import { pricingReady } from '../billing/pricing';
 import { campaignWallet, type WalletCtx } from './wallet';
@@ -299,7 +299,7 @@ export type PageResult = { state: 'next'; count: number } | { state: 'done'; cou
 const stop = (reason: string): { state: 'stop'; reason: string } => ({ state: 'stop', reason });
 
 /** The campaigns feature is required for EVERY category (a utility campaign is still a campaign); a lapsed plan additionally blocks marketing spend. */
-const planBlocked = (host: LinkHost, category: string): boolean => !featureAllowed(host.sql, 'campaigns') || (category === 'MARKETING' && marketingBlocked(host.sql));
+const planBlocked = (host: LinkHost, category: string, now = Date.now()): boolean => !serviceAllowed(host.sql, now) || !featureAllowed(host.sql, 'campaigns') || (category === 'MARKETING' && marketingBlocked(host.sql));
 
 /** First step of a workflow instance: is it still the live one, and is the campaign in a state worth running? */
 export function campaignStart(host: LinkHost, id: string, attempt: number): StartResult {

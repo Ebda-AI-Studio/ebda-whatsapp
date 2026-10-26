@@ -38,17 +38,17 @@ describe('Final review: send queue', () => {
   });
 });
 
-describe('Final review: a workspace with no entitlement fails closed for marketing', () => {
-  it('no entitlement row: a marketing template is plan_blocked; utility and an inbox text reply still go', async () => {
+describe('Final review: a workspace with no entitlement fails closed', () => {
+  it('no entitlement row: every send is plan_required (WA-NOFREE-1)', async () => {
     const ws = W(20);
     await setupBilling(ws);
     await fund(ws, 5000);
     const conv = await chat(ws);
     await exec(ws, 'DELETE FROM entitlements'); // helpers give every workspace a baseline plan; this one has none
     expect(await rows(ws, 'SELECT 1 FROM entitlements')).toEqual([]);
-    expect(await queueTemplate(ws, conv, 'MARKETING')).toMatchObject({ ok: false, reason: 'plan_blocked' });
-    expect(await queueTemplate(ws, conv, 'UTILITY')).toMatchObject({ ok: true });
-    expect(await workspace(ws).queueOutbound(conv, pn(ws), { type: 'text', clientId: crypto.randomUUID(), text: 'hi' })).toMatchObject({ ok: true });
+    expect(await queueTemplate(ws, conv, 'MARKETING')).toMatchObject({ ok: false, reason: 'plan_required' });
+    expect(await queueTemplate(ws, conv, 'UTILITY')).toMatchObject({ ok: false, reason: 'plan_required' });
+    expect(await workspace(ws).queueOutbound(conv, pn(ws), { type: 'text', clientId: crypto.randomUUID(), text: 'hi' })).toMatchObject({ ok: false, reason: 'plan_required' });
   });
 
   it('with an active entitlement row the same marketing template is queued', async () => {

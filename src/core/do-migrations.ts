@@ -438,6 +438,8 @@ export const DO_MIGRATIONS: readonly string[] = [
    ALTER TABLE entitlements ADD COLUMN lim_order_in_chat INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE entitlements ADD COLUMN lim_api INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE entitlements ADD COLUMN lim_priority_support INTEGER NOT NULL DEFAULT 0;`,
+  // v32 (WA-GRACE-1): when the control plane saw the subscription first fail to renew. NULL = never past_due (or unknown: serviceAllowed then bounds the grace from updated_at).
+  `ALTER TABLE entitlements ADD COLUMN past_due_since INTEGER;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

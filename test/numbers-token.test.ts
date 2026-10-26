@@ -15,7 +15,7 @@ const job = (ws: string, pn: string, key: string): SendJob => ({ workspaceId: ws
 
 it('an own-number send uses the business token; a platform number uses the platform token', async () => {
   await seedOwnNumber('pn-own-1', 'ws-tok-1', 'waba-own-1', 'biz-token-1');
-  await seedNumber('pn-plat-1', 'ws-tok-2');
+  await seedNumber('pn-plat-1', 'ws-tok-2'); // seedNumber / seedOwnNumber both put the workspace on a package
   graph = stubGraph();
   await consume([job('ws-tok-1', 'pn-own-1', 'reply:own')]);
   await consume([job('ws-tok-2', 'pn-plat-1', 'reply:plat')]);

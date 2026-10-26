@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { sharedNumberJoin, type SharedNumberDto } from '../core/api/contract';
 import { joinShared, leaveShared, sharedEnabled, sharedStatus } from '../core/shared/shared-number';
-import { apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
+import { apiError, planRequired, workspaceStub, type ApiContext, type ApiEnv } from './shared';
 
 const owner = (c: ApiContext) => c.get('storeRole') === 'owner';
 
@@ -20,7 +20,10 @@ sharedNumberRoutes.post('/stores/:storeId/shared-number/join', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
   const body = sharedNumberJoin.safeParse(await c.req.json().catch(() => ({})));
   if (!body.success) return apiError(c, 400, 'invalid_request');
-  if (!(await workspaceStub(c))) return apiError(c, 404, 'not_found');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const noPlan = await planRequired(c, ws); // WA-NOFREE-1: the shared number is service too
+  if (noPlan) return noPlan;
   const st = await joinShared(c.env, c.req.param('storeId')!, body.data.displayName);
   if (!st) return apiError(c, 404, 'not_found'); // no platform number registered yet
   if (st === 'package_required') return apiError(c, 402, 'package_required', 'package_required'); // the plan does not include the shared number

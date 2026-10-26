@@ -64,7 +64,7 @@ import { parentHoldRef } from './campaigns/campaigns';
 import { indexContactName, rebuildContactIndex } from './contact-index';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
-import { applyEntitlement, expireSubscription, featureAllowed, marketingBlocked, memberLimit, readEntitlement, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
+import { applyEntitlement, expireSubscription, featureAllowed, marketingBlocked, memberLimit, readEntitlement, serviceAllowed, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
@@ -87,7 +87,7 @@ export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; st
 export type CoexBatch = { phoneNumberId: string; echoes: CoexMessage[]; history: CoexMessage[]; contacts: SyncedContact[] };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
-export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
+export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'plan_required' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
 export type TaskPayload = { job?: SendJob; phoneNumberId?: string; reason?: 'tier' | 'throughput' | 'frequency_cap' | 'event'; n?: number; messageId?: number; mediaId?: string; orderId?: string };
@@ -427,6 +427,19 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   private claimRow(job: SendJob, now: number): ClaimResult {
     {
+      // WA-NOFREE-1 / WA-GRACE-1: a message that waited in the queue (or an automatic reply) is refused if the plan lapsed meanwhile, whatever its category.
+      if (!serviceAllowed(this.sql, now)) {
+        const queued = this.sql.exec<{ id: number; status: string }>('SELECT id, status FROM messages WHERE idempotency_key = ?', job.idempotencyKey).toArray()[0];
+        if (queued && (queued.status === 'queued' || queued.status === 'retry')) {
+          this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'plan_required', updated_at = ? WHERE id = ?", now, queued.id);
+          this.emitMessageStatus(queued.id);
+        }
+        // A message already claimed or sent is left to the normal path (it may be with Meta): only what has not gone out is stopped.
+        if (!queued || queued.status === 'queued' || queued.status === 'retry') {
+          this.billing.settleHold(job.idempotencyKey, 'dropped', now);
+          return 'dropped';
+        }
+      }
       const existing = this.sql
         .exec<{ id: number; status: string; updated_at: number; claim_attempts: number }>('SELECT id, status, updated_at, claim_attempts FROM messages WHERE idempotency_key = ?', job.idempotencyKey)
         .toArray()[0];
@@ -626,6 +639,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       const key = `ui:${req.clientId}`;
       const dup = this.sql.exec<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.idempotency_key = ?`, key).toArray()[0];
       if (dup) return { ok: true, message: messageDto(dup, workspaceId), job: null };
+      if (!serviceAllowed(this.sql, now)) return { ok: false, reason: 'plan_required' }; // WA-NOFREE-1
       const windowOpen = conv.last_inbound_at !== null && conv.last_inbound_at * 1000 + WINDOW_MS > now;
       const base = { workspaceId, phoneNumberId, to: conv.wa_id, idempotencyKey: key };
       let type: string;
@@ -1005,7 +1019,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         waId, phoneNumberId, name: copy.templates.otp, language: 'ar', fallbackLanguage: 'en', params: [code], idempotencyKey: key,
         requireCategory: 'AUTHENTICATION', maskText: OTP_MASK, scheduleRelease: false, now,
       });
-      if (!r.ok) return { ok: false, reason: r.reason === 'template_not_approved' || r.reason === 'wrong_category' ? 'template_unavailable' : r.reason === 'wallet_empty' ? 'wallet_empty' : r.reason === 'funding_unknown' || r.reason === 'rate_unavailable' ? 'unavailable' : 'invalid' };
+      if (!r.ok) return { ok: false, reason: r.reason === 'template_not_approved' || r.reason === 'wrong_category' ? 'template_unavailable' : r.reason === 'wallet_empty' ? 'wallet_empty' : r.reason === 'funding_unknown' || r.reason === 'rate_unavailable' || r.reason === 'plan_required' ? 'unavailable' : 'invalid' };
       return r.duplicate ? { ok: true } : { job: r.job };
     });
     if (!('job' in queued)) return queued;
@@ -1385,6 +1399,11 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** Which of these wallet refs are on the ledger (to reverse only what was really posted). */
   async walletRefsPresent(refs: string[]): Promise<string[]> {
     return refs.filter((ref) => this.sql.exec('SELECT 1 FROM wallet_ledger WHERE ref = ?', ref).toArray().length > 0);
+  }
+
+  /** WA-NOFREE-1: may this workspace send, run the agent or set a number up right now? (routes ask this before doing any of it) */
+  async serviceOk(): Promise<boolean> {
+    return serviceAllowed(this.sql, Date.now());
   }
 
   async getEntitlement() {

@@ -56,9 +56,9 @@ describe('PUT /operator/workspaces/:id/subscription', () => {
     await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
     await own(ws);
     const conv = await openChat(ws);
-    await exec(ws, 'DELETE FROM entitlements'); // no plan on record: marketing is blocked (fail closed)
+    await exec(ws, 'DELETE FROM entitlements'); // no plan on record: every send is refused (fail closed)
     const tmpl = { type: 'template' as const, clientId: '00000000-0000-4000-8000-00000000a0c1', name: 'promo', language: 'ar', params: ['a', 'b'] };
-    expect(await workspace(ws).queueOutbound(conv, 'pn-x', tmpl)).toMatchObject({ ok: false, reason: 'plan_blocked' });
+    expect(await workspace(ws).queueOutbound(conv, 'pn-x', tmpl)).toMatchObject({ ok: false, reason: 'plan_required' });
     const r = await put(ws, body());
     expect(r.status).toBe(200);
     expect(await r.json()).toMatchObject({ packageId: 'gold', status: 'active', version: 1 });

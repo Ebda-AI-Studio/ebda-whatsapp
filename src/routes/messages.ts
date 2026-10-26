@@ -23,6 +23,7 @@ messagesRoutes.post('/stores/:storeId/conversations/:conversationId/messages', a
       case 'not_found': return apiError(c, 404, 'not_found');
       case 'invalid_request': return apiError(c, 400, 'invalid_request', r.message);
       case 'unsupported_media': return apiError(c, 415, 'unsupported_media', r.message);
+      case 'plan_required': return apiError(c, 403, 'plan_required');
       default: return apiError(c, 409, r.reason, r.message);
     }
   }

@@ -1,6 +1,6 @@
 import type { TemplateComponent } from '../meta/client';
 import { WINDOW_MS } from '../dto';
-import { marketingBlocked } from '../billing/entitlements';
+import { marketingBlocked, serviceAllowed } from '../billing/entitlements';
 import { addTask } from '../scheduler';
 import type { SendJob } from '../send-queue';
 import { componentsSchema, renderTemplate } from '../templates';
@@ -17,7 +17,7 @@ export function cleanParam(value: string | null | undefined, fallback: string, m
 export type QueueResult =
   | { ok: true; duplicate: false; messageId: number; job: SendJob }
   | { ok: true; duplicate: true }
-  | { ok: false; reason: 'template_not_approved' | 'wrong_category' | 'opted_out' | 'no_consent' | 'plan_blocked' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'invalid_request'; message?: string };
+  | { ok: false; reason: 'template_not_approved' | 'wrong_category' | 'opted_out' | 'no_consent' | 'plan_blocked' | 'plan_required' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'invalid_request'; message?: string };
 
 export type TemplateSend = {
   waId: string;
@@ -54,6 +54,8 @@ export type TemplateSend = {
 export function queueTemplate(host: LinkHost, a: TemplateSend): QueueResult {
   const now = a.now ?? Date.now();
   if (host.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', a.idempotencyKey).toArray().length) return { ok: true, duplicate: true };
+  // WA-NOFREE-1: no package, no service. Every category (OTP, order and COD confirmations, campaigns) stops here, before anything is written or held.
+  if (!serviceAllowed(host.sql, now)) return { ok: false, reason: 'plan_required' };
   const languages = [a.language, ...(a.fallbackLanguage && a.fallbackLanguage !== a.language ? [a.fallbackLanguage] : [])];
   let t: { category: string; components: string; language: string } | undefined;
   for (const language of languages) {
@@ -91,9 +93,10 @@ export function queueTemplate(host: LinkHost, a: TemplateSend): QueueResult {
 }
 
 /** Free text to a contact whose 24 h window is open; null when it is closed (templates only then). Call inside a transaction. */
-export function queueFreeText(host: LinkHost, a: { waId: string; phoneNumberId: string; text: string; idempotencyKey: string; now?: number }): { messageId: number; job: SendJob } | 'duplicate' | 'window_closed' {
+export function queueFreeText(host: LinkHost, a: { waId: string; phoneNumberId: string; text: string; idempotencyKey: string; now?: number }): { messageId: number; job: SendJob } | 'duplicate' | 'window_closed' | 'plan_required' {
   const now = a.now ?? Date.now();
   if (host.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', a.idempotencyKey).toArray().length) return 'duplicate';
+  if (!serviceAllowed(host.sql, now)) return 'plan_required'; // WA-NOFREE-1
   const contact = host.sql.exec<{ last_inbound_at: number | null }>('SELECT last_inbound_at FROM contacts WHERE wa_id = ?', a.waId).toArray()[0];
   if (!contact?.last_inbound_at || contact.last_inbound_at * 1000 + WINDOW_MS <= now) return 'window_closed';
   const { conversationId } = host.ensureConversation(a.waId, now);

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PARAMS, seedContacts, seedTemplate } from './helpers/campaigns';
 import { chat, fund, holdOf, jobOf, ledger, nowS, pn, pricing, queueTemplate, queueText, sendOut, setupBilling, status, wamidOf } from './helpers/billing';
 import { recordNumberFunding } from '../src/core/billing/funding';
-import { exec, openChat, rows, workspace } from './helpers/workspace';
+import { exec, openChat, rows, seedPlan, workspace } from './helpers/workspace';
 
 const W = (n: number) => `00000000-0000-4000-8000-0000000076${String(n).padStart(2, '0')}`;
 const spyAlerts = () => vi.spyOn(console, 'error');
@@ -58,6 +58,7 @@ describe('connecting a number does not stamp its funding', () => {
       env.DB.prepare("INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status) VALUES ('pn-raw-10', 'waba-1', ?, 'active')").bind(ws),
     ]);
     expect(await env.DB.prepare("SELECT 1 FROM number_funding WHERE phone_number_id = 'pn-raw-10'").first()).toBeNull();
+    await seedPlan(ws); // WA-NOFREE-1: a package is on record, so the refusal below is about funding
     const conv = await chat(ws);
     expect(await workspace(ws).queueOutbound(conv, 'pn-raw-10', { type: 'text', clientId: '00000000-0000-4000-8000-000000001010', text: 'x' })).toMatchObject({ ok: false, reason: 'funding_unknown' });
     // recording the funding is what makes it sendable
