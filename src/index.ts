@@ -49,6 +49,7 @@ import { walletRoutes } from './routes/wallet';
 import { instapayProofRoutes, instapayRoutes } from './routes/instapay';
 import { sharedNumberRoutes } from './routes/shared-number';
 import { handleSharedEvent, sharedEnabled, sharedNumberById, sweepShared } from './core/shared/shared-number';
+import { secretProblems } from './core/secrets-check';
 import { applySharedTemplateEvent } from './core/shared/shared-templates';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
@@ -165,7 +166,16 @@ app.post('/kashier/webhook', async (c) => {
   return c.text(out.body, out.status);
 });
 
-app.get('/health', (c) => c.json({ ok: true, status: 'ok', service: PACK.service, commit: c.env.COMMIT_SHA || 'dev' }));
+app.get('/health', (c) => {
+  const commit = c.env.COMMIT_SHA || 'dev';
+  // A malformed or missing secret fails health (so verify-prod catches it at deploy); the key names go to the alert line only.
+  const problems = secretProblems(c.env as unknown as Record<string, unknown>);
+  if (problems.length) {
+    console.error(JSON.stringify({ alert: 'secret_misconfigured', severity: 'P1', keys: problems }));
+    return c.json({ ok: false, status: 'misconfigured', service: PACK.service, commit }, 503);
+  }
+  return c.json({ ok: true, status: 'ok', service: PACK.service, commit });
+});
 
 app.get('/meta/webhook', (c) => {
   const mode = c.req.query('hub.mode');

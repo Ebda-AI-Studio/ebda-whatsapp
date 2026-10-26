@@ -91,5 +91,7 @@ export type Env = {
   /** JSON, see src/core/identity/oidc.ts; required when IDENTITY_MODE=oidc. */
   IDENTITY_OIDC_CONFIG?: string;
   SUITE_BUYER_KEY_SECRET?: string;
+  /** Var: comma-separated secret names this deployment must have (checked by /health, see core/secrets-check.ts). */
+  REQUIRED_SECRETS?: string;
   SENTRY_DSN?: string;
 };

@@ -62,6 +62,8 @@ Generate random keys locally: `node -e "console.log(crypto.randomBytes(32).toStr
 | `EBDA_INSTAPAY_HANDLE` | **the same value as `ebda-api`** (Ebda Store's InstaPay address; set on both Workers in the same session) | InstaPay billing: who merchants pay (unset = InstaPay billing is unavailable, 503) |
 | `SENTRY_DSN` | Sentry project | error reports |
 
+**Self-check:** `/health` answers `503 {status: "misconfigured"}` while any secret named in the `REQUIRED_SECRETS` var (`TOKEN_ENC_KEY`, `AGENT_SECRETS_KEY`, `PROOF_URL_SECRET`, `SUITE_BUYER_KEY_SECRET`) is missing, or any of them is set but malformed (the two AES keys must decode to exactly 32 bytes, so a 64-character hex string fails; the other two need at least 32 characters). The Worker log names the key (alert `secret_misconfigured`, never the value); `scripts/verify-prod.mjs` reports it. Section C secrets (Meta, Kashier) are not in the list: their features stay off until they are set.
+
 Plain vars, not secrets (set in `wrangler.jsonc` or the dashboard): `EBDA_INSTAPAY_QR_URL` (same as ebda-api; Store's value is `https://media.ebda.app/platform/instapay-qr.jpg`, https only), `EBDA_INSTAPAY_PAYEE_NAME` (optional; defaults to the studio name), `META_APP_ID`, `EMBEDDED_SIGNUP_CONFIG_ID`, `KASHIER_MERCHANT_ID`, `KASHIER_API_URL` (default `https://api.kashier.io`), `KASHIER_FEE_BPS`, `KASHIER_FEE_FIXED_MINOR`, `ADJUSTMENT_APPROVAL_MINOR`, `ADJUSTMENT_DAILY_CAP`, and the switches in §8. `IDENTITY_OIDC_CONFIG` is only for white-label tenants on their own identity provider (`deploy/white-label`).
 
 ## 8. Switches (Claude, one at a time, each verified before the next)
