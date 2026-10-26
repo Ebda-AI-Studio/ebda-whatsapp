@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configureCampaignLinks, linkCodeKeyFingerprint, newSignedCode, parseCode, verifyCode } from '../src/core/campaigns/links';
 import { requestGuards } from '../src/core/request-guards';
+import { seedNumber } from './helpers/workspace';
 
 const SECRET = 'link-secret-for-tests-0123456789abcdef';
 const WS = '00000000-0000-4000-8000-000000009501';
@@ -53,6 +54,26 @@ describe('the guard rejects unsigned codes before any bucket or Durable Object',
       for (let i = 0; i < 5; i++) await a.request(`/t/${WS}.${'A'.repeat(22)}.${'C'.repeat(22)}`, {}, env); // forged: spends no bucket
       const good = await a.request(`/t/${await newSignedCode(WS, SECRET)}`, {}, env);
       expect(await good.text()).toBe('route'); // the store's one-token bucket is still full
+    } finally {
+      configureCampaignLinks(prev);
+    }
+  });
+});
+
+describe('every way in checks the MAC', () => {
+  it('a HEAD (or any method) with an unsigned code is refused at the edge, and the track route verifies the MAC itself too', async () => {
+    const prev = configureCampaignLinks({ signingSecret: () => SECRET });
+    try {
+      const { SELF } = await import('cloudflare:test');
+      await seedNumber('pn-sig-9501', WS); // a registered workspace: without the MAC check the route WOULD reach its Durable Object
+      const unsigned = `${WS}.${'A'.repeat(22)}.${'B'.repeat(22)}`;
+      const spy = vi.spyOn(env.WORKSPACE_DO, 'get');
+      for (const method of ['HEAD', 'GET', 'POST']) expect((await SELF.fetch(`https://x/t/${unsigned}`, { method, redirect: 'manual' })).status, method).toBe(404);
+      expect(spy).not.toHaveBeenCalled();
+      // defense in depth: the route alone (no guard in front) refuses an unsigned code before touching a Durable Object
+      const { trackRoutes } = await import('../src/routes/track');
+      expect((await trackRoutes.request(`/t/${unsigned}`, { method: 'HEAD' }, env)).status).toBe(404);
+      expect(spy).not.toHaveBeenCalled();
     } finally {
       configureCampaignLinks(prev);
     }

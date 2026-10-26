@@ -158,7 +158,7 @@ export function requestGuards(limits: GuardLimits = DEFAULT_LIMITS): MiddlewareH
     const path = new URL(req.url).pathname;
 
     // Public tracked link: only a signed code gets through, then it is limited per client and per workspace.
-    if (req.method === 'GET' && path.startsWith('/t/')) {
+    if (path.startsWith('/t/')) { // every method (HEAD is served by the GET route)
       let raw = path.slice(3);
       try { raw = decodeURIComponent(raw); } catch { return next(); }
       const parsed = parseCode(raw);
