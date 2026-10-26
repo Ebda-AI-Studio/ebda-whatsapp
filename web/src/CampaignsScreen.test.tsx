@@ -178,8 +178,8 @@ describe('contacts', () => {
     await openContacts();
     expect(await screen.findByText('نورا حسن')).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'طلبوا يوقفوا الرسايل' })));
-    const list = screen.getByRole('list', { name: 'العملاء' });
-    expect(within(list).getAllByRole('listitem')).toHaveLength(1);
+    const list = screen.getByRole('listbox', { name: 'العملاء' });
+    expect(within(list).getAllByRole('option')).toHaveLength(1);
     expect(within(list).getByText('مصطفى عادل')).toBeTruthy();
   });
 

@@ -66,7 +66,7 @@ describe('a failed load shows an error with Retry, never the empty copy', () => 
     expect(screen.queryByText(t.contactsEmpty)).toBeNull();
     const alert = await screen.findByRole('alert');
     await act(async () => fireEvent.click(within(alert).getByRole('button', { name: t.retry })));
-    expect(await screen.findByRole('list', { name: 'العملاء' })).toBeTruthy();
+    expect(await screen.findByRole('listbox', { name: 'العملاء' })).toBeTruthy();
   });
 
   it('wallet refunds list', async () => {

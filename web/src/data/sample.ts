@@ -1,6 +1,7 @@
 import type {
   AgentSettingsDto, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
+import { normaliseText } from '../../../src/core/text-normalise';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
 import type { SharedTemplatesApi } from './shared-templates';
 import type { InboxSource } from './source';
@@ -288,9 +289,11 @@ export function createSampleSource(): InboxSource {
     sharedTemplates: createSampleSharedTemplates(),
     contacts: {
       async list(q) {
-        const query = q.q?.trim() ?? '';
+        const query = normaliseText(q.q ?? '');
+        const digits = query.replace(/\D/g, '');
+        // Same matching as the server (name tokens by prefix through the shared normaliser, phone by digits), so sample mode behaves like the real one.
         const items = contacts
-          .filter((c) => !query || (c.name ?? '').includes(query) || c.waId.includes(query.replace(/\D/g, '') || '\u0000'))
+          .filter((c) => !query || query.split(' ').every((qt) => normaliseText(c.name ?? '').split(' ').some((w) => w.startsWith(qt))) || (digits.length >= 3 && c.waId.includes(digits)))
           .filter((c) => !q.tag || (c.tags ?? []).includes(q.tag))
           .filter((c) => q.optedOut === undefined || c.optedOut === q.optedOut);
         return { items: items.map((c) => ({ ...c })), nextCursor: null };

@@ -14,13 +14,13 @@ describe('inbox', () => {
     setup();
     expect(document.documentElement.dir).toBe('rtl');
     expect(screen.getByRole('navigation', { name: 'التنقل الرئيسي' })).toBeTruthy();
-    expect(screen.getByRole('list', { name: 'المحادثات' })).toBeTruthy();
+    expect(screen.getByRole('listbox', { name: 'المحادثات' })).toBeTruthy();
     expect(screen.getByText('بيانات تجريبية للعرض فقط')).toBeTruthy();
   });
 
   it('opens a conversation, shows its messages and the customer order with a Confirm action', async () => {
     setup();
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     expect(await within(screen.getByRole('log')).findByText('عايزة أأكد الأوردر بتاع امبارح')).toBeTruthy();
     const orders = screen.getByRole('complementary', { name: 'طلبات العميل' });
@@ -30,15 +30,15 @@ describe('inbox', () => {
 
   it('filters to unread', async () => {
     setup();
-    await screen.findByRole('button', { name: /منى عبد الرحمن/ });
-    const before = screen.getAllByRole('listitem').length;
+    await screen.findByRole('option', { name: /منى عبد الرحمن/ });
+    const before = screen.getAllByRole('option').length;
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'غير مقروءة' })));
-    expect(screen.getAllByRole('listitem').length).toBeLessThan(before);
+    expect(screen.getAllByRole('option').length).toBeLessThan(before);
   });
 
   it('sends a message optimistically', async () => {
     setup();
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     const box = screen.getByRole('textbox', { name: 'اكتب رسالة' });
     await act(async () => fireEvent.change(box, { target: { value: 'تمام، هنأكده دلوقتي' } }));
@@ -48,7 +48,7 @@ describe('inbox', () => {
 
   it('a closed window disables free text and offers templates', async () => {
     setup();
-    const target = await screen.findByRole('button', { name: /يوسف علي/ });
+    const target = await screen.findByRole('option', { name: /يوسف علي/ });
     await act(async () => fireEvent.click(target));
     expect(within(screen.getByRole('banner')).getByText('النافذة مقفولة · ابعت قالب')).toBeTruthy();
     expect((screen.getByLabelText('اكتب رسالة') as HTMLTextAreaElement).disabled).toBe(true);
@@ -58,7 +58,7 @@ describe('inbox', () => {
   it('keeps Arabic customer text in its own direction inside the English UI', async () => {
     setup();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'English' })));
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     const text = await within(screen.getByRole('log')).findByText('عايزة أأكد الأوردر بتاع امبارح');
     expect(text.getAttribute('dir')).toBe('auto');
@@ -68,12 +68,12 @@ describe('inbox', () => {
     setup();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'English' })));
     expect(document.documentElement.dir).toBe('ltr');
-    expect(screen.getByRole('list', { name: 'Conversations' })).toBeTruthy();
+    expect(screen.getByRole('listbox', { name: 'Conversations' })).toBeTruthy();
   });
 
   it('confirms a pending COD order in one action: the rail advances and an undo is offered', async () => {
     setup();
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     const orders = screen.getByRole('complementary', { name: 'طلبات العميل' });
     await act(async () => fireEvent.click(await within(orders).findByRole('button', { name: 'تأكيد الطلب' })));
@@ -83,7 +83,7 @@ describe('inbox', () => {
 
   it('asks once before refusing an order', async () => {
     setup();
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     const orders = screen.getByRole('complementary', { name: 'طلبات العميل' });
     await act(async () => fireEvent.click(await within(orders).findByRole('button', { name: 'رفض' })));
@@ -94,7 +94,7 @@ describe('inbox', () => {
 
   it('offers quick replies that fill the composer', async () => {
     setup();
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     const group = screen.getByRole('group', { name: 'ردود سريعة' });
     const first = within(group).getAllByRole('button')[0]!;
@@ -108,7 +108,7 @@ describe('inbox', () => {
     const slowSend = source.send.bind(source);
     source.send = (id, req) => new Promise((r) => { release = () => r(slowSend(id, req)); });
     render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'اكتب رسالة' }), { target: { value: 'رسالة سريعة' } }));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'إرسال' })));
@@ -119,7 +119,7 @@ describe('inbox', () => {
 
   it('in a closed window the template button is the primary action', async () => {
     setup();
-    const target = await screen.findByRole('button', { name: /يوسف علي/ });
+    const target = await screen.findByRole('option', { name: /يوسف علي/ });
     await act(async () => fireEvent.click(target));
     const tpl = screen.getByRole('button', { name: 'اختيار قالب' });
     expect(tpl.className).toContain('gold');
@@ -129,7 +129,7 @@ describe('inbox', () => {
     const source = createSampleSource();
     const spy = vi.spyOn(source, 'recordCodOutcome');
     render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
-    let target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    let target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     const orders = () => screen.getByRole('complementary', { name: 'طلبات العميل' });
     await act(async () => fireEvent.click(await within(orders()).findByRole('button', { name: 'تأكيد الطلب' })));
@@ -145,7 +145,7 @@ describe('inbox', () => {
     let release: (m: Awaited<ReturnType<typeof source.send>>) => void = () => undefined;
     source.send = (_id, req) => new Promise((r) => { release = r; void req; });
     render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'اكتب رسالة' }), { target: { value: 'مرة واحدة بس' } }));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'إرسال' })));
@@ -158,7 +158,7 @@ describe('inbox', () => {
 
   it('the undo toast follows the language switch', async () => {
     setup();
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     await act(async () => fireEvent.click(await within(screen.getByRole('complementary', { name: 'طلبات العميل' })).findByRole('button', { name: 'تأكيد الطلب' })));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'English' })));
@@ -168,7 +168,7 @@ describe('inbox', () => {
 
   it('asks for template variables before sending a template that has them', async () => {
     setup();
-    const target = await screen.findByRole('button', { name: /يوسف علي/ });
+    const target = await screen.findByRole('option', { name: /يوسف علي/ });
     await act(async () => fireEvent.click(target));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'اختيار قالب' })));
     await act(async () => fireEvent.click(screen.getByRole('menuitem', { name: /تحديث الشحن/ })));
@@ -187,7 +187,7 @@ describe('inbox', () => {
     let emit: (e: Parameters<Parameters<typeof source.subscribe>[0]>[0]) => void = () => undefined;
     source.subscribe = (cb) => { emit = cb; return () => undefined; };
     render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     const base = { clientId: null, wamid: 'w.img', direction: 'in' as const, type: 'image' as const, hasLongBody: false, template: null, status: null, errorCode: null, at: Date.UTC(2026, 9, 24, 16, 59) };
     await act(async () => emit({ type: 'message.created', seq: 1, conversationId: 1, message: { ...base, id: 900, text: 'صورة', media: null } }));
@@ -201,7 +201,7 @@ describe('inbox', () => {
     const source = createSampleSource();
     source.orders = async () => { throw new Error('404'); };
     render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     expect(await within(screen.getByRole('log')).findByText('عايزة أأكد الأوردر بتاع امبارح')).toBeTruthy();
   });
@@ -213,7 +213,7 @@ describe('inbox', () => {
     const real = source.send.bind(source);
     source.send = async (id, req) => { seen.push(req.clientId); if (fail) { fail = false; throw new Error('net'); } return real(id, req); };
     render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'اكتب رسالة' }), { target: { value: 'تجربة' } }));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'إرسال' })));
@@ -226,7 +226,7 @@ describe('inbox', () => {
     const source = createSampleSource();
     source.capabilities = { codOutcome: false };
     render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     const orders = screen.getByRole('complementary', { name: 'طلبات العميل' });
     await within(orders).findByText('#1048');
@@ -240,7 +240,7 @@ describe('inbox', () => {
     let release: (m: Awaited<ReturnType<typeof source.send>>) => void = () => undefined;
     source.send = () => new Promise((r) => { release = r; });
     render(<App source={source} now={() => Date.UTC(2026, 9, 24, 17, 0)} />);
-    const target = await screen.findByRole('button', { name: /منى عبد الرحمن/ });
+    const target = await screen.findByRole('option', { name: /منى عبد الرحمن/ });
     await act(async () => fireEvent.click(target));
     await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'اكتب رسالة' }), { target: { value: 'حالة' } }));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'إرسال' })));
