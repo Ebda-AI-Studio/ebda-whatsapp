@@ -20,6 +20,8 @@ type NumberStateKey = 'active' | 'pending' | 'failed' | 'locked' | 'disconnected
 
 
 const ar = {
+  searchLoading: 'بندوّر…', searchFailed: 'البحث مشتغلش دلوقتي، جرّب تاني.', searchNone: (q: string) => `مفيش نتايج لـ «${q}»`,
+  searchCount: (n: number, s: string) => (n === 1 ? 'لقينا نتيجة واحدة' : n === 2 ? 'لقينا نتيجتين' : n <= 10 ? `لقينا ${s} نتايج` : `لقينا ${s} نتيجة`),
   nav: 'التنقل الرئيسي', inbox: 'المحادثات', templates: 'القوالب', campaigns: 'الحملات', settings: 'الإعدادات',
   conversations: 'المحادثات', all: 'الكل', unread: 'غير مقروءة', mine: 'ليا', unassigned: 'بدون مسؤول',
   search: 'ابحث في المحادثات', noResults: 'مفيش محادثات هنا دلوقتي.', pickChat: 'اختار محادثة من القايمة علشان تبدأ ترد.',
@@ -217,6 +219,8 @@ const ar = {
 };
 
 const en: typeof ar = {
+  searchLoading: 'Searching…', searchFailed: 'Search is not working right now, try again.', searchNone: (q: string) => `No results for “${q}”`,
+  searchCount: (n: number, s: string) => (n === 1 ? '1 result' : `${s} results`),
   nav: 'Main navigation', inbox: 'Inbox', templates: 'Templates', campaigns: 'Campaigns', settings: 'Settings',
   conversations: 'Conversations', all: 'All', unread: 'Unread', mine: 'Mine', unassigned: 'Unassigned',
   search: 'Search conversations', noResults: 'No conversations here right now.', pickChat: 'Pick a conversation from the list to start replying.',
