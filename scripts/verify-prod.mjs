@@ -18,8 +18,10 @@ export async function runChecks({ base, expectCommit, expectBrand, verifyToken, 
   let health = null;
   try {
     const res = await get('/health');
-    health = res.ok ? await res.json() : null;
-    add('health', health?.ok === true, health ? `service ${health.service}` : `status ${res.status}`);
+    const body = await res.json().catch(() => null);
+    health = res.ok ? body : null;
+    const why = body?.status === 'misconfigured' ? 'misconfigured: a secret is missing or malformed (see the secret_misconfigured alert in the Worker logs)' : `status ${res.status}`;
+    add('health', health?.ok === true, health ? `service ${health.service}` : why);
     const sec = res.headers.get('strict-transport-security') && res.headers.get('x-content-type-options') === 'nosniff';
     add('api security headers', !!sec, sec ? 'hsts + nosniff' : 'missing strict-transport-security or nosniff on /health');
   } catch (e) {

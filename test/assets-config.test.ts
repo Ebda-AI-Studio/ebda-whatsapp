@@ -88,3 +88,7 @@ it('a brand with its own OIDC provider lists that issuer origin, exactly, in con
   }
   expect(withOidc).toContain('demo'); // the demo brand proves the seam
 });
+
+it('production lists the secrets /health must find well-formed (the first deploy\'s section B keys)', () => {
+  expect(String(cfg.vars?.REQUIRED_SECRETS ?? '').split(',').sort()).toEqual(['AGENT_SECRETS_KEY', 'PROOF_URL_SECRET', 'SUITE_BUYER_KEY_SECRET', 'TOKEN_ENC_KEY']);
+});
