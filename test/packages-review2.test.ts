@@ -21,7 +21,7 @@ beforeEach(async () => {
   configureSessionCheck(async () => false);
   await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('gold', 'Gold', 50000, 300, 1, 1)"),
-    env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('pro', 'Pro', 90000, 900, 1, 1)"),
+    env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('pro-fixture', 'Pro', 90000, 900, 1, 1)"),
   ]);
 });
 afterEach(() => { configureSessionCheck(null); vi.restoreAllMocks(); });
@@ -191,10 +191,10 @@ describe('4/5. a refund takes back exactly the period its order paid for', () =>
     const q = await start(ws);
     await hook(q.orderId, 'TX-Q12', '500.00');
     expect((await sub(ws))!.queued_periods).toBe(1);
-    await buy(ws, 'pro');
-    expect(await sub(ws)).toMatchObject({ package_id: 'pro', queued_periods: 1 });
+    await buy(ws, 'pro-fixture');
+    expect(await sub(ws)).toMatchObject({ package_id: 'pro-fixture', queued_periods: 1 });
     await hook(q.orderId, 'TX-Q12-R', '500.00', { label: 'refund' });
-    expect(await sub(ws)).toMatchObject({ package_id: 'pro', status: 'active', queued_periods: 0 });
+    expect(await sub(ws)).toMatchObject({ package_id: 'pro-fixture', status: 'active', queued_periods: 0 });
     expect(await order(q.orderId)).toMatchObject({ status: 'refunded', queued_seq: null });
   });
   it('N2: buy O1, renew early with O2, refund O1: O2\'s month starts now', async () => {

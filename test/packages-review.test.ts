@@ -22,7 +22,7 @@ beforeEach(async () => {
   configureSessionCheck(async () => false);
   await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('gold', 'Gold', 50000, 300, 1, 1)"),
-    env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('pro', 'Pro', 90000, 900, 1, 1)"),
+    env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('pro-fixture', 'Pro', 90000, 900, 1, 1)"),
   ]);
 });
 afterEach(() => { configurePayments((e) => (e.KASHIER_MERCHANT_ID && e.KASHIER_API_KEY ? new KashierProvider(e.KASHIER_MERCHANT_ID, e.KASHIER_API_KEY) : null)); configureSessionCheck(null); vi.restoreAllMocks(); });
@@ -266,7 +266,7 @@ describe('I6: an operator extension keeps the period and its credits', () => {
     expect(b.periodEnd).toBeGreaterThan(a.periodEnd);
     expect(await credits(ws)).toBe(300);
     expect((await ledger(ws)).filter((r) => r.kind === 'grant')).toHaveLength(1);
-    expect((await put('pro', Date.now() + 40 * DAY)).status).toBe(200);
+    expect((await put('pro-fixture', Date.now() + 40 * DAY)).status).toBe(200);
     expect((await workspace(ws).getEntitlement())!.periodStart).toBeGreaterThan(a.periodStart);
   });
 });

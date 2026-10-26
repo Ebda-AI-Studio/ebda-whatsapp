@@ -64,7 +64,7 @@ import { parentHoldRef } from './campaigns/campaigns';
 import { indexContactName, rebuildContactIndex } from './contact-index';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
-import { applyEntitlement, expireSubscription, marketingBlocked, readEntitlement, type EntitlementEvent } from './billing/entitlements';
+import { applyEntitlement, expireSubscription, featureAllowed, marketingBlocked, memberLimit, readEntitlement, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
@@ -1389,6 +1389,16 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   async getEntitlement() {
     return readEntitlement(this.sql);
+  }
+
+  /** Whether this workspace's plan allows a feature right now (no entitlement, a lapsed status or a package without it = false). Read per call, never cached. */
+  async planAllows(feature: PlanFeature): Promise<boolean> {
+    return featureAllowed(this.sql, feature);
+  }
+
+  /** Seats the plan allows, the owner included (1 without a live entitlement). */
+  async planMemberLimit(): Promise<number> {
+    return memberLimit(this.sql);
   }
 
   /** One-shot check at an InstaPay proof's review deadline (the SLA): the control plane alerts once if the request is still under review. */

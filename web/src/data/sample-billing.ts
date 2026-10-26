@@ -84,8 +84,8 @@ export function createSampleWallet(): WalletApi {
     },
     topupState: async (orderId) => ({ orderId, state: 'pending', amountMinor: 0, feeMinor: 0, totalMinor: 0 }),
     packages: async () => [
-      { id: 'basic', name: 'Basic', priceMinor: 25000, aiCredits: 100 },
-      { id: 'gold', name: 'Gold', priceMinor: 50000, aiCredits: 300 },
+      { id: 'basic', name: 'Basic', priceMinor: 25000, aiCredits: 100, maxMembers: 2, features: ['members', 'shared_inbox', 'order_confirmations', 'templates', 'ai_credits'], periodMonths: 1 },
+      { id: 'gold', name: 'Gold', priceMinor: 50000, aiCredits: 300, maxMembers: 5, features: ['members', 'shared_inbox', 'order_confirmations', 'templates', 'campaigns', 'order_in_chat', 'ai_credits'], periodMonths: 1 },
     ],
     async buyPackage(packageId) {
       const id = nextId++;

@@ -55,7 +55,7 @@ grant_type=client_credentials&audience=whatsapp&scope=conversations:read message
 
 The token lives **10 minutes** and there is no refresh token. Ask for a new one when it expires, and a little before is fine.
 
-**3. Use it like any token.** Send `Authorization: Bearer <access_token>` to the endpoints above. `GET /stores/{storeId}/me` works with any server token and returns the store the token belongs to. Any other store answers `403 forbidden`.
+**3. Use it like any token.** Send `Authorization: Bearer <access_token>` to the endpoints above. `GET /stores/{storeId}/me` works with any server token and returns the store the token belongs to. Any other store answers `403 forbidden`. Server tokens are a Pro feature: on a package without `api` (or a store with no package on record) every route, `GET /me` included, answers `403 plan_feature` with `feature: "api"`.
 
 #### Scopes
 | Scope | Allows |
@@ -101,6 +101,7 @@ Every error uses one envelope:
 | `unsupported_media` | 415 | The media type is not supported |
 | `wallet_empty` | 409 | The wallet cannot cover the send |
 | `plan_blocked`, `funding_unknown`, `rate_unavailable` | 409 | The send is refused for plan, funding or pricing reasons |
+| `plan_feature` | 403 | The package does not include this feature. The body carries `feature` (`campaigns`, `order_in_chat` or `api`); upgrade the package. A store with no package on record is refused too |
 | `rate_limited` | 503 (429 on the connector test) | A temporary condition, such as Meta being unavailable or a send that could not be queued. Retry later |
 | `registration_locked`, `number_conflict`, `signup_failed`, `signup_unavailable` | varies | Number connection problems |
 
