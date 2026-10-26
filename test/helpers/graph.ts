@@ -44,7 +44,11 @@ export function stubGraph(
     // A real delay lets the DO's input gate open, as a real network call does, so overlapping runs can interleave.
     if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs));
     await opts.before?.(call);
-    const r = responder(call, calls.length);
+    let r = responder(call, calls.length);
+    // A responder written for one media id answers other media lookups with a plain send reply (200, no url): the download would
+    // fail and retry into a later test. Treat that as unanswered and give the default media reply; an explicit error status is kept.
+    const mediaLookup = call.method === 'GET' && /^https:\/\/graph\.facebook\.com\/v[\d.]+\/media-[^/?]+$/.test(url);
+    if (mediaLookup && r.status === 200 && !(r.json && typeof r.json === 'object' && 'url' in r.json)) r = defaultGraphReply(call, calls.length);
     if (r.body !== undefined) return new Response(r.body, { status: r.status, headers: r.headers });
     return new Response(JSON.stringify(r.json ?? null), { status: r.status, headers: { 'content-type': 'application/json' } });
   });
