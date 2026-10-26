@@ -37,13 +37,13 @@ export function signupConfig(env: Env): { appId: string; encKey: string } {
 // ---- rows and the DTO ------------------------------------------------------------------------------------------------
 
 export const NUMBER_COLUMNS = `phone_number_id, waba_id, workspace_id, display_phone, status, kind, onboarding, verified_name, quality_rating, messaging_limit_tier,
-  throughput_level, name_status, platform_type, is_on_biz_app, registration, sync_requested_at, last_status_sync_at, connected_at, subscribed_at, history_sync, contacts_sync, pin_enc`;
+  throughput_level, name_status, platform_type, is_on_biz_app, registration, sync_requested_at, last_status_sync_at, connected_at, subscribed_at, history_sync, contacts_sync, pin_enc, health_state`;
 export type NumberRow = {
   phone_number_id: string; waba_id: string; workspace_id: string; display_phone: string | null; status: 'active' | 'disconnected'; kind: 'own' | 'platform';
   onboarding: 'cloud_api' | 'business_app' | null; verified_name: string | null; quality_rating: string | null; messaging_limit_tier: string | null;
   throughput_level: string | null; name_status: string | null; platform_type: string | null; is_on_biz_app: number | null;
   registration: NumberDto['registration']; sync_requested_at: number | null; last_status_sync_at: number | null; connected_at: number | null; subscribed_at: number | null;
-  history_sync: NumberDto['historySync']; contacts_sync: NumberDto['contactsSync']; pin_enc: string | null;
+  history_sync: NumberDto['historySync']; contacts_sync: NumberDto['contactsSync']; pin_enc: string | null; health_state: 'green' | 'yellow' | 'red' | 'restricted';
 };
 
 /** Never carries the token, the PIN or the workspace id. */
@@ -54,7 +54,7 @@ export function numberDto(r: NumberRow): NumberDto {
     nameStatus: r.name_status, platformType: r.platform_type, isOnBizApp: r.is_on_biz_app === null ? null : r.is_on_biz_app === 1,
     historySync: r.history_sync, contactsSync: r.contacts_sync, connectedAt: r.connected_at,
     syncDeadlineAt: r.onboarding === 'business_app' && r.connected_at ? r.connected_at + SYNC_WINDOW_MS : null,
-    lastStatusSyncAt: r.last_status_sync_at,
+    lastStatusSyncAt: r.last_status_sync_at, health: r.health_state,
   };
 }
 
@@ -115,7 +115,10 @@ async function applyStatus(env: Env, workspaceId: string, phoneNumberId: string,
   const tier = st.messaging_limit_tier ? TIER_LIMITS[st.messaging_limit_tier] : undefined;
   const row = await env.DB.prepare('SELECT onboarding FROM phone_numbers WHERE phone_number_id = ?').bind(phoneNumberId).first<{ onboarding: string | null }>();
   const limits = { ...(tier !== undefined ? { tier } : {}), ...(row?.onboarding === 'business_app' ? { mps: BUSINESS_APP_MPS } : {}) };
-  if (Object.keys(limits).length) await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId)).setNumberLimits(phoneNumberId, limits);
+  const stub = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId));
+  if (Object.keys(limits).length) await stub.setNumberLimits(phoneNumberId, limits);
+  // The rating Meta reports is a health signal too (a webhook can be missed): RED / YELLOW worsen the state, GREEN recovers it.
+  if (st.quality_rating) await stub.applyNumberHealth(phoneNumberId, { kind: 'rating', rating: st.quality_rating });
 }
 
 /** Reads the number's state from Meta into D1 (no-op on a Graph failure; the caller decides whether that matters). */

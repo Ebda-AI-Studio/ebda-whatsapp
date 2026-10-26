@@ -320,7 +320,7 @@ export const campaignParam = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('link_code') }),
 ]);
 export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled']);
-export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable']);
+export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable', 'quality_flagged', 'operator_paused']);
 export const campaignCreate = z.object({
   name: z.string().trim().min(1).max(80),
   template: z.object({ name: z.string().min(1).max(512), language: z.string().min(2).max(10) }),
@@ -598,6 +598,8 @@ export const numberDto = z.object({
   /** The last moment the one-time syncs can still be requested (24 h after onboarding); null when they do not apply. */
   syncDeadlineAt: z.number().int().nullable(),
   lastStatusSyncAt: z.number().int().nullable(),
+  /** W2-META: green = fine; yellow = flagged (campaigns paused); red / restricted = no new template sends. Meta's own rating is `qualityRating`. */
+  health: z.enum(['green', 'yellow', 'red', 'restricted']).optional(),
 });
 export const listNumbersResponse = z.object({ items: z.array(numberDto) });
 /** GET /numbers/signup-config: public Meta ids for launching Embedded Signup in the page. */

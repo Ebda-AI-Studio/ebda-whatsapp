@@ -191,6 +191,56 @@ export function extractTierUpdates(payload: unknown): TierUpdateEvent[] {
   return out;
 }
 
+export type QualityEvent = { wabaId: string; displayPhone: string; event: string };
+const qualityChangeSchema = z.object({
+  field: z.literal('phone_number_quality_update'),
+  value: z.object({ display_phone_number: z.string(), event: z.string() }).loose(),
+}).loose();
+
+/** `phone_number_quality_update` changes that carry Meta's `event` (FLAGGED, UNFLAGGED, UPGRADE, DOWNGRADE, ONBOARDING): the number's health signal. */
+export function extractQualityEvents(payload: unknown): QualityEvent[] {
+  const parsed = payloadSchema.extend({ entry: z.array(z.object({ id: z.string(), changes: z.array(z.unknown()) }).loose()) }).safeParse(payload);
+  if (!parsed.success) return [];
+  const out: QualityEvent[] = [];
+  for (const entry of parsed.data.entry) {
+    for (const ch of entry.changes) {
+      const c = qualityChangeSchema.safeParse(ch);
+      if (c.success) out.push({ wabaId: entry.id, displayPhone: c.data.value.display_phone_number, event: c.data.value.event });
+    }
+  }
+  return out;
+}
+
+/** `account_update`: WABA-wide. restricted = a restriction, ban or violation is in force; lifted = Meta cleared it; anything else is not about sending. */
+export type AccountEvent = { wabaId: string; restricted: boolean };
+const accountChangeSchema = z.object({
+  field: z.literal('account_update'),
+  value: z.object({ event: z.string().optional(), restriction_info: z.array(z.unknown()).optional(), ban_info: z.object({ waba_ban_state: z.union([z.string(), z.array(z.string())]).optional() }).loose().optional() }).loose(),
+}).loose();
+
+/**
+ * INFERRED from Meta's documented account_update shapes, not yet seen on live traffic (verify on the first real event): a ban state DISABLE / SCHEDULE_FOR_DISABLE,
+ * ACCOUNT_VIOLATION, ACCOUNT_DELETED, or ACCOUNT_RESTRICTION with restriction_info = restricted; REINSTATE, or ACCOUNT_RESTRICTION with an empty restriction_info = lifted.
+ */
+export function extractAccountEvents(payload: unknown): AccountEvent[] {
+  const parsed = payloadSchema.extend({ entry: z.array(z.object({ id: z.string(), changes: z.array(z.unknown()) }).loose()) }).safeParse(payload);
+  if (!parsed.success) return [];
+  const out: AccountEvent[] = [];
+  for (const entry of parsed.data.entry) {
+    for (const ch of entry.changes) {
+      const c = accountChangeSchema.safeParse(ch);
+      if (!c.success) continue;
+      const v = c.data.value;
+      const states = ([] as string[]).concat(v.ban_info?.waba_ban_state ?? []).map((s) => s.toUpperCase());
+      const event = (v.event ?? '').toUpperCase();
+      if (states.includes('REINSTATE')) out.push({ wabaId: entry.id, restricted: false });
+      else if (states.includes('DISABLE') || states.includes('SCHEDULE_FOR_DISABLE') || event === 'ACCOUNT_VIOLATION' || event === 'ACCOUNT_DELETED') out.push({ wabaId: entry.id, restricted: true });
+      else if (event === 'ACCOUNT_RESTRICTION') out.push({ wabaId: entry.id, restricted: v.restriction_info === undefined || v.restriction_info.length > 0 });
+    }
+  }
+  return out;
+}
+
 // ---- Coexistence (a number kept on the WhatsApp Business app): echoes, contact sync, history, name decisions ------------
 
 /** A message that was not received through the Cloud API: typed in the merchant's app (an echo) or read from its chat history. */

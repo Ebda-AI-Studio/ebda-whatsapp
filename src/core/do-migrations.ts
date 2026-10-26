@@ -438,6 +438,25 @@ export const DO_MIGRATIONS: readonly string[] = [
    ALTER TABLE entitlements ADD COLUMN lim_order_in_chat INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE entitlements ADD COLUMN lim_api INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE entitlements ADD COLUMN lim_priority_support INTEGER NOT NULL DEFAULT 0;`,
+  // v35 (W2-META number health): the state of each number is its latest log row (no row = green); the log is the audit of every change.
+  // number_health_events counts the Meta errors that signal a sender-quality problem (131049 frequency cap, 131026 undeliverable) per number in
+  // 10-minute buckets, for the spike guard. No phone number, no message content.
+  `CREATE TABLE number_health_log (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     phone_number_id TEXT NOT NULL,
+     at INTEGER NOT NULL,
+     from_state TEXT NOT NULL,
+     to_state TEXT NOT NULL CHECK (to_state IN ('green', 'yellow', 'red', 'restricted')),
+     source TEXT NOT NULL,
+     detail TEXT
+   );
+   CREATE INDEX number_health_log_number ON number_health_log (phone_number_id, id);
+   CREATE TABLE number_health_events (
+     phone_number_id TEXT NOT NULL,
+     bucket INTEGER NOT NULL,
+     n INTEGER NOT NULL,
+     PRIMARY KEY (phone_number_id, bucket)
+   );`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
