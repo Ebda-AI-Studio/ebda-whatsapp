@@ -45,10 +45,10 @@ describe('operator: pricing settings', () => {
   it('lists the current and the scheduled version apart, with who and why', async () => {
     await openOperator();
     const current = await screen.findByRole('region', { name: t.opCurrent });
-    expect(within(current).getByText(t.opSettingsLine('١٥', egp(5000), '٢', '٠'))).toBeTruthy();
+    expect(within(current).getByText(t.opSettingsLine('15', egp(5000), '2', '0'))).toBeTruthy();
     expect(within(current).getByText('تحديث هامش الربع الأخير')).toBeTruthy();
     const scheduled = screen.getByRole('region', { name: t.opScheduled });
-    expect(within(scheduled).getByText(t.opSettingsLine('١٨', egp(5000), '٢', '٠'))).toBeTruthy();
+    expect(within(scheduled).getByText(t.opSettingsLine('18', egp(5000), '2', '0'))).toBeTruthy();
     expect(screen.getByText(t.opNeverRetro)).toBeTruthy();
   });
 
@@ -75,7 +75,7 @@ describe('operator: pricing settings', () => {
     field(t.opReason, 'سبب كافي');
     field(t.opEffective, '2026-10-01T00:00');
     await submit(t.opPublishSettings);
-    expect((await screen.findByRole('alert')).textContent).toBe(t.opTooSoon('١'));
+    expect((await screen.findByRole('alert')).textContent).toBe(t.opTooSoon('1'));
     field(t.opEffective, '2030-01-01T00:00');
     field(t.opReason, 'ق');
     await submit(t.opPublishSettings);
@@ -119,7 +119,7 @@ describe('operator: rate cards and the dollar rate', () => {
     field(t.opRatesInput, 'EG,marketing,0.05\nsa,utility,1');
     field(t.opReason, 'تحديث ميتا');
     await submit(t.opPublishRates);
-    expect((await screen.findByRole('alert')).textContent).toContain(t.opRateLine('٢', t.opRateErrors.bad_country!));
+    expect((await screen.findByRole('alert')).textContent).toContain(t.opRateLine('2', t.opRateErrors.bad_country!));
     expect(publish).not.toHaveBeenCalled();
   });
 
@@ -145,7 +145,7 @@ describe('operator: rate cards and the dollar rate', () => {
     field(t.opReason, 'تحديث ميتا');
     field(t.opRatesEffective, '2026-10-25T00:00');
     await submit(t.opPublishRates);
-    expect(screen.getByRole('alert').textContent).toBe(t.opTooSoon('٢٤'));
+    expect(screen.getByRole('alert').textContent).toBe(t.opTooSoon('24'));
     fireEvent.change(screen.getByLabelText(t.opFxRate), { target: { value: '49.5' } });
     field(t.opFxEffective, '2026-10-25T00:00');
     field(t.opFxReason, 'سبب الصرف');

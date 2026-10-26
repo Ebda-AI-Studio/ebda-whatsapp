@@ -76,7 +76,7 @@ export function ChatPane({ t, lang, now, conversation, source, userNames, curren
       <div className="thread" ref={thread} role="log" aria-live="polite">
         {messages.map((m) => {
           const d = dayKey(m.at);
-          const sep = d !== lastDay ? <span className="tag day" key={`d${d}`}>{d === today ? t.today : new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG' : 'en-GB', { day: 'numeric', month: 'long' }).format(m.at)}</span> : null;
+          const sep = d !== lastDay ? <span className="tag day" key={`d${d}`}>{d === today ? t.today : new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'long' }).format(m.at)}</span> : null;
           lastDay = d;
           return [sep, (
             <div key={m.id} className={`bubble ${m.direction}`} data-client-id={m.clientId ?? undefined}>

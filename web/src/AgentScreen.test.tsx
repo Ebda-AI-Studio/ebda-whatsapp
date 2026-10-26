@@ -15,10 +15,10 @@ describe('AI agent', () => {
     const toggle = await screen.findByRole('switch', { name: 'شغّل المساعد الذكي' });
     expect(toggle.getAttribute('aria-checked')).toBe('false');
     await act(async () => fireEvent.click(toggle));
-    await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'أسئلة وأجوبة متجرك' }), { target: { value: 'الشحن خلال ٣ أيام' } }));
+    await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'أسئلة وأجوبة متجرك' }), { target: { value: 'الشحن خلال 3 أيام' } }));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حفظ' })));
     expect((await source.agentSettings!())!.enabled).toBe(true);
-    expect((await source.agentSettings!())!.faqText).toBe('الشحن خلال ٣ أيام');
+    expect((await source.agentSettings!())!.faqText).toBe('الشحن خلال 3 أيام');
     expect(screen.getByRole('status').textContent).toContain('اتحفظ');
   });
 
