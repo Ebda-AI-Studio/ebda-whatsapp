@@ -87,14 +87,22 @@ Each merge: full suite green twice locally, CI green, then deploy.
 ## 11. Migrations (Claude)
 `npx wrangler d1 migrations apply ebda-wa-platform --remote` before the deploy that needs them. Durable Object SQLite migrates itself on first access (versioned in code).
 
-## 12. Deploy (Claude)
-`npx wrangler deploy --var COMMIT_SHA:$(git rev-parse --short HEAD)` from a clean checkout of `main` (so `/health` reports the commit).
+## 12. Deploy
+**Normal path (every deploy after the first): the `cf-deploy` workflow.** Actions → cf-deploy → Run workflow on `main`. It checks the Cloudflare account and that the commit is on `main`, applies the D1 migrations, deploys with `COMMIT_SHA`, then runs `verify-prod --expect <sha>` (including the live cron schedule) and messages Telegram if anything fails. Secrets it needs and the rollback procedure: `docs/runbooks/rollback.md`.
+
+**First deploy (GO-1) runs from Ahmad's Mac with OAuth wrangler** (the Actions secrets do not exist yet): from a clean checkout of `main`, after `npx wrangler whoami` shows the personal account (`69188202efc4df480140dd76545aa3ab`):
+```
+npm ci && npm run typecheck && npm run build:web
+npx wrangler d1 migrations apply ebda-wa-platform --remote
+npx wrangler deploy --var COMMIT_SHA:$(git rev-parse --short HEAD)
+```
+then the same verification as the workflow (section 13), with `--cron "17 1 * * *" --worker ebda-wa` and `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` set so the live cron schedule is printed.
 
 ## 13. Verify production (Claude) — after EVERY deploy
 ```
 META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://wa.ebda.app --expect "$(git rev-parse --short origin/main)" --brand ebda
 ```
-It checks the running commit, the security headers on the API and the page, Meta's webhook handshake, that unsigned/badly-signed webhooks are refused, and that a correctly signed empty webhook is accepted. Anything it could not check prints as SKIP and must be reported as not verified. Then, by hand:
+It checks the running commit, the live cron schedule (with `--cron`/`--worker` and the Cloudflare env), the security headers on the API and the page, Meta's webhook handshake, that unsigned/badly-signed webhooks are refused, and that a correctly signed empty webhook is accepted. Anything it could not check prints as SKIP and must be reported as not verified. Then, by hand:
 0. **Live identity round trip** (the first deploy only proves it): Ahmad signs in at `https://wa.ebda.app`; the inbox loads his store, which proves a real accounts.ebda.app token (ES256, `iss` https://accounts.ebda.app, `aud` whatsapp, `stores[]`) passes our verifier. A 401/403 loop here = stop and report, do not continue.
 1. Send a WhatsApp message to the connected number from the owner's phone; it appears in the inbox in real time; reply from the inbox; the owner receives it.
 2. Open the inbox in Arabic and English, on a phone and a desktop.

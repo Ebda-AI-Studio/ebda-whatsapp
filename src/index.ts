@@ -319,7 +319,8 @@ export default Sentry.withSentry((env: Env) => {
   /** Daily (the only cron; no polling): re-send subscriptions so a lost push heals. Idempotent by construction. */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     bindAlerts({ env, waitUntil: (p) => ctx.waitUntil(p) });
-    ctx.waitUntil(dailyBilling(env));
+    // The log line is the proof of a real tick (the cron can't be waited on): see docs/runbooks/rollback.md.
+    ctx.waitUntil(dailyBilling(env).then(() => console.log(JSON.stringify({ cron: 'daily_billing', done: true }))));
   },
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
     bindAlerts({ env, waitUntil: (p) => ctx.waitUntil(p) });
