@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import type { Env } from '../env';
 import { MAX_PROOF_BYTES } from './billing/instapay';
-import { parseCode } from './campaigns/links';
+import { campaignLinks, parseCode, verifyCode } from './campaigns/links';
 import { MAX_IMPORT_BYTES } from './campaigns/contacts';
 import { MAX_DOCUMENT_BYTES } from './media';
 import { verifyMetaSignature } from './meta/signature';
@@ -53,6 +53,9 @@ export function classify(method: string, path: string): RouteClass | null {
  * guard money or permissions. The Workers Rate Limiting binding is not configured for this Worker; if it is later, swap `take`.
  * The map is bounded (oldest keys dropped) so a stream of made-up keys cannot grow memory.
  */
+/** The tracked-link 404, byte-identical to the route's own (so a probe cannot tell a malformed code from a bad MAC). */
+const linkNotFound = () => new Response('not found', { status: 404, headers: { 'cache-control': 'no-store', 'content-type': 'text/plain; charset=utf-8' } });
+
 /** A client for rate limiting: the IPv4 address, or the IPv6 /64 (one subscriber's prefix), so rotating within one /64 buys nothing. */
 export function clientKey(ip: string | null): string {
   if (!ip) return 'unknown';
@@ -154,18 +157,19 @@ export function requestGuards(limits: GuardLimits = DEFAULT_LIMITS): MiddlewareH
     const req = c.req.raw;
     const path = new URL(req.url).pathname;
 
-    // Public tracked link: limited per client per workspace. A malformed code is left to the route (404 before any Durable Object).
-    if (req.method === 'GET' && path.startsWith('/t/')) {
+    // Public tracked link: only a signed code gets through, then it is limited per client and per workspace.
+    if (path.startsWith('/t/')) { // every method (HEAD is served by the GET route)
       let raw = path.slice(3);
       try { raw = decodeURIComponent(raw); } catch { return next(); }
       const parsed = parseCode(raw);
-      if (parsed) {
-        // Keyed per client AND workspace: a forged but well-formed code naming a store only spends the sender's own share, never the
-        // store's allowance for its real customers. (A client without cf-connecting-ip, local or tests, shares one key per workspace.)
-        const client = clientKey(req.headers.get('cf-connecting-ip'));
-        const wait = linkBuckets.take(`${client}|${parsed.workspaceId}`) || linkWorkspaceBuckets.take(parsed.workspaceId);
-        if (wait) return json(429, 'rate_limited', { 'retry-after': String(wait), 'cache-control': 'no-store' });
-      }
+      // A code must be signed (WA-LINK-2): a made-up or moved code is a 404 here, the same answer as a malformed one, before any rate
+      // bucket or Durable Object is touched. No signing secret = no tracked links at all (fail closed).
+      const secret = campaignLinks().signingSecret(c.env as Env);
+      if (!parsed || !secret || !(await verifyCode(raw, secret))) return linkNotFound();
+      // Keyed per client AND workspace (a client without cf-connecting-ip, local or tests, shares one key per workspace).
+      const client = clientKey(req.headers.get('cf-connecting-ip'));
+      const wait = linkBuckets.take(`${client}|${parsed.workspaceId}`) || linkWorkspaceBuckets.take(parsed.workspaceId);
+      if (wait) return json(429, 'rate_limited', { 'retry-after': String(wait), 'cache-control': 'no-store' });
       return next();
     }
 
