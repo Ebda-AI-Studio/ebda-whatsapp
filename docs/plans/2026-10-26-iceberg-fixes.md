@@ -76,3 +76,41 @@ Verified-OK items in the report (C3, C4, C5, C6, D2, D5, E6, F7, B8, A6) need no
 
 ## Wave 2
 Each W2 group above becomes one PR with its own short brief at the time it starts; Opus review on W2-OFFBOARD, W2-ERASE, W2-ABUSE (F1), W2-MONEY. Order: W2-META + W2-OPS first (shared-number gate), then OFFBOARD, ERASE, ABUSE, CONSENT, RETENTION, MONEY, CONTRACT, DR, SCALE, GROWTH, SUPPORT, LEGAL.
+
+## Reconciliation with the master findings (EBDA-MASTER-FINDINGS-2026-10-26.md, section 6, PW1-PW9)
+Every M-id below maps to a ledger row (or a new row). Gates as in the master file.
+| M-id | Master group | Ledger row / new | Wave / PR |
+|---|---|---|---|
+| M-018, M-019, M-020 | PW1 | E1/T24, E2/T26, C1 (+ E3, E4, E5) | 1 / W1-OBS |
+| M-021, M-060 | PW2 | B1, B7, A2, A3 | 1 / W1-PRIV (#22) |
+| M-017 | PW3 | **NEW: reproducible deploy workflow** (`.github/workflows/cf-deploy.yml`: dispatch, D1 migrate, deploy, `verify-prod.mjs --expect $SHA`, notify-failure; `workers_dev:false`) - wa.ebda.app currently runs a stale manual deploy | 1 / **W1-DEPLOY** (before GO-1) |
+| M-098 | PW3 | T25 incident runbooks, T29 rollback + additive-migration guard | 1 / W1-DEPLOY (runbook + guard), rest W2-DR |
+| M-180 | PW3 | T28 (accepted, INFRA-PREVIEW-1) | n/a |
+| (controller 2026-10-26) | PW6 part | **NEW: request guards before deploy**: body-size cap, content-type allow-list, 413/415, per-workspace limit on public routes (`/meta/webhook`, `/kashier/webhook`, `/t/:code`) | 1 / **W1-GUARD** |
+| M-058 | PW7 | **NEW: PHONE-2 + shared vectors** (`vectors/phone.json`, `vectors/buyer-key.json`) | 1 / **fix/phone2-vectors** |
+| (VAT-0) | parity #7 | W2-VAT0 pulled into wave 1 (lock + VAT-0 clause sha f0af75e0) | 1 / **fix/vat-zero** |
+| M-043, M-100 | PW4 | A1/A5/A7, F3 | 2 (before shared number) / W2-META, W2-OPS |
+| M-042, M-093, M-094, M-095 | PW5 | B2, B3 + T8, B4/T7, B5 | 2 / W2-OFFBOARD, W2-ERASE, W2-RETENTION |
+| M-068, M-069, M-090, M-091, M-092, M-179 | PW6 | B6, F2 (+ **NEW: reply URL/price/promise guard + adversarial injection eval in CI**), F1, F4, F5, F6 | 2 / W2-ABUSE |
+| M-059 | PW7 | **NEW: first live contact checklist** (Meta Graph, Embedded Signup, Kashier; recorded once live) | launch gate / W2-CONTRACT |
+| M-061 | PW7 | D1 = P1b seats (held for wa-members-rpc) | 2 / P1b |
+| M-089 | PW7 | A4 | 2 / W2-CONSENT |
+| M-096 | PW7 | C2 | 2 / W2-MONEY |
+| M-122 | PW7 | T11 (#20 WA-NOFREE-1/WA-CANCEL-1) | 1 / #20 |
+| M-172 | PW7 | D3 | 2 / W2-CONTRACT |
+| M-057, M-138 | PW8 | **NEW: D1 indexes on hot `workspace_id` lookups; CHECK/trigger bounding refunded <= charged** | 2 / **W2-D1** |
+| M-084 | PW9 | **NEW: define "AI credit" (cost per reply) and fix the low-credit alert threshold** | 2 / W2-GROWTH |
+| M-097 | PW9 | T21 | 2 / W2-DR |
+| M-120 | PW9 | T17 | 2 / W2-SCALE |
+| M-121 | PW9 | T12, T13, T26b, T32 | 2 / W2-GROWTH |
+| M-134 | PW9 | **NEW: sniff outbound media type, don't trust the declared MIME** | 2 / W2-ABUSE |
+| M-135 | PW9 | **NEW: revocation check on person tokens for every write, not only money** | 2 / W2-OPS |
+| M-158 | PW9 | **NEW: split the 2,100-line WorkspaceDO by concern; rename review-round test files** | 2 / W2-SCALE |
+| M-167 | PW9 | **NEW: web app small items** (per the master file) | 2 / W2-SUPPORT |
+| M-173 | PW9 | **NEW: TOKEN_ENC_KEY rotation procedure (dual-key read)** | 2 / W2-DR |
+| M-174 | PW9 | **NEW: backup manifest signed (HMAC), not only hashed** | 2 / W2-DR |
+| M-175 | PW9 | **NEW: contact edit/merge** | 2 / W2-RETENTION |
+| M-176 | PW9 | **NEW: nightly bench budget fixed, not runner-sized** | 2 / W2-SCALE |
+| M-177 | PW9 | **NEW: connector error text masked before it reaches the model** | 2 / W2-ABUSE |
+| M-178 | PW9 | **NEW: dailyBilling LIMIT 100 → drain until empty (bounded per pass with continuation)** | 2 / W2-MONEY |
+Ledger rows with no M-id (kept, still to fix): A3, A5, A7, B7, B9, D4, E3, E4, E5, T20, T33-T35.
