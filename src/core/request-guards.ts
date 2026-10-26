@@ -72,12 +72,12 @@ export class Buckets {
 export type GuardLimits = { webhook: { ratePerSec: number; burst: number }; link: { ratePerSec: number; burst: number } };
 /**
  * Defaults sit far above real traffic. Meta webhooks: one request per message batch; 50/s sustained and a burst of 200 per phone number is
- * several times what one busy number sends. Tracked links: clicks arrive in waves after a campaign; 200/s and a burst of 500 per workspace.
+ * several times what one busy number sends. Tracked links: per client per workspace, 20/s and a burst of 60 (a person taps a link a few times, a campaign wave comes from many clients).
  * RESIDUAL (webhooks): a signed request over the limit gets 429, which Meta (and Kashier) redeliver with backoff for days, so a legitimate
  * event is delayed, not lost; only a number that keeps exceeding the limit keeps being delayed. Unsigned requests are never counted, so
  * nobody can spend another number's allowance by naming it.
  */
-export const DEFAULT_LIMITS: GuardLimits = { webhook: { ratePerSec: 50, burst: 200 }, link: { ratePerSec: 200, burst: 500 } };
+export const DEFAULT_LIMITS: GuardLimits = { webhook: { ratePerSec: 50, burst: 200 }, link: { ratePerSec: 20, burst: 60 } };
 
 const json = (status: number, error: string, extra: Record<string, string> = {}) =>
   new Response(JSON.stringify({ error }), { status, headers: { 'content-type': 'application/json', ...extra } });
@@ -142,13 +142,16 @@ export function requestGuards(limits: GuardLimits = DEFAULT_LIMITS): MiddlewareH
     const req = c.req.raw;
     const path = new URL(req.url).pathname;
 
-    // Public tracked link: limited per workspace. A malformed code is left to the route (404 before any Durable Object).
+    // Public tracked link: limited per client per workspace. A malformed code is left to the route (404 before any Durable Object).
     if (req.method === 'GET' && path.startsWith('/t/')) {
       let raw = path.slice(3);
       try { raw = decodeURIComponent(raw); } catch { return next(); }
       const parsed = parseCode(raw);
       if (parsed) {
-        const wait = linkBuckets.take(parsed.workspaceId);
+        // Keyed per client AND workspace: a forged but well-formed code naming a store only spends the sender's own share, never the
+        // store's allowance for its real customers. (A client without cf-connecting-ip, local or tests, shares one key per workspace.)
+        const client = req.headers.get('cf-connecting-ip') ?? 'unknown';
+        const wait = linkBuckets.take(`${client}|${parsed.workspaceId}`);
         if (wait) return json(429, 'rate_limited', { 'retry-after': String(wait), 'cache-control': 'no-store' });
       }
       return next();

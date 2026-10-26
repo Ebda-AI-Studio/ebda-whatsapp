@@ -116,6 +116,15 @@ it('/t/:code: a flood on one workspace is limited with 429, another workspace is
   for (let i = 0; i < 20; i++) expect((await app.request('/t/garbage')).status).toBe(200); // left to the real route (404 there), never rate counted
 });
 
+it('/t/:code: one client flooding a store\'s links cannot use up that store\'s allowance for other customers (keyed per client + workspace)', async () => {
+  const app = mini(4);
+  const code = (w: string) => `${w}.${'B'.repeat(22)}`;
+  const from = (ip: string) => ({ headers: { 'cf-connecting-ip': ip } });
+  for (let i = 0; i < 10; i++) await app.request(`/t/${code(W(930))}`, from('203.0.113.9')); // the attacker exhausts its own share
+  expect((await app.request(`/t/${code(W(930))}`, from('203.0.113.9'))).status).toBe(429);
+  expect((await app.request(`/t/${code(W(930))}`, from('198.51.100.7'))).status).toBe(200); // a real customer's click still lands
+});
+
 it('/t/:code on the real Worker: a junk code is a 404 that never wakes a Durable Object', async () => {
   const get = vi.spyOn(env.WORKSPACE_DO, 'get');
   for (const junk of ['garbage', 'a.b', `${W(910)}.short`, '../../etc', `${W(911)}.${'A'.repeat(22)}`]) {
