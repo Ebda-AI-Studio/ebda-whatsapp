@@ -98,6 +98,21 @@ function menuList(host: LinkHost, locale: Locale): BotMsg {
   return { kind: 'list', body: copy.body[locale], button: copy.button[locale], rows: [...rows, ...tail] };
 }
 
+/** The away message has left: Meta accepted it (or a later status). Queued, claimed, deferred or failed = not on the wire. */
+function awayOnTheWire(host: Pick<LinkHost, 'sql'>, key: string): boolean {
+  const r = host.sql.exec<{ status: string }>('SELECT status FROM messages WHERE idempotency_key = ?', key).toArray()[0];
+  return !!r && ['accepted', 'sent', 'delivered', 'read'].includes(r.status);
+}
+
+/** This customer's most recent away message exists but has not left yet (queued, claimed, deferred). */
+function awayStillWaiting(host: Pick<LinkHost, 'sql'>, waId: string): boolean {
+  const r = host.sql.exec<{ status: string }>(
+    `SELECT m.status FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
+     WHERE ct.wa_id = ? AND m.direction = 'out' AND m.idempotency_key LIKE 'away:%' ORDER BY m.id DESC LIMIT 1`, waId,
+  ).toArray()[0];
+  return !!r && !['accepted', 'sent', 'delivered', 'read', 'failed'].includes(r.status);
+}
+
 /**
  * Business hours. While the shop is closed, the first message of the closed period gets the merchant's away message (once per
  * customer per period: the period is named by the moment the shop next opens). 'stop' = the away message replaces the bot and agent.
@@ -114,8 +129,13 @@ export async function runHoursGate(host: LinkHost, input: BotInput, now: number)
     // The customer may have been erased or said stop while the send was in flight: then nothing about them is written.
     if (!sent) return 'stop';
     host.storage.transactionSync(() => { if (!turnGone(host, input)) putState(host, stateKey, period); });
+    // "We are closed" must be the customer's first reply. If its send was deferred (throttle, wallet wait) or another path holds its
+    // claim, it goes out later from the scheduler: nothing else may be sent in this turn, or the bot/agent answer would overtake it.
+    if (!awayOnTheWire(host, `away:${input.messageId}:0`)) return 'stop';
   } else if (!hours.ordersWhileClosed) {
     return 'stop'; // already told this period: stay quiet instead of repeating it
+  } else if (awayStillWaiting(host, input.from)) {
+    return 'stop'; // told this period, but that away message has not left yet: nothing may overtake it
   }
   return hours.ordersWhileClosed ? 'continue' : 'stop';
 }

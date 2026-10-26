@@ -1,5 +1,5 @@
 import { SELF, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isOpen, nextOpenAt } from '../src/core/front-desk-hours';
 import type { HoursSettings } from '../src/core/store-link/bot-settings';
 import { holdPoint } from './helpers/hold';
@@ -143,16 +143,22 @@ describe('out-of-hours auto reply', () => {
   });
 
   it('the AI agent follows the same switch', async () => {
-    for (const [n, orders] of [[6, false], [7, true]] as const) {
-      const { ws, pn } = await setup(n, hours({ ordersWhileClosed: orders }));
-      expect((await workspace(ws).setAgentSettings({ enabled: true })).ok).toBe(true);
-      await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 'test', credits: 100 });
-      const model = (agent.model = new ScriptedProvider([{ text: 'تمام' }])) as ScriptedProvider;
-      const g = stubGraph();
-      const out = await say(ws, pn, 'عندكم ورد؟', g, CLOSED_THU);
-      expect(out[0]!.body.text.body).toBe(AWAY.ar);
-      expect(model.calls).toHaveLength(orders ? 1 : 0);
-      expect(out.length).toBe(orders ? 2 : 1);
+    // One clock (WA-FLAKE-AWAY-1): the turn ran at CLOSED_THU while the send claim read the real Date.now(); fake only Date so both agree.
+    vi.useFakeTimers({ toFake: ['Date'], now: CLOSED_THU });
+    try {
+      for (const [n, orders] of [[6, false], [7, true]] as const) {
+        const { ws, pn } = await setup(n, hours({ ordersWhileClosed: orders }));
+        expect((await workspace(ws).setAgentSettings({ enabled: true })).ok).toBe(true);
+        await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 'test', credits: 100 });
+        const model = (agent.model = new ScriptedProvider([{ text: 'تمام' }])) as ScriptedProvider;
+        const g = stubGraph();
+        const out = await say(ws, pn, 'عندكم ورد؟', g, Date.now());
+        expect(out[0]!.body.text.body).toBe(AWAY.ar);
+        expect(model.calls).toHaveLength(orders ? 1 : 0);
+        expect(out.length).toBe(orders ? 2 : 1);
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 
@@ -206,5 +212,53 @@ describe('business hours settings route', () => {
     expect(await patch(hours({ week: week({ 0: [{ open: '08:00', close: '10:00' }, { open: '11:00', close: '12:00' }, { open: '13:00', close: '14:00' }] }) }))).toBe(400);
     expect(await patch(hours({ awayMessage: { ar: 'ا'.repeat(1025), en: 'x' } }))).toBe(400);
     expect(await patch(hours({ awayMessage: { ar: '', en: 'x' } }))).toBe(400);
+  });
+});
+
+describe('the away message always goes before any bot or agent reply (WA-FLAKE-AWAY-1)', () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'], now: CLOSED_THU }); });
+  afterEach(() => { vi.useRealTimers(); });
+  const closed = week();
+
+  it('when the away message could not be sent yet (its claim was deferred), nothing else is sent in that turn', async () => {
+    const { ws, pn } = await setup(20, hours({ week: closed, ordersWhileClosed: true }));
+    expect((await workspace(ws).setAgentSettings({ enabled: true })).ok).toBe(true);
+    await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 'test', credits: 100 });
+    agent.model = new ScriptedProvider([{ text: 'تمام' }]);
+    // What a throttle / wallet wait / an in-flight claim does to deliverNow: the away job is not sent now.
+    await runInDurableObject(workspace(ws), (i) => {
+      const d = i as unknown as { deliverNow: (job: { idempotencyKey: string }) => Promise<void> };
+      const orig = d.deliverNow.bind(d);
+      d.deliverNow = async (job) => (job.idempotencyKey.startsWith('away:') ? undefined : orig(job));
+    });
+    const g = stubGraph();
+    expect(await say(ws, pn, 'عندكم ورد؟', g, Date.now())).toEqual([]); // no agent answer ahead of "we are closed"
+  });
+
+  it('a second message while the first away message is still waiting to go: still nothing ahead of it', async () => {
+    const { ws, pn } = await setup(22, hours({ week: closed, ordersWhileClosed: true }));
+    expect((await workspace(ws).setAgentSettings({ enabled: true })).ok).toBe(true);
+    await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 'test', credits: 100 });
+    agent.model = new ScriptedProvider([{ text: 'تمام' }, { text: 'أكيد' }]);
+    await runInDurableObject(workspace(ws), (i) => {
+      const d = i as unknown as { deliverNow: (job: { idempotencyKey: string }) => Promise<void> };
+      const orig = d.deliverNow.bind(d);
+      d.deliverNow = async (job) => (job.idempotencyKey.startsWith('away:') ? undefined : orig(job));
+    });
+    const g = stubGraph();
+    expect(await say(ws, pn, 'عندكم ورد؟', g, Date.now())).toEqual([]);
+    expect(await say(ws, pn, 'وكمان شوكولاتة؟', g, Date.now() + 60_000)).toEqual([]);
+  });
+
+  it('with real interleaving (every Meta call takes 40 ms), two quick messages from the customer: the away message is first on the wire', async () => {
+    const { ws, pn } = await setup(21, hours({ week: closed, ordersWhileClosed: true }));
+    expect((await workspace(ws).setAgentSettings({ enabled: true })).ok).toBe(true);
+    await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 'test', credits: 100 });
+    agent.model = new ScriptedProvider([{ text: 'تمام' }, { text: 'أكيد' }]);
+    const g = stubGraph(undefined, { delayMs: 40 });
+    await Promise.all([say(ws, pn, 'عندكم ورد؟', g, Date.now()), say(ws, pn, 'وكمان شوكولاتة؟', g, Date.now())]);
+    const texts = sentOf(g, pn).map((m) => m.body.text?.body);
+    expect(texts[0]).toBe(AWAY.ar);
+    expect(texts.filter((t) => t === AWAY.ar)).toHaveLength(1); // once per closed period
   });
 });
