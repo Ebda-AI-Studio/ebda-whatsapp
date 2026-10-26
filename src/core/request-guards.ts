@@ -53,6 +53,17 @@ export function classify(method: string, path: string): RouteClass | null {
  * guard money or permissions. The Workers Rate Limiting binding is not configured for this Worker; if it is later, swap `take`.
  * The map is bounded (oldest keys dropped) so a stream of made-up keys cannot grow memory.
  */
+/** A client for rate limiting: the IPv4 address, or the IPv6 /64 (one subscriber's prefix), so rotating within one /64 buys nothing. */
+export function clientKey(ip: string | null): string {
+  if (!ip) return 'unknown';
+  if (!ip.includes(':')) return ip;
+  const [head, tail = ''] = ip.split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const full = [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right];
+  return full.slice(0, 4).map((h) => (h || '0').toLowerCase().replace(/^0+(?=.)/, '')).join(':') + '::/64';
+}
+
 export class Buckets {
   private readonly map = new Map<string, { tokens: number; at: number }>();
   constructor(private readonly ratePerSec: number, private readonly burst: number, private readonly maxKeys = 5_000) {}
@@ -69,15 +80,15 @@ export class Buckets {
   }
 }
 
-export type GuardLimits = { webhook: { ratePerSec: number; burst: number }; link: { ratePerSec: number; burst: number } };
+export type GuardLimits = { webhook: { ratePerSec: number; burst: number }; link: { ratePerSec: number; burst: number; workspaceRatePerSec: number; workspaceBurst: number } };
 /**
  * Defaults sit far above real traffic. Meta webhooks: one request per message batch; 50/s sustained and a burst of 200 per phone number is
- * several times what one busy number sends. Tracked links: per client per workspace, 20/s and a burst of 60 (a person taps a link a few times, a campaign wave comes from many clients).
+ * several times what one busy number sends. Tracked links: two buckets, both must have a token: per client per workspace 20/s (burst 60), so one source cannot spend a store's allowance, and per workspace 200/s (burst 500), so a flood spread over many clients is still capped.
  * RESIDUAL (webhooks): a signed request over the limit gets 429, which Meta (and Kashier) redeliver with backoff for days, so a legitimate
  * event is delayed, not lost; only a number that keeps exceeding the limit keeps being delayed. Unsigned requests are never counted, so
  * nobody can spend another number's allowance by naming it.
  */
-export const DEFAULT_LIMITS: GuardLimits = { webhook: { ratePerSec: 50, burst: 200 }, link: { ratePerSec: 20, burst: 60 } };
+export const DEFAULT_LIMITS: GuardLimits = { webhook: { ratePerSec: 50, burst: 200 }, link: { ratePerSec: 20, burst: 60, workspaceRatePerSec: 200, workspaceBurst: 500 } };
 
 const json = (status: number, error: string, extra: Record<string, string> = {}) =>
   new Response(JSON.stringify({ error }), { status, headers: { 'content-type': 'application/json', ...extra } });
@@ -137,6 +148,7 @@ export function apiContentTypes(): MiddlewareHandler {
 export function requestGuards(limits: GuardLimits = DEFAULT_LIMITS): MiddlewareHandler<{ Bindings: Env }> {
   const webhookBuckets = new Buckets(limits.webhook.ratePerSec, limits.webhook.burst);
   const linkBuckets = new Buckets(limits.link.ratePerSec, limits.link.burst);
+  const linkWorkspaceBuckets = new Buckets(limits.link.workspaceRatePerSec, limits.link.workspaceBurst);
 
   return async (c: Context<{ Bindings: Env }>, next) => {
     const req = c.req.raw;
@@ -150,8 +162,8 @@ export function requestGuards(limits: GuardLimits = DEFAULT_LIMITS): MiddlewareH
       if (parsed) {
         // Keyed per client AND workspace: a forged but well-formed code naming a store only spends the sender's own share, never the
         // store's allowance for its real customers. (A client without cf-connecting-ip, local or tests, shares one key per workspace.)
-        const client = req.headers.get('cf-connecting-ip') ?? 'unknown';
-        const wait = linkBuckets.take(`${client}|${parsed.workspaceId}`);
+        const client = clientKey(req.headers.get('cf-connecting-ip'));
+        const wait = linkBuckets.take(`${client}|${parsed.workspaceId}`) || linkWorkspaceBuckets.take(parsed.workspaceId);
         if (wait) return json(429, 'rate_limited', { 'retry-after': String(wait), 'cache-control': 'no-store' });
       }
       return next();

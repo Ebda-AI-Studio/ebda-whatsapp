@@ -1,7 +1,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { expect, it, vi } from 'vitest';
-import { requestGuards } from '../src/core/request-guards';
+import { type GuardLimits, requestGuards } from '../src/core/request-guards';
 import { inboundPayload } from './helpers/payload';
 import { sign } from './helpers/meta';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
@@ -72,9 +72,9 @@ it('a wrong content type on a body is 415 unsupported_media (API, webhooks); mul
 // ---- public routes
 // The limits are exercised on a tiny app with the real middleware and tiny buckets (no refill): deterministic whatever the machine load.
 // The wiring into the real Worker is covered by the 413/415 tests above and the junk /t test below.
-const mini = (burst: number) => {
+const mini = (burst: number, over: Partial<GuardLimits> = {}) => {
   const app = new Hono<{ Bindings: { META_APP_SECRET: string } }>();
-  app.use('*', requestGuards({ webhook: { ratePerSec: 0.0001, burst }, link: { ratePerSec: 0.0001, burst } }));
+  app.use('*', requestGuards({ webhook: { ratePerSec: 0.0001, burst }, link: { ratePerSec: 0.0001, burst, workspaceRatePerSec: 1000, workspaceBurst: 1000 }, ...over }));
   app.post('/meta/webhook', (c) => c.text('ok'));
   app.get('/t/:code', (c) => c.text('hit'));
   return app;
@@ -123,6 +123,20 @@ it('/t/:code: one client flooding a store\'s links cannot use up that store\'s a
   for (let i = 0; i < 10; i++) await app.request(`/t/${code(W(930))}`, from('203.0.113.9')); // the attacker exhausts its own share
   expect((await app.request(`/t/${code(W(930))}`, from('203.0.113.9'))).status).toBe(429);
   expect((await app.request(`/t/${code(W(930))}`, from('198.51.100.7'))).status).toBe(200); // a real customer's click still lands
+});
+
+it('/t/:code: many clients together still hit the store-wide cap, and IPv6 clients are keyed by their /64', async () => {
+  const app = mini(4, { link: { ratePerSec: 0.001, burst: 2, workspaceRatePerSec: 0.001, workspaceBurst: 5 } });
+  const code = (w: string) => `${w}.${'C'.repeat(22)}`;
+  const from = (ip: string) => ({ headers: { 'cf-connecting-ip': ip } });
+  const statuses = [];
+  for (let i = 0; i < 7; i++) statuses.push((await app.request(`/t/${code(W(940))}`, from(`198.51.100.${i}`))).status); // 7 different clients
+  expect(statuses.slice(0, 5)).toEqual([200, 200, 200, 200, 200]);
+  expect(statuses.slice(5)).toEqual([429, 429]); // the store-wide cap holds against a spread flood
+  // two addresses in one IPv6 /64 share one client share
+  await app.request(`/t/${code(W(941))}`, from('2001:db8:1:2::a'));
+  await app.request(`/t/${code(W(941))}`, from('2001:db8:1:2::b'));
+  expect((await app.request(`/t/${code(W(941))}`, from('2001:db8:1:2::c'))).status).toBe(429);
 });
 
 it('/t/:code on the real Worker: a junk code is a 404 that never wakes a Durable Object', async () => {
