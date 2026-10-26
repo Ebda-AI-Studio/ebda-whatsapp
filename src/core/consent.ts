@@ -1,13 +1,20 @@
 import { normaliseText } from './text-normalise';
 
 // Whole-message keywords only: "stop" or "cancel" inside a sentence must never opt anyone out ("cancel my order" is an order question).
-// ONE list for text and for button/list replies, matched through normaliseText (case, diacritics, alef/yaa/taa forms, punctuation).
-const OPT_OUT_WORDS = [
-  'stop', 'stop all', 'stop messages', 'unsubscribe', 'unsubscribe me', 'optout', 'opt out', 'cancel', 'remove me',
-  'إلغاء', 'وقف', 'وقف الرسائل', 'الغاء الاشتراك', 'توقف', 'ايقاف', 'ايقاف الرسائل', 'بطل', 'بطلوا', 'بطل رسايل',
-  'مش عايز رسايل', 'مش عايز رسائل', 'لا تراسلني', 'متبعتليش رسايل',
+// ONE vocabulary module, two sets, matched through normaliseText (case, diacritics, alef/yaa/taa forms, punctuation):
+//  - BUTTON words: explicit opt-out phrases, safe for a tapped button / list row (title or id).
+//  - TEXT words: the button words PLUS bare words that are an opt-out only when the customer TYPES them. A bare "Cancel" / "إلغاء" / "وقف"
+//    on a button belongs to the merchant's own flow ("cancel appointment"); treating the tap as a STOP would silence the customer for all marketing.
+export const OPT_OUT_BUTTON_WORDS: readonly string[] = [
+  'stop', 'stop all', 'stop messages', 'stop promotions', 'unsubscribe', 'unsubscribe me', 'optout', 'opt out',
+  'وقف الرسائل', 'الغاء الاشتراك', 'ايقاف الرسائل', 'بطل رسايل', 'مش عايز رسايل', 'مش عايز رسائل', 'لا تراسلني', 'متبعتليش رسايل',
 ];
-const OPT_OUT = new Set(OPT_OUT_WORDS.map(normaliseText));
+export const OPT_OUT_TEXT_WORDS: readonly string[] = [
+  ...OPT_OUT_BUTTON_WORDS,
+  'cancel', 'remove me', 'إلغاء', 'وقف', 'توقف', 'ايقاف', 'بطل', 'بطلوا',
+];
+const OPT_OUT = new Set(OPT_OUT_TEXT_WORDS.map(normaliseText));
+const OPT_OUT_BUTTON = new Set(OPT_OUT_BUTTON_WORDS.map(normaliseText));
 /** Opt-in words every product shares; a product adds its own through config (see WorkspaceConfig.optInKeywords). */
 export const CORE_OPT_IN_KEYWORDS: readonly string[] = ['start', 'اشترك'];
 
@@ -16,12 +23,12 @@ export function detectOptOut(text: string): boolean {
   return OPT_OUT.has(normaliseText(text));
 }
 
-/** An inbound message that is an opt-out: a text, or a tapped button / list row whose title or id is an opt-out word. COD answers and store picks are never one. */
+/** An inbound message that is an opt-out: a text, or a tapped button / list row whose title or id is an explicit opt-out phrase (never a bare cancel/إلغاء/وقف). COD answers and store picks are never one. */
 export function detectOptOutMessage(m: { type: string; text?: string; reply?: { kind: string; id: string; title: string } }): boolean {
   if (m.type === 'text') return !!m.text && detectOptOut(m.text);
   if (m.type === 'interactive' && m.reply) {
     if (m.reply.id.startsWith('cod:') || m.reply.id.startsWith('shared:pick:')) return false;
-    return detectOptOut(m.reply.title) || detectOptOut(m.reply.id);
+    return OPT_OUT_BUTTON.has(normaliseText(m.reply.title)) || OPT_OUT_BUTTON.has(normaliseText(m.reply.id));
   }
   return false;
 }

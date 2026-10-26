@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
-import { detectOptOut, detectOptOutMessage } from '../src/core/consent';
+import { detectOptOut, detectOptOutMessage, OPT_OUT_BUTTON_WORDS, OPT_OUT_TEXT_WORDS } from '../src/core/consent';
 import { customerKey } from '../src/core/shared/shared-number';
 import { rows, workspace } from './helpers/workspace';
 
@@ -19,11 +19,22 @@ it.each([
 // ---- A2: a button / list reply is judged on title or id, same vocabulary
 const rep = (kind: 'button' | 'list', id: string, title: string) => ({ type: 'interactive' as const, reply: { kind, id, title } });
 it('A2 a Stop button tap (title or id) is an opt-out; ordinary and COD replies are not', () => {
-  expect(detectOptOutMessage(rep('button', 'x1', 'Stop promotions'.slice(0, 4)))).toBe(true); // "Stop"
+  expect(detectOptOutMessage(rep('button', 'x1', 'Stop'))).toBe(true);
+  expect(detectOptOutMessage(rep('button', 'x1', 'Stop promotions'))).toBe(true);
+  expect(detectOptOutMessage(rep('button', 'x1', 'إلغاء الاشتراك'))).toBe(true);
+  expect(detectOptOutMessage(rep('button', 'x1', 'مش عايز رسايل'))).toBe(true);
   expect(detectOptOutMessage(rep('button', 'x1', 'وقف الرسائل'))).toBe(true);
   expect(detectOptOutMessage(rep('button', 'optout', 'Not now'))).toBe(true); // id
   expect(detectOptOutMessage(rep('button', 'opt_out', 'x'))).toBe(true);
   expect(detectOptOutMessage(rep('list', 'stop', 'x'))).toBe(true);
+  // a bare Cancel / إلغاء / وقف on a button belongs to the merchant's own flow ("cancel appointment"): never a STOP
+  for (const t of ['Cancel', 'cancel', 'إلغاء', 'وقف', 'توقف', 'بطل', 'ايقاف']) {
+    expect(detectOptOutMessage(rep('button', 'x1', t)), t).toBe(false);
+    expect(detectOptOutMessage(rep('list', 'x1', t)), t).toBe(false);
+    expect(detectOptOutMessage({ type: 'text', text: t }), `text ${t}`).toBe(true); // typed text keeps the full list
+  }
+  expect(detectOptOutMessage(rep('button', 'cancel', 'x'))).toBe(false); // id too
+  expect([...OPT_OUT_BUTTON_WORDS].every((w) => OPT_OUT_TEXT_WORDS.includes(w))).toBe(true); // one vocabulary: button words are a subset
   expect(detectOptOutMessage(rep('button', 'yes', 'أيوه'))).toBe(false);
   expect(detectOptOutMessage(rep('button', 'cod:n:o1', 'cancel'))).toBe(false); // a COD answer is an order answer, never an opt-out
   expect(detectOptOutMessage(rep('list', 'shared:pick:ws', 'Stop'))).toBe(false); // a store pick
@@ -62,4 +73,19 @@ it('B7 eraseContact deletes the parked shared-number objects of that sender (and
   expect(r.r2Pending).toBe(0);
   expect((await env.MEDIA.list({ prefix: `shared-parked/${pn}/${mine}/` })).objects).toEqual([]);
   expect((await env.MEDIA.list({ prefix: `shared-parked/${pn}/${other}/` })).objects).toHaveLength(1);
+});
+
+it('B7 where another store is still a candidate, the parked message stays for it and the erasing store is no longer offered', async () => {
+  const [a, b] = ['ws-priv-b7a', 'ws-priv-b7b'];
+  const pn = 'pn-priv-2';
+  const k = await customerKey(env, PHONE);
+  for (const w of [a, b]) await env.DB.prepare('INSERT INTO shared_routes (phone_number_id, customer_key, workspace_id, last_at) VALUES (?, ?, ?, 1)').bind(pn, k, w).run();
+  await env.MEDIA.put(`shared-parked/${pn}/${k}/000000000001-a`, '{"from":"x"}');
+  await workspace(a).eraseContact(PHONE);
+  expect((await env.MEDIA.list({ prefix: `shared-parked/${pn}/${k}/` })).objects).toHaveLength(1); // B can still receive it
+  const left = await env.DB.prepare('SELECT workspace_id FROM shared_routes WHERE phone_number_id = ? AND customer_key = ?').bind(pn, k).all<{ workspace_id: string }>();
+  expect(left.results.map((r) => r.workspace_id)).toEqual([b]); // A is gone from the candidate / pick list
+  // and once B is the only one left and erases, the parked message goes
+  await workspace(b).eraseContact(PHONE);
+  expect((await env.MEDIA.list({ prefix: `shared-parked/${pn}/${k}/` })).objects).toEqual([]);
 });

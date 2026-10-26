@@ -42,7 +42,7 @@ Only for the number found in `shared_numbers` while the switch is on. Per messag
 4. Routed → the message is ingested into that store's Durable Object (normal path: opt-out words, bot, agent, auto reply).
 5. Ambiguous → the message is parked in R2 (`shared-parked/<number>/<customer_key>/…`, 48 h) and the customer gets ONE list (`shared-list/…` marker, 24 h, claimed with a conditional put) with store display names only; nothing from any store's conversation goes into it.
 6. No route → one generic reply per customer per 24 h (`shared-noroute/…` marker); nothing is stored in any store.
-Erasing a contact (`eraseSharedFor`) also removes that sender's parked messages (`shared-parked/<number>/<customer_key>/`) through `r2_pending_deletes` (queued before the routes are deleted, retried until R2 confirms).
+Erasing a contact (`eraseSharedFor`) drops this store's routes (so it is no longer a candidate or offered in the pick list) and removes the sender's parked messages (`shared-parked/<number>/<customer_key>/`) through `r2_pending_deletes` ONLY for a number where this store is the sole candidate; parked messages are shared by every candidate store, so while another store is still a candidate they stay for it (queued before the routes are deleted, retried until R2 confirms).
 
 Opt-out (`STOP`, the other opt-out words and a Stop button tap): routed → that store; ambiguous → every active store that wrote to the customer (safe direction), no list, nothing parked; no route → silent, nothing stored.
 Statuses (`sent/delivered/read/failed`) are routed by the message id in `shared_sent`; an unknown id is dropped with a warning.

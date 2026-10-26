@@ -218,14 +218,18 @@ export async function afterSharedSend(env: Env, job: Pick<SendJob, 'workspaceId'
 const AFTER_SEND_ATTEMPTS = 3;
 
 /**
- * Erasure of one contact in one store: its routes and sent-message map go (other stores' rows stay), and so do the sender's parked
- * messages in R2 (`shared-parked/<number>/<customer_key>/`, raw text). The parked keys are handed to `owe` BEFORE anything is deleted
- * (the caller records them in its r2_pending_deletes, which retries until R2 confirms); the numbers to look under come from the routes,
- * so they are read first.
+ * Erasure of one contact in one store: its routes and sent-message map go (other stores' rows stay). Dropping this store's routes also
+ * removes it from the customer's candidate / pick list, so the customer can never be routed back to it. The sender's parked messages in R2
+ * (`shared-parked/<number>/<customer_key>/`, raw text) are shared by every candidate store, so they are deleted ONLY for a number where this
+ * store is the sole candidate; where another store is still a candidate they stay for it. The parked keys are handed to `owe` BEFORE anything
+ * is deleted (the caller records them in its r2_pending_deletes, which retries until R2 confirms).
  */
 export async function eraseSharedFor(env: Env, workspaceId: string, waId: string, owe: (keys: string[]) => void = () => {}): Promise<void> {
   const key = await customerKey(env, waId);
-  const numbers = await env.DB.prepare('SELECT DISTINCT phone_number_id FROM shared_routes WHERE customer_key = ?').bind(key).all<{ phone_number_id: string }>();
+  const numbers = await env.DB.prepare(
+    `SELECT DISTINCT r.phone_number_id FROM shared_routes r WHERE r.customer_key = ? AND r.workspace_id = ?
+       AND NOT EXISTS (SELECT 1 FROM shared_routes o WHERE o.phone_number_id = r.phone_number_id AND o.customer_key = r.customer_key AND o.workspace_id <> r.workspace_id)`,
+  ).bind(key, workspaceId).all<{ phone_number_id: string }>();
   const keys: string[] = [];
   for (const { phone_number_id: pn } of numbers.results) {
     let cursor: string | undefined;
