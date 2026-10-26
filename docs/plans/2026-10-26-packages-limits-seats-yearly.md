@@ -4,7 +4,7 @@
 
 **Goal:** The approved Ebda WhatsApp packages exist in D1 with their limits; every limit is enforced server-side (deny by default); team access is by explicit seat assignment; packages can be bought monthly or yearly.
 
-**Architecture:** D1 `packages` (control plane) gains limit columns; the entitlement event that already carries `aiCredits` to each workspace DO now also carries the limits, so the DO (the workspace's authority) decides every gate from its own copy, with no entitlement row = deny. Seats live in the workspace DO; the Store staff list comes through ONE identity adapter (`src/core/identity/members.ts`) so its final location (accounts or Store bridge) is a one-file change. Yearly = `period_months` on packages, carried through checkout, renewal and refund; AI credits are granted monthly inside a yearly period.
+**Architecture:** D1 `packages` (control plane) gains limit columns; the entitlement event that already carries `aiCredits` to each workspace DO now also carries the limits, so the DO (the workspace's authority) decides every gate from its own copy, with no entitlement row = deny. Seats live in the workspace DO; the Store staff list and each request's membership check come through the Store bridge adapter (`src/addons/ebda/store-bridge.ts`, contract v1.4), the one file that touches the binding. Yearly = `period_months` on packages, carried through checkout, renewal and refund; AI credits are granted monthly inside a yearly period.
 
 **Tech Stack:** Cloudflare Workers + Hono, D1, DO SQLite, React.
 
@@ -41,14 +41,17 @@
 - Gates: `POST campaigns`, `POST .../send`, `POST .../resume` → 403 plan_feature `campaigns`; ordering bot `orderingActive` also requires `order_in_chat` (a stopped bot falls back to the plain inbox reply path it already has); a client principal (`principal.client`) on a store whose workspace has no `api` → 403 plan_feature `api` (checked in `requireStore` after the store is resolved, one DO read).
 - [ ] Tests first: Review Focus 1, 2, 3; each package's seeded values exactly; listPackages shows starter/growth/pro with features in key order; an event without `limits` grants nothing.
 
-### Task P1b: seats by explicit assignment (PR 2, HELD from main until the controller confirms the identity RPC)
-**Files:** Create `src/core/identity/members.ts` (THE adapter), `src/routes/members.ts`, DO migration (append `seats`), web Team screen; tests `test/seats.test.ts`, `web/src/TeamScreen.test.tsx`; vitest stand-in `listStoreMembers` on the ACCOUNTS stand-in.
-**Interfaces:**
-- Adapter: `listStoreMembers(env, storeId): Promise<{ ok: true; items: { userId: string; displayName: string; role: 'owner' | 'staff'; addedAt: number }[] } | { ok: false; reason: 'unavailable' }>`; today via `env.ACCOUNTS.listStoreMembers(storeId)`.
-- DO `seats(user_id TEXT PRIMARY KEY, assigned_at INTEGER NOT NULL, assigned_by TEXT NOT NULL)`; `seatState(userId, ownerId?)`: owner → 'owner'; else seated within the first `memberLimit - 1` by (assigned_at, user_id) → 'seated'; seated beyond → 'over_limit'; else 'none'.
-- Routes (owner only): `GET /stores/:id/members` → staff list joined with seat state + `{ limit, used, overLimit }`; `PUT /stores/:id/members/:userId/seat` → 201 or 403 `seat_limit` (body carries `limit` for the CTA); `DELETE .../seat` → 204; the owner cannot be unseated (400).
-- Middleware: a staff (non-owner, non-super-admin, non-client) principal whose `seatState` is not 'seated' → 403 `no_seat`.
-- Downgrade notice: when an applied entitlement lowers `maxMembers` below the seats in use, record an owner notice (shown on the Team screen and the inbox banner) and alert `seats_over_limit`.
+### Task P1b: seats by explicit assignment (PR 2, HELD from main until the Store's feat/wa-members-rpc merges)
+Shape CONFIRMED 2026-10-26 (identity Ruling ID-19, contract v1.4): membership lives in the STORE and is read through the Store worker's `WhatsAppBridge` service binding (the existing `STORE_BRIDGE`), not ACCOUNTS. There is NO member_removed event: revocation = `memberRole` on every staff request.
+**Files:** `src/core/store-bridge.ts` (interface + zod schemas: `listStoreMembers`, `memberRole`), `src/addons/ebda/store-bridge.ts` (the adapter: the ONE place that calls the binding), `src/routes/members.ts`, DO migration (append `seats`), `src/core/identity/middleware.ts`, web Team screen; tests `test/seats.test.ts`, `web/src/TeamScreen.test.tsx`; the FakeStore in `test/helpers/fake-store.ts` gains both methods.
+**Interfaces (Store side, contract v1.4):**
+- `listStoreMembers(storeId, asUserId)` → `{ items: [{ userId, displayName, role: 'owner' | 'staff', addedAt }] }`: owner + ACTIVE staff only (suspended excluded), no email/phone/credential. `asUserId` = the verified token `sub` and must OWN the store, else `FORBIDDEN`; malformed ids → `INVALID_ID`; a read failure THROWS → we answer 503 and change nothing.
+- `memberRole(storeId, userId)` → `'owner' | 'staff' | null`: called on EVERY staff request, no cache (permissions are never-stale); null or a thrown/timed-out call → refuse (`403 no_seat` for null, `503` on error: fail closed either way).
+**WhatsApp side:**
+- DO `seats(user_id TEXT PRIMARY KEY, assigned_at INTEGER NOT NULL, assigned_by TEXT NOT NULL)`; `seatState(userId)`: seated within the first `memberLimit - 1` by (assigned_at, user_id) → 'seated'; seated beyond → 'over_limit'; else 'none'. The owner never has a row and always counts as one.
+- Middleware, staff principal (not owner by `memberRole`, not super admin, not a client token): `memberRole` must return 'staff' AND `seatState` must be 'seated', else refuse. An owner by token whose `memberRole` is not 'owner' is refused too.
+- Routes (owner only): `GET /stores/:id/members` (calls `listStoreMembers(storeId, sub)`) → items + seat state + `{ limit, used, overLimit }`; `PUT /stores/:id/members/:userId/seat` → 201, or 403 `seat_limit` with `{ limit }` for the upgrade CTA, or 404 when the user is not an active member; `DELETE .../seat` → 204; the owner cannot be unseated (400).
+- Downgrade notice: an applied entitlement that lowers `maxMembers` below the seats in use records an owner notice (Team screen + inbox banner) and alerts `seats_over_limit`; nothing is deleted.
 
 ### Task P2: yearly billing (PR 3, Opus review)
 **Files:** `migrations/d1/0015_yearly.sql` (`packages.period_months INTEGER NOT NULL DEFAULT 1 CHECK (period_months IN (1, 12))`, seed the three yearly rows), `src/core/billing/subscriptions.ts` (`MONTH_SQL` → period length from the package), `package-orders.ts` + `instapay.ts` (amount = the package's price; period = its months), refunds (yearly rule), `entitlements.ts` + `ai/credits.ts` (monthly grant inside a long period: a `credit_month` task at each monthly anniversary inside the period grants that month's allowance and expires the previous month's unused grant), docs.
