@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { connectNumberRequest, listNumbersResponse, signupConfigDto } from '../core/api/contract';
 import { SignupConfigError, connectNumber, disconnectNumber, listNumbers, refreshNumber, resumeSetup, signupEnabled, type NumberResult } from '../core/numbers/numbers';
-import { apiError, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
+import { apiError, planRequired, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 import { alert } from '../core/observability';
 
 const owner = managesStore;
@@ -20,9 +20,14 @@ numbersRoutes.use('/stores/:storeId/numbers', async (c, next) => (signupEnabled(
 numbersRoutes.use('/stores/:storeId/numbers/*', async (c, next) => (signupEnabled(c.env) ? next() : apiError(c, 404, 'not_found')));
 
 /** Wraps a handler so a missing secret is one loud log line and a clear 503 instead of a crash. */
-async function guarded(c: ApiContext, run: (workspaceId: string) => Promise<NumberResult>): Promise<Response> {
+async function guarded(c: ApiContext, run: (workspaceId: string) => Promise<NumberResult>, needsPlan = false): Promise<Response> {
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
+  // WA-NOFREE-1: connecting / registering a number (coexistence included) needs a package. Refreshing and disconnecting stay open.
+  if (needsPlan) {
+    const noPlan = await planRequired(c, ws);
+    if (noPlan) return noPlan;
+  }
   try {
     return reply(c, await run(c.req.param('storeId')!));
   } catch (err) {
@@ -56,7 +61,7 @@ numbersRoutes.post('/stores/:storeId/numbers/connect', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
   const body = connectNumberRequest.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return apiError(c, 400, 'invalid_request');
-  return guarded(c, (workspaceId) => connectNumber(c.env, workspaceId, body.data));
+  return guarded(c, (workspaceId) => connectNumber(c.env, workspaceId, body.data), true);
 });
 
 numbersRoutes.post('/stores/:storeId/numbers/:phoneNumberId/refresh', async (c) => {
@@ -69,7 +74,7 @@ numbersRoutes.post('/stores/:storeId/numbers/:phoneNumberId/register', async (c)
   if (!owner(c)) return apiError(c, 403, 'forbidden');
   const pn = c.req.param('phoneNumberId');
   if (!PN.test(pn)) return apiError(c, 400, 'invalid_request');
-  return guarded(c, (workspaceId) => resumeSetup(c.env, workspaceId, pn));
+  return guarded(c, (workspaceId) => resumeSetup(c.env, workspaceId, pn), true);
 });
 
 numbersRoutes.post('/stores/:storeId/numbers/:phoneNumberId/disconnect', async (c) => {

@@ -85,7 +85,7 @@ CI is paused by Ahmad's instruction. To resume: bring the Umbra runner for this 
 Each merge: full suite green twice locally, CI green, then deploy.
 
 ## 11. Migrations (Claude)
-`npx wrangler d1 migrations apply ebda-wa-platform --remote` before the deploy that needs them. Durable Object SQLite migrates itself on first access (versioned in code).
+`npx wrangler d1 migrations apply ebda-wa-platform --remote` before the deploy that needs them. Durable Object SQLite migrates itself on first access (versioned in code). Packages: `0014_package_limits.sql` seeds starter / growth / pro and `0015_past_due_since.sql` adds the grace clock. **There is no free plan (WA-NOFREE-1):** a store with no package, or a cancelled / expired one, can read and buy but cannot send ANY message, run the AI agent or connect a number (`403 plan_required`); `past_due` keeps service sends for at most 7 days (WA-GRACE-1). So before the first merchant, make sure they either have a Store plan that includes WhatsApp (`store-included`, set only by the Store plan event) or buy / are assigned a paid package.
 
 ## 12. Deploy
 **Ruling WA-DEPLOY-1: deploys run from Ahmad's Mac with `bash scripts/deploy.sh` until the repo has environment protection. Do NOT add `CLOUDFLARE_API_TOKEN` to GitHub secrets until then** (required reviewer + main-only deployment branches on the `production` environment). Why: Whisky-11 is on the GitHub Free plan with a private repo, where environment protection does not exist, so a dispatch from a branch with an edited workflow could read any secret it can reference. Cost if wrong: a leaked Cloudflare token lets someone deploy arbitrary code to the live Worker and read/write D1, R2 and the queues; treating the token as Mac-only costs one manual command per deploy. The `cf-deploy` workflow (environment `production`, step-scoped secrets, `npm ci --ignore-scripts`, dispatch-only) is kept ready and fails closed without the secret; it calls the very same script.
@@ -116,4 +116,4 @@ It checks the running commit, the live cron schedule (with `--cron`/`--worker` a
 - `/t/:code` already answers a malformed code or an unknown workspace with 404 before any Durable Object is woken; after deploy check that a made-up code returns 404 and a normal webhook and API call still pass.
 
 ## 14. Go live checklist for the first merchant
-Business verified · number connected and registered (or coexistence synced within 24 h) · templates approved · store linked (if Ebda Store) · AI agent configured (optional) · wallet funded (shared number only) · help guides published at help.ebda.app.
+Business verified · a package on record (Store plan with WhatsApp, a purchase or an operator-assigned paid package; no package = no sending) · number connected and registered (or coexistence synced within 24 h) · templates approved · store linked (if Ebda Store) · AI agent configured (optional) · wallet funded (shared number only) · help guides published at help.ebda.app.

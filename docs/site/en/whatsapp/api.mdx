@@ -102,6 +102,7 @@ Every error uses one envelope:
 | `payload_too_large` | 413 | The body is over the limit: 1 MB for JSON requests. Uploads keep their own larger limits (media 50 MB, contact imports 10 MB, transfer proofs 5 MB). Checked before the body is read, also for requests sent without a length |
 | `wallet_empty` | 409 | The wallet cannot cover the send |
 | `plan_blocked`, `funding_unknown`, `rate_unavailable` | 409 | The send is refused for plan, funding or pricing reasons |
+| `plan_required` | 403 | The store has no package in good standing (none, cancelled, expired, or past due beyond its 7-day grace), so nothing can be sent, no AI agent runs and no number can be connected. Reading, the package list, checkout and the wallet stay open. A queued message that meets this later is marked failed with `plan_required` |
 | `plan_feature` | 403 | The package does not include this feature. The body carries `feature` (`campaigns`, `order_in_chat` or `api`); upgrade the package. A store with no package on record is refused too |
 | `rate_limited` | 503 (429 on the connector test and on a flood to a public route) | A temporary condition, such as Meta being unavailable or a send that could not be queued. Retry later |
 | `registration_locked`, `number_conflict`, `signup_failed`, `signup_unavailable` | varies | Number connection problems |

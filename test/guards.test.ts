@@ -144,4 +144,31 @@ it('DIGITS-1: no ٠-٩ / ۰-۹ in code, copy, templates, brands, help, legal or 
     }
   }
   expect(hits).toEqual([]);
+// ---- WA-NOFREE-1: there is no free plan ----
+it('across the D1 migrations, a package with price_minor = 0 is only ever store-included', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const dir = new URL('../migrations/d1/', import.meta.url);
+  const seen: { id: string; price: number; file: string }[] = [];
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.sql'))) {
+    const sql = readFileSync(new URL(f, dir), 'utf8');
+    for (const stmt of sql.split(';').filter((s) => /INSERT\s+(OR\s+\w+\s+)?INTO\s+packages\b/i.test(s))) {
+      for (const m of stmt.matchAll(/\(\s*'([\w-]+)'\s*,\s*'[^']*'\s*,\s*(\d+)\s*,/g)) seen.push({ id: m[1]!, price: Number(m[2]), file: f });
+    }
+  }
+  expect(seen.map((s) => s.id)).toEqual(expect.arrayContaining(['store-included', 'starter', 'growth', 'pro'])); // the parse is not vacuous
+  expect(seen.filter((s) => s.price === 0 && s.id !== 'store-included')).toEqual([]);
+});
+
+it('store-included is only ever written by the Store-plan path (store-plan.ts and the fallback to it in subscriptions.ts)', async () => {
+  const files = [...new Set(findMatches(/store-included|STORE_INCLUDED/, 'src').map((m) => m.split(':')[0]!))].sort();
+  expect(files).toEqual(['src/core/billing/store-plan.ts', 'src/core/billing/subscriptions.ts', 'src/routes/operator.ts']);
+  expect(findMatches(/STORE_INCLUDED/, 'src/routes').length).toBe(2); // operator.ts: the import and the refusal, nothing that writes it
+  // The other two writers of workspace_subscriptions take an id from outside, so each must refuse the free package where it takes it.
+  const { readFileSync } = await import('node:fs');
+  // The listing a merchant buys from: the SQL string of listPackages itself must filter price_minor > 0 (not just mention it somewhere).
+  const orders = readFileSync(new URL('../src/core/billing/package-orders.ts', import.meta.url), 'utf8');
+  const listing = /export async function listPackages[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '';
+  expect(listing).toMatch(/FROM packages WHERE[^']*active = 1[^']*price_minor > 0/);
+  expect(/export async function startPackageCheckout[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '').toMatch(/FROM packages WHERE id = \? AND active = 1 AND price_minor > 0/);
+  expect(readFileSync(new URL('../src/routes/operator.ts', import.meta.url), 'utf8')).toMatch(/store_included_is_store_plan_only/);
 });

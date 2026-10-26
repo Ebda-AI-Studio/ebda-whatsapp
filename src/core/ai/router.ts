@@ -4,6 +4,7 @@
  */
 import type { LinkHost } from '../store-link/host';
 import { orderingActive, orderingEngaged, runBotTurnLocked, serialisedTurn, turnGone, type BotInput } from '../ordering/bot';
+import { serviceAllowed } from '../billing/entitlements';
 import { recordFunnel } from '../bot-funnel';
 import { frontDeskActive, runFrontDesk, runHoursGate } from '../front-desk';
 import { agentConfig } from './config';
@@ -16,6 +17,8 @@ const ORDERING_TYPES = new Set(['text', 'interactive', 'order', 'image']);
 
 export async function runTurn(host: LinkHost, input: BotInput, now: number): Promise<void> {
   await serialisedTurn(host, input.from, async () => {
+    // WA-NOFREE-1: no package, no bot, no menu, no AI agent (the inbound itself is already stored: reading stays open).
+    if (!serviceAllowed(host.sql, now)) return;
     const agentOn = agentActive(host);
     const orderingOn = orderingActive(host);
     if (!agentOn && !orderingOn && !frontDeskActive(host)) return;

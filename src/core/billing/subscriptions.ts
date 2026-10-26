@@ -15,15 +15,15 @@ import { alert } from '../observability';
 export const STORE_INCLUDED = 'store-included';
 export const MONTH_SQL = (col: string) => `CAST(strftime('%s', ${col} / 1000, 'unixepoch', '+1 month') AS INTEGER) * 1000`;
 
-type SubRow = { workspace_id: string; package_id: string; status: EntitlementEvent['status']; period_start: number; period_end: number; cancelled_at: number | null; version: number; ai_credits: number | null; max_members: number | null; feat_campaigns: number | null; feat_order_in_chat: number | null; feat_api: number | null; priority_support: number | null };
+type SubRow = { workspace_id: string; package_id: string; status: EntitlementEvent['status']; period_start: number; period_end: number; cancelled_at: number | null; version: number; ai_credits: number | null; max_members: number | null; feat_campaigns: number | null; feat_order_in_chat: number | null; feat_api: number | null; priority_support: number | null; past_due_since: number | null };
 
 /** A package row that is missing (LEFT JOIN null) yields the DENY limits, never a feature. */
 export const toEvent = (r: SubRow): EntitlementEvent => ({
-  version: r.version, packageId: r.package_id, status: r.status, periodStart: r.period_start, periodEnd: r.period_end, aiCredits: r.ai_credits ?? 0, cancelledAt: r.cancelled_at,
+  version: r.version, packageId: r.package_id, status: r.status, periodStart: r.period_start, periodEnd: r.period_end, aiCredits: r.ai_credits ?? 0, cancelledAt: r.cancelled_at, pastDueSince: r.status === 'past_due' ? r.past_due_since : null,
   limits: { maxMembers: Math.max(1, r.max_members ?? 1), campaigns: r.feat_campaigns === 1, orderInChat: r.feat_order_in_chat === 1, api: r.feat_api === 1, prioritySupport: r.priority_support === 1 },
 });
 
-const SELECT = `SELECT s.workspace_id, s.package_id, s.status, s.period_start, s.period_end, s.cancelled_at, s.version, p.ai_credits, p.max_members, p.feat_campaigns, p.feat_order_in_chat, p.feat_api, p.priority_support
+const SELECT = `SELECT s.workspace_id, s.package_id, s.status, s.period_start, s.period_end, s.cancelled_at, s.version, p.ai_credits, p.max_members, p.feat_campaigns, p.feat_order_in_chat, p.feat_api, p.priority_support, s.past_due_since
   FROM workspace_subscriptions s LEFT JOIN packages p ON p.id = s.package_id`;
 
 const errName = (err: unknown) => (err instanceof Error ? err.name : 'error');
@@ -82,6 +82,8 @@ export type SetSubscription = {
   /** What caused the write: the Store event id, the operator's user id or the order id. Goes to the audit row. */
   ref: string;
   reason?: string;
+  /** Epoch ms the renewal first failed, when the caller knows it (the Store plan event). Otherwise "now" the first time the status turns past_due. */
+  pastDueSince?: number;
 };
 export type WriteResult = { version: number; written: boolean; applied: boolean; eventQueued: boolean; pre: number[] };
 
@@ -106,16 +108,17 @@ async function runWrite(env: Env, write: D1PreparedStatement, audit: D1PreparedS
  */
 export async function setSubscription(env: Env, a: SetSubscription, now = Date.now(), o: WriteOpts = {}): Promise<WriteResult> {
   const RUNNING = "workspace_subscriptions.package_id = excluded.package_id AND workspace_subscriptions.period_end > ? AND workspace_subscriptions.status IN ('active', 'trialing')";
-  const sql = `INSERT INTO workspace_subscriptions (workspace_id, package_id, status, period_start, period_end, cancelled_at, version, updated_at, source, queued_periods)
-    SELECT ?, ?, ?, ?, ?, CASE WHEN ? = 'cancelled' THEN ? END, 1, ?, ?, 0 WHERE ${o.only?.sql ?? '1'}
+  const sql = `INSERT INTO workspace_subscriptions (workspace_id, package_id, status, period_start, period_end, cancelled_at, version, updated_at, source, queued_periods, past_due_since)
+    SELECT ?, ?, ?, ?, ?, CASE WHEN ? = 'cancelled' THEN ? END, 1, ?, ?, 0, CASE WHEN ? = 'past_due' THEN coalesce(?, ?) END WHERE ${o.only?.sql ?? '1'}
     ON CONFLICT(workspace_id) DO UPDATE SET package_id = excluded.package_id, status = excluded.status,
       period_start = CASE WHEN ${RUNNING} THEN workspace_subscriptions.period_start ELSE excluded.period_start END,
       period_end = CASE WHEN ${o.renewal ? 'TRUE' : 'FALSE'} AND ${RUNNING} THEN workspace_subscriptions.period_end ELSE excluded.period_end END,
       queued_periods = CASE WHEN ${o.renewal ? 'TRUE' : 'FALSE'} AND ${RUNNING} THEN workspace_subscriptions.queued_periods + 1 ELSE workspace_subscriptions.queued_periods END,
-      cancelled_at = excluded.cancelled_at, version = workspace_subscriptions.version + 1, updated_at = excluded.updated_at, source = excluded.source
+      cancelled_at = excluded.cancelled_at, version = workspace_subscriptions.version + 1, updated_at = excluded.updated_at, source = excluded.source,
+      past_due_since = CASE WHEN excluded.status = 'past_due' THEN coalesce(?, CASE WHEN workspace_subscriptions.status = 'past_due' THEN workspace_subscriptions.past_due_since END, ?) ELSE NULL END
     WHERE ${o.guard?.sql ?? '1'}
     RETURNING version`;
-  const binds = [a.workspaceId, a.packageId, a.status, a.periodStart, a.periodEnd, a.status, now, now, a.source, ...(o.only?.binds ?? []), now, now, now, ...(o.guard?.binds ?? [])];
+  const binds = [a.workspaceId, a.packageId, a.status, a.periodStart, a.periodEnd, a.status, now, now, a.source, a.status, a.pastDueSince ?? null, now, ...(o.only?.binds ?? []), now, now, now, a.pastDueSince ?? null, now, ...(o.guard?.binds ?? [])];
   return runWrite(env, env.DB.prepare(sql).bind(...binds),
     auditStmt(env, { actor: a.source, workspaceId: a.workspaceId, ref: a.ref, after: { packageId: a.packageId, status: a.status, periodStart: a.periodStart, periodEnd: a.periodEnd, ...(a.reason ? { reason: a.reason } : {}) } }, now),
     o, a.workspaceId, now);
@@ -123,7 +126,7 @@ export async function setSubscription(env: Env, a: SetSubscription, now = Date.n
 
 /** Cancels the existing subscription (never creates one). `periodEndNow` ends the period at `now` (a refund); otherwise the period is kept. */
 export async function cancelSubscription(env: Env, a: { workspaceId: string; actor: SubscriptionSource; ref: string; periodEndNow?: boolean; takeSource?: boolean }, now = Date.now(), o: WriteOpts = {}): Promise<WriteResult> {
-  const sql = `UPDATE workspace_subscriptions SET status = 'cancelled', cancelled_at = ?, period_end = CASE WHEN ? THEN ? ELSE period_end END,
+  const sql = `UPDATE workspace_subscriptions SET status = 'cancelled', past_due_since = NULL, cancelled_at = ?, period_end = CASE WHEN ? THEN ? ELSE period_end END,
       version = version + 1, updated_at = ?, source = CASE WHEN ? THEN ? ELSE source END
     WHERE workspace_id = ? AND ${o.only?.sql ?? '1'} AND ${o.guard?.sql ?? '1'} RETURNING version`;
   const binds = [now, a.periodEndNow ? 1 : 0, now, now, a.takeSource ? 1 : 0, a.actor, a.workspaceId, ...(o.only?.binds ?? []), ...(o.guard?.binds ?? [])];

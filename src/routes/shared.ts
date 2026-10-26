@@ -66,3 +66,8 @@ export const managesStore = (c: ApiContext): boolean => {
   const r = c.get('storeRole');
   return r === 'owner' || r === 'super_admin';
 };
+
+/** WA-NOFREE-1: 403 plan_required unless the workspace has a package in good standing (or inside its bounded past_due grace). Null = go on. */
+export async function planRequired(c: ApiContext, ws: { serviceOk(): Promise<boolean> }): Promise<Response | null> {
+  return (await ws.serviceOk()) ? null : apiError(c, 403, 'plan_required');
+}

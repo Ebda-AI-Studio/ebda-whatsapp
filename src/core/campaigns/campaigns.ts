@@ -8,7 +8,7 @@ import { DEFAULT_TIER, TIER_WINDOW_MS } from '../throttle';
 import { buyerKey } from '../buyer-key';
 import { campaignLinks, newSignedCode, validateTrackedUrl, withUtm } from './links';
 import { audiencePage, getSegment, previewAudience } from './segments';
-import { featureAllowed, marketingBlocked } from '../billing/entitlements';
+import { featureAllowed, marketingBlocked, serviceAllowed } from '../billing/entitlements';
 import { countryOf } from '../billing/country';
 import { pricingReady } from '../billing/pricing';
 import { campaignWallet, type WalletCtx } from './wallet';
@@ -299,7 +299,7 @@ export type PageResult = { state: 'next'; count: number } | { state: 'done'; cou
 const stop = (reason: string): { state: 'stop'; reason: string } => ({ state: 'stop', reason });
 
 /** The campaigns feature is required for EVERY category (a utility campaign is still a campaign); a lapsed plan additionally blocks marketing spend. */
-const planBlocked = (host: LinkHost, category: string): boolean => !featureAllowed(host.sql, 'campaigns') || (category === 'MARKETING' && marketingBlocked(host.sql));
+const planBlocked = (host: LinkHost, category: string, now: number): boolean => !serviceAllowed(host.sql, now) || !featureAllowed(host.sql, 'campaigns', now) || (category === 'MARKETING' && marketingBlocked(host.sql, now));
 
 /** First step of a workflow instance: is it still the live one, and is the campaign in a state worth running? */
 export function campaignStart(host: LinkHost, id: string, attempt: number): StartResult {
@@ -316,7 +316,7 @@ export function campaignActivate(host: LinkHost, id: string, attempt: number, no
   if (!c) return stop('not_found');
   if (c.attempt !== attempt) return stop('superseded');
   if (c.status === 'scheduled' || c.status === 'running') {
-    if (planBlocked(host, c.category)) {
+    if (planBlocked(host, c.category, now)) {
       host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'plan_blocked', updated_at = ? WHERE id = ? AND status IN ('scheduled', 'running')", now, id);
       return stop('plan_blocked');
     }
@@ -349,7 +349,7 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
     host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'template_unavailable', updated_at = ? WHERE id = ?", now, id);
     return stop('template_unavailable');
   }
-  if (planBlocked(host, c.category)) {
+  if (planBlocked(host, c.category, now)) {
     // A plan without campaigns (any category: a downgrade or a lapse) or a past due / cancelled / expired plan (marketing) may not keep sending;
     // the merchant resumes after fixing the plan. Messages already queued for earlier pages are not reversed.
     host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'plan_blocked', updated_at = ? WHERE id = ? AND status = 'running'", now, id);
@@ -487,7 +487,7 @@ export async function sweepCampaigns(host: LinkHost, now: number): Promise<numbe
   const active = host.sql.exec<{ id: string; attempt: number }>("SELECT id, attempt FROM campaigns WHERE status IN ('scheduled', 'running')").toArray();
   for (const c of active) {
     // No campaigns in the plan any more: do not re-launch a scheduled or running one; park it (the merchant resumes after upgrading).
-    if (!featureAllowed(host.sql, 'campaigns')) {
+    if (!featureAllowed(host.sql, 'campaigns', now)) {
       host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'plan_blocked', updated_at = ? WHERE id = ? AND status IN ('scheduled', 'running')", now, c.id);
       continue;
     }

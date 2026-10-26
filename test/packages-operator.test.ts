@@ -51,14 +51,21 @@ describe('PUT /operator/workspaces/:id/subscription', () => {
     expect((await put(ws, body({ reason: 'x' }))).status).toBe(400);
   });
 
+  it('WA-CANCEL-1: an active or trialing assignment with a past periodEnd is refused (the workspace would deny it anyway), a cancelled one is allowed', async () => {
+    const ws = W(8305);
+    await seedNumber('pn-op-8305', ws);
+    for (const status of ['active', 'trialing']) expect((await put(ws, body({ status, periodEnd: Date.now() - 1000 }))).status, status).toBe(400);
+    expect((await put(ws, body({ status: 'cancelled', periodEnd: Date.now() + 5 * 86_400_000 }))).status).toBe(200);
+  });
+
   it('success writes source operator with an audit row, pushes at once and tells the Store; a marketing send is then not plan_blocked', async () => {
     const ws = W(8304);
     await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
     await own(ws);
     const conv = await openChat(ws);
-    await exec(ws, 'DELETE FROM entitlements'); // no plan on record: marketing is blocked (fail closed)
+    await exec(ws, 'DELETE FROM entitlements'); // no plan on record: every send is refused (fail closed)
     const tmpl = { type: 'template' as const, clientId: '00000000-0000-4000-8000-00000000a0c1', name: 'promo', language: 'ar', params: ['a', 'b'] };
-    expect(await workspace(ws).queueOutbound(conv, 'pn-x', tmpl)).toMatchObject({ ok: false, reason: 'plan_blocked' });
+    expect(await workspace(ws).queueOutbound(conv, 'pn-x', tmpl)).toMatchObject({ ok: false, reason: 'plan_required' });
     const r = await put(ws, body());
     expect(r.status).toBe(200);
     expect(await r.json()).toMatchObject({ packageId: 'gold', status: 'active', version: 1 });

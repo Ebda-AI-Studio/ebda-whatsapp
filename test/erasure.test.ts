@@ -1,7 +1,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { beforeAll, expect, it, vi as vitestVi } from 'vitest';
 import { JWKS_URL, mint, newKey, type TestKey } from './helpers/issuer';
-import { rows, workspace } from './helpers/workspace';
+import { rows, seedPlan, workspace } from './helpers/workspace';
 
 const A = '201001111111';
 const B = '201002222222';
@@ -38,6 +38,7 @@ it('is idempotent', async () => {
 
 it('also erases outbound replies to that contact', async () => {
   await seed('ws-e3');
+  await seedPlan('ws-e3'); // WA-NOFREE-1: the reply below needs a package on record
   await workspace('ws-e3').claimSend({ workspaceId: 'ws-e3', phoneNumberId: 'pn', to: A, text: 'reply', idempotencyKey: 'k1' });
   await workspace('ws-e3').recordOutbound('k1', { ok: true, wamid: 'out.1' });
   expect((await workspace('ws-e3').eraseContact(A)).messages).toBe(3);
