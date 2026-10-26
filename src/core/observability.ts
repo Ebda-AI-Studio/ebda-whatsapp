@@ -98,6 +98,15 @@ const P1_ALERTS = new Set([
   'funding_unknown', 'rate_unavailable', 'billing_unpriced_model', 'rate_missing_no_estimate', 'bot_turn_abandoned', 'media_fetch_abandoned', 'agent_model_failed', 'wallet_wait_expired',
   'topup_webhook_failed', 'package_webhook_failed', 'cod_outcome_push_failed', 'inquiry_multiple_success', 'topup_unknown_order', 'topup_refunded_by_provider', 'signup_not_configured',
   'business_id_unverified', 'refund_refused', 'refund_id_conflict',
+  // Added in review: each of these was silently `info` and a human must see it.
+  'instapay_sla_not_scheduled', 'proof_url_not_configured', 'catalog_mass_delete_refused', 'catalog_business_mismatch', 'rate_missing_estimate_charged', 'bot_buyer_key_unavailable',
+  'package_refunded', 'package_partial_refund',
+]);
+/** Known and deliberately log-only. A NEW alert name must be added to exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS (test/guards.test.ts fails otherwise). */
+export const INFO_ALERTS = new Set([
+  'agent_no_credits', 'agent_tool_failed', 'ai_overdraw_refused', 'catalog_not_linked', 'catalog_provision_failed', 'catalog_vector_search_failed', 'cod_outcome_refused',
+  'cod_request_details_missing', 'connector_call_crashed', 'connector_call_failed', 'kb_index_unavailable', 'kb_retrieve_failed', 'r2_delete_failed', 'rate_missing_pending',
+  'send_tier_exhausted', 'shared_pick_id_refused', 'shared_trueup_no_rebate', 'topup_inquiry_unsupported', 'wallet_low_balance', 'webhook_unconfirmed',
 ]);
 
 export const severityOf = (name: string, explicit?: AlertSeverity): AlertSeverity => explicit ?? (P0_ALERTS.has(name) ? 'P0' : P1_ALERTS.has(name) ? 'P1' : 'info');

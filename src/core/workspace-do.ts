@@ -807,9 +807,15 @@ export class WorkspaceDO extends DurableObject<Env> {
     this.failUnsent(idempotencyKey, reason);
   }
 
-  /** The send queue gave up on this job (dead letter): if it never reached Meta (queued, retry or stuck claimed) it is failed `send_dlq` and its hold released. True when it was. */
-  async failDeadLetter(idempotencyKey: string): Promise<boolean> {
-    return this.failUnsent(idempotencyKey, 'send_dlq', ['queued', 'retry', 'claimed']);
+  /**
+   * The send queue gave up on this job (dead letter). Only a row that PROVABLY never left (queued / retry) is failed `send_dlq` and its hold released.
+   * A `claimed` row may be in flight to Meta (sent, recorded later): failing it could mark a delivered message failed and release the hold of a paid
+   * send, so it is left to the stale-claim recovery (no status change, no hold release) and reported as 'claimed' so the alert shows a human.
+   */
+  async failDeadLetter(idempotencyKey: string): Promise<'failed' | 'claimed' | 'other'> {
+    if (this.failUnsent(idempotencyKey, 'send_dlq')) return 'failed';
+    const st = this.sql.exec<{ status: string }>('SELECT status FROM messages WHERE idempotency_key = ?', idempotencyKey).toArray()[0]?.status;
+    return st === 'claimed' ? 'claimed' : 'other';
   }
 
   private failUnsent(idempotencyKey: string, reason: 'enqueue_failed' | 'sender_unavailable' | 'send_dlq', from: string[] = ['queued', 'retry']): boolean {

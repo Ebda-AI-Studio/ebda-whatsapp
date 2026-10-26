@@ -37,16 +37,16 @@ Verified means `enabled: true`, `last_complete` is recent and `error_message` is
 | Logpush job id | ______ (fill in at deploy) |
 | Verified on | ______ |
 
-## Uptime on /health (iceberg E4)
-`/health` already answers 503 when a required secret is missing, so a monitor on it also catches misconfiguration. Pick ONE (Ahmad creates it at deploy):
-- **Cloudflare Health Check** (zone-level; needs a plan that includes Health Checks and the `ebda.app` zone in this account):
+## Uptime on /health (iceberg E4, Ruling NO-UPTIMEROBOT-1)
+There is no third-party uptime service. The monitor is the **suite status page probing `https://wa.ebda.app/health`**, with its failures sent to the same Telegram alerts chat. Add the probe to the status page after the first deploy (Ahmad). `/health` answers 503 when a required secret is missing or malformed, so the same probe also catches a bad secret.
+- Probe: `GET https://wa.ebda.app/health`, healthy = HTTP 200 with `"ok":true`, interval 1 minute, 2 consecutive failures = down.
+- Optional extra on the Cloudflare side (zone-level; needs a plan with Health Checks and the `ebda.app` zone in this account), if a second opinion from Cloudflare's edge is wanted:
   ```sh
   curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/<zone id>/healthchecks" -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" \
     --data '{"name":"ebda-wa-health","address":"wa.ebda.app","type":"HTTPS","check_regions":["WEU","ME"],"interval":60,"retries":2,"http_config":{"method":"GET","path":"/health","expected_codes":["200"],"port":443}}'
   ```
-  then Notifications → *Health Check Status* → destination: the e-mail/PagerDuty you read (Cloudflare notifications cannot post to Telegram directly).
-- **External prober** (free, the same one Ebda Store uses, UptimeRobot): HTTPS monitor on `https://wa.ebda.app/health`, keyword `"ok":true`, 1-minute interval, alert contact = the Ebda alerts Telegram chat.
-Verify: stop it deliberately for one interval (a wrong `REQUIRED_SECRETS` var on a throwaway deploy makes `/health` 503) and confirm the alert arrives; record the monitor id here: ______
+  Its notifications go to e-mail (Cloudflare cannot post to Telegram directly); the status page is what pages Telegram.
+Verify: make `/health` fail for one interval (a wrong `REQUIRED_SECRETS` var on a throwaway deploy returns 503) and confirm the status page flips and the Telegram alert arrives; record the date here: ______
 
 ## Alert channel
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALERT_CHAT_ID` (worker secrets, same bot/chat as Ebda Store): see `docs/runbooks/alerts.md`.

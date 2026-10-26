@@ -145,8 +145,8 @@ export async function consumeSendBatch(batch: MessageBatch<unknown>, env: Env): 
 
 /**
  * The send queue's dead letters (iceberg E5): a job that exhausted its attempts. The last attempt already recorded a failure, so this normally finds the
- * message failed; if one is still queued/claimed (the consumer died holding it) it is failed here so it does not sit in the inbox as "sending" forever, and its
- * wallet hold is released. Every dead letter is a P1 `send_dlq` (no phone, no text: the workspace and the failure only). Always acks.
+ * message failed; one still queued/retry (provably never sent) is failed here and its wallet hold released. A `claimed` row may be in flight to Meta, so it is
+ * left alone (the stale-claim recovery owns it) and the alert says `state: claimed`. Every dead letter is a P1 `send_dlq` (no phone, no text: the workspace and the failure only). Always acks.
  */
 export async function consumeSendDlq(batch: MessageBatch<unknown>, env: Env): Promise<void> {
   for (const msg of batch.messages) {
@@ -157,13 +157,13 @@ export async function consumeSendDlq(batch: MessageBatch<unknown>, env: Env): Pr
       continue;
     }
     const job = parsed.data;
-    let marked = false;
+    let state: 'failed' | 'claimed' | 'other' | 'unknown' = 'unknown';
     try {
-      marked = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(job.workspaceId)).failDeadLetter(job.idempotencyKey);
+      state = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(job.workspaceId)).failDeadLetter(job.idempotencyKey);
     } catch {
       /* the alert below still goes out; the next delivery of this dead letter is not expected, so the message stays for the operator */
     }
-    alert('send_dlq', { severity: 'P1', workspace: job.workspaceId, kind: job.kind, attempts: msg.attempts, markedFailed: marked });
+    alert('send_dlq', { severity: 'P1', workspace: job.workspaceId, kind: job.kind, attempts: msg.attempts, state });
     msg.ack();
   }
 }

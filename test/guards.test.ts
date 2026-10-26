@@ -64,3 +64,37 @@ it('legal pages are pinned: a change needs a new pin AND a message to the Store 
 it('routes never decide owner powers with a negative role check', () => {
   expect(findMatches(/!==?\s*'staff'|'staff'\s*!==?/, 'src')).toEqual([]);
 });
+
+// ---- Alerts: every name has a decided severity (W1-OBS) ----
+it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS, so a new name fails CI until someone picks its severity', async () => {
+  const { readFileSync } = await import('node:fs');
+  const obs = readFileSync(new URL('../src/core/observability.ts', import.meta.url), 'utf8');
+  const setOf = (name: string): Set<string> => {
+    const body = new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\);`).exec(obs)?.[1] ?? '';
+    return new Set([...body.replace(/\/\/[^\n]*/g, '').matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1]!));
+  };
+  const sets = { P0: setOf('P0_ALERTS'), P1: setOf('P1_ALERTS'), INFO: setOf('INFO_ALERTS') };
+  expect(sets.P0.size).toBeGreaterThan(5);
+  expect(sets.P1.size).toBeGreaterThan(40);
+  expect(sets.INFO.size).toBe(20);
+  const used = new Set<string>();
+  for (const hit of findMatches(/\balert\(/, 'src')) {
+    const [file, line] = hit.split(':') as [string, string];
+    if (file.endsWith('core/observability.ts')) continue;
+    const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').split('\n').slice(Number(line) - 1).join('\n');
+    // The first argument: up to the first comma at depth 0 (a ternary may name several alerts).
+    let depth = 0;
+    let arg = '';
+    for (const ch of text.slice(text.indexOf('alert(') + 6)) {
+      if ('([{'.includes(ch)) depth++;
+      else if (')]}'.includes(ch)) { if (depth === 0) break; depth--; }
+      else if (ch === ',' && depth === 0) break;
+      arg += ch;
+    }
+    for (const m of arg.matchAll(/'([a-z0-9_]+)'/g)) used.add(m[1]!);
+  }
+  expect(used.size).toBeGreaterThan(60);
+  const wrong = [...used].filter((n) => [sets.P0, sets.P1, sets.INFO].filter((s) => s.has(n)).length !== 1);
+  expect(wrong, 'alert names with no severity (or more than one): add each to exactly one set in observability.ts').toEqual([]);
+  for (const a of ['P0', 'P1'] as const) for (const b of ['P1', 'INFO'] as const) if (a !== b) expect([...sets[a]].filter((n) => sets[b].has(n)), `${a} and ${b} overlap`).toEqual([]);
+});

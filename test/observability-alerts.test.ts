@@ -179,4 +179,35 @@ describe('the send DLQ has a consumer', () => {
     await getQueueResult(batch, ctx);
     expect(await rows(ws, 'SELECT status FROM messages WHERE idempotency_key = ?', `ui:${id}`)).toEqual([{ status: 'accepted' }]);
   });
+
+  // Billing integrity: a `claimed` row may be in flight to Meta (sent, recorded later). Failing it would mark a delivered message failed and release
+  // the hold of a paid send, so the DLQ only touches rows that provably never left (queued / retry).
+  describe.each([
+    ['queued', true, 'failed', 'released'],
+    ['retry', true, 'failed', 'released'],
+    ['claimed', false, 'claimed', 'held'],
+  ] as const)('a dead letter for a %s row', (state, changes, status, hold) => {
+    it(changes ? 'fails it and settles its wallet hold' : 'changes nothing (status, hold) and tells a human the state', async () => {
+      const h = harness();
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const ws = W(state === 'queued' ? 1110 : state === 'retry' ? 1111 : 1112);
+      await apiFor(ws);
+      await own(ws);
+      const conv = await openChat(ws);
+      const id = crypto.randomUUID();
+      const key = `ui:${id}`;
+      expect(await workspace(ws).queueOutbound(conv, 'pn-x', { type: 'text', clientId: id, text: 'hello' })).toMatchObject({ ok: true });
+      await exec(ws, 'UPDATE messages SET status = ? WHERE idempotency_key = ?', state, key);
+      await exec(ws, "INSERT OR REPLACE INTO wallet_holds (ref, amount_minor, state, expires_at, created_at, funding) VALUES (?, 500, 'held', ?, ?, 'platform_line')", `msg:${key}`, Date.now() + 86_400_000, Date.now());
+      const batch = createMessageBatch('ebda-wa-send-dlq', [{ id: 'a', timestamp: new Date(), attempts: 5, body: { workspaceId: ws, phoneNumberId: 'pn-x', to: PHONE, idempotencyKey: key, kind: 'text', text: 'hello' } }]);
+      const ctx = createExecutionContext();
+      await worker.queue(batch, env, ctx);
+      expect((await getQueueResult(batch, ctx)).explicitAcks).toEqual(['a']);
+      expect(await rows(ws, 'SELECT status FROM messages WHERE idempotency_key = ?', key)).toEqual([{ status }]);
+      expect(await rows(ws, 'SELECT state FROM wallet_holds WHERE ref = ?', `msg:${key}`)).toEqual([{ state: hold }]);
+      await h.flush();
+      expect(log.mock.calls.flat().join(' ')).toContain(`"state":"${state === 'claimed' ? 'claimed' : 'failed'}"`);
+      expect(h.messages.some((m) => m.message.includes('send_dlq'))).toBe(true); // a human is told either way
+    });
+  });
 });
