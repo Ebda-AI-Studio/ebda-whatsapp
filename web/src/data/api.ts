@@ -2,7 +2,7 @@ import { z } from 'zod';
 import {
   agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
-  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, searchResponse, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
+  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
 import type { InboxSource } from './source';
@@ -60,22 +60,11 @@ export function createApiSource(o: Opts): LiveSource {
     currentUserId: o.currentUserId,
     userNames: o.userNames,
     async listConversations(filter, q, signal) {
+      // One call: the server matches names, phone digits and message text, so the client never pages through the list to find hits.
       const query = q.trim();
-      if (query) {
-        const hits = await call(`/search?q=${encodeURIComponent(query)}&limit=50`, searchResponse, { signal });
-        const wanted = new Set(hits.items.map((h) => h.conversationId));
-        // Page through the list until every hit is found (bounded), so older conversations are not lost.
-        const found: z.infer<typeof listConversationsResponse>['items'] = [];
-        let cursor: string | null = null;
-        for (let page = 0; page < 10; page++) {
-          const r: z.infer<typeof listConversationsResponse> = await call(`/conversations?filter=${filter}&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, listConversationsResponse, { signal });
-          for (const c of r.items) if (wanted.has(c.id) || (c.contact.name ?? '').includes(query)) found.push(c);
-          cursor = r.nextCursor;
-          if (!cursor || found.filter((c) => wanted.has(c.id)).length >= wanted.size) break;
-        }
-        return found;
-      }
-      return (await call(`/conversations?filter=${filter}&limit=50`, listConversationsResponse, { signal })).items;
+      const params = new URLSearchParams({ filter, limit: '50' });
+      if (query) params.set('q', query);
+      return (await call(`/conversations?${params}`, listConversationsResponse, signal ? { signal } : {})).items;
     },
     async getMessages(id) {
       return (await call(`/conversations/${id}/messages?limit=50`, getMessagesResponse)).items.slice().sort((a, b) => a.at - b.at);

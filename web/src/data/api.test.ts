@@ -98,15 +98,18 @@ describe('createApiSource', () => {
     expect(calls[0]!.init?.keepalive).toBe(true);
   });
 
-  it('search finds a conversation beyond the first page', async () => {
+  it('a query is ONE server call with q, filter and the abort signal (no paging, no client-side matching)', async () => {
     const old = { ...conv, id: 99, contact: { ...conv.contact, name: 'قديم' } };
-    const { f } = fetchStub({
-      '/search?q=': () => ({ status: 200, body: { items: [{ conversationId: 99, messageId: 1, snippet: 'x', at: 1 }] } }),
-      'cursor=c2': () => ({ status: 200, body: { items: [old], nextCursor: null } }),
-      '/conversations?filter=all&limit=50': () => ({ status: 200, body: { items: [conv], nextCursor: 'c2' } }),
-    });
+    const { f, calls } = fetchStub({ '/conversations?': () => ({ status: 200, body: { items: [old], nextCursor: null } }) });
     const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
-    expect((await src.listConversations('all', 'كلمة')).map((c) => c.id)).toEqual([99]);
+    const ctl = new AbortController();
+    expect((await src.listConversations('unread', ' كلمة ', ctl.signal)).map((c) => c.id)).toEqual([99]);
+    expect(calls).toHaveLength(1);
+    const u = new URL(calls[0]!.url);
+    expect(u.pathname.endsWith('/conversations')).toBe(true);
+    expect(u.searchParams.get('q')).toBe('كلمة');
+    expect(u.searchParams.get('filter')).toBe('unread');
+    expect((f.mock.calls[0] as unknown as [string, RequestInit])[1].signal).toBe(ctl.signal);
   });
 
   it('turns COD outcomes on when /me reports the store link', async () => {
@@ -145,13 +148,6 @@ describe('createApiSource', () => {
     const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
     expect(await src.mediaUrl!('/api/v1/stores/s/media/9')).toBe('blob:x');
     expect(new Headers((f.mock.calls[0] as unknown as [string, RequestInit])[1].headers).get('authorization')).toBe('Bearer tok');
-  });
-
-  it('uses search for a non-empty query', async () => {
-    const { f, calls } = fetchStub({ '/search?q=': () => ({ status: 200, body: { items: [] } }), '/conversations': () => ({ status: 200, body: { items: [conv], nextCursor: null } }) });
-    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
-    await src.listConversations('all', 'منى');
-    expect(calls.some((c) => c.url.includes('/search?q=%D9%85%D9%86%D9%89'))).toBe(true);
   });
 });
 

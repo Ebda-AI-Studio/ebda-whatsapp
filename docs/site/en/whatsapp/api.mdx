@@ -112,7 +112,7 @@ There is no general per-request rate limit documented in the code. The 24-hour w
 
 | Method and path | Purpose |
 |---|---|
-| `GET /conversations` | List conversations. Query: `filter` (`all`, `unread`, `mine`, `unassigned`; default `all`), `cursor`, `limit` (1 to 50, default 30). Returns `{ items, nextCursor }` |
+| `GET /conversations` | List conversations. Query: `filter` (`all`, `unread`, `mine`, `unassigned`; default `all`), `q` (optional, 1 to 100 characters), `cursor`, `limit` (1 to 50, default 30). Returns `{ items, nextCursor }`. With `q` the answer is one page of conversations whose contact name starts with every typed word, whose number contains the typed digits (3 or more; Arabic-Indic digits, spaces and `+` are fine), or that have a matching message, newest first, `filter` still applies, and `nextCursor` is `null` |
 | `GET /conversations/{conversationId}/messages` | List messages, newest first. Query: `before` (a message id), `limit` (1 to 50, default 50). Returns `{ items, nextBefore }` |
 | `GET /messages/{messageId}/body` | The full text of a message longer than 1 KB |
 | `POST /conversations/{conversationId}/read` | Mark the conversation as read |

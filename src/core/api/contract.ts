@@ -48,6 +48,8 @@ export const conversationDto = z.object({
 
 export const listConversationsQuery = z.object({
   filter: z.enum(['all', 'unread', 'mine', 'unassigned']).default('all'),
+  /** Typeahead: contact name, phone digits or message text; the answer is one page with no cursor. */
+  q: z.string().trim().min(1).max(100).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(50).default(30),
 });

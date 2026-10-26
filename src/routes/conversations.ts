@@ -9,6 +9,7 @@ conversationsRoutes.get('/stores/:storeId/conversations', async (c) => {
   if (!q.success || (q.data.cursor !== undefined && !/^\d+\.\d+$/.test(q.data.cursor))) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
+  if (q.data.q !== undefined) return c.json({ items: await ws.searchConversations(q.data.q, q.data.filter, q.data.limit, c.get('principal').userId), nextCursor: null });
   return c.json(await ws.listConversations({ filter: q.data.filter, userId: c.get('principal').userId, ...(q.data.cursor ? { cursor: q.data.cursor } : {}), limit: q.data.limit }));
 });
 
