@@ -1,12 +1,17 @@
 import { SELF, env } from 'cloudflare:test';
 import { Hono } from 'hono';
-import { expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { configureCampaignLinks, newSignedCode, type LinkConfig } from '../src/core/campaigns/links';
 import { type GuardLimits, requestGuards } from '../src/core/request-guards';
 import { inboundPayload } from './helpers/payload';
 import { sign } from './helpers/meta';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
 
 useApiKey();
+const LINK_SECRET = 'guard-link-secret-for-tests-0123456789';
+let prevLinks: LinkConfig | undefined;
+beforeEach(() => { prevLinks = configureCampaignLinks({ signingSecret: () => LINK_SECRET }); });
+afterEach(() => { if (prevLinks) configureCampaignLinks(prevLinks); });
 
 const big = (n: number) => 'x'.repeat(n);
 const streamOf = (n: number) => new ReadableStream<Uint8Array>({
@@ -105,7 +110,9 @@ it('/meta/webhook: an UNSIGNED body naming a victim number cannot use up the vic
 
 it('/t/:code: a flood on one workspace is limited with 429, another workspace is not; a malformed code is never counted', async () => {
   const app = mini(4);
-  const code = (w: string) => `${w}.${'A'.repeat(22)}`;
+  const signed = new Map<string, string>();
+  const code = (w: string) => signed.get(w)!;
+  for (const w of [W(920), W(921)]) signed.set(w, await newSignedCode(w, LINK_SECRET));
   const statuses = [];
   for (let i = 0; i < 6; i++) statuses.push((await app.request(`/t/${code(W(920))}`)).status);
   expect(statuses).toEqual([200, 200, 200, 200, 429, 429]);
@@ -113,12 +120,15 @@ it('/t/:code: a flood on one workspace is limited with 429, another workspace is
   expect(await limited.json()).toEqual({ error: 'rate_limited' });
   expect(limited.headers.get('retry-after')).toBeTruthy();
   expect((await app.request(`/t/${code(W(921))}`)).status).toBe(200);
-  for (let i = 0; i < 20; i++) expect((await app.request('/t/garbage')).status).toBe(200); // left to the real route (404 there), never rate counted
+  for (let i = 0; i < 20; i++) expect((await app.request('/t/garbage')).status).toBe(404); // refused at the edge (unsigned), never rate counted
+  expect((await app.request(`/t/${code(W(921))}`)).status).toBe(200); // W(921)'s bucket still has its token
 });
 
 it('/t/:code: one client flooding a store\'s links cannot use up that store\'s allowance for other customers (keyed per client + workspace)', async () => {
   const app = mini(4);
-  const code = (w: string) => `${w}.${'B'.repeat(22)}`;
+  const signed = new Map<string, string>();
+  const code = (w: string) => signed.get(w)!;
+  for (const w of [W(930)]) signed.set(w, await newSignedCode(w, LINK_SECRET));
   const from = (ip: string) => ({ headers: { 'cf-connecting-ip': ip } });
   for (let i = 0; i < 10; i++) await app.request(`/t/${code(W(930))}`, from('203.0.113.9')); // the attacker exhausts its own share
   expect((await app.request(`/t/${code(W(930))}`, from('203.0.113.9'))).status).toBe(429);
@@ -127,7 +137,9 @@ it('/t/:code: one client flooding a store\'s links cannot use up that store\'s a
 
 it('/t/:code: many clients together still hit the store-wide cap, and IPv6 clients are keyed by their /64', async () => {
   const app = mini(4, { link: { ratePerSec: 0.001, burst: 2, workspaceRatePerSec: 0.001, workspaceBurst: 5 } });
-  const code = (w: string) => `${w}.${'C'.repeat(22)}`;
+  const signed = new Map<string, string>();
+  const code = (w: string) => signed.get(w)!;
+  for (const w of [W(940), W(941)]) signed.set(w, await newSignedCode(w, LINK_SECRET));
   const from = (ip: string) => ({ headers: { 'cf-connecting-ip': ip } });
   const statuses = [];
   for (let i = 0; i < 7; i++) statuses.push((await app.request(`/t/${code(W(940))}`, from(`198.51.100.${i}`))).status); // 7 different clients
