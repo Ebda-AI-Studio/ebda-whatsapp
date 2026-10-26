@@ -5,8 +5,8 @@
 import type { Env } from '../../env';
 import { RATE_LEAD_MS, SETTINGS_LEAD_MS } from './pricing';
 import { monthRange } from './statement';
+import { alert } from '../observability';
 
-const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
 const SKEW_MS = 5_000;
 
 export async function audit(env: Env, a: { actor: string; action: string; workspaceId?: string | null; before?: unknown; after?: unknown; reason?: string | null }, now = Date.now()): Promise<void> {

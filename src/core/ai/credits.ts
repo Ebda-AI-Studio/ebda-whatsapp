@@ -10,6 +10,7 @@
  * No phone number or name is stored here, so erasure never touches it.
  */
 import { addTask } from '../scheduler';
+import { alert } from '../observability';
 
 type Sql = DurableObjectStorage['sql'];
 
@@ -72,7 +73,7 @@ export function settleHold(sql: Sql, ref: string, now: number): 'charged' | 'ref
   const lapsed = h.state === 'expired' || h.expires_at <= now;
   if (lapsed && creditsAvailable(sql, now) < h.amount) {
     sql.exec("UPDATE credit_holds SET state = 'released', settled_at = ? WHERE ref = ?", now, ref);
-    console.error(JSON.stringify({ alert: 'ai_overdraw_refused', ref: ref.slice(0, 40) }));
+    alert('ai_overdraw_refused', { ref: ref.slice(0, 40) });
     return 'refused';
   }
   postCredit(sql, { kind: 'ai_charge', amount: -h.amount, ref, parentRef: ref, now });

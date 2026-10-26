@@ -7,6 +7,7 @@ import type { CodOutcome } from '../store-bridge';
 import type { LinkHost } from './host';
 import { locale, upsertOrder } from './order-store';
 import { queueFreeText, setTag } from './outbound';
+import { alert } from '../observability';
 
 export type CodResolution = 'resolved' | 'already' | 'conflict' | 'closed' | 'not_cod' | 'unknown_order';
 
@@ -144,7 +145,7 @@ export async function pushCodOutcome(host: LinkHost, orderId: string, now = Date
     const res = await bridge.recordCodOutcome(host.workspaceId, { orderId, outcome, at, idempotencyKey: row.outcome_idem });
     if (!res.ok && res.reason === 'unavailable') throw new Error(`store unavailable: ${res.message ?? ''}`.slice(0, 120));
     // not_found / not_linked / invalid are answers, not outages: retrying would not change them.
-    if (!res.ok) console.error(JSON.stringify({ alert: 'cod_outcome_refused', workspace: host.workspaceId, reason: res.reason }));
+    if (!res.ok) alert('cod_outcome_refused', { workspace: host.workspaceId, reason: res.reason });
   }
   if (sink) {
     const event: OutboundStoreEvent = outboundStoreEventSchema.parse({

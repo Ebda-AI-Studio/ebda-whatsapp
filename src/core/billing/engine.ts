@@ -15,6 +15,7 @@ import { addTask } from '../scheduler';
 import { countryOf } from './country';
 import { ensureTrueupTask } from './trueup';
 import { DEFAULT_SETTINGS, fundingOf, normaliseCategory, priceAt, pricingReady, settingsAt, type Funding } from './pricing';
+import { alert } from '../observability';
 
 type Sql = DurableObjectStorage['sql'];
 
@@ -53,7 +54,6 @@ type SendRow = {
   billable: number | null; funding: Funding; delivered_at: number | null; charged_ref: string | null; charged_category: string | null; charged_minor: number | null; unpriced: number; pending_rate: number;
 };
 
-const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
 
 export class Billing {
   /** `touch` tells the Durable Object a scheduler row was added, so it re-arms its alarm after the transaction. */
@@ -281,7 +281,7 @@ export class Billing {
    * Settles a message's hold when the message reached a terminal state without a charge (failed, dropped, erased, opted out, cancelled,
    * not billable). Idempotent; a charged hold is left alone. Also forgets a wait.
    */
-  settleHold(key: string, outcome: 'failed' | 'dropped' | 'erased' | 'opted_out' | 'cancelled' | 'not_billable' | 'enqueue_failed' | 'rate_limited' | 'sender_unavailable', now: number): void {
+  settleHold(key: string, outcome: 'failed' | 'dropped' | 'erased' | 'opted_out' | 'cancelled' | 'not_billable' | 'enqueue_failed' | 'rate_limited' | 'sender_unavailable' | 'send_dlq', now: number): void {
     this.close(`msg:${key}`, 'released', outcome, now);
     this.sql.exec('DELETE FROM wallet_waits WHERE key = ?', key);
   }

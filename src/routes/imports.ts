@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { createImportFields, importMapping } from '../core/api/contract';
 import { MAX_IMPORT_BYTES } from '../core/campaigns/contacts';
 import { apiError, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
+import { alert } from '../core/observability';
 
 export const importsRoutes = new Hono<ApiEnv>();
 
@@ -58,7 +59,7 @@ importsRoutes.post('/stores/:storeId/imports', async (c) => {
     await c.env.IMPORT_WORKFLOW.create({ id, params: { workspaceId: storeId, importId: id } });
   } catch (err) {
     await ws.failImport(id, 'could_not_start');
-    console.error(JSON.stringify({ alert: 'import_start_failed', workspace: storeId, error: (err as Error).name }));
+    alert('import_start_failed', { workspace: storeId, error: (err as Error).name });
     return apiError(c, 503, 'rate_limited', 'could_not_start');
   }
   return c.json({ id, status: 'pending' }, 202);

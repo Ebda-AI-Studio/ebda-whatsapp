@@ -6,6 +6,7 @@ import { listOwnedWabas } from '../meta/catalog-api';
 import { TIER_LIMITS } from '../throttle';
 import { HISTORY_DECLINED_CODE, REGISTRATION_LOCKED_CODE, deregisterNumber, exchangeCode, fetchPhone, fetchWabaNumbers, registerNumber, requestSync, subscribeApp, unsubscribeApp, type GraphFail, type PhoneStatus } from './graph';
 import { graphTokenFor, invalidateNumber, invalidateWaba, TokenUnavailable } from './token';
+import { alert } from '../observability';
 
 /** Meta fixes the throughput of a number that stays on the WhatsApp Business app at 20 messages per second. */
 export const BUSINESS_APP_MPS = 20;
@@ -141,7 +142,7 @@ async function conflicts(env: Env, workspaceId: string, wabaId: string, phoneNum
 async function verifiedBusinessId(env: Env, workspaceId: string, token: string, businessId: string, wabaId: string): Promise<string | null> {
   const owned = await listOwnedWabas({ token, graphVersion: env.META_GRAPH_VERSION, businessId });
   if (owned.ok && owned.value.includes(wabaId)) return businessId;
-  console.error(JSON.stringify({ alert: 'business_id_unverified', workspace: workspaceId, why: owned.ok ? 'not_owner' : 'graph_error' }));
+  alert('business_id_unverified', { workspace: workspaceId, why: owned.ok ? 'not_owner' : 'graph_error' });
   return null;
 }
 

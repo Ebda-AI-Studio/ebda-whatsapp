@@ -26,6 +26,7 @@ import { normaliseText } from '../text-normalise';
 import type { Locale, OrderingCopy } from './copy';
 import { parseMinor } from './money';
 import { signProofUrl } from './proof-url';
+import { alert } from '../observability';
 
 export const BOT_PAGE = 9;
 /** A customer has this long after placing an InstaPay order to send the receipt. */
@@ -231,7 +232,7 @@ async function buyerOf(t: Turn): Promise<Buyer | null> {
   const secret = storeLink().buyerSecret(t.host.env);
   const e164 = `+${t.input.from}`;
   if (!secret || !isE164(e164)) {
-    console.error(JSON.stringify({ alert: 'bot_buyer_key_unavailable', workspace: t.ws, why: secret ? 'bad_number' : 'no_secret' }));
+    alert('bot_buyer_key_unavailable', { workspace: t.ws, why: secret ? 'bad_number' : 'no_secret' });
     t.buyer = null;
     return null;
   }
@@ -638,7 +639,7 @@ async function receiveImage(t: Turn): Promise<void> {
   const proof = storeLink().proof(host.env);
   if (!proof) {
     release();
-    console.error(JSON.stringify({ alert: 'proof_url_not_configured', workspace: t.ws }));
+    alert('proof_url_not_configured', { workspace: t.ws });
     throw new Error('payment screenshot links are not configured');
   }
   const url = await signProofUrl({ baseUrl: proof.baseUrl, secret: proof.secret, workspaceId: t.ws, messageId: i.messageId, now: t.now });

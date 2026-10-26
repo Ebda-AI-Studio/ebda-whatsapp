@@ -28,7 +28,7 @@ import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { getState, putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
 import { ensureCatalogReconcile, LAST_SYNC_KEY, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { provisionCatalog, type ProvisionResult } from './store-link/catalog-provision';
-import { errClass, safeMessage } from './observability';
+import { errClass, safeMessage, alert, bindAlerts } from './observability';
 import { recordClick } from './campaigns/campaigns';
 import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, cancelCampaign, createCampaign, deleteDraft, endInstance, gateFor, getCampaign, launchCampaign, listCampaigns, pauseCampaign, resumeCampaign, sendCampaign, settleWallet, sweepCampaigns, type CreateArgs } from './campaigns/campaigns';
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
@@ -128,6 +128,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    bindAlerts({ env, waitUntil: (p) => ctx.waitUntil(p) }); // alert() from DO code outlives the call via the DO's own waitUntil
     this.billing = new Billing(this.sql, () => this.workspaceId, () => { this.armPending = true; });
     // 'ping' from a hibernated client is answered without waking the DO.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
@@ -157,7 +158,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.pricingPulledAt = now;
       } catch (err) {
         this.pricingPulledAt = now - PRICING_MAX_AGE_MS + 60_000;
-        console.error(JSON.stringify({ alert: 'pricing_pull_failed', workspace: this.workspaceId, error: errClass(err) }));
+        alert('pricing_pull_failed', { workspace: this.workspaceId, error: errClass(err) });
       } finally {
         this.pricingPull = null;
       }
@@ -405,7 +406,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec("UPDATE messages SET status = 'queued', claim_attempts = max(0, claim_attempts - 1), updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
       this.addReleaseOnce(job, now + 60_000, 'pricing_unavailable');
       this.armPending = true;
-      console.error(JSON.stringify({ alert: 'pricing_copy_missing', workspace: this.workspaceId }));
+      alert('pricing_copy_missing', { workspace: this.workspaceId });
       return 'deferred';
     }
     if (bill.kind === 'empty') {
@@ -415,7 +416,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         const cid = job.idempotencyKey.split(':')[1];
         this.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = ?, updated_at = ? WHERE id = ? AND status = 'running'", bill.reason === 'wallet_empty_expired' ? 'wallet_empty' : bill.reason, now, cid);
       }
-      if (bill.reason === 'wallet_empty_expired') console.error(JSON.stringify({ alert: 'wallet_wait_expired', workspace: this.workspaceId }));
+      if (bill.reason === 'wallet_empty_expired') alert('wallet_wait_expired', { workspace: this.workspaceId });
       return 'dropped';
     }
     this.sql.exec("UPDATE messages SET status = 'queued', claim_attempts = max(0, claim_attempts - 1), updated_at = ? WHERE idempotency_key = ?", now, job.idempotencyKey);
@@ -539,7 +540,7 @@ export class WorkspaceDO extends DurableObject<Env> {
               `INSERT INTO number_limits (phone_number_id, tier, mps, tokens, tokens_at, alerted_at) VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(phone_number_id) DO UPDATE SET alerted_at = excluded.alerted_at`, pn, lim.tier, lim.mps, lim.tokens, lim.tokens_at, now,
             );
-            console.warn(JSON.stringify({ alert: 'send_tier_exhausted', workspace: this.workspaceId, phoneNumberId: pn, tier: lim.tier, waiting: waiting + 1 }));
+            alert('send_tier_exhausted', { workspace: this.workspaceId, phoneNumberId: pn, tier: lim.tier, waiting: waiting + 1 });
           }
           return { dueAt: nth + lap * TIER_WINDOW_MS + 1000, reason: 'tier' };
         }
@@ -806,14 +807,26 @@ export class WorkspaceDO extends DurableObject<Env> {
     this.failUnsent(idempotencyKey, reason);
   }
 
-  private failUnsent(idempotencyKey: string, reason: 'enqueue_failed' | 'sender_unavailable'): void {
-    this.ctx.storage.transactionSync(() => {
+  /**
+   * The send queue gave up on this job (dead letter). Only a row that PROVABLY never left (queued / retry) is failed `send_dlq` and its hold released.
+   * A `claimed` row may be in flight to Meta (sent, recorded later): failing it could mark a delivered message failed and release the hold of a paid
+   * send, so it is left to the stale-claim recovery (no status change, no hold release) and reported as 'claimed' so the alert shows a human.
+   */
+  async failDeadLetter(idempotencyKey: string): Promise<'failed' | 'claimed' | 'other'> {
+    if (this.failUnsent(idempotencyKey, 'send_dlq')) return 'failed';
+    const st = this.sql.exec<{ status: string }>('SELECT status FROM messages WHERE idempotency_key = ?', idempotencyKey).toArray()[0]?.status;
+    return st === 'claimed' ? 'claimed' : 'other';
+  }
+
+  private failUnsent(idempotencyKey: string, reason: 'enqueue_failed' | 'sender_unavailable' | 'send_dlq', from: string[] = ['queued', 'retry']): boolean {
+    return this.ctx.storage.transactionSync(() => {
       const now = Date.now();
-      const row = this.sql.exec<{ id: number }>("UPDATE messages SET status = 'failed', error_reason = ?, updated_at = ? WHERE idempotency_key = ? AND status IN ('queued', 'retry') RETURNING id", reason, now, idempotencyKey).toArray()[0];
+      const row = this.sql.exec<{ id: number }>(`UPDATE messages SET status = 'failed', error_reason = ?, updated_at = ? WHERE idempotency_key = ? AND status IN (${from.map(() => '?').join(', ')}) RETURNING id`, reason, now, idempotencyKey, ...from).toArray()[0];
       if (row) {
         this.emitMessageStatus(row.id);
         this.billing.settleHold(idempotencyKey, reason, now);
       }
+      return !!row;
     });
   }
 
@@ -974,7 +987,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (r.pushed) this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'cod_outcome_push' AND json_extract(payload, '$.orderId') = ? AND lease_until IS NULL", orderId);
       return r.pushed || (r.reason === 'nothing_to_push');
     } catch (err) {
-      console.error(JSON.stringify({ alert: 'cod_outcome_push_failed', workspace: this.workspaceId, error: errClass(err) }));
+      alert('cod_outcome_push_failed', { workspace: this.workspaceId, error: errClass(err) });
       return false;
     }
   }
@@ -1428,7 +1441,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.emitMessageStatus(msg.id);
         this.billing.settleHold(key, 'failed', now);
       });
-      console.error(JSON.stringify({ alert: 'wallet_wait_expired', workspace: this.workspaceId, reason }));
+      alert('wallet_wait_expired', { workspace: this.workspaceId, reason });
       return undefined;
     }
     await this.env.SEND_QUEUE.sendBatch([{ body: job }]);
@@ -1834,7 +1847,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           failed++;
           const attempts = t.attempts + 1;
           this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', attempts, now + backoffMs(attempts), safeMessage(err), t.id, t.kind);
-          console.error(JSON.stringify({ alert: `${t.kind}_failed`, workspace: this.workspaceId, attempts, error: errClass(err) }));
+          alert(`${t.kind}_failed`, { workspace: this.workspaceId, attempts, error: errClass(err) });
         }
       }
     }
@@ -1854,7 +1867,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       case 'r2_drain': {
         const stillOwed = await this.drainR2Deletes();
         if (stillOwed > 0) {
-          console.error(JSON.stringify({ alert: 'r2_deletes_still_owed', workspace: this.workspaceId, keys: stillOwed }));
+          alert('r2_deletes_still_owed', { workspace: this.workspaceId, keys: stillOwed });
           return now + 3_600_000;
         }
         return nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
@@ -1862,7 +1875,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       case 'send_release': {
         const job = sendJobSchema.safeParse((JSON.parse(payload ?? 'null') as { job?: unknown } | null)?.job);
         if (!job.success) {
-          console.error(JSON.stringify({ alert: 'scheduled_task_invalid', kind, workspace: this.workspaceId }));
+          alert('scheduled_task_invalid', { kind, workspace: this.workspaceId });
           return undefined; // a payload that can never parse must not retry forever
         }
         await this.env.SEND_QUEUE.sendBatch([{ body: job.data }]);
@@ -1876,7 +1889,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         } catch (err) {
           if (attempts + 1 < MEDIA_FETCH_MAX_ATTEMPTS) throw err;
           // Meta media ids live 30 days and we retried for hours: stop, say so, keep the message (without its media).
-          console.error(JSON.stringify({ alert: 'media_fetch_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: errClass(err) }));
+          alert('media_fetch_abandoned', { workspace: this.workspaceId, attempts: attempts + 1, error: errClass(err) });
         }
         return undefined;
       }
@@ -1904,7 +1917,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       case 'bot_turn': {
         const input = botInputSchema.safeParse(JSON.parse(payload ?? 'null'));
         if (!input.success) {
-          console.error(JSON.stringify({ alert: 'scheduled_task_invalid', kind, workspace: this.workspaceId }));
+          alert('scheduled_task_invalid', { kind, workspace: this.workspaceId });
           return undefined;
         }
         try {
@@ -1912,7 +1925,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         } catch (err) {
           // Give up quietly after a few tries: the customer can simply write again.
           if (attempts + 1 < BOT_TURN_MAX_ATTEMPTS) throw err;
-          console.error(JSON.stringify({ alert: 'bot_turn_abandoned', workspace: this.workspaceId, attempts: attempts + 1, error: errClass(err) }));
+          alert('bot_turn_abandoned', { workspace: this.workspaceId, attempts: attempts + 1, error: errClass(err) });
         }
         return undefined;
       }
@@ -1954,7 +1967,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           const ev = await currentEvent(this.env, this.workspaceId);
           if (ev) await this.applyEntitlement(ev, now);
         } catch (err) {
-          console.error(JSON.stringify({ alert: 'queued_period_roll_failed', workspace: this.workspaceId, error: errClass(err) }));
+          alert('queued_period_roll_failed', { workspace: this.workspaceId, error: errClass(err) });
           return now + 60_000; // never expire a renewal that was paid for because D1 blinked
         }
         return this.ctx.storage.transactionSync(() => expireSubscription(this.sql, now)) ?? undefined;
@@ -2113,7 +2126,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       try {
         await this.env.MEDIA.delete(batch);
       } catch (err) {
-        console.error(JSON.stringify({ alert: 'r2_delete_failed', workspace: this.workspaceId, keys: batch.length, error: errClass(err) }));
+        alert('r2_delete_failed', { workspace: this.workspaceId, keys: batch.length, error: errClass(err) });
         return this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM r2_pending_deletes').one().n;
       }
       this.ctx.storage.transactionSync(() => {

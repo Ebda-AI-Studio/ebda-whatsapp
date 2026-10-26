@@ -14,6 +14,7 @@ import { applyProviderRefund } from './card-refunds';
 import { roundHalfEvenDiv } from './money';
 import { RefundContention, applyPackageWebhook, auditOnce, findPackageOrder } from './package-orders';
 import { packagesEnabled, paymentProvider, topupsEnabled, type ParsedWebhook, type PaymentProvider } from './payments';
+import { alert } from '../observability';
 
 export const MIN_TOPUP_MINOR = 1000;
 export const MAX_TOPUP_MINOR = 5_000_000;
@@ -24,7 +25,6 @@ export const EXPIRE_AFTER_MS = 7 * 86_400_000;
 export type TopupRow = { order_id: string; workspace_id: string; amount_minor: number; fee_minor: number; total_minor: number; currency: string; state: 'pending' | 'paid' | 'failed' | 'expired'; created_at: number; transaction_id: string | null };
 export const TOPUP_COLS = 'order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_at, transaction_id';
 const stubOf = (env: Env, workspaceId: string) => env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId));
-const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
 
 /** The card fee on top of `amountMinor`: bps of the amount (half-even) plus a fixed part, both from the environment. */
 export function feeFor(env: Env, amountMinor: number): number {

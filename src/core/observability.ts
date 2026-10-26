@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare';
 import type { ErrorEvent } from '@sentry/cloudflare';
 
 // A run of 8+ digits (ASCII, Arabic-Indic or Persian), optionally with +, spaces, dashes, dots or parentheses between them.
@@ -65,4 +66,146 @@ export function errClass(err: unknown): string {
 export function safeMessage(err: unknown, max = 200): string {
   const raw = String((err as { message?: unknown } | null)?.message ?? err);
   return (maskPhones(raw) ?? '').replace(EMAIL, '[email]').slice(0, max);
+}
+
+// ---- Alerts that reach a human (iceberg E1/E2, W1-OBS) ---------------------------------------------------------------------------------
+
+export type AlertSeverity = 'P0' | 'P1' | 'info';
+export type AlertFields = { severity?: AlertSeverity; workspace?: string } & Record<string, unknown>;
+export type AlertEnv = { TELEGRAM_BOT_TOKEN?: string; TELEGRAM_ALERT_CHAT_ID?: string; ENVIRONMENT?: string; ALERT_PRODUCT?: string; [k: string]: unknown };
+type SentryLevel = 'error' | 'warning';
+type AlertDeps = {
+  env: AlertEnv;
+  /** Hands a promise to the runtime so it outlives the response (ctx.waitUntil). */
+  waitUntil: (p: Promise<unknown>) => void;
+  captureMessage: (message: string, level: SentryLevel) => void;
+  captureException: (err: unknown) => void;
+};
+
+/** P0 = wake someone (money or consent integrity). P1 = degraded, a human must look today. Everything else is `info` (logs only) unless the caller says otherwise. */
+const P0_ALERTS = new Set([
+  'ledger_mirror_mismatch', 'refund_debit_incomplete', 'card_refund_over_refundable', 'package_paid_not_granted', 'instapay_confirmed_not_granted',
+  'duplicate_success', 'package_amount_mismatch', 'topup_amount_mismatch', 'shared_sent_not_recorded',
+]);
+const P1_ALERTS = new Set([
+  'send_dlq', 'unhandled_error', 'secret_misconfigured', 'entitlement_push_failed', 'entitlement_reconcile_failed', 'entitlement_event_not_queued', 'webhook_reconfirm_failed',
+  'webhook_unconfirmed_abandoned', 'webhook_unconfirmed_aged', 'topup_repair_failed', 'package_repair_failed', 'instapay_repair_failed', 'card_refund_reconcile_failed', 'card_refund_stuck',
+  'refund_abandon_sweep_failed', 'instapay_expiry_failed', 'instapay_overdue_check_failed', 'instapay_grant_failed', 'instapay_proof_overdue', 'instapay_amount_mismatch', 'send_enqueue_failed',
+  'store_event_failed', 'business_token_unavailable', 'campaign_launch_failed', 'campaign_paused_internal_error', 'campaign_wallet_settle_failed', 'campaign_wallet_unavailable',
+  'shared_sweep_failed', 'shared_template_refresh_failed', 'shared_trueup_not_published', 'pricing_pull_failed', 'pricing_copy_missing', 'queued_period_roll_failed',
+  'store_plan_fallback_failed', 'r2_deletes_still_owed', 'scheduled_task_invalid', 'otp_failed', 'import_start_failed', 'import_workflow_failed', 'refund_id_conflict', 'refund_held',
+  'refund_held_debited', 'refund_unmatched_no_credit', 'refund_excess_for_review', 'refund_reversal_blocked', 'package_refund_contention', 'package_refund_unmatched', 'package_chargeback',
+  'funding_unknown', 'rate_unavailable', 'billing_unpriced_model', 'rate_missing_no_estimate', 'bot_turn_abandoned', 'media_fetch_abandoned', 'agent_model_failed', 'wallet_wait_expired',
+  'topup_webhook_failed', 'package_webhook_failed', 'cod_outcome_push_failed', 'inquiry_multiple_success', 'topup_unknown_order', 'topup_refunded_by_provider', 'signup_not_configured',
+  'business_id_unverified', 'refund_refused', 'refund_id_conflict',
+  // Added in review: each of these was silently `info` and a human must see it.
+  'instapay_sla_not_scheduled', 'proof_url_not_configured', 'catalog_mass_delete_refused', 'catalog_business_mismatch', 'rate_missing_estimate_charged', 'bot_buyer_key_unavailable',
+  'package_refunded', 'package_partial_refund',
+]);
+/** Known and deliberately log-only. A NEW alert name must be added to exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS (test/guards.test.ts fails otherwise). */
+export const INFO_ALERTS = new Set([
+  'agent_no_credits', 'agent_tool_failed', 'ai_overdraw_refused', 'catalog_not_linked', 'catalog_provision_failed', 'catalog_vector_search_failed', 'cod_outcome_refused',
+  'cod_request_details_missing', 'connector_call_crashed', 'connector_call_failed', 'kb_index_unavailable', 'kb_retrieve_failed', 'r2_delete_failed', 'rate_missing_pending',
+  'send_tier_exhausted', 'shared_pick_id_refused', 'shared_trueup_no_rebate', 'topup_inquiry_unsupported', 'wallet_low_balance', 'webhook_unconfirmed',
+]);
+
+export const severityOf = (name: string, explicit?: AlertSeverity): AlertSeverity => explicit ?? (P0_ALERTS.has(name) ? 'P0' : P1_ALERTS.has(name) ? 'P1' : 'info');
+
+const THROTTLE_MS = 10 * 60_000;
+const defaultDeps = (): AlertDeps => ({
+  env: {},
+  waitUntil: () => undefined,
+  captureMessage: (message, level) => { Sentry.captureMessage(message, { level, fingerprint: [message.split(' ')[0] ?? 'alert'] }); },
+  captureException: (err) => { Sentry.captureException(err); },
+});
+let deps: AlertDeps = defaultDeps();
+const lastSent = new Map<string, { at: number; suppressed: number }>();
+
+/** Called at every entry point (request, queue batch, cron, Durable Object) so alert() knows the secrets and how to outlive the response. */
+export function bindAlerts(d: Partial<AlertDeps> & { env: AlertEnv }): void {
+  // Merge, don't reset: a later entry point (a request, a DO constructor) refreshes env / waitUntil but keeps an injected capture.
+  deps = { ...deps, ...d };
+}
+export function resetAlerts(): void {
+  deps = defaultDeps();
+  lastSent.clear();
+}
+
+// Keys whose values can be a person's data or a credential: never rendered, whatever the caller passed.
+const DENIED_KEY = /^(to|from|body|text|code|email|caption|address|message|name|customer\w*)$|phone|wa_?id|token|secret|password|authorization/i;
+function renderFields(fields: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(fields)) {
+    if (k === 'severity' || k === 'workspace' || DENIED_KEY.test(k)) continue;
+    const raw = Array.isArray(v) ? v.filter((x) => ['string', 'number', 'boolean'].includes(typeof x)).join(',') : ['string', 'number', 'boolean'].includes(typeof v) ? String(v) : '';
+    if (!raw) continue;
+    out.push(`${k}=${(maskPhones(raw) ?? '').replace(PHONE_ANYWHERE, '[phone]').slice(0, 80)}`);
+  }
+  return out.slice(0, 12);
+}
+// Belt and braces on top of maskPhones: any run of 8+ digits that survived is hidden too.
+const PHONE_ANYWHERE = /[0-9\u0660-\u0669\u06f0-\u06f9]{8,}/g;
+
+const shortWorkspace = (ws: string): string => (ws.length > 8 ? `${ws.slice(0, 8)}…` : ws);
+
+function telegramText(name: string, sev: AlertSeverity, workspace: string | undefined, fields: string[], suppressed: number, env: AlertEnv): string {
+  const lines = [
+    `${sev === 'P0' ? '🔴' : '🟠'} ${env.ALERT_PRODUCT ?? 'WhatsApp'}: ${name}`,
+    `[${sev} ${workspace ? 'WORKSPACE' : 'PLATFORM'}]`,
+    ...(workspace ? [`workspace=${shortWorkspace(workspace)}`] : []),
+    `env=${env.ENVIRONMENT ?? 'production'} · runbook=docs/runbooks/alerts.md#${name}`,
+    ...fields,
+    ...(suppressed > 0 ? [`(suppressed ${suppressed} more since the last alert)`] : []),
+  ];
+  return lines.join('\n').slice(0, 4000);
+}
+
+/**
+ * THE way a code path says "a human should know". Always writes the JSON log line (the existing `{ alert: name, ...fields }` shape). For P0/P1 it also
+ * records a Sentry EVENT (captureMessage, not a breadcrumb) and sends one Telegram message to TELEGRAM_ALERT_CHAT_ID, both fire-and-forget through waitUntil
+ * and throttled per (name, workspace) for 10 minutes per isolate (the count it swallowed is stated in the next message). Secrets unset = log + Sentry only.
+ * It NEVER throws into the caller, and never puts a phone, a body or a credential in Telegram or Sentry (maskPhones + a denied-key list).
+ */
+export function alert(name: string, fields: AlertFields = {}): void {
+  try {
+    console.error(JSON.stringify({ alert: name, ...fields }));
+  } catch { /* an unserialisable field must not lose the alert */ }
+  try {
+    const sev = severityOf(name, fields.severity);
+    if (sev === 'info') return;
+    const workspace = typeof fields.workspace === 'string' ? fields.workspace : undefined;
+    const key = `${name}|${workspace ?? ''}`;
+    const now = Date.now();
+    const seen = lastSent.get(key);
+    if (seen && now - seen.at < THROTTLE_MS) {
+      seen.suppressed++;
+      return;
+    }
+    const suppressed = seen?.suppressed ?? 0;
+    lastSent.set(key, { at: now, suppressed: 0 });
+    const d = deps;
+    const rendered = renderFields(fields);
+    const message = `${name} [${sev}]${workspace ? ` workspace=${shortWorkspace(workspace)}` : ''}${rendered.length ? ` ${rendered.join(' ')}` : ''}`;
+    try {
+      d.captureMessage(maskPhones(message) ?? name, sev === 'P0' ? 'error' : 'warning');
+    } catch { /* Sentry must never break the caller */ }
+    const { TELEGRAM_BOT_TOKEN: token, TELEGRAM_ALERT_CHAT_ID: chat } = d.env;
+    if (!token || !chat) return;
+    const send = fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: chat, text: telegramText(name, sev, workspace, rendered, suppressed, d.env) }),
+      signal: AbortSignal.timeout(5000),
+    }).then(() => undefined, () => undefined);
+    try {
+      d.waitUntil(send);
+    } catch { /* a stale execution context: the promise still runs, just unowned */ }
+  } catch { /* never throws into the caller */ }
+}
+
+/** Reports a caught exception to Sentry (text masked by scrubEvent) without ever throwing. */
+export function captureError(err: unknown): void {
+  try {
+    deps.captureException(err);
+  } catch { /* ignore */ }
 }

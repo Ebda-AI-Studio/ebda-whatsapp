@@ -21,6 +21,7 @@ import type { InstapayPayee } from './instapay-payee';
 import { adjustmentThreshold } from './operator';
 import { ORDER_COLS, grantOrder, type PackageOrderRow } from './package-orders';
 import { MAX_TOPUP_MINOR, MIN_TOPUP_MINOR, TOPUP_COLS, credit, type TopupRow } from './topups';
+import { alert } from '../observability';
 
 export type { InstapayPayee };
 export const INSTAPAY_TTL_MS = 48 * 3_600_000;
@@ -31,7 +32,6 @@ export const REVIEW_SLA_BUSINESS_MS = 4 * 3_600_000;
 export const PROOF_LINK_TTL_MS = 2 * 60_000;
 
 export const instapayEnabled = (env: Env): boolean => env.INSTAPAY_BILLING_ENABLED === 'true';
-const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
 const stubOf = (env: Env, ws: string) => env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(ws));
 
 export type RequestState = 'awaiting_proof' | 'under_review' | 'confirmed' | 'rejected' | 'expired';

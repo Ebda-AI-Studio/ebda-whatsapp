@@ -1,5 +1,5 @@
 import { segmentCriteria, type CampaignDto, type CampaignParam, type SegmentCriteria } from '../api/contract';
-import { errClass } from '../observability';
+import { errClass, alert } from '../observability';
 import { addTask } from '../scheduler';
 import { cleanParam, queueTemplate } from '../store-link/outbound';
 import type { LinkHost } from '../store-link/host';
@@ -375,7 +375,7 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
       reservedMinor = (await wallet.walletEstimate(host.workspaceId, c.category, ctx)) * rows.length;
       res = await wallet.walletReserve(host.workspaceId, ref, reservedMinor, ctx);
     } catch (err) {
-      console.error(JSON.stringify({ alert: 'campaign_wallet_unavailable', workspace: host.workspaceId, error: errClass(err) }));
+      alert('campaign_wallet_unavailable', { workspace: host.workspaceId, error: errClass(err) });
       return { state: 'retry', reason: 'wallet_unavailable' };
     }
     if (!res.ok) {
@@ -422,7 +422,7 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
   await host.arm();
   if (result.state === 'done') {
     // The page is queued and final; a wallet that cannot be told now is told by the sweep. Failing here would only make the step ask again.
-    await settleWallet(host, id).catch((err) => console.error(JSON.stringify({ alert: 'campaign_wallet_settle_failed', workspace: host.workspaceId, error: errClass(err) })));
+    await settleWallet(host, id).catch((err) => alert('campaign_wallet_settle_failed', { workspace: host.workspaceId, error: errClass(err) }));
   }
   return result;
 }
@@ -460,7 +460,7 @@ export async function launchCampaign(host: LinkHost, id: string, now: number): P
   try {
     await host.env.CAMPAIGN_WORKFLOW.create({ id: `${id}-${row.attempt}`, params: { workspaceId: host.workspaceId, campaignId: id, attempt: row.attempt } });
   } catch (err) {
-    console.error(JSON.stringify({ alert: 'campaign_launch_failed', workspace: host.workspaceId, attempt: row.attempt, error: errClass(err) }));
+    alert('campaign_launch_failed', { workspace: host.workspaceId, attempt: row.attempt, error: errClass(err) });
   }
 }
 
@@ -498,7 +498,7 @@ export async function sweepCampaigns(host: LinkHost, now: number): Promise<numbe
     if (alive) continue;
     if (c.attempt >= MAX_ATTEMPTS) {
       host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'internal_error', updated_at = ? WHERE id = ? AND status IN ('scheduled', 'running')", now, c.id);
-      console.error(JSON.stringify({ alert: 'campaign_paused_internal_error', workspace: host.workspaceId, campaign: c.id }));
+      alert('campaign_paused_internal_error', { workspace: host.workspaceId, campaign: c.id });
     } else {
       await launchCampaign(host, c.id, now);
     }
@@ -507,7 +507,7 @@ export async function sweepCampaigns(host: LinkHost, now: number): Promise<numbe
     try {
       await settleWallet(host, c.id);
     } catch (err) {
-      console.error(JSON.stringify({ alert: 'campaign_wallet_settle_failed', workspace: host.workspaceId, error: errClass(err) }));
+      alert('campaign_wallet_settle_failed', { workspace: host.workspaceId, error: errClass(err) });
     }
   }
   const stillActive = host.sql.exec<{ n: number }>("SELECT count(*) AS n FROM campaigns WHERE status IN ('scheduled', 'running')").one().n;

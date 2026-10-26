@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Env } from '../env';
 import { normaliseE164 } from './phone';
-import { errClass } from './observability';
+import { errClass, alert } from './observability';
 import { senderNumberFor } from './shared/shared-number';
 import { storeLink } from './store-link';
 
@@ -33,7 +33,7 @@ export async function sendOtp(env: Env, input: unknown): Promise<OtpResult> {
     if (!number || number.shared) return { ok: false, reason: 'no_number' };
     return await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(storeId)).queueOtp(e164.slice(1), number.phoneNumberId, code);
   } catch (err) {
-    console.error(JSON.stringify({ alert: 'otp_failed', storeId, error: errClass(err) }));
+    alert('otp_failed', { storeId, error: errClass(err) });
     return { ok: false, reason: 'unavailable' };
   }
 }

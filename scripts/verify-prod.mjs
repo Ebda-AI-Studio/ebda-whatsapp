@@ -67,6 +67,16 @@ export async function runChecks({ base, expectCommit, expectBrand, verifyToken, 
   const empty = JSON.stringify({ object: 'whatsapp_business_account', entry: [] });
   const unsigned = await get('/meta/webhook', { method: 'POST', headers: { 'content-type': 'application/json' }, body: empty });
   add('webhook refuses unsigned', unsigned.status === 401, `status ${unsigned.status}`);
+  // The card provider's webhook must reach the Worker (wrangler run_worker_first has /kashier/*). If the SPA fallback answered instead, no payment
+  // would ever be confirmed: an unsigned POST must get the Worker's 4xx (text or JSON), never 200 / HTML.
+  try {
+    const k = await get('/kashier/webhook', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const kBody = (await k.text()).trimStart();
+    const html = /text\/html/i.test(k.headers.get('content-type') ?? '') || kBody.startsWith('<');
+    add('kashier webhook is served by the Worker', k.status >= 400 && k.status < 500 && !html, html ? `status ${k.status}, an HTML page: the static assets answered, /kashier/* is missing from run_worker_first` : `status ${k.status}`);
+  } catch (e) {
+    add('kashier webhook is served by the Worker', false, `unreachable: ${e.message}`);
+  }
   if (!appSecret) add('webhook accepts signed', null, 'skipped: set META_APP_SECRET');
   else {
     const sig = `sha256=${createHmac('sha256', appSecret).update(empty).digest('hex')}`;
