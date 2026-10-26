@@ -301,6 +301,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
                 <b dir="auto">{p.name}</b> <span>{money(p.priceMinor)}</span>
                 <p className="muted">{t.wPackageCredits(num(p.aiCredits, lang))}</p>
                 <p className="muted">{t.wPackageMembers(num(p.maxMembers, lang))}</p>
+                {p.periodMonths > 1 && <p className="muted">{t.wPackageYearly(num(p.periodMonths, lang))}</p>}
                 <ul className="muted">{p.features.filter((k) => k in t.wPackageFeature).map((k) => <li key={k}>{t.wPackageFeature[k]}</li>)}</ul>
                 <button type="button" className="btn gold" disabled={busy !== null || pending !== null} onClick={() => void buy(p.id)}>{t.wPackageBuy}</button>
               </li>

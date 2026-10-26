@@ -440,6 +440,9 @@ export const DO_MIGRATIONS: readonly string[] = [
    ALTER TABLE entitlements ADD COLUMN lim_priority_support INTEGER NOT NULL DEFAULT 0;`,
   // v33 (WA-GRACE-1): when the control plane saw the subscription first fail to renew. NULL = never past_due (or unknown: serviceAllowed then bounds the grace from updated_at).
   `ALTER TABLE entitlements ADD COLUMN past_due_since INTEGER;`,
+  // v34 (P2 yearly): the billing period length (1 or 12 months) of the workspace's package, carried by the entitlement event. A period longer than a month
+  // gets its AI credits one month at a time (credit_month tasks), never 12x at once.
+  `ALTER TABLE entitlements ADD COLUMN period_months INTEGER NOT NULL DEFAULT 1;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

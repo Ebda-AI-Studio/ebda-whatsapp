@@ -10,6 +10,7 @@ import {
   requestAdjustment, setFunding,
 } from '../core/billing/operator';
 import { STORE_INCLUDED, setSubscription } from '../core/billing/subscriptions';
+import { packageRefundQuote } from '../core/billing/package-orders';
 import { currentSharedNumber, registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
 import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type SharedTemplateFailure } from '../core/shared/shared-templates';
 import { submitTemplateRequest } from './templates';
@@ -194,6 +195,14 @@ operatorRoutes.put('/workspaces/:workspaceId/subscription', async (c) => {
   const r = await setSubscription(c.env, { workspaceId, packageId: b.data.packageId, status: b.data.status, periodStart: Date.now(), periodEnd: b.data.periodEnd, source: 'operator', ref: actor(c), reason: b.data.reason });
   console.log(JSON.stringify({ audit: 'operator_subscription_set', workspace: workspaceId, packageId: b.data.packageId, status: b.data.status, version: r.version, actor: actor(c) }));
   return c.json({ packageId: b.data.packageId, status: b.data.status, periodEnd: b.data.periodEnd, version: r.version, applied: r.applied });
+});
+
+// What a human can refund of a package order right now (Review Focus 5): unused whole months x floor(price / 12), the current month kept, wallet debt first.
+operatorRoutes.get('/package-orders/:orderId/refund-quote', async (c) => {
+  const q = await packageRefundQuote(c.env, c.req.param('orderId'));
+  if (q === 'not_found') return c.json({ error: 'not_found' }, 404);
+  if (q === 'not_paid') return c.json({ error: 'invalid_request', message: 'order_not_paid' }, 409);
+  return c.json(q);
 });
 
 operatorRoutes.get('/change-log', async (c) => {

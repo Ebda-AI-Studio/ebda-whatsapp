@@ -325,6 +325,20 @@ describe('wallet: low balance banner in the inbox', () => {
 describe('wallet: packages (owner)', () => {
   const props = (source: InboxSource, go = vi.fn()) => ({ t, lang: 'ar' as const, source, api: source.wallet!, now, go });
 
+  it('a yearly package says it is paid once for 12 months with credits added monthly; a monthly one does not', async () => {
+    const source = createSampleSource();
+    vi.spyOn(source.wallet!, 'packages').mockResolvedValue([
+      { id: 'starter', name: 'Starter', priceMinor: 69000, aiCredits: 300, maxMembers: 2, features: ['members'], periodMonths: 1 },
+      { id: 'starter-yearly', name: 'Starter (yearly)', priceMinor: 621000, aiCredits: 300, maxMembers: 2, features: ['members'], periodMonths: 12 },
+    ]);
+    render(<WalletScreen {...props(source, vi.fn())} />);
+    const card = await screen.findByRole('region', { name: t.wPackagesTitle });
+    const yearly = (await within(card).findByText('Starter (yearly)')).closest('li')!;
+    expect(within(yearly).getByText(t.wPackageYearly(num(12, 'ar')))).toBeTruthy();
+    const monthly = (await within(card).findByText('Starter')).closest('li')!;
+    expect(within(monthly).queryByText(t.wPackageYearly(num(12, 'ar')))).toBeNull();
+  });
+
   it('lists the packages with price and AI credits and sends only the package id; redirects only to https', async () => {
     const source = createSampleSource();
     const go = vi.fn();

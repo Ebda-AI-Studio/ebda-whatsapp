@@ -12,17 +12,21 @@ import { uuidFromKey } from '../store-link/orders';
 import type { EntitlementEvent } from './entitlements';
 
 export const STORE_INCLUDED = 'store-included';
-export const MONTH_SQL = (col: string) => `CAST(strftime('%s', ${col} / 1000, 'unixepoch', '+1 month') AS INTEGER) * 1000`;
+/** `col` (ms) plus N whole calendar months, N being a SQL expression. */
+export const MONTHS_SQL = (col: string, months: string) => `CAST(strftime('%s', ${col} / 1000, 'unixepoch', '+' || (${months}) || ' months') AS INTEGER) * 1000`;
+export const MONTH_SQL = (col: string) => MONTHS_SQL(col, '1');
+/** The billing period (1 or 12 months) of the package a `workspace_subscriptions` row is on. */
+export const PERIOD_MONTHS_SQL = 'coalesce((SELECT period_months FROM packages WHERE id = workspace_subscriptions.package_id), 1)';
 
-type SubRow = { workspace_id: string; package_id: string; status: EntitlementEvent['status']; period_start: number; period_end: number; cancelled_at: number | null; version: number; ai_credits: number | null; max_members: number | null; feat_campaigns: number | null; feat_order_in_chat: number | null; feat_api: number | null; priority_support: number | null; past_due_since: number | null };
+type SubRow = { workspace_id: string; package_id: string; status: EntitlementEvent['status']; period_start: number; period_end: number; cancelled_at: number | null; version: number; ai_credits: number | null; max_members: number | null; feat_campaigns: number | null; feat_order_in_chat: number | null; feat_api: number | null; priority_support: number | null; past_due_since: number | null; period_months: number | null };
 
 /** A package row that is missing (LEFT JOIN null) yields the DENY limits, never a feature. */
 export const toEvent = (r: SubRow): EntitlementEvent => ({
-  version: r.version, packageId: r.package_id, status: r.status, periodStart: r.period_start, periodEnd: r.period_end, aiCredits: r.ai_credits ?? 0, cancelledAt: r.cancelled_at, pastDueSince: r.status === 'past_due' ? r.past_due_since : null,
+  version: r.version, packageId: r.package_id, status: r.status, periodStart: r.period_start, periodEnd: r.period_end, aiCredits: r.ai_credits ?? 0, cancelledAt: r.cancelled_at, pastDueSince: r.status === 'past_due' ? r.past_due_since : null, periodMonths: r.period_months ?? 1,
   limits: { maxMembers: Math.max(1, r.max_members ?? 1), campaigns: r.feat_campaigns === 1, orderInChat: r.feat_order_in_chat === 1, api: r.feat_api === 1, prioritySupport: r.priority_support === 1 },
 });
 
-const SELECT = `SELECT s.workspace_id, s.package_id, s.status, s.period_start, s.period_end, s.cancelled_at, s.version, p.ai_credits, p.max_members, p.feat_campaigns, p.feat_order_in_chat, p.feat_api, p.priority_support, s.past_due_since
+const SELECT = `SELECT s.workspace_id, s.package_id, s.status, s.period_start, s.period_end, s.cancelled_at, s.version, p.ai_credits, p.max_members, p.feat_campaigns, p.feat_order_in_chat, p.feat_api, p.priority_support, s.past_due_since, p.period_months
   FROM workspace_subscriptions s LEFT JOIN packages p ON p.id = s.package_id`;
 
 const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
@@ -147,7 +151,7 @@ export async function rollRenewals(env: Env, workspaceId: string, now: number): 
       env.DB.prepare(`UPDATE package_orders SET owns_running = 0 WHERE workspace_id = ? AND owns_running = 1 AND ${due.sql}`).bind(workspaceId, ...due.binds),
       env.DB.prepare(`UPDATE package_orders SET owns_running = 1, queued_seq = NULL WHERE order_id = (SELECT order_id FROM package_orders WHERE workspace_id = ? AND queued_seq IS NOT NULL ORDER BY queued_seq LIMIT 1) AND ${due.sql}`).bind(workspaceId, ...due.binds),
       env.DB.prepare(`UPDATE package_orders SET queued_seq = queued_seq - 1 WHERE workspace_id = ? AND queued_seq IS NOT NULL AND ${due.sql}`).bind(workspaceId, ...due.binds),
-      env.DB.prepare(`UPDATE workspace_subscriptions SET period_start = period_end, period_end = ${MONTH_SQL('period_end')}, queued_periods = queued_periods - 1,
+      env.DB.prepare(`UPDATE workspace_subscriptions SET period_start = period_end, period_end = ${MONTHS_SQL('period_end', PERIOD_MONTHS_SQL)}, queued_periods = queued_periods - 1,
           version = version + 1, updated_at = ? WHERE workspace_id = ? AND queued_periods > 0 AND period_end <= ? AND status IN ('active', 'trialing') RETURNING version`).bind(now, workspaceId, now),
       auditStmt(env, { actor: 'purchase', workspaceId, ref: 'queued_period_started', after: { rolledAt: now } }, now),
     ]);

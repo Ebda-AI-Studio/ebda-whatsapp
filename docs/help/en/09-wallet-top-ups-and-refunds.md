@@ -28,9 +28,13 @@ While card payment is not switched on for your account, you pay by InstaPay tran
 1. Open **Wallet** and find the **Packages** card (the owner sees it; it appears once package purchase is switched on for your account).
 2. Pick a package. The price and the monthly AI credits are shown; the price is set by us and is exactly what the card is charged (no extra card fee, unlike a top-up).
 3. Pay on the Kashier page. The package turns on when Kashier confirms the payment, not when you return to the page. Until then you see "waiting for confirmation".
-4. A package runs for **one month** and does **not renew by itself**. A week before it ends, the inbox shows a reminder with a link to the wallet; buy again to renew. If you renew early, the new month starts the day the current one ends (you do not lose days), and the AI credits of a month are valid for that month only; the new month brings a fresh amount.
+4. A package runs for **one month** (a yearly one for **twelve**) and does **not renew by itself**. A week before it ends, the inbox shows a reminder with a link to the wallet; buy again to renew. If you renew early, the new month starts the day the current one ends (you do not lose days), and the AI credits of a month are valid for that month only; the new month brings a fresh amount.
+
+**Yearly packages** (Starter, Growth and Pro "yearly") cost 9 times the monthly price and run for **12 months**. They have the same features and the same AI credits per month as the monthly package; the credits are added **every month**, not all at once, and a month's unused credits end when the next month's arrive.
 
 **There is no free plan.** Without a package in good standing you can still sign in, read your inbox, see the packages and buy one, but you cannot send any message (replies, order and COD confirmations and one-time codes included), use the AI agent, or connect a number. The app tells you "a package is required". If a renewal fails your package becomes **past due**: replies and confirmations keep working for up to **7 days** (or until the package period ends, whichever comes first), marketing campaigns stop at once, and then sending stops until you pay.
+
+*Refunding a yearly package:* we can refund the **whole months you have not started**, at the yearly price divided by 12 (rounded down). The month you are in is never refunded, so a refund in the last month is nothing. If your wallet is in debt, the debt is settled first out of the refund. A partial refund shortens the yearly period by the months refunded.
 
 *Notes:* if your store plan already includes WhatsApp, you get the included package automatically. A package you bought is never replaced by a change in the store plan while it is running. Support can also assign a package to your account.
 
