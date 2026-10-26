@@ -60,7 +60,7 @@ export function SearchBox({ t, lang, label, placeholder, query, onQuery, status,
           onChange={(e) => { onQuery(e.target.value); onActiveIndex(-1); }} onKeyDown={onKeyDown}
         />
       </label>
-      <p className="vh" role="status" aria-live="polite">{message}</p>
+      <p className="vh" aria-live="polite" aria-atomic="true">{message}</p>
     </div>
   );
 }

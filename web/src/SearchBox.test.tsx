@@ -91,7 +91,7 @@ describe('SearchBox keyboard', () => {
 });
 
 describe('SearchBox live status', () => {
-  const live = () => screen.getByRole('status');
+  const live = () => document.querySelector('[aria-live="polite"]')!;
   it('is polite and empty while idle', () => {
     render(<Harness status="idle" query="" count={0} />);
     expect(live().getAttribute('aria-live')).toBe('polite');
