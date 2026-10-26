@@ -107,13 +107,13 @@ describe('SearchBox live status', () => {
     rerender(<SearchBox t={STRINGS.en} lang="en" label="Search" query="zed" onQuery={() => {}} status="done" count={1} listId="r" activeIndex={-1} onActiveIndex={() => {}} onPick={() => {}} />);
     expect(live().textContent).toBe('1 result');
   });
-  it('Arabic (Egyptian): بندوّر، مفيش نتايج لـ، لقينا ٣ نتايج', () => {
+  it('Arabic (Egyptian): بندوّر، مفيش نتايج لـ، لقينا 3 نتايج', () => {
     const { rerender } = render(<SearchBox t={STRINGS.ar} lang="ar" label="بحث" query="زيد" onQuery={() => {}} status="loading" count={0} listId="r" activeIndex={-1} onActiveIndex={() => {}} onPick={() => {}} />);
     expect(live().textContent).toBe('بندوّر…');
     rerender(<SearchBox t={STRINGS.ar} lang="ar" label="بحث" query="زيد" onQuery={() => {}} status="done" count={0} listId="r" activeIndex={-1} onActiveIndex={() => {}} onPick={() => {}} />);
     expect(live().textContent).toBe('مفيش نتايج لـ «زيد»');
     rerender(<SearchBox t={STRINGS.ar} lang="ar" label="بحث" query="زيد" onQuery={() => {}} status="done" count={3} listId="r" activeIndex={-1} onActiveIndex={() => {}} onPick={() => {}} />);
-    expect(live().textContent).toBe('لقينا ٣ نتايج');
+    expect(live().textContent).toBe('لقينا 3 نتايج');
   });
   it('an error says so instead of "no results"', () => {
     render(<Harness status="error" count={0} />);

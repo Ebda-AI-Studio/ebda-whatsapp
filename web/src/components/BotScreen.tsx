@@ -50,7 +50,7 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
     }
   };
 
-  const when = (ms: number) => new Date(ms).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
+  const when = (ms: number) => new Date(ms).toLocaleString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
   return (
     <section className="settings" aria-labelledby="bot-catalog-title">
       <h2 id="bot-catalog-title">{t.catTitle}</h2>

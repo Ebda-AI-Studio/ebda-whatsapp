@@ -52,7 +52,7 @@ describe('operator: shared number templates', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: t.opSharedSync })));
     expect(sync).toHaveBeenCalledTimes(1);
     expect(list.mock.calls.length).toBeGreaterThan(before);
-    expect((await screen.findByRole('status')).textContent).toContain(t.opSharedSynced('٣', '٠'));
+    expect((await screen.findByRole('status')).textContent).toContain(t.opSharedSynced('3', '0'));
   });
 
   it('submit sends a BODY component for a utility or authentication template; marketing is not offered; a bad name never reaches the API', async () => {

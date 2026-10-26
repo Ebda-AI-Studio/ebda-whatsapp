@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { findMatches } from './helpers/grep';
 
@@ -97,4 +99,49 @@ it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / IN
   const wrong = [...used].filter((n) => [sets.P0, sets.P1, sets.INFO].filter((s) => s.has(n)).length !== 1);
   expect(wrong, 'alert names with no severity (or more than one): add each to exactly one set in observability.ts').toEqual([]);
   for (const a of ['P0', 'P1'] as const) for (const b of ['P1', 'INFO'] as const) if (a !== b) expect([...sets[a]].filter((n) => sets[b].has(n)), `${a} and ${b} overlap`).toEqual([]);
+});
+
+// DIGITS-1 (Ahmad): Western digits 0-9 everywhere a person reads a number. Never Arabic-Indic (٠-٩) or Persian (۰-۹), in the Arabic UI too.
+// 1) Intl / toLocale* may name an Arabic locale only with the latin numbering system (`ar-EG-u-nu-latn`).
+it('DIGITS-1: no Arabic locale reaches Intl / toLocale* without -u-nu-latn (it would print ٠-٩)', () => {
+  const call = /Intl\.(NumberFormat|DateTimeFormat|RelativeTimeFormat|ListFormat|PluralRules)\(|toLocale(Date|Time)?String\(/;
+  const arabicLocale = /['"`]ar(-[A-Za-z]{2})?(-u-[A-Za-z0-9-]+)?['"`]\s*[,)]|['"`]ar-[A-Za-z]{2}(-u-[A-Za-z0-9-]+)?['"`]/g;
+  const hits: string[] = [];
+  for (const scope of ['src', 'web/src']) {
+    for (const m of findMatches(call, scope)) {
+      const [file, line] = m.split(':') as [string, string];
+      if (/\.test\.tsx?$/.test(file)) continue;
+      const text = readFileSync(join(import.meta.dirname, '..', file), 'utf8').split('\n')[Number(line) - 1]!;
+      for (const lit of text.match(arabicLocale) ?? []) if (!lit.includes('nu-latn')) hits.push(`${m}  ${lit}`);
+    }
+  }
+  expect(hits).toEqual([]);
+});
+
+// 2) No Arabic-Indic / Persian digit in anything a user can read. INPUT-side code may still name them (it must ACCEPT what people type),
+// listed by path with the reason; test files (vectors, expectations of typed input) are not scanned.
+const ARABIC_DIGIT = /[٠-٩۰-۹]/;
+const INPUT_SIDE: Record<string, string> = {
+  'src/core/text-normalise.ts': 'normaliseText / phoneDigits fold typed ٠-٩ and ۰-۹ to 0-9 (input side)',
+  'src/core/phone.ts': 'normaliseE164 accepts digits typed in Arabic-Indic or Persian form (input side)',
+  'src/core/shared/shared-number.ts': 'customer key folds typed digits before hashing (input side)',
+  'web/src/lib/rates.ts': 'parses a price typed with Arabic-Indic digits (input side)',
+  'web/src/components/WalletScreen.tsx': 'parses an amount typed with Arabic-Indic digits (input side)',
+};
+const WHOLLY_INPUT = new Set(['src/core/text-normalise.ts', 'src/core/phone.ts']);
+it('DIGITS-1: no ٠-٩ / ۰-۹ in code, copy, templates, brands, help, legal or site docs (except the input-side normalisers)', () => {
+  const hits: string[] = [];
+  for (const scope of ['src', 'web', 'docs/help', 'docs/legal', 'docs/site']) {
+    for (const m of findMatches(ARABIC_DIGIT, scope)) {
+      const [file, line] = m.split(':') as [string, string];
+      if (/\.test\.tsx?$/.test(file) || !/\.(tsx?|mjs|js|json|html|css|svg|md|mdx|txt)$/.test(file)) continue; // tests are not user-facing; images are binary
+      if (INPUT_SIDE[file]) {
+        const text = readFileSync(join(import.meta.dirname, '..', file), 'utf8').split('\n')[Number(line) - 1]!;
+        // Files that are wholly input normalisers may name the digits anywhere (also in their comments); mixed files only in the conversion tables.
+        if (WHOLLY_INPUT.has(file) || /\[٠-٩|\[۰-۹|'٠١٢٣٤٥٦٧٨٩'|'۰۱۲۳۴۵۶۷۸۹'/.test(text)) continue;
+      }
+      hits.push(m);
+    }
+  }
+  expect(hits).toEqual([]);
 });
