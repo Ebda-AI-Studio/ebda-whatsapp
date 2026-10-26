@@ -15,7 +15,7 @@ import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './medi
 import { detectOptIn, detectOptOut } from './consent';
 import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
-import { normaliseText } from './text-normalise';
+import { normaliseText, phoneDigits } from './text-normalise';
 import { conversationDto, type ConversationRow } from './dto';
 import type { ConversationDto, NoteDto } from './api/contract';
 import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './throttle';
@@ -61,6 +61,7 @@ import { countryToDigits } from './billing/country';
 import type { WalletPosted } from './billing/engine';
 import { PRICING_MAX_AGE_MS, applyPricing, copyCursor, fundingOf, pullPricing } from './billing/pricing';
 import { parentHoldRef } from './campaigns/campaigns';
+import { indexContactName, rebuildContactIndex } from './contact-index';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
 import { applyEntitlement, expireSubscription, marketingBlocked, readEntitlement, type EntitlementEvent } from './billing/entitlements';
@@ -133,6 +134,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       migrate(ctx.storage);
       this.reindexIfEmpty();
+      this.reindexContactsIfEmpty();
       this.lastBroadcast = this.sql.exec<{ s: number | null }>('SELECT max(seq) AS s FROM events').one().s ?? 0;
     });
   }
@@ -224,6 +226,7 @@ export class WorkspaceDO extends DurableObject<Env> {
            RETURNING id`,
           m.from, m.profileName ?? null, m.ts,
         ).one().id;
+        if (m.profileName) indexContactName(this.sql, contactId);
         const conversationId = this.sql.exec<{ id: number }>(
           `INSERT INTO conversations (contact_id, last_message_at) VALUES (?, ?)
            ON CONFLICT(contact_id) DO UPDATE SET last_message_at = max(coalesce(last_message_at, 0), excluded.last_message_at)
@@ -332,9 +335,11 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       for (const c of batch.contacts) {
         const r = this.sql.exec(
-          'INSERT INTO contacts (wa_id, profile_name) VALUES (?, ?) ON CONFLICT(wa_id) DO UPDATE SET profile_name = coalesce(profile_name, excluded.profile_name)', c.waId, c.name ?? null,
+          'INSERT INTO contacts (wa_id, profile_name) VALUES (?, ?) ON CONFLICT(wa_id) DO UPDATE SET profile_name = coalesce(profile_name, excluded.profile_name) RETURNING id', c.waId, c.name ?? null,
         );
+        const cid = r.one().id as number;
         if (r.rowsWritten) out.contacts++;
+        if (c.name) indexContactName(this.sql, cid);
       }
       // One update per conversation, not per message: a history import can carry thousands of messages.
       for (const id of touched) this.emitConversationUpdated(id);
@@ -919,6 +924,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     const contactId = this.sql.exec<{ id: number }>(
       'INSERT INTO contacts (wa_id, profile_name) VALUES (?, ?) ON CONFLICT(wa_id) DO UPDATE SET profile_name = coalesce(profile_name, excluded.profile_name) RETURNING id', waId, profileName ?? null,
     ).one().id;
+    if (profileName) indexContactName(this.sql, contactId);
     const conversationId = this.sql.exec<{ id: number }>(
       `INSERT INTO conversations (contact_id, last_message_at) VALUES (?, ?)
        ON CONFLICT(contact_id) DO UPDATE SET last_message_at = max(coalesce(last_message_at, 0), excluded.last_message_at) RETURNING id`, contactId, Math.floor(now / 1000),
@@ -1560,9 +1566,16 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** Rebuilds the index from message previews (after a restore, or for rows older than the index). */
   private rebuildFts(): void {
     this.ctx.storage.transactionSync(() => {
+      rebuildContactIndex(this.sql);
       this.sql.exec('DELETE FROM messages_fts');
       for (const m of this.sql.exec<{ id: number; preview: string }>('SELECT id, preview FROM messages WHERE preview IS NOT NULL').toArray()) this.indexMessage(m.id, m.preview);
     });
+  }
+
+  /** Contacts that predate `contacts_fts` (v31) get their names indexed once, when the DO wakes; afterwards every name write maintains it. */
+  private reindexContactsIfEmpty(): void {
+    if (this.sql.exec('SELECT 1 FROM contacts_fts LIMIT 1').toArray().length) return;
+    if (this.sql.exec('SELECT 1 FROM contacts WHERE profile_name IS NOT NULL LIMIT 1').toArray().length) this.ctx.storage.transactionSync(() => rebuildContactIndex(this.sql));
   }
 
   private reindexIfEmpty(): void {
@@ -1591,22 +1604,58 @@ export class WorkspaceDO extends DurableObject<Env> {
     return row ? conversationDto(row, this.tagsFor([id]).get(id) ?? [], now) : null;
   }
 
+  /** The inbox filter as SQL conditions on `c` (conversations). `mine` needs the caller. */
+  private filterWhere(filter: 'all' | 'unread' | 'mine' | 'unassigned', userId: string, where: string[], params: SqlStorageValue[]): void {
+    if (filter === 'unread') where.push('c.unread > 0');
+    else if (filter === 'mine') { where.push('c.assignee_user_id = ?'); params.push(userId); }
+    else if (filter === 'unassigned') where.push('c.assignee_user_id IS NULL');
+  }
+
+  private conversationDtos(rows: ConversationRow[], now: number): ConversationDto[] {
+    const tags = this.tagsFor(rows.map((r) => r.id));
+    return rows.map((r) => conversationDto(r, tags.get(r.id) ?? [], now));
+  }
+
   /** Newest first by (last_message_at, id); `cursor` is the opaque "<at>.<id>" of the last row of the previous page. */
   async listConversations(opts: { filter: 'all' | 'unread' | 'mine' | 'unassigned'; userId: string; cursor?: string; limit: number }, now = Date.now()): Promise<{ items: ConversationDto[]; nextCursor: string | null }> {
     const where: string[] = [];
     const params: SqlStorageValue[] = [];
-    if (opts.filter === 'unread') where.push('c.unread > 0');
-    else if (opts.filter === 'mine') { where.push('c.assignee_user_id = ?'); params.push(opts.userId); }
-    else if (opts.filter === 'unassigned') where.push('c.assignee_user_id IS NULL');
+    this.filterWhere(opts.filter, opts.userId, where, params);
     const m = opts.cursor ? /^(\d+)\.(\d+)$/.exec(opts.cursor) : null;
     if (m) { where.push('(c.last_message_at, c.id) < (?, ?)'); params.push(Number(m[1]), Number(m[2])); }
     const rows = this.sql
       .exec<ConversationRow>(`${WorkspaceDO.CONVERSATION_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY c.last_message_at DESC, c.id DESC LIMIT ?`, ...params, opts.limit + 1)
       .toArray();
     const page = rows.slice(0, opts.limit);
-    const tags = this.tagsFor(page.map((r) => r.id));
     const last = page.at(-1);
-    return { items: page.map((r) => conversationDto(r, tags.get(r.id) ?? [], now)), nextCursor: rows.length > opts.limit && last ? `${last.last_message_at ?? 0}.${last.id}` : null };
+    return { items: this.conversationDtos(page, now), nextCursor: rows.length > opts.limit && last ? `${last.last_message_at ?? 0}.${last.id}` : null };
+  }
+
+  /**
+   * Typeahead over conversations: the contact's name (every typed word is a prefix of a name word), the number (`wa_id` contains the typed digits,
+   * only from 3 digits so one or two digits never scan), or a message (messages_fts). Newest activity first, at most `limit`, same DTO as the list.
+   * The query is only ever a bound parameter or a quoted letters/digits token; it is never logged.
+   */
+  async searchConversations(q: string, filter: 'all' | 'unread' | 'mine' | 'unassigned', limit: number, userId: string, now = Date.now()): Promise<ConversationDto[]> {
+    const tokens = normaliseText(q).split(' ').filter(Boolean).slice(0, 8);
+    const digits = phoneDigits(q);
+    const match = tokens.map((t) => `"${t}"*`).join(' ');
+    const any: string[] = [];
+    const params: SqlStorageValue[] = [];
+    if (tokens.length) {
+      any.push('c.contact_id IN (SELECT rowid FROM contacts_fts WHERE contacts_fts MATCH ?)');
+      params.push(match);
+      any.push('c.id IN (SELECT m.conversation_id FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid WHERE messages_fts MATCH ?)');
+      params.push(match);
+    }
+    if (digits.length >= 3) { any.push('instr(ct.wa_id, ?) > 0'); params.push(digits); }
+    if (!any.length) return [];
+    const where = [`(${any.join(' OR ')})`];
+    this.filterWhere(filter, userId, where, params);
+    const rows = this.sql
+      .exec<ConversationRow>(`${WorkspaceDO.CONVERSATION_SELECT} WHERE ${where.join(' AND ')} ORDER BY c.last_message_at DESC, c.id DESC LIMIT ?`, ...params, limit)
+      .toArray();
+    return this.conversationDtos(rows, now);
   }
 
   /** The newest `limit` messages before message id `before`, oldest first. Null when the conversation does not exist. */
@@ -2031,6 +2080,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         this.sql.exec('DELETE FROM messages WHERE conversation_id = ?', conv.id);
         this.sql.exec('DELETE FROM conversations WHERE id = ?', conv.id);
       }
+      this.sql.exec('DELETE FROM contacts_fts WHERE rowid = ?', contact.id);
       this.sql.exec('DELETE FROM contacts WHERE id = ?', contact.id);
       return { found: true, keys, messages: msgs.length, statusEvents };
     });

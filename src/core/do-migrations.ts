@@ -428,6 +428,9 @@ export const DO_MIGRATIONS: readonly string[] = [
   `CREATE TABLE bot_funnel_salt (day TEXT PRIMARY KEY, salt TEXT NOT NULL) WITHOUT ROWID;
    CREATE TABLE bot_funnel_markers (day TEXT NOT NULL, step TEXT NOT NULL, token TEXT NOT NULL, PRIMARY KEY (day, step, token)) WITHOUT ROWID;
    CREATE TABLE bot_funnel_daily (day TEXT NOT NULL, step TEXT NOT NULL, customers INTEGER NOT NULL, PRIMARY KEY (day, step)) WITHOUT ROWID;`,
+  // v31 (search as you type): contact names, normalised with normaliseText, rowid = contacts.id. Filled by the DO (reindexContactsIfEmpty) because
+  // normalisation is JS; kept current by indexContactName on every write of contacts.profile_name and by the contact erasure.
+  `CREATE VIRTUAL TABLE contacts_fts USING fts5(name);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

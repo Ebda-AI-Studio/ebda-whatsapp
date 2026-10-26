@@ -1,6 +1,7 @@
 import type { LinkHost } from '../store-link/host';
 import type { ColumnMap, ImportRejectReason } from './csv';
 import { MAX_TAGS_PER_CONTACT } from './csv';
+import { indexContactName } from '../contact-index';
 
 /** Hard limits of one import: file size is checked at the edge, rows here. */
 export const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
@@ -109,10 +110,12 @@ export function applyImportChunk(host: LinkHost, a: ApplyArgs): ApplyResult {
           'INSERT INTO contacts (wa_id, profile_name, last_import_id, consent_source, consent_at) VALUES (?, ?, ?, ?, ?) RETURNING id',
           row.waId, row.name, a.importId, grant ? source : null, grant ? a.now : null,
         ).one().id;
+        indexContactName(host.sql, contactId);
         created++;
       } else {
         contactId = have.id;
         host.sql.exec('UPDATE contacts SET profile_name = coalesce(profile_name, ?), last_import_id = ? WHERE id = ?', row.name, a.importId, contactId);
+        indexContactName(host.sql, contactId);
         if (grant && have.consent_at === null && have.opted_out_at === null) host.sql.exec('UPDATE contacts SET consent_source = ?, consent_at = ? WHERE id = ?', source, a.now, contactId);
         updated++;
       }

@@ -139,7 +139,7 @@ grant_type=client_credentials&audience=whatsapp&scope=conversations:read message
 
 | الطريقة والمسار | الغرض |
 |---|---|
-| `GET /conversations` | قايمة المحادثات. Query: ‏`filter` ‏(`all` و`unread` و`mine` و`unassigned`، الافتراضي `all`) و`cursor` و`limit` ‏(من 1 لـ 50، الافتراضي 30). بيرجّع `{ items, nextCursor }` |
+| `GET /conversations` | قايمة المحادثات. Query: ‏`filter` ‏(`all` و`unread` و`mine` و`unassigned`، الافتراضي `all`) و`q` ‏(اختياري، من 1 لـ 100 حرف) و`cursor` و`limit` ‏(من 1 لـ 50، الافتراضي 30). بيرجّع `{ items, nextCursor }`. لما تبعت `q` بترجع صفحة واحدة من المحادثات اللي اسم العميل فيها بيبدأ بكل كلمة كتبتها، أو رقمه فيه الأرقام اللي كتبتها (3 أو أكتر، والأرقام العربي والمسافات و`+` عادي)، أو فيها رسالة مطابقة، الأحدث الأول، و`filter` لسه شغّال، و`nextCursor` بتبقى `null` |
 | `GET /conversations/{conversationId}/messages` | رسايل المحادثة، الأحدث الأول. Query: ‏`before` ‏(رقم رسالة) و`limit` ‏(من 1 لـ 50، الافتراضي 50). بيرجّع `{ items, nextBefore }` |
 | `GET /messages/{messageId}/body` | النص الكامل للرسالة اللي أطول من 1 كيلوبايت |
 | `POST /conversations/{conversationId}/read` | تعليم المحادثة كمقروءة |
