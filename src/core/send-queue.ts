@@ -49,6 +49,7 @@ import { graphTokenFor, TokenUnavailable } from './numbers/token';
 import { STALE_CLAIM_MS } from './workspace-do';
 import { afterSharedSend, beforeSharedSend, isActiveMember, sharedEnabled } from './shared/shared-number';
 import { sharedTemplateSendable } from './shared/shared-templates';
+import { alert } from './observability';
 
 const MAX_RETRY_DELAY_S = 300;
 
@@ -59,7 +60,7 @@ export async function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>):
     token = await graphTokenFor(env, { phoneNumberId: job.phoneNumberId });
   } catch (err) {
     if (!(err instanceof TokenUnavailable)) throw err;
-    console.error(JSON.stringify({ alert: 'business_token_unavailable', workspace: job.workspaceId, reason: err.reason }));
+    alert('business_token_unavailable', { workspace: job.workspaceId, reason: err.reason });
     return { ok: false, code: 0, retryable: false, message: 'token_unavailable' };
   }
   // The platform number answers to no single store: a send through it is refused
@@ -139,5 +140,30 @@ export async function consumeSendBatch(batch: MessageBatch<unknown>, env: Env): 
     if (result.ok) mark(env, 'meta_accepted', job.inboundAt ? Date.now() - job.inboundAt : 0, job.receivedAt ? Date.now() - job.receivedAt : 0, job.workspaceId);
     if (!result.ok && result.retryable) msg.retry({ delaySeconds: Math.min(MAX_RETRY_DELAY_S, 5 * 2 ** (msg.attempts - 1)) });
     else msg.ack();
+  }
+}
+
+/**
+ * The send queue's dead letters (iceberg E5): a job that exhausted its attempts. The last attempt already recorded a failure, so this normally finds the
+ * message failed; if one is still queued/claimed (the consumer died holding it) it is failed here so it does not sit in the inbox as "sending" forever, and its
+ * wallet hold is released. Every dead letter is a P1 `send_dlq` (no phone, no text: the workspace and the failure only). Always acks.
+ */
+export async function consumeSendDlq(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+  for (const msg of batch.messages) {
+    const parsed = sendJobSchema.safeParse(msg.body);
+    if (!parsed.success) {
+      alert('send_dlq', { severity: 'P1', reason: 'invalid_job' });
+      msg.ack();
+      continue;
+    }
+    const job = parsed.data;
+    let marked = false;
+    try {
+      marked = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(job.workspaceId)).failDeadLetter(job.idempotencyKey);
+    } catch {
+      /* the alert below still goes out; the next delivery of this dead letter is not expected, so the message stays for the operator */
+    }
+    alert('send_dlq', { severity: 'P1', workspace: job.workspaceId, kind: job.kind, attempts: msg.attempts, markedFailed: marked });
+    msg.ack();
   }
 }

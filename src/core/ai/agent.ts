@@ -5,7 +5,7 @@
  * does not call the model again (the finished turn is recorded in the same transaction as its replies).
  */
 import { WINDOW_MS } from '../dto';
-import { errClass } from '../observability';
+import { errClass, alert } from '../observability';
 import { turnGone, orderingActive, runBotTurnLocked, type BotInput } from '../ordering/bot';
 import type { SendJob } from '../send-queue';
 import { bridgeFor } from '../store-link';
@@ -233,7 +233,7 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     if (!real.byoKey) {
       const held = host.storage.transactionSync(() => holdCredits(host.sql, holdRef, Date.now()));
       if (held === 'insufficient') {
-        console.error(JSON.stringify({ alert: 'agent_no_credits', workspace: host.workspaceId }));
+        alert('agent_no_credits', { workspace: host.workspaceId });
         return await handoff(host, input, 'no_credits', locale, now);
       }
       if (held === 'already_charged') {
@@ -255,7 +255,7 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     } catch (err) {
       finishHold();
       if (err instanceof Aborted) return;
-      console.error(JSON.stringify({ alert: 'agent_model_failed', workspace: host.workspaceId, error: errClass(err) }));
+      alert('agent_model_failed', { workspace: host.workspaceId, error: errClass(err) });
       return await handoff(host, input, 'provider_error', locale, now);
     }
     finishHold();

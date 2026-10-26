@@ -12,7 +12,7 @@
     "directory": "web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/meta/*", "/health", "/t/*"]
+    "run_worker_first": ["/api/*", "/meta/*", "/kashier/*", "/health", "/t/*"]
   },
   "observability": { "enabled": true },
   // One daily pass (Phase 7): re-send subscriptions, repair lost top-up webhooks. No cron shorter than a day.
@@ -22,6 +22,8 @@
     "IDENTITY_ISSUER": "https://accounts.ebda.app",
     "IDENTITY_JWKS_URL": "https://accounts.ebda.app/.well-known/jwks.json",
     "IDENTITY_AUDIENCE": "whatsapp",
+    // Shown first in Telegram alerts (one Ebda AI Studio bot serves every product).
+    "ALERT_PRODUCT": "Ebda WhatsApp",
     // This Worker's public origin: tracked campaign links and Store proof links are built on it.
     "PUBLIC_BASE_URL": "https://wa.ebda.app",
     // /health fails (503, alert secret_misconfigured) unless these secrets are set and well-formed; see src/core/secrets-check.ts.
@@ -36,7 +38,11 @@
   ],
   "queues": {
     "producers": [{ "binding": "SEND_QUEUE", "queue": "ebda-wa-send" }],
-    "consumers": [{ "queue": "ebda-wa-send", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-send-dlq" }]
+    "consumers": [
+      { "queue": "ebda-wa-send", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-send-dlq" },
+      // The dead letters: marked failed + a P1 `send_dlq` alert (src/core/send-queue.ts consumeSendDlq). Nothing else may consume this queue.
+      { "queue": "ebda-wa-send-dlq", "max_batch_size": 10, "max_retries": 2 }
+    ]
   },
   // Workers AI: the AI agent's default model and the knowledge-base embeddings (@cf/baai/bge-m3). Billed to this account.
   "ai": { "binding": "AI" },

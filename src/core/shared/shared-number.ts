@@ -18,6 +18,7 @@ import { sendList, sendText } from '../meta/client';
 import type { InboundMessage, StatusEvent, WebhookEvents } from '../meta/webhook-schema';
 import type { SendJob } from '../send-queue';
 import type { WorkspaceConfig } from '../workspace-do';
+import { alert } from '../observability';
 
 export const sharedEnabled = (env: Pick<Env, 'SHARED_NUMBER_ENABLED'>): boolean => env.SHARED_NUMBER_ENABLED === '1' || env.SHARED_NUMBER_ENABLED?.toLowerCase() === 'true';
 
@@ -183,7 +184,7 @@ export async function beforeSharedSend(env: Env, job: Pick<SendJob, 'workspaceId
   if (!sharedEnabled(env) || !(await isActiveMember(env, job.workspaceId, job.phoneNumberId))) return 'refused';
   const ids = [...(job.list?.rows ?? []).map((r) => r.id), ...(job.interactive?.buttons ?? []).map((b) => b.id)];
   if (ids.some((id) => id.startsWith(PICK_PREFIX))) {
-    console.warn(JSON.stringify({ alert: 'shared_pick_id_refused', workspace: job.workspaceId }));
+    alert('shared_pick_id_refused', { workspace: job.workspaceId });
     return 'refused';
   }
   // A member whose plan lapsed (or never included the number) keeps receiving and may answer, but cannot START a conversation: a template is
@@ -211,7 +212,7 @@ export async function afterSharedSend(env: Env, job: Pick<SendJob, 'workspaceId'
       return;
     } catch (err) {
       if (attempt < AFTER_SEND_ATTEMPTS) continue;
-      console.error(JSON.stringify({ alert: 'shared_sent_not_recorded', workspace: job.workspaceId, attempts: attempt, error: err instanceof Error ? err.name : 'error' }));
+      alert('shared_sent_not_recorded', { workspace: job.workspaceId, attempts: attempt, error: err instanceof Error ? err.name : 'error' });
     }
   }
 }

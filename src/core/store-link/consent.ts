@@ -7,6 +7,7 @@ import type { StoreEventOutcome } from './events';
 import { acceptVersion, rememberBuyerKey } from './order-store';
 import { uuidFromKey } from './orders';
 import { getState, putState } from './settings';
+import { alert } from '../observability';
 
 // Per-buyer state kept here (both removed by forgetBuyer on erasure): the newest Store consent change applied
 // (entity_versions `consent:<buyerKey>`) and the last opt-out version we sent (store_state `optver:<buyerKey>`).
@@ -65,7 +66,7 @@ export function noteOptOutChange(host: LinkHost, waId: string, optedOut: boolean
 export async function pushOptOut(host: LinkHost, payload: string | null): Promise<void> {
   const p = optOutPayload.safeParse(JSON.parse(payload ?? 'null'));
   if (!p.success) {
-    console.error(JSON.stringify({ alert: 'scheduled_task_invalid', kind: 'opt_out_push', workspace: host.workspaceId }));
+    alert('scheduled_task_invalid', { kind: 'opt_out_push', workspace: host.workspaceId });
     return;
   }
   const sink = storeLink().events(host.env);

@@ -61,6 +61,7 @@ Generate random keys locally: `node -e "console.log(crypto.randomBytes(32).toStr
 | `KASHIER_SECRET_KEY` | Kashier dashboard (the **Secret key**, a different key) | confirms every webhook with Kashier's transaction-details API before money moves; without it webhooks answer 503 |
 | `EBDA_INSTAPAY_HANDLE` | **the same value as `ebda-api`** (Ebda Store's InstaPay address; set on both Workers in the same session) | InstaPay billing: who merchants pay (unset = InstaPay billing is unavailable, 503) |
 | `SENTRY_DSN` | Sentry project | error reports |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_ID` | the Ebda AI Studio alerts bot (same as Ebda Store) | P0/P1 alerts reach a human (`docs/runbooks/alerts.md`); unset = logs + Sentry only |
 
 **Self-check:** `/health` answers `503 {status: "misconfigured"}` while any secret named in the `REQUIRED_SECRETS` var (`TOKEN_ENC_KEY`, `AGENT_SECRETS_KEY`, `PROOF_URL_SECRET`, `SUITE_BUYER_KEY_SECRET`) is missing, or any of them is set but malformed (the two AES keys must decode to exactly 32 bytes, so a 64-character hex string fails; the other two need at least 32 characters). The Worker log names the key (alert `secret_misconfigured`, never the value); `scripts/verify-prod.mjs` reports it. Section C secrets (Meta, Kashier) are not in the list: their features stay off until they are set.
 

@@ -1,0 +1,50 @@
+# Alerts: what reaches a human, and what to do
+
+Every code path that used to write an ad-hoc `{ "alert": ... }` line now calls ONE function, `alert(name, fields)` in `src/core/observability.ts` (iceberg E1/E2). It always writes the same JSON log line; for **P0** and **P1** it also:
+
+1. records a **Sentry event** (`captureMessage`, level `error` for P0, `warning` for P1; not a breadcrumb), and
+2. sends **one Telegram message** to `TELEGRAM_ALERT_CHAT_ID` through `TELEGRAM_BOT_TOKEN` (the Ebda AI Studio alerts bot, the same chat as Ebda Store).
+
+| Level | Meaning | Who |
+|---|---|---|
+| P0 | money or consent integrity is at risk (a ledger mismatch, a payment taken but not granted, a refund debit that did not finish) | wake someone now |
+| P1 | degraded, a person must look today (a failed sweep, a dead-lettered send, a 5xx, a misconfigured secret) | same day |
+| info | log only, no Sentry event, no Telegram | read in the weekly log pass |
+
+A name's level is decided in `P0_ALERTS` / `P1_ALERTS` (observability.ts); a call may also pass `severity` explicitly. An unknown name is `info`.
+
+## Behaviour you can rely on
+- **Fire-and-forget**: the send goes through `waitUntil`; the caller never waits and never sees an error (Telegram down, Sentry down and a missing binding are all swallowed).
+- **Throttled** per (name, workspace): one message per 10 minutes per isolate. The next one says `(suppressed N more since the last alert)`. The JSON log line is never throttled. Isolates restart, so a flapping alert can repeat at most once per isolate per 10 minutes.
+- **No personal data**: phone numbers are masked (`maskPhones` plus a catch-all for any run of 8+ digits), and fields named like a phone, body, text, token, secret, code or e-mail are never rendered. Telegram shows the alert name, level, a shortened workspace id, the environment, this runbook link and a few scalar fields. The test `observability-alerts.test.ts` fails if a phone, body or secret appears.
+- **Secrets unset** (`TELEGRAM_BOT_TOKEN` or `TELEGRAM_ALERT_CHAT_ID` missing): console + Sentry only. Set them with `npx wrangler secret put TELEGRAM_BOT_TOKEN` and `npx wrangler secret put TELEGRAM_ALERT_CHAT_ID` (values: the Store's bot token and chat id; ask Ahmad).
+- A route that throws answers `500 {"error":"internal"}`, is captured in Sentry and raises `unhandled_error` (P1).
+- The workspace Durable Object is wrapped with Sentry's instrumentation, so errors in its fetch, alarm and RPC methods reach Sentry.
+- The send queue's dead letters (`ebda-wa-send-dlq`) are consumed: a message that never reached Meta is marked failed (`send_dlq`), its wallet hold released, and `send_dlq` (P1) is raised.
+
+## Verify the channel (after setting the secrets and deploying)
+Drill with the dead-letter queue, which touches no workspace: Cloudflare dashboard → Queues → `ebda-wa-send-dlq` → *Send message* → body `{}`. The consumer finds an invalid job and raises `send_dlq` (P1, `reason=invalid_job`). Expect within a minute: one Telegram message `🟠 Ebda WhatsApp: send_dlq [P1 PLATFORM]` and one Sentry event named `send_dlq [P1]`. Record the date of the drill here: ______
+
+## Alerts worth a section
+Search the code for the name in the Telegram text (`grep -rn "'<name>'" src`) to find where it fires. The ones you are most likely to meet:
+
+### send_dlq
+A send job exhausted its retries. The message is now `failed` with `error_reason = send_dlq`. Check Meta status / the number's token (`business_token_unavailable`), then ask the merchant to resend.
+
+### unhandled_error
+A route threw. Find the event in Sentry (search the route and the time); `route` and `method` are in the message.
+
+### secret_misconfigured
+`/health` is 503: a secret named in `REQUIRED_SECRETS` is missing or malformed. The key NAMES are in the alert (never values). Fix with `wrangler secret put`.
+
+### entitlement_push_failed
+A plan change could not be pushed to a workspace. The daily reconcile re-sends it; if it keeps firing, check the workspace Durable Object and `workspace_subscriptions` in D1.
+
+### ledger_mirror_mismatch
+The D1 mirror of a workspace's wallet ledger differs from the Durable Object ledger. Money may be wrong: stop top-ups for that workspace and follow `docs/billing.md` (mirror section).
+
+### package_paid_not_granted, instapay_confirmed_not_granted
+A payment is confirmed but the package was not granted. The daily repair grants it; if it fires twice, grant by hand through the operator route and reconcile.
+
+### refund_debit_incomplete, card_refund_over_refundable
+A refund did not complete or exceeds what the payment allows. Do not retry blindly: read `docs/billing.md` (refunds) first.

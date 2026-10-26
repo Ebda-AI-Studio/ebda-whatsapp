@@ -11,6 +11,7 @@ import type { TemplateDto } from '../api/contract';
 import { fetchTemplates, submitTemplate } from '../meta/templates-api';
 import { bodyTextOf, componentsSchema, paramCount, type StoredComponent } from '../templates';
 import { currentSharedNumber, type SharedNumberRow } from './shared-number';
+import { alert } from '../observability';
 
 const SENDABLE_CATEGORIES = ['UTILITY', 'AUTHENTICATION'];
 type Db = Pick<Env, 'DB'>;
@@ -105,7 +106,7 @@ async function refreshSharedTemplate(env: Env, wabaId: string, name: string): Pr
   const readStarted = await dbNow(env);
   const fetched = token ? await fetchTemplates({ token, graphVersion: env.META_GRAPH_VERSION, wabaId }, { name }) : null;
   if (!fetched || !fetched.ok) {
-    console.error(JSON.stringify({ alert: 'shared_template_refresh_failed', name, reason: fetched ? 'meta_unavailable' : 'token_unavailable' }));
+    alert('shared_template_refresh_failed', { name, reason: fetched ? 'meta_unavailable' : 'token_unavailable' });
     return;
   }
   const mine = fetched.value.filter((t) => t.name === name);

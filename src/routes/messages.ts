@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { sendMessageRequest } from '../core/api/contract';
 import { sharedTemplateSendable } from '../core/shared/shared-templates';
 import { senderNumber, apiError, intParam, workspaceStub, type ApiEnv } from './shared';
+import { alert } from '../core/observability';
 
 export const messagesRoutes = new Hono<ApiEnv>();
 
@@ -32,7 +33,7 @@ messagesRoutes.post('/stores/:storeId/conversations/:conversationId/messages', a
     } catch (err) {
       // Queue-then-send fails fast: never leave an orphan 'queued' row that nothing will send.
       await ws.markEnqueueFailed(r.job.idempotencyKey);
-      console.error(JSON.stringify({ alert: 'send_enqueue_failed', workspace: c.req.param('storeId'), error: (err as Error).message }));
+      alert('send_enqueue_failed', { workspace: c.req.param('storeId'), error: (err as Error).message });
       return apiError(c, 503, 'rate_limited', 'enqueue_failed');
     }
   }

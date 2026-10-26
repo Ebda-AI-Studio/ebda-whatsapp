@@ -10,6 +10,7 @@ import { addTask } from '../scheduler';
 import type { Billing } from './engine';
 import { roundHalfEvenDiv } from './money';
 import { monthRange } from './statement';
+import { alert } from '../observability';
 
 type Sql = DurableObjectStorage['sql'];
 const DAY = 86_400_000;
@@ -62,7 +63,7 @@ export async function runTrueup(env: Env, sql: Sql, billing: Billing, tx: <R>(f:
   if (missing) {
     const end = monthRange(month)!.to;
     if (now > end + TRUEUP_WAIT_DAYS * DAY) {
-      console.error(JSON.stringify({ alert: 'shared_trueup_not_published', workspace: workspaceId, month }));
+      alert('shared_trueup_not_published', { workspace: workspaceId, month });
       return null;
     }
     return now + DAY;
