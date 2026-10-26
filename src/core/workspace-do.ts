@@ -434,8 +434,14 @@ export class WorkspaceDO extends DurableObject<Env> {
           this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'plan_required', updated_at = ? WHERE id = ?", now, queued.id);
           this.emitMessageStatus(queued.id);
         }
-        // A message already claimed or sent is left to the normal path (it may be with Meta): only what has not gone out is stopped.
-        if (!queued || queued.status === 'queued' || queued.status === 'retry') {
+        // A claim only seconds old may really be with Meta, so it is left to the normal path; one stuck in `claimed` past STALE_CLAIM_MS would be
+        // re-claimed and sent by that path, so it is failed here like a queued one.
+        const stale = queued?.status === 'claimed' && now - (this.sql.exec<{ u: number }>('SELECT updated_at AS u FROM messages WHERE id = ?', queued.id).one().u) > STALE_CLAIM_MS;
+        if (stale) {
+          this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'plan_required', updated_at = ? WHERE id = ?", now, queued!.id);
+          this.emitMessageStatus(queued!.id);
+        }
+        if (!queued || queued.status === 'queued' || queued.status === 'retry' || stale) {
           this.billing.settleHold(job.idempotencyKey, 'dropped', now);
           return 'dropped';
         }
@@ -489,7 +495,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           this.billing.settleHold(job.idempotencyKey, 'opted_out', now);
           return 'dropped';
         }
-        if (this.isMarketingJob(job) && marketingBlocked(this.sql)) {
+        if (this.isMarketingJob(job) && marketingBlocked(this.sql, now)) {
           this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'plan_blocked', updated_at = ? WHERE id = ?", now, existing.id);
           this.emitMessageStatus(existing.id);
           this.billing.settleHold(job.idempotencyKey, 'dropped', now);
@@ -673,7 +679,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           const t = this.sql.exec<{ category: string; status: string; components: string }>('SELECT category, status, components FROM templates WHERE name = ? AND language = ?', req.name, req.language).toArray()[0];
           if (!t || t.status !== 'APPROVED') return { ok: false, reason: 'template_not_approved' };
           if (t.category === 'MARKETING' && conv.opted_out_at !== null) return { ok: false, reason: 'opted_out' };
-          if (t.category === 'MARKETING' && marketingBlocked(this.sql)) return { ok: false, reason: 'plan_blocked' };
+          if (t.category === 'MARKETING' && marketingBlocked(this.sql, now)) return { ok: false, reason: 'plan_blocked' };
           const stored = componentsSchema.safeParse(JSON.parse(t.components));
           if (!stored.success) return { ok: false, reason: 'invalid_request', message: 'stored template is malformed' };
           const rendered = renderTemplate(stored.data, req.params, t.category);
@@ -786,7 +792,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           fail('opted_out');
           continue;
         }
-        if (category === 'MARKETING' && marketingBlocked(this.sql)) {
+        if (category === 'MARKETING' && marketingBlocked(this.sql, now)) {
           fail('plan_blocked');
           continue;
         }
@@ -1412,7 +1418,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Whether this workspace's plan allows a feature right now (no entitlement, a lapsed status or a package without it = false). Read per call, never cached. */
   async planAllows(feature: PlanFeature): Promise<boolean> {
-    return featureAllowed(this.sql, feature);
+    return featureAllowed(this.sql, feature, Date.now());
   }
 
   /** Seats the plan allows, the owner included (1 without a live entitlement). */

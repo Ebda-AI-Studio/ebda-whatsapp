@@ -43,7 +43,7 @@ describe('joining the shared number needs a package that includes it', () => {
   });
 
   it.each([
-    ['active', 'gold', 200], ['trialing', 'gold', 200], ['past_due', 'gold', 402], ['cancelled', 'gold', 403], ['expired', 'gold', 403],
+    ['active', 'gold', 200], ['trialing', 'gold', 200], ['past_due', 'gold', 402], ['cancelled', 'gold', 402], ['expired', 'gold', 403],
   ] as const)('a %s plan on %s answers %i', async (status, packageId, want) => {
     const ws = W(10 + ['active', 'trialing', 'past_due', 'cancelled', 'expired'].indexOf(status));
     await apiFor(ws);
@@ -57,7 +57,7 @@ describe('joining the shared number needs a package that includes it', () => {
     const a = W(20);
     await apiFor(a);
     await plan(a, { periodEnd: Date.now() - 1000 });
-    expect((await call(a, 'owner', 'POST', '/shared-number/join', { displayName: 'Ended Plan' })).status).toBe(402);
+    expect((await call(a, 'owner', 'POST', '/shared-number/join', { displayName: 'Ended Plan' })).status).toBe(403); // WA-CANCEL-1: a plan whose period ended is no plan at all (plan_required)
     const b = W(21);
     await apiFor(b);
     await plan(b, { packageId: 'lite' });
@@ -94,7 +94,7 @@ describe('joining the shared number needs a package that includes it', () => {
     expect((await call(ws, 'owner', 'POST', '/shared-number/join', { displayName: 'Comes Back' })).status).toBe(200);
     expect((await call(ws, 'owner', 'POST', '/shared-number/leave')).status).toBe(200);
     await plan(ws, { status: 'cancelled' });
-    expect((await call(ws, 'owner', 'POST', '/shared-number/join', { displayName: 'Comes Back' })).status).toBe(403); // plan_required: a cancelled plan may not connect at all
+    expect((await call(ws, 'owner', 'POST', '/shared-number/join', { displayName: 'Comes Back' })).status).toBe(402); // cancelled but paid until period end: in effect, yet the shared number needs an active plan
     expect(await sharedPackageAllowed(envOn, ws)).toBe(false);
     expect(await joinShared(envOn, ws, 'Comes Back')).toBe('package_required');
   });

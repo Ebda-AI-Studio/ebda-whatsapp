@@ -84,7 +84,7 @@ describe('entitlements: past_due blocks marketing only', () => {
     await seedTemplate(ws, { name: 'upd', category: 'UTILITY', components: JSON.stringify([{ type: 'BODY', text: 'hi' }]) });
     await own(ws);
     const conv = await openChat(ws);
-    await workspace(ws).applyEntitlement(ev({ status }));
+    await workspace(ws).applyEntitlement(ev({ status, periodEnd: Date.now() - 1000 })); // WA-CANCEL-1: cancelled lapses only once its paid period has ended
     const tmpl = (name: string, n: number) => ({ type: 'template' as const, clientId: `00000000-0000-4000-8000-00000000a0${n}`, name, language: 'ar', params: name === 'promo' ? ['a', 'b'] : [] });
     expect(await workspace(ws).queueOutbound(conv, 'pn-x', tmpl('promo', 1))).toMatchObject({ ok: false, reason: 'plan_required' });
     expect(await workspace(ws).queueOutbound(conv, 'pn-x', tmpl('upd', 2))).toMatchObject({ ok: false, reason: 'plan_required' });

@@ -52,51 +52,60 @@ export function readEntitlement(sql: Sql): Entitlement | null {
 }
 
 /**
- * A plan feature (campaigns, ordering in chat, the server API) is allowed only when an entitlement row exists, its status is trialing or active
- * AND the package's limit is on. No row, a lapsed status or an old event without limits = DENY. Read per request from the workspace's own copy:
- * a permission is NEVER-stale, so there is no cache here.
+ * Ruling WA-CANCEL-1: the ONE definition of "the paid plan is in effect". trialing, active AND cancelled (the Store sends `cancelled` while the
+ * paid period is still running) are in effect only while period_end is in the future, compared with `now` on EVERY check: the workspace expires
+ * itself from its own copy, never waiting for the reconcile, an `expired` event or the expiry alarm. expired, past_due and a cancelled or active
+ * plan whose period has ended are NOT in effect. (past_due has its own bounded grace, see `serviceAllowed`.)
  */
-export function featureAllowed(sql: Sql, feature: PlanFeature): boolean {
-  const col = feature === 'campaigns' ? 'lim_campaigns' : feature === 'order_in_chat' ? 'lim_order_in_chat' : 'lim_api';
-  const r = sql.exec<{ status: EntitlementStatus; flag: number }>(`SELECT status, ${col} AS flag FROM entitlements WHERE id = 1`).toArray()[0];
-  return r !== undefined && GRANTING.has(r.status) && r.flag === 1;
-}
-
-/** Seats the package allows, the owner included. No row or a lapsed status = 1 (the owner alone). */
-export function memberLimit(sql: Sql): number {
-  const r = sql.exec<{ status: EntitlementStatus; n: number }>('SELECT status, max_members AS n FROM entitlements WHERE id = 1').toArray()[0];
-  return r && GRANTING.has(r.status) ? Math.max(1, r.n) : 1;
+function inEffect(r: { status: EntitlementStatus; period_end: number }, now: number): boolean {
+  return (r.status === 'trialing' || r.status === 'active' || r.status === 'cancelled') && r.period_end > now;
 }
 
 /**
- * Marketing needs a plan on record that is not lapsed. No entitlement row = BLOCKED (fail closed: a plan gate is money state, and a
- * workspace the control plane has not pushed yet must not send paid marketing for free). Utility, authentication and service sends and
- * the inbox never consult this.
+ * A plan feature (campaigns, ordering in chat, the server API) is allowed only when the plan is in effect (WA-CANCEL-1) AND the package's limit
+ * is on. No row, a lapsed plan or an old event without limits = DENY. Read per request from the workspace's own copy: a permission is
+ * NEVER-stale, so there is no cache here.
  */
-export function marketingBlocked(sql: Sql): boolean {
-  const e = readEntitlement(sql);
-  return e === null || e.status === 'past_due' || e.status === 'cancelled' || e.status === 'expired';
+export function featureAllowed(sql: Sql, feature: PlanFeature, now: number = Date.now()): boolean {
+  const col = feature === 'campaigns' ? 'lim_campaigns' : feature === 'order_in_chat' ? 'lim_order_in_chat' : 'lim_api';
+  const r = sql.exec<{ status: EntitlementStatus; period_end: number; flag: number }>(`SELECT status, period_end, ${col} AS flag FROM entitlements WHERE id = 1`).toArray()[0];
+  return r !== undefined && inEffect(r, now) && r.flag === 1;
+}
+
+/** Seats the package allows, the owner included. No row or a plan not in effect = 1 (the owner alone). */
+export function memberLimit(sql: Sql, now: number = Date.now()): number {
+  const r = sql.exec<{ status: EntitlementStatus; period_end: number; n: number }>('SELECT status, period_end, max_members AS n FROM entitlements WHERE id = 1').toArray()[0];
+  return r && inEffect(r, now) ? Math.max(1, r.n) : 1;
+}
+
+/**
+ * Marketing needs a plan IN EFFECT (WA-CANCEL-1: `cancelled` itself does not block it while the paid period runs). No entitlement row = BLOCKED
+ * (fail closed: a plan gate is money state, and a workspace the control plane has not pushed yet must not send paid marketing for free).
+ * past_due blocks it at once, whatever the grace for service. Utility, authentication and service sends and the inbox consult `serviceAllowed`.
+ */
+export function marketingBlocked(sql: Sql, now: number = Date.now()): boolean {
+  const r = sql.exec<{ status: EntitlementStatus; period_end: number }>('SELECT status, period_end FROM entitlements WHERE id = 1').toArray()[0];
+  return r === undefined || !inEffect(r, now);
 }
 
 /** WA-GRACE-1: how long after the first failed renewal a past_due workspace may still send service messages. */
 export const PAST_DUE_GRACE_MS = 7 * 86_400_000;
 
 /**
- * WA-NOFREE-1 + WA-GRACE-1, THE gate for service: every send path (API, template, bot, agent replies, store-link outbound incl. OTP and order / COD
- * confirmations, campaigns), the AI agent turn and number setup ask this and nothing else. True only with an entitlement row that is trialing or
- * active, or past_due INSIDE its bounded grace (now < min(period_end, past_due_since + 7 days)). No row, cancelled or expired = false: there is no
- * free plan. A past_due copy that never learned its start (past_due_since null) is bounded from the moment the copy was written. Marketing has its
- * own, stricter gate (`marketingBlocked`, unchanged: past_due blocks it at once). Read per call from the workspace copy; never cached.
+ * WA-NOFREE-1 + WA-CANCEL-1 + WA-GRACE-1, THE gate for service: every send path (API, template, bot, agent replies, store-link outbound incl. OTP and
+ * order / COD confirmations, campaigns), the AI agent turn, background AI spend and number setup ask this and nothing else. True only when the plan
+ * is in effect (trialing / active / cancelled, with period_end in the future) or past_due INSIDE its bounded grace (now < min(period_end,
+ * past_due_since + 7 days)). No row, expired, or any plan whose period has ended = false: there is no free plan. A past_due copy that never learned
+ * its start (past_due_since null) is bounded from the moment the copy was written. Read per call from the workspace copy; never cached.
  */
 export function serviceAllowed(sql: Sql, now: number): boolean {
   const r = sql.exec<{ status: EntitlementStatus; period_end: number; past_due_since: number | null; updated_at: number }>('SELECT status, period_end, past_due_since, updated_at FROM entitlements WHERE id = 1').toArray()[0];
   if (!r) return false;
-  if (r.status === 'trialing' || r.status === 'active') return true;
-  if (r.status === 'past_due') return now < Math.min(r.period_end, (r.past_due_since ?? r.updated_at) + PAST_DUE_GRACE_MS);
-  return false;
+  if (inEffect(r, now)) return true;
+  return r.status === 'past_due' && now < Math.min(r.period_end, (r.past_due_since ?? r.updated_at) + PAST_DUE_GRACE_MS);
 }
 
-const GRANTING: ReadonlySet<EntitlementStatus> = new Set(['trialing', 'active']);
+const GRANTING: ReadonlySet<EntitlementStatus> = new Set(['trialing', 'active']); // grants AI credits (a cancelled plan's period already got its grant)
 
 /** Replaces the pending expiry task with one at `periodEnd`. */
 function scheduleExpiry(sql: Sql, periodEnd: number): void {

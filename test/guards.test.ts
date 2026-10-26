@@ -86,6 +86,10 @@ it('store-included is only ever written by the Store-plan path (store-plan.ts an
   expect(findMatches(/STORE_INCLUDED/, 'src/routes').length).toBe(2); // operator.ts: the import and the refusal, nothing that writes it
   // The other two writers of workspace_subscriptions take an id from outside, so each must refuse the free package where it takes it.
   const { readFileSync } = await import('node:fs');
-  expect(readFileSync(new URL('../src/core/billing/package-orders.ts', import.meta.url), 'utf8')).toMatch(/price_minor > 0/);
+  // The listing a merchant buys from: the SQL string of listPackages itself must filter price_minor > 0 (not just mention it somewhere).
+  const orders = readFileSync(new URL('../src/core/billing/package-orders.ts', import.meta.url), 'utf8');
+  const listing = /export async function listPackages[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '';
+  expect(listing).toMatch(/FROM packages WHERE[^']*active = 1[^']*price_minor > 0/);
+  expect(/export async function startPackageCheckout[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '').toMatch(/FROM packages WHERE id = \? AND active = 1 AND price_minor > 0/);
   expect(readFileSync(new URL('../src/routes/operator.ts', import.meta.url), 'utf8')).toMatch(/store_included_is_store_plan_only/);
 });

@@ -69,7 +69,7 @@ export function queueTemplate(host: LinkHost, a: TemplateSend): QueueResult {
     if (contact?.opted_out_at != null) return { ok: false, reason: 'opted_out' };
     if (a.requireConsent && contact?.consent_at == null) return { ok: false, reason: 'no_consent' };
     if (a.campaign && contact?.consent_source === 'store_checkout' && contact.last_inbound_at == null) return { ok: false, reason: 'no_consent' };
-    if (marketingBlocked(host.sql)) return { ok: false, reason: 'plan_blocked' };
+    if (marketingBlocked(host.sql, now)) return { ok: false, reason: 'plan_blocked' };
   }
   const stored = componentsSchema.safeParse(JSON.parse(t.components));
   if (!stored.success) return { ok: false, reason: 'invalid_request', message: 'stored template is malformed' };

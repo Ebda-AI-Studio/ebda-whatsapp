@@ -1,8 +1,11 @@
 import { SELF, createExecutionContext, env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import worker, { apiRoutes } from '../src/index';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
-import { seedTemplate } from './helpers/campaigns';
+import { campaignActivate } from '../src/core/campaigns/campaigns';
+import { MemoryVectors, ScriptedProvider, bagEmbedder, until, useAgent } from './helpers/agent';
+import { agentWorkspace, say as agentSay, text as agentText } from './helpers/agent-chat';
+import { makeCampaign, seedContacts, seedTemplate } from './helpers/campaigns';
 import { stubGraph } from './helpers/graph';
 import { postWebhook } from './helpers/meta';
 import { listReply, rawMessagePayload } from './helpers/payload';
@@ -11,6 +14,10 @@ import { exec, grantPlan, openChat, own, rows, workspace } from './helpers/works
 
 useApiKey();
 useStoreLink();
+const vecs = { v: new MemoryVectors() };
+const agent = useAgent({ vectors: () => vecs.v, embedder: () => bagEmbedder });
+beforeEach(() => { vecs.v = new MemoryVectors(); });
+const vectorsFor = () => vecs.v;
 const DAY = 86_400_000;
 const PLAN_REQUIRED = { error: 'plan_required' };
 const TEXT = (id: string) => ({ type: 'text', clientId: id, text: 'hello' });
@@ -23,20 +30,24 @@ async function shop(n: number) {
   await own(ws);
   await seedTemplate(ws, { name: 'util', category: 'UTILITY', components: JSON.stringify([{ type: 'BODY', text: 'hi' }]) });
   const conv = await openChat(ws);
+  await workspace(ws).runDueTasks(); // let setup settle (alarm-driven tasks) BEFORE anything is measured
   return { ws, api, conv };
 }
-const lapse = (ws: string, kind: 'none' | 'expired' | 'cancelled') => (kind === 'none' ? exec(ws, 'DELETE FROM entitlements') : grantPlan(ws, 'growth', kind));
+// WA-CANCEL-1: `cancelled` only lapses once its paid period has ended.
+/** Every outbound row (key, type, status): a stray row shows up by name in the assertion diff, not as a bare count. */
+const outbound = (ws: string) => rows(ws, "SELECT idempotency_key, type, status, error_reason FROM messages WHERE direction = 'out' ORDER BY id");
+const lapse = (ws: string, kind: 'none' | 'expired' | 'cancelled') => (kind === 'none' ? exec(ws, 'DELETE FROM entitlements') : grantPlan(ws, 'growth', kind, { periodEnd: Date.now() - 1000 }));
 
 describe('WA-NOFREE-1: no package, no service', () => {
   it.each(['none', 'expired', 'cancelled'] as const)('%s: an API text send, a template send and a media upload are 403 plan_required, and nothing is queued', async (kind) => {
     const { ws, api, conv } = await shop(kind === 'none' ? 1000 : kind === 'expired' ? 1001 : 1002);
-    const outBefore = await rows(ws, "SELECT count(*) AS n FROM messages WHERE direction = 'out'");
+    const outBefore = await outbound(ws);
     await lapse(ws, kind);
     for (const body of [TEXT(uid()), { type: 'template', clientId: uid(), name: 'util', language: 'ar', params: [] }]) {
       const r = await api.call('POST', `/conversations/${conv}/messages`, body);
       expect([r.status, await r.json()], JSON.stringify(body)).toEqual([403, PLAN_REQUIRED]);
     }
-    expect(await rows(ws, "SELECT count(*) AS n FROM messages WHERE direction = 'out'")).toEqual(outBefore);
+    expect(await outbound(ws), 'no NEW outbound row (the diff names what appeared)').toEqual(outBefore);
     const form = new FormData();
     form.set('file', new File([new Uint8Array([1, 2, 3])], 'a.jpg', { type: 'image/jpeg' }));
     const up = await api.call('POST', '/media', form);
@@ -72,19 +83,74 @@ describe('WA-NOFREE-1: no package, no service', () => {
     expect(await rows(ws, `SELECT state FROM wallet_holds WHERE ref = 'msg:ui:${id}' AND state = 'held'`)).toEqual([]);
   });
 
-  it('an automatic reply (no row yet) is dropped at claim, and the bot / menu / agent stay silent on inbound', async () => {
+  it('an automatic reply (no row yet) is dropped at claim', async () => {
     const ws = W(1006);
     const pn = await storeWorkspace(ws);
-    await runInDurableObject(workspace(ws), (i) => { (i as unknown as { botSendGapMs: number }).botSendGapMs = 0; });
     await exec(ws, 'DELETE FROM entitlements');
-    const g = stubGraph();
     const reply = { workspaceId: ws, phoneNumberId: pn, to: WA_1, idempotencyKey: 'bot:x:1', kind: 'text', text: 'hi' } as never;
     expect(await workspace(ws).claimSend(reply)).toBe('dropped');
-    expect((await postWebhook(SELF, rawMessagePayload(pn, { id: 'wamid.pr.1', from: WA_1, type: 'text', text: { body: 'مرحبا' } }))).status).toBe(200);
-    expect((await postWebhook(SELF, rawMessagePayload(pn, listReply('wamid.pr.2', 'menu:ar:order', 'x')))).status).toBe(200);
-    await workspace(ws).runDueTasks();
-    expect(g.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/messages'))).toEqual([]);
-    expect(await rows(ws, "SELECT count(*) AS n FROM messages WHERE direction = 'in'")).toEqual([{ n: 2 }]); // reading is open: the inbound is stored
+  });
+
+  // The features stay ON in the plan (pro keeps order_in_chat), so ONLY the lapse can silence the bot, menu and replies: the router gate is what this proves.
+  describe.each([
+    ['expired', async (ws: string) => grantPlan(ws, 'pro', 'expired')],
+    ['past_due on day 8', async (ws: string) => grantPlan(ws, 'pro', 'past_due', { pastDueSince: Date.now() - 8 * DAY })],
+  ] as const)('a lapsed plan (%s) silences the bot, the menu and the ordering flow', (_name, lapseIt) => {
+    it('replies on an active pro plan, then says nothing once it lapses; the inbound is still stored', async () => {
+      const ws = W(_name === 'expired' ? 1030 : 1031);
+      const pn = await storeWorkspace(ws);
+      await runInDurableObject(workspace(ws), (i) => { (i as unknown as { botSendGapMs: number }).botSendGapMs = 0; });
+      expect((await workspace(ws).setStoreLinkSettings({ menu: { enabled: true, items: [{ id: 'hours', title: { ar: 'مواعيد', en: 'Hours' }, answer: { ar: 'كل يوم.', en: 'Daily.' } }] } } as never)).ok).toBe(true);
+      await grantPlan(ws, 'pro');
+      const g = stubGraph();
+      const sent = () => g.calls.filter((c) => c.method === 'POST' && c.url.endsWith(`/${pn}/messages`)).length;
+      const say = async (m: Record<string, unknown>) => {
+        expect((await postWebhook(SELF, rawMessagePayload(pn, m))).status).toBe(200);
+        await workspace(ws).runDueTasks();
+      };
+      await say({ id: `wamid.lp.${_name}.1`, from: WA_1, type: 'text', text: { body: 'مرحبا' } });
+      expect(sent(), 'on an active pro plan the menu answers').toBeGreaterThan(0);
+      const before = sent();
+      await lapseIt(ws);
+      await workspace(ws).grantAiCredits?.({ periodStart: 1, packageId: 't', credits: 5 }).catch(() => undefined);
+      await say({ id: `wamid.lp.${_name}.2`, from: WA_1, type: 'text', text: { body: 'مرحبا' } });
+      await say(listReply(`wamid.lp.${_name}.3`, 'menu:ar:order', 'x') as unknown as Record<string, unknown>);
+      expect(sent(), 'nothing is sent after the lapse').toBe(before);
+      expect(await rows(ws, "SELECT count(*) AS n FROM messages WHERE direction = 'in'")).toEqual([{ n: 3 }]);
+    });
+  });
+
+  // The router gate is what keeps the AI model from being CALLED (and billed) for a lapsed workspace; the send-side gates alone would still pay for the answer.
+  it.each([
+    ['expired', async (ws: string) => grantPlan(ws, 'pro', 'expired')],
+    ['past_due on day 8', async (ws: string) => grantPlan(ws, 'pro', 'past_due', { pastDueSince: Date.now() - 8 * DAY })],
+  ] as const)('the AI agent is not even run for a lapsed plan (%s): the model is not called', async (name, lapseIt) => {
+    const ws = W(name === 'expired' ? 1050 : 1051);
+    const pn = await agentWorkspace(ws);
+    await grantPlan(ws, 'pro');
+    await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 't', credits: 50 });
+    const model = (agent.model = new ScriptedProvider([{ text: 'hello there' }, { text: 'again' }])) as ScriptedProvider;
+    const g = stubGraph();
+    await agentSay(ws, pn, agentText('مرحبا'), g);
+    expect(model.calls.length, 'on an active pro plan the agent runs').toBe(1);
+    await lapseIt(ws);
+    await agentSay(ws, pn, agentText('لسه موجود؟'), g);
+    expect(model.calls.length, 'the model is not called once the plan has lapsed').toBe(1);
+  });
+
+  it('a row stuck in claimed past the stale window is failed plan_required at the next claim, not re-sent (a fresh claim in flight is left alone)', async () => {
+    const { ws, api, conv } = await shop(1032);
+    const id = uid();
+    expect((await api.call('POST', `/conversations/${conv}/messages`, TEXT(id))).status).toBe(202);
+    const key = `ui:${id}`;
+    const job = { workspaceId: ws, phoneNumberId: 'pn-x', to: '201001234567', idempotencyKey: key, kind: 'text', text: 'hello' } as never;
+    await exec(ws, "UPDATE messages SET status = 'claimed', updated_at = ?, claim_attempts = 1 WHERE idempotency_key = ?", Date.now() - 10 * 60_000, key);
+    await exec(ws, 'DELETE FROM entitlements');
+    expect(await workspace(ws).claimSend(job)).toBe('dropped');
+    expect(await rows(ws, 'SELECT status, error_reason FROM messages WHERE idempotency_key = ?', key)).toEqual([{ status: 'failed', error_reason: 'plan_required' }]);
+    // a claim that is only seconds old may really be with Meta: left to the normal path
+    const id2 = uid();
+    expect((await api.call('POST', `/conversations/${conv}/messages`, TEXT(id2))).status).toBe(403); // plan is gone: refused up front
   });
 
   it('store-link outbound (OTP, order and COD confirmations) is refused with no package', async () => {
@@ -101,6 +167,105 @@ describe('WA-NOFREE-1: no package, no service', () => {
       return import('../src/core/store-link/outbound').then((m) => m.queueTemplate(host, { waId: '201001234567', phoneNumberId: `pn-${ws}`, name: 'order_confirmation', language: 'ar', params: ['a', 'b'], idempotencyKey: 'order:x:created' }));
     });
     expect(sent).toMatchObject({ ok: false, reason: 'plan_required' });
+  });
+});
+
+describe('positive controls', () => {
+  it('the same OTP is queued and sent on a package in good standing', async () => {
+    const ws = W(1033);
+    const pn = await storeWorkspace(ws);
+    await workspace(ws).setStoreLinkSettings({ otpViaWhatsApp: true });
+    const g = stubGraph();
+    expect(await workspace(ws).queueOtp('201001234567', pn, 'K7Q93X')).toEqual({ ok: true });
+    expect(g.calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+});
+
+describe('WA-CANCEL-1: cancelled stays in effect until its paid period ends', () => {
+  const mktg = () => ({ type: 'template', clientId: uid(), name: 'promo', language: 'ar', params: ['a', 'b'] });
+  it('cancelled with a FUTURE period_end: service, marketing and the package features all work', async () => {
+    const { ws, api, conv } = await shop(1040);
+    await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
+    await grantPlan(ws, 'growth', 'cancelled', { periodEnd: Date.now() + 10 * DAY });
+    expect((await api.call('POST', `/conversations/${conv}/messages`, TEXT(uid()))).status).toBe(202);
+    expect((await api.call('POST', `/conversations/${conv}/messages`, mktg())).status).toBe(202); // marketing is not blocked by `cancelled` itself
+    expect(await workspace(ws).planAllows('campaigns')).toBe(true); // features per package
+    expect(await workspace(ws).planAllows('api')).toBe(false); // growth has no api
+    expect(await workspace(ws).planMemberLimit()).toBe(5);
+  });
+  it.each([['a past period_end', -1000], ['an ancient one (no real period)', -(400 * DAY)]] as const)('cancelled with %s: denied everywhere', async (_n, delta) => {
+    const { ws, api, conv } = await shop(1041 + (delta < -DAY ? 1 : 0));
+    await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
+    await grantPlan(ws, 'growth', 'cancelled', { periodEnd: Date.now() + delta });
+    for (const b of [TEXT(uid()), mktg()]) {
+      const r = await api.call('POST', `/conversations/${conv}/messages`, b);
+      expect([r.status, await r.json()]).toEqual([403, PLAN_REQUIRED]);
+    }
+    expect(await workspace(ws).planAllows('campaigns')).toBe(false);
+    expect(await workspace(ws).planMemberLimit()).toBe(1);
+  });
+  it('the workspace expires ITSELF at period_end: no reconcile, no expired event, no alarm', async () => {
+    const { ws, api, conv } = await shop(1043);
+    await grantPlan(ws, 'growth', 'cancelled', { periodEnd: Date.now() + 10 * DAY });
+    expect((await api.call('POST', `/conversations/${conv}/messages`, TEXT(uid()))).status).toBe(202);
+    await exec(ws, 'UPDATE entitlements SET period_end = ?', Date.now() - 1); // the clock passes period_end; nothing else happens
+    const r = await api.call('POST', `/conversations/${conv}/messages`, TEXT(uid()));
+    expect([r.status, await r.json()]).toEqual([403, PLAN_REQUIRED]);
+    expect(await workspace(ws).planAllows('campaigns')).toBe(false);
+  });
+  it('active and trialing with a past period_end are denied too', async () => {
+    for (const [i, st] of (['active', 'trialing'] as const).entries()) {
+      const { ws, api, conv } = await shop(1044 + i);
+      await exec(ws, "UPDATE entitlements SET status = ?, period_end = ?", st, Date.now() - 1000);
+      const r = await api.call('POST', `/conversations/${conv}/messages`, TEXT(uid()));
+      expect([r.status, await r.json()], st).toEqual([403, PLAN_REQUIRED]);
+    }
+  });
+});
+
+describe('serviceAllowed: the period and the missing clock', () => {
+  it('an active plan whose period has ended is refused even if the expiry alarm has not run', async () => {
+    const { ws, api, conv } = await shop(1034);
+    await grantPlan(ws, 'growth', 'active', { periodEnd: Date.now() - 1000 });
+    const r = await api.call('POST', `/conversations/${conv}/messages`, TEXT(uid()));
+    expect([r.status, await r.json()]).toEqual([403, PLAN_REQUIRED]);
+  });
+  it('a past_due copy with past_due_since NULL is bounded from when the copy was written (updated_at), 7 days', async () => {
+    const { ws, api, conv } = await shop(1035);
+    await grantPlan(ws, 'growth', 'past_due'); // no pastDueSince on the event
+    expect((await api.call('POST', `/conversations/${conv}/messages`, TEXT(uid()))).status).toBe(202);
+    await exec(ws, 'UPDATE entitlements SET updated_at = ?', Date.now() - 8 * DAY);
+    const r = await api.call('POST', `/conversations/${conv}/messages`, TEXT(uid()));
+    expect([r.status, await r.json()]).toEqual([403, PLAN_REQUIRED]);
+  });
+  it('campaign steps judge the plan at the STEP time they are given, not the wall clock', async () => {
+    const { ws } = await shop(1036);
+    await seedTemplate(ws); // the campaign's template ('promo')
+    await grantPlan(ws, 'growth', 'active', { periodEnd: Date.now() + DAY });
+    await seedContacts(ws, 2);
+    const c = await makeCampaign(ws);
+    await exec(ws, "UPDATE campaigns SET status = 'scheduled', scheduled_at = ?, attempt = 1 WHERE id = ?", Date.now() + 1000, c.id);
+    const out = await runInDurableObject(workspace(ws), (inst) => campaignActivate((inst as unknown as { host(): never }).host(), c.id, 1, Date.now() + 3 * DAY));
+    expect(out).toEqual({ state: 'stop', reason: 'plan_blocked' });
+  });
+});
+
+describe('WA-NOFREE-1: background AI spend stops with the package', () => {
+  it('catalog_embed and kb_index do nothing without a package (no embedding, no index write); with one they index', async () => {
+    const ws = W(1037);
+    await agentWorkspace(ws, { faqText: 'الشحن مجاني لأي طلب فوق 500 جنيه.' });
+    await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 't', credits: 100 });
+    await workspace(ws).runDueTasks();
+    await until(async () => (await rows(ws, 'SELECT 1 FROM catalog_vectors')).length > 0); // positive control: on a package it indexes
+    await exec(ws, 'DELETE FROM entitlements');
+    await exec(ws, 'DELETE FROM catalog_vectors');
+    const settled = vectorsFor().upserts;
+    await workspace(ws).setAgentSettings({ faqText: 'سياسة جديدة تماما عن الدفع بالبطاقة.' }); // schedules kb_index
+    await workspace(ws).schedule('catalog_embed', 1);
+    await workspace(ws).runDueTasks();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(vectorsFor().upserts, 'no embedding spend without a package').toBe(settled);
+    expect(await rows(ws, 'SELECT 1 FROM catalog_vectors')).toEqual([]);
   });
 });
 

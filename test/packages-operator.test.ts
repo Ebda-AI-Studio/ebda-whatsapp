@@ -51,6 +51,13 @@ describe('PUT /operator/workspaces/:id/subscription', () => {
     expect((await put(ws, body({ reason: 'x' }))).status).toBe(400);
   });
 
+  it('WA-CANCEL-1: an active or trialing assignment with a past periodEnd is refused (the workspace would deny it anyway), a cancelled one is allowed', async () => {
+    const ws = W(8305);
+    await seedNumber('pn-op-8305', ws);
+    for (const status of ['active', 'trialing']) expect((await put(ws, body({ status, periodEnd: Date.now() - 1000 }))).status, status).toBe(400);
+    expect((await put(ws, body({ status: 'cancelled', periodEnd: Date.now() + 5 * 86_400_000 }))).status).toBe(200);
+  });
+
   it('success writes source operator with an audit row, pushes at once and tells the Store; a marketing send is then not plan_blocked', async () => {
     const ws = W(8304);
     await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
