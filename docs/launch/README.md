@@ -87,14 +87,21 @@ Each merge: full suite green twice locally, CI green, then deploy.
 ## 11. Migrations (Claude)
 `npx wrangler d1 migrations apply ebda-wa-platform --remote` before the deploy that needs them. Durable Object SQLite migrates itself on first access (versioned in code).
 
-## 12. Deploy (Claude)
-`npx wrangler deploy --var COMMIT_SHA:$(git rev-parse --short HEAD)` from a clean checkout of `main` (so `/health` reports the commit).
+## 12. Deploy
+**Ruling WA-DEPLOY-1: deploys run from Ahmad's Mac with `bash scripts/deploy.sh` until the repo has environment protection. Do NOT add `CLOUDFLARE_API_TOKEN` to GitHub secrets until then** (required reviewer + main-only deployment branches on the `production` environment). Why: Whisky-11 is on the GitHub Free plan with a private repo, where environment protection does not exist, so a dispatch from a branch with an edited workflow could read any secret it can reference. Cost if wrong: a leaked Cloudflare token lets someone deploy arbitrary code to the live Worker and read/write D1, R2 and the queues; treating the token as Mac-only costs one manual command per deploy. The `cf-deploy` workflow (environment `production`, step-scoped secrets, `npm ci --ignore-scripts`, dispatch-only) is kept ready and fails closed without the secret; it calls the very same script.
+
+`scripts/deploy.sh` is the one path (Mac and workflow): it refuses a wrong Cloudflare account (`69188202efc4df480140dd76545aa3ab`), a commit that is not an ancestor of `origin/main` and an unclean tree; applies the D1 migrations (list, then `apply --remote`); `wrangler deploy --var COMMIT_SHA:<sha>`; then `verify-prod --expect <sha>` including the live cron schedule. From a clean checkout of `main`, after `npx wrangler whoami` shows the personal account:
+```
+git pull --ff-only && npm ci --ignore-scripts && npm run typecheck && npm run build:web
+META_VERIFY_TOKEN=… META_APP_SECRET=… CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=69188202efc4df480140dd76545aa3ab bash scripts/deploy.sh
+```
+(`CLOUDFLARE_API_TOKEN` here only lets verify-prod read the live cron schedule; wrangler itself uses the OAuth login, and the token can be read-only on Workers Scripts. Without them the cron and webhook checks print SKIP, which means NOT verified.) This is also the first deploy (GO-1). Rollback: `docs/runbooks/rollback.md`.
 
 ## 13. Verify production (Claude) — after EVERY deploy
 ```
 META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://wa.ebda.app --expect "$(git rev-parse --short origin/main)" --brand ebda
 ```
-It checks the running commit, the security headers on the API and the page, Meta's webhook handshake, that unsigned/badly-signed webhooks are refused, and that a correctly signed empty webhook is accepted. Anything it could not check prints as SKIP and must be reported as not verified. Then, by hand:
+It checks the running commit, the live cron schedule (with `--cron`/`--worker` and the Cloudflare env), the security headers on the API and the page, Meta's webhook handshake, that unsigned/badly-signed webhooks are refused, and that a correctly signed empty webhook is accepted. Anything it could not check prints as SKIP and must be reported as not verified. Then, by hand:
 0. **Live identity round trip** (the first deploy only proves it): Ahmad signs in at `https://wa.ebda.app`; the inbox loads his store, which proves a real accounts.ebda.app token (ES256, `iss` https://accounts.ebda.app, `aud` whatsapp, `stores[]`) passes our verifier. A 401/403 loop here = stop and report, do not continue.
 1. Send a WhatsApp message to the connected number from the owner's phone; it appears in the inbox in real time; reply from the inbox; the owner receives it.
 2. Open the inbox in Arabic and English, on a phone and a desktop.
