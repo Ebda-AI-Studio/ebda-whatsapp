@@ -57,12 +57,13 @@ describe('operator: pricing settings', () => {
     const publish = vi.spyOn(source.operator!, 'publishPricingSettings');
     await openOperator(source);
     await screen.findByRole('region', { name: t.opCurrent });
-    field(t.opMargin, '12.5'); field(t.opOverdraft, '75'); field(t.opFxBuffer, '1.5'); field(t.opVat, '14');
+    field(t.opMargin, '12.5'); field(t.opOverdraft, '75'); field(t.opFxBuffer, '1.5');
     field(t.opReason, 'مراجعة الربع');
     await submit(t.opPublishSettings);
     expect(publish).toHaveBeenCalledTimes(1);
     const arg = publish.mock.calls[0]![0];
-    expect(arg).toMatchObject({ marginBps: 1250, creditLimitMinor: 7500, fxBufferBps: 150, vatBps: 1400, reason: 'مراجعة الربع' });
+    expect(arg).toMatchObject({ marginBps: 1250, creditLimitMinor: 7500, fxBufferBps: 150, vatBps: 0, reason: 'مراجعة الربع' }); // VAT is locked at 0 (Ruling VAT-0)
+    expect((screen.getByLabelText(new RegExp(`^${t.opVat.replace(/[.*+?^${}()|[\]\\%]/g, '\\$&')}`)) as HTMLInputElement).readOnly).toBe(true);
     expect(arg.effectiveFrom).toBeGreaterThanOrEqual(NOW + HOUR);
     expect(await screen.findByText(t.opSaved)).toBeTruthy();
   });
