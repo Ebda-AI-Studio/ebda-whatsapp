@@ -35,6 +35,10 @@ done
 if have ebda-wa-backups "$r2" && $W r2 bucket lifecycle list ebda-wa-backups 2>/dev/null | grep -q expire-30d; then echo "ok: R2 ebda-wa-backups lifecycle expire-30d"
 else run "R2 lifecycle expire-30d on ebda-wa-backups" $W r2 bucket lifecycle add ebda-wa-backups expire-30d --expire-days 30 -y; fi
 
+# Import CSVs hold customers' phone numbers: the app deletes each one when its import ends; this 7-day expiry is the backstop (R2 bucket ebda-wa-media, prefix imports/).
+if have ebda-wa-media "$r2" && $W r2 bucket lifecycle list ebda-wa-media 2>/dev/null | grep -q imports-expire-7d; then echo "ok: R2 ebda-wa-media lifecycle imports-expire-7d"
+else run "R2 lifecycle imports-expire-7d on ebda-wa-media (prefix imports/)" $W r2 bucket lifecycle add ebda-wa-media imports-expire-7d imports/ --expire-days 7 -y; fi
+
 # ---- Queues: sends (live now) and the Store link pair (bound once the Store side exists).
 qs=$($W queues list 2>/dev/null | grep -oE 'ebda-[a-z-]+' | sort -u || true)
 for q in ebda-wa-send ebda-wa-send-dlq ebda-wa-events ebda-wa-events-dlq ebda-store-events; do
