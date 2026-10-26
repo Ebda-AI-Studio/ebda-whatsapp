@@ -15,6 +15,8 @@ import { WalletScreen } from './components/WalletScreen';
 import type { WalletDto } from './data/billing';
 import type { ConversationFilter, InboxSource } from './data/source';
 import { STRINGS, type Lang } from './i18n';
+
+const SEARCH_DEBOUNCE_MS = 150;
 import { formatMoney } from './lib/format';
 
 type Props = { source: InboxSource; now?: () => number; initialLang?: Lang };
@@ -55,19 +57,31 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
 
+  // Latest request wins: a newer refresh aborts the one in flight, and an answer that still arrives for an older one is dropped.
+  const latest = useRef<{ seq: number; ctrl: AbortController | null }>({ seq: 0, ctrl: null });
   const refresh = useCallback(async () => {
+    latest.current.ctrl?.abort();
+    const ctrl = new AbortController();
+    const seq = ++latest.current.seq;
+    latest.current.ctrl = ctrl;
     try {
-      const list = await source.listConversations(filter, query);
+      const list = await source.listConversations(filter, query, ctrl.signal);
+      if (seq !== latest.current.seq) return;
       setItems(list);
       // The unread total is only knowable from the unfiltered list; keep the last value under a filter.
       if (filter === 'all' && !query.trim()) setTotalUnread(list.reduce((n, c) => n + c.unread, 0));
       setError(false);
     } catch {
-      setError(true);
+      if (seq === latest.current.seq) setError(true);
     }
   }, [source, filter, query]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  // Search as you type: from the first character, once typing pauses for 150 ms; an empty box or a filter change loads at once.
+  useEffect(() => {
+    if (!query.trim()) { void refresh(); return; }
+    const id = setTimeout(() => void refresh(), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [refresh, query]);
   const [templatesFailed, setTemplatesFailed] = useState(false);
   const loadTemplates = useCallback(() => { void source.templates().then((ts) => { setTemplates(ts); setTemplatesFailed(false); }, () => setTemplatesFailed(true)); }, [source]);
   useEffect(loadTemplates, [loadTemplates]);

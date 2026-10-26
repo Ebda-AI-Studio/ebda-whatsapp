@@ -59,23 +59,23 @@ export function createApiSource(o: Opts): LiveSource {
     role: 'staff',
     currentUserId: o.currentUserId,
     userNames: o.userNames,
-    async listConversations(filter, q) {
+    async listConversations(filter, q, signal) {
       const query = q.trim();
       if (query) {
-        const hits = await call(`/search?q=${encodeURIComponent(query)}&limit=50`, searchResponse);
+        const hits = await call(`/search?q=${encodeURIComponent(query)}&limit=50`, searchResponse, { signal });
         const wanted = new Set(hits.items.map((h) => h.conversationId));
         // Page through the list until every hit is found (bounded), so older conversations are not lost.
         const found: z.infer<typeof listConversationsResponse>['items'] = [];
         let cursor: string | null = null;
         for (let page = 0; page < 10; page++) {
-          const r: z.infer<typeof listConversationsResponse> = await call(`/conversations?filter=${filter}&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, listConversationsResponse);
+          const r: z.infer<typeof listConversationsResponse> = await call(`/conversations?filter=${filter}&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, listConversationsResponse, { signal });
           for (const c of r.items) if (wanted.has(c.id) || (c.contact.name ?? '').includes(query)) found.push(c);
           cursor = r.nextCursor;
           if (!cursor || found.filter((c) => wanted.has(c.id)).length >= wanted.size) break;
         }
         return found;
       }
-      return (await call(`/conversations?filter=${filter}&limit=50`, listConversationsResponse)).items;
+      return (await call(`/conversations?filter=${filter}&limit=50`, listConversationsResponse, { signal })).items;
     },
     async getMessages(id) {
       return (await call(`/conversations/${id}/messages?limit=50`, getMessagesResponse)).items.slice().sort((a, b) => a.at - b.at);

@@ -158,7 +158,7 @@ export function createSampleSource(): InboxSource {
     role: 'owner',
     currentUserId: 'u-me',
     userNames: { 'u-me': 'أنا', 'u-dina': 'دينا' },
-    async listConversations(filter, q) {
+    async listConversations(filter, q, _signal) {
       const query = q.trim();
       return convs
         .filter((c) => (filter === 'unread' ? c.unread > 0 : filter === 'mine' ? c.assigneeUserId === 'u-me' : filter === 'unassigned' ? c.assigneeUserId === null : true))

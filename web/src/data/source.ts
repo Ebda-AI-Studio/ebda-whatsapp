@@ -59,7 +59,8 @@ export interface InboxSource {
   role: Role;
   /** Display names of staff for assignee labels. */
   userNames: Record<string, string>;
-  listConversations(filter: ConversationFilter, q: string): Promise<ConversationDto[]>;
+  /** `signal` aborts a search the user has already typed past (the caller also drops its answer if it still arrives). */
+  listConversations(filter: ConversationFilter, q: string, signal?: AbortSignal): Promise<ConversationDto[]>;
   getMessages(conversationId: number): Promise<MessageDto[]>;
   send(conversationId: number, req: SendMessageRequest): Promise<MessageDto>;
   markRead(conversationId: number): Promise<void>;
