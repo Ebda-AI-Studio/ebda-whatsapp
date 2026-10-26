@@ -61,7 +61,7 @@ You give us accurate information and keep your login details secret. You are res
 
 6.5 Refunds. <!-- PENDING LEGAL REVIEW: refunds --> The remaining wallet balance can be refunded for 12 months after you cancel, once any debt is settled. The minimum refund is 50 EGP. Refunds go to the original payment method through the payment provider where possible; otherwise by bank transfer or InstaPay after an identity check. The following are not refundable: card fees already paid, AI credits that came with a package, the current package period (which keeps working until it ends), and purchased AI credits that were used or are older than 14 days. We keep financial records as the law requires, even after you cancel or ask for deletion of data.
 
-6.6 VAT and taxes. <!-- PENDING LEGAL REVIEW: VAT --> Prices and wallet amounts are stated before value-added tax unless we say otherwise. Where value-added tax or any other tax applies, we add it and show it as a separate line on the statement or invoice. You are responsible for your own taxes.
+6.6 Prices and VAT. All prices are final amounts in Egyptian pounds. We are not registered for value-added tax (VAT) and therefore charge none. If we become registered, VAT will be introduced only after at least 30 days of written notice, as a change to fees, will be shown as a separate line, and will never apply retroactively to any amount already paid or invoiced.
 
 ## 7. AI agent
 
