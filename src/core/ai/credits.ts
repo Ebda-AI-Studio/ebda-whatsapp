@@ -86,6 +86,19 @@ export function releaseHold(sql: Sql, ref: string, now: number): void {
   sql.exec("UPDATE credit_holds SET state = 'released', settled_at = ? WHERE ref = ? AND state = 'held'", now, ref);
 }
 
+/**
+ * The start of the most recent grant at or after `periodStart` (refs are `grant:<start>:<package>`). A monthly period has one grant, at its start; a yearly
+ * period has one per month, and the unused part of the LATEST one is what a period end, a renewal or a refund has to expire.
+ */
+export function lastGrantStart(sql: Sql, periodStart: number): number {
+  let latest = periodStart;
+  for (const r of sql.exec<{ ref: string }>("SELECT ref FROM credit_ledger WHERE kind = 'grant' AND ref LIKE 'grant:%' ORDER BY id DESC LIMIT 40").toArray()) {
+    const n = Number(r.ref.split(':')[1]);
+    if (Number.isSafeInteger(n) && n >= periodStart && n > latest) latest = n;
+  }
+  return latest;
+}
+
 const grantedInPeriod = (sql: Sql, periodStart: number): number =>
   sql.exec<{ g: number }>("SELECT coalesce(sum(amount), 0) AS g FROM credit_ledger WHERE kind = 'grant' AND ref LIKE ?", `grant:${periodStart}:%`).one().g;
 
@@ -120,6 +133,17 @@ export function expireGrant(sql: Sql, a: { periodStart: number; now: number; ref
   if (unused <= 0) return 0;
   const r = postCredit(sql, { kind: 'expire', amount: -unused, ref: a.ref ?? `expire:${a.periodStart}`, parentRef: `period:${a.periodStart}`, now: a.now });
   return r.ok ? unused : 0;
+}
+
+/**
+ * A refunded upgrade gives back what it added: the credits this month's grant holds ABOVE `keep` (the allowance of the package the workspace goes back to) expire,
+ * but never more than the grant's unused part (credits already spent stay spent). One ledger row under `ref`, so a retry is a no-op.
+ */
+export function revokeGrantExcess(sql: Sql, a: { periodStart: number; keep: number; now: number; ref: string }): number {
+  const amount = Math.min(unusedGrant(sql, a.periodStart, a.now), Math.max(0, grantedInPeriod(sql, a.periodStart) - a.keep));
+  if (amount <= 0) return 0;
+  const r = postCredit(sql, { kind: 'expire', amount: -amount, ref: a.ref, parentRef: `period:${a.periodStart}`, now: a.now });
+  return r.ok ? amount : 0;
 }
 
 /** A partial refund: `num/den` of the period's UNUSED granted credits expire (a ledger row under `ref`, so a retry is a no-op; used credits stay used). */

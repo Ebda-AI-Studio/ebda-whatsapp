@@ -171,7 +171,7 @@ it('store-included is only ever written by the Store-plan path (store-plan.ts an
   const orders = readFileSync(new URL('../src/core/billing/package-orders.ts', import.meta.url), 'utf8');
   const listing = /export async function listPackages[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '';
   expect(listing).toMatch(/FROM packages WHERE[^']*active = 1[^']*price_minor > 0/);
-  expect(/export async function startPackageCheckout[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '').toMatch(/FROM packages WHERE id = \? AND active = 1 AND price_minor > 0/);
+  expect(/export async function planPurchase[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '').toMatch(/FROM packages WHERE id = \? AND active = 1 AND price_minor > 0/); // card checkout AND InstaPay both price through planPurchase
   expect(readFileSync(new URL('../src/routes/operator.ts', import.meta.url), 'utf8')).toMatch(/store_included_is_store_plan_only/);
 });
 

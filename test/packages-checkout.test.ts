@@ -167,7 +167,7 @@ describe('routes', () => {
     expect((await staff.call('GET', `/packages/orders/${j.orderId}`)).status).toBe(403);
     expect((await (await apiFor(W(8499))).call('GET', `/packages/orders/${j.orderId}`)).status).toBe(404);
   });
-  it('an expired token is refused and a revoked session is 401 with nothing written', async () => {
+  it('an expired token is refused and a revoked session is 403 (session_revoked) with nothing written', async () => {
     const ws = W(8422);
     const owner = await apiFor(ws, 'owner');
     configureSessionCheck(async () => true);

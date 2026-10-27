@@ -90,4 +90,10 @@ export interface OperatorApi {
   createAdjustment(workspaceId: string, amountMinor: number, reason: string): Promise<Adjustment>;
   decideAdjustment(id: string, decision: 'approve' | 'reject'): Promise<Adjustment>;
   changeLog(): Promise<ChangeLogItem[]>;
+  /** A yearly package order: what can be refunded now (unused whole months x price/12, current month kept, wallet debt settled first). */
+  yearlyRefundQuote(orderId: string): Promise<YearlyRefundQuoteView>;
+  /** Cancels the yearly plan at the end of the current month and settles the wallet debt first. Idempotent: a replay returns the same figures. */
+  yearlyRefundExecute(orderId: string, reason: string): Promise<YearlyRefundDone>;
 }
+export type YearlyRefundQuoteView = { orderId: string; packageId: string; periodMonths: number; monthlyMinor: number; unusedMonths: number; grossMinor: number; debtMinor: number; debtSettledMinor: number; refundMinor: number };
+export type YearlyRefundDone = { orderId: string; shortenedMonths: number; debtSettledMinor: number; cashRefundMinor: number; noMoneyOut: boolean; periodEnd: number };

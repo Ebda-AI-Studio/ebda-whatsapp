@@ -32,6 +32,7 @@ instapayRoutes.post('/stores/:storeId/wallet/instapay', async (c) => {
   if (r.ok) return c.json({ ...r.request, payee: payee! }, 201);
   if (r.reason === 'invalid_amount' || r.reason === 'unknown_package') return apiError(c, 400, 'invalid_request', r.reason);
   if (r.reason === 'session_revoked') return apiError(c, 401, 'unauthorized');
+  if (r.reason === 'yearly_queued') return c.json({ error: 'yearly_queued' }, 409);
   if (r.reason === 'too_many_open') return apiError(c, 409, 'invalid_request', r.reason);
   if (r.reason === 'disabled') return apiError(c, 404, 'not_found');
   return apiError(c, 503, 'unavailable', r.reason); // no payee configured / session check unavailable: nothing was written

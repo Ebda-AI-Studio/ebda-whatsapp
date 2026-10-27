@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import {
   fxPublish, instapayReject, operatorKillSwitch, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
 } from '../core/api/contract';
@@ -10,6 +11,7 @@ import {
   requestAdjustment, setFunding,
 } from '../core/billing/operator';
 import { STORE_INCLUDED, setSubscription } from '../core/billing/subscriptions';
+import { executeYearlyRefund, packageRefundQuote } from '../core/billing/package-orders';
 import { currentSharedNumber, registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
 import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type SharedTemplateFailure } from '../core/shared/shared-templates';
 import { submitTemplateRequest } from './templates';
@@ -24,7 +26,7 @@ export const operatorRoutes = new Hono<E>();
 // Every state-changing operator action re-checks that the session was not revoked, and fails closed (accounts binding missing or erroring = refused).
 operatorRoutes.use('*', async (c, next) => {
   // Reads that return personal data (the InstaPay review list and proof images) re-check the session too; other reads keep working while the accounts service is down.
-  const personal = c.req.path.includes('/instapay');
+  const personal = c.req.path.includes('/instapay') || c.req.path.includes('/package-orders'); // the refund quote shows a merchant's wallet debt: re-check the session
   if ((c.req.method === 'GET' || c.req.method === 'HEAD') && !personal) return next();
   const s = await sessionState(c.env, c.get('principal').sessionId);
   if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
@@ -196,6 +198,26 @@ operatorRoutes.put('/workspaces/:workspaceId/subscription', async (c) => {
   const r = await setSubscription(c.env, { workspaceId, packageId: b.data.packageId, status: b.data.status, periodStart: Date.now(), periodEnd: b.data.periodEnd, source: 'operator', ref: actor(c), reason: b.data.reason });
   console.log(JSON.stringify({ audit: 'operator_subscription_set', workspace: workspaceId, packageId: b.data.packageId, status: b.data.status, version: r.version, actor: actor(c) }));
   return c.json({ packageId: b.data.packageId, status: b.data.status, periodEnd: b.data.periodEnd, version: r.version, applied: r.applied });
+});
+
+// What a human can refund of a package order right now (Review Focus 5): unused whole months x floor(price / 12), the current month kept, wallet debt first.
+operatorRoutes.get('/package-orders/:orderId/refund-quote', async (c) => {
+  const q = await packageRefundQuote(c.env, c.req.param('orderId'));
+  if (q === 'not_found') return c.json({ error: 'not_found' }, 404);
+  if (q === 'not_paid') return c.json({ error: 'invalid_request', message: 'order_not_paid' }, 409);
+  if (typeof q === 'string') return c.json({ error: 'invalid_request', message: q }, 409); // queued_periods | order_queued: the same refusals the refund action makes
+  return c.json(q);
+});
+
+// The operator's cancel + refund of a yearly period, debt first (the console action behind "your yearly plan runs until <date>; contact support"). Idempotent.
+operatorRoutes.post('/package-orders/:orderId/yearly-refund', async (c) => {
+  const body = z.object({ reason: z.string().trim().min(5).max(500) }).safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return bad(c, 'reason_required');
+  const r = await executeYearlyRefund(c.env, c.req.param('orderId'), { actor: actor(c), reason: body.data.reason });
+  if (!r.ok) return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+  console.log(JSON.stringify({ audit: 'operator_yearly_refund', orderId: r.orderId, shortenedMonths: r.shortenedMonths, debtSettledMinor: r.debtSettledMinor, cashRefundMinor: r.cashRefundMinor, actor: actor(c) }));
+  const { ok: _ok, ...out } = r;
+  return c.json(out);
 });
 
 operatorRoutes.get('/change-log', async (c) => {

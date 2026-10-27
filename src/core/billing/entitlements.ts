@@ -8,7 +8,8 @@
  * keep working. A cancelled workspace keeps its wallet and ledger (money rows are never deleted).
  */
 import { z } from 'zod';
-import { expireGrant, grantCredits, upgradeGrant } from '../ai/credits';
+import { expireGrant, grantCredits, lastGrantStart, upgradeGrant } from '../ai/credits';
+import { addMonthsUtc, monthsStarted } from './yearly';
 import { addTask } from '../scheduler';
 
 type Sql = DurableObjectStorage['sql'];
@@ -27,6 +28,8 @@ export const entitlementEvent = z.object({
   cancelledAt: z.number().int().positive().nullable().default(null),
   /** When the subscription first became past_due (epoch ms), set by the control plane; null otherwise. Bounds the WA-GRACE-1 grace. */
   pastDueSince: z.number().int().positive().nullable().default(null),
+  /** Billing period length of the package: 1 (monthly) or 12 (yearly). AI credits are `aiCredits` PER MONTH either way. */
+  periodMonths: z.number().int().min(1).max(12).default(1),
   /** What the package allows. The default is the DENY shape: an event from before limits existed grants no feature and one seat. */
   limits: z.object({
     maxMembers: z.number().int().min(1),
@@ -39,16 +42,16 @@ export const entitlementEvent = z.object({
 export type EntitlementEvent = z.input<typeof entitlementEvent>;
 
 export type Entitlement = {
-  version: number; packageId: string; status: EntitlementStatus; periodStart: number; periodEnd: number; aiCredits: number; cancelledAt: number | null; updatedAt: number;
+  version: number; packageId: string; status: EntitlementStatus; periodStart: number; periodEnd: number; aiCredits: number; cancelledAt: number | null; updatedAt: number; periodMonths: number;
 };
 
 export type PlanFeature = 'campaigns' | 'order_in_chat' | 'api';
 
-type Row = { version: number; package_id: string; status: EntitlementStatus; period_start: number; period_end: number; ai_credits: number; cancelled_at: number | null; updated_at: number };
+type Row = { version: number; package_id: string; status: EntitlementStatus; period_start: number; period_end: number; ai_credits: number; cancelled_at: number | null; updated_at: number; period_months: number };
 
 export function readEntitlement(sql: Sql): Entitlement | null {
-  const r = sql.exec<Row>('SELECT version, package_id, status, period_start, period_end, ai_credits, cancelled_at, updated_at FROM entitlements WHERE id = 1').toArray()[0];
-  return r ? { version: r.version, packageId: r.package_id, status: r.status, periodStart: r.period_start, periodEnd: r.period_end, aiCredits: r.ai_credits, cancelledAt: r.cancelled_at, updatedAt: r.updated_at } : null;
+  const r = sql.exec<Row>('SELECT version, package_id, status, period_start, period_end, ai_credits, cancelled_at, updated_at, period_months FROM entitlements WHERE id = 1').toArray()[0];
+  return r ? { version: r.version, packageId: r.package_id, status: r.status, periodStart: r.period_start, periodEnd: r.period_end, aiCredits: r.ai_credits, cancelledAt: r.cancelled_at, updatedAt: r.updated_at, periodMonths: r.period_months } : null;
 }
 
 /**
@@ -113,6 +116,53 @@ function scheduleExpiry(sql: Sql, periodEnd: number): void {
   addTask(sql, 'subscription_expire', periodEnd);
 }
 
+/** Statuses whose yearly period still earns its monthly AI credits: a plan cancelled while in effect keeps them until period_end (WA-CANCEL-1). */
+function earnsMonthlyCredits(e: { status: EntitlementStatus; period_end?: number; periodEnd?: number; aiCredits?: number; ai_credits?: number }, now: number): boolean {
+  const end = e.periodEnd ?? e.period_end ?? 0;
+  const credits = e.aiCredits ?? e.ai_credits ?? 0;
+  return credits > 0 && (e.status === 'active' || e.status === 'trialing' || (e.status === 'cancelled' && end > now));
+}
+
+/**
+ * The next month of a period longer than a month (yearly) that has not been granted yet, derived from the LAST month actually granted (never from the clock, so a
+ * missed run or a replayed event cannot skip a month), and when it is due. Null = nothing more to grant in this period.
+ */
+function nextCreditMonth(sql: Sql, e: { periodStart: number; periodEnd: number; periodMonths: number }): { k: number; due: number } | null {
+  if (e.periodMonths <= 1) return null;
+  const k = monthsStarted(e.periodStart, e.periodMonths, lastGrantStart(sql, e.periodStart));
+  const due = addMonthsUtc(e.periodStart, k);
+  return k >= 1 && k < e.periodMonths && due < e.periodEnd ? { k, due } : null;
+}
+
+/**
+ * A period longer than a month (yearly) gets its AI credits ONE MONTH AT A TIME: the first month's allowance lands with the event, and ONE `credit_month` task
+ * (a singleton row) sits at the next monthly anniversary. An event re-points that row; a RUNNING (leased) row is left alone, because it recomputes its own next
+ * month when it finishes. A plan that no longer earns them, or a one-month period, has none.
+ */
+function scheduleCreditMonth(sql: Sql, ev: { periodStart: number; periodEnd: number; periodMonths: number; status: EntitlementStatus; aiCredits: number }, now: number): void {
+  sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'credit_month' AND lease_until IS NULL");
+  if (!earnsMonthlyCredits(ev, now)) return;
+  const next = nextCreditMonth(sql, ev);
+  if (next) addTask(sql, 'credit_month', next.due, { periodStart: ev.periodStart });
+}
+
+/**
+ * The `credit_month` task. Everything is derived from the ledger and the entitlement, never from the payload: it grants the next UNGRANTED month if its
+ * anniversary has come (the previous month's unused grant expires first; purchased credits roll over), under refs keyed by the month so a replay is a no-op, and
+ * returns the due time of the month after (or the not-yet-due month), or undefined when the period has nothing more to grant. A duplicate row, a stale payload, a
+ * replacement period or a refund-shortened period therefore cannot grant or expire anything twice.
+ */
+export function runCreditMonth(sql: Sql, now: number): number | undefined {
+  const e = readEntitlement(sql);
+  if (!e || !earnsMonthlyCredits(e, now)) return undefined;
+  const next = nextCreditMonth(sql, e);
+  if (!next) return undefined;
+  if (next.due > now) return next.due; // not yet: keep the row at its true time
+  expireGrant(sql, { periodStart: lastGrantStart(sql, e.periodStart), now });
+  grantCredits(sql, { periodStart: next.due, packageId: e.packageId, credits: e.aiCredits, now });
+  return nextCreditMonth(sql, e)?.due;
+}
+
 /** Applies one event inside the caller's transaction. */
 export function applyEntitlement(sql: Sql, raw: EntitlementEvent, now: number): 'applied' | 'stale' | 'invalid' {
   const parsed = entitlementEvent.safeParse(raw);
@@ -135,20 +185,22 @@ export function applyEntitlement(sql: Sql, raw: EntitlementEvent, now: number): 
   }
   const l = ev.limits;
   sql.exec(
-    `INSERT INTO entitlements (id, version, package_id, status, period_start, period_end, ai_credits, cancelled_at, updated_at, max_members, lim_campaigns, lim_order_in_chat, lim_api, lim_priority_support, past_due_since)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO entitlements (id, version, package_id, status, period_start, period_end, ai_credits, cancelled_at, updated_at, max_members, lim_campaigns, lim_order_in_chat, lim_api, lim_priority_support, past_due_since, period_months)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET version = excluded.version, package_id = excluded.package_id, status = excluded.status, period_start = excluded.period_start,
        period_end = excluded.period_end, ai_credits = excluded.ai_credits, cancelled_at = excluded.cancelled_at, updated_at = excluded.updated_at,
-       max_members = excluded.max_members, lim_campaigns = excluded.lim_campaigns, lim_order_in_chat = excluded.lim_order_in_chat, lim_api = excluded.lim_api, lim_priority_support = excluded.lim_priority_support, past_due_since = excluded.past_due_since`,
-    ev.version, ev.packageId, ev.status, ev.periodStart, ev.periodEnd, ev.aiCredits, ev.cancelledAt, now, l.maxMembers, l.campaigns ? 1 : 0, l.orderInChat ? 1 : 0, l.api ? 1 : 0, l.prioritySupport ? 1 : 0, ev.pastDueSince,
+       max_members = excluded.max_members, lim_campaigns = excluded.lim_campaigns, lim_order_in_chat = excluded.lim_order_in_chat, lim_api = excluded.lim_api, lim_priority_support = excluded.lim_priority_support, past_due_since = excluded.past_due_since, period_months = excluded.period_months`,
+    ev.version, ev.packageId, ev.status, ev.periodStart, ev.periodEnd, ev.aiCredits, ev.cancelledAt, now, l.maxMembers, l.campaigns ? 1 : 0, l.orderInChat ? 1 : 0, l.api ? 1 : 0, l.prioritySupport ? 1 : 0, ev.pastDueSince, ev.periodMonths,
   );
   if (!cur || ev.periodStart > cur.periodStart) {
     // A new period: what the last one granted and nobody used expires (purchased credits roll over), then the new grant lands.
-    if (cur) expireGrant(sql, { periodStart: cur.periodStart, now });
-    if (GRANTING.has(ev.status) && ev.aiCredits > 0) grantCredits(sql, { periodStart: ev.periodStart, packageId: ev.packageId, credits: ev.aiCredits, now });
+    // (In a yearly period the grant still unused is the LATEST month's: expireGrant is pointed at it. For a monthly period that is the period start, as always.)
+    if (cur) expireGrant(sql, { periodStart: lastGrantStart(sql, cur.periodStart), now });
+    if (GRANTING.has(ev.status) && ev.aiCredits > 0) grantCredits(sql, { periodStart: ev.periodStart, packageId: ev.packageId, credits: ev.aiCredits, now }); // month 1 of the period
   } else if (ev.periodStart === cur.periodStart && GRANTING.has(ev.status) && ev.aiCredits > 0) {
-    upgradeGrant(sql, { periodStart: ev.periodStart, toPackage: ev.packageId, toCredits: ev.aiCredits, now }); // only the difference; a downgrade or repeat grants nothing
+    upgradeGrant(sql, { periodStart: lastGrantStart(sql, ev.periodStart), toPackage: ev.packageId, toCredits: ev.aiCredits, now }); // only the difference; a downgrade or repeat grants nothing
   }
+  scheduleCreditMonth(sql, ev, now);
   scheduleExpiry(sql, ev.periodEnd);
   return 'applied';
 }
@@ -163,7 +215,8 @@ export function expireSubscription(sql: Sql, now: number): number | null {
   if (e.periodEnd > now) return e.periodEnd;
   if (e.status === 'active' || e.status === 'trialing' || e.status === 'past_due') {
     sql.exec("UPDATE entitlements SET status = 'expired', updated_at = ? WHERE id = 1", now);
-    expireGrant(sql, { periodStart: e.periodStart, now });
+    expireGrant(sql, { periodStart: lastGrantStart(sql, e.periodStart), now });
+    sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'credit_month' AND lease_until IS NULL");
   }
   return null;
 }

@@ -466,6 +466,9 @@ export const DO_MIGRATIONS: readonly string[] = [
      n INTEGER NOT NULL,
      PRIMARY KEY (phone_number_id, bucket)
    );`,
+  // v35 (P2 yearly): the billing period length (1 or 12 months) of the workspace's package, carried by the entitlement event. A period longer than a month
+  // gets its AI credits one month at a time (credit_month tasks), never 12x at once.
+  `ALTER TABLE entitlements ADD COLUMN period_months INTEGER NOT NULL DEFAULT 1;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

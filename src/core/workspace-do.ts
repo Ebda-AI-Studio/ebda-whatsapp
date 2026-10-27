@@ -37,7 +37,7 @@ import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, p
 import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
 import type { AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
-import { creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, postCredit, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
+import { creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
@@ -66,7 +66,7 @@ import { parentHoldRef } from './campaigns/campaigns';
 import { indexContactName, rebuildContactIndex } from './contact-index';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
-import { applyEntitlement, expireSubscription, featureAllowed, marketingBlocked, memberLimit, readEntitlement, serviceAllowed, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
+import { applyEntitlement, expireSubscription, runCreditMonth, featureAllowed, marketingBlocked, memberLimit, readEntitlement, serviceAllowed, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
@@ -1483,7 +1483,16 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
   /** Period end: unused granted credits expire; returns how many. */
   async expireAiCredits(periodStart: number, now = Date.now(), ref?: string): Promise<{ expired: number }> {
-    return { expired: this.ctx.storage.transactionSync(() => expireGrant(this.sql, { periodStart, now, ...(ref ? { ref } : {}) })) };
+    return { expired: this.ctx.storage.transactionSync(() => expireGrant(this.sql, { periodStart: lastGrantStart(this.sql, periodStart), now, ...(ref ? { ref } : {}) })) };
+  }
+  /** A refunded upgrade: the current month's granted credits above `keepCredits` (the allowance of the package it goes back to) expire, unused ones only (idempotent under `ref`). */
+  async revokeUpgradeCredits(a: { keepCredits: number; ref: string }, now = Date.now()): Promise<{ expired: number }> {
+    return {
+      expired: this.ctx.storage.transactionSync(() => {
+        const e = this.sql.exec<{ period_start: number }>('SELECT period_start FROM entitlements WHERE id = 1').toArray()[0];
+        return e ? revokeGrantExcess(this.sql, { periodStart: lastGrantStart(this.sql, e.period_start), keep: a.keepCredits, now, ref: a.ref }) : 0;
+      }),
+    };
   }
   /** A partial refund of a package: `num/den` of the period's unused granted credits expire under `ref` (idempotent). */
   async expireAiCreditsFraction(a: { periodStart: number; num: number; den: number; ref: string }, now = Date.now()): Promise<{ expired: number }> {
@@ -2129,6 +2138,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       case 'funnel_rollup':
         return funnelRollup(this.sql, now);
+      case 'credit_month':
+        return this.ctx.storage.transactionSync(() => runCreditMonth(this.sql, now));
       case 'subscription_expire': {
         // A paid early renewal queued behind this period starts now instead of the plan expiring (the control plane owns the queue).
         try {
