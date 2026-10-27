@@ -332,6 +332,9 @@ describe('the platform number reaches every member (items 6 and 7, and the shado
     }
     return ids;
   }
+  /** How many messages `ws` sent on the platform number in the current window (the denominator of its error rate). */
+  const seedSends = (ws: string, n: number) => env.DB.prepare('INSERT INTO shared_number_sends (phone_number_id, workspace_id, bucket, n) VALUES (?, ?, ?, ?) ON CONFLICT(phone_number_id, workspace_id, bucket) DO UPDATE SET n = n + excluded.n').bind(PLAT, ws, Math.floor(Date.now() / 600_000), n).run();
+  const errors = async (ws: string, n: number) => { for (let i = 0; i < n; i++) await workspace(ws).noteSendError(PLAT, i % 2 ? 131049 : 131026); };
   const restrictedHook = (time: number) => JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: 'waba-plat', time, changes: [{ field: 'account_update', value: { event: 'ACCOUNT_RESTRICTION', restriction_info: [{ restriction_type: 'X' }] } }] }] });
 
   it('one signal pages on-call ONCE however many members there are, and every member ends up restricted', async () => {
@@ -391,6 +394,7 @@ describe('the platform number reaches every member (items 6 and 7, and the shado
   it('one member spamming the platform number: ONLY that store\'s templates stop (24 h); the number and the other members are untouched', async () => {
     const [bad, good] = await platform([1140, 1141]);
     await fund(bad!, 100_000); await fund(good!, 100_000);
+    await seedSends(bad!, 40); await seedSends(good!, 40); // 25 errors on 40 sends = 62%
     const spy = vi.spyOn(console, 'error');
     for (let i = 0; i < SPIKE_THRESHOLD; i++) await workspace(bad!).noteSendError(PLAT, i % 2 ? 131049 : 131026);
     expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green'); // the number is fine
@@ -418,6 +422,7 @@ describe('the platform number reaches every member (items 6 and 7, and the shado
   }
   it('dominance is checked FIRST: an abuser with ~85% plus two tiny accomplices is blocked and does NOT take the number down for everyone', async () => {
     const [abuser, a, b] = await platform([1147, 1148, 1149]);
+    await seedSends(abuser!, 100); await seedSends(a!, 30); await seedSends(b!, 30);
     const send = async (ws: string, n: number) => { for (let i = 0; i < n; i++) await workspace(ws).noteSendError(PLAT, 131049); };
     await send(a!, 2); await send(b!, 2); await send(abuser!, SPIKE_THRESHOLD - 4); // the 25th error: abuser 21 (84%), accomplices 2 + 2
     expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green'); // the platform did not trip
@@ -427,6 +432,7 @@ describe('the platform number reaches every member (items 6 and 7, and the shado
   });
   it('a member holding 60% in three consecutive AMBIGUOUS windows is blocked on the third (rolling tally), and the other member never is', async () => {
     const [x, y] = await platform([1150, 1151]);
+    await seedSends(x!, 40); await seedSends(y!, 500); // x: 15 errors on 40 sends = 37%; y: 10 on 500 = 2%
     const oneWindow = async () => { // 10 from y first, then 15 from x: the 25th error leaves x at 60%
       for (let i = 0; i < 10; i++) await workspace(y!).noteSendError(PLAT, 131049);
       for (let i = 0; i < 15; i++) await workspace(x!).noteSendError(PLAT, 131049);
@@ -439,6 +445,40 @@ describe('the platform number reaches every member (items 6 and 7, and the shado
     expect(await templateRefused(x!)).toBe(true);
     expect(await templateRefused(y!)).toBe(false);
     expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green');
+  });
+  it('dead branch fixed: a dominant abuser (exactly 80%) is blocked AND the platform trips when the OTHER members reach the scaled bar from 3 distinct members', async () => {
+    const [abuser, a, b, c] = await platform([1152, 1153, 1154, 1155]);
+    await seedSends(abuser!, 100); await seedSends(a!, 30); await seedSends(b!, 30); await seedSends(c!, 30);
+    await errors(a!, 2); await errors(b!, 2); await errors(c!, 1); // 5 = SHARED_REST_THRESHOLD, from 3 members
+    await errors(abuser!, SPIKE_THRESHOLD - 5); // the 25th error: abuser 20 (80%), rate 20%
+    expect(await env.DB.prepare('SELECT health_state, health_reason FROM shared_numbers').first()).toEqual({ health_state: 'yellow', health_reason: 'spike' });
+    expect(await templateRefused(abuser!)).toBe(true);
+    expect(await templateRefused(a!)).toBe(false);
+  });
+  it('a BIG honest store (1000 sends, 3% errors) is never struck or blocked, even holding 60% of the errors in three windows; a SMALL store at 25% is struck and blocked on the third', async () => {
+    const [big, other, small] = await platform([1156, 1157, 1158]);
+    await seedSends(big!, 1000); await seedSends(other!, 500);
+    for (let w = 0; w < 3; w++) { await errors(other!, 10); await errors(big!, 15); } // big: 45 errors on 1000 sends = 4.5%, 60% of every window
+    expect(await templateRefused(big!)).toBe(false);
+    expect(await templateRefused(other!)).toBe(false);
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM shared_number_strikes').first('n')).toBe(0);
+    // now a small store with a really bad rate takes the other seat
+    await seedSends(small!, 40);
+    for (let w = 0; w < 3; w++) { await errors(small!, 10); await errors(big!, 15); } // small: 10 errors per window on 40 sends = 25% (strike each window)
+    expect(await templateRefused(small!)).toBe(true);
+    expect(await templateRefused(big!)).toBe(false);
+  });
+  it('sends on the platform number are counted per member where the claim happens (ids and a count, nothing else)', async () => {
+    const [ws] = await platform([1159]);
+    await syncMemberHealth(env, ws!); // a joined member knows it sends on the platform number
+    await env.DB.prepare("INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, 'platform_line', 0)").bind(PLAT).run();
+    await seedSharedTemplate(PLAT, { name: 'tpl-u', language: 'ar' });
+    await fund(ws!, 100_000);
+    const c = await chat(ws!, 'UTILITY');
+    const r = await workspace(ws!).queueOutbound(c, PLAT, { type: 'template', clientId: crypto.randomUUID(), name: 'tpl-u', language: 'ar', params: [] });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.job) expect(await workspace(ws!).claimSend(r.job)).toBe('claimed');
+    await vi.waitFor(async () => expect(await env.DB.prepare('SELECT sum(n) AS n FROM shared_number_sends WHERE workspace_id = ?').bind(ws).first('n')).toBe(1));
   });
   it('errors spread over 3 or more members trip the platform number for everyone (yellow)', async () => {
     const members = await platform([1142, 1143, 1144]);

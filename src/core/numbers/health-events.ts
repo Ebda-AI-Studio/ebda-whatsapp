@@ -1,7 +1,7 @@
 import type { Env } from '../../env';
 import { alert } from '../observability';
 import { numberForDisplayPhone } from '../routing';
-import { HEALTH_STATES, MEMBER_BLOCK_MS, SHARED_DOMINANCE, SHARED_REPEAT_SHARE, SHARED_REPEAT_WINDOWS, SHARED_REPEAT_WINDOW_MS, SHARED_SPIKE_MIN_MEMBERS, SPIKE_THRESHOLD, SPIKE_WINDOW_MS, mirrorHealth, nextHealth, sharedNumberByDisplay, signalSource, worsened, type HealthSignal, type HealthState } from './health';
+import { HEALTH_STATES, MEMBER_BLOCK_MS, SHARED_DOMINANCE, SHARED_MEMBER_ERROR_RATE, SHARED_MEMBER_MIN_SENDS, SHARED_REPEAT_WINDOWS, SHARED_REPEAT_WINDOW_MS, SHARED_REST_THRESHOLD, SHARED_SPIKE_MIN_MEMBERS, SPIKE_THRESHOLD, SPIKE_WINDOW_MS, mirrorHealth, nextHealth, sharedNumberByDisplay, signalSource, worsened, type HealthSignal, type HealthState } from './health';
 
 /** Hands background work to the request's waitUntil (the webhook answers Meta once D1 is up to date, not after every member was told). */
 export type Schedule = (work: () => Promise<unknown>) => void;
@@ -90,39 +90,47 @@ export type SharedSpike =
   | { kind: 'member'; workspaceId: string; platform: boolean }
   | { kind: 'ambiguous' };
 
+/** One send claimed by a member on the platform number: the denominator of its error rate. Counts only. */
+export async function noteSharedSend(env: Env, phoneNumberId: string, workspaceId: string, now = Date.now()): Promise<void> {
+  const bucket = Math.floor(now / 600_000);
+  await env.DB.prepare('INSERT INTO shared_number_sends (phone_number_id, workspace_id, bucket, n) VALUES (?, ?, ?, 1) ON CONFLICT(phone_number_id, workspace_id, bucket) DO UPDATE SET n = n + 1').bind(phoneNumberId, workspaceId, bucket).run();
+}
+
 /**
- * The platform number's spike guard, attributed per MEMBER (D1 `shared_number_errors`). Once the window holds SPIKE_THRESHOLD errors, in this ORDER:
- *  1. DOMINANCE first: a member with at least SHARED_DOMINANCE of the window's errors is blocked. The platform still trips only if the REMAINING members' errors meet
- *     the platform rule on their own (at least SPIKE_THRESHOLD errors from at least SHARED_SPIKE_MIN_MEMBERS members): an abuser with two tiny accomplices is blocked
- *     and does not take the number down for everyone;
+ * The platform number's spike guard, attributed per MEMBER by its OWN error RATE (D1 `shared_number_errors` / `shared_number_sends`). Once the window holds SPIKE_THRESHOLD errors,
+ * in this ORDER ("over the bar" = at least SHARED_MEMBER_MIN_SENDS sends and an error rate of at least SHARED_MEMBER_ERROR_RATE; no send data = not over the bar):
+ *  1. DOMINANCE first: a member with at least SHARED_DOMINANCE of the window's errors AND over the rate bar is blocked. The platform still trips if the OTHERS reach
+ *     SHARED_REST_THRESHOLD errors from at least SHARED_SPIKE_MIN_MEMBERS members (a dominance-scaled bar: an abuser with two tiny accomplices does not take the number down);
  *  2. else errors from at least SHARED_SPIKE_MIN_MEMBERS distinct members -> the number itself: `platform`;
- *  3. else `ambiguous` (two members, no culprit): alert only, BUT a member holding at least SHARED_REPEAT_SHARE of the window earns a strike, and SHARED_REPEAT_WINDOWS
- *     strikes inside SHARED_REPEAT_WINDOW_MS block it like a dominant one (a rolling tally; the window counters are cleared, the strikes are not).
- * The window counters are cleared on any verdict but `none`.
+ *  3. else `ambiguous`: alert only, BUT every member over the rate bar (whatever its share) earns a strike, and SHARED_REPEAT_WINDOWS strikes inside SHARED_REPEAT_WINDOW_MS block
+ *     it (a rolling tally; the window counters are cleared, the strikes are not).
+ * A high-volume, low-rate store is never blamed. The window counters are cleared on any verdict but `none`.
  */
 export async function noteSharedError(env: Env, phoneNumberId: string, workspaceId: string, now = Date.now()): Promise<SharedSpike> {
   const bucket = Math.floor(now / 600_000);
+  const oldest = bucket - Math.ceil(SPIKE_WINDOW_MS / 600_000);
   await env.DB.batch([
     env.DB.prepare('INSERT INTO shared_number_errors (phone_number_id, workspace_id, bucket, n) VALUES (?, ?, ?, 1) ON CONFLICT(phone_number_id, workspace_id, bucket) DO UPDATE SET n = n + 1').bind(phoneNumberId, workspaceId, bucket),
-    env.DB.prepare('DELETE FROM shared_number_errors WHERE bucket < ?').bind(bucket - Math.ceil(SPIKE_WINDOW_MS / 600_000) - 1),
+    env.DB.prepare('DELETE FROM shared_number_errors WHERE bucket < ?').bind(oldest - 1),
+    env.DB.prepare('DELETE FROM shared_number_sends WHERE bucket < ?').bind(oldest - 1),
   ]);
-  const { results } = await env.DB.prepare('SELECT workspace_id, sum(n) AS n FROM shared_number_errors WHERE phone_number_id = ? AND bucket > ? GROUP BY workspace_id ORDER BY n DESC')
-    .bind(phoneNumberId, bucket - Math.ceil(SPIKE_WINDOW_MS / 600_000)).all<{ workspace_id: string; n: number }>();
+  const { results } = await env.DB.prepare('SELECT workspace_id, sum(n) AS n FROM shared_number_errors WHERE phone_number_id = ? AND bucket > ? GROUP BY workspace_id ORDER BY n DESC').bind(phoneNumberId, oldest).all<{ workspace_id: string; n: number }>();
   const total = results.reduce((a, r) => a + r.n, 0);
   if (total < SPIKE_THRESHOLD) return { kind: 'none' };
+  const sends = new Map((await env.DB.prepare('SELECT workspace_id, sum(n) AS n FROM shared_number_sends WHERE phone_number_id = ? AND bucket > ? GROUP BY workspace_id').bind(phoneNumberId, oldest).all<{ workspace_id: string; n: number }>()).results.map((r) => [r.workspace_id, r.n]));
   await env.DB.prepare('DELETE FROM shared_number_errors WHERE phone_number_id = ?').bind(phoneNumberId).run();
+  const overBar = (r: { workspace_id: string; n: number }): boolean => { const s = sends.get(r.workspace_id) ?? 0; return s >= SHARED_MEMBER_MIN_SENDS && r.n / s >= SHARED_MEMBER_ERROR_RATE; };
   const top = results[0]!;
-  if (top.n / total >= SHARED_DOMINANCE) { // 1. dominance FIRST
+  if (top.n / total >= SHARED_DOMINANCE && overBar(top)) { // 1. dominance FIRST (and only for a member whose own rate is bad)
     const rest = results.slice(1);
-    const restTotal = total - top.n;
-    return { kind: 'member', workspaceId: top.workspace_id, platform: rest.length >= SHARED_SPIKE_MIN_MEMBERS && restTotal >= SPIKE_THRESHOLD };
+    return { kind: 'member', workspaceId: top.workspace_id, platform: rest.length >= SHARED_SPIKE_MIN_MEMBERS && total - top.n >= SHARED_REST_THRESHOLD };
   }
   if (results.length >= SHARED_SPIKE_MIN_MEMBERS) return { kind: 'platform' }; // 2.
-  // 3. ambiguous: remember who carried it, so a repeat offender is caught across windows
+  // 3. ambiguous: a member whose own rate is over the bar earns a strike, whatever its share
   const since = now - SHARED_REPEAT_WINDOW_MS;
   await env.DB.prepare('DELETE FROM shared_number_strikes WHERE at < ?').bind(since).run();
   for (const r of results) {
-    if (r.n / total < SHARED_REPEAT_SHARE) continue;
+    if (!overBar(r)) continue;
     await env.DB.prepare('INSERT INTO shared_number_strikes (phone_number_id, workspace_id, at) VALUES (?, ?, ?)').bind(phoneNumberId, r.workspace_id, now).run();
     const strikes = (await env.DB.prepare('SELECT count(*) AS n FROM shared_number_strikes WHERE phone_number_id = ? AND workspace_id = ? AND at >= ?').bind(phoneNumberId, r.workspace_id, since).first<{ n: number }>())?.n ?? 0;
     if (strikes >= SHARED_REPEAT_WINDOWS) {

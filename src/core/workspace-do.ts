@@ -14,7 +14,7 @@ import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
 import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
-import { applySharedHealth, noteSharedError } from './numbers/health-events';
+import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
 import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText, phoneDigits } from './text-normalise';
@@ -389,6 +389,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.armPending = false;
       await this.arm();
     }
+    // A send on the platform number is counted per member (the denominator of its error rate): ids and a count, nothing else. Not awaited: counting never delays a send.
+    if (result === 'claimed' && this.sql.exec('SELECT 1 FROM store_state WHERE key = ?', `shared.number:${job.phoneNumberId}`).toArray().length) this.ctx.waitUntil(noteSharedSend(this.env, job.phoneNumberId, this.workspaceId, now).catch(() => undefined));
     return result;
   }
 
@@ -684,6 +686,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       recordSignalAt(this.sql, phoneNumberId, signalAt);
       if (state !== from) logHealth(this.sql, phoneNumberId, from, state, 'shared', null, now);
     });
+    this.sql.exec("INSERT INTO store_state (key, value) VALUES (?, '1') ON CONFLICT(key) DO NOTHING", `shared.number:${phoneNumberId}`); // this store sends on the platform number: its sends are counted
     if (worsened(from, state)) await this.pauseCampaignsOn(phoneNumberId, 'quality_flagged', now);
   }
 

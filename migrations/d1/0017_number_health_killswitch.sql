@@ -13,7 +13,17 @@ ALTER TABLE shared_numbers ADD COLUMN health_reason TEXT;
 ALTER TABLE shared_numbers ADD COLUMN health_at INTEGER;
 ALTER TABLE shared_numbers ADD COLUMN health_signal_at INTEGER NOT NULL DEFAULT 0;
 
--- A member that was the main contributor of an ambiguous spike gets a strike; repeated strikes inside a day block it (see SHARED_REPEAT_* in health.ts).
+-- Messages each member SENT on the platform number per 10-minute bucket (counted where the send is claimed; ids and counts only, no phone number, no content): the
+-- denominator of a member's own error RATE. A big honest sender has many errors in absolute terms and a low rate.
+CREATE TABLE shared_number_sends (
+  phone_number_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  bucket INTEGER NOT NULL,
+  n INTEGER NOT NULL,
+  PRIMARY KEY (phone_number_id, workspace_id, bucket)
+);
+
+-- A member whose own error RATE was over the bar in an ambiguous spike gets a strike; repeated strikes inside a day block it (see SHARED_* in health.ts).
 CREATE TABLE shared_number_strikes (
   phone_number_id TEXT NOT NULL,
   workspace_id TEXT NOT NULL,

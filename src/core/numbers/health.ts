@@ -90,11 +90,17 @@ export const SPIKE_WINDOW_MS = 60 * 60_000;
 export const SHARED_SPIKE_MIN_MEMBERS = 3;
 /** Below that, one member that produced at least this share of the window's errors is the problem: only ITS template sends on the number stop. */
 export const SHARED_DOMINANCE = 0.8;
-/** A member that contributed at least this share of an AMBIGUOUS window (no one dominant, fewer than 3 members) gets a strike... */
-export const SHARED_REPEAT_SHARE = 0.5;
-/** ...and this many strikes inside SHARED_REPEAT_WINDOW_MS block it like a dominant member (a rolling tally: the per-window counters are cleared, the strikes are not). */
+/**
+ * A member is only ever blamed for its OWN error RATE (errors / messages it sent on the number in the same window), never for its share of the errors: a big honest sender
+ * has many errors in absolute terms and a low rate, and another member could otherwise choose when the window closes. The bar: at least this rate over at least this many sends.
+ */
+export const SHARED_MEMBER_ERROR_RATE = 0.15;
+export const SHARED_MEMBER_MIN_SENDS = 20;
+/** In an ambiguous window (no one dominant, fewer than 3 members) a member over the rate bar earns a strike; this many strikes inside the window block it like a dominant one. */
 export const SHARED_REPEAT_WINDOWS = 3;
 export const SHARED_REPEAT_WINDOW_MS = 24 * 60 * 60_000;
+/** When one member dominates, the platform still trips if the OTHERS reach the dominance-scaled share of the threshold, from at least SHARED_SPIKE_MIN_MEMBERS members. */
+export const SHARED_REST_THRESHOLD = Math.ceil(Math.round(SPIKE_THRESHOLD * (1 - SHARED_DOMINANCE) * 1e6) / 1e6);
 /** How long a dominant member's template sends on the platform number stay stopped (it can be shortened by the operator evicting it). */
 export const MEMBER_BLOCK_MS = 24 * 60 * 60_000;
 const BUCKET_MS = 10 * 60_000;
