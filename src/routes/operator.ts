@@ -24,6 +24,7 @@ import { eraseContactFlow } from '../core/contact-erase';
 import { purgeAuditLog } from '../core/ops/audit-retention';
 import { approveOffboarding, cancelOffboarding, getOffboardingWithLog, listOffboardings, releaseAbuseHold, requestOffboarding, runDueOffboardings } from '../core/ops/offboarding';
 import { listAudit, recordAudit } from '../core/audit';
+import { reasonSql } from '../core/audit-reason';
 import { subjectHash } from '../core/erasure';
 import { waIdParam } from './contacts';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
@@ -396,7 +397,7 @@ operatorRoutes.post('/token-key/rotate', async (c) => {
 operatorRoutes.get('/view-log', async (c) => {
   const q = z.object({ workspaceId: z.string().min(1).max(64), limit: z.coerce.number().int().min(1).max(200).default(50) }).safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
   if (!q.success) return bad(c);
-  const { results } = await c.env.DB.prepare('SELECT at, actor, method, route, reason FROM operator_view_log WHERE workspace_id = ? ORDER BY id DESC LIMIT ?').bind(q.data.workspaceId, q.data.limit).all();
+  const { results } = await c.env.DB.prepare(`SELECT v.at, v.actor, v.method, v.route, ${reasonSql('v', 'r')} AS reason FROM operator_view_log v LEFT JOIN audit_reasons r ON r.id = v.reason_id WHERE v.workspace_id = ? ORDER BY v.id DESC LIMIT ?`).bind(q.data.workspaceId, q.data.limit).all();
   return c.json({ items: results });
 });
 // B9: Meta data-deletion requests, newest first. State and counts only: the Meta user id is never stored, only a hash that is not shown here.

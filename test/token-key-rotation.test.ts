@@ -1,5 +1,6 @@
 import { createExecutionContext, env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { configureSessionCheck } from '../src/core/identity/session';
 import { decryptSecret, encryptSecret } from '../src/core/ai/secrets';
 import { rotationStatus, rotateTokenKey } from '../src/core/enc-rotation';
 import { clearTokenCaches, graphTokenFor, TokenUnavailable } from '../src/core/numbers/token';
@@ -12,6 +13,8 @@ import { seedOwnNumber } from './helpers/own-number';
 // M-173: TOKEN_ENC_KEY rotation with a dual-key read. New writes use TOKEN_ENC_KEY; reads also accept TOKEN_ENC_KEY_PREVIOUS until
 // every row has been re-encrypted (operator route), then the old key is removed.
 useApiKey();
+beforeEach(() => { configureSessionCheck(async () => false); }); // the operator guard asks the accounts service on every request (fail closed): these tests run a healthy one
+afterEach(() => configureSessionCheck(null));
 const key = (n: number) => btoa(String.fromCharCode(...new Uint8Array(32).fill(n)));
 const OLD = key(11);
 const NEW = key(22);

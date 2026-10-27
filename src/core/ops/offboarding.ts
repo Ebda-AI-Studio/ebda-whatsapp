@@ -46,7 +46,7 @@ export const OFFBOARD_TABLES = {
     shared_number_usage: { people: [], clear: [] },
   } as Record<string, { people: string[]; clear: string[] }>,
   // Immutable by trigger (a row can be neither updated nor deleted): they keep the opaque workspace id, which names no one once everything above is erased.
-  audit: ['operator_actions', 'offboarding', 'offboarding_log', 'ledger_mirror', 'billing_audit', 'workspace_pricing_overrides', 'audit_log'],
+  audit: ['operator_actions', 'offboarding', 'offboarding_log', 'ledger_mirror', 'billing_audit', 'workspace_pricing_overrides', 'audit_log', 'operator_view_log'], // operator_view_log: who looked at a workspace, when and which route (no text, the reason is in audit_reasons and goes with the workspace)
 };
 
 export type OffboardingStatus = {

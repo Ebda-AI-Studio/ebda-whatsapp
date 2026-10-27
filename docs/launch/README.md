@@ -182,5 +182,5 @@ Business verified · a package on record (Store plan with WhatsApp, a purchase o
 - **Fixed bench budget (M-176).** Benches no longer take a runner-sized millisecond budget; each measures a same-run baseline and fails over a fixed multiple (`test/helpers/bench.ts`, `BUDGET_RATIO`). `scripts/bench-local.mjs` additionally asserts the 150 ms absolute product budget on a known machine (`BENCH_ABSOLUTE_MS`).
 
 ## Support (W2-SUPPORT)
-`docs/support.md`: intake through the brand's `supportEmail`, the merchant escalation path, the operator's tools and the read-only, audited "view as merchant" (D1 migration `0025_operator_view_log.sql`, run it with the others before the deploy that needs it).
+`docs/support.md`: intake through the brand's `supportEmail`, the merchant escalation path, the operator's tools and the read-only, audited "view as merchant" (D1 migrations `0025_operator_view_log.sql` and `0027_operator_view_log_reason_id.sql`, run them with the others before the deploy that needs it).
 

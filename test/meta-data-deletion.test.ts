@@ -1,5 +1,6 @@
 import { SELF, env } from 'cloudflare:test';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { configureSessionCheck } from '../src/core/identity/session';
 import { connectNumberRequest } from '../src/core/api/contract';
 import { OP1, operatorCall, useApiKey } from './helpers/api';
 import { TEST_APP_SECRET } from './helpers/meta';
@@ -9,6 +10,8 @@ import { seedOwnNumber } from './helpers/own-number';
 // B9: Meta's "Data Deletion Request URL" is OUR route. Meta POSTs a signed_request when a person removes the app; we verify it (HMAC-SHA256 over the payload with
 // the app secret), queue the erasure, and answer { url, confirmation_code } as Meta's spec says. NOT VERIFIED against Meta's live callback (docs/launch/README.md s4).
 useApiKey();
+beforeEach(() => { configureSessionCheck(async () => false); }); // the operator guard asks the accounts service on every request (fail closed): these tests run a healthy one
+afterEach(() => configureSessionCheck(null));
 afterEach(() => vi.restoreAllMocks());
 const b64url = (b: ArrayBuffer | Uint8Array | string) => btoa(typeof b === 'string' ? b : String.fromCharCode(...new Uint8Array(b as ArrayBuffer))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 async function signedRequest(payload: Record<string, unknown>, secret = TEST_APP_SECRET): Promise<string> {

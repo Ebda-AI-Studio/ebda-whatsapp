@@ -1,3 +1,4 @@
+import { LAST_REASON_ID, REASON_PLACEHOLDER, reasonStmt } from '../audit-reason';
 import type { MiddlewareHandler } from 'hono';
 import type { Env } from '../../env';
 import { takeApiToken } from '../api-rate';
@@ -55,8 +56,6 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
       return c.json({ error, ...extra }, status);
     };
     if (!membership && !principal.superAdmin) return refuse('forbidden', 403);
-    // STORE-ROUTES-OWNER-1: a platform super admin who is not a member READS store routes (support) but never WRITES through them: an operator write has an /operator route that requires a reason and is audited.
-    if (write && principal.superAdmin && !membership) return refuse('forbidden', 403, { message: 'operator_route_required' });
     // F4: per-workspace and per-integrator-client rate limit, as soon as the caller is a valid member (a platform operator is not limited by a store's bucket).
     if (storeId && !principal.superAdmin) {
       const wait = takeApiToken(storeId, principal.integration?.clientId ?? null);
@@ -67,14 +66,21 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
       if (!principal.superAdmin) return c.json({ error: 'forbidden', message: 'view_as_operators_only' }, 403);
       const reason = (c.req.header('x-view-as-reason') ?? '').trim();
       if (reason.length < 10 || reason.length > 200) return c.json({ error: 'invalid_request', message: 'view_as_reason_required' }, 400);
-      const route = routed; // the routed pattern (no ids), the same decision basis as every check here
+      const route = new URL(c.req.url).pathname.replace(/^\/api\/v1/, '').replace(/\/\d{6,}(?=\/|$)/g, '/:id'); // the CONCRETE path (the audit must say WHICH record was viewed); a long digit run (a phone) is masked
       try {
-        await c.env.DB.prepare('INSERT INTO operator_view_log (at, actor, workspace_id, method, route, reason) VALUES (?, ?, ?, ?, ?, ?)').bind(Date.now(), principal.userId, storeId ?? '', c.req.method, route.slice(0, 300), reason).run();
+        const at = Date.now();
+        // AUDIT-REASONS-1: the typed reason goes to the deletable audit_reasons (removed with the workspace); the immutable row keeps only reason_id. One batch: no audit, no view.
+        await c.env.DB.batch([
+          reasonStmt(c.env, { at, workspaceId: storeId ?? null, actor: principal.userId, action: 'operator.view_as', reason }),
+          c.env.DB.prepare(`INSERT INTO operator_view_log (at, actor, workspace_id, method, route, reason, reason_id) VALUES (?, ?, ?, ?, ?, ?, ${LAST_REASON_ID})`).bind(at, principal.userId, storeId ?? '', c.req.method, route.slice(0, 300), REASON_PLACEHOLDER),
+        ]);
       } catch {
         return c.json({ error: 'unavailable', message: 'view_as_audit_unavailable' }, 503);
       }
       if (write || c.req.header('upgrade')?.toLowerCase() === 'websocket') return c.json({ error: 'forbidden', message: 'view_as_read_only' }, 403);
     }
+    // STORE-ROUTES-OWNER-1: a platform super admin who is not a member READS store routes (support) but never WRITES through them: an operator write has an /operator route that requires a reason and is audited.
+    if (write && principal.superAdmin && !membership) return refuse('forbidden', 403, { message: 'operator_route_required' });
     // M-135: a person token is revocation-checked on EVERY write, not only on money actions (fail closed: an unreachable accounts service refuses it).
     // A read that hands over a person's whole data is checked like a write; which reads those are is a named list (scopes.ts), and every read route must be on one list or the other.
     const sensitiveRead = !write && SESSION_CHECKED_READS.has(`GET ${routed}`);

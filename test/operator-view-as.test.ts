@@ -1,11 +1,14 @@
 import { SELF, env } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { configureSessionCheck } from '../src/core/identity/session';
 import { OP1, adminToken, apiFor, operatorCall, storeId as W, useApiKey } from './helpers/api';
 import { openChat } from './helpers/workspace';
 
 // T35: an operator can look at a merchant's workspace "as the merchant" to help them, READ-ONLY and AUDITED. The operator sends X-View-As-Merchant: 1 and a reason; every
 // request is written to operator_view_log BEFORE it is served (no audit, no view), writes and sockets are refused, and the log holds no body, query string or phone.
 useApiKey();
+beforeEach(() => { configureSessionCheck(async () => false); }); // the operator guard asks the accounts service on every request (fail closed): these tests run a healthy one
+afterEach(() => configureSessionCheck(null));
 const REASON = 'merchant asked why campaigns are paused (ticket 123)';
 const view = async (ws: string, path: string, o: { method?: string; headers?: Record<string, string>; body?: unknown } = {}) =>
   SELF.fetch(`https://x/api/v1/stores/${ws}${path}`, {
@@ -13,7 +16,8 @@ const view = async (ws: string, path: string, o: { method?: string; headers?: Re
     headers: { authorization: `Bearer ${await adminToken(OP1)}`, 'x-view-as-merchant': '1', 'x-view-as-reason': REASON, ...(o.body !== undefined ? { 'content-type': 'application/json' } : {}), ...(o.headers ?? {}) },
     ...(o.body !== undefined ? { body: JSON.stringify(o.body) } : {}),
   });
-const log = (ws: string) => env.DB.prepare('SELECT at, actor, workspace_id, method, route, reason FROM operator_view_log WHERE workspace_id = ? ORDER BY id').bind(ws).all<{ at: number; actor: string; workspace_id: string; method: string; route: string; reason: string }>().then((r) => r.results);
+// AUDIT-REASONS-1: the typed text is in audit_reasons, the immutable row has only reason_id
+const log = (ws: string) => env.DB.prepare('SELECT v.at, v.actor, v.workspace_id, v.method, v.route, r.reason FROM operator_view_log v LEFT JOIN audit_reasons r ON r.id = v.reason_id WHERE v.workspace_id = ? ORDER BY v.id').bind(ws).all<{ at: number; actor: string; workspace_id: string; method: string; route: string; reason: string }>().then((r) => r.results);
 
 describe('reading as the merchant', () => {
   it('an operator reads the merchant\'s inbox, and each read is in the audit log with who, which workspace, which route and why', async () => {
@@ -28,6 +32,14 @@ describe('reading as the merchant', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ actor: OP1, workspace_id: ws, method: 'GET', route: `/stores/${ws}/conversations`, reason: REASON });
     expect(rows[0]!.at).toBeGreaterThanOrEqual(before);
+  });
+
+  it('the immutable row holds no typed text: only reason_id', async () => {
+    const ws = W(9920);
+    await apiFor(ws);
+    await view(ws, '/conversations');
+    const raw = await env.DB.prepare('SELECT reason, reason_id FROM operator_view_log WHERE workspace_id = ?').bind(ws).first<{ reason: string; reason_id: number | null }>();
+    expect(raw).toEqual({ reason: 'see reason_id', reason_id: expect.any(Number) });
   });
 
   it('the log keeps no query string, no body and no phone number (a phone in the path is masked)', async () => {
