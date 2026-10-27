@@ -496,3 +496,33 @@ describe('wallet: pay with InstaPay', () => {
     expect(screen.queryByRole('region', { name: t.wIpTitle })).toBeNull();
   });
 });
+
+describe('AI credits: what one is and when it is low (M-084)', () => {
+  it('says what a credit pays for and shows no warning while credits are healthy', async () => {
+    await openWallet();
+    expect(screen.getByText(t.wAiCreditDefinition)).toBeTruthy();
+    expect(screen.queryByText(/باقي .* رصيد ذكاء اصطناعي بس/)).toBeNull();
+  });
+  it('warns, with the threshold, when the credits are low', async () => {
+    await openWallet(withWallet({ aiCredits: { balance: 8, available: 8, low: true, lowThreshold: 30, allowance: 300 } }));
+    expect(screen.getByText(t.wAiCreditsLow('8', '30'))).toBeTruthy();
+  });
+});
+
+describe('weekly digest (T13)', () => {
+  it('shows the week in counts and the balance, and the owner can switch it off and on', async () => {
+    await openWallet();
+    const card = await screen.findByRole('region', { name: t.dgTitle });
+    expect(card.textContent).toContain(t.dgCustomers);
+    expect(card.textContent).toContain(t.dgSpend);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: t.dgSwitchOff })));
+    expect(await screen.findByText(t.dgOff)).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: t.dgSwitchOn })));
+    expect((await screen.findByRole('region', { name: t.dgTitle })).textContent).toContain(t.dgCustomers);
+  });
+  it('staff see the digest but not the switch', async () => {
+    await openWallet(withWallet({}, 'staff'));
+    await screen.findByRole('region', { name: t.dgTitle });
+    expect(screen.queryByRole('button', { name: t.dgSwitchOff })).toBeNull();
+  });
+});

@@ -37,8 +37,10 @@ import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, canc
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
 import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
-import type { AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
-import { creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
+import type { DigestDto, AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
+import { funnelOnce } from './funnel';
+import { digestCounts, digestEnabled, setDigestEnabled } from './digest';
+import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
@@ -252,6 +254,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           if (!claimed && !optOut && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
           continue;
         }
+        funnelOnce(this.host(), 'first_inbound');
         result.stored++;
         this.indexMessage(inserted.id, cols.preview);
         if (m.media) {
@@ -1510,13 +1513,32 @@ export class WorkspaceDO extends DurableObject<Env> {
   // ---- Wallet (Phase 7) --------------------------------------------------------------------------------------------------
   // All answers are result objects. The only writers of money are Billing.post (one synchronous transaction per row) and the AI credit ledger.
 
+  /** T13: the weekly digest (counts only), or `{ enabled: false }` when the owner switched it off. */
+  async weeklyDigest(now = Date.now()): Promise<DigestDto> {
+    if (!digestEnabled(this.sql)) return { enabled: false };
+    const view = this.billing.view(now);
+    const available = creditsAvailable(this.sql, now);
+    const allowance = monthlyAllowance(this.sql);
+    return {
+      enabled: true, ...digestCounts(this.sql, now), balanceMinor: view.balanceMinor, availableMinor: view.availableMinor, lowBalance: view.lowBalance,
+      aiCredits: { available, low: available < lowCreditsThreshold(allowance), lowThreshold: lowCreditsThreshold(allowance), allowance },
+    };
+  }
+  async setDigestEnabled(enabled: boolean): Promise<void> {
+    setDigestEnabled(this.sql, enabled);
+  }
+
   async walletView(now = Date.now()) {
     await this.ensurePricing(now);
     const ent = readEntitlement(this.sql);
     return {
       ...this.billing.view(now),
       funding: Object.fromEntries(this.sql.exec<{ phone_number_id: string; funding: string }>('SELECT phone_number_id, funding FROM number_funding').toArray().map((f) => [f.phone_number_id, f.funding])),
-      aiCredits: { balance: creditBalance(this.sql), available: creditsAvailable(this.sql, now) },
+      aiCredits: (() => {
+        const available = creditsAvailable(this.sql, now);
+        const allowance = monthlyAllowance(this.sql);
+        return { balance: creditBalance(this.sql), available, low: available < lowCreditsThreshold(allowance), lowThreshold: lowCreditsThreshold(allowance), allowance };
+      })(),
       plan: ent ? { packageId: ent.packageId, status: ent.status, periodEnd: ent.periodEnd, cancelledAt: ent.cancelledAt } : null,
     };
   }

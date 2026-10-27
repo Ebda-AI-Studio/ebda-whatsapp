@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
@@ -163,6 +163,8 @@ export function createApiSource(o: Opts): LiveSource {
     },
     wallet: {
       wallet: () => call('/wallet', walletDto),
+      digest: () => call('/digest', digestDto),
+      async setDigest(enabled) { await call('/digest', z.object({ enabled: z.boolean() }), { method: 'PUT', body: JSON.stringify({ enabled }) }); },
       statement: (month) => call(`/wallet/statement?month=${encodeURIComponent(month)}`, statementDto),
       async statementCsv(month) {
         const res = await f(`${root}/wallet/statement?month=${encodeURIComponent(month)}&format=csv`, { headers: { authorization: `Bearer ${await o.getToken()}` } });

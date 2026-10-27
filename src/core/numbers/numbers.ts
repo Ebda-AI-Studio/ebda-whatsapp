@@ -8,6 +8,7 @@ import { TIER_LIMITS } from '../throttle';
 import { HISTORY_DECLINED_CODE, REGISTRATION_LOCKED_CODE, deregisterNumber, exchangeCode, fetchPhone, fetchWabaNumbers, registerNumber, requestSync, subscribeApp, unsubscribeApp, type GraphFail, type PhoneStatus } from './graph';
 import { graphTokenFor, invalidateNumber, invalidateWaba, TokenUnavailable } from './token';
 import { alert } from '../observability';
+import { funnel } from '../funnel';
 
 /** Meta fixes the throughput of a number that stays on the WhatsApp Business app at 20 messages per second. */
 export const BUSINESS_APP_MPS = 20;
@@ -99,6 +100,7 @@ export function generatePin(): string {
  * at once so the number is usable now rather than after the next 30-minute pull. Idempotent: a resumed connect calls it again.
  */
 export async function onNumberConnected(env: Env, n: { workspaceId: string; phoneNumberId: string; wabaId: string; kind: 'own' }): Promise<void> {
+  funnel(env, 'number_connected', n.workspaceId);
   await recordNumberFunding(env, n.phoneNumberId, 'merchant_card');
   await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(n.workspaceId)).refreshPricing();
 }

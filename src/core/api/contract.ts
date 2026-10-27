@@ -417,10 +417,27 @@ export const walletDto = z.object({
   funding: z.array(z.object({ phoneNumberId: z.string(), displayPhone: z.string().nullable(), funding: walletFundingKind })),
   topupsEnabled: z.boolean(),
   lowBalance: z.boolean(),
-  aiCredits: z.object({ balance: z.number().int(), available: z.number().int() }),
+  /** The wallet is low under this many minor units: max(20 EGP, 3 days of the last week's average Meta spend). */
+  lowBalanceThresholdMinor: z.number().int().nonnegative(),
+  /** One credit = one AI turn. `low` = available under a tenth of the monthly `allowance` (never under 5 credits, `lowThreshold`). */
+  aiCredits: z.object({ balance: z.number().int(), available: z.number().int(), low: z.boolean(), lowThreshold: z.number().int().nonnegative(), allowance: z.number().int().nonnegative() }),
   plan: z.object({ packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable() }).nullable(),
 });
 export type WalletDto = z.infer<typeof walletDto>;
+
+/** T13: the weekly usage digest. Counts and amounts only. `{ enabled: false }` when the owner switched it off. */
+export const digestDto = z.union([
+  z.object({ enabled: z.literal(false) }),
+  z.object({
+    enabled: z.literal(true), from: z.number().int(), to: z.number().int(),
+    customersWrote: z.number().int(), messagesIn: z.number().int(), messagesOut: z.number().int(), delivered: z.number().int(), failed: z.number().int(),
+    aiReplies: z.number().int(), aiCreditsUsed: z.number().int(), handoffs: z.number().int(), campaignRecipients: z.number().int(), optOuts: z.number().int(),
+    spendMinor: z.number().int(), topupsMinor: z.number().int(), balanceMinor: z.number().int(), availableMinor: z.number().int(), lowBalance: z.boolean(),
+    aiCredits: z.object({ available: z.number().int(), low: z.boolean(), lowThreshold: z.number().int(), allowance: z.number().int() }),
+  }),
+]);
+export type DigestDto = z.infer<typeof digestDto>;
+export const digestSettings = z.object({ enabled: z.boolean() });
 
 export const walletMoney = z.object({ count: z.number().int(), netMinor: z.number().int(), vatMinor: z.number().int(), amountMinor: z.number().int() });
 export const statementRowDto = z.object({
