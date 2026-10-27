@@ -142,3 +142,22 @@ Each workspace's `shared_number_trueup` task reports its service charges per pla
 - **Campaign review**: a zero per-message cost reads "WhatsApp bills your card directly" only when every active number is `merchant_card`; otherwise it stays "price not ready".
 - **Operator** ("لوحة التشغيل", rail item only for `super_admin`; the server still checks every call): pricing settings (current / scheduled / earlier; publish with percent and EGP parsed as exact integers, effective-from >= 1 h, reason >= 5 chars, "never retroactive"), rate cards (textarea `country,category,usd`, parsed client-side with line-numbered errors, >= 24 h) and FX, per-account margin override / who-pays-Meta / adjustment request, refund queue (approve explains the wallet is debited first and asks to confirm), adjustments (your own pending request has no approve/reject and says another super admin must decide), change log. A `503` on any write shows "session protection is not switched on yet, changes are locked"; reads keep working.
 - Preview: `npx vite web` then `?role=super_admin` (or `staff`) switches the sample role. Everything under it is invented sample data.
+
+## AI credits: what one is, and when it is "low" (M-084)
+- **One credit pays for one AI turn**: one customer message the agent took on (it called the model, up to 3 rounds with tools, and answered or handed over). Not per token, not per reply length, not per tool call (`AI_TURN_CREDITS = 1` in `src/core/ai/credits.ts`). Free: a message handed to a person before the model (a "talk to a human" request, no credits left, misconfigured), the "text only" note, a replayed task (charged once), every turn of a workspace with its own model key.
+- **What a turn costs the platform is measured, not assumed**: every turn writes its token use to Analytics Engine; the query that turns it into a cost per reply and per workspace is in `docs/analytics.md`.
+- **Low credits** = the available credits (balance minus held) are under a tenth of the package's monthly allowance, never under 5 credits (`lowCreditsThreshold`): 100 -> warns at 10, 300 -> 30, 1500 -> 150, 5000 -> 500. The wallet view says it (`aiCredits.low`, `lowThreshold`, `allowance`; the Wallet screen shows a line), and the INFO alert `ai_credits_low` fires once a day while it holds. At zero the agent hands customers to a person (`agent_no_credits`).
+- **Low wallet balance** is no longer a flat 20 EGP (about six marketing messages): it is `max(20 EGP, 3 days of the last week's average Meta spend)` (`LOW_RUNWAY_DAYS`), returned as `lowBalanceThresholdMinor`, and `wallet_low_balance` fires once a day while the available balance is under it.
+
+## Notifications (T32): each one has a test
+| # | Trigger | What happens | Evidence |
+|---|---|---|---|
+| N1 | the available wallet balance falls under the threshold above | alert `wallet_low_balance` once a day; `lowBalance` in the wallet view (banner) | `test/billing-notifications.test.ts` N1, `test/growth-credits-thresholds.test.ts` |
+| N2 | AI credits under the threshold / at zero | alert `ai_credits_low`, flag `aiCredits.low`; at zero `agent_no_credits` and a handoff, no model call | `test/growth-credits-thresholds.test.ts`, N2 |
+| N3 | a package is bought, renewed, changed or cancelled | `whatsapp.entitlement_changed` to the Store (package, status, automation) | N3, `test/packages-operator.test.ts` |
+| N4 | debt, a past-due plan, a plan ending soon | `debtMinor`, `plan.status`, `plan.periodEnd` in the wallet view (the screen shows the lines) | N4, `web/src/WalletScreen.test.tsx` |
+| N5 | a money mismatch, a payment not granted, a refund stuck | P0/P1 alerts to Telegram and Sentry, each with its runbook | `test/observability-alerts.test.ts`, `docs/runbooks/alerts/` |
+| N6 | every week | the in-app digest (`GET /digest`), owner can switch it off | `test/digest.test.ts` |
+
+Ruling GROWTH-DIGEST-1 - the weekly digest is shown in the app, not sent as a WhatsApp template. Evidence: a template needs Meta approval, a merchant phone number we do not hold in the control plane, and costs a conversation per merchant per week; the in-app version needs none of those and is opt-out-able today. Cost if wrong: a merchant who never opens the app never sees it; a template push can be added later behind the same switch (`digest.enabled`).
+
