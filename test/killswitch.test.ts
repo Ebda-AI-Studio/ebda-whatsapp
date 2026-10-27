@@ -147,14 +147,18 @@ describe('shared number', () => {
     }
     expect(await env.DB.prepare('SELECT 1 FROM shared_number_members').first()).toBeNull();
   });
-  it('the platform number\'s state follows Meta\'s webhooks (D1 row; FLAGGED -> red, UNFLAGGED recovers) and an older retry is ignored', async () => {
+  it('the platform number\'s state follows Meta\'s webhooks (D1 row; FLAGGED -> red, UNFLAGGED recovers) and a stale recovery is ignored', async () => {
     await sharedRow('green');
     const hook = (event: string, time: number) => JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: 'waba-plat', time, changes: [{ field: 'phone_number_quality_update', value: { display_phone_number: '201008880001', event, current_limit: 'TIER_1K' } }] }] });
     expect((await postWebhook(SELF, hook('FLAGGED', 100))).status).toBe(200);
     expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('red');
     await postWebhook(SELF, hook('UNFLAGGED', 200));
     expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green');
-    await postWebhook(SELF, hook('FLAGGED', 100)); // Meta retries the old one
+    await postWebhook(SELF, hook('FLAGGED', 100)); // Meta retries the old FLAGGED: a worsening signal is never dropped for being old (fail closed)...
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('red');
+    await postWebhook(SELF, hook('UNFLAGGED', 150)); // ...and an older RECOVERY is: UNFLAGGED(150) is older than the newest applied (200)
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('red');
+    await postWebhook(SELF, hook('UNFLAGGED', 300));
     expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green');
   });
   it('a member store\'s own Durable Object learns the platform number went red / restricted: template sends are refused and a campaign cannot start (fail-open gate closed)', async () => {
@@ -384,10 +388,36 @@ describe('the platform number reaches every member (items 6 and 7, and the shado
     await postWebhook(SELF, lifted);
     expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('restricted');
   });
-  it('the spike guard counts the platform number per NUMBER: errors spread over several members trip it once', async () => {
-    const members = await platform([1140, 1141]);
-    for (let i = 0; i < SPIKE_THRESHOLD; i++) await workspace(members[i % 2]!).noteSendError(PLAT, 131049);
+  it('one member spamming the platform number: ONLY that store\'s templates stop (24 h); the number and the other members are untouched', async () => {
+    const [bad, good] = await platform([1140, 1141]);
+    await fund(bad!, 100_000); await fund(good!, 100_000);
+    const spy = vi.spyOn(console, 'error');
+    for (let i = 0; i < SPIKE_THRESHOLD; i++) await workspace(bad!).noteSendError(PLAT, i % 2 ? 131049 : 131026);
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green'); // the number is fine
+    expect(await workspace(good!).numberHealth(PLAT)).toBe('green');
+    await env.DB.prepare("INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, 'platform_line', 0)").bind(PLAT).run();
+    await seedSharedTemplate(PLAT, { name: 'tpl-u', language: 'ar' });
+    const tplFor = async (ws: string) => { const c = await chat(ws, 'UTILITY'); const r = await workspace(ws).queueOutbound(c, PLAT, { type: 'template', clientId: crypto.randomUUID(), name: 'tpl-u', language: 'ar', params: [] }); expect(r.ok).toBe(true); return r.ok && r.job ? r.job : null; };
+    const badJob = await tplFor(bad!);
+    const goodJob = await tplFor(good!);
+    expect(await workspace(bad!).claimSend(badJob!)).toBe('dropped'); // the abuser: refused
+    expect(await rows(bad!, 'SELECT error_reason FROM messages WHERE idempotency_key = ?', badJob!.idempotencyKey)).toEqual([{ error_reason: 'number_restricted' }]);
+    expect(await workspace(good!).claimSend(goodJob!)).not.toBe('dropped'); // the innocent one: still sends
+    expect(spy.mock.calls.some((c) => String(c[0]).includes('number_member_abuse'))).toBe(true);
+  });
+  it('errors spread over 3 or more members trip the platform number for everyone (yellow)', async () => {
+    const members = await platform([1142, 1143, 1144]);
+    for (let i = 0; i < SPIKE_THRESHOLD; i++) await workspace(members[i % 3]!).noteSendError(PLAT, 131049);
     expect(await env.DB.prepare('SELECT health_state, health_reason FROM shared_numbers').first()).toEqual({ health_state: 'yellow', health_reason: 'spike' });
+    await vi.waitFor(async () => { for (const m of members) expect(await workspace(m).numberHealth(PLAT)).toBe('yellow'); });
+  });
+  it('two members with no clear culprit raise an alert but stop nobody', async () => {
+    const members = await platform([1145, 1146]);
+    const spy = vi.spyOn(console, 'error');
+    for (let i = 0; i < SPIKE_THRESHOLD; i++) await workspace(members[i % 2]!).noteSendError(PLAT, 131049);
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green');
+    expect(spy.mock.calls.some((c) => String(c[0]).includes('number_error_spike'))).toBe(true);
+    expect(spy.mock.calls.some((c) => String(c[0]).includes('number_member_abuse'))).toBe(false);
   });
 });
 

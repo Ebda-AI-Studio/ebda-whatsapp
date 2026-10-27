@@ -13,12 +13,13 @@ ALTER TABLE shared_numbers ADD COLUMN health_reason TEXT;
 ALTER TABLE shared_numbers ADD COLUMN health_at INTEGER;
 ALTER TABLE shared_numbers ADD COLUMN health_signal_at INTEGER NOT NULL DEFAULT 0;
 
--- The spike guard for the platform number counts per NUMBER (10-minute buckets), not per member workspace.
+-- The spike guard for the platform number: errors per number AND per member (10-minute buckets), so one abusive member is told apart from a number-wide problem.
 CREATE TABLE shared_number_errors (
   phone_number_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
   bucket INTEGER NOT NULL,
   n INTEGER NOT NULL,
-  PRIMARY KEY (phone_number_id, bucket)
+  PRIMARY KEY (phone_number_id, workspace_id, bucket)
 );
 
 -- Suspended: all sends and the agent stop, reading stays. integrations_revoked_at: while set, EVERY integrator token of the store is refused (until the operator restores them).

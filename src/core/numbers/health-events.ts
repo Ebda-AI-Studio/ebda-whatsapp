@@ -1,7 +1,7 @@
 import type { Env } from '../../env';
 import { alert } from '../observability';
 import { numberForDisplayPhone } from '../routing';
-import { SPIKE_THRESHOLD, SPIKE_WINDOW_MS, mirrorHealth, nextHealth, sharedNumberByDisplay, signalSource, worsened, type HealthSignal, type HealthState } from './health';
+import { HEALTH_STATES, MEMBER_BLOCK_MS, SHARED_DOMINANCE, SHARED_SPIKE_MIN_MEMBERS, SPIKE_THRESHOLD, SPIKE_WINDOW_MS, mirrorHealth, nextHealth, sharedNumberByDisplay, signalSource, worsened, type HealthSignal, type HealthState } from './health';
 
 /** Hands background work to the request's waitUntil (the webhook answers Meta once D1 is up to date, not after every member was told). */
 export type Schedule = (work: () => Promise<unknown>) => void;
@@ -14,7 +14,7 @@ const MEMBER_CHUNK = 10;
  * `at` is Meta's own time of the event (ms; 0 = unknown): an older signal retried later is dropped. Unknown numbers are ignored (still a 200: a 5xx only makes Meta repeat it).
  */
 export async function applyHealthEvent(env: Env, wabaId: string, displayPhone: string, signal: HealthSignal, at = 0, schedule: Schedule = detached): Promise<void> {
-  const when = at || Date.now();
+  const when = at > 0 ? at : undefined; // no Meta time = a local signal: it never takes part in the ordering
   const shared = await sharedNumberByDisplay(env.DB, wabaId, displayPhone);
   if (shared) { await applySharedHealth(env, shared.phoneNumberId, signal, when, schedule); return; }
   const own = await numberForDisplayPhone(env.DB, wabaId, displayPhone);
@@ -23,7 +23,7 @@ export async function applyHealthEvent(env: Env, wabaId: string, displayPhone: s
 
 /** `account_update` is WABA-wide: every active number on the WABA and every platform number on it. */
 export async function applyAccountEvent(env: Env, wabaId: string, signal: HealthSignal, at = 0, schedule: Schedule = detached): Promise<void> {
-  const when = at || Date.now();
+  const when = at > 0 ? at : undefined;
   const sharedIds = new Set((await env.DB.prepare('SELECT phone_number_id FROM shared_numbers WHERE waba_id = ?').bind(wabaId).all<{ phone_number_id: string }>()).results.map((r) => r.phone_number_id));
   const { results } = await env.DB.prepare("SELECT phone_number_id, workspace_id FROM phone_numbers WHERE waba_id = ? AND status = 'active'").bind(wabaId).all<{ phone_number_id: string; workspace_id: string }>();
   for (const n of results) {
@@ -38,11 +38,13 @@ export async function applyAccountEvent(env: Env, wabaId: string, signal: Health
  * pushed to every active member's own copy in the background. Members never alert for the shared number and never replay a signal: they are set to the
  * state, so a lost or reordered push is repaired by the next push, by a join, and by the daily reconcile.
  */
-export async function applySharedHealth(env: Env, phoneNumberId: string, signal: HealthSignal, signalAt: number, schedule: Schedule = detached, now = Date.now()): Promise<void> {
+export async function applySharedHealth(env: Env, phoneNumberId: string, signal: HealthSignal, signalAt: number | undefined, schedule: Schedule = detached, now = Date.now()): Promise<void> {
   const row = await env.DB.prepare('SELECT health_state, health_signal_at FROM shared_numbers WHERE phone_number_id = ?').bind(phoneNumberId).first<{ health_state: HealthState; health_signal_at: number }>();
-  if (!row || signalAt < row.health_signal_at) return; // unknown number, or an older signal arriving after a newer one
+  if (!row) return;
   const to = nextHealth(row.health_state, signal);
-  await mirrorHealth(env.DB, 'shared_numbers', phoneNumberId, to, signalSource(signal), now, signalAt);
+  // Ordering may only drop a stale RECOVERY: a signal that is older than the newest Meta-timed one AND would lower the state. A worsening signal always applies.
+  if (signalAt !== undefined && signalAt < row.health_signal_at && HEALTH_STATES.indexOf(to) < HEALTH_STATES.indexOf(row.health_state)) return;
+  await mirrorHealth(env.DB, 'shared_numbers', phoneNumberId, to, signalSource(signal), now, signalAt ?? 0); // only Meta-timed signals advance the ordering column
   const fields = { phoneNumberId, shared: true, from: row.health_state, to, source: signalSource(signal) };
   if (signal.kind === 'spike') alert('number_error_spike', fields);
   else if (worsened(row.health_state, to)) {
@@ -81,15 +83,29 @@ export async function reconcileSharedHealth(env: Env): Promise<void> {
   for (const n of results) await pushToMembers(env, n.phone_number_id, n.health_state, n.health_at);
 }
 
-/** The platform number's spike guard counts per NUMBER (all members together), in D1. True when the window holds SPIKE_THRESHOLD errors; the counters are then cleared. */
-export async function noteSharedError(env: Env, phoneNumberId: string, now = Date.now()): Promise<boolean> {
+export type SharedSpike = { kind: 'none' } | { kind: 'platform' } | { kind: 'member'; workspaceId: string } | { kind: 'ambiguous' };
+
+/**
+ * The platform number's spike guard, attributed per MEMBER (D1 `shared_number_errors`). Once the window holds SPIKE_THRESHOLD errors:
+ *  - from at least SHARED_SPIKE_MIN_MEMBERS distinct members -> the number itself is in trouble: `platform` (the state trips for everyone);
+ *  - else one member with at least SHARED_DOMINANCE of them -> `member`: only that store's template sends on the number stop;
+ *  - else (two members, no clear culprit) -> `ambiguous`: alert only, nobody is stopped.
+ * The counters are cleared on any verdict but `none`, so the next spike needs fresh errors.
+ */
+export async function noteSharedError(env: Env, phoneNumberId: string, workspaceId: string, now = Date.now()): Promise<SharedSpike> {
   const bucket = Math.floor(now / 600_000);
   await env.DB.batch([
-    env.DB.prepare('INSERT INTO shared_number_errors (phone_number_id, bucket, n) VALUES (?, ?, 1) ON CONFLICT(phone_number_id, bucket) DO UPDATE SET n = n + 1').bind(phoneNumberId, bucket),
+    env.DB.prepare('INSERT INTO shared_number_errors (phone_number_id, workspace_id, bucket, n) VALUES (?, ?, ?, 1) ON CONFLICT(phone_number_id, workspace_id, bucket) DO UPDATE SET n = n + 1').bind(phoneNumberId, workspaceId, bucket),
     env.DB.prepare('DELETE FROM shared_number_errors WHERE bucket < ?').bind(bucket - Math.ceil(SPIKE_WINDOW_MS / 600_000) - 1),
   ]);
-  const total = (await env.DB.prepare('SELECT sum(n) AS n FROM shared_number_errors WHERE phone_number_id = ? AND bucket > ?').bind(phoneNumberId, bucket - Math.ceil(SPIKE_WINDOW_MS / 600_000)).first<{ n: number | null }>())?.n ?? 0;
-  if (total < SPIKE_THRESHOLD) return false;
+  const { results } = await env.DB.prepare('SELECT workspace_id, sum(n) AS n FROM shared_number_errors WHERE phone_number_id = ? AND bucket > ? GROUP BY workspace_id ORDER BY n DESC')
+    .bind(phoneNumberId, bucket - Math.ceil(SPIKE_WINDOW_MS / 600_000)).all<{ workspace_id: string; n: number }>();
+  const total = results.reduce((a, r) => a + r.n, 0);
+  if (total < SPIKE_THRESHOLD) return { kind: 'none' };
   await env.DB.prepare('DELETE FROM shared_number_errors WHERE phone_number_id = ?').bind(phoneNumberId).run();
-  return true;
+  if (results.length >= SHARED_SPIKE_MIN_MEMBERS) return { kind: 'platform' };
+  const top = results[0]!;
+  return top.n / total >= SHARED_DOMINANCE ? { kind: 'member', workspaceId: top.workspace_id } : { kind: 'ambiguous' };
 }
+
+export { MEMBER_BLOCK_MS };

@@ -100,7 +100,7 @@ const P1_ALERTS = new Set([
   'business_id_unverified', 'refund_refused', 'refund_id_conflict',
   // Added in review: each of these was silently `info` and a human must see it.
   'instapay_sla_not_scheduled', 'proof_url_not_configured', 'catalog_mass_delete_refused', 'catalog_business_mismatch', 'rate_missing_estimate_charged', 'bot_buyer_key_unavailable',
-  'package_refunded', 'package_partial_refund', 'number_quality_flagged', 'number_error_spike', 'shared_health_push_failed',
+  'package_refunded', 'package_partial_refund', 'number_quality_flagged', 'number_error_spike', 'number_member_abuse', 'shared_health_push_failed',
 ]);
 /** Known and deliberately log-only. A NEW alert name must be added to exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS (test/guards.test.ts fails otherwise). */
 export const INFO_ALERTS = new Set([

@@ -86,6 +86,12 @@ export const QUALITY_ERROR_CODES: ReadonlySet<number> = new Set([131049, 131026]
 /** This many quality errors on one number inside the window pause its campaigns (A5). A fixed threshold: it does not scale with the tier (documented residual). */
 export const SPIKE_THRESHOLD = 25;
 export const SPIKE_WINDOW_MS = 60 * 60_000;
+/** The platform number is shared by strangers: its state trips (for every member) only when the errors come from at least this many DISTINCT members. */
+export const SHARED_SPIKE_MIN_MEMBERS = 3;
+/** Below that, one member that produced at least this share of the window's errors is the problem: only ITS template sends on the number stop. */
+export const SHARED_DOMINANCE = 0.8;
+/** How long a dominant member's template sends on the platform number stay stopped (it can be shortened by the operator evicting it). */
+export const MEMBER_BLOCK_MS = 24 * 60 * 60_000;
 const BUCKET_MS = 10 * 60_000;
 
 /** Counts one quality error; true when the window now holds SPIKE_THRESHOLD or more (the counters are cleared so the next spike needs a fresh N). */
@@ -97,6 +103,15 @@ export function noteQualityError(sql: SqlStorage, phoneNumberId: string, now: nu
   if (total < SPIKE_THRESHOLD) return false;
   sql.exec('DELETE FROM number_health_events WHERE phone_number_id = ?', phoneNumberId);
   return true;
+}
+
+const BLOCK_PREFIX = 'shared.blocked:';
+/** Until when (epoch ms) this workspace's template sends on the platform number `pn` are stopped because it dominated a spike; 0 = not blocked. */
+export function memberBlockedUntil(sql: SqlStorage, pn: string): number {
+  return Number(sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', BLOCK_PREFIX + pn).toArray()[0]?.value ?? 0);
+}
+export function blockMember(sql: SqlStorage, pn: string, until: number): void {
+  sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', BLOCK_PREFIX + pn, String(until));
 }
 
 const SUSPENDED_KEY = 'ops.suspended';

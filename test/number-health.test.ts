@@ -155,6 +155,33 @@ describe('fail closed and ordered', () => {
   });
 });
 
+describe('ordering can only drop a stale RECOVERY, never a worsening', () => {
+  it('a local spike (processing time) does not make a later-arriving, earlier-stamped Meta DISABLE look stale: it is applied -> restricted', async () => {
+    const ws = W(993);
+    await runningCampaign(ws);
+    for (let i = 0; i < SPIKE_THRESHOLD; i++) await workspace(ws).noteSendError('pn-x', 131049); // local "now" is far newer than the DISABLE below
+    expect((await d1Health('pn-x'))!.health_state).toBe('yellow');
+    expect(await env.DB.prepare("SELECT health_signal_at AS t FROM phone_numbers WHERE phone_number_id = 'pn-x'").first('t')).toBe(0); // a local signal never advances the ordering column
+    await postWebhook(SELF, accountHook('waba-own', { event: 'DISABLED_UPDATE', ban_info: { waba_ban_state: 'DISABLE' } }, 90));
+    expect((await d1Health('pn-x'))!.health_state).toBe('restricted');
+    expect(await workspace(ws).numberHealth('pn-x')).toBe('restricted');
+  });
+  it('a worsening Meta signal stamped BEFORE the newest applied one is still applied (FLAGGED t=5 after UNFLAGGED t=10)', async () => {
+    const ws = W(994);
+    await runningCampaign(ws);
+    await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'UNFLAGGED', 10));
+    await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'FLAGGED', 5));
+    expect((await d1Health('pn-x'))!.health_state).toBe('red'); // fail closed: never dropped for being old
+  });
+  it('a stale RECOVERY is dropped: DISABLE(t2) then REINSTATE(t1) -> still restricted', async () => {
+    const ws = W(995);
+    await runningCampaign(ws);
+    await postWebhook(SELF, accountHook('waba-own', { event: 'DISABLED_UPDATE', ban_info: { waba_ban_state: 'DISABLE' } }, 2000));
+    await postWebhook(SELF, accountHook('waba-own', { event: 'DISABLED_UPDATE', ban_info: { waba_ban_state: 'REINSTATE' } }, 1000));
+    expect((await d1Health('pn-x'))!.health_state).toBe('restricted');
+  });
+});
+
 describe('what a number state stops', () => {
   it('RED / restricted: a template send is refused at claim (number_restricted) but a service reply inside the window still goes; yellow stops nothing but campaigns', async () => {
     const ws = W(986);

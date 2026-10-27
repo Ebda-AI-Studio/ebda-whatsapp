@@ -13,7 +13,7 @@ import { eraseSharedFor } from './shared/shared-number';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
-import { QUALITY_ERROR_CODES, blocksTemplates, currentHealth, isSuspended, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
 import { applySharedHealth, noteSharedError } from './numbers/health-events';
 import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
@@ -432,7 +432,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** Why this send must not leave right now, or null. Suspended stops everything; a red / restricted number stops business-initiated templates only. */
   private sendRefusal(job: SendJob): 'workspace_suspended' | 'number_restricted' | null {
     if (isSuspended(this.sql)) return 'workspace_suspended';
-    if (jobKind(job) === 'template' && blocksTemplates(currentHealth(this.sql, job.phoneNumberId))) return 'number_restricted';
+    if (jobKind(job) === 'template' && (blocksTemplates(currentHealth(this.sql, job.phoneNumberId)) || memberBlockedUntil(this.sql, job.phoneNumberId) > Date.now())) return 'number_restricted';
     return null;
   }
 
@@ -643,17 +643,19 @@ export class WorkspaceDO extends DurableObject<Env> {
    * redelivers, and the mirror only writes when D1 differs, so a redelivery repairs it), and every worsening (and every spike) pauses the number's
    * running / scheduled campaigns and tells a human. Recovery changes the state and nothing else: a paused campaign is resumed by the merchant.
    */
-  async applyNumberHealth(phoneNumberId: string, signal: HealthSignal, now = Date.now(), signalAt = now): Promise<{ from: HealthState; to: HealthState; changed: boolean; paused: number; dropped?: true }> {
+  async applyNumberHealth(phoneNumberId: string, signal: HealthSignal, now = Date.now(), signalAt?: number): Promise<{ from: HealthState; to: HealthState; changed: boolean; paused: number; dropped?: true }> {
     const from = currentHealth(this.sql, phoneNumberId);
-    // Meta retries a webhook for days: a signal older than the newest one already applied (by Meta's own time) is dropped, never undoing a newer one.
-    if (signalAt < lastSignalAt(this.sql, phoneNumberId)) return { from, to: from, changed: false, paused: 0, dropped: true };
     const to = nextHealth(from, signal);
+    // Meta retries a webhook for days. ORDERING MAY ONLY DROP A STALE RECOVERY: a Meta-timed signal older than the newest one already applied AND lowering the state is
+    // dropped; a signal that worsens (restricted / red / flagged / spike) is ALWAYS applied, whatever its time. Locally generated signals (spike, a rating read, no Meta time)
+    // never take part in the ordering and never advance the ordering column, so they cannot make a later, earlier-stamped Meta DISABLE look stale.
+    if (signalAt !== undefined && signalAt < lastSignalAt(this.sql, phoneNumberId) && HEALTH_STATES.indexOf(to) < HEALTH_STATES.indexOf(from)) return { from, to: from, changed: false, paused: 0, dropped: true };
     const source = signalSource(signal);
     this.ctx.storage.transactionSync(() => {
-      recordSignalAt(this.sql, phoneNumberId, signalAt);
+      if (signalAt !== undefined) recordSignalAt(this.sql, phoneNumberId, signalAt);
       if (to !== from) logHealth(this.sql, phoneNumberId, from, to, source, null, now);
     });
-    await mirrorHealth(this.env.DB, 'phone_numbers', phoneNumberId, to, source, now, signalAt);
+    await mirrorHealth(this.env.DB, 'phone_numbers', phoneNumberId, to, source, now, signalAt ?? 0);
     let paused = 0;
     if (worsened(from, to) || signal.kind === 'spike') paused = await this.pauseCampaignsOn(phoneNumberId, 'quality_flagged', now);
     const fields = { workspace: this.workspaceId, phoneNumberId, from, to, source, pausedCampaigns: paused };
@@ -663,6 +665,11 @@ export class WorkspaceDO extends DurableObject<Env> {
       else alert('number_restricted', fields);
     }
     return { from, to, changed: to !== from, paused };
+  }
+
+  /** This store dominated a spike on the platform number: its OWN template sends on that number stop for a day. Nobody else is touched. */
+  async blockSharedSends(phoneNumberId: string, until: number): Promise<void> {
+    blockMember(this.sql, phoneNumberId, until);
   }
 
   /**
@@ -686,7 +693,14 @@ export class WorkspaceDO extends DurableObject<Env> {
     // The platform number is counted per NUMBER (every member together, in D1) and tripped once at the platform level; an own number is counted here.
     const shared = await this.env.DB.prepare('SELECT 1 FROM shared_numbers WHERE phone_number_id = ?').bind(phoneNumberId).first();
     if (shared) {
-      if (await noteSharedError(this.env, phoneNumberId, now)) await applySharedHealth(this.env, phoneNumberId, { kind: 'spike' }, now, (f) => this.ctx.waitUntil(f()), now);
+      const verdict = await noteSharedError(this.env, phoneNumberId, this.workspaceId, now);
+      if (verdict.kind === 'platform') await applySharedHealth(this.env, phoneNumberId, { kind: 'spike' }, undefined, (f) => this.ctx.waitUntil(f()), now);
+      else if (verdict.kind === 'member') {
+        // One store produced (nearly) all of it: stop THAT store's templates on the number, not everyone's.
+        if (verdict.workspaceId === this.workspaceId) blockMember(this.sql, phoneNumberId, now + MEMBER_BLOCK_MS);
+        else await this.env.WORKSPACE_DO.get(this.env.WORKSPACE_DO.idFromName(verdict.workspaceId)).blockSharedSends(phoneNumberId, now + MEMBER_BLOCK_MS);
+        alert('number_member_abuse', { workspace: verdict.workspaceId, phoneNumberId, shared: true });
+      } else if (verdict.kind === 'ambiguous') alert('number_error_spike', { phoneNumberId, shared: true, ambiguous: true });
       return;
     }
     if (noteQualityError(this.sql, phoneNumberId, now)) await this.applyNumberHealth(phoneNumberId, { kind: 'spike' }, now);
