@@ -217,7 +217,7 @@ describe('review findings: separation of duties, the bank reference across two a
     expect(await releaseInstapay(low, { id: d.id, actor: OP1, reason: 'I approved it, now I release it' })).toEqual({ ok: false, reason: 'approver_cannot_release' });
   });
 
-  it('the database enforces it too: the first-approval and confirm statements refuse a releaser or a held request (meta.changes = 0)', async () => {
+  it('the database guards it too: the first-approval and confirm statements refuse a releaser or a held request (meta.changes = 0)', async () => {
     const a = await req(W(36));
     const b = await req(W(37));
     await upload(W(36), a.id, 'sql-guard');
