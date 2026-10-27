@@ -13,7 +13,7 @@ import { eraseSharedFor } from './shared/shared-number';
 import { dropErased } from './erasure';
 import { deleteTargets } from './erasure-targets';
 import { exportContact, mergeContacts, renameContact } from './contact-data';
-import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, writeRetentionDays } from './retention';
+import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
@@ -132,6 +132,9 @@ export class WorkspaceDO extends DurableObject<Env> {
   private pricingPulledAt = 0;
   /** Set once the workspace was deleted (OFFBOARD-1): the storage holds only a tombstone and nothing recreates the schema. */
   private offboarded = false;
+  /** Set at the START of a deletion: new snapshots are refused and the wipe waits for the ones in flight (so no backup lands after the backups were listed). */
+  private offboarding = false;
+  private readonly snapshotRuns = new Set<Promise<unknown>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -1993,7 +1996,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   private alarmRun: Promise<unknown> | null = null;
 
   async alarm(): Promise<void> {
-    if (this.offboarded) return;
+    if (this.offboarded || this.offboarding) return;
     const run = this.drainDueTasks(Date.now());
     this.alarmRun = run;
     try {
@@ -2177,6 +2180,17 @@ export class WorkspaceDO extends DurableObject<Env> {
    * (fine for the spike's metadata-only rows; streaming export is a Phase 3 follow-up).
    */
   async exportSnapshot(date: string): Promise<BackupManifest> {
+    if (this.offboarding || this.offboarded) throw new Error('workspace is being deleted');
+    const run = this.writeSnapshot(date);
+    this.snapshotRuns.add(run);
+    try {
+      return await run;
+    } finally {
+      this.snapshotRuns.delete(run);
+    }
+  }
+
+  private async writeSnapshot(date: string): Promise<BackupManifest> {
     const workspaceId = this.workspaceId;
     const dumps = this.ctx.storage.transactionSync(() =>
       BACKUP_TABLES.map((t) => ({ t, rows: this.sql.exec(`SELECT * FROM ${t} ORDER BY ${BACKUP_ORDER[t]}`).toArray() as Record<string, unknown>[] })),
@@ -2273,6 +2287,8 @@ export class WorkspaceDO extends DurableObject<Env> {
         if (m.direction === 'in' && m.wamid) this.sql.exec('INSERT OR IGNORE INTO erased_keys (key) VALUES (?)', `reply:${m.wamid}`);
         for (const k of [m.body_r2_key, m.media_r2_key]) {
           if (!k) continue;
+          // RETENTION's rule: a key another conversation's message still points at (a campaign image sent to many contacts) is kept, with its uploads row.
+          if (conv && stillReferenced(this.sql, k, conv.id)) continue;
           this.sql.exec('INSERT OR IGNORE INTO r2_pending_deletes (key) VALUES (?)', k);
           this.sql.exec('DELETE FROM uploads WHERE r2_key = ?', k);
           keys++;
@@ -2306,6 +2322,9 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   async offboardWipe(): Promise<{ vectors: number }> {
     if (this.offboarded) return { vectors: 0 };
+    // From here no new alarm run or backup starts, and the ones already running finish BEFORE anything is erased (their R2 writes are then visible to the caller's backups step).
+    this.offboarding = true;
+    await Promise.allSettled([this.alarmRun, ...this.snapshotRuns]);
     let vectors = 0;
     const v = this.env.VECTORIZE;
     if (v) {

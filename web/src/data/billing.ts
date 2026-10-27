@@ -93,8 +93,8 @@ export interface OperatorApi {
   instapayQueue(): Promise<OperatorInstapay[]>;
   /** A signed link that opens the proof for a couple of minutes. */
   instapayProofLink(id: string): Promise<{ url: string; expiresAt: number }>;
-  /** `bankRef` = the bank's own transaction reference read from the proof (optional). A re-used one answers 409 `duplicate_reference` and holds the request; a held request answers 409 `held`. */
-  confirmInstapay(id: string, bankRef?: string): Promise<OperatorInstapay & { needsSecond?: true }>;
+  /** `bankRef` = the bank's own transaction reference read from the proof (REQUIRED for every amount; DUP-REF-REQUIRED-1). A proof that truly shows none is confirmed with `noReferenceReason` (5+ characters, audited; sends `noReference: true`). A re-used one answers 409 `duplicate_reference` and holds the request; a held request answers 409 `held`. */
+  confirmInstapay(id: string, bankRef?: string, noReferenceReason?: string): Promise<OperatorInstapay & { needsSecond?: true }>;
   /** C2: lifts a duplicate hold after a person compared both transfers (a reason of 5+ characters; audited). */
   releaseInstapay(id: string, reason: string): Promise<OperatorInstapay>;
   rejectInstapay(id: string, reason: string): Promise<OperatorInstapay>;
@@ -108,6 +108,10 @@ export interface OperatorApi {
   /** 409 `write_off_required` carries `amountMinor`: resend with `acceptWriteOff` to give up that balance. */
   requestOffboarding(workspaceId: string, body: { reason: string; immediate?: true; acceptWriteOff?: true }): Promise<OperatorOffboarding>;
   cancelOffboarding(workspaceId: string, reason: string): Promise<void>;
+  /** OFFBOARD-2ND-APPROVER-1: a second operator approves an immediate deletion that writes off >= 1,000 EGP. */
+  approveOffboarding(workspaceId: string, reason: string): Promise<void>;
+  /** OFFBOARD-ABUSE-1: lifts the abuse hold with a reason. */
+  releaseOffboardingHold(workspaceId: string, reason: string): Promise<void>;
   /** T8: who did what to which ids (append-only). Newest first; pass `before` (the smallest id seen) for the next page. */
   auditLog(filter: AuditFilter): Promise<AuditLogItem[]>;
   /** A yearly package order: what can be refunded now (unused whole months x price/12, current month kept, wallet debt settled first). */

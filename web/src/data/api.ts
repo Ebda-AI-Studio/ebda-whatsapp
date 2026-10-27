@@ -220,7 +220,7 @@ export function createApiSource(o: Opts): LiveSource {
       markRefundPaid: async (id) => { await op(`/refund-requests/${encodeURIComponent(id)}/manual-paid`, done, { method: 'POST' }); },
       instapayQueue: async () => (await op('/instapay?state=under_review', items(operatorInstapayDto))).items,
       instapayProofLink: (id) => op(`/instapay/${encodeURIComponent(id)}/proof-link`, z.object({ url: z.string(), expiresAt: z.number().int() })),
-      confirmInstapay: (id, bankRef) => op(`/instapay/${encodeURIComponent(id)}/confirm`, operatorInstapayDto.extend({ needsSecond: z.literal(true).optional() }), post(bankRef ? { bankRef } : {})),
+      confirmInstapay: (id, bankRef, noReferenceReason) => op(`/instapay/${encodeURIComponent(id)}/confirm`, operatorInstapayDto.extend({ needsSecond: z.literal(true).optional() }), post(noReferenceReason ? { noReference: true, reason: noReferenceReason } : bankRef ? { bankRef } : {})),
       releaseInstapay: (id, reason) => op(`/instapay/${encodeURIComponent(id)}/release`, operatorInstapayDto, post({ reason })),
       rejectInstapay: (id, reason) => op(`/instapay/${encodeURIComponent(id)}/reject`, operatorInstapayDto, post({ reason })),
       adjustments: async () => (await op('/adjustments', items(adjustmentDto))).items,
@@ -230,6 +230,8 @@ export function createApiSource(o: Opts): LiveSource {
       offboarding: (ws) => op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, operatorOffboardingDto),
       requestOffboarding: (ws, body) => op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, operatorOffboardingDto, post(body)),
       cancelOffboarding: async (ws, reason) => { await op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, done, { method: 'DELETE', body: JSON.stringify({ reason }) }); },
+      approveOffboarding: async (ws, reason) => { await op(`/workspaces/${encodeURIComponent(ws)}/offboarding/approve`, done, post({ reason })); },
+      releaseOffboardingHold: async (ws, reason) => { await op(`/workspaces/${encodeURIComponent(ws)}/offboarding/release-hold`, done, post({ reason })); },
       changeLog: async () => (await op('/change-log?limit=100', items(changeLogItemDto))).items,
       auditLog: async (f) => {
         const q = new URLSearchParams({ limit: '100' });

@@ -78,7 +78,7 @@ it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / IN
   const sets = { P0: setOf('P0_ALERTS'), P1: setOf('P1_ALERTS'), INFO: setOf('INFO_ALERTS') };
   expect(sets.P0.size).toBeGreaterThan(5);
   expect(sets.P1.size).toBeGreaterThan(40);
-  expect(sets.INFO.size).toBe(20);
+  expect(sets.INFO.size).toBe(21); // 20 + instapay_no_reference (DUP-REF-REQUIRED-1, W2 final review)
   const used = new Set<string>();
   for (const hit of findMatches(/\balert\(/, 'src')) {
     const [file, line] = hit.split(':') as [string, string];
@@ -215,4 +215,17 @@ it('every DO migration has a `// vNN` label directly above it that matches its p
   expect(entries).toBe(DO_MIGRATIONS.length);
   expect(labels.filter((l) => l.label !== l.entry)).toEqual([]); // a mislabelled entry, or a slot inserted mid-array
   expect(DO_MIGRATIONS.map((_, i) => i + 1).filter((n) => !labelled.has(n))).toEqual([]); // an UNLABELLED entry
+});
+
+// AUDIT-RETENTION-1 (review item 6): the audit log is append-only, so free text (which can hold a phone number) never goes into `detail`; an operator's reason goes to audit_reasons.
+it('GUARD: no recordAudit call in src names a detail key reason / note / text / message / body', () => {
+  const hits = findMatches(/recordAudit\(/, 'src');
+  expect(hits.length).toBeGreaterThan(1);
+  for (const h of hits) {
+    const [file, line] = h.split(':') as [string, string];
+    if (file.endsWith('core/audit.ts')) continue;
+    const call = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').split('\n').slice(Number(line) - 1, Number(line) + 3).join(' ');
+    const detail = /detail:\s*\{([^}]*)\}/.exec(call)?.[1] ?? '';
+    expect(detail, `${file}:${line}`).not.toMatch(/\b(reason|note|text|message|body)\b\s*[:,}]/);
+  }
 });

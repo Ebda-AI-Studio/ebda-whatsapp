@@ -1,5 +1,6 @@
 import type { Env } from '../../env';
 import { alert } from '../observability';
+import { DRAIN_PAGE, drainKeyset } from './drain';
 
 /**
  * Ruling MONEY-FACT-1 - never reject an external money fact. A provider refund or chargeback is recorded in full and acted on (the wallet is debited, the package revoked) from the
@@ -14,11 +15,20 @@ export async function noteRefundExcess(env: Env, a: { kind: 'topup' | 'package';
   alert('refund_exceeds_charge', { severity: 'P1', workspace: a.workspaceId, orderId: a.orderId, kind: a.kind, eventMinor: a.eventMinor, overMinor: a.overMinor });
 }
 
-/** Daily: no order should ever have refunded > charged (every writer clamps). Any that does is reported. */
+/**
+ * Daily: no order should ever have refunded > charged (every writer clamps). Any that does is reported. Paged by KEYSET through `drainKeyset` (M-178): a `LIMIT 50` read
+ * and stop would report the first fifty and never see the rest, so a pass that finds many (the case that matters most) would hide most of them.
+ */
 export async function reconcileRefundBounds(env: Env): Promise<{ over: number }> {
-  const t = await env.DB.prepare('SELECT order_id, workspace_id, refunded_minor - amount_minor AS over FROM topups WHERE refunded_minor > amount_minor LIMIT 50').all<{ order_id: string; workspace_id: string; over: number }>();
-  const p = await env.DB.prepare('SELECT order_id, workspace_id, refunded_minor - amount_minor AS over FROM package_orders WHERE refunded_minor > amount_minor LIMIT 50').all<{ order_id: string; workspace_id: string; over: number }>();
-  for (const r of t.results) alert('refund_exceeds_charge', { severity: 'P1', workspace: r.workspace_id, orderId: r.order_id, kind: 'topup', overMinor: r.over, unclamped: true });
-  for (const r of p.results) alert('refund_exceeds_charge', { severity: 'P1', workspace: r.workspace_id, orderId: r.order_id, kind: 'package', overMinor: r.over, unclamped: true });
-  return { over: t.results.length + p.results.length };
+  let over = 0;
+  type R = { order_id: string; workspace_id: string; over: number };
+  for (const [table, kind] of [['topups', 'topup'], ['package_orders', 'package']] as const) {
+    await drainKeyset<R, string>({
+      name: `refund_bounds_${kind}`, pageSize: DRAIN_PAGE,
+      page: async (after) => (await env.DB.prepare(`SELECT order_id, workspace_id, refunded_minor - amount_minor AS over FROM ${table} WHERE refunded_minor > amount_minor AND (?1 IS NULL OR order_id > ?1) ORDER BY order_id LIMIT ?2`).bind(after, DRAIN_PAGE).all<R>()).results,
+      cursorOf: (r) => r.order_id,
+      handle: async (r) => { over++; alert('refund_exceeds_charge', { severity: 'P1', workspace: r.workspace_id, orderId: r.order_id, kind, overMinor: r.over, unclamped: true }); },
+    });
+  }
+  return { over };
 }

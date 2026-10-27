@@ -52,7 +52,7 @@ describe('the same proof image (C2)', () => {
     const a = await req(W(4));
     const b = await req(W(5));
     await upload(W(4), a.id, 'paid-once');
-    expect((await confirmInstapay(env, { id: a.id, actor: OP1 })).ok).toBe(true);
+    expect((await confirmInstapay(env, { id: a.id, actor: OP1, bankRef: 'AUTO-REF-6' })).ok).toBe(true);
     await upload(W(5), b.id, 'paid-once');
     expect((await state(b.id))!.held_reason).toBe('duplicate_image');
     expect((await state(a.id))!.state).toBe('confirmed');
@@ -71,13 +71,13 @@ describe('the same proof image (C2)', () => {
     const b = await req(W(8));
     await upload(W(7), a.id, 'dup-held');
     await upload(W(8), b.id, 'dup-held');
-    expect(await confirmInstapay(env, { id: b.id, actor: OP1 })).toEqual({ ok: false, reason: 'held' });
+    expect(await confirmInstapay(env, { id: b.id, actor: OP1, bankRef: 'AUTO-REF-7' })).toEqual({ ok: false, reason: 'held' });
     expect((await state(b.id))!.state).toBe('under_review');
     expect(await releaseInstapay(env, { id: b.id, actor: 'merchant-1', reason: 'looks fine' })).toEqual({ ok: false, reason: 'self_approval_refused' });
     expect(await releaseInstapay(env, { id: b.id, actor: OP1, reason: 'x' })).toEqual({ ok: false, reason: 'reason_required' });
     expect((await releaseInstapay(env, { id: b.id, actor: OP1, reason: 'different transfers, checked both in the bank app' })).ok).toBe(true);
     expect((await state(b.id))!.held_reason).toBeNull();
-    expect((await confirmInstapay(env, { id: b.id, actor: OP2 })).ok).toBe(true);
+    expect((await confirmInstapay(env, { id: b.id, actor: OP2, bankRef: 'AUTO-REF-8' })).ok).toBe(true);
     expect((await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'instapay_released'").first<{ n: number }>())!.n).toBeGreaterThan(0);
     // the other can still simply be rejected while held
     expect((await rejectInstapay(env, { id: a.id, actor: OP1, reason: 'duplicate of another transfer' })).ok).toBe(true);
@@ -101,11 +101,12 @@ describe('the same bank reference (C2)', () => {
     expect((await confirmInstapay(env, { id: b.id, actor: OP2, bankRef: 'IP9999' })).ok).toBe(true);
   });
 
-  it('a confirmation without a bank reference still works (optional), and a malformed reference is refused', async () => {
+  it('a confirmation without a bank reference is refused (DUP-REF-REQUIRED-1), and a malformed reference is refused', async () => {
     const a = await req(W(11));
     await upload(W(11), a.id, 'no-ref');
     expect(await confirmInstapay(env, { id: a.id, actor: OP1, bankRef: '!!' })).toEqual({ ok: false, reason: 'bad_reference' });
-    expect((await confirmInstapay(env, { id: a.id, actor: OP1 })).ok).toBe(true);
+    expect(await confirmInstapay(env, { id: a.id, actor: OP1 })).toEqual({ ok: false, reason: 'bank_reference_required' });
+    expect((await confirmInstapay(env, { id: a.id, actor: OP1, bankRef: 'AUTO-REF-9' })).ok).toBe(true);
   });
 });
 
@@ -137,9 +138,9 @@ describe('review findings: separation of duties, the bank reference across two a
     await upload(W(21), b.id, 'sod-dup');
     expect((await releaseInstapay(env, { id: b.id, actor: OP1, reason: 'checked both transfers in the bank app' })).ok).toBe(true);
     expect(await state(b.id)).toMatchObject({ held_reason: null });
-    expect(await confirmInstapay(env, { id: b.id, actor: OP1 })).toEqual({ ok: false, reason: 'releaser_cannot_approve' });
+    expect(await confirmInstapay(env, { id: b.id, actor: OP1, bankRef: 'AUTO-REF-10' })).toEqual({ ok: false, reason: 'releaser_cannot_approve' });
     expect((await env.DB.prepare('SELECT actor, twin_of FROM instapay_releases WHERE request_id = ?').bind(b.id).all<{ actor: string; twin_of: string }>()).results).toEqual([{ actor: OP1, twin_of: a.id }]);
-    expect((await confirmInstapay(env, { id: b.id, actor: OP2 })).ok).toBe(true);
+    expect((await confirmInstapay(env, { id: b.id, actor: OP2, bankRef: 'AUTO-REF-11' })).ok).toBe(true);
     // and as a FIRST approval of a two-approval amount
     const c = await req(W(22));
     const d = await req(W(23));
@@ -186,7 +187,7 @@ describe('review findings: separation of duties, the bank reference across two a
     await upload(W(28), a.id, 'recheck');
     await upload(W(29), b.id, 'recheck');
     await env.DB.prepare('UPDATE instapay_requests SET held_reason = NULL, held_of = NULL, held_at = NULL WHERE id IN (?, ?)').bind(a.id, b.id).run(); // simulate holds that never got written
-    expect(await confirmInstapay(env, { id: a.id, actor: OP1 })).toEqual({ ok: false, reason: 'held' });
+    expect(await confirmInstapay(env, { id: a.id, actor: OP1, bankRef: 'AUTO-REF-12' })).toEqual({ ok: false, reason: 'held' });
     expect((await state(a.id))!.held_reason).toBe('duplicate_image');
     expect((await state(a.id))!.state).toBe('under_review');
   });
@@ -201,9 +202,9 @@ describe('review findings: separation of duties, the bank reference across two a
     await upload(W(32), y.id, 'every-release'); // a NEW twin: x is held again
     expect((await state(x.id))!.held_reason).toBe('duplicate_image');
     expect((await releaseInstapay(env, { id: x.id, actor: OP2, reason: 'B looked at the new one too' })).ok).toBe(true);
-    expect(await confirmInstapay(env, { id: x.id, actor: OP1 })).toEqual({ ok: false, reason: 'releaser_cannot_approve' }); // A released it once, B released it last
-    expect(await confirmInstapay(env, { id: x.id, actor: OP2 })).toEqual({ ok: false, reason: 'releaser_cannot_approve' });
-    expect((await confirmInstapay(env, { id: x.id, actor: OP3 })).ok).toBe(true);
+    expect(await confirmInstapay(env, { id: x.id, actor: OP1, bankRef: 'AUTO-REF-13' })).toEqual({ ok: false, reason: 'releaser_cannot_approve' }); // A released it once, B released it last
+    expect(await confirmInstapay(env, { id: x.id, actor: OP2, bankRef: 'AUTO-REF-14' })).toEqual({ ok: false, reason: 'releaser_cannot_approve' });
+    expect((await confirmInstapay(env, { id: x.id, actor: OP3, bankRef: 'AUTO-REF-15' })).ok).toBe(true);
     // an approver cannot release the request they first-approved
     const c = await req(W(33));
     const d = await req(W(34));
@@ -248,7 +249,7 @@ describe('review findings: separation of duties, the bank reference across two a
     // and confirm's own re-check holds an unheld request that has an UNREVIEWED twin even after a release
     await releaseInstapay(env, { id: x.id, actor: OP1, reason: 'checked x against y as well' });
     await env.DB.prepare('UPDATE instapay_requests SET held_reason = NULL WHERE id = ?').bind(w.id).run(); // w was never reviewed against y
-    expect(await confirmInstapay(env, { id: w.id, actor: OP2 })).toEqual({ ok: false, reason: 'held' });
+    expect(await confirmInstapay(env, { id: w.id, actor: OP2, bankRef: 'AUTO-REF-16' })).toEqual({ ok: false, reason: 'held' });
   });
 
   it('a duplicate reference that slips past the first check is caught IN the conditional UPDATE: held + alert, never a constraint error', async () => {

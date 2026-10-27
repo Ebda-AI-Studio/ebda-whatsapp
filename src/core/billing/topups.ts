@@ -15,6 +15,7 @@ import { roundHalfEvenDiv } from './money';
 import { RefundContention, applyPackageWebhook, auditOnce, findPackageOrder } from './package-orders';
 import { packagesEnabled, paymentProvider, topupsEnabled, type ParsedWebhook, type PaymentProvider } from './payments';
 import { alert } from '../observability';
+import { frozenForOffboarding, refuseIfOffboarded } from '../ops/offboarded';
 import { drainKeyset, type PassOpts } from './drain';
 
 export const MIN_TOPUP_MINOR = 1000;
@@ -37,9 +38,10 @@ export function feeFor(env: Env, amountMinor: number): number {
 
 export type StartResult =
   | { ok: true; orderId: string; amountMinor: number; feeMinor: number; totalMinor: number; checkoutUrl: string }
-  | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'invalid_amount' };
+  | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'invalid_amount' | 'offboarding' };
 
 export async function startTopup(env: Env, a: { workspaceId: string; userId: string; sessionId: string; amountMinor: number; returnUrl?: string }, now = Date.now()): Promise<StartResult> {
+  if (await frozenForOffboarding(env, a.workspaceId)) return { ok: false, reason: 'offboarding' }; // OFFBOARD-FREEZE-1
   if (!topupsEnabled(env)) return { ok: false, reason: 'disabled' };
   const provider = paymentProvider(env);
   // Without the Kashier secret key every webhook would be refused: do not let customers pay for a credit that could never arrive.
@@ -72,7 +74,9 @@ export async function getTopup(env: Env, workspaceId: string, orderId: string): 
  * while empty): a second SUCCESS carrying another transaction id is `conflict` and credits nothing, so two different payments (or a refund
  * relabelled as a payment) can never both credit one order. Throws if the workspace could not be reached (the caller answers 5xx).
  */
-export async function credit(env: Env, row: TopupRow, transactionId: string, now: number, walletRef = `kashier:${transactionId}`): Promise<'credited' | 'duplicate' | 'conflict'> {
+export async function credit(env: Env, row: TopupRow, transactionId: string, now: number, walletRef = `kashier:${transactionId}`): Promise<'credited' | 'duplicate' | 'conflict' | 'offboarded'> {
+  // A late confirmation for a deleted workspace credits nothing and never addresses its (pseudonymous) Durable Object: a person refunds it (credit_after_offboard, P1).
+  if (await refuseIfOffboarded(env, row.workspace_id, 'topup', row.order_id, now)) return 'offboarded';
   const claim = await env.DB.prepare('UPDATE topups SET transaction_id = ? WHERE order_id = ? AND transaction_id IS NULL').bind(transactionId, row.order_id).run();
   if (claim.meta.changes !== 1) {
     const cur = await env.DB.prepare('SELECT transaction_id FROM topups WHERE order_id = ?').bind(row.order_id).first<{ transaction_id: string | null }>();
@@ -130,6 +134,7 @@ async function applyTopupWebhook(env: Env, t: TopupRow, ev: ParsedWebhook, now: 
       alert('duplicate_success', { kind: 'topup', workspace: t.workspace_id, eventKey: ev.eventKey });
       return 'duplicate_success';
     }
+    if (c === 'offboarded') return 'offboarded_manual_refund'; // credit_after_offboard (P1) was raised: the money is refunded by hand
     // Another path (the webhook or a repair) already credited this transaction: nothing was credited now, so nothing follows from it.
     return c === 'duplicate' ? 'duplicate' : 'credited';
   }

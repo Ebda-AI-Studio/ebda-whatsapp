@@ -250,6 +250,17 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       offs.set(ws, o);
       return structuredClone(o);
     },
+    async approveOffboarding(ws, reason) {
+      const o = offs.get(ws);
+      if (!o) throw new ApiError('not_found', 404);
+      o.needsSecondApproval = false;
+      o.log = [...(o.log ?? []), { at: BASE, actor: currentUserId, action: 'second_approval', reason }];
+    },
+    async releaseOffboardingHold(ws, reason) {
+      const o = offs.get(ws);
+      if (!o) throw new ApiError('not_found', 404);
+      o.log = [...(o.log ?? []), { at: BASE, actor: currentUserId, action: 'abuse_hold_released', reason }];
+    },
     async cancelOffboarding(ws, reason) {
       const o = offs.get(ws);
       if (!o || o.state !== 'pending') throw new ApiError('invalid_request', 409, 'nothing_pending');

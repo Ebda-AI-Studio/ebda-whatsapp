@@ -107,7 +107,9 @@ export function mergeContacts(sql: SqlStorage, fromWaId: string, intoWaId: strin
   sql.exec('DELETE FROM contact_tags WHERE contact_id = ?', f.id);
   sql.exec('UPDATE OR IGNORE campaign_recipients SET contact_id = ? WHERE contact_id = ?', t.id, f.id);
   sql.exec('DELETE FROM campaign_recipients WHERE contact_id = ?', f.id);
-  sql.exec('UPDATE campaign_links SET contact_id = ? WHERE contact_id = ?', t.id, f.id);
+  // (campaign_id, contact_id) is unique: a campaign both numbers were in keeps ONE row (the target's); the source's leftover is removed.
+  sql.exec('UPDATE OR IGNORE campaign_links SET contact_id = ? WHERE contact_id = ?', t.id, f.id);
+  sql.exec('DELETE FROM campaign_links WHERE contact_id = ?', f.id);
   sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', f.id);
   sql.exec('UPDATE store_orders SET wa_id = ? WHERE wa_id = ?', intoWaId, fromWaId);
   sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', fromWaId);

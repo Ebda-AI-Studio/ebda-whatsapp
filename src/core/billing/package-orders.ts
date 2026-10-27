@@ -20,6 +20,7 @@ import { packagesEnabled, paymentProvider, type ParsedWebhook, type PaymentProvi
 import { MONTHS_SQL, announceSubscription, auditStmt, fallbackToStorePlan, runWrite, setSubscription } from './subscriptions';
 import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
 import { alert } from '../observability';
+import { frozenForOffboarding, refuseIfOffboarded } from '../ops/offboarded';
 import { noteRefundExcess } from './refund-excess';
 
 const SWITCH_KINDS: readonly PurchaseKind[] = ['upgrade', 'queued_switch'];
@@ -86,9 +87,10 @@ export async function planPurchase(env: Env, workspaceId: string, packageId: str
 
 export type StartPackageResult =
   | { ok: true; orderId: string; amountMinor: number; checkoutUrl: string }
-  | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'unknown_package' | 'yearly_queued' };
+  | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'unknown_package' | 'yearly_queued' | 'offboarding' };
 
 export async function startPackageCheckout(env: Env, a: { workspaceId: string; userId: string; sessionId: string; packageId: string }, now = Date.now()): Promise<StartPackageResult> {
+  if (await frozenForOffboarding(env, a.workspaceId)) return { ok: false, reason: 'offboarding' }; // OFFBOARD-FREEZE-1
   if (!packagesEnabled(env)) return { ok: false, reason: 'disabled' };
   const provider = paymentProvider(env);
   // Without the Kashier secret key every webhook would be refused: do not let customers pay for something that can never be granted.
@@ -140,6 +142,7 @@ const orderPaidUngranted = (orderId: string, ref: string) => ({
  * running package, queued behind it), so a later refund knows what to take back.
  */
 export async function grantOrder(env: Env, row: PackageOrderRow, ref: string, now: number, opts: { claim: boolean }): Promise<'granted' | 'replay'> {
+  if (await refuseIfOffboarded(env, row.workspace_id, 'package_order', row.order_id, now)) return 'replay'; // nothing granted: credit_after_offboard (P1), a person refunds it
   if (row.kind === 'upgrade') return grantUpgrade(env, row, ref, now, opts);
   if (row.kind === 'queued_switch' && (await yearlyRunning(env, row.workspace_id, now))) return grantQueuedSwitch(env, row, ref, now, opts);
   // (A queued switch whose yearly period ended before it was paid is just a purchase at its own full price: it falls through.)

@@ -197,14 +197,14 @@ describe('operator review', () => {
     const ws = W(32);
     const r = await pkgReq(ws);
     await proof(ws, r.id);
-    const first = await operatorCall(OP1, 'POST', `/instapay/${r.id}/confirm`, {});
+    const first = await operatorCall(OP1, 'POST', `/instapay/${r.id}/confirm`, { bankRef: 'BILL-REF-32' });
     expect(first.status).toBe(200);
     expect(await sub(ws)).toMatchObject({ package_id: 'gold', status: 'active', source: 'purchase', version: 1 });
     expect(await orderRow('package_orders', r.id)).toEqual({ s: 'paid', provider: 'instapay', ref: `instapay:${r.reference}` });
     expect(await workspace(ws).getEntitlement()).toMatchObject({ packageId: 'gold', version: 1 });
     expect(await row(r.id)).toMatchObject({ state: 'confirmed', decided_by: OP1 });
     expect((await row(r.id))!.granted_at).not.toBeNull();
-    const again = await operatorCall(OP2, 'POST', `/instapay/${r.id}/confirm`, {});
+    const again = await operatorCall(OP2, 'POST', `/instapay/${r.id}/confirm`, { bankRef: 'BILL-REF-32' });
     expect(again.status).toBe(409);
     expect(await audits(ws)).toBe(1);
     expect((await sub(ws) as { version: number }).version).toBe(1);
@@ -213,8 +213,8 @@ describe('operator review', () => {
     const ws = W(33);
     const r = await topupReq(ws, 20000);
     await proof(ws, r.id, PDF);
-    expect((await operatorCall(OP1, 'POST', `/instapay/${r.id}/confirm`, {})).status).toBe(200);
-    await operatorCall(OP2, 'POST', `/instapay/${r.id}/confirm`, {});
+    expect((await operatorCall(OP1, 'POST', `/instapay/${r.id}/confirm`, { bankRef: 'BILL-REF-33' })).status).toBe(200);
+    await operatorCall(OP2, 'POST', `/instapay/${r.id}/confirm`, { bankRef: 'BILL-REF-33' });
     expect((await ledger(ws)).map((x) => [x.kind, x.amount_minor, x.ref])).toEqual([['topup', 20000, `instapay:${r.reference}`]]);
     expect(await orderRow('topups', r.id)).toEqual({ s: 'paid', provider: 'instapay', ref: `instapay:${r.reference}` });
     expect((await workspace(ws).walletView()).balanceMinor).toBe(20000);
@@ -223,7 +223,7 @@ describe('operator review', () => {
     const ws = W(34);
     const r = await pkgReq(ws, { userId: OP1 });
     await proof(ws, r.id);
-    expect(await confirmInstapay(env, { id: r.id, actor: OP1 })).toEqual({ ok: false, reason: 'self_approval_refused' });
+    expect(await confirmInstapay(env, { id: r.id, actor: OP1, bankRef: 'AUTO-REF-1' })).toEqual({ ok: false, reason: 'self_approval_refused' });
     expect(await rejectInstapay(env, { id: r.id, actor: OP1, reason: 'no thanks' })).toEqual({ ok: false, reason: 'self_approval_refused' });
     expect((await operatorCall(OP1, 'POST', `/instapay/${r.id}/confirm`, {})).status).toBe(403);
     expect(await sub(ws)).toBeNull();
@@ -260,7 +260,7 @@ describe('operator review', () => {
     const ws = W(37);
     const r = await topupReq(ws, 5000);
     await proof(ws, r.id);
-    const [a, b] = await Promise.all([confirmInstapay(env, { id: r.id, actor: OP1 }), rejectInstapay(env, { id: r.id, actor: OP2, reason: 'race' })]);
+    const [a, b] = await Promise.all([confirmInstapay(env, { id: r.id, actor: OP1, bankRef: 'AUTO-REF-2' }), rejectInstapay(env, { id: r.id, actor: OP2, reason: 'race' })]);
     expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
     const final = (await row(r.id))!.state;
     expect(['confirmed', 'rejected']).toContain(final);
@@ -271,7 +271,7 @@ describe('operator review', () => {
     const r = await topupReq(ws, 20000);
     await proof(ws, r.id);
     await env.DB.prepare('UPDATE instapay_requests SET amount_minor = 99999 WHERE id = ?').bind(r.id).run();
-    expect(await confirmInstapay(env, { id: r.id, actor: OP1 })).toEqual({ ok: false, reason: 'amount_mismatch' });
+    expect(await confirmInstapay(env, { id: r.id, actor: OP1, bankRef: 'AUTO-REF-3' })).toEqual({ ok: false, reason: 'amount_mismatch' });
     expect(await ledger(ws)).toEqual([]);
     expect((await row(r.id))!.state).toBe('under_review');
   });
@@ -287,7 +287,7 @@ describe('expiry', () => {
     expect(await orderRow('package_orders', stale.id)).toMatchObject({ s: 'expired' });
     expect((await row(waiting.id))!.state).toBe('under_review');
     // a confirm still works on it
-    expect((await confirmInstapay(env, { id: waiting.id, actor: OP1 })).ok).toBe(true);
+    expect((await confirmInstapay(env, { id: waiting.id, actor: OP1, bankRef: 'AUTO-REF-4' })).ok).toBe(true);
     // upload racing the expiry: the expiry wins when it lands first
     const ws = W(42);
     const r = await pkgReq(ws, { now: Date.now() - 48 * HOUR + 50 });
@@ -394,7 +394,7 @@ describe('review round (Opus check of item i)', () => {
     expect(fired()).toBe(1);
     const decided = await pkgReq(W(62), { now: cairo('2027-07-01T13:00:00Z') });
     await proof(W(62), decided.id, PNG, cairo('2027-07-01T13:00:00Z'));
-    await confirmInstapay(env, { id: decided.id, actor: OP1 });
+    await confirmInstapay(env, { id: decided.id, actor: OP1, bankRef: 'AUTO-REF-5' });
     await workspace(W(62)).runDueTasks(due + 1);
     expect(spy.mock.calls.filter((c) => String(c[0]).includes('instapay_proof_overdue') && String(c[0]).includes(decided.id))).toHaveLength(0);
   });

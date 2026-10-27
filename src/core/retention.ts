@@ -68,7 +68,7 @@ export function purgeBatch(sql: SqlStorage, cutoff: number, batch: number): numb
   // A conversation-updated event carries the last message's preview: drop them, a client re-reads the list.
   for (const c of conversations) sql.exec("DELETE FROM events WHERE json_extract(payload, '$.type') = 'conversation.updated' AND json_extract(payload, '$.conversation.id') = ?", c);
   for (const k of keys) {
-    if (sql.exec('SELECT 1 FROM messages WHERE body_r2_key = ?1 OR media_r2_key = ?1 LIMIT 1', k).toArray().length) continue; // still referenced
+    if (stillReferenced(sql, k)) continue; // still referenced
     sql.exec('INSERT OR IGNORE INTO r2_pending_deletes (key) VALUES (?)', k);
     sql.exec('DELETE FROM uploads WHERE r2_key = ?', k);
   }
@@ -81,3 +81,17 @@ export function purgeOldEvents(sql: SqlStorage, cutoff: number): void {
 }
 
 export const hasExpired = (sql: SqlStorage, cutoff: number): boolean => sql.exec('SELECT 1 FROM messages WHERE created_at < ? LIMIT 1', cutoff).toArray().length > 0;
+
+/**
+ * The one "is this R2 key still referenced by a message?" query (retention, erasure of one contact). Two lookups, one per column, each on its partial index
+ * (messages_body_r2 / messages_media_r2, DO migration v37), so the check costs two index probes instead of a scan of every message per key. With
+ * `exceptConversation` the messages of that conversation are ignored (the contact being erased: its rows are deleted after the keys are decided).
+ * Bind: key, then (when `exceptConversation`) the conversation id.
+ */
+export const referencedElsewhereSql = (exceptConversation: boolean): string =>
+  `SELECT 1 FROM messages WHERE body_r2_key = ?1${exceptConversation ? ' AND conversation_id <> ?2' : ''} UNION ALL SELECT 1 FROM messages WHERE media_r2_key = ?1${exceptConversation ? ' AND conversation_id <> ?2' : ''} LIMIT 1`;
+export function stillReferenced(sql: SqlStorage, key: string, exceptConversation?: number): boolean {
+  return exceptConversation === undefined
+    ? sql.exec(referencedElsewhereSql(false), key).toArray().length > 0
+    : sql.exec(referencedElsewhereSql(true), key, exceptConversation).toArray().length > 0;
+}

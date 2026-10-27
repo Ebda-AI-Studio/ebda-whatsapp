@@ -19,7 +19,8 @@ import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { confirmInstapay, listForOperator, rejectInstapay, releaseInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
-import { cancelOffboarding, getOffboardingWithLog, listOffboardings, requestOffboarding, runDueOffboardings } from '../core/ops/offboarding';
+import { purgeAuditLog } from '../core/ops/audit-retention';
+import { approveOffboarding, cancelOffboarding, getOffboardingWithLog, listOffboardings, releaseAbuseHold, requestOffboarding, runDueOffboardings } from '../core/ops/offboarding';
 import { listAudit, recordAudit } from '../core/audit';
 import { subjectHash } from '../core/erasure';
 import { waIdParam } from './contacts';
@@ -258,8 +259,8 @@ const decided = (c: { json(b: unknown, s?: 200 | 403 | 404 | 409): Response }, r
 };
 operatorRoutes.post('/instapay/:id/confirm', async (c) => {
   const b = instapayConfirm.safeParse(await c.req.json().catch(() => ({})));
-  if (!b.success) return bad(c, 'bank_reference_invalid');
-  return decided(c, await confirmInstapay(c.env, { id: c.req.param('id'), actor: actor(c), ...(b.data.bankRef ? { bankRef: b.data.bankRef } : {}) }));
+  if (!b.success) return bad(c, b.error.issues[0]?.message === 'no_reference_needs_reason' ? 'reason_required' : 'bank_reference_invalid');
+  return decided(c, await confirmInstapay(c.env, { id: c.req.param('id'), actor: actor(c), ...(b.data.bankRef ? { bankRef: b.data.bankRef } : {}), ...(b.data.noReference ? { noReference: { reason: b.data.reason! } } : {}) }));
 });
 operatorRoutes.post('/instapay/:id/release', async (c) => {
   const b = instapayRelease.safeParse(await c.req.json().catch(() => null));
@@ -306,6 +307,22 @@ operatorRoutes.delete('/workspaces/:workspaceId/offboarding', async (c) => {
   if (r.ok) return c.json({ ok: true });
   return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
 });
+// OFFBOARD-2ND-APPROVER-1 and the abuse hold: a second operator approves an immediate deletion that writes off >= the InstaPay two-approval amount; an operator releases an abuse hold. Both need a reason.
+operatorRoutes.post('/workspaces/:workspaceId/offboarding/approve', async (c) => {
+  const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  const r = await approveOffboarding(c.env, { workspaceId: c.req.param('workspaceId')!, actor: actor(c), reason: b.data.reason });
+  if (r.ok) return c.json({ ok: true });
+  if (r.reason === 'not_found') return c.json({ error: 'not_found' }, 404);
+  return c.json({ error: r.reason === 'not_required' ? 'invalid_request' : 'forbidden', message: r.reason }, r.reason === 'not_required' ? 409 : 403);
+});
+operatorRoutes.post('/workspaces/:workspaceId/offboarding/release-hold', async (c) => {
+  const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  const r = await releaseAbuseHold(c.env, { workspaceId: c.req.param('workspaceId')!, actor: actor(c), reason: b.data.reason });
+  if (r.ok) return c.json({ ok: true });
+  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+});
 operatorRoutes.post('/offboardings/run', async (c) => c.json(await runDueOffboardings(c.env))); // finish an interrupted run now instead of waiting for the daily pass
 // T8: the append-only audit log (who did what to which ids). Read-only.
 // B5: a data-subject export on the subject's written request. The operator states why (kept in the audit record); the call is audited like the owner's.
@@ -318,9 +335,16 @@ operatorRoutes.get('/workspaces/:workspaceId/contacts/:waId/export', async (c) =
   if (!(await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(workspaceId).first())) return c.json({ error: 'not_found' }, 404);
   const out = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).exportContact(waId, q.data.after, q.data.limit);
   if (!out) return c.json({ error: 'not_found' }, 404);
-  await recordAudit(c.env, { workspaceId, actor: actor(c), role: 'operator', action: 'contact.export', targetType: 'waId', targetId: await subjectHash(c.env, workspaceId, waId), detail: { messages: out.messages.length, after: q.data.after, reason: reason.data } });
+  await recordAudit(c.env, { workspaceId, actor: actor(c), role: 'operator', action: 'contact.export', targetType: 'waId', targetId: await subjectHash(c.env, workspaceId, waId), detail: { messages: out.messages.length, after: q.data.after }, reason: reason.data });
   c.header('cache-control', 'no-store');
   return c.json(out);
+});
+
+// AUDIT-RETENTION-1: rows past the retention are purged by ONE controlled batch (drop the append-only triggers, delete, audit the purge, re-create the triggers).
+operatorRoutes.post('/audit-log/purge', async (c) => {
+  const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  return c.json(await purgeAuditLog(c.env, { actor: actor(c), reason: b.data.reason }));
 });
 
 operatorRoutes.get('/audit-log', async (c) => {

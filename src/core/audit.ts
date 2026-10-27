@@ -14,7 +14,13 @@ import { alert, maskPhones } from './observability';
  * gap a human is told about. Cost if wrong: an action during a D1 outage has no row; the Worker log line (`audit`) still names it.
  */
 export type AuditRole = 'owner' | 'staff' | 'operator' | 'integration' | 'system';
-export type AuditEntry = { workspaceId?: string | null; actor: string; role: AuditRole; action: string; targetType?: string | null; targetId?: string | null; detail?: Record<string, string | number | boolean | null>; status?: number };
+export type AuditEntry = {
+  workspaceId?: string | null; actor: string; role: AuditRole; action: string; targetType?: string | null; targetId?: string | null; detail?: Record<string, string | number | boolean | null>; status?: number;
+  /** Free text an operator typed (AUDIT-RETENTION-1): never in the append-only log; kept, phone numbers masked, in the deletable `audit_reasons`. */
+  reason?: string;
+};
+/** `detail` is for structured facts only: a key like these would carry free text (and a phone number) into a table nothing can edit. */
+const FREE_TEXT_KEY = /^(reason|note|notes|text|message|body|comment|caption)$/i;
 
 /** High-volume routes whose every call would swamp the log; the content they touch is already in the workspace. */
 const SKIP = [/^POST \/stores\/:storeId\/conversations\/:conversationId\/messages$/, /^POST \/stores\/:storeId\/conversations\/:conversationId\/read$/, /^POST \/stores\/:storeId\/media$/];
@@ -23,8 +29,13 @@ const PHONE_LIKE = /^\+?\d{8,}$/;
 export async function recordAudit(env: Env, e: AuditEntry, now = Date.now()): Promise<void> {
   try {
     const targetId = e.targetId == null ? null : (maskPhones(e.targetId) ?? null)?.slice(0, 128) ?? null;
-    await env.DB.prepare('INSERT INTO audit_log (at, workspace_id, actor, actor_role, action, target_type, target_id, detail, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(now, e.workspaceId ?? null, e.actor, e.role, e.action.slice(0, 200), e.targetType ?? null, targetId, e.detail ? JSON.stringify(e.detail) : null, e.status ?? 200).run();
+    const detail = e.detail ? Object.fromEntries(Object.entries(e.detail).filter(([k]) => !FREE_TEXT_KEY.test(k))) : null;
+    const stmts = [
+      env.DB.prepare('INSERT INTO audit_log (at, workspace_id, actor, actor_role, action, target_type, target_id, detail, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(now, e.workspaceId ?? null, e.actor, e.role, e.action.slice(0, 200), e.targetType ?? null, targetId, detail && Object.keys(detail).length ? JSON.stringify(detail) : null, e.status ?? 200),
+      ...(e.reason && e.workspaceId ? [env.DB.prepare('INSERT INTO audit_reasons (at, workspace_id, actor, action, reason) VALUES (?, ?, ?, ?, ?)').bind(now, e.workspaceId, e.actor, e.action.slice(0, 200), (maskPhones(e.reason) ?? '').slice(0, 300))] : []),
+    ];
+    await env.DB.batch(stmts);
     console.log(JSON.stringify({ audit: 'action', workspace: e.workspaceId ?? null, role: e.role, action: e.action, status: e.status ?? 200 }));
   } catch {
     alert('audit_write_failed', { ...(e.workspaceId ? { workspace: e.workspaceId } : {}), action: e.action });

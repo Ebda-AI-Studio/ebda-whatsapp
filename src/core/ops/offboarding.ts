@@ -1,6 +1,9 @@
 import type { Env } from '../../env';
 import { alert, errClass } from '../observability';
 import { parkedPrefix } from '../shared/shared-number';
+import { pseudonymiseAuditActors } from './audit-retention';
+import { adjustmentThreshold } from '../billing/operator';
+import { DRAIN_MAX_BATCHES, drainKeyset } from '../billing/drain';
 
 /**
  * Workspace deletion (OFFBOARD-1, B2). An owner or an operator asks; after a cooling-off window (14 days, an operator may skip it with a reason) a
@@ -29,6 +32,7 @@ export const OFFBOARD_TABLES = {
     phone_numbers: 'workspace_id', waba_credentials: 'workspace_id', shared_number_members: 'workspace_id', shared_routes: 'workspace_id', shared_sent: 'workspace_id',
     shared_number_sends: 'workspace_id', shared_number_strikes: 'workspace_id', shared_number_errors: 'workspace_id', workspace_subscriptions: 'workspace_id',
     store_plan_applied: 'workspace_id',
+    audit_reasons: 'workspace_id', // operators' free-text reasons (AUDIT-RETENTION-1): deletable on purpose
     erasure_records: 'workspace_id', // the workspace's backups are erased with it, so nothing is left for a restore to bring back
   } as Record<string, string>,
   keep: {
@@ -48,22 +52,75 @@ export const OFFBOARD_TABLES = {
 export type OffboardingStatus = {
   workspaceId: string; state: 'pending' | 'running' | 'done' | 'cancelled'; requestedBy: string; requestedRole: 'owner' | 'operator'; reason: string | null;
   requestedAt: number; executeAfter: number; writeOffMinor: number; stepsDone: string[]; attempts: number; lastError: string | null; finishedAt: number | null;
+  /** OFFBOARD-2ND-APPROVER-1: an immediate deletion with a write-off at or above the InstaPay two-approval threshold waits for a second operator. True until one approved THIS request. */
+  needsSecondApproval: boolean;
 };
 type Row = {
   workspace_id: string; state: OffboardingStatus['state']; requested_by: string; requested_role: 'owner' | 'operator'; reason: string | null; requested_at: number; execute_after: number;
   write_off_minor: number; started_at: number | null; finished_at: number | null; steps_done: string; attempts: number; last_error: string | null; pseudonym: string | null;
 };
-const dto = (r: Row): OffboardingStatus => ({
+const dto = (r: Row, needsSecondApproval = false): OffboardingStatus => ({
   workspaceId: r.workspace_id, state: r.state, requestedBy: r.requested_by, requestedRole: r.requested_role, reason: r.reason, requestedAt: r.requested_at, executeAfter: r.execute_after,
-  writeOffMinor: r.write_off_minor, stepsDone: r.steps_done ? r.steps_done.split(',') : [], attempts: r.attempts, lastError: r.last_error, finishedAt: r.finished_at,
+  writeOffMinor: r.write_off_minor, stepsDone: r.steps_done ? r.steps_done.split(',') : [], attempts: r.attempts, lastError: r.last_error, finishedAt: r.finished_at, needsSecondApproval,
 });
 const stub = (env: Env, ws: string) => env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(ws));
 const logRow = (env: Env, ws: string, actor: string, action: string, now: number, reason?: string | null, detail?: string) =>
   env.DB.prepare('INSERT INTO offboarding_log (at, workspace_id, actor, action, reason, detail) VALUES (?, ?, ?, ?, ?, ?)').bind(now, ws, actor, action, reason ?? null, detail ?? null);
 
+
+// ---- second approver (OFFBOARD-2ND-APPROVER-1) and operator holds -----------------------------------------------------------------
+
+/** Does the rule apply to this row (an operator's deletion brought forward from the 14 days, writing off at least the InstaPay two-approval amount)? */
+const approvalRule = (env: Env, r: Row): boolean =>
+  r.requested_role === 'operator' && r.execute_after < r.requested_at + COOLING_OFF_MS && r.write_off_minor >= adjustmentThreshold(env) && (r.state === 'pending' || r.state === 'running');
+/** Everyone who touched this request or released a hold on it: none of them may be the second approver. */
+async function involvedActors(env: Env, ws: string): Promise<Set<string>> {
+  const { results } = await env.DB.prepare("SELECT DISTINCT actor FROM offboarding_log WHERE workspace_id = ? AND action IN ('requested', 'taken_over', 'operator_changed', 'write_off_accepted', 'abuse_hold_released')").bind(ws).all<{ actor: string }>();
+  return new Set(results.map((x) => x.actor));
+}
+/** The approval counts only for the exact request it was given for: any later change of date, write-off or requester voids it. */
+async function approvedBy(env: Env, r: Row): Promise<string | null> {
+  const { results } = await env.DB.prepare("SELECT actor, detail FROM offboarding_log WHERE workspace_id = ? AND action = 'second_approval' ORDER BY id DESC").bind(r.workspace_id).all<{ actor: string; detail: string | null }>();
+  for (const a of results) {
+    try {
+      const d = JSON.parse(a.detail ?? '{}') as { executeAfter?: number; writeOffMinor?: number; requestedBy?: string };
+      if (d.executeAfter === r.execute_after && d.writeOffMinor === r.write_off_minor && d.requestedBy === r.requested_by && a.actor !== r.requested_by) return a.actor;
+    } catch { /* not ours */ }
+  }
+  return null;
+}
+async function needsApproval(env: Env, r: Row): Promise<boolean> {
+  return approvalRule(env, r) && !(await approvedBy(env, r));
+}
+
+export type ApproveResult = { ok: true } | { ok: false; reason: 'not_found' | 'not_required' | 'requester_cannot_approve' | 'releaser_cannot_approve' };
+export async function approveOffboarding(env: Env, a: { workspaceId: string; actor: string; reason: string }, now = Date.now()): Promise<ApproveResult> {
+  const r = await env.DB.prepare("SELECT * FROM offboarding WHERE workspace_id = ? AND state IN ('pending', 'running')").bind(a.workspaceId).first<Row>();
+  if (!r) return { ok: false, reason: 'not_found' };
+  if (!approvalRule(env, r)) return { ok: false, reason: 'not_required' };
+  if (a.actor === r.requested_by) return { ok: false, reason: 'requester_cannot_approve' };
+  if ((await involvedActors(env, a.workspaceId)).has(a.actor)) return { ok: false, reason: 'releaser_cannot_approve' };
+  await logRow(env, a.workspaceId, a.actor, 'second_approval', now, a.reason, JSON.stringify({ executeAfter: r.execute_after, writeOffMinor: r.write_off_minor, requestedBy: r.requested_by })).run();
+  return { ok: true };
+}
+
+export type ReleaseHoldResult = { ok: true } | { ok: false; reason: 'not_found' | 'not_held' };
+/** An operator lifts the abuse hold (a suspension for abuse keeps its evidence until a person says it may go). Audited with the reason. */
+export async function releaseAbuseHold(env: Env, a: { workspaceId: string; actor: string; reason: string }, now = Date.now()): Promise<ReleaseHoldResult> {
+  const r = await env.DB.prepare("SELECT 1 FROM offboarding WHERE workspace_id = ? AND state IN ('pending', 'running')").bind(a.workspaceId).first();
+  if (!r) return { ok: false, reason: 'not_found' };
+  if (!(await abuseSuspended(env, a.workspaceId))) return { ok: false, reason: 'not_held' };
+  await logRow(env, a.workspaceId, a.actor, 'abuse_hold_released', now, a.reason).run();
+  return { ok: true };
+}
+async function abuseSuspended(env: Env, ws: string): Promise<boolean> {
+  const w = await env.DB.prepare('SELECT suspended_at, suspended_reason FROM workspaces WHERE id = ?').bind(ws).first<{ suspended_at: number | null; suspended_reason: string | null }>();
+  return !!w && w.suspended_at !== null && w.suspended_reason !== 'offboarding';
+}
+
 export async function getOffboarding(env: Env, ws: string): Promise<OffboardingStatus | null> {
   const r = await env.DB.prepare('SELECT * FROM offboarding WHERE workspace_id = ?').bind(ws).first<Row>();
-  return r ? dto(r) : null;
+  return r ? dto(r, await needsApproval(env, r)) : null;
 }
 /** The status with its audit trail, newest last (what the operator console shows). */
 export async function getOffboardingWithLog(env: Env, ws: string): Promise<(OffboardingStatus & { log: { at: number; actor: string; action: string; reason: string | null }[] }) | null> {
@@ -74,7 +131,9 @@ export async function getOffboardingWithLog(env: Env, ws: string): Promise<(Offb
 }
 export async function listOffboardings(env: Env, state?: string): Promise<OffboardingStatus[]> {
   const q = state ? env.DB.prepare('SELECT * FROM offboarding WHERE state = ? ORDER BY execute_after LIMIT 200').bind(state) : env.DB.prepare('SELECT * FROM offboarding ORDER BY requested_at DESC LIMIT 200');
-  return (await q.all<Row>()).results.map(dto);
+  const out: OffboardingStatus[] = [];
+  for (const r of (await q.all<Row>()).results) out.push(dto(r, await needsApproval(env, r)));
+  return out;
 }
 /** True once a deletion has started: the workspace is being (or has been) erased, so late queue messages for it are dropped instead of retried. */
 export async function isOffboarding(env: Env, ws: string): Promise<boolean> {
@@ -101,7 +160,24 @@ export async function requestOffboarding(
   if (!ws) return { ok: false, reason: 'not_found' };
   if (!(await pseudonymFor(env, a.workspaceId))) return { ok: false, reason: 'no_key' }; // never promise a deletion that could not keep its money records safely
   const existing = await env.DB.prepare('SELECT * FROM offboarding WHERE workspace_id = ?').bind(a.workspaceId).first<Row>();
-  if (existing?.state === 'running') return { ok: false, reason: 'already_running' };
+  if (existing?.state === 'running') {
+    // A run held because the balance grew past the write-off may be released by an OPERATOR who accepts the new amount (audited). Nothing else changes a running row.
+    const done = new Set(existing.steps_done ? existing.steps_done.split(',') : []);
+    if (a.role === 'operator' && existing.last_error === 'held:balance_grew' && !done.has('wipe_do')) {
+      const balance = Math.max(0, (await stub(env, a.workspaceId).walletView(now)).balanceMinor);
+      if (balance > existing.write_off_minor) {
+        if (!a.acceptWriteOff) return { ok: false, reason: 'write_off_required', amountMinor: balance };
+        const detail = JSON.stringify({ previous: { write_off_minor: existing.write_off_minor }, new: { write_off_minor: balance } });
+        const [upd] = await env.DB.batch([
+          env.DB.prepare("UPDATE offboarding SET write_off_minor = ?, requested_by = ?, last_error = NULL WHERE workspace_id = ? AND state = 'running' AND write_off_minor = ?").bind(balance, a.actor, a.workspaceId, existing.write_off_minor),
+          logRow(env, a.workspaceId, a.actor, 'write_off_accepted', now, a.reason, detail),
+        ]);
+        if (!upd!.meta.changes) return { ok: false, reason: 'already_running' };
+        return { ok: true, value: (await getOffboarding(env, a.workspaceId))! };
+      }
+    }
+    return { ok: false, reason: 'already_running' };
+  }
   if (existing?.state === 'done') return { ok: false, reason: 'already_deleted' };
   const executeAfter = a.immediate && a.role === 'operator' ? now : now + COOLING_OFF_MS;
   if (existing?.state === 'pending') {
@@ -132,7 +208,7 @@ export async function requestOffboarding(
         .bind(now, a.workspaceId, a.actor, takenOver ? 'taken_over' : 'operator_changed', reason, detail, a.workspaceId, a.actor),
     ]);
     if (!upd!.meta.changes) return { ok: false, reason: 'already_running' };
-    return { ok: true, value: dto({ ...existing, requested_role: 'operator', requested_by: a.actor, reason, execute_after: after, write_off_minor: writeOff }) };
+    return { ok: true, value: (await getOffboarding(env, a.workspaceId))! };
   }
   const balance = (await stub(env, a.workspaceId).walletView(now)).balanceMinor;
   if (balance > 0 && !a.acceptWriteOff) return { ok: false, reason: 'wallet_balance_remains' };
@@ -163,16 +239,37 @@ export async function cancelOffboarding(env: Env, a: { workspaceId: string; acto
   return { ok: true };
 }
 
-/** Work in flight that a deletion must not cut off: an open refund, a card refund, or a payment still being confirmed. Null = clear to go. */
-async function heldReason(env: Env, ws: string, now: number): Promise<string | null> {
+/**
+ * Work in flight that a deletion must not cut off. Null = clear to go. Money is held on ANY open row however old (a late confirmation would otherwise credit a
+ * deleted workspace, review item 2): an open refund, a card refund, a top-up or package order still pending, a paid-but-ungranted order, an InstaPay request
+ * awaiting proof or review (or confirmed and not granted).
+ */
+async function moneyHold(env: Env, ws: string): Promise<string | null> {
   const q = (sql: string, ...p: unknown[]) => env.DB.prepare(sql).bind(...p).first();
   if (await q("SELECT 1 FROM refund_requests WHERE workspace_id = ? AND state IN ('pending', 'processing', 'manual_payout', 'abandoning')", ws)) return 'open_refund';
   if (await q("SELECT 1 FROM card_refunds WHERE workspace_id = ? AND state IN ('planned', 'sending', 'calling', 'pending', 'uncertain', 'held')", ws)) return 'open_card_refund';
-  const recent = now - 2 * 86_400_000;
-  if (await q("SELECT 1 FROM topups WHERE workspace_id = ? AND state = 'pending' AND created_at > ?", ws, recent)) return 'payment_in_flight';
-  if (await q("SELECT 1 FROM package_orders WHERE workspace_id = ? AND status IN ('pending') AND created_at > ?", ws, recent)) return 'payment_in_flight';
-  if (await q("SELECT 1 FROM instapay_requests WHERE workspace_id = ? AND state IN ('awaiting_proof', 'under_review') AND created_at > ?", ws, recent - 5 * 86_400_000)) return 'payment_in_flight';
+  if (await q("SELECT 1 FROM topups WHERE workspace_id = ? AND state = 'pending'", ws)) return 'payment_in_flight';
+  if (await q("SELECT 1 FROM package_orders WHERE workspace_id = ? AND (status = 'pending' OR (status = 'paid' AND granted_at IS NULL))", ws)) return 'payment_in_flight';
+  if (await q("SELECT 1 FROM instapay_requests WHERE workspace_id = ? AND (state IN ('awaiting_proof', 'under_review') OR (state = 'confirmed' AND granted_at IS NULL))", ws)) return 'payment_in_flight';
   return null;
+}
+
+/** Before anything is touched: money in flight, an abuse suspension nobody released, a missing second approval. */
+async function startHold(env: Env, row: Row): Promise<string | null> {
+  const ws = row.workspace_id;
+  const money = await moneyHold(env, ws);
+  if (money) return money;
+  if (await abuseSuspended(env, ws)) {
+    const released = await env.DB.prepare("SELECT 1 FROM offboarding_log WHERE workspace_id = ? AND action = 'abuse_hold_released' AND at >= ? LIMIT 1").bind(ws, row.requested_at).first();
+    if (!released) return 'suspended_abuse';
+  }
+  if (await needsApproval(env, row)) return 'second_approval_required';
+  return null;
+}
+/** Right before the wipe: a balance that grew beyond what the owner (or an operator) agreed to give up is never erased silently (review item 1). */
+async function balanceHold(env: Env, row: Row, now: number): Promise<string | null> {
+  const balance = Math.max(0, (await stub(env, row.workspace_id).walletView(now)).balanceMinor);
+  return balance > row.write_off_minor ? 'balance_grew' : null;
 }
 
 /** Deletes one prefix's objects, a bounded number of pages. Returns true when the prefix is empty. */
@@ -233,6 +330,8 @@ async function runStep(env: Env, ws: string, step: Step, pseudo: string, now: nu
       return;
     }
     case 'd1': {
+      // A backup that was still being written when the backups step listed the prefix (the wipe now waits for it, but a Durable Object restart can still race): list again.
+      if (!(await deletePrefix(env.BACKUPS, `backups/${ws}/`))) throw new Unfinished();
       const stmts: D1PreparedStatement[] = [
         env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(pseudo, 'deleted workspace', now),
       ];
@@ -241,6 +340,7 @@ async function runStep(env: Env, ws: string, step: Step, pseudo: string, now: nu
         const sets = ['workspace_id = ?', ...k.people.map((c) => `${c} = ?`), ...k.clear.map((c) => `${c} = NULL`)];
         stmts.push(env.DB.prepare(`UPDATE ${t} SET ${sets.join(', ')} WHERE workspace_id = ?`).bind(pseudo, ...k.people.map(() => pseudo), ws));
       }
+      stmts.push(...pseudonymiseAuditActors(env, ws, pseudo)); // the merchant's user ids in audit_log, through the controlled drop / update / re-create sequence (one transaction with the rest)
       stmts.push(env.DB.prepare('DELETE FROM workspaces WHERE id = ?').bind(ws));
       await env.DB.batch(stmts);
       return;
@@ -257,14 +357,19 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now(), hoo
   if (!row || (row.state !== 'pending' && row.state !== 'running') || row.execute_after > now) return 'skipped';
   await hooks.afterRead?.();
   const done = new Set(row.steps_done ? row.steps_done.split(',') : []);
+  const hold = async (reason: string): Promise<'held'> => {
+    const first = row.last_error !== `held:${reason}`;
+    await env.DB.prepare("UPDATE offboarding SET last_error = ? WHERE workspace_id = ? AND state IN ('pending', 'running')").bind(`held:${reason}`, ws).run();
+    if (first) alert('offboarding_held', { workspace: ws, reason });
+    return 'held';
+  };
   if (done.size === 0) {
-    const held = await heldReason(env, ws, now);
-    if (held) {
-      const first = row.last_error !== `held:${held}`;
-      await env.DB.prepare("UPDATE offboarding SET last_error = ? WHERE workspace_id = ? AND state = 'pending'").bind(`held:${held}`, ws).run();
-      if (first) alert('offboarding_held', { workspace: ws, reason: held });
-      return 'held';
-    }
+    const held = await startHold(env, row);
+    if (held) return hold(held);
+  }
+  if (!done.has('wipe_do')) {
+    const grew = await balanceHold(env, row, now);
+    if (grew) return hold(grew);
   }
   const pseudo = await pseudonymFor(env, ws);
   if (!pseudo) {
@@ -283,6 +388,11 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now(), hoo
     // Re-checked before EVERY step: a cancel that lands mid-run stops the next (irreversible) step.
     const live = await env.DB.prepare("SELECT 1 FROM offboarding WHERE workspace_id = ? AND state = 'running'").bind(ws).first();
     if (!live) return 'skipped';
+    // The point of no return: the balance is read again right before the wipe (a credit may have landed since the first check).
+    if (step === 'wipe_do') {
+      const grew = await balanceHold(env, row, now);
+      if (grew) return hold(grew);
+    }
     try {
       const detail = await runStep(env, ws, step, pseudo, now);
       done.add(step);
@@ -305,15 +415,29 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now(), hoo
   return 'done';
 }
 
-/** The daily pass (and the operator's "run now"): every due or interrupted deletion, one at a time. */
-export async function runDueOffboardings(env: Env, now = Date.now()): Promise<{ processed: number; failed: number; held: number }> {
-  const due = (await env.DB.prepare("SELECT workspace_id FROM offboarding WHERE state IN ('pending', 'running') AND execute_after <= ? ORDER BY execute_after LIMIT 20").bind(now).all<{ workspace_id: string }>()).results;
+/** Rows read per page by the daily pass; a test passes smaller numbers. */
+export const OFFBOARD_PAGE = 20;
+/**
+ * The daily pass (and the operator's "run now"): every due or interrupted deletion, one at a time, paged by KEYSET (execute_after, workspace_id) so held rows
+ * can never starve a later one (the M-178 class). A pass that stops with due rows left raises `offboarding_backlog` (P1).
+ */
+export async function runDueOffboardings(env: Env, now = Date.now(), opts: { pageSize?: number; maxBatches?: number } = {}): Promise<{ processed: number; failed: number; held: number }> {
   const out = { processed: 0, failed: 0, held: 0 };
-  for (const { workspace_id } of due) {
-    const r = await runOffboarding(env, workspace_id, now);
-    if (r === 'done') out.processed++;
-    else if (r === 'failed' || r === 'unfinished') out.failed++;
-    else if (r === 'held') out.held++;
-  }
+  const pageSize = opts.pageSize ?? OFFBOARD_PAGE;
+  const { capped } = await drainKeyset<{ workspace_id: string; execute_after: number }, { at: number; ws: string }>({
+    name: 'offboarding', pageSize, maxBatches: opts.maxBatches ?? DRAIN_MAX_BATCHES,
+    page: async (after) => (await env.DB.prepare(
+      `SELECT workspace_id, execute_after FROM offboarding WHERE state IN ('pending', 'running') AND execute_after <= ?1
+         AND (?2 IS NULL OR execute_after > ?2 OR (execute_after = ?2 AND workspace_id > ?3)) ORDER BY execute_after, workspace_id LIMIT ?4`,
+    ).bind(now, after?.at ?? null, after?.ws ?? '', pageSize).all<{ workspace_id: string; execute_after: number }>()).results,
+    cursorOf: (r) => ({ at: r.execute_after, ws: r.workspace_id }),
+    handle: async (r) => {
+      const res = await runOffboarding(env, r.workspace_id, now);
+      if (res === 'done') out.processed++;
+      else if (res === 'failed' || res === 'unfinished') out.failed++;
+      else if (res === 'held') out.held++;
+    },
+  });
+  if (capped) alert('offboarding_backlog', { severity: 'P1', processed: out.processed, held: out.held, failed: out.failed });
   return out;
 }

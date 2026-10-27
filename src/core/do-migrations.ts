@@ -473,6 +473,9 @@ export const DO_MIGRATIONS: readonly string[] = [
   `CREATE INDEX messages_created ON messages (created_at);
    ALTER TABLE contacts ADD COLUMN name_edited INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE events ADD COLUMN at INTEGER;`, // events.at: the realtime log is purged by age too
+  // v37 (W2 review): "is this R2 key still referenced by a message?" (retention purge, erasure of one contact) probes these two partial indexes instead of scanning every message per key.
+  `CREATE INDEX messages_body_r2 ON messages (body_r2_key) WHERE body_r2_key IS NOT NULL;
+   CREATE INDEX messages_media_r2 ON messages (media_r2_key) WHERE media_r2_key IS NOT NULL;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

@@ -346,7 +346,7 @@ export const offboardingDto = z.object({
 /** GET /operator/workspaces/:id/offboarding and the list: the status plus the audit trail of the request (previous values are in `detail`). */
 export const operatorOffboardingDto = z.object({
   workspaceId: z.string(), state: z.enum(['pending', 'running', 'done', 'cancelled']), requestedBy: z.string(), requestedRole: z.enum(['owner', 'operator']), reason: z.string().nullable(),
-  requestedAt: z.number().int(), executeAfter: z.number().int(), writeOffMinor: z.number().int(), stepsDone: z.array(z.string()), attempts: z.number().int(), lastError: z.string().nullable(), finishedAt: z.number().int().nullable(),
+  requestedAt: z.number().int(), executeAfter: z.number().int(), writeOffMinor: z.number().int(), stepsDone: z.array(z.string()), attempts: z.number().int(), lastError: z.string().nullable(), finishedAt: z.number().int().nullable(), needsSecondApproval: z.boolean().optional(),
   log: z.array(z.object({ at: z.number().int(), actor: z.string(), action: z.string(), reason: z.string().nullable() })).optional(),
 });
 /** An operator asks (a reason is required and audited); `immediate` skips the cooling-off. */
@@ -507,7 +507,10 @@ export const operatorInstapayDto = instapayRequestDto.extend({
   heldReason: z.enum(['duplicate_image', 'duplicate_reference']).nullable().optional(), heldOf: z.string().nullable().optional(), bankRef: z.string().nullable().optional(),
 });
 /** Confirming may carry the bank's own transaction reference, read from the proof (optional; a re-used one is refused). */
-export const instapayConfirm = z.object({ bankRef: z.string().trim().min(1).max(60).optional() }).strict();
+/** DUP-REF-REQUIRED-1: the bank reference is required for every amount; a proof that shows none is confirmed with `noReference: true` and a reason (audited). */
+export const instapayConfirm = z.object({ bankRef: z.string().trim().min(1).max(60).optional(), noReference: z.literal(true).optional(), reason: z.string().trim().min(5).max(300).optional() }).strict()
+  .refine((b) => !b.noReference || (!b.bankRef && !!b.reason), { message: 'no_reference_needs_reason' })
+  .refine((b) => b.noReference || !b.reason, { message: 'reason_only_with_no_reference' });
 export const instapayRelease = z.object({ reason: z.string().trim().min(5).max(300) });
 export const instapayReject = z.object({ reason: z.string().trim().min(3).max(300) });
 export const refundRequestCreate = z.object({ amountMinor: z.number().int().min(5000), note: z.string().trim().max(500).optional() });

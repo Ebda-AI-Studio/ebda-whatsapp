@@ -6,6 +6,7 @@ import type { Env } from '../../env';
 import { RATE_LEAD_MS, SETTINGS_LEAD_MS } from './pricing';
 import { monthRange } from './statement';
 import { alert } from '../observability';
+import { refuseIfOffboarded } from '../ops/offboarded';
 
 const SKEW_MS = 5_000;
 
@@ -122,6 +123,7 @@ const ADJ_COLS = 'id, workspace_id, amount_minor, reason, requested_by, state, a
 const stubOf = (env: Env, ws: string) => env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(ws));
 
 async function applyAdjustment(env: Env, r: Adj, now: number): Promise<void> {
+  if (await refuseIfOffboarded(env, r.workspace_id, 'adjustment', r.id, now)) return; // a deleted workspace has no wallet; credit_after_offboard (P1) was raised
   const res = await stubOf(env, r.workspace_id).postWallet({ kind: 'adjustment', netMinor: r.amount_minor, ref: `adj:${r.id}`, actor: r.requested_by, note: r.reason }, now);
   if (!res.ok && res.reason !== 'duplicate') throw new Error(`adjustment refused: ${res.reason}`);
 }

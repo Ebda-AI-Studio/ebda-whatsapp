@@ -115,7 +115,10 @@ export async function dropErased(env: Env, workspaceId: string, files: BackupFil
     const f = get(t.table);
     if (f) f.rows = f.rows.filter((r) => !matches(t.by, r));
   }
+  // An upload row goes only if no KEPT message still references its key (a campaign image shared with other contacts stays).
+  const kept = new Set<string>();
+  for (const m of rowsOf('messages')) for (const k of [m.body_r2_key, m.media_r2_key]) if (k) kept.add(String(k));
   const uploads = get('uploads');
-  if (uploads) uploads.rows = uploads.rows.filter((r) => !r2Keys.has(String(r.r2_key)));
+  if (uploads) uploads.rows = uploads.rows.filter((r) => !r2Keys.has(String(r.r2_key)) || kept.has(String(r.r2_key)));
   return drop.size;
 }

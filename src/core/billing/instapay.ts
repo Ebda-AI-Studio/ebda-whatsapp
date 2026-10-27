@@ -21,7 +21,8 @@ import type { InstapayPayee } from './instapay-payee';
 import { adjustmentThreshold } from './operator';
 import { ORDER_COLS, grantOrder, planPurchase, type PackageOrderRow, type PurchasePlan } from './package-orders';
 import { MAX_TOPUP_MINOR, MIN_TOPUP_MINOR, TOPUP_COLS, credit, type TopupRow } from './topups';
-import { alert } from '../observability';
+import { alert, maskPhones } from '../observability';
+import { frozenForOffboarding } from '../ops/offboarded';
 import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
 
 export type { InstapayPayee };
@@ -31,6 +32,8 @@ export const MAX_OPEN_PER_WORKSPACE = 5;
 /** A proof that waits longer than this many business hours (Sun-Thu 09:00-17:00 Cairo) raises the overdue alert once. */
 export const REVIEW_SLA_BUSINESS_MS = 4 * 3_600_000;
 export const PROOF_LINK_TTL_MS = 2 * 60_000;
+/** DUP-REF-REQUIRED-1: two no-reference confirms for one workspace and amount inside this window hold the second. */
+export const NO_REF_WINDOW_MS = 7 * 86_400_000;
 
 export const instapayEnabled = (env: Env): boolean => env.INSTAPAY_BILLING_ENABLED === 'true';
 const stubOf = (env: Env, ws: string) => env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(ws));
@@ -66,9 +69,10 @@ function newReference(): string {
 }
 
 export type CreateInput = { kind: 'package'; packageId: string } | { kind: 'topup'; amountMinor: number };
-export type CreateResult = { ok: true; request: InstapayRequestDto } | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'invalid_amount' | 'unknown_package' | 'too_many_open' | 'yearly_queued' };
+export type CreateResult = { ok: true; request: InstapayRequestDto } | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'invalid_amount' | 'unknown_package' | 'too_many_open' | 'yearly_queued' | 'offboarding' };
 
 export async function createInstapayRequest(env: Env, a: { workspaceId: string; userId: string; sessionId: string; input: CreateInput; payee: InstapayPayee | null }, now = Date.now()): Promise<CreateResult> {
+  if (await frozenForOffboarding(env, a.workspaceId)) return { ok: false, reason: 'offboarding' }; // OFFBOARD-FREEZE-1
   if (!instapayEnabled(env)) return { ok: false, reason: 'disabled' };
   if (!a.payee) return { ok: false, reason: 'unavailable' }; // without payee details the merchant would see an empty address: fail closed
   const session = await sessionState(env, a.sessionId);
@@ -246,7 +250,7 @@ async function audit(env: Env, a: { at: number; actor: string; action: string; w
 
 export type DecideResult =
   | { ok: true; request: OperatorInstapayDto; needsSecond?: true }
-  | { ok: false; reason: 'not_found' | 'not_reviewable' | 'self_approval_refused' | 'second_approver_required' | 'amount_mismatch' | 'held' | 'duplicate_reference' | 'bad_reference' | 'releaser_cannot_approve' | 'bank_reference_required' | 'reference_mismatch' };
+  | { ok: false; reason: 'not_found' | 'not_reviewable' | 'self_approval_refused' | 'second_approver_required' | 'amount_mismatch' | 'held' | 'duplicate_reference' | 'bad_reference' | 'releaser_cannot_approve' | 'bank_reference_required' | 'reference_mismatch' | 'reason_required' };
 
 /** Grants what the request paid for, through the card payment's own paths. Idempotent: the reference decides, so a retry changes nothing. */
 async function grant(env: Env, r: Row, now: number): Promise<void> {
@@ -258,7 +262,9 @@ async function grant(env: Env, r: Row, now: number): Promise<void> {
   } else {
     const t = await env.DB.prepare(`SELECT ${TOPUP_COLS} FROM topups WHERE order_id = ?`).bind(r.id).first<TopupRow>();
     if (!t || t.amount_minor !== r.amount_minor) throw new Error('instapay order does not match its request');
-    if ((await credit(env, t, ref, now, ref)) === 'conflict') throw new Error('instapay top-up is bound to another transaction');
+    const c = await credit(env, t, ref, now, ref);
+    if (c === 'conflict') throw new Error('instapay top-up is bound to another transaction');
+    if (c === 'offboarded') return; // credit_after_offboard (P1) was raised: granted_at stays empty and a person refunds the transfer
   }
   await env.DB.prepare('UPDATE instapay_requests SET granted_at = coalesce(granted_at, ?) WHERE id = ?').bind(now, r.id).run();
 }
@@ -271,7 +277,7 @@ async function orderMatches(env: Env, r: Row): Promise<boolean> {
   return !!o && o.amount_minor === r.amount_minor;
 }
 
-export async function confirmInstapay(env: Env, a: { id: string; actor: string; bankRef?: string }, now = Date.now(), depth = 0): Promise<DecideResult> {
+export async function confirmInstapay(env: Env, a: { id: string; actor: string; bankRef?: string; noReference?: { reason: string } }, now = Date.now(), depth = 0): Promise<DecideResult> {
   if (depth > 2) return { ok: false, reason: 'not_reviewable' }; // looked again twice: something keeps changing under us
   const r = await get(env, a.id);
   if (!r) return { ok: false, reason: 'not_found' };
@@ -297,13 +303,28 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
     ref = normaliseBankRef(a.bankRef);
     if (!ref) return { ok: false, reason: 'bad_reference' };
   }
+  // DUP-REF-REQUIRED-1: the bank reference is required for EVERY amount. The one way round it is an audited `noReference` with a reason, never at a two-approval amount.
+  const noRefReason = a.noReference ? a.noReference.reason.trim() : null;
+  if (a.noReference) {
+    if (ref) return { ok: false, reason: 'bad_reference' }; // a typed reference and "there is none" contradict each other
+    if (needsTwo) return { ok: false, reason: 'bank_reference_required' };
+    if (!noRefReason || noRefReason.length < 5) return { ok: false, reason: 'reason_required' };
+  } else if (!ref) {
+    return { ok: false, reason: 'bank_reference_required' };
+  }
+  if (noRefReason !== null) {
+    // A second no-reference confirm for the same workspace and amount within 7 days: the re-encoded screenshot of one transfer. HOLD it, never confirm it unseen.
+    const twin = await env.DB.prepare('SELECT id FROM instapay_requests WHERE no_reference = 1 AND state = \'confirmed\' AND workspace_id = ? AND amount_minor = ? AND decided_at > ? AND id <> ? ORDER BY decided_at LIMIT 1')
+      .bind(r.workspace_id, r.amount_minor, now - NO_REF_WINDOW_MS, r.id).first<{ id: string }>();
+    if (twin) return holdForReference(env, r, twin.id, now);
+  }
   // A two-approval amount: the reference is REQUIRED at both approvals, the second must repeat the first's, and the duplicate check runs at both.
   if (needsTwo) {
     if (!ref) return { ok: false, reason: 'bank_reference_required' };
     if (r.first_approver !== null && r.pending_bank_ref !== ref) return { ok: false, reason: 'reference_mismatch' };
   }
   if (ref) {
-    const other = await env.DB.prepare('SELECT id FROM instapay_requests WHERE (bank_ref = ?1 OR pending_bank_ref = ?1) AND id <> ?2 LIMIT 1').bind(ref, r.id).first<{ id: string }>();
+    const other = await env.DB.prepare('SELECT id FROM instapay_requests WHERE (bank_ref = ?1 OR pending_bank_ref = ?1) AND id <> ?2 AND state NOT IN (\'rejected\', \'expired\') LIMIT 1').bind(ref, r.id).first<{ id: string }>();
     if (other) return holdForReference(env, r, other.id, now);
   }
   if (!(await orderMatches(env, r))) {
@@ -312,14 +333,14 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
   }
   if (needsTwo) {
     if (r.first_approver === null) {
-      const first = await env.DB.prepare("UPDATE instapay_requests SET first_approver = ?2, first_approved_at = ?3, pending_bank_ref = ?4 WHERE id = ?1 AND state = 'under_review' AND first_approver IS NULL AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2) AND (?4 IS NULL OR NOT EXISTS (SELECT 1 FROM instapay_requests o WHERE (o.bank_ref = ?4 OR o.pending_bank_ref = ?4) AND o.id <> ?1))").bind(r.id, a.actor, now, ref).run();
+      const first = await env.DB.prepare("UPDATE instapay_requests SET first_approver = ?2, first_approved_at = ?3, pending_bank_ref = ?4 WHERE id = ?1 AND state = 'under_review' AND first_approver IS NULL AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2) AND (?4 IS NULL OR NOT EXISTS (SELECT 1 FROM instapay_requests o WHERE (o.bank_ref = ?4 OR o.pending_bank_ref = ?4) AND o.id <> ?1 AND o.state NOT IN ('rejected', 'expired')))").bind(r.id, a.actor, now, ref).run();
       if (first.meta.changes) {
         await audit(env, { at: now, actor: a.actor, action: 'instapay_first_approval', workspaceId: r.workspace_id, after: { id: r.id, amountMinor: r.amount_minor } });
         return { ok: true, needsSecond: true, request: opDto((await get(env, r.id))!) };
       }
       if (ref) {
         // The reference was taken between our check and our write (the statement above carries the check too): hold, never fail.
-        const other = await env.DB.prepare('SELECT id FROM instapay_requests WHERE (bank_ref = ?1 OR pending_bank_ref = ?1) AND id <> ?2 LIMIT 1').bind(ref, r.id).first<{ id: string }>();
+        const other = await env.DB.prepare('SELECT id FROM instapay_requests WHERE (bank_ref = ?1 OR pending_bank_ref = ?1) AND id <> ?2 AND state NOT IN (\'rejected\', \'expired\') LIMIT 1').bind(ref, r.id).first<{ id: string }>();
         if (other) return holdForReference(env, r, other.id, now);
       }
       return confirmInstapay(env, a, now, depth + 1); // someone recorded the first approval, or a hold / release landed, between our read and write: look again
@@ -328,7 +349,7 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
   }
   let claim: D1Result;
   try {
-    claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?2, decided_at = ?3, bank_ref = ?4 WHERE id = ?1 AND state = 'under_review' AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2) AND (?4 IS NULL OR NOT EXISTS (SELECT 1 FROM instapay_requests o WHERE o.bank_ref = ?4 AND o.id <> ?1))").bind(r.id, a.actor, now, ref).run();
+    claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?2, decided_at = ?3, bank_ref = ?4, no_reference = ?5 WHERE id = ?1 AND state = 'under_review' AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2) AND (?4 IS NULL OR NOT EXISTS (SELECT 1 FROM instapay_requests o WHERE o.bank_ref = ?4 AND o.id <> ?1))").bind(r.id, a.actor, now, ref, noRefReason !== null ? 1 : 0).run();
   } catch (err) {
     // The unique index on bank_ref: another request took this reference between our check and our write.
     if (ref && /UNIQUE/i.test(String(err instanceof Error ? err.message : err))) {
@@ -345,7 +366,8 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
     if (await everReleased(env, r.id, a.actor)) return { ok: false, reason: 'releaser_cannot_approve' };
     return { ok: false, reason: (await get(env, r.id))?.held_reason ? 'held' : 'not_reviewable' };
   }
-  await audit(env, { at: now, actor: a.actor, action: 'instapay_confirmed', workspaceId: r.workspace_id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor } });
+  await audit(env, { at: now, actor: a.actor, action: 'instapay_confirmed', workspaceId: r.workspace_id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor, ...(noRefReason !== null ? { noReference: true } : {}) }, ...(noRefReason !== null ? { reason: maskPhones(noRefReason) ?? '' } : {}) });
+  if (noRefReason !== null) alert('instapay_no_reference', { workspace: r.workspace_id, id: r.id, amountMinor: r.amount_minor });
   try {
     await grant(env, (await get(env, r.id))!, now);
   } catch (err) {
@@ -398,7 +420,7 @@ export async function rejectInstapay(env: Env, a: { id: string; actor: string; r
   if (!r) return { ok: false, reason: 'not_found' };
   if (r.state !== 'under_review') return { ok: false, reason: 'not_reviewable' };
   if (r.created_by === a.actor) return { ok: false, reason: 'self_approval_refused' };
-  const claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'rejected', decided_by = ?, decided_at = ?, reject_reason = ? WHERE id = ? AND state = 'under_review'").bind(a.actor, now, a.reason, r.id).run();
+  const claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'rejected', decided_by = ?, decided_at = ?, reject_reason = ?, pending_bank_ref = NULL WHERE id = ? AND state = 'under_review'").bind(a.actor, now, a.reason, r.id).run();
   if (!claim.meta.changes) return { ok: false, reason: 'not_reviewable' };
   // The order closes with it: a rejected payment never grants anything.
   await env.DB.batch([
@@ -413,7 +435,7 @@ export async function rejectInstapay(env: Env, a: { id: string; actor: string; r
 
 /** 48 h without a proof: the request and its order expire. A request with a proof waits for a person and is never expired by the clock. */
 export async function expireInstapay(env: Env, now = Date.now()): Promise<{ expired: number }> {
-  const res = await env.DB.prepare("UPDATE instapay_requests SET state = 'expired' WHERE state = 'awaiting_proof' AND expires_at <= ?").bind(now).run();
+  const res = await env.DB.prepare("UPDATE instapay_requests SET state = 'expired', pending_bank_ref = NULL WHERE state = 'awaiting_proof' AND expires_at <= ?").bind(now).run();
   if (res.meta.changes) {
     await env.DB.batch([
       env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE provider = 'instapay' AND status = 'pending' AND order_id IN (SELECT id FROM instapay_requests WHERE state = 'expired')"),

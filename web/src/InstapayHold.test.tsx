@@ -40,11 +40,19 @@ describe('InstaPay review: duplicates (C2)', () => {
     expect(within(card).getByRole('button', { name: t.opIpReject })).toBeTruthy(); // rejecting is always possible
   });
 
-  it('confirm sends the bank reference when one is typed (and nothing when not); a duplicate reference is explained', async () => {
+  it('confirm needs the bank reference (DUP-REF-REQUIRED-1), or the "no number on the proof" tick with a reason; a duplicate reference is explained', async () => {
     const { source, card } = await openQueue([item({ id: 'ip-ok' })]);
     const confirm = vi.spyOn(source.operator!, 'confirmInstapay');
-    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.opIpConfirm })));
-    expect(confirm).toHaveBeenLastCalledWith('ip-ok');
+    const btn = within(card).getByRole('button', { name: t.opIpConfirm }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true); // neither a number nor the tick
+    fireEvent.click(within(card).getByLabelText(t.opIpNoRef)); // ticked: the number box goes, a reason box appears
+    expect(within(card).queryByLabelText(t.opIpBankRef)).toBeNull();
+    expect(btn.disabled).toBe(true);
+    fireEvent.change(within(card).getByLabelText(t.opIpNoRefReason), { target: { value: 'الإيصال مفيهوش رقم عملية' } });
+    expect(btn.disabled).toBe(false);
+    await act(async () => fireEvent.click(btn));
+    expect(confirm).toHaveBeenLastCalledWith('ip-ok', undefined, 'الإيصال مفيهوش رقم عملية');
+    fireEvent.click(within(card).getByLabelText(t.opIpNoRef)); // un-ticked: back to the number
     fireEvent.change(within(card).getByLabelText(t.opIpBankRef), { target: { value: 'IP 4471 0098' } });
     confirm.mockRejectedValueOnce(new ApiError('invalid_request', 409, 'duplicate_reference'));
     await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.opIpConfirm })));
@@ -55,6 +63,7 @@ describe('InstaPay review: duplicates (C2)', () => {
   it('explains the two-approval rules: the reference is required, must match the first approver\'s, and the releaser cannot approve', async () => {
     const { source, card } = await openQueue([item({ id: 'ip-two' })]);
     const confirm = vi.spyOn(source.operator!, 'confirmInstapay');
+    fireEvent.change(within(card).getByLabelText(t.opIpBankRef), { target: { value: 'IP 5500 7766' } });
     for (const [detail, text] of [['bank_reference_required', t.opIpRefRequired], ['reference_mismatch', t.opIpRefMismatch], ['releaser_cannot_approve', t.opIpReleaser]] as const) {
       confirm.mockRejectedValueOnce(new ApiError('invalid_request', 409, detail));
       await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.opIpConfirm })));

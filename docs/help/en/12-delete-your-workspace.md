@@ -9,7 +9,9 @@ The store owner can ask us to delete the workspace and everything in it. Support
 
 ## Before you ask
 - If your wallet still has a balance, either request your refund first ([Wallet](09-wallet-top-ups-and-refunds.md)) or agree in the request that the balance is given up.
-- A refund or payment still being processed delays the deletion until it finishes.
+- A refund or payment still being processed delays the deletion until it finishes, however long ago it was started.
+- While a deletion is waiting, top-ups and package purchases are paused. If you want to buy something, cancel the deletion first and ask again later.
+- If your balance grows during the 14 days (for example a payment that was still in progress arrives), we do not delete until you or our team agrees to the new amount, or you cancel. We will write to you at ahlan@ebda.app.
 - Deleting does not cancel anything at Meta; remove your number from your Meta account yourself if you no longer want it there.
 
 ## Who can do what

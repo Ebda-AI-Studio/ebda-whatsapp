@@ -527,6 +527,15 @@ function OffboardingOpPanel({ t, lang, api }: PanelProps) {
     setMsg(null);
     try { await api.cancelOffboarding(ws.trim(), reason.trim()); await show(); list.reload(); } catch { setMsg(t.offOpFailed); }
   };
+  const approve = async () => {
+    setMsg(null);
+    try { await api.approveOffboarding(ws.trim(), reason.trim()); setMsg(t.offOpApproved); await show(); list.reload(); } catch { setMsg(t.offOpFailed); }
+  };
+  const release = async () => {
+    setMsg(null);
+    try { await api.releaseOffboardingHold(ws.trim(), reason.trim()); await show(); list.reload(); } catch { setMsg(t.offOpFailed); }
+  };
+  const heldKey = st?.lastError?.startsWith('held:') ? st.lastError.slice(5) : null;
 
   return (
     <>
@@ -541,6 +550,8 @@ function OffboardingOpPanel({ t, lang, api }: PanelProps) {
           <button type="button" className="btn danger" disabled={!ready} onClick={() => void request(false)()}>{t.offOpRequest}</button>
           <button type="button" className="btn danger" disabled={!ready} onClick={() => void request(true)()}>{t.offOpNow}</button>
           {st?.state === 'pending' && <button type="button" className="btn" disabled={!ready} onClick={() => void cancel()}>{t.offCancel}</button>}
+          {st?.needsSecondApproval && <button type="button" className="btn" disabled={!ready} onClick={() => void approve()}>{t.offOpApprove}</button>}
+          {heldKey === 'suspended_abuse' && <button type="button" className="btn" disabled={!ready} onClick={() => void release()}>{t.offOpRelease}</button>}
         </div>
         {msg && <p role="alert" className="error-text">{msg}</p>}
         {st && (
@@ -549,7 +560,8 @@ function OffboardingOpPanel({ t, lang, api }: PanelProps) {
             {st.state === 'pending' && <p>{t.offPending(dateTime(st.executeAfter, lang))}</p>}
             {st.writeOffMinor > 0 && <p className="muted">{t.offWriteOff(money(st.writeOffMinor))}</p>}
             {st.stepsDone.length > 0 && <p className="muted"><b>{t.offOpSteps}:</b> <bdi dir="ltr">{st.stepsDone.join(', ')}</bdi></p>}
-            {st.lastError && <p className="error-text"><bdi dir="ltr">{st.lastError}</bdi></p>}
+            {st.needsSecondApproval && <p className="error-text" role="note">{t.offOpApproval}</p>}
+            {st.lastError && <p className="error-text"><bdi dir="ltr">{st.lastError}</bdi>{heldKey && t.offOpHeldWhy[heldKey] ? <> {t.offOpHeldWhy[heldKey]}</> : null}</p>}
             <h3 className="pane-sub">{t.offOpLog}</h3>
             <ul className="wallet-rows">
               {(st.log ?? []).map((l, i) => <li key={i}><span className="wallet-row-main"><b>{l.action}</b> <span className="muted">• {dateTime(l.at, lang)} • <bdi dir="ltr">{l.actor}</bdi></span></span>{l.reason && <p className="muted" dir="auto">{l.reason}</p>}</li>)}
@@ -613,12 +625,14 @@ function InstapayReview({ t, lang, api, source, run }: PanelProps) {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [refs, setRefs] = useState<Record<string, string>>({});
   const [releases, setReleases] = useState<Record<string, string>>({});
+  const [noRef, setNoRef] = useState<Record<string, boolean>>({});
+  const [noRefWhy, setNoRefWhy] = useState<Record<string, string>>({});
   const money = (m: number) => formatMoney(m, 'EGP', lang);
   const view = (r: OperatorInstapay) => async () => {
     await run(async () => { const link = await api.instapayProofLink(r.id); window.open(link.url, '_blank', 'noopener,noreferrer'); });
   };
   const confirm = (r: OperatorInstapay) => async () => {
-    await run(async () => { const ref = (refs[r.id] ?? '').trim(); const next = ref ? await api.confirmInstapay(r.id, ref) : await api.confirmInstapay(r.id); setNotes((n) => ({ ...n, [r.id]: next.needsSecond ? t.opIpSecond : '' })); list.reload(); });
+    await run(async () => { const ref = (refs[r.id] ?? '').trim(); const next = noRef[r.id] ? await api.confirmInstapay(r.id, undefined, (noRefWhy[r.id] ?? '').trim()) : await api.confirmInstapay(r.id, ref); setNotes((n) => ({ ...n, [r.id]: next.needsSecond ? t.opIpSecond : '' })); list.reload(); });
   };
   const release = (r: OperatorInstapay) => async () => {
     await run(async () => { await api.releaseInstapay(r.id, (releases[r.id] ?? '').trim()); list.reload(); });
@@ -647,12 +661,14 @@ function InstapayReview({ t, lang, api, source, run }: PanelProps) {
                 <div className="op-actions">
                   <label className="field"><span>{t.opIpReason}</span><input dir="auto" maxLength={300} value={reasons[r.id] ?? ''} onChange={(e) => setReasons({ ...reasons, [r.id]: e.target.value })} /></label>
                   {r.heldReason && <label className="field"><span>{t.opIpReleaseReason}</span><input dir="auto" maxLength={300} value={releases[r.id] ?? ''} onChange={(e) => setReleases({ ...releases, [r.id]: e.target.value })} /></label>}
-                  {!r.heldReason && <label className="field"><span>{t.opIpBankRef}</span><input dir="ltr" maxLength={60} value={refs[r.id] ?? ''} onChange={(e) => setRefs({ ...refs, [r.id]: e.target.value })} /></label>}
+                  {!r.heldReason && !noRef[r.id] && <label className="field"><span>{t.opIpBankRef}</span><input dir="ltr" maxLength={60} value={refs[r.id] ?? ''} onChange={(e) => setRefs({ ...refs, [r.id]: e.target.value })} /></label>}
+                  {!r.heldReason && <label className="field check"><input type="checkbox" checked={!!noRef[r.id]} onChange={(e) => setNoRef({ ...noRef, [r.id]: e.target.checked })} /> <span>{t.opIpNoRef}</span></label>}
+                  {!r.heldReason && noRef[r.id] && <label className="field"><span>{t.opIpNoRefReason}</span><input dir="auto" maxLength={300} value={noRefWhy[r.id] ?? ''} onChange={(e) => setNoRefWhy({ ...noRefWhy, [r.id]: e.target.value })} /></label>}
                   <div className="campaign-actions">
                     <button type="button" className="btn" onClick={() => void view(r)()}>{t.opIpView}</button>
                     {r.heldReason
                       ? <button type="button" className="btn primary" disabled={(releases[r.id] ?? '').trim().length < 5} onClick={() => void release(r)()}>{t.opIpRelease}</button>
-                      : <button type="button" className="btn primary" onClick={() => void confirm(r)()}>{t.opIpConfirm}</button>}
+                      : <button type="button" className="btn primary" disabled={noRef[r.id] ? (noRefWhy[r.id] ?? '').trim().length < 5 : (refs[r.id] ?? '').trim().length < 4} onClick={() => void confirm(r)()}>{t.opIpConfirm}</button>}
                     <button type="button" className="btn quiet" disabled={(reasons[r.id] ?? '').trim().length < 3} onClick={() => void reject(r)()}>{t.opIpReject}</button>
                   </div>
                 </div>

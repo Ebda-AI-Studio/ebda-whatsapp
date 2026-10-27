@@ -166,4 +166,25 @@ describe('operator console: workspace deletion', () => {
     await act(async () => fireEvent.click(await within(c).findByRole('button', { name: t.offCancel })));
     expect(cancel).toHaveBeenCalledWith('ws-sample', 'طلب كتابي من صاحب المتجر');
   });
+
+  it('OFFBOARD-2ND-APPROVER-1 and the abuse hold: the second operator gets an Approve button with the reason; a held abuse suspension gets Release; both need the reason', async () => {
+    const source = await openOp();
+    const c = await screen.findByRole('region', { name: t.offOpTitle });
+    fill(c, 'ws-sample', 'أمر قانوني رقم 12');
+    await act(async () => fireEvent.click(within(c).getByRole('button', { name: t.offOpNow })));
+    const base = await source.operator!.offboarding('ws-sample');
+    const approve = vi.spyOn(source.operator!, 'approveOffboarding');
+    const release = vi.spyOn(source.operator!, 'releaseOffboardingHold');
+    vi.spyOn(source.operator!, 'offboarding').mockResolvedValue({ ...base, needsSecondApproval: true, lastError: 'held:second_approval_required' });
+    await act(async () => fireEvent.click(within(c).getByRole('button', { name: t.offOpLoad })));
+    expect(await within(c).findByText(t.offOpApproval)).toBeTruthy();
+    expect(within(c).getByText(t.offOpHeldWhy.second_approval_required!, { exact: false })).toBeTruthy();
+    await act(async () => fireEvent.click(within(c).getByRole('button', { name: t.offOpApprove })));
+    expect(approve).toHaveBeenCalledWith('ws-sample', 'أمر قانوني رقم 12');
+    expect(within(c).queryByRole('button', { name: t.offOpRelease })).toBeNull();
+    vi.spyOn(source.operator!, 'offboarding').mockResolvedValue({ ...base, needsSecondApproval: false, lastError: 'held:suspended_abuse' });
+    await act(async () => fireEvent.click(within(c).getByRole('button', { name: t.offOpLoad })));
+    await act(async () => fireEvent.click(await within(c).findByRole('button', { name: t.offOpRelease })));
+    expect(release).toHaveBeenCalledWith('ws-sample', 'أمر قانوني رقم 12');
+  });
 });

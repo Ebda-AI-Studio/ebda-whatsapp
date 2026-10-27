@@ -303,8 +303,12 @@ describe('operator: InstaPay transfers', () => {
     expect(rejectBtn.disabled).toBe(false);
     await act(async () => fireEvent.click(rejectBtn));
     expect(reject).toHaveBeenCalledWith('ip-op-1', 'المبلغ غلط');
-    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.opIpConfirm })));
-    expect(confirm).toHaveBeenCalledWith('ip-op-1');
+    const confirmBtn = within(card).getByRole('button', { name: t.opIpConfirm }) as HTMLButtonElement;
+    expect(confirmBtn.disabled).toBe(true); // DUP-REF-REQUIRED-1: no confirm without the bank number
+    fireEvent.change(within(card).getByLabelText(t.opIpBankRef), { target: { value: 'IP 4471 0098' } });
+    expect(confirmBtn.disabled).toBe(false);
+    await act(async () => fireEvent.click(confirmBtn));
+    expect(confirm).toHaveBeenCalledWith('ip-op-1', 'IP 4471 0098');
   });
 });
 

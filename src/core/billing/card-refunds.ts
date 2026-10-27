@@ -22,6 +22,7 @@ import { auditOnce } from './package-orders';
 import { APPROVAL_LEASE_MS } from './refunds';
 import { isCardRefundOperation, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { alert } from '../observability';
+import { refuseIfOffboarded } from '../ops/offboarded';
 import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
 import { noteRefundExcess } from './refund-excess';
 
@@ -214,6 +215,8 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
       alert('refund_excess_for_review', { severity: 'P1', workspace: t.workspace_id, orderId: t.order_id, refundId: ev.transactionId, excessMinor: unexplained, chargeback: !!ev.chargeback });
     }
   }
+  // A deleted workspace has no wallet to debit (and addressing its pseudonym would create a ghost): the refund fact is recorded above; a person reconciles it.
+  if (await refuseIfOffboarded(env, t.workspace_id, 'provider_refund', ev.transactionId, now)) return 'refunded';
   // Same ref on every path and replay: a second delivery posts nothing.
   const r = await stubOf(env, t.workspace_id).postWallet({ kind: 'chargeback', netMinor: -row.amount_minor, ref: `chargeback:${ev.transactionId}`, note: `provider refund of ${t.order_id}: operator review` }, now);
   if (r.ok) alert('topup_refunded_by_provider', { workspace: t.workspace_id, orderId: t.order_id });
@@ -383,6 +386,7 @@ export async function matchHeldRefund(env: Env, a: { refundId: string; actor: st
     if (debit > 0) {
       // Money first (the ref is idempotent per Kashier transaction, so a retry cannot debit twice), THEN the state flip: if the wallet post
       // throws, the row is still `held` and the retry finds it.
+      if (await refuseIfOffboarded(env, held.workspace_id, 'provider_refund', a.refundId, now)) return { ok: false, reason: 'separate_refund_debited' };
       const r = await stubOf(env, held.workspace_id).postWallet({ kind: 'chargeback', netMinor: -debit, ref: `chargeback:${a.refundId}`, note: `provider refund of ${held.order_id}: operator review` }, now);
       if (!r.ok && r.reason !== 'duplicate') throw new Error(`refund debit refused: ${r.reason}`);
       await env.DB.batch([
