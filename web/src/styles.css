@@ -278,6 +278,7 @@ textarea { caret-color: var(--gold-ink); }
 .status-chip[data-status='paused'] { background: #fbf1e4; color: var(--warn); }
 .status-chip[data-status='cancelled'], .status-chip[data-status='failed'] { background: var(--bad-tint); color: var(--bad); }
 .campaign-reason { margin: 0; font-size: 14px; color: var(--warn); }
+.campaign-reason-contact { margin: 0; font-size: 14px; color: var(--ink-2); }
 /* Cumulative delivery meter: sent ⊇ delivered ⊇ read, layered from the line start. */
 .meter { position: relative; height: 8px; border-radius: 999px; background: var(--cream); border: 1px solid var(--line); overflow: hidden; margin-top: 4px; }
 .meter span { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 999px; transition: width 600ms var(--ease); }

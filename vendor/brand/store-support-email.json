@@ -1,0 +1,6 @@
+{
+  "supportEmail": "ahlan@ebda.app",
+  "source": "Whisky-11/ebda-store packages/shared/src/brand/index.ts:71 (supportEmail)",
+  "storeCommit": "e2702a8c62496198e979ed2b10b188d5d909ee1e",
+  "ruling": "WA-SUPPORT-1 (Ahmad 2026-10-27): support contact is email, the Store's public address"
+}

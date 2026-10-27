@@ -1,4 +1,5 @@
 import { Megaphone, Plus } from 'lucide-react';
+import { BRAND } from '@brand';
 import { useCallback, useEffect, useState } from 'react';
 import type { CampaignDto } from '../../../src/core/api/contract';
 import type { CampaignsApi, InboxSource } from '../data/source';
@@ -77,6 +78,7 @@ function CampaignRow({ c, t, lang, owner, api, onChange, onRemoved }: { c: Campa
         <bdi>{t.templateNames[c.template.name] ?? c.template.name}</bdi>{when && <> · {when}</>}
       </p>
       {c.status === 'paused' && c.pauseReason && <p className="campaign-reason" data-reason={c.pauseReason}>{t.pauseReasons[c.pauseReason] ?? t.pauseUnknown}</p>}
+      {c.status === 'paused' && c.pauseReason && (c.pauseReason === 'operator_paused' || !t.pauseReasons[c.pauseReason]) && <p className="campaign-reason-contact">{t.pauseContact(BRAND.supportEmail ?? t.wSupport)}</p>}
       {c.status === 'scheduled' && total > 0 && <p className="audience-line">{t.audienceCount(n(total))}</p>}
       {total > 0 && c.status !== 'scheduled' && (
         <>

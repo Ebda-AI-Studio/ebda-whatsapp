@@ -99,6 +99,10 @@ describe('campaigns', () => {
     expect(texts.every((x) => !!x && x.length > 8)).toBe(true);
     expect(new Set(texts).size).toBe(4);
     expect(texts[3]).toBe(STRINGS.ar.pauseUnknown);
+    // WA-SUPPORT-1: an unknown reason (and operator_paused) says where to write; a known self-serve reason does not.
+    const contact = (i: number) => within(screen.getByRole('article', { name: `حملة ${i}` })).queryByText((_c, el) => el?.className === 'campaign-reason-contact')?.textContent;
+    expect(contact(3)).toBe(STRINGS.ar.pauseContact('ahlan@ebda.app'));
+    expect(contact(0)).toBeUndefined();
   });
 
   it('an audience count that could not be computed says so, never "0 recipients"', async () => {
