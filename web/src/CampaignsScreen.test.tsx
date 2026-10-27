@@ -197,8 +197,19 @@ describe('contacts', () => {
     await act(async () => fireEvent.change(screen.getByLabelText('اختار ملف'), { target: { files: [file] } }));
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
     await act(async () => fireEvent.click(start));
-    expect(spy).toHaveBeenCalledWith(file, false);
+    expect(spy).toHaveBeenCalledWith(file, false, STRINGS.ar.importConsent);
     expect(await screen.findByText('list.csv')).toBeTruthy();
+  });
+
+  it('a ticked import sends the exact sentence next to the tick as its wording (A4)', async () => {
+    const source = createSampleSource();
+    const spy = vi.spyOn(source.contacts!, 'importCsv');
+    await openContacts(source);
+    const file = new File(['phone,name\n01001234567,Test\n'], 'list.csv', { type: 'text/csv' });
+    await act(async () => fireEvent.change(screen.getByLabelText('اختار ملف'), { target: { files: [file] } }));
+    await act(async () => fireEvent.click(screen.getByRole('checkbox')));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'ابدأ الاستيراد' })));
+    expect(spy).toHaveBeenCalledWith(file, true, screen.getAllByText(STRINGS.ar.importConsent)[0]!.textContent);
   });
 
   it('shows rejected rows of an import with readable reasons', async () => {

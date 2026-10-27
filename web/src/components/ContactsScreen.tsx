@@ -80,6 +80,13 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
                       {c.optedOut ? <span className="flag bad">{t.optedOutBadge}</span>
                         : <span className="flag" data-ok={!!c.consent}>{c.consent ? t.consentYes : t.consentNo}</span>}
                     </div>
+                    {c.consent?.proof && (
+                      <details className="consent-proof small">
+                        <summary>{t.consentProof}</summary>
+                        <p className="muted">{t.consentProofLine(t.consentSource[c.consent.proof.source], c.consent.proof.attestedBy, new Date(c.consent.proof.at).toLocaleDateString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB'))}</p>
+                        <blockquote dir="auto">{c.consent.proof.wording}</blockquote>
+                      </details>
+                    )}
                     {c.lastInboundAt != null && <span className="muted small contact-when">{t.lastMessage(relativeTime(c.lastInboundAt, now(), lang))}</span>}
                   </li>
                 ))}
@@ -106,7 +113,7 @@ function ImportPanel({ t, lang, api, imports, failed, onRetry, onStarted }: { t:
     setBusy(true);
     setError(false);
     try {
-      await api.importCsv(file, consented);
+      await api.importCsv(file, consented, t.importConsent);
       setFile(null);
       setConsented(false);
       onStarted();

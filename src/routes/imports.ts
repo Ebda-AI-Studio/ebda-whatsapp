@@ -34,7 +34,7 @@ importsRoutes.post('/stores/:storeId/imports', async (c) => {
   const isCsvName = /\.csv$/i.test(file.name);
   if (!CSV_TYPES.has(file.type) && !(isCsvName && CSV_BY_NAME_TYPES.has(file.type))) return apiError(c, 415, 'unsupported_media', 'csv_only');
   if (file.size > MAX_IMPORT_BYTES) return apiError(c, 413, 'invalid_request', 'file_too_large');
-  const fields = createImportFields.safeParse({ consented: form.get('consented') ?? undefined, mapping: form.get('mapping') ?? undefined });
+  const fields = createImportFields.safeParse({ consented: form.get('consented') ?? undefined, wording: form.get('wording') ?? undefined, mapping: form.get('mapping') ?? undefined });
   if (!fields.success) return apiError(c, 400, 'invalid_request');
   let mapping: ReturnType<typeof importMapping.parse> | null = null;
   if (fields.data.mapping !== undefined) {
@@ -50,7 +50,7 @@ importsRoutes.post('/stores/:storeId/imports', async (c) => {
   const id = crypto.randomUUID();
   const r2Key = `imports/${storeId}/${id}.csv`;
   // The workspace takes the slot first: one import at a time, so a second upload never writes a file nothing will read.
-  const slot = await ws.createImport({ id, filename: file.name, r2Key, size: file.size, consented: fields.data.consented, mapping, actor: c.get('principal').userId });
+  const slot = await ws.createImport({ id, filename: file.name, r2Key, size: file.size, consented: fields.data.consented, wording: fields.data.wording ?? null, mapping, actor: c.get('principal').userId });
   if (!slot.ok) return apiError(c, 409, 'invalid_request', slot.reason);
   try {
     const fixed = new FixedLengthStream(file.size);

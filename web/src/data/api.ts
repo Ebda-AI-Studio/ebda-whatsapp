@@ -151,10 +151,11 @@ export function createApiSource(o: Opts): LiveSource {
         if (q.cursor) p.set('cursor', q.cursor);
         return call(`/contacts?${p}`, listContactsResponse, signal ? { signal } : {});
       },
-      async importCsv(file, consented) {
+      async importCsv(file, consented, wording) {
         const form = new FormData();
         form.set('file', file);
         form.set('consented', consented ? 'true' : 'false');
+        if (consented && wording) form.set('wording', wording); // the exact sentence the owner ticked (A4)
         return (await call('/imports', z.object({ id: z.string() }).loose(), { method: 'POST', body: form })).id;
       },
       imports: async () => (await call('/imports', listImportsResponse)).items,

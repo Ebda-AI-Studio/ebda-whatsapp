@@ -46,7 +46,7 @@ export type ContactsQuery = { q?: string; tag?: string; optedOut?: boolean; curs
 export interface ContactsApi {
   list(query: ContactsQuery, signal?: AbortSignal): Promise<{ items: ContactDto[]; nextCursor: string | null }>;
   /** Uploads a CSV for import. `consented` must reflect the owner's explicit tick: it is the marketing consent on record. */
-  importCsv(file: File, consented: boolean): Promise<string>;
+  importCsv(file: File, consented: boolean, wording?: string): Promise<string>;
   imports(): Promise<ImportDto[]>;
   rejects(importId: string): Promise<{ line: number; reason: string }[]>;
 }
