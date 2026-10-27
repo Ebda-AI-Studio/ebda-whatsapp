@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { findMatches } from './helpers/grep';
 
@@ -45,10 +47,10 @@ const LEGAL_PINS: Record<string, string> = {
   'docs/legal/README.md': '3e2ac6be2d00104de0be887baab908784ba2468e0e97761579646c2640b8cf31',
   'docs/legal/ar/whatsapp-dpa.md': '43dfa98c3dc681bc047ff7f04738279a326d6e71d80d9c1afbb75bb2c0975e51',
   'docs/legal/ar/whatsapp-privacy.md': '93cc40cde3913d7f0c31bcbe5c93a1b63e5676250528b282b8ff45a9f4e59cc8',
-  'docs/legal/ar/whatsapp-terms.md': '83ff0b9a36f3fbda22adec3f1be5813190e855a8ce780587130c4ff93b0efbca',
+  'docs/legal/ar/whatsapp-terms.md': '4038e770687b89d5d0b7005b33c48812d2e595860efb194c72b0bcb2e8e4e3e8',
   'docs/legal/en/whatsapp-dpa.md': '8cfe9328d4478c1150c2c445835b0761c4a7f90849301d69dbe4e777b7f4a65a',
   'docs/legal/en/whatsapp-privacy.md': '139b5484f759014a0245ebbbf90b3a504aebf324717f98bbd3426397ade7008a',
-  'docs/legal/en/whatsapp-terms.md': 'c4d72c46ca6a74b57eabf2c5ec86e89edf08b94ac06ac07c4287da3eeea064d8',
+  'docs/legal/en/whatsapp-terms.md': '155f31f7b3a46b80d2cc8b7980193ff3b9a4704ae04e4306b004cbaebf7c325a',
 };
 it('legal pages are pinned: a change needs a new pin AND a message to the Store session, which publishes them', async () => {
   const { readFileSync, readdirSync } = await import('node:fs');
@@ -97,4 +99,78 @@ it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / IN
   const wrong = [...used].filter((n) => [sets.P0, sets.P1, sets.INFO].filter((s) => s.has(n)).length !== 1);
   expect(wrong, 'alert names with no severity (or more than one): add each to exactly one set in observability.ts').toEqual([]);
   for (const a of ['P0', 'P1'] as const) for (const b of ['P1', 'INFO'] as const) if (a !== b) expect([...sets[a]].filter((n) => sets[b].has(n)), `${a} and ${b} overlap`).toEqual([]);
+});
+
+// DIGITS-1 (Ahmad): Western digits 0-9 everywhere a person reads a number. Never Arabic-Indic (٠-٩) or Persian (۰-۹), in the Arabic UI too.
+// 1) Intl / toLocale* may name an Arabic locale only with the latin numbering system (`ar-EG-u-nu-latn`).
+it('DIGITS-1: no Arabic locale reaches Intl / toLocale* without -u-nu-latn (it would print ٠-٩)', () => {
+  const call = /Intl\.(NumberFormat|DateTimeFormat|RelativeTimeFormat|ListFormat|PluralRules)\(|toLocale(Date|Time)?String\(/;
+  const arabicLocale = /['"`]ar(-[A-Za-z]{2})?(-u-[A-Za-z0-9-]+)?['"`]\s*[,)]|['"`]ar-[A-Za-z]{2}(-u-[A-Za-z0-9-]+)?['"`]/g;
+  const hits: string[] = [];
+  for (const scope of ['src', 'web/src']) {
+    for (const m of findMatches(call, scope)) {
+      const [file, line] = m.split(':') as [string, string];
+      if (/\.test\.tsx?$/.test(file)) continue;
+      const text = readFileSync(join(import.meta.dirname, '..', file), 'utf8').split('\n')[Number(line) - 1]!;
+      for (const lit of text.match(arabicLocale) ?? []) if (!lit.includes('nu-latn')) hits.push(`${m}  ${lit}`);
+    }
+  }
+  expect(hits).toEqual([]);
+});
+
+// 2) No Arabic-Indic / Persian digit in anything a user can read. INPUT-side code may still name them (it must ACCEPT what people type),
+// listed by path with the reason; test files (vectors, expectations of typed input) are not scanned.
+const ARABIC_DIGIT = /[٠-٩۰-۹]/;
+const INPUT_SIDE: Record<string, string> = {
+  'src/core/text-normalise.ts': 'normaliseText / phoneDigits fold typed ٠-٩ and ۰-۹ to 0-9 (input side)',
+  'src/core/phone.ts': 'normaliseE164 accepts digits typed in Arabic-Indic or Persian form (input side)',
+  'src/core/shared/shared-number.ts': 'customer key folds typed digits before hashing (input side)',
+  'web/src/lib/rates.ts': 'parses a price typed with Arabic-Indic digits (input side)',
+  'web/src/components/WalletScreen.tsx': 'parses an amount typed with Arabic-Indic digits (input side)',
+};
+const WHOLLY_INPUT = new Set(['src/core/text-normalise.ts', 'src/core/phone.ts']);
+it('DIGITS-1: no ٠-٩ / ۰-۹ in code, copy, templates, brands, help, legal or site docs (except the input-side normalisers)', () => {
+  const hits: string[] = [];
+  for (const scope of ['src', 'web', 'docs/help', 'docs/legal', 'docs/site']) {
+    for (const m of findMatches(ARABIC_DIGIT, scope)) {
+      const [file, line] = m.split(':') as [string, string];
+      if (/\.test\.tsx?$/.test(file) || !/\.(tsx?|mjs|js|json|html|css|svg|md|mdx|txt)$/.test(file)) continue; // tests are not user-facing; images are binary
+      if (INPUT_SIDE[file]) {
+        const text = readFileSync(join(import.meta.dirname, '..', file), 'utf8').split('\n')[Number(line) - 1]!;
+        // Files that are wholly input normalisers may name the digits anywhere (also in their comments); mixed files only in the conversion tables.
+        if (WHOLLY_INPUT.has(file) || /\[٠-٩|\[۰-۹|'٠١٢٣٤٥٦٧٨٩'|'۰۱۲۳۴۵۶۷۸۹'/.test(text)) continue;
+      }
+      hits.push(m);
+    }
+  }
+  expect(hits).toEqual([]);
+});
+
+// ---- WA-NOFREE-1: there is no free plan ----
+it('across the D1 migrations, a package with price_minor = 0 is only ever store-included', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const dir = new URL('../migrations/d1/', import.meta.url);
+  const seen: { id: string; price: number; file: string }[] = [];
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.sql'))) {
+    const sql = readFileSync(new URL(f, dir), 'utf8');
+    for (const stmt of sql.split(';').filter((s) => /INSERT\s+(OR\s+\w+\s+)?INTO\s+packages\b/i.test(s))) {
+      for (const m of stmt.matchAll(/\(\s*'([\w-]+)'\s*,\s*'[^']*'\s*,\s*(\d+)\s*,/g)) seen.push({ id: m[1]!, price: Number(m[2]), file: f });
+    }
+  }
+  expect(seen.map((s) => s.id)).toEqual(expect.arrayContaining(['store-included', 'starter', 'growth', 'pro'])); // the parse is not vacuous
+  expect(seen.filter((s) => s.price === 0 && s.id !== 'store-included')).toEqual([]);
+});
+
+it('store-included is only ever written by the Store-plan path (store-plan.ts and the fallback to it in subscriptions.ts)', async () => {
+  const files = [...new Set(findMatches(/store-included|STORE_INCLUDED/, 'src').map((m) => m.split(':')[0]!))].sort();
+  expect(files).toEqual(['src/core/billing/store-plan.ts', 'src/core/billing/subscriptions.ts', 'src/routes/operator.ts']);
+  expect(findMatches(/STORE_INCLUDED/, 'src/routes').length).toBe(2); // operator.ts: the import and the refusal, nothing that writes it
+  // The other two writers of workspace_subscriptions take an id from outside, so each must refuse the free package where it takes it.
+  const { readFileSync } = await import('node:fs');
+  // The listing a merchant buys from: the SQL string of listPackages itself must filter price_minor > 0 (not just mention it somewhere).
+  const orders = readFileSync(new URL('../src/core/billing/package-orders.ts', import.meta.url), 'utf8');
+  const listing = /export async function listPackages[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '';
+  expect(listing).toMatch(/FROM packages WHERE[^']*active = 1[^']*price_minor > 0/);
+  expect(/export async function startPackageCheckout[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '').toMatch(/FROM packages WHERE id = \? AND active = 1 AND price_minor > 0/);
+  expect(readFileSync(new URL('../src/routes/operator.ts', import.meta.url), 'utf8')).toMatch(/store_included_is_store_plan_only/);
 });

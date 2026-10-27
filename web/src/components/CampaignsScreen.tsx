@@ -11,7 +11,7 @@ import { LoadError } from './LoadError';
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number };
 
 export function dateTime(at: number, lang: Lang): string {
-  return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Cairo' }).format(at);
+  return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Cairo' }).format(at);
 }
 
 export function CampaignsScreen({ t, lang, source, api, now }: Props) {

@@ -75,11 +75,17 @@ export const PLAN_LIMITS = {
   pro: { maxMembers: 15, campaigns: true, orderInChat: true, api: true, prioritySupport: true },
 } as const;
 
-/** Pushes a (newer-version) active entitlement for `plan` to the workspace, the way the control plane does on a purchase or a downgrade. */
-export async function grantPlan(workspaceId: string, plan: keyof typeof PLAN_LIMITS, status: 'active' | 'past_due' = 'active'): Promise<void> {
+/**
+ * Pushes a (newer-version) entitlement for `plan` to the workspace, the way the control plane does on a purchase, a downgrade or a lapse.
+ * `pastDueSince` / `periodEnd` let a test place itself inside or outside the WA-GRACE-1 window.
+ */
+export async function grantPlan(
+  workspaceId: string, plan: keyof typeof PLAN_LIMITS, status: 'active' | 'past_due' | 'cancelled' | 'expired' = 'active', o: { periodEnd?: number; pastDueSince?: number | null } = {},
+): Promise<void> {
   const cur = await workspace(workspaceId).getEntitlement();
   const r = await workspace(workspaceId).applyEntitlement({
-    version: (cur?.version ?? 0) + 1, packageId: plan, status, periodStart: Date.now() - 86_400_000, periodEnd: Date.now() + 29 * 86_400_000, aiCredits: 0, limits: PLAN_LIMITS[plan],
+    version: (cur?.version ?? 0) + 1, packageId: plan, status, periodStart: Date.now() - 86_400_000, periodEnd: o.periodEnd ?? Date.now() + 29 * 86_400_000, aiCredits: 0, limits: PLAN_LIMITS[plan],
+    ...(o.pastDueSince !== undefined ? { pastDueSince: o.pastDueSince } : {}),
   });
   if (r !== 'applied') throw new Error(`plan not applied: ${r}`);
 }

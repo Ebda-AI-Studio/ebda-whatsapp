@@ -96,7 +96,7 @@ it('Final #9: an upload without Content-Length is 411 and one claiming more than
   expect(chunked.status).toBe(411);
   const claim = await api.call('POST', '/media', new Uint8Array(8), { 'content-length': String(60 * 1024 * 1024), 'content-type': 'application/pdf' });
   expect(claim.status).toBe(413);
-  expect(await claim.json()).toEqual({ error: 'invalid_request', message: 'file_too_large' });
+  expect(await claim.json()).toEqual({ error: 'payload_too_large' }); // refused by the request guard (cap + multipart envelope) before the route
   expect(g.calls).toHaveLength(0);
 });
 

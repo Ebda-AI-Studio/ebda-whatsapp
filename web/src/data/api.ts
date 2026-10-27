@@ -143,13 +143,13 @@ export function createApiSource(o: Opts): LiveSource {
       },
     },
     contacts: {
-      async list(q) {
+      async list(q, signal) {
         const p = new URLSearchParams({ limit: '50' });
         if (q.q?.trim()) p.set('q', q.q.trim());
         if (q.tag) p.set('tag', q.tag);
         if (q.optedOut !== undefined) p.set('optedOut', String(q.optedOut));
         if (q.cursor) p.set('cursor', q.cursor);
-        return call(`/contacts?${p}`, listContactsResponse);
+        return call(`/contacts?${p}`, listContactsResponse, signal ? { signal } : {});
       },
       async importCsv(file, consented) {
         const form = new FormData();

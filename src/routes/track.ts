@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
-import { isAutomatedFetch, parseCode } from '../core/campaigns/links';
+import { campaignLinks, isAutomatedFetch, parseCode, verifyCode } from '../core/campaigns/links';
 
 export const trackRoutes = new Hono<{ Bindings: Env }>();
 
@@ -17,6 +17,9 @@ const notFound = () => new Response('not found', { status: 404, headers: { 'cach
 trackRoutes.get('/t/:code', async (c) => {
   const parsed = parseCode(c.req.param('code'));
   if (!parsed) return notFound();
+  // Defense in depth (WA-LINK-2): the MAC is checked here too, so however this route is reached an unsigned code never wakes a DO.
+  const secret = campaignLinks().signingSecret(c.env);
+  if (!secret || !(await verifyCode(parsed.code, secret))) return notFound();
   const now = Date.now();
   if ((known.get(parsed.workspaceId) ?? 0) <= now) {
     const row = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(parsed.workspaceId).first();

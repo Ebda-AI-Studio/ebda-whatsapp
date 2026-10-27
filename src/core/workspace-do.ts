@@ -65,7 +65,7 @@ import { parentHoldRef } from './campaigns/campaigns';
 import { indexContactName, rebuildContactIndex } from './contact-index';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
-import { applyEntitlement, expireSubscription, featureAllowed, marketingBlocked, memberLimit, readEntitlement, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
+import { applyEntitlement, expireSubscription, featureAllowed, marketingBlocked, memberLimit, readEntitlement, serviceAllowed, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
 /** How many realtime events a client can resync from. */
@@ -88,7 +88,7 @@ export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; st
 export type CoexBatch = { phoneNumberId: string; echoes: CoexMessage[]; history: CoexMessage[]; contacts: SyncedContact[] };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
-export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
+export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'plan_required' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
 export type TaskPayload = { job?: SendJob; phoneNumberId?: string; reason?: 'tier' | 'throughput' | 'frequency_cap' | 'event'; n?: number; messageId?: number; mediaId?: string; orderId?: string };
@@ -448,6 +448,25 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   private claimRow(job: SendJob, now: number): ClaimResult {
     {
+      // WA-NOFREE-1 / WA-GRACE-1: a message that waited in the queue (or an automatic reply) is refused if the plan lapsed meanwhile, whatever its category.
+      if (!serviceAllowed(this.sql, now)) {
+        const queued = this.sql.exec<{ id: number; status: string }>('SELECT id, status FROM messages WHERE idempotency_key = ?', job.idempotencyKey).toArray()[0];
+        if (queued && (queued.status === 'queued' || queued.status === 'retry')) {
+          this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'plan_required', updated_at = ? WHERE id = ?", now, queued.id);
+          this.emitMessageStatus(queued.id);
+        }
+        // A claim only seconds old may really be with Meta, so it is left to the normal path; one stuck in `claimed` past STALE_CLAIM_MS would be
+        // re-claimed and sent by that path, so it is failed here like a queued one.
+        const stale = queued?.status === 'claimed' && now - (this.sql.exec<{ u: number }>('SELECT updated_at AS u FROM messages WHERE id = ?', queued.id).one().u) > STALE_CLAIM_MS;
+        if (stale) {
+          this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'plan_required', updated_at = ? WHERE id = ?", now, queued!.id);
+          this.emitMessageStatus(queued!.id);
+        }
+        if (!queued || queued.status === 'queued' || queued.status === 'retry' || stale) {
+          this.billing.settleHold(job.idempotencyKey, 'dropped', now);
+          return 'dropped';
+        }
+      }
       const existing = this.sql
         .exec<{ id: number; status: string; updated_at: number; claim_attempts: number }>('SELECT id, status, updated_at, claim_attempts FROM messages WHERE idempotency_key = ?', job.idempotencyKey)
         .toArray()[0];
@@ -497,7 +516,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           this.billing.settleHold(job.idempotencyKey, 'opted_out', now);
           return 'dropped';
         }
-        if (this.isMarketingJob(job) && marketingBlocked(this.sql)) {
+        if (this.isMarketingJob(job) && marketingBlocked(this.sql, now)) {
           this.sql.exec("UPDATE messages SET status = 'failed', error_reason = 'plan_blocked', updated_at = ? WHERE id = ?", now, existing.id);
           this.emitMessageStatus(existing.id);
           this.billing.settleHold(job.idempotencyKey, 'dropped', now);
@@ -705,6 +724,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       const key = `ui:${req.clientId}`;
       const dup = this.sql.exec<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.idempotency_key = ?`, key).toArray()[0];
       if (dup) return { ok: true, message: messageDto(dup, workspaceId), job: null };
+      if (!serviceAllowed(this.sql, now)) return { ok: false, reason: 'plan_required' }; // WA-NOFREE-1
       const windowOpen = conv.last_inbound_at !== null && conv.last_inbound_at * 1000 + WINDOW_MS > now;
       const base = { workspaceId, phoneNumberId, to: conv.wa_id, idempotencyKey: key };
       let type: string;
@@ -738,7 +758,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           const t = this.sql.exec<{ category: string; status: string; components: string }>('SELECT category, status, components FROM templates WHERE name = ? AND language = ?', req.name, req.language).toArray()[0];
           if (!t || t.status !== 'APPROVED') return { ok: false, reason: 'template_not_approved' };
           if (t.category === 'MARKETING' && conv.opted_out_at !== null) return { ok: false, reason: 'opted_out' };
-          if (t.category === 'MARKETING' && marketingBlocked(this.sql)) return { ok: false, reason: 'plan_blocked' };
+          if (t.category === 'MARKETING' && marketingBlocked(this.sql, now)) return { ok: false, reason: 'plan_blocked' };
           const stored = componentsSchema.safeParse(JSON.parse(t.components));
           if (!stored.success) return { ok: false, reason: 'invalid_request', message: 'stored template is malformed' };
           const rendered = renderTemplate(stored.data, req.params, t.category);
@@ -851,7 +871,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           fail('opted_out');
           continue;
         }
-        if (category === 'MARKETING' && marketingBlocked(this.sql)) {
+        if (category === 'MARKETING' && marketingBlocked(this.sql, now)) {
           fail('plan_blocked');
           continue;
         }
@@ -1096,7 +1116,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         waId, phoneNumberId, name: copy.templates.otp, language: 'ar', fallbackLanguage: 'en', params: [code], idempotencyKey: key,
         requireCategory: 'AUTHENTICATION', maskText: OTP_MASK, scheduleRelease: false, now,
       });
-      if (!r.ok) return { ok: false, reason: r.reason === 'template_not_approved' || r.reason === 'wrong_category' ? 'template_unavailable' : r.reason === 'wallet_empty' ? 'wallet_empty' : r.reason === 'funding_unknown' || r.reason === 'rate_unavailable' ? 'unavailable' : 'invalid' };
+      if (!r.ok) return { ok: false, reason: r.reason === 'template_not_approved' || r.reason === 'wrong_category' ? 'template_unavailable' : r.reason === 'wallet_empty' ? 'wallet_empty' : r.reason === 'funding_unknown' || r.reason === 'rate_unavailable' || r.reason === 'plan_required' ? 'unavailable' : 'invalid' };
       return r.duplicate ? { ok: true } : { job: r.job };
     });
     if (!('job' in queued)) return queued;
@@ -1486,13 +1506,18 @@ export class WorkspaceDO extends DurableObject<Env> {
     return refs.filter((ref) => this.sql.exec('SELECT 1 FROM wallet_ledger WHERE ref = ?', ref).toArray().length > 0);
   }
 
+  /** WA-NOFREE-1: may this workspace send, run the agent or set a number up right now? (routes ask this before doing any of it) */
+  async serviceOk(): Promise<boolean> {
+    return serviceAllowed(this.sql, Date.now());
+  }
+
   async getEntitlement() {
     return readEntitlement(this.sql);
   }
 
   /** Whether this workspace's plan allows a feature right now (no entitlement, a lapsed status or a package without it = false). Read per call, never cached. */
   async planAllows(feature: PlanFeature): Promise<boolean> {
-    return featureAllowed(this.sql, feature);
+    return featureAllowed(this.sql, feature, Date.now());
   }
 
   /** Seats the plan allows, the owner included (1 without a live entitlement). */

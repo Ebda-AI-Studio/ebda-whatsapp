@@ -3,7 +3,7 @@ import { marketingBlocked } from '../src/core/billing/entitlements';
 import { describe, expect, it } from 'vitest';
 import { setSubscription } from '../src/core/billing/subscriptions';
 import { deliver, iso, storeEvent, storeWorkspace, useStoreLink } from './helpers/store-link';
-import { rows, workspace } from './helpers/workspace';
+import { exec, rows, workspace } from './helpers/workspace';
 
 const W = (n: number) => `00000000-0000-4000-8000-0000000082${String(n).padStart(2, '0')}`;
 const DAY = 86_400_000;
@@ -42,6 +42,10 @@ describe('store.plan_changed -> store-included package', () => {
     await deliver([plan(ws, true, t)]);
     await deliver([plan(ws, false, t + 1000)]);
     expect(await sub(ws)).toMatchObject({ package_id: 'store-included', status: 'cancelled', version: 2 });
+    // WA-CANCEL-1: cancelled with the paid period still running is in effect, so marketing is NOT blocked by `cancelled` itself ...
+    expect(await blocked(ws)).toBe(false);
+    // ... and the workspace expires itself at period_end from its own copy, with no event.
+    await exec(ws, 'UPDATE entitlements SET period_end = ?', Date.now() - 1);
     expect(await blocked(ws)).toBe(true);
   });
 

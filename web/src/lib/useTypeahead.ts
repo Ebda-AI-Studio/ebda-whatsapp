@@ -9,8 +9,8 @@ export type TypeaheadStatus = 'idle' | 'loading' | 'done' | 'error';
  * Search as you type: starts at `minChars` (default 1), waits `debounceMs` (default 150) after the last keystroke, aborts the previous
  * request, and drops any answer (or error) that arrives for a query that is no longer the current one. An empty query is idle with no request.
  */
-export function useTypeahead<T>(fetcher: (q: string, signal: AbortSignal) => Promise<T[]>, opts: { debounceMs?: number; minChars?: number } = {}) {
-  const { debounceMs = SEARCH_DEBOUNCE_MS, minChars = 1 } = opts;
+export function useTypeahead<T>(fetcher: (q: string, signal: AbortSignal) => Promise<T[]>, opts: { debounceMs?: number; minChars?: number; deps?: readonly unknown[] } = {}) {
+  const { debounceMs = SEARCH_DEBOUNCE_MS, minChars = 1, deps = [] } = opts;
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<T[]>([]);
   const [status, setStatus] = useState<TypeaheadStatus>('idle');
@@ -31,7 +31,9 @@ export function useTypeahead<T>(fetcher: (q: string, signal: AbortSignal) => Pro
     }, debounceMs);
     // Cleanup runs when the query changes (and on unmount): aborting here is what makes every older answer land on a dead signal.
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [trimmed, debounceMs, minChars]);
+    // `deps`: anything the fetcher closes over that should re-run the SAME query when it changes (a filter, a reload tick). Keep its length constant.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trimmed, debounceMs, minChars, ...deps]);
 
   return { query, setQuery, results, status };
 }

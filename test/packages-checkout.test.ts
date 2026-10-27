@@ -46,6 +46,14 @@ async function start(ws: string, packageId = 'gold') {
 }
 
 describe('starting a checkout', () => {
+  it('WA-NOFREE-1: a workspace with NO package can start a checkout (a merchant must be able to buy)', async () => {
+    const ws = W(8409);
+    await seedNumber('pn-pc-8409', ws);
+    await workspace(ws).applyEntitlement({ version: 1, packageId: 'old', status: 'expired', periodStart: 1, periodEnd: 2 });
+    expect((await workspace(ws).getEntitlement())?.status).toBe('expired');
+    const r = await startPackageCheckout(env, { workspaceId: ws, userId: 'u1', sessionId: 's1', packageId: 'gold' });
+    expect(r.ok).toBe(true);
+  });
   it('takes the amount from packages.price_minor only and signs the link with it', async () => {
     const ws = W(8401);
     const r = await start(ws);

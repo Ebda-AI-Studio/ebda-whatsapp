@@ -15,10 +15,10 @@ describe('AI agent', () => {
     const toggle = await screen.findByRole('switch', { name: 'شغّل المساعد الذكي' });
     expect(toggle.getAttribute('aria-checked')).toBe('false');
     await act(async () => fireEvent.click(toggle));
-    await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'أسئلة وأجوبة متجرك' }), { target: { value: 'الشحن خلال ٣ أيام' } }));
+    await act(async () => fireEvent.change(screen.getByRole('textbox', { name: 'أسئلة وأجوبة متجرك' }), { target: { value: 'الشحن خلال 3 أيام' } }));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حفظ' })));
     expect((await source.agentSettings!())!.enabled).toBe(true);
-    expect((await source.agentSettings!())!.faqText).toBe('الشحن خلال ٣ أيام');
+    expect((await source.agentSettings!())!.faqText).toBe('الشحن خلال 3 أيام');
     expect(screen.getByRole('status').textContent).toContain('اتحفظ');
   });
 
@@ -35,7 +35,7 @@ describe('AI agent', () => {
   it('flags a conversation that needs a human and lets staff take it over', async () => {
     const source = createSampleSource();
     render(<App source={source} now={now} />);
-    const row = await screen.findByRole('button', { name: /كريم سمير/ });
+    const row = await screen.findByRole('option', { name: /كريم سمير/ });
     expect(within(row).getByText('محتاج حد من الفريق')).toBeTruthy();
     await act(async () => fireEvent.click(row));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'استلم المحادثة' })));
@@ -45,7 +45,7 @@ describe('AI agent', () => {
 
   it('marks replies written by the AI agent', async () => {
     render(<App source={createSampleSource()} now={now} />);
-    const row = await screen.findByRole('button', { name: /سارة محمود/ });
+    const row = await screen.findByRole('option', { name: /سارة محمود/ });
     await act(async () => fireEvent.click(row));
     expect(within(screen.getByRole('log')).getByText('رد المساعد الذكي')).toBeTruthy();
   });

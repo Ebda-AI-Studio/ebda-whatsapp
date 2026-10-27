@@ -79,22 +79,31 @@ Every InstaPay payment waits for a person: an operator opens **Operator -> Queue
 ## 9. CI back on (Ahmad decides, Claude sets up)
 CI is paused by Ahmad's instruction. To resume: bring the Umbra runner for this repo online, set repo variable `EBDA_RUNS_ON` to `["self-hosted","umbra-ebda"]` (JSON), and confirm the remote Actions cache stays off on the self-hosted runner. Branch protection: require `ci` + `gitleaks` on `main`.
 
+**Ruling WA-CI-STALL-1 (2026-10-27): a test that times out on the CI VM but runs fast on a laptop is a stall, not slowness; do not raise the timeout.** Seen once: kashier-refunds "HIGH: a chunk whose card refund row may have sent money…" hit the 60 s CI deadline (setup 397 s, VM under I/O pressure) and takes 245 ms locally. **Trigger: a second stall of any test within 7 days → add per-test deadline diagnostics** (which await is pending when the deadline fires), never a timeout bump. Cost if wrong: a real hang in the refund path is treated as CI noise until it repeats.
+
 ## 10. Merge order (Claude, after Ahmad's go)
 1. `feat/phase4-7` → `main` in one PR: it already carries Phases 4-9 (store link, AI agent, campaigns, billing and its screens, own numbers, shared number, operator console, connectors, brand packs, white-label kit) and the final whole-branch review fixes.
 2. Launch is joint with Ebda Store (LAUNCH-SUITE-1): accounts.ebda.app live first, then this deploy; the Store session holds the launch gate.
 Each merge: full suite green twice locally, CI green, then deploy.
 
 ## 11. Migrations (Claude)
-`npx wrangler d1 migrations apply ebda-wa-platform --remote` before the deploy that needs them. Durable Object SQLite migrates itself on first access (versioned in code).
+`npx wrangler d1 migrations apply ebda-wa-platform --remote` before the deploy that needs them. Durable Object SQLite migrates itself on first access (versioned in code). Packages: `0014_package_limits.sql` seeds starter / growth / pro and `0015_past_due_since.sql` adds the grace clock. **There is no free plan (WA-NOFREE-1):** a store with no package, or a cancelled / expired one, can read and buy but cannot send ANY message, run the AI agent or connect a number (`403 plan_required`); `past_due` keeps service sends for at most 7 days (WA-GRACE-1). So before the first merchant, make sure they either have a Store plan that includes WhatsApp (`store-included`, set only by the Store plan event) or buy / are assigned a paid package.
 
-## 12. Deploy (Claude)
-`npx wrangler deploy --var COMMIT_SHA:$(git rev-parse --short HEAD)` from a clean checkout of `main` (so `/health` reports the commit).
+## 12. Deploy
+**Ruling WA-DEPLOY-1: deploys run from Ahmad's Mac with `bash scripts/deploy.sh` until the repo has environment protection. Do NOT add `CLOUDFLARE_API_TOKEN` to GitHub secrets until then** (required reviewer + main-only deployment branches on the `production` environment). Why: Whisky-11 is on the GitHub Free plan with a private repo, where environment protection does not exist, so a dispatch from a branch with an edited workflow could read any secret it can reference. Cost if wrong: a leaked Cloudflare token lets someone deploy arbitrary code to the live Worker and read/write D1, R2 and the queues; treating the token as Mac-only costs one manual command per deploy. The `cf-deploy` workflow (environment `production`, step-scoped secrets, `npm ci --ignore-scripts`, dispatch-only) is kept ready and fails closed without the secret; it calls the very same script.
+
+`scripts/deploy.sh` is the one path (Mac and workflow): it refuses a wrong Cloudflare account (`69188202efc4df480140dd76545aa3ab`), a commit that is not an ancestor of `origin/main` and an unclean tree; applies the D1 migrations (list, then `apply --remote`); `wrangler deploy --var COMMIT_SHA:<sha>`; then `verify-prod --expect <sha>` including the live cron schedule. From a clean checkout of `main`, after `npx wrangler whoami` shows the personal account:
+```
+git pull --ff-only && npm ci --ignore-scripts && npm run typecheck && npm run build:web
+META_VERIFY_TOKEN=… META_APP_SECRET=… CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=69188202efc4df480140dd76545aa3ab bash scripts/deploy.sh
+```
+(`CLOUDFLARE_API_TOKEN` here only lets verify-prod read the live cron schedule; wrangler itself uses the OAuth login, and the token can be read-only on Workers Scripts. Without them the cron and webhook checks print SKIP, which means NOT verified.) This is also the first deploy (GO-1). Rollback: `docs/runbooks/rollback.md`.
 
 ## 13. Verify production (Claude) — after EVERY deploy
 ```
 META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://wa.ebda.app --expect "$(git rev-parse --short origin/main)" --brand ebda
 ```
-It checks the running commit, the security headers on the API and the page, Meta's webhook handshake, that unsigned/badly-signed webhooks are refused, and that a correctly signed empty webhook is accepted. Anything it could not check prints as SKIP and must be reported as not verified. Then, by hand:
+It checks the running commit, the live cron schedule (with `--cron`/`--worker` and the Cloudflare env), the security headers on the API and the page, Meta's webhook handshake, that unsigned/badly-signed webhooks are refused, and that a correctly signed empty webhook is accepted. Anything it could not check prints as SKIP and must be reported as not verified. Then, by hand:
 0. **Live identity round trip** (the first deploy only proves it): Ahmad signs in at `https://wa.ebda.app`; the inbox loads his store, which proves a real accounts.ebda.app token (ES256, `iss` https://accounts.ebda.app, `aud` whatsapp, `stores[]`) passes our verifier. A 401/403 loop here = stop and report, do not continue.
 1. Send a WhatsApp message to the connected number from the owner's phone; it appears in the inbox in real time; reply from the inbox; the owner receives it.
 2. Open the inbox in Arabic and English, on a phone and a desktop.
@@ -104,5 +113,12 @@ It checks the running commit, the security headers on the API and the page, Meta
 ### Number health and the kill switch (before `SHARED_NUMBER_ENABLED` is ever on)
 Subscribe the Meta app to `phone_number_quality_update` and `account_update` (already in the webhook field list in section 2). After the first real event of each kind, check `phone_numbers.health_state` moved and that the P1 / P0 alert reached Telegram. The operator console has a "Kill switch" tab (suspend, pause campaigns, evict, revoke tokens), every action is in `operator_actions`. Details and limits: `docs/number-health.md`.
 
+### Request guards (security, `src/core/request-guards.ts`, one middleware before every route)
+- Body size is checked before the body is read (`Content-Length`) and counted while it is read (chunked, no length): `/meta/webhook` and `/kashier/webhook` 256 KB, JSON API 1 MB, uploads keep their own limits (media 50 MB, imports 10 MB, InstaPay proof 5 MB, plus the multipart envelope). Over: `413 {"error":"payload_too_large"}`.
+- Content-type allow-list when a body is present: webhooks and API writes `application/json`; media and imports `multipart/form-data`; the InstaPay proof jpeg/png/webp/pdf. Anything else: `415 {"error":"unsupported_media"}`.
+- Public-route limits, token buckets in the isolate (the Workers Rate Limiting binding is not configured): `/t/:code` 20/s (burst 60) per client (IPv6 by /64) AND 200/s (burst 500) per workspace; `/meta/webhook` 50/s (burst 200) per `phone_number_id`, counted only for requests with a VALID signature (a forged body cannot spend another number's allowance). Over: `429 {"error":"rate_limited"}` with `Retry-After`. Staleness class BOUNDED-stale: per isolate, resets on eviction, several isolates each hold a bucket; the limits sit far above real traffic and guard no money or permission. Residual: Meta and Kashier redeliver a 429 with backoff, so a signed event over the limit is delayed, not lost; a number that keeps exceeding the limit keeps being delayed.
+  - **Ruling WA-LINK-1 (closed by WA-LINK-2):** tracked-link codes are signed (`<ws>.<random>.<mac>`, HKDF label `tracked-link-code/v1` from `PROOF_URL_SECRET`). The guard verifies the MAC for every method on `/t/` before any bucket or Durable Object, and the route verifies it again; so made-up codes can no longer spend a store's store-wide allowance. Remaining: a flood of GENUINE codes (each signed for a real recipient) is capped per client and per store as before. Cost if wrong: a leaked `PROOF_URL_SECRET` lets anyone mint valid link codes (and proof links); rotating it invalidates EVERY issued tracked link and proof link at once, so rotate only for a leak, and announce it.
+- `/t/:code` already answers a malformed code or an unknown workspace with 404 before any Durable Object is woken; after deploy check that a made-up code returns 404 and a normal webhook and API call still pass.
+
 ## 14. Go live checklist for the first merchant
-Business verified · number connected and registered (or coexistence synced within 24 h) · templates approved · store linked (if Ebda Store) · AI agent configured (optional) · wallet funded (shared number only) · help guides published at help.ebda.app.
+Business verified · a package on record (Store plan with WhatsApp, a purchase or an operator-assigned paid package; no package = no sending) · number connected and registered (or coexistence synced within 24 h) · templates approved · store linked (if Ebda Store) · AI agent configured (optional) · wallet funded (shared number only) · help guides published at help.ebda.app.

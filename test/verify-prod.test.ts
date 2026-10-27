@@ -34,7 +34,9 @@ function fakeDeploy(over: { kashierServedByAssets?: boolean; commit?: string; no
 
 describe('verify-prod', () => {
   it('passes every check against a healthy deployment', async () => {
-    const r = await runChecks({ base: 'https://wa.test', expectCommit: COMMIT, expectBrand: 'ebda', verifyToken: TOKEN, appSecret: SECRET, fetchImpl: fakeDeploy() });
+    const deploy = fakeDeploy();
+    const fetchImpl = async (url: string, init?: RequestInit) => (url.startsWith('https://api.cloudflare.com/') ? new Response(JSON.stringify({ success: true, result: { schedules: [{ cron: '17 1 * * *' }] } })) : deploy(url, init));
+    const r = await runChecks({ base: 'https://wa.test', expectCommit: COMMIT, expectBrand: 'ebda', verifyToken: TOKEN, appSecret: SECRET, expectCron: '17 1 * * *', worker: 'ebda-wa', cfToken: 't', cfAccount: 'a', fetchImpl });
     expect(r.filter((c: { ok: boolean | null }) => c.ok !== true)).toEqual([]);
   });
 
@@ -43,6 +45,34 @@ describe('verify-prod', () => {
     expect(ok.find((c: { name: string }) => c.name === 'kashier webhook is served by the Worker')).toMatchObject({ ok: true });
     const spa = await runChecks({ base: 'https://wa.test', fetchImpl: fakeDeploy({ kashierServedByAssets: true }) });
     expect(spa.find((c: { name: string }) => c.name === 'kashier webhook is served by the Worker')).toMatchObject({ ok: false });
+  });
+
+  describe('the live cron schedule (Ruling #17: a registered schedule is proven from the API, not assumed from wrangler.jsonc)', () => {
+    const withApi = (cron: string[] | 'error') => async (url: string, init: RequestInit = {}) => {
+      if (url.startsWith('https://api.cloudflare.com/')) {
+        expect(url).toBe('https://api.cloudflare.com/client/v4/accounts/acct-1/workers/scripts/ebda-wa/schedules');
+        expect(new Headers(init.headers).get('authorization')).toBe('Bearer tok-1');
+        return cron === 'error' ? new Response('{"success":false}', { status: 403 }) : new Response(JSON.stringify({ success: true, result: { schedules: cron.map((c) => ({ cron: c })) } }));
+      }
+      return fakeDeploy()(url, init);
+    };
+    const run = (fetchImpl: never, extra: Record<string, unknown> = {}) => runChecks({ base: 'https://wa.test', expectCron: '17 1 * * *', worker: 'ebda-wa', cfToken: 'tok-1', cfAccount: 'acct-1', fetchImpl, ...extra });
+    const cronCheck = (r: { name: string; ok: boolean | null; detail: string }[]) => r.find((c) => c.name === 'cron schedule registered live');
+    it('passes and prints the live schedule when the expected cron is registered', async () => {
+      const c = cronCheck(await run(withApi(['17 1 * * *']) as never));
+      expect(c).toMatchObject({ ok: true });
+      expect(c!.detail).toContain('17 1 * * *');
+    });
+    it('fails (and prints what IS registered) when the schedule is missing or different', async () => {
+      const c = cronCheck(await run(withApi(['0 5 * * *']) as never))!;
+      expect(c.ok).toBe(false);
+      expect(c.detail).toContain('0 5 * * *');
+      expect(cronCheck(await run(withApi([]) as never))).toMatchObject({ ok: false });
+    });
+    it('fails when the API cannot be read, and is SKIPPED (never passed) without credentials', async () => {
+      expect(cronCheck(await run(withApi('error') as never))).toMatchObject({ ok: false });
+      expect(cronCheck(await run(fakeDeploy() as never, { cfToken: undefined }))).toMatchObject({ ok: null });
+    });
   });
 
   it('fails when the running commit is not the expected one', async () => {

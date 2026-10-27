@@ -7,10 +7,11 @@
 // Optional secrets come from the environment only (never argv, which lands in shell history):
 //   META_VERIFY_TOKEN  → runs the webhook handshake check
 //   META_APP_SECRET    → sends one signed, empty webhook (no side effects) and expects 200
+//   CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID (+ --cron "<expr>" --worker <name>) → prints the LIVE cron schedule and requires the expected one
 import { createHmac, randomUUID } from 'node:crypto';
 
 /** @returns {Promise<{ name: string; ok: boolean | null; detail: string }[]>} ok: true = passed, false = failed, null = skipped */
-export async function runChecks({ base, expectCommit, expectBrand, verifyToken, appSecret, fetchImpl = fetch }) {
+export async function runChecks({ base, expectCommit, expectBrand, verifyToken, appSecret, expectCron, worker, cfToken, cfAccount, fetchImpl = fetch }) {
   const out = [];
   const add = (name, ok, detail) => out.push({ name, ok, detail });
   const get = (path, init) => fetchImpl(`${base}${path}`, { redirect: 'manual', ...init });
@@ -83,6 +84,22 @@ export async function runChecks({ base, expectCommit, expectBrand, verifyToken, 
     const signed = await get('/meta/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, body: empty });
     add('webhook accepts signed', signed.status === 200, `status ${signed.status}`);
   }
+
+  // The daily cron cannot be waited on, so its REGISTRATION is proven from Cloudflare's API (not assumed from wrangler.jsonc): the live schedules of the
+  // Worker are printed, and the expected one must be among them. The first real tick is proven by the next run's `daily_billing` log line (docs/runbooks/rollback.md).
+  if (!expectCron) add('cron schedule registered live', null, 'skipped: pass --cron "<expression>" (the schedule wrangler.jsonc registers)');
+  else if (!cfToken || !cfAccount || !worker) add('cron schedule registered live', null, 'skipped: set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID and pass --worker <name>');
+  else {
+    try {
+      const res = await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${cfAccount}/workers/scripts/${worker}/schedules`, { headers: { authorization: `Bearer ${cfToken}` } });
+      const body = res.ok ? await res.json().catch(() => null) : null;
+      const live = (body?.result?.schedules ?? []).map((s) => s.cron);
+      if (!body?.success) add('cron schedule registered live', false, `could not read the live schedule (status ${res.status})`);
+      else add('cron schedule registered live', live.includes(expectCron), `live schedule: ${live.length ? live.map((c) => `"${c}"`).join(', ') : '(none)'}; expected "${expectCron}"`);
+    } catch (e) {
+      add('cron schedule registered live', false, `unreachable: ${e.message}`);
+    }
+  }
   return out;
 }
 
@@ -94,7 +111,7 @@ if (isMain) {
     console.error('usage: node scripts/verify-prod.mjs --base https://<host> [--expect <commit>] [--brand <brand>]');
     process.exit(2);
   }
-  const results = await runChecks({ base: base.replace(/\/$/, ''), expectCommit: arg('--expect'), expectBrand: arg('--brand'), verifyToken: process.env.META_VERIFY_TOKEN, appSecret: process.env.META_APP_SECRET });
+  const results = await runChecks({ base: base.replace(/\/$/, ''), expectCommit: arg('--expect'), expectBrand: arg('--brand'), verifyToken: process.env.META_VERIFY_TOKEN, appSecret: process.env.META_APP_SECRET, expectCron: arg('--cron'), worker: arg('--worker'), cfToken: process.env.CLOUDFLARE_API_TOKEN, cfAccount: process.env.CLOUDFLARE_ACCOUNT_ID });
   for (const r of results) console.log(`${r.ok === true ? 'PASS' : r.ok === false ? 'FAIL' : 'SKIP'}  ${r.name}: ${r.detail}`);
   const failed = results.filter((r) => r.ok === false).length;
   const skipped = results.filter((r) => r.ok === null).length;

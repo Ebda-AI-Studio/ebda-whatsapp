@@ -8,19 +8,41 @@ function asciiDigits(s: string): string {
     .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
 }
 
+/** Egyptian fixed-line area codes (without the trunk 0) besides Cairo/Giza 2 and Alexandria 3. Same table as the store product's toE164 (Ruling PHONE-2). */
+const EG_AREA_3 = new Set(['13', '15', '40', '45', '46', '47', '48', '50', '55', '57', '62', '64', '65', '66', '68', '69', '82', '84', '86', '88', '92', '93', '95', '96', '97']);
+
 /**
- * Normalises a phone number to E.164. Without a `+`/`00` prefix only Egyptian forms are accepted:
- * national `0…`, `20…` (12 digits) or a 10-digit mobile typed without its leading 0. Anything else returns null
- * rather than guessing a country.
+ * Is `national` (trunk 0 + digits, nothing else) a valid Egyptian number? Mobile `01[0125]` + 8 digits; Cairo/Giza `02` + 8;
+ * Alexandria `03` + 7; a governorate code (`EG_AREA_3`) + 7.
+ */
+export function isEgyptianNational(national: string): boolean {
+  if (/^01[0125]\d{8}$/.test(national)) return true;
+  if (/^02\d{8}$/.test(national)) return true;
+  if (/^03\d{7}$/.test(national)) return true;
+  const m = /^0(\d{2})\d{7}$/.exec(national);
+  return !!m && EG_AREA_3.has(m[1]!);
+}
+
+/**
+ * Normalises a phone number to E.164 (the buyerKey input in every suite product: shared vectors in `vectors/phone.json`).
+ * Without a `+`/`00` prefix only VALID Egyptian numbers are accepted (Ruling PHONE-2): national `0…`, `20…` (12 digits) or a
+ * 10-digit mobile typed without its 0, each checked against the Egyptian number plan. A UK `07911…` or a Saudi `050…` that is
+ * not an Egyptian shape returns null rather than becoming +20; a foreign number must carry `+` or `00`.
  */
 export function normaliseE164(input: string, defaultCountry: '20' = '20'): string | null {
   let s = asciiDigits(input.replace(BIDI_MARKS, '')).replace(/[\s\-().]/g, '');
   if (s.startsWith('00')) s = '+' + s.slice(2);
   if (!s.startsWith('+')) {
-    if (s.startsWith('0')) s = `+${defaultCountry}${s.slice(1)}`;
-    else if (s.startsWith(defaultCountry) && s.length === 12) s = '+' + s;
-    else if (/^1\d{9}$/.test(s)) s = `+${defaultCountry}${s}`;
-    else return null;
+    if (s.startsWith('0')) {
+      if (!isEgyptianNational(s)) return null;
+      s = `+${defaultCountry}${s.slice(1)}`;
+    } else if (s.startsWith(defaultCountry) && s.length === 12) {
+      if (!isEgyptianNational(`0${s.slice(2)}`)) return null;
+      s = '+' + s;
+    } else if (/^1\d{9}$/.test(s)) {
+      if (!isEgyptianNational(`0${s}`)) return null;
+      s = `+${defaultCountry}${s}`;
+    } else return null;
   }
   // A trunk 0 kept after the country code (+20 0100…) is dropped.
   if (s.startsWith(`+${defaultCountry}0`)) s = `+${defaultCountry}${s.slice(defaultCountry.length + 2)}`;
