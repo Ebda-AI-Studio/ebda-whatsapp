@@ -14,6 +14,10 @@ A wallet balance above zero is refused (`409 wallet_balance_remains`) unless the
 
 An operator asking while an owner request is pending TAKES IT OVER in one conditional statement (role, requester, reason, the earlier of the two dates, the write-off), so the owner can no longer cancel it; an owner asking never downgrades an operator-owned row. Every change writes exactly ONE `offboarding_log` row in the same batch (`taken_over` or `operator_changed`, detail = previous and new values plus `taken_over` / `expedited` flags); a request that changes nothing writes nothing. The wallet balance is read again: if it grew beyond the write-off the owner accepted, the operator gets `409 write_off_required` with `amountMinor` and must pass `acceptWriteOff: true` (the new amount replaces the stored one and is in the log).
 
+## Screens
+- **Owner**: Wallet screen, last card "Delete this store's WhatsApp account" (`OffboardingCard`): what happens, the wallet balance and a tick to give it up (shown in money; confirm stays off until ticked), the cooling-off date once asked, a cancel button, and, when our team started the deletion, no cancel button but "Our team started this deletion. Write to us at <supportEmail>" (the brand's `supportEmail`).
+- **Operator console**: tab "Delete a workspace" (`OffboardingOpPanel`): store id + reason (5+ characters), "Request deletion in 14 days", "Delete now" (immediate), the write-off tick when the server answers `write_off_required` (with the amount), cancel, the status (state, steps done, last error), the request's log, and the list of all requests.
+
 ## Race safety (security review)
 The run is claimed with ONE conditional write (`state IN ('pending','running') AND execute_after <= now`, `meta.changes` checked); a row cancelled or not yet due since it was read is `skipped`. The state is re-read (`running`) before EVERY step, so a cancel that lands mid-run stops before the next destructive step. Cancel itself only succeeds on `pending`, so once the claim wins the deletion is irreversible by design.
 

@@ -1,4 +1,4 @@
-import type { OpsStatusDto, InstapayRequest, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, WalletDto } from './billing';
+import type { OffboardingView, OperatorOffboarding, OpsStatusDto, InstapayRequest, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, WalletDto } from './billing';
 import { ApiError } from './api';
 
 // Sample billing data for preview only (the app labels the whole source as sample). Amounts are invented; nothing here is real money.
@@ -62,6 +62,7 @@ export function createSampleWallet(): WalletApi {
   const instapayItems: InstapayRequest[] = [
     { id: 'ip-0', reference: 'WA-K7M2Q9XD', kind: 'package', packageId: 'gold', amountMinor: 50000, currency: 'EGP', state: 'rejected', createdAt: BASE - 5 * D, expiresAt: BASE - 3 * D, hasProof: true, rejectReason: 'المبلغ في الإيصال أقل من المطلوب', decidedAt: BASE - 4 * D },
   ];
+  let off: OffboardingView = { state: 'none' };
   const wallet: WalletDto = {
     balanceMinor: 18500, heldMinor: 2500, availableMinor: 16000, debtMinor: 0, creditLimitMinor: 5000, currency: 'EGP',
     funding: [{ phoneNumberId: 'pn-sample-1', displayPhone: '+20 100 555 0101', funding: 'merchant_card' }, { phoneNumberId: 'pn-sample-shared', displayPhone: '+20 100 555 0900', funding: 'platform_line' }],
@@ -114,11 +115,22 @@ export function createSampleWallet(): WalletApi {
       refunds.push(r);
       return { ...r };
     },
+    offboarding: async () => ({ ...off }),
+    async requestOffboarding(opts) {
+      if (wallet.balanceMinor > 0 && !opts.acceptWriteOff) throw new ApiError('invalid_request', 409, 'wallet_balance_remains');
+      off = { state: 'pending', requestedRole: 'owner', requestedAt: BASE, executeAfter: BASE + 14 * D, writeOffMinor: Math.max(0, wallet.balanceMinor) };
+      return { ...off };
+    },
+    async cancelOffboarding() {
+      if (off.state !== 'pending') throw new ApiError('invalid_request', 409, 'nothing_pending');
+      off = { state: 'cancelled' };
+    },
   };
 }
 
 export function createSampleOperator(currentUserId: string): OperatorApi {
   let n = 100;
+  const offs = new Map<string, OperatorOffboarding>();
   const ops = { suspended: false, evicted: false, revokedAt: null as number | null };
   const opsView = (): OpsStatusDto => ({
     suspended: ops.suspended, suspendedReason: ops.suspended ? 'sample' : null, integrationsRevokedAt: ops.revokedAt, evicted: ops.evicted,
@@ -220,6 +232,28 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       Object.assign(a, { state: decision === 'approve' ? 'approved' : 'rejected', approvedBy: currentUserId, decidedAt: Date.now() });
       record(`adjustment_${decision}d`, a.workspaceId, { state: 'pending' }, { state: a.state }, a.reason);
       return { ...a };
+    },
+    async offboardings() { return [...offs.values()].map((o) => structuredClone(o)); },
+    async offboarding(ws) {
+      const o = offs.get(ws);
+      if (!o) throw new ApiError('not_found', 404);
+      return structuredClone(o);
+    },
+    async requestOffboarding(ws, body) {
+      const at = BASE;
+      const prev = offs.get(ws);
+      const o: OperatorOffboarding = prev ?? { workspaceId: ws, state: 'pending', requestedBy: currentUserId, requestedRole: 'operator', reason: body.reason, requestedAt: at, executeAfter: at + 14 * D, writeOffMinor: 0, stepsDone: [], attempts: 0, lastError: null, finishedAt: null, log: [] };
+      if (body.immediate) o.executeAfter = at;
+      Object.assign(o, { requestedRole: 'operator', requestedBy: currentUserId, reason: body.reason });
+      o.log = [...(o.log ?? []), { at, actor: currentUserId, action: prev ? 'operator_changed' : 'requested', reason: body.reason }];
+      offs.set(ws, o);
+      return structuredClone(o);
+    },
+    async cancelOffboarding(ws, reason) {
+      const o = offs.get(ws);
+      if (!o || o.state !== 'pending') throw new ApiError('invalid_request', 409, 'nothing_pending');
+      o.state = 'cancelled';
+      o.log = [...(o.log ?? []), { at: BASE, actor: currentUserId, action: 'cancelled', reason }];
     },
     changeLog: async () => structuredClone(log),
     async yearlyRefundQuote(orderId) {

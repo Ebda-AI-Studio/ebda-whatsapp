@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
+  opsStatusDto, offboardingDto, operatorOffboardingDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -9,7 +9,7 @@ import type { InboxSource } from './source';
 
 export class ApiError extends Error {
   /** `detail` = the server's machine reason for a 409 (e.g. `empty_audience`), when it sends one. */
-  constructor(public readonly code: string, public readonly status: number, public readonly detail?: string) {
+  constructor(public readonly code: string, public readonly status: number, public readonly detail?: string, public readonly amountMinor?: number) {
     super(code);
   }
 }
@@ -36,7 +36,7 @@ export function createApiSource(o: Opts): LiveSource {
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       const err = apiError.safeParse(json);
-      throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined);
+      throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined, err.success ? err.data.amountMinor : undefined);
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) throw new Error(`response does not match the contract: ${path}`);
@@ -170,6 +170,9 @@ export function createApiSource(o: Opts): LiveSource {
       },
       estimate: (category, count) => call(`/wallet/estimate?category=${category}&count=${count}`, costEstimateDto),
       topup: (amountMinor) => call('/wallet/topups', topupDto, post({ amountMinor })),
+      offboarding: () => call('/offboarding', offboardingDto),
+      requestOffboarding: (opts) => call('/offboarding', offboardingDto, post({ confirm: true, ...opts })),
+      cancelOffboarding: async () => { await call('/offboarding', done, { method: 'DELETE' }); },
       topupState: (orderId) => call(`/wallet/topups/${encodeURIComponent(orderId)}`, topupDto),
       packages: async () => (await call('/packages', items(packageDto))).items,
       buyPackage: (packageId) => call(`/packages/${encodeURIComponent(packageId)}/checkout`, packageOrderDto, post({})),
@@ -208,6 +211,10 @@ export function createApiSource(o: Opts): LiveSource {
       adjustments: async () => (await op('/adjustments', items(adjustmentDto))).items,
       createAdjustment: (workspaceId, amountMinor, reason) => op(`/workspaces/${encodeURIComponent(workspaceId)}/adjustments`, adjustmentDto, post({ amountMinor, reason })),
       decideAdjustment: (id, decision) => op(`/adjustments/${encodeURIComponent(id)}/decision`, adjustmentDto, post({ decision })),
+      offboardings: async () => (await op('/offboardings', items(operatorOffboardingDto))).items,
+      offboarding: (ws) => op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, operatorOffboardingDto),
+      requestOffboarding: (ws, body) => op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, operatorOffboardingDto, post(body)),
+      cancelOffboarding: async (ws, reason) => { await op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, done, { method: 'DELETE', body: JSON.stringify({ reason }) }); },
       changeLog: async () => (await op('/change-log?limit=100', items(changeLogItemDto))).items,
       yearlyRefundQuote: (orderId) => op(`/package-orders/${encodeURIComponent(orderId)}/refund-quote`, z.object({
         orderId: z.string(), packageId: z.string(), periodMonths: z.number(), monthlyMinor: z.number(), unusedMonths: z.number(), grossMinor: z.number(), debtMinor: z.number(), debtSettledMinor: z.number(), refundMinor: z.number(),

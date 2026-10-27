@@ -18,7 +18,7 @@ import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
-import { cancelOffboarding, getOffboarding, listOffboardings, requestOffboarding, runDueOffboardings } from '../core/ops/offboarding';
+import { cancelOffboarding, getOffboardingWithLog, listOffboardings, requestOffboarding, runDueOffboardings } from '../core/ops/offboarding';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -263,7 +263,7 @@ const killSwitch = (run: (env: Env, a: { actor: string; workspaceId: string; rea
 // ---- W2-OFFBOARD: workspace deletion. A reason is required and audited; `immediate` skips the 14-day cooling-off.
 operatorRoutes.get('/offboardings', async (c) => c.json({ items: await listOffboardings(c.env, c.req.query('state') || undefined) }));
 operatorRoutes.get('/workspaces/:workspaceId/offboarding', async (c) => {
-  const st = await getOffboarding(c.env, c.req.param('workspaceId'));
+  const st = await getOffboardingWithLog(c.env, c.req.param('workspaceId'));
   return st ? c.json(st) : c.json({ error: 'not_found' }, 404);
 });
 operatorRoutes.post('/workspaces/:workspaceId/offboarding', async (c) => {

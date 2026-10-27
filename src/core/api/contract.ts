@@ -84,6 +84,8 @@ export const apiError = z.object({
   message: z.string().optional(),
   /** plan_feature: which plan feature the package lacks (the client shows the upgrade CTA for it). */
   feature: z.enum(['campaigns', 'order_in_chat', 'api']).optional(),
+  /** write_off_required: the wallet balance the requester has to agree to give up (piasters). */
+  amountMinor: z.number().int().optional(),
 });
 
 export const templateDto = z.object({
@@ -325,6 +327,17 @@ export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_u
 export const operatorKillSwitch = z.object({ reason: z.string().trim().min(5).max(300) });
 /** W2-OFFBOARD: an owner asks to delete the workspace (explicit confirmation; a wallet balance has to be given up explicitly). Strict: an owner cannot skip the cooling-off. */
 export const offboardingRequest = z.object({ confirm: z.literal(true), acceptWriteOff: z.boolean().optional(), reason: z.string().trim().min(5).max(300).optional() }).strict();
+/** GET /stores/:id/offboarding. `none` = nothing asked yet; the other fields exist from `pending` on. */
+export const offboardingDto = z.object({
+  state: z.enum(['none', 'pending', 'running', 'done', 'cancelled']), requestedRole: z.enum(['owner', 'operator']).optional(),
+  requestedAt: z.number().int().optional(), executeAfter: z.number().int().optional(), writeOffMinor: z.number().int().optional(),
+});
+/** GET /operator/workspaces/:id/offboarding and the list: the status plus the audit trail of the request (previous values are in `detail`). */
+export const operatorOffboardingDto = z.object({
+  workspaceId: z.string(), state: z.enum(['pending', 'running', 'done', 'cancelled']), requestedBy: z.string(), requestedRole: z.enum(['owner', 'operator']), reason: z.string().nullable(),
+  requestedAt: z.number().int(), executeAfter: z.number().int(), writeOffMinor: z.number().int(), stepsDone: z.array(z.string()), attempts: z.number().int(), lastError: z.string().nullable(), finishedAt: z.number().int().nullable(),
+  log: z.array(z.object({ at: z.number().int(), actor: z.string(), action: z.string(), reason: z.string().nullable() })).optional(),
+});
 /** An operator asks (a reason is required and audited); `immediate` skips the cooling-off. */
 export const operatorOffboardingRequest = z.object({ reason: z.string().trim().min(5).max(300), immediate: z.boolean().optional(), acceptWriteOff: z.boolean().optional() }).strict();
 export const healthState = z.enum(['green', 'yellow', 'red', 'restricted']);

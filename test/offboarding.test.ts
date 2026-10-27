@@ -194,6 +194,21 @@ describe('who may cancel', () => {
   });
 });
 
+describe('operator read view', () => {
+  it('GET returns the status with the request\'s log, newest last; the list shows every request', async () => {
+    const ws = W(2040);
+    await own(ws);
+    await ownerCall(ws, 'POST', { confirm: true });
+    await operatorCall(OP1, 'POST', `/workspaces/${ws}/offboarding`, { reason: REASON });
+    const one = (await (await operatorCall(OP1, 'GET', `/workspaces/${ws}/offboarding`)).json()) as { requestedRole: string; log: { action: string }[] };
+    expect(one.requestedRole).toBe('operator');
+    expect(one.log.map((l) => l.action)).toEqual(['requested', 'taken_over']);
+    const all = (await (await operatorCall(OP1, 'GET', '/offboardings')).json()) as { items: { workspaceId: string }[] };
+    expect(all.items.map((i) => i.workspaceId)).toContain(ws);
+    expect((await operatorCall(OP1, 'GET', `/workspaces/${W(2041)}/offboarding`)).status).toBe(404);
+  });
+});
+
 describe('operator takeover: audit and money', () => {
   const logs = (ws: string) => d1<{ action: string; actor: string; reason: string | null; detail: string | null }>('SELECT action, actor, reason, detail FROM offboarding_log WHERE workspace_id = ? ORDER BY id', ws);
   const op = (ws: string, body: Record<string, unknown>) => operatorCall(OP1, 'POST', `/workspaces/${ws}/offboarding`, { reason: REASON, ...body });

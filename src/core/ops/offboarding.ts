@@ -64,6 +64,13 @@ export async function getOffboarding(env: Env, ws: string): Promise<OffboardingS
   const r = await env.DB.prepare('SELECT * FROM offboarding WHERE workspace_id = ?').bind(ws).first<Row>();
   return r ? dto(r) : null;
 }
+/** The status with its audit trail, newest last (what the operator console shows). */
+export async function getOffboardingWithLog(env: Env, ws: string): Promise<(OffboardingStatus & { log: { at: number; actor: string; action: string; reason: string | null }[] }) | null> {
+  const st = await getOffboarding(env, ws);
+  if (!st) return null;
+  const { results } = await env.DB.prepare('SELECT at, actor, action, reason FROM offboarding_log WHERE workspace_id = ? ORDER BY id DESC LIMIT 50').bind(ws).all<{ at: number; actor: string; action: string; reason: string | null }>();
+  return { ...st, log: results.reverse() };
+}
 export async function listOffboardings(env: Env, state?: string): Promise<OffboardingStatus[]> {
   const q = state ? env.DB.prepare('SELECT * FROM offboarding WHERE state = ? ORDER BY execute_after LIMIT 200').bind(state) : env.DB.prepare('SELECT * FROM offboarding ORDER BY requested_at DESC LIMIT 200');
   return (await q.all<Row>()).results.map(dto);

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { OpsStatusDto, StatementDto, WalletDto } from '../../../src/core/api/contract';
-import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
+import { changeLogItemDto, offboardingDto, operatorOffboardingDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
 
 export type { OpsStatusDto, StatementDto, WalletDto };
 export type CostEstimateDto = z.infer<typeof costEstimateDto>;
@@ -32,6 +32,8 @@ export type Adjustment = z.infer<typeof adjustmentDto>;
 export type BillingCategory = 'marketing' | 'utility' | 'authentication' | 'service';
 
 /** The merchant's wallet (Phase 7). Reads are open to every role; topping up and refunds are the owner's. */
+export type OffboardingView = z.infer<typeof offboardingDto>;
+export type OperatorOffboarding = z.infer<typeof operatorOffboardingDto>;
 export interface WalletApi {
   wallet(): Promise<WalletDto>;
   /** `month` = YYYY-MM. Owner and operator only (the server answers 403 to staff). */
@@ -55,6 +57,11 @@ export interface WalletApi {
   uploadInstapayProof(requestId: string, file: File): Promise<InstapayRequest>;
   refundRequests(): Promise<RefundRequest[]>;
   requestRefund(amountMinor: number, note: string): Promise<RefundRequest>;
+  /** OFFBOARD-1 (owner): delete the workspace after a 14-day cooling-off. A wallet balance has to be given up explicitly (`acceptWriteOff`), else 409 `wallet_balance_remains`. */
+  offboarding(): Promise<OffboardingView>;
+  requestOffboarding(opts: { acceptWriteOff?: true }): Promise<OffboardingView>;
+  /** Only while pending and only if the owner asked: an operator-started deletion answers 403 `operator_requested`. */
+  cancelOffboarding(): Promise<void>;
 }
 
 export type PricingSettingsInput = { effectiveFrom: number; marginBps: number; creditLimitMinor: number; fxBufferBps: number; vatBps: number; reason: string };
@@ -90,6 +97,12 @@ export interface OperatorApi {
   createAdjustment(workspaceId: string, amountMinor: number, reason: string): Promise<Adjustment>;
   decideAdjustment(id: string, decision: 'approve' | 'reject'): Promise<Adjustment>;
   changeLog(): Promise<ChangeLogItem[]>;
+  /** OFFBOARD-1: every workspace deletion asked for (newest first), one with its audit trail, request (a reason is required; `immediate` skips the 14-day wait), cancel. */
+  offboardings(): Promise<OperatorOffboarding[]>;
+  offboarding(workspaceId: string): Promise<OperatorOffboarding>;
+  /** 409 `write_off_required` carries `amountMinor`: resend with `acceptWriteOff` to give up that balance. */
+  requestOffboarding(workspaceId: string, body: { reason: string; immediate?: true; acceptWriteOff?: true }): Promise<OperatorOffboarding>;
+  cancelOffboarding(workspaceId: string, reason: string): Promise<void>;
   /** A yearly package order: what can be refunded now (unused whole months x price/12, current month kept, wallet debt settled first). */
   yearlyRefundQuote(orderId: string): Promise<YearlyRefundQuoteView>;
   /** Cancels the yearly plan at the end of the current month and settles the wallet debt first. Idempotent: a replay returns the same figures. */
