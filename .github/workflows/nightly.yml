@@ -1,9 +1,10 @@
 name: nightly
 
 # Heavy tier, once a day (PRs run lint + typecheck + tests only): the opt-in speed benches (BENCH=1).
-# On the shared CI runner a wall-clock budget measures the runner, so the nightly budget is runner-sized (10x the
-# product budget of 150 ms, the runner being 7-12x slower than a quiet laptop): it catches regressions, it does not
-# certify the 150 ms figure. That one is measured locally with `node scripts/bench-local.mjs`.
+# The budget is FIXED, not runner-sized (M-176): every bench measures a baseline on this same runner in this same run and
+# fails when a path is slower than a fixed multiple of it (test/helpers/bench.ts), so a slow runner cannot hide a
+# regression and a fast one cannot invent one. The 150 ms absolute product figure is certified only on a known machine:
+# `node scripts/bench-local.mjs`.
 on:
   schedule:
     - cron: '30 2 * * *'
@@ -32,8 +33,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: ${{ vars.EBDA_RUNS_ON == '' && 'npm' || '' }}
       - run: npm ci
-      - name: Benches (runner-sized budget)
+      - name: Benches (fixed-ratio budget)
         env:
           BENCH: '1'
-          BENCH_BUDGET_MS: '1500'
-        run: npx vitest run test/perf.test.ts test/inbox-api.test.ts --reporter=verbose
+        run: npx vitest run test/perf.test.ts test/inbox-api.test.ts test/scale-spike.test.ts --reporter=verbose

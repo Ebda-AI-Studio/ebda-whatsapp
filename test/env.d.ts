@@ -8,8 +8,8 @@ declare global {
       BENCH: string;
       /** The workers project's testTimeout in ms (test/setup.ts names pending operations a moment before it). */
       VITEST_TEST_TIMEOUT: string;
-      /** p95 budget for the opt-in benches: 150 ms on a quiet machine (the product budget); the nightly CI job passes a runner-sized one. */
-      BENCH_BUDGET_MS: string;
+      /** Absolute p95 ceiling in ms, set ONLY by scripts/bench-local.mjs (the product budget, 150, on a known machine); empty = the fixed-ratio budget only (test/helpers/bench.ts). */
+      BENCH_ABSOLUTE_MS: string;
     }
   }
 }
