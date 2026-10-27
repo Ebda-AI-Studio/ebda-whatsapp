@@ -1,30 +1,21 @@
 /**
  * The last check before a model's reply reaches a customer (iceberg F2, M-069). A reply is refused (the turn becomes a handoff to a
  * person) when it contains (1) a link whose host the merchant never wrote or the Store never returned, (2) a price that is not in the
- * catalogue result of this turn or in the merchant's own texts, or (3) a refund / discount / free-shipping / guarantee promise of a
- * class the merchant's own texts never mention. "Trusted" = the persona, the FAQ / knowledge chunks and the tool results of THIS turn:
- * never anything the customer typed. Known cost: a reply that restates a sum the model computed itself (2 x 110) is refused too;
- * totals come from the ordering flow, not from the model.
+ * catalogue result of this turn or in the merchant's own texts, (3) a refund / discount / free-shipping / guarantee promise of a
+ * class the merchant's own texts never mention, or (4) a recital of the rules.
+ *
+ * What is TRUSTED: the merchant's persona, FAQ and knowledge chunks (free text they wrote), and the STRUCTURED fields of tool results (JSON
+ * numbers, and link / url fields). Never trusted: anything the customer typed, a connector's free-text or error fields, or any value of a
+ * connector result that the customer's own message or the tool-call arguments also contain (a connector can echo its input, so an echoed
+ * value proves nothing). Known cost: a reply that restates a sum the model computed itself (2 x 110) is refused too; totals come from the
+ * ordering flow. A sentence whose period has no space after it ("تمام.شكرا") reads as a host and is refused too: a person answers it.
  */
+import { findUrls, hostUnder } from '../url-extract';
 import { normaliseText } from '../text-normalise';
 
 export type GuardVerdict = { ok: true } | { ok: false; reason: 'url' | 'price' | 'promise' | 'leak' };
 
 const asciiDigits = (s: string): string => s.replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x660)).replace(/[\u06f0-\u06f9]/g, (d) => String(d.charCodeAt(0) - 0x6f0));
-
-const TLD = 'com|net|org|io|app|co|me|ly|eg|kw|sa|ae|info|biz|xyz|link|shop|store|online|site|top|ru|cn|tk|ml|click|cc|gl|to|gd|page|dev|ws|vip|club';
-const URL_RE = new RegExp(`(?:https?:\\/\\/|www\\.)[^\\s<>"'\\)\\]]+|\\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+(?:${TLD})\\b(?:\\/[^\\s<>"'\\)\\]]*)?`, 'giu');
-
-function hostsOf(text: string): string[] {
-  const out: string[] = [];
-  for (const m of asciiDigits(text).matchAll(URL_RE)) {
-    const raw = m[0].replace(/^https?:\/\//i, '').replace(/^www\./i, '');
-    const host = raw.split(/[/?#:]/)[0]!.toLowerCase().replace(/[.,;!?]+$/, '');
-    if (host) out.push(host);
-  }
-  return out;
-}
-const hostAllowed = (host: string, allowed: Set<string>): boolean => [...allowed].some((a) => host === a || host.endsWith(`.${a}`));
 
 const CUR = '(?:egp|e\\.?g\\.?p|l\\.?e\\b|جنيه|جنية|جنيهات|ج\\.?م|جم|usd|kwd|sar|aed|\\$|ريال|دينار|درهم|دولار)';
 const NUM = '(\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?)';
@@ -37,6 +28,43 @@ function numbersOf(text: string): Set<number> {
   for (const m of asciiDigits(text).matchAll(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g)) out.add(num(m[0]));
   return out;
 }
+const hostsOf = (text: string): string[] => findUrls(asciiDigits(text)).flatMap((u) => (u.host && !u.ip ? [u.host] : []));
+
+/** What the reply is checked against. */
+export class Trusted {
+  readonly text: string[] = [];
+  readonly numbers = new Set<number>();
+  readonly hosts = new Set<string>();
+  /** Free text the merchant wrote (persona, FAQ, knowledge): numbers, link hosts and promise classes in it are all vouched for. */
+  addText(...t: string[]): void { this.text.push(...t); }
+  /**
+   * A tool result (the JSON the model is shown). Only structured fields count: JSON numbers and string fields that are links. For a
+   * connector (`echoCheck` = everything the customer typed plus the call arguments) a value that also appears there is dropped, and a
+   * failed call (`error` / `ok:false`) adds nothing.
+   */
+  addToolResult(content: string, echoCheck: string | null): void {
+    let data: unknown;
+    try { data = JSON.parse(content); } catch { return; }
+    if (echoCheck !== null) {
+      const o = data as { ok?: unknown; error?: unknown; result?: unknown } | null;
+      if (!o || o.ok !== true || o.error !== undefined) return;
+      data = o.result;
+    }
+    const echoedNumbers = echoCheck === null ? new Set<number>() : numbersOf(echoCheck);
+    const echoedHosts = new Set(echoCheck === null ? [] : hostsOf(echoCheck));
+    const walk = (v: unknown, key: string, depth: number): void => {
+      if (depth > 6 || v === null) return;
+      if (typeof v === 'number' && Number.isFinite(v)) { if (!echoedNumbers.has(v)) this.numbers.add(v); return; }
+      if (typeof v === 'string') {
+        if (/^(?:link|url|href)$/i.test(key)) for (const h of hostsOf(v)) if (![...echoedHosts].some((e) => hostUnder(h, e))) this.hosts.add(h);
+        return;
+      }
+      if (Array.isArray(v)) { for (const x of v.slice(0, 50)) walk(x, key, depth + 1); return; }
+      if (typeof v === 'object') for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 50)) walk(x, k, depth + 1);
+    };
+    walk(data, '', 0);
+  }
+}
 
 // Normalised forms (`normaliseText`): alef/yaa/taa-marbuta folded, no punctuation.
 const PROMISES: Record<string, RegExp> = {
@@ -46,7 +74,7 @@ const PROMISES: Record<string, RegExp> = {
   guarantee: /guarantee|warranty|ضمان|مضمون|كفاله/u,
 };
 
-/** True when `reply` repeats a run of `LEAK_WORDS` consecutive words of `secret` (the system prompt): the model was talked into reciting its instructions. */
+/** True when `reply` repeats a run of `LEAK_WORDS` consecutive words of `secret` (the rules): the model was talked into reciting its instructions. */
 const LEAK_WORDS = 8;
 function leaks(reply: string, secret: string): boolean {
   const words = normaliseText(secret).split(' ').filter(Boolean);
@@ -55,17 +83,20 @@ function leaks(reply: string, secret: string): boolean {
   return false;
 }
 
-export function guardReply(reply: string, trusted: string[], protectedText = ''): GuardVerdict {
+export function guardReply(reply: string, trustedIn: Trusted | string[], protectedText = ''): GuardVerdict {
+  const trusted = Array.isArray(trustedIn) ? Object.assign(new Trusted(), { text: trustedIn }) : trustedIn;
   if (protectedText && leaks(reply, protectedText)) return { ok: false, reason: 'leak' };
-  const trustedText = trusted.join('\n');
-  // 1. links
-  const allowedHosts = new Set(hostsOf(trustedText));
-  for (const h of hostsOf(reply)) if (!hostAllowed(h, allowedHosts)) return { ok: false, reason: 'url' };
+  const trustedText = trusted.text.join('\n');
+  // 1. links: every link-looking token, parsed as a browser would; an IP address or an unparsable token is never allowed
+  const allowedHosts = new Set([...hostsOf(trustedText), ...trusted.hosts]);
+  for (const u of findUrls(asciiDigits(reply))) {
+    if (u.host === null || u.ip || ![...allowedHosts].some((a) => hostUnder(u.host, a))) return { ok: false, reason: 'url' };
+  }
   // 2. prices
-  const known = numbersOf(trustedText);
+  const known = new Set([...numbersOf(trustedText), ...trusted.numbers]);
   const text = asciiDigits(reply);
   for (const re of [PRICE_AFTER, PRICE_BEFORE]) for (const m of text.matchAll(re)) if (!known.has(num(m[1]!))) return { ok: false, reason: 'price' };
-  // 3. promises
+  // 3. promises: only the merchant's own texts can configure one
   const said = normaliseText(reply);
   const configured = normaliseText(trustedText);
   for (const re of Object.values(PROMISES)) if (re.test(said) && !re.test(configured)) return { ok: false, reason: 'promise' };

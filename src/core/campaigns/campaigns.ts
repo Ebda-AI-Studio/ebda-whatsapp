@@ -175,7 +175,7 @@ export async function createCampaign(host: LinkHost, a: CreateArgs): Promise<Cre
   }
   const dry = renderTemplate(stored.data, resolveParams(a.params, 'Sample', SAMPLE_LINK), t.category);
   if (!dry.ok) return { ok: false, reason: 'invalid_params', message: dry.message };
-  const problem = contentProblem([dry.text, ...a.params.flatMap((p) => (p.kind === 'text' ? [p.value] : []))]);
+  const problem = contentProblem([dry.text, ...(linkUrl ? [linkUrl] : []), ...a.params.flatMap((p) => (p.kind === 'text' ? [p.value] : p.kind === 'name' ? [p.fallback] : []))]);
   if (problem) {
     alert('campaign_content_blocked', { workspace: host.workspaceId, why: problem });
     return { ok: false, reason: 'invalid_params', message: `content_blocked:${problem}` };
