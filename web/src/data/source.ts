@@ -38,7 +38,7 @@ export interface NumbersApi {
   /** Loads what the popup needs ahead of the click (sample data and tests replace it); absent = Meta's SDK. */
   prepare?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<void>;
   /** Replaces Meta's popup (sample data and tests only); absent = the real Embedded Signup. */
-  launch?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<{ code: string; event: ConnectNumberRequest['event']; wabaId: string; phoneNumberId: string; businessId?: string }>;
+  launch?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<{ code: string; event: ConnectNumberRequest['event']; wabaId: string; phoneNumberId: string; businessId?: string; fbUserId?: string }>;
 }
 
 export type ContactsQuery = { q?: string; tag?: string; optedOut?: boolean; cursor?: string | null };

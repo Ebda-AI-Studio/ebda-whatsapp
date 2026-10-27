@@ -7,6 +7,7 @@ import { selectVerifier } from './identity-select';
 import { configureAgent } from './core/ai/config';
 import { signupEnabled } from './core/numbers/numbers';
 import { verifyMetaSignature } from './core/meta/signature';
+import { parseSignedRequest, processRequest, recordRequest, requestStatus, statusPage } from './core/meta/data-deletion';
 import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
@@ -201,6 +202,28 @@ app.get('/health', (c) => {
     return c.json({ ok: false, status: 'misconfigured', service: PACK.service, commit }, 503);
   }
   return c.json({ ok: true, status: 'ok', service: PACK.service, commit });
+});
+
+// B9: Meta's data-deletion callback and its status page (public; the signed request is the authentication).
+app.post('/meta/data-deletion', async (c) => {
+  const form = await c.req.formData().catch(() => null);
+  const sr = form?.get('signed_request');
+  const parsed = typeof sr === 'string' ? await parseSignedRequest(sr, c.env.META_APP_SECRET) : null;
+  if (!parsed) return c.json({ error: 'invalid_request' }, 400);
+  const { code, created } = await recordRequest(c.env, parsed, Date.now());
+  if (created) {
+    const work = processRequest(c.env, code, parsed.userId);
+    try { c.executionCtx.waitUntil(work); } catch { await work; }
+  }
+  return c.json({ url: `${new URL(c.req.url).origin}/meta/data-deletion/status?code=${code}`, confirmation_code: code });
+});
+const wantsHtml = (c: { req: { header(n: string): string | undefined } }) => (c.req.header('accept') ?? '').includes('text/html');
+app.get('/meta/data-deletion', (c) => c.html(statusPage(c.env.SUPPORT_EMAIL ?? '', null), 200, { 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; frame-ancestors 'none'" }));
+app.get('/meta/data-deletion/status', async (c) => {
+  const s = await requestStatus(c.env, c.req.query('code') ?? '');
+  if (!s) return c.json({ error: 'not_found' }, 404);
+  const headers = { 'cache-control': 'no-store' };
+  return wantsHtml(c) ? c.html(statusPage(c.env.SUPPORT_EMAIL ?? '', s), 200, { ...headers, 'content-security-policy': "default-src 'none'; frame-ancestors 'none'" }) : c.json(s, 200, headers);
 });
 
 app.get('/meta/webhook', (c) => {

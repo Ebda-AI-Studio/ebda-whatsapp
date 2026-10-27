@@ -8,7 +8,7 @@ const TOKEN = 'verify-token-test';
 const COMMIT = 'abc1234';
 
 /** A fake deployment that behaves like the real Worker: health, webhook handshake, signature check, security headers. */
-function fakeDeploy(over: { kashierServedByAssets?: boolean; commit?: string; noHsts?: boolean; acceptUnsigned?: boolean; brand?: string | null; csp?: string } = {}) {
+function fakeDeploy(over: { deletionServedByAssets?: boolean; kashierServedByAssets?: boolean; commit?: string; noHsts?: boolean; acceptUnsigned?: boolean; brand?: string | null; csp?: string } = {}) {
   const sec: Record<string, string> = over.noHsts ? {} : { 'strict-transport-security': 'max-age=63072000', 'x-content-type-options': 'nosniff' };
   return async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
@@ -24,6 +24,7 @@ function fakeDeploy(over: { kashierServedByAssets?: boolean; commit?: string; no
       const good = sig === `sha256=${createHmac('sha256', SECRET).update(body).digest('hex')}`;
       return good || over.acceptUnsigned ? new Response('ok') : new Response('unauthorized', { status: 401 });
     }
+    if (u.pathname === '/meta/data-deletion') return init.method === 'POST' ? new Response(JSON.stringify({ error: 'invalid_request' }), { status: over.deletionServedByAssets ? 200 : 400, headers: { 'content-type': over.deletionServedByAssets ? 'text/html' : 'application/json' } }) : new Response('nf', { status: 404 });
     if (u.pathname === '/kashier/webhook') {
       if (over.kashierServedByAssets) return new Response('<html>spa</html>', { status: 200, headers: { 'content-type': 'text/html' } });
       return new Response(JSON.stringify({ error: 'invalid_signature' }), { status: 401, headers: { 'content-type': 'application/json' } });
@@ -45,6 +46,13 @@ describe('verify-prod', () => {
     expect(ok.find((c: { name: string }) => c.name === 'kashier webhook is served by the Worker')).toMatchObject({ ok: true });
     const spa = await runChecks({ base: 'https://wa.test', fetchImpl: fakeDeploy({ kashierServedByAssets: true }) });
     expect(spa.find((c: { name: string }) => c.name === 'kashier webhook is served by the Worker')).toMatchObject({ ok: false });
+  });
+
+  it('Meta\'s data-deletion callback must be served by the Worker (an unsigned post gets its 400 JSON, not the SPA)', async () => {
+    const ok = await runChecks({ base: 'https://wa.test', fetchImpl: fakeDeploy() });
+    expect(ok.find((c: { name: string }) => c.name.startsWith('data-deletion callback'))).toMatchObject({ ok: true });
+    const spa = await runChecks({ base: 'https://wa.test', fetchImpl: fakeDeploy({ deletionServedByAssets: true }) });
+    expect(spa.find((c: { name: string }) => c.name.startsWith('data-deletion callback'))).toMatchObject({ ok: false });
   });
 
   describe('the live cron schedule (Ruling #17: a registered schedule is proven from the API, not assumed from wrangler.jsonc)', () => {

@@ -185,10 +185,10 @@ export async function connectNumber(env: Env, workspaceId: string, req: ConnectN
   const registration: NumberRow['registration'] = cloud ? (mine && existing.registration === 'registered' ? 'registered' : 'pending') : 'not_needed';
 
   const cred = await env.DB.prepare(
-    `INSERT INTO waba_credentials (waba_id, workspace_id, token_enc, kind, created_at, updated_at, business_id) VALUES (?, ?, ?, 'own', ?, ?, ?)
-     ON CONFLICT(waba_id) DO UPDATE SET token_enc = excluded.token_enc, updated_at = excluded.updated_at, business_id = coalesce(excluded.business_id, waba_credentials.business_id)
+    `INSERT INTO waba_credentials (waba_id, workspace_id, token_enc, kind, created_at, updated_at, business_id, fb_user_id) VALUES (?, ?, ?, 'own', ?, ?, ?, ?)
+     ON CONFLICT(waba_id) DO UPDATE SET token_enc = excluded.token_enc, updated_at = excluded.updated_at, business_id = coalesce(excluded.business_id, waba_credentials.business_id), fb_user_id = coalesce(excluded.fb_user_id, waba_credentials.fb_user_id)
      WHERE waba_credentials.workspace_id = excluded.workspace_id`,
-  ).bind(wabaId, workspaceId, tokenEnc, now, now, businessId).run();
+  ).bind(wabaId, workspaceId, tokenEnc, now, now, businessId, req.fbUserId ?? null).run();
   if (!cred.meta.changes) return fail(409, 'number_conflict', 'number_belongs_to_another_workspace');
   // Reconnecting keeps what was already learned; a number released by another workspace starts clean. The WHERE is the race guard.
   const up = await env.DB.prepare(

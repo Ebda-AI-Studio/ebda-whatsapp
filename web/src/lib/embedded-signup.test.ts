@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isMetaOrigin, launchEmbeddedSignup, loadSdk } from './embedded-signup';
 
-type LoginCb = (r: { authResponse?: { code?: string } | null }) => void;
+type LoginCb = (r: { authResponse?: { code?: string; userID?: string } | null }) => void;
 
 function fakeFb(onLogin: (cb: LoginCb, opts: Record<string, unknown>) => void) {
   const fb = { init: vi.fn(), login: vi.fn(onLogin) };
@@ -24,6 +24,13 @@ describe('Embedded Signup launcher', () => {
     const r = await launchEmbeddedSignup({ appId: 'app-1', configId: 'cfg-1', graphVersion: 'v25.0' });
     expect(fb.login.mock.calls[0]![1]).toEqual({ config_id: 'cfg-1', response_type: 'code', override_default_response_type: true, extras: { setup: {} } });
     expect(r).toEqual({ code: 'code-xyz', event: 'FINISH', wabaId: '9001', phoneNumberId: '8001', businessId: '7001' });
+  });
+
+  it('passes the app-scoped user id on (digits only), so Meta\'s data-deletion callback can find the connection', async () => {
+    fakeFb((cb) => { post({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH', data: { phone_number_id: '8001', waba_id: '9001' } }); cb({ authResponse: { code: 'c', userID: '1234567890' } }); });
+    expect((await launchEmbeddedSignup(CFG)).fbUserId).toBe('1234567890');
+    fakeFb((cb) => { post({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH', data: { phone_number_id: '8001', waba_id: '9001' } }); cb({ authResponse: { code: 'c', userID: '12 34; drop' } }); });
+    expect((await launchEmbeddedSignup(CFG)).fbUserId).toBeUndefined();
   });
 
   it('works when the code arrives before the session message (either order)', async () => {

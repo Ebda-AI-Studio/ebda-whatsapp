@@ -24,6 +24,7 @@
     "IDENTITY_AUDIENCE": "whatsapp",
     // Shown first in Telegram alerts (one Ebda AI Studio bot serves every product).
     "ALERT_PRODUCT": "Ebda WhatsApp",
+    "SUPPORT_EMAIL": "ahlan@ebda.app",
     // This Worker's public origin: tracked campaign links and Store proof links are built on it.
     "PUBLIC_BASE_URL": "https://wa.ebda.app",
     // /health fails (503, alert secret_misconfigured) unless these secrets are set and well-formed; see src/core/secrets-check.ts.

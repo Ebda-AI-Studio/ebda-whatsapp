@@ -29,6 +29,8 @@ export type Env = {
   AGENT_ALLOWED_HOSTS?: string;
   /** Overrides the default Workers AI model of the agent. */
   AGENT_MODEL?: string;
+  /** The public support address shown on the data-deletion page; the brand's supportEmail (pinned to vendor/brand/store-support-email.json). */
+  SUPPORT_EMAIL?: string;
   /** Phase 6: contact-import workflow (one instance per uploaded file). */
   IMPORT_WORKFLOW: Workflow<{ workspaceId: string; importId: string }>;
   /** Phase 6: campaign broadcasts (one instance per campaign generation, id `<campaignId>-<attempt>`). */
