@@ -80,3 +80,59 @@ it('composite-key tables page correctly (tags: contact_id, tag)', async () => {
   expect(lines.length).toBe(ids.length * 3);
   expect(new Set(lines.map((l) => `${l.contact_id}/${l.tag}`)).size).toBe(lines.length); // no row twice, none missed across chunk edges
 });
+
+// ---- the cursor must be unique and never NULL; success is a positive count match -------------------------------------------------------------
+it('rows whose old cursor column is NULL are exported across chunk boundaries (a nullable keyset silently dropped everything after the first NULL)', async () => {
+  const ws = 'ws-ck6';
+  await seed(ws, 2);
+  for (let i = 0; i < 5; i++) await exec(ws, "INSERT INTO agent_state (key, value) VALUES (NULL, ?)", `null-${i}`);
+  for (let i = 0; i < 5; i++) await exec(ws, "INSERT INTO agent_state (key, value) VALUES (?, ?)", `k${i}`, `v${i}`);
+  await knobs(ws, (k) => { k.backupChunkRows = 2; });
+  const m = await workspace(ws).exportSnapshot('2026-10-27');
+  const total = (await rows<{ n: number }>(ws, 'SELECT count(*) AS n FROM agent_state'))[0]!.n;
+  expect(m.tables.agent_state!.rows).toBe(total);
+  expect((await body(ws, 'agent_state')).split('\n').filter(Boolean)).toHaveLength(total);
+  expect((await body(ws, 'agent_state')).match(/null-/g)).toHaveLength(5);
+  expect((await workspace('ws-ck6-restore').importSnapshot(`backups/${ws}/2026-10-27/`)).ok).toBe(true);
+  expect(await rows('ws-ck6-restore', 'SELECT count(*) AS n FROM agent_state')).toEqual([{ n: total }]);
+});
+
+it('a row removed while its table was being exported makes the export FAIL (positive count match required), alerts, and writes no manifest', async () => {
+  const ws = 'ws-ck7';
+  await seed(ws, 6);
+  const lines: string[] = [];
+  await knobs(ws, (k) => {
+    k.backupChunkRows = 2;
+    const sql = (k as unknown as { sql: SqlStorage }).sql;
+    let done = false;
+    k.backupHooks = { afterChunk: async (t) => { if (t === 'messages' && !done) { done = true; sql.exec('DELETE FROM messages WHERE id = (SELECT min(id) FROM messages)'); } } };
+  });
+  const { vi } = await import('vitest');
+  const spy = vi.spyOn(console, 'error').mockImplementation((m: unknown) => { lines.push(String(m)); });
+  const failure = await workspace(ws).exportSnapshot('2026-10-27').then(() => null, (e: Error) => e);
+  spy.mockRestore();
+  expect(String(failure?.message)).toMatch(/export mismatch/);
+  expect(await env.BACKUPS.get(`backups/${ws}/2026-10-27/manifest.json`)).toBeNull();
+  expect(lines.join('\n')).toContain('backup_export_mismatch');
+  expect(lines.join('\n')).not.toMatch(/\d{9,}/); // table name and counts only
+});
+
+it('the key is discovered per table: rowid tables page on rowid, WITHOUT ROWID tables on their primary key, and anything with neither (a view) is refused', async () => {
+  const { exportTable } = await import('../src/core/backup-export');
+  const ws = 'ws-ck8';
+  await seed(ws, 1);
+  const r = await runInDurableObject(workspace(ws), async (_i, state) => {
+    const sql = state.storage.sql;
+    sql.exec('CREATE TABLE t_rowid (a TEXT)');
+    sql.exec('CREATE TABLE t_wr (a TEXT, b TEXT, PRIMARY KEY (a, b)) WITHOUT ROWID');
+    sql.exec("CREATE VIEW v_none AS SELECT 1 AS x");
+    for (let i = 0; i < 7; i++) { sql.exec('INSERT INTO t_rowid (a) VALUES (?)', i % 2 ? null : `r${i}`); sql.exec('INSERT INTO t_wr (a, b) VALUES (?, ?)', `a${i % 3}`, `b${i}`); }
+    const run = (table: string) => exportTable({ sql, bucket: env.BACKUPS, key: `scratch/${table}`, table: table as never, highWater: undefined, chunkRows: 2 }).then((x) => x.rows, (e: Error) => e.message);
+    const out = { rowid: await run('t_rowid'), wr: await run('t_wr'), view: await run('v_none') };
+    sql.exec('DROP VIEW v_none'); sql.exec('DROP TABLE t_rowid'); sql.exec('DROP TABLE t_wr');
+    return out;
+  });
+  expect(r.rowid).toBe(7);
+  expect(r.wr).toBe(7);
+  expect(String(r.view)).toMatch(/no usable key/);
+});

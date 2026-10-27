@@ -1,13 +1,18 @@
-import { BACKUP_ORDER, type BackupTable } from './backup';
+import type { BackupTable } from './backup';
+import { alert } from './observability';
 
 /**
  * Chunked, streaming export of one table (T17). The old export read every table of the workspace inside ONE `transactionSync` and held the whole thing in
  * memory: on a big workspace that blocks the Durable Object for the whole read and can exceed its memory. Now:
- *  - rows are read in keyset chunks (`WHERE key > last ORDER BY key LIMIT n`), each its own short synchronous read; the awaits between chunks let other requests in;
+ *  - rows are read in keyset chunks (`WHERE key > last ORDER BY key LIMIT n`), each its own short synchronous read; the awaits between chunks let other requests in.
+ *    THE KEY IS ALWAYS UNIQUE AND NEVER NULL: `rowid` for a rowid table, the primary key for a WITHOUT ROWID table (SQLite makes those columns NOT NULL), and a table with
+ *    neither is refused. (A keyset over a nullable column, `(a, b) > (?, ?)`, is never true for a NULL row, so every row after the first NULL was silently dropped.)
  *  - the NDJSON is streamed to R2 (a single put while the file is small, a multipart upload past `PART_BYTES`) and hashed incrementally (DigestStream), so memory
  *    is one chunk plus one part, not the table;
- *  - tables with an integer `id` key stop at the high-water mark taken at the start of the whole export, so a child row written during the export never refers to a parent
- *    row the snapshot lacks (messages -> conversations -> contacts). Keyed tables (tags, recipients, state) are read as of their chunk.
+ *  - every rowid table stops at the high-water mark (`max(rowid)`) taken at the start of the whole export, so a child row written during the export never refers to a parent
+ *    row the snapshot lacks (messages -> conversations -> contacts). WITHOUT ROWID tables (tags, recipients) are read as of their chunk.
+ *  - SUCCESS IS A POSITIVE COUNT MATCH: after a table is read, the rows written are compared with `count(*)` under the same condition. A mismatch (a row deleted or added
+ *    while the table was read) raises `backup_export_mismatch`, throws, and writes neither the table file nor the manifest: a partial backup never reads as complete.
  * The files and hashes are byte-identical to the one-shot export. Consistency model: per row, not per workspace (Ruling WA-BACKUP-CHUNK-1 in docs/runbooks/backup-restore.md).
  */
 export const DEFAULT_CHUNK_ROWS = 2_000;
@@ -15,14 +20,28 @@ export const DEFAULT_CHUNK_ROWS = 2_000;
 export const PART_BYTES = 5 * 1024 * 1024;
 
 type Sql = Pick<DurableObjectStorage, 'sql'>['sql'];
-const columnsOf = (t: BackupTable): string[] => BACKUP_ORDER[t].split(',').map((c) => c.trim());
-const isIdKeyed = (t: BackupTable): boolean => BACKUP_ORDER[t] === 'id';
+type Key = { kind: 'rowid' } | { kind: 'pk'; cols: string[] };
+const SAFE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** The largest `id` of each id-keyed table, read in one tiny transaction at the start. */
+/** The unique, non-null cursor of a table. Throws for a table that has none (a view, a table the engine cannot order). */
+export function keyOf(sql: Sql, table: string): Key {
+  if (!SAFE_NAME.test(table)) throw new Error(`export refused: ${table} is not a plain table name`);
+  try {
+    sql.exec(`SELECT rowid FROM ${table} LIMIT 0`).toArray();
+    return { kind: 'rowid' };
+  } catch {
+    // no rowid: WITHOUT ROWID table (its primary key is NOT NULL by definition), or not a table at all
+  }
+  const cols = sql.exec<{ name: string }>(`SELECT name FROM pragma_table_info('${table}') WHERE pk > 0 ORDER BY pk`).toArray().map((r) => r.name);
+  if (!cols.length) throw new Error(`export refused: ${table} has no usable key`);
+  return { kind: 'pk', cols };
+}
+
+/** `max(rowid)` of every rowid table, read in one tiny transaction at the start. */
 export function highWaterMarks(sql: Sql, storage: DurableObjectStorage, tables: readonly BackupTable[]): Partial<Record<BackupTable, number>> {
   return storage.transactionSync(() => {
     const out: Partial<Record<BackupTable, number>> = {};
-    for (const t of tables) if (isIdKeyed(t)) out[t] = sql.exec<{ m: number | null }>(`SELECT max(id) AS m FROM ${t}`).one().m ?? 0;
+    for (const t of tables) if (keyOf(sql, t).kind === 'rowid') out[t] = sql.exec<{ m: number | null }>(`SELECT max(rowid) AS m FROM ${t}`).one().m ?? 0;
     return out;
   });
 }
@@ -40,10 +59,13 @@ export type ExportDeps = {
 const hex = (buf: ArrayBuffer): string => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 export async function exportTable(d: ExportDeps): Promise<{ rows: number; sha256: string }> {
-  const cols = columnsOf(d.table);
-  const colList = cols.join(', ');
-  const tuple = `(${colList})`;
+  const key = keyOf(d.sql, d.table);
+  const cols = key.kind === 'rowid' ? ['__rid'] : key.cols;
+  const order = key.kind === 'rowid' ? 'rowid' : key.cols.join(', ');
+  const tuple = `(${order})`;
   const marks = `(${cols.map(() => '?').join(', ')})`;
+  const select = key.kind === 'rowid' ? 'rowid AS __rid, *' : '*';
+  const capped = key.kind === 'rowid' && d.highWater !== undefined;
   const digest = new crypto.DigestStream('SHA-256');
   const hasher = digest.getWriter();
   const encoder = new TextEncoder();
@@ -74,11 +96,11 @@ export async function exportTable(d: ExportDeps): Promise<{ rows: number; sha256
 
   try {
     for (;;) {
-      const where = [last ? `${tuple} > ${marks}` : null, d.highWater !== undefined ? 'id <= ?' : null].filter(Boolean).join(' AND ');
-      const params: SqlStorageValue[] = [...(last ?? []), ...(d.highWater !== undefined ? [d.highWater] : [])];
-      const batch = d.sql.exec(`SELECT * FROM ${d.table} ${where ? `WHERE ${where}` : ''} ORDER BY ${colList} LIMIT ?`, ...params, d.chunkRows).toArray() as Record<string, SqlStorageValue>[];
+      const where = [last ? `${tuple} > ${marks}` : null, capped ? 'rowid <= ?' : null].filter(Boolean).join(' AND ');
+      const params: SqlStorageValue[] = [...(last ?? []), ...(capped ? [d.highWater!] : [])];
+      const batch = d.sql.exec(`SELECT ${select} FROM ${d.table} ${where ? `WHERE ${where}` : ''} ORDER BY ${order} LIMIT ?`, ...params, d.chunkRows).toArray() as Record<string, SqlStorageValue>[];
       if (!batch.length) break;
-      const text = batch.map((r) => `${JSON.stringify(r)}\n`).join('');
+      const text = batch.map(({ __rid: _rid, ...row }) => `${JSON.stringify(row)}\n`).join('');
       const bytes = encoder.encode(text);
       await hasher.write(bytes);
       pending.push(bytes);
@@ -89,6 +111,12 @@ export async function exportTable(d: ExportDeps): Promise<{ rows: number; sha256
       while (pendingBytes >= PART_BYTES) await flushPart();
       await d.afterChunk?.(d.table, chunk);
       if (batch.length < d.chunkRows) break;
+    }
+    // Positive count match BEFORE anything is finalised: the table file does not exist, and no manifest follows, unless the rows written equal the rows the table holds.
+    const counted = d.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${d.table} ${capped ? 'WHERE rowid <= ?' : ''}`, ...(capped ? [d.highWater!] : [])).one().n;
+    if (counted !== rows) {
+      alert('backup_export_mismatch', { table: d.table, exported: rows, counted });
+      throw new Error(`backup export mismatch: ${d.table} exported ${rows} rows, the table holds ${counted}`);
     }
     if (upload) {
       if (pendingBytes > 0) await flushPart(true);

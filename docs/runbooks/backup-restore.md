@@ -7,6 +7,10 @@
 - All tables are read in one transaction, so a snapshot is consistent even while messages arrive.
 - Large message bodies live in `ebda-wa-media` (`bodies/<workspaceId>/<wamid>`) and are NOT copied into the backup (Phase 3: add an R2→R2 copy or lifecycle-protected versioning).
 
+## Consistency model of the chunked export (T17, Ruling WA-BACKUP-CHUNK-1)
+The nightly export no longer reads the whole workspace in one transaction. Each table is read in keyset chunks (`DEFAULT_CHUNK_ROWS`, 2,000), each chunk its own short read, and streamed to R2 (a plain put while small, a multipart upload past 5 MiB; every part but the last is exactly 5 MiB, R2's rule) and hashed as it goes. The cursor is `rowid` (or the primary key of a WITHOUT ROWID table), never a nullable column. Every rowid table stops at the `max(rowid)` taken at the start, so a message written during the export never refers to a conversation the snapshot lacks. The snapshot is therefore consistent per row, not per workspace instant: a tag or recipient row (WITHOUT ROWID tables have no high-water mark) may be one chunk newer than the contacts. After each table the rows written must equal `count(*)` under the same condition, otherwise the export fails with `backup_export_mismatch` and writes no manifest. Restore is unchanged: it still reads the whole snapshot and inserts it in one transaction, which is the next scale limit (a restore of a very large workspace needs a chunked import; not built, see `docs/launch/README.md`, WA-SCALE-1).
+Cost if wrong: a restore may contain a tag or recipient row for a contact created seconds after the snapshot began; harmless because rows refer to each other by value and the restore does not enforce foreign keys.
+
 ## Mac copy
 `scripts/backup-pull.sh [date]` mirrors one night's backups plus a D1 export to `~/Backups/ebda-whatsapp/<date>/`,
 asserts every file's line count against the manifest, keeps 30 days (prunes only `YYYY-MM-DD` folders), exports D1 first, and skips (then reports, exit 1) workspaces that have no snapshot yet.
