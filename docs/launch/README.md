@@ -155,3 +155,6 @@ Business verified · a package on record (Store plan with WhatsApp, a purchase o
 - **Ruling WA-SCALE-1 - the backup EXPORT is chunked and streamed; the backup RESTORE is not yet.** `importSnapshot` still reads a whole snapshot into memory and inserts it in one transaction, which is the next ceiling for a very large workspace (it is exercised only by drills and disasters, not nightly). Cost if wrong: restoring a workspace of several hundred thousand rows could exceed Durable Object memory or time; the fallback is restoring tables in separate calls by hand. The 500,000-row spike (`test/scale-spike.test.ts`, BENCH=1, nightly) measures the export and the hot reads at that size.
 - **Fixed bench budget (M-176).** Benches no longer take a runner-sized millisecond budget; each measures a same-run baseline and fails over a fixed multiple (`test/helpers/bench.ts`, `BUDGET_RATIO`). `scripts/bench-local.mjs` additionally asserts the 150 ms absolute product budget on a known machine (`BENCH_ABSOLUTE_MS`).
 
+## Support (W2-SUPPORT)
+`docs/support.md`: intake through the brand's `supportEmail`, the merchant escalation path, the operator's tools and the read-only, audited "view as merchant" (D1 migration `0025_operator_view_log.sql`, run it with the others before the deploy that needs it).
+

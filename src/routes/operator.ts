@@ -285,3 +285,10 @@ operatorRoutes.post('/token-key/rotate', async (c) => {
   console.log(JSON.stringify({ audit: 'token_key_rotate', by: c.get('principal').userId, ...(r.ok ? { rotated: r.rotated, remaining: r.remaining, unreadable: r.unreadable, complete: r.complete } : { refused: r.reason }) }));
   return r.ok ? c.json(r) : c.json({ error: 'invalid_request', message: r.reason }, 409);
 });
+// T35: the trail of operator "view as merchant" reads of one workspace, newest first (docs/support.md).
+operatorRoutes.get('/view-log', async (c) => {
+  const q = z.object({ workspaceId: z.string().min(1).max(64), limit: z.coerce.number().int().min(1).max(200).default(50) }).safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
+  if (!q.success) return bad(c);
+  const { results } = await c.env.DB.prepare('SELECT at, actor, method, route, reason FROM operator_view_log WHERE workspace_id = ? ORDER BY id DESC LIMIT ?').bind(q.data.workspaceId, q.data.limit).all();
+  return c.json({ items: results });
+});

@@ -54,6 +54,8 @@ export interface ContactsApi {
 /** Where the inbox reads from: the live API (contract.ts) or labelled sample data. */
 export interface InboxSource {
   kind: 'live' | 'sample';
+  /** T35: an operator looking at a merchant's workspace, read-only (every request carries the view-as headers; the server refuses writes). */
+  viewAs?: boolean;
   currentUserId: string;
   /** The signed-in user's role in this store (GET /me); `staff` hides spending actions. */
   role: Role;
