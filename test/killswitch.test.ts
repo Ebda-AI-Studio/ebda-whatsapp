@@ -455,6 +455,16 @@ describe('the platform number reaches every member (items 6 and 7, and the shado
     expect(await templateRefused(abuser!)).toBe(true);
     expect(await templateRefused(a!)).toBe(false);
   });
+  it('fail closed: a dominant member with too little send data (5 sends, 20 errors; or 0 sends right after a clear) is BLOCKED, not given a pass', async () => {
+    const [dom, a, b] = await platform([1167, 1168, 1169]);
+    await seedSends(dom!, 5); await seedSends(a!, 30); await seedSends(b!, 30);
+    await errors(a!, 3); await errors(b!, 2); await errors(dom!, SPIKE_THRESHOLD - 5); // dominant 20 of 25 (80%) on 5 sends: not measurable
+    expect(await templateRefused(dom!)).toBe(true);
+    expect(await templateRefused(a!)).toBe(false);
+    const [alone] = await platform([1170]);
+    await errors(alone!, SPIKE_THRESHOLD); // no sends at all: the window was just cleared while its errors kept coming
+    expect(await templateRefused(alone!)).toBe(true);
+  });
   it('a dominant member UNDER the rate bar (80%+ of the errors at a 4% rate) plus two tiny members does NOT trip the platform (its own errors never count), and it earns a strike', async () => {
     const [dom, a, b] = await platform([1160, 1161, 1162]);
     await seedSends(dom!, 500); await seedSends(a!, 30); await seedSends(b!, 30);

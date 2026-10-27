@@ -99,7 +99,7 @@ export async function noteSharedSend(env: Env, phoneNumberId: string, workspaceI
 /**
  * The platform number's spike guard, attributed per MEMBER by its OWN error RATE (D1 `shared_number_errors` / `shared_number_sends`). Once the window holds SPIKE_THRESHOLD errors,
  * in this ORDER ("over the bar" = at least SHARED_MEMBER_MIN_SENDS sends and an error rate of at least SHARED_MEMBER_ERROR_RATE; no send data = not over the bar):
- *  1. DOMINANCE first: a member with at least SHARED_DOMINANCE of the window's errors AND over the rate bar is blocked; one under the bar earns a strike instead. Either way
+ *  1. DOMINANCE first: a member with at least SHARED_DOMINANCE of the window's errors is blocked when it is over the rate bar OR has too little send data to measure it (fail closed); one with a MEASURED rate under the bar earns a strike instead. Either way
  *     the platform verdict uses the REST ONLY: it trips if the OTHERS reach SHARED_REST_THRESHOLD errors from at least SHARED_SPIKE_MIN_MEMBERS members (a dominance-scaled
  *     bar: an abuser, or a big honest store, with two tiny accomplices does not take the number down);
  *  2. else errors from at least SHARED_SPIKE_MIN_MEMBERS distinct members -> the number itself: `platform`;
@@ -120,11 +120,13 @@ export async function noteSharedError(env: Env, phoneNumberId: string, workspace
   if (total < SPIKE_THRESHOLD) return { kind: 'none' };
   const sends = new Map((await env.DB.prepare('SELECT workspace_id, sum(n) AS n FROM shared_number_sends WHERE phone_number_id = ? AND bucket > ? GROUP BY workspace_id').bind(phoneNumberId, oldest).all<{ workspace_id: string; n: number }>()).results.map((r) => [r.workspace_id, r.n]));
   // Both windows are cleared together on any verdict: errors and the sends they are measured against always cover the same stretch of time.
+  // Only the buckets this verdict was measured over (up to and including the current one): rows of a later bucket belong to the next window.
   await env.DB.batch([
-    env.DB.prepare('DELETE FROM shared_number_errors WHERE phone_number_id = ?').bind(phoneNumberId),
-    env.DB.prepare('DELETE FROM shared_number_sends WHERE phone_number_id = ?').bind(phoneNumberId),
+    env.DB.prepare('DELETE FROM shared_number_errors WHERE phone_number_id = ? AND bucket <= ?').bind(phoneNumberId, bucket),
+    env.DB.prepare('DELETE FROM shared_number_sends WHERE phone_number_id = ? AND bucket <= ?').bind(phoneNumberId, bucket),
   ]);
-  const overBar = (r: { workspace_id: string; n: number }): boolean => { const s = sends.get(r.workspace_id) ?? 0; return s >= SHARED_MEMBER_MIN_SENDS && r.n / s >= SHARED_MEMBER_ERROR_RATE; };
+  const measured = (r: { workspace_id: string }): boolean => (sends.get(r.workspace_id) ?? 0) >= SHARED_MEMBER_MIN_SENDS;
+  const overBar = (r: { workspace_id: string; n: number }): boolean => measured(r) && r.n / (sends.get(r.workspace_id) ?? 1) >= SHARED_MEMBER_ERROR_RATE;
   const since = now - SHARED_REPEAT_WINDOW_MS;
   await env.DB.prepare('DELETE FROM shared_number_strikes WHERE at < ?').bind(since).run();
   /** A strike for `ws`; true once it has SHARED_REPEAT_WINDOWS of them inside the rolling window (then they are spent). */
@@ -140,8 +142,9 @@ export async function noteSharedError(env: Env, phoneNumberId: string, workspace
     // 1. DOMINANCE first. The platform verdict then uses the REST ONLY: the dominant member's own errors never count toward tripping the number for everyone,
     //    whether or not it is blocked.
     const platform = results.length - 1 >= SHARED_SPIKE_MIN_MEMBERS && total - top.n >= SHARED_REST_THRESHOLD;
-    // Over the rate bar: blocked at once. Under it (a big honest store): never blocked on one window, but it earns a strike, so repeated dominance still escalates.
-    if (overBar(top) || (await strike(top.workspace_id))) return { kind: 'member', workspaceId: top.workspace_id, platform };
+    // Over the rate bar, or with too little send data to measure it (FAIL CLOSED: a verdict that just cleared the sends, or a member that sent little and failed a lot, is not "fine"):
+    // blocked at once. Only a MEASURED rate under the bar (a big honest store) is never blocked on one window, but it earns a strike, so repeated dominance still escalates.
+    if (!measured(top) || overBar(top) || (await strike(top.workspace_id))) return { kind: 'member', workspaceId: top.workspace_id, platform };
     return platform ? { kind: 'platform' } : { kind: 'ambiguous' };
   }
   if (results.length >= SHARED_SPIKE_MIN_MEMBERS) return { kind: 'platform' }; // 2.
