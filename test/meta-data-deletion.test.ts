@@ -1,12 +1,14 @@
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectNumberRequest } from '../src/core/api/contract';
+import { OP1, operatorCall, useApiKey } from './helpers/api';
 import { TEST_APP_SECRET } from './helpers/meta';
 import { stubGraph } from './helpers/graph';
 import { seedOwnNumber } from './helpers/own-number';
 
 // B9: Meta's "Data Deletion Request URL" is OUR route. Meta POSTs a signed_request when a person removes the app; we verify it (HMAC-SHA256 over the payload with
 // the app secret), queue the erasure, and answer { url, confirmation_code } as Meta's spec says. NOT VERIFIED against Meta's live callback (docs/launch/README.md s4).
+useApiKey();
 afterEach(() => vi.restoreAllMocks());
 const b64url = (b: ArrayBuffer | Uint8Array | string) => btoa(typeof b === 'string' ? b : String.fromCharCode(...new Uint8Array(b as ArrayBuffer))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 async function signedRequest(payload: Record<string, unknown>, secret = TEST_APP_SECRET): Promise<string> {
@@ -50,12 +52,38 @@ describe('the callback', () => {
     expect((await post(`${good.split('.')[0]}.${other.split('.')[1]}`)).status).toBe(400);
   });
 
-  it('the same request twice is the same confirmation code (Meta retries), and one stored row', async () => {
-    const sr = await signedRequest(PAYLOAD('999', { issued_at: 1_800_000_000 }));
-    const a = (await (await post(sr)).json()) as { confirmation_code: string };
-    const b = (await (await post(sr)).json()) as { confirmation_code: string };
-    expect(b.confirmation_code).toBe(a.confirmation_code);
+  it('the same request twice is the same confirmation code and status URL (Meta retries; a replay), one stored row, and the erasure runs ONCE', async () => {
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((m: unknown) => { logs.push(String(m)); });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const sr = await signedRequest(PAYLOAD('999'));
+    const a = (await (await post(sr)).json()) as { confirmation_code: string; url: string };
+    const b = (await (await post(sr)).json()) as { confirmation_code: string; url: string };
+    expect(b).toEqual(a);
+    await vi.waitFor(async () => { if ((await request(a.confirmation_code))?.state === 'queued') throw new Error('queued'); }, { timeout: 5000 });
+    await post(sr); // a third replay after it finished
     expect(await env.DB.prepare('SELECT count(*) AS n FROM meta_deletion_requests WHERE code = ?').bind(a.confirmation_code).first('n')).toBe(1);
+    expect(logs.filter((l) => l.includes('"audit":"meta_deletion"'))).toHaveLength(1);
+  });
+
+  it('issued_at is REQUIRED and must be fresh: missing, 10 minutes old, or in the future is 400 (a captured signed blob cannot be replayed later)', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const before = await count();
+    const { issued_at: _drop, ...noTime } = PAYLOAD('1212');
+    for (const p of [noTime, PAYLOAD('1212', { issued_at: now - 600 }), PAYLOAD('1212', { issued_at: now + 120 }), PAYLOAD('1212', { issued_at: 0 })]) {
+      const res = await post(await signedRequest(p));
+      expect(res.status, JSON.stringify(p)).toBe(400);
+    }
+    expect((await post(await signedRequest(PAYLOAD('1212', { issued_at: now - 200 })))).status).toBe(200); // within 5 minutes
+    expect((await post(await signedRequest(PAYLOAD('1313', { issued_at: now + 30 })))).status).toBe(200); // a small clock skew
+    expect(await count()).toBe(before + 2);
+  });
+
+  it('a signed blob from a LOGIN flow (it carries code / oauth_token / expires) is not a deletion request', async () => {
+    for (const extra of [{ code: 'AQB...' }, { oauth_token: 'EAAB...' }, { expires: 3600 }, { access_token: 'x' }]) {
+      const res = await post(await signedRequest(PAYLOAD('1414', extra)));
+      expect(res.status, JSON.stringify(extra)).toBe(400);
+    }
   });
 
   it('is a form POST only and small: JSON is 415 and a big body is 413', async () => {
@@ -125,5 +153,18 @@ describe('Embedded Signup remembers who connected, so a deletion request can fin
     expect(connectNumberRequest.safeParse({ ...base, fbUserId: '12 34' }).success).toBe(false);
     expect(connectNumberRequest.safeParse({ ...base, fbUserId: '1'.repeat(41) }).success).toBe(false);
     expect(connectNumberRequest.parse(base).fbUserId).toBeUndefined();
+  });
+});
+
+describe('the operator can see the requests', () => {
+  it('GET /operator/meta-deletions lists them newest first with state and counts, and no user id, hash or token', async () => {
+    const a = (await (await post(await signedRequest(PAYLOAD('81818181')))).json()) as { confirmation_code: string };
+    await vi.waitFor(async () => { if ((await request(a.confirmation_code))?.state === 'queued') throw new Error('queued'); }, { timeout: 5000 });
+    const res = await operatorCall(OP1, 'GET', '/meta-deletions');
+    expect(res.status).toBe(200);
+    const items = ((await res.json()) as { items: { code: string; state: string; receivedAt: number; removedConnections: number }[] }).items;
+    expect(items[0]).toMatchObject({ code: a.confirmation_code, state: 'nothing_found', removedConnections: 0 });
+    expect(JSON.stringify(items)).not.toMatch(/81818181|user_hash|userHash/);
+    expect((await operatorCall(null, 'GET', '/meta-deletions')).status).toBe(401);
   });
 });

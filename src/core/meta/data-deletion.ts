@@ -4,7 +4,8 @@
  *
  * What "erase" covers: the connections (WhatsApp Business Accounts, their numbers, business tokens and registration PINs) that the person authorised, found through
  * `waba_credentials.fb_user_id` (the id the browser reported at Embedded Signup). A merchant's CUSTOMER data belongs to the merchant's workspace and has its own erasure
- * path (`DELETE /contacts/:waId`, workspace deletion). A request we cannot match is NOT reported as done: it waits for a person (state `nothing_found`, status
+ * path (`DELETE /contacts/:waId`, workspace deletion). A request must carry a fresh `issued_at` (at most 5 minutes old) and no login-only field, and is deduplicated per
+ * (user id, issued_at): a replay gets the same code and runs nothing. A request we cannot match is NOT reported as done: it waits for a person (state `nothing_found`, status
  * `needs_review`, P1 alert). NOT VERIFIED against Meta's live callback.
  */
 import { z } from 'zod';
@@ -19,18 +20,26 @@ const b64urlToBytes = (s: string): Uint8Array<ArrayBuffer> => {
 const hex = (b: ArrayBuffer): string => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
 const hmacKey = (secret: string, usage: 'sign' | 'verify') => crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [usage]);
 
-const payloadSchema = z.object({ algorithm: z.literal('HMAC-SHA256'), user_id: z.string().regex(/^[0-9]{1,40}$/), issued_at: z.number().int().nonnegative().optional() });
+const payloadSchema = z.object({ algorithm: z.literal('HMAC-SHA256'), user_id: z.string().regex(/^[0-9]{1,40}$/), issued_at: z.number().int().positive() });
+/** Fields a LOGIN / OAuth signed_request carries and a deletion request never does: a blob that has one was not issued for deletion. */
+const LOGIN_ONLY_FIELDS = ['code', 'oauth_token', 'access_token', 'expires', 'expires_in'];
+/** A deletion request is acted on only if Meta issued it this recently (replay window); a small skew into the future is tolerated. */
+export const MAX_AGE_S = 300;
+export const MAX_FUTURE_S = 60;
 
 /** The payload of a genuine signed request, or null for anything else (wrong signature, algorithm, shape). */
-export async function parseSignedRequest(raw: string, appSecret: string | undefined): Promise<{ userId: string; issuedAt: number } | null> {
+export async function parseSignedRequest(raw: string, appSecret: string | undefined, nowS = Math.floor(Date.now() / 1000)): Promise<{ userId: string; issuedAt: number } | null> {
   if (!appSecret) return null;
   const [sig, payload, extra] = raw.split('.');
   if (!sig || !payload || extra !== undefined) return null;
   try {
     const ok = await crypto.subtle.verify('HMAC', await hmacKey(appSecret, 'verify'), b64urlToBytes(sig), new TextEncoder().encode(payload));
     if (!ok) return null;
-    const p = payloadSchema.safeParse(JSON.parse(new TextDecoder().decode(b64urlToBytes(payload))));
-    return p.success ? { userId: p.data.user_id, issuedAt: p.data.issued_at ?? 0 } : null;
+    const json = JSON.parse(new TextDecoder().decode(b64urlToBytes(payload))) as Record<string, unknown>;
+    if (LOGIN_ONLY_FIELDS.some((f) => f in json)) return null;
+    const p = payloadSchema.safeParse(json);
+    if (!p.success || nowS - p.data.issued_at > MAX_AGE_S || p.data.issued_at - nowS > MAX_FUTURE_S) return null;
+    return { userId: p.data.user_id, issuedAt: p.data.issued_at };
   } catch {
     return null;
   }

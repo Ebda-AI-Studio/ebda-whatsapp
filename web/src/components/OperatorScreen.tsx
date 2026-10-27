@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../data/api';
-import type { Adjustment, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView } from '../data/billing';
+import type { Adjustment, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, MetaDeletion, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -323,6 +323,7 @@ const chip = (state: string) => (state === 'paid' || state === 'approved' ? 'don
 
 function QueuesPanel({ t, lang, api, source, run, now, fail }: PanelProps) {
   const refunds = useList<RefundRequest>(api.refundQueue);
+  const deletions = useList<MetaDeletion>(api.metaDeletions);
   const adjustments = useList<Adjustment>(api.adjustments);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
   const signed = (m: number) => formatSigned(m, lang);
@@ -342,6 +343,19 @@ function QueuesPanel({ t, lang, api, source, run, now, fail }: PanelProps) {
 
   return (
     <>
+      <Card id="op-meta-deletions" title={t.opDeletionsTitle}>
+        {deletions.error && <p className="error-text">{t.opLoadError}</p>}
+        {deletions.items?.length === 0 && <p className="muted">{t.opDeletionsEmpty}</p>}
+        <ul className="wallet-rows op-rows">
+          {deletions.items?.map((d) => (
+            <li key={d.code}>
+              <span className="wallet-row-main"><code dir="ltr">{d.code.slice(0, 8)}</code> <span className="status-chip" data-status={d.state === 'done' ? 'ok' : d.state === 'queued' ? 'wait' : 'bad'}>{t.opDeletionState[d.state]}</span></span>
+              <span className="muted small">{dateTime(d.receivedAt, lang)} · {t.opDeletionRemoved(num(d.removedConnections, lang))}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="muted small">{t.opDeletionsHelp}</p>
+      </Card>
       <Card id="op-refunds" title={t.opRefundTitle}>
         {refunds.error && <p className="error-text">{t.opLoadError}</p>}
         {refunds.items?.length === 0 && <p className="muted">{t.opRefundEmpty}</p>}
