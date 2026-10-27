@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
+import { DEFAULT_CHUNK_ROWS, exportTable, highWaterMarks } from './backup-export';
 import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, toNdjson, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
 import type { SendResult } from './meta/client';
@@ -2166,19 +2167,21 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   async exportSnapshot(date: string): Promise<BackupManifest> {
     const workspaceId = this.workspaceId;
-    const dumps = this.ctx.storage.transactionSync(() =>
-      BACKUP_TABLES.map((t) => ({ t, rows: this.sql.exec(`SELECT * FROM ${t} ORDER BY ${BACKUP_ORDER[t]}`).toArray() as Record<string, unknown>[] })),
-    );
     const manifest: BackupManifest = { workspaceId, date, schemaVersion: DO_MIGRATIONS.length, tables: {} as BackupManifest['tables'] };
     const prefix = backupPrefix(workspaceId, date);
-    for (const { t, rows } of dumps) {
-      const body = toNdjson(rows);
-      manifest.tables[t] = { rows: rows.length, sha256: await sha256Hex(body) };
-      await this.env.BACKUPS.put(`${prefix}${t}.ndjson`, body);
+    // T17: chunked and streamed (src/core/backup-export.ts); the only transaction is the tiny read of the high-water marks.
+    const marks = highWaterMarks(this.sql, this.ctx.storage, BACKUP_TABLES);
+    for (const t of BACKUP_TABLES) {
+      manifest.tables[t] = await exportTable({ sql: this.sql, bucket: this.env.BACKUPS, key: `${prefix}${t}.ndjson`, table: t, highWater: marks[t], chunkRows: this.backupChunkRows, ...(this.backupHooks.afterChunk ? { afterChunk: this.backupHooks.afterChunk } : {}) });
     }
     await this.env.BACKUPS.put(`${prefix}manifest.json`, JSON.stringify(manifest));
     return manifest;
   }
+
+  /** Rows per read of the chunked export (a field so a test can shrink it). */
+  backupChunkRows = DEFAULT_CHUNK_ROWS;
+  /** Test seam: runs after every chunk of every table, between reads. */
+  backupHooks: { afterChunk?: (table: string, chunk: number) => Promise<void> } = {};
 
   /** Restores a snapshot into THIS workspace, which must be empty. Verifies counts and hashes before writing anything. */
   async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest } | { ok: false; reason: string }> {
