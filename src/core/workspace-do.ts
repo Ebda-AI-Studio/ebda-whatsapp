@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
-import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, toNdjson, type BackupManifest } from './backup';
+import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, signManifest, toNdjson, verifyManifestSignature, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
 import type { SendResult } from './meta/client';
 import type { CoexMessage, InboundMessage, StatusEvent, StatusPricing, SyncedContact } from './meta/webhook-schema';
@@ -2176,6 +2176,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       manifest.tables[t] = { rows: rows.length, sha256: await sha256Hex(body) };
       await this.env.BACKUPS.put(`${prefix}${t}.ndjson`, body);
     }
+    // M-174: signed when BACKUP_HMAC_KEY is set. The signature is part of the stored manifest and of the returned one.
+    if (this.env.BACKUP_HMAC_KEY) manifest.signature = await signManifest(manifest, this.env.BACKUP_HMAC_KEY);
     await this.env.BACKUPS.put(`${prefix}manifest.json`, JSON.stringify(manifest));
     return manifest;
   }
@@ -2200,6 +2202,15 @@ export class WorkspaceDO extends DurableObject<Env> {
     const parsed = backupManifestSchema.safeParse(await manifestObj.json().catch(() => null));
     if (!parsed.success) throw new Error('backup manifest is invalid');
     const manifest = parsed.data;
+    // M-174: with a key the manifest MUST carry a valid signature (an unsigned one is a stripped signature, not a legacy backup); a signed manifest is never
+    // restored where nothing can check it. With no key and no signature the old integrity-only behaviour stands.
+    const hmacKeys = [this.env.BACKUP_HMAC_KEY, this.env.BACKUP_HMAC_KEY_PREVIOUS].filter((k): k is string => !!k);
+    if (hmacKeys.length) {
+      if (!manifest.signature) throw new Error('backup manifest is not signed');
+      if (!(await verifyManifestSignature(manifest, hmacKeys))) throw new Error('backup manifest signature invalid');
+    } else if (manifest.signature) {
+      throw new Error('backup manifest is signed but BACKUP_HMAC_KEY is not set');
+    }
     if (manifest.schemaVersion > DO_MIGRATIONS.length) throw new Error('backup is newer than this schema');
     const files: { t: (typeof BACKUP_TABLES)[number]; rows: Record<string, unknown>[] }[] = [];
     for (const t of BACKUP_TABLES) {

@@ -60,6 +60,8 @@ function watch(chunk, out) {
   const lines = ((partial.get(out) ?? '') + text).split('\n');
   partial.set(out, lines.pop() ?? '');
   for (const l of lines) {
+    // WA-CI-STALL-1: a test about to hit its deadline printed which operations are still pending; surface it on the run page (the verdict is still vitest's).
+    if (l.startsWith('{"stall":')) console.log(`::warning title=test stall::${l.replace(/[\r\n%]/g, ' ').slice(0, 900)}`);
     if (/Unhandled (Errors?|Rejection)/.test(l)) unhandled = true;
     const m = /^\s*(✓|❯|×|↓)\s+\|?[\w-]+\|?\s+(\S+\.test\.tsx?)\s+\(([^)]*)\)/.exec(l);
     if (m) reported.set(m[2], { mark: m[1], tests: Number(/(\d+) tests?/.exec(m[3])?.[1] ?? NaN), skipped: Number(/(\d+) skipped/.exec(m[3])?.[1] ?? 0) });

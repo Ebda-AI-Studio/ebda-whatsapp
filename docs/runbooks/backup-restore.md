@@ -5,7 +5,7 @@
   `backups/<workspaceId>/<YYYY-MM-DD>/{contacts,conversations,messages,message_status_events,notes,conversation_tags,templates,uploads}.ndjson` and `manifest.json`
   (row count + sha256 per table, schema version) to R2 bucket **`ebda-wa-backups`**, then schedules the next one for 02:00 (the backup is a task in the DO scheduler: a failed run is retried with backoff from 30 s up to 1 h and logs `{alert:'backup_failed'}` each time).
 - All tables are read in one transaction, so a snapshot is consistent even while messages arrive.
-- Large message bodies live in `ebda-wa-media` (`bodies/<workspaceId>/<wamid>`) and are NOT copied into the backup (Phase 3: add an R2→R2 copy or lifecycle-protected versioning).
+- Large message bodies live in `ebda-wa-media` (`bodies/<workspaceId>/<wamid>`) and are NOT in the nightly snapshot; `scripts/backup-offsite.sh` mirrors that prefix off Cloudflare (below).
 
 ## Mac copy
 `scripts/backup-pull.sh [date]` mirrors one night's backups plus a D1 export to `~/Backups/ebda-whatsapp/<date>/`,
@@ -13,11 +13,18 @@ asserts every file's line count against the manifest, keeps 30 days (prunes only
 Install the daily 04:00 job only when Ahmad approves (it is not installed):
 `cp ops/com.ebda.wa-backup-pull.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.ebda.wa-backup-pull.plist`
 
+## Off-Cloudflare copy, bodies included (T21)
+`scripts/backup-offsite.sh [date]` (rclone; run from the Mac or a small VPS, not from Cloudflare) copies the nightly snapshots to `$OFFSITE_DEST/snapshots/<date>/` and **mirrors `bodies/`** to `$OFFSITE_DEST/bodies/`. The mirror deletes what erasure deleted, so an erased body does not live on off-site; whatever a run removes is first moved to `bodies-removed/<date>/` and kept for `OFFSITE_KEEP_DAYS` (30), then pruned (the same window the privacy policy states). After copying it verifies every snapshot folder with `scripts/verify-backup-manifest.mjs` (signature, sha256, row counts) and fails the run if one is not verified. Credentials come from rclone's own config or environment, never from arguments. Install it as a daily job only when Ahmad approves; the Mac pull (`backup-pull.sh`) and this script can both run.
+D1 has its own restore path: `d1-time-travel.md`.
+
+## Signed manifests (M-174)
+With the secret `BACKUP_HMAC_KEY` set (at least 32 characters; `npx wrangler secret put BACKUP_HMAC_KEY`), each `manifest.json` carries `signature: "hmac-sha256:<hex>"` over its canonical form. A restore with the key set **requires** a valid signature (an unsigned manifest is treated as a stripped signature and refused; a signed one is refused where no key is set, instead of skipping the check). To change the key: set the new one as `BACKUP_HMAC_KEY` and the old as `BACKUP_HMAC_KEY_PREVIOUS` until the old backups age out (30 days), then remove it. Verify a copy offline: `BACKUP_HMAC_KEY=... node scripts/verify-backup-manifest.mjs <folder>`.
+
 ## Restore a workspace
 1. Pick the snapshot prefix, e.g. `backups/ws-123/2026-10-24/`.
 2. Restore into a FRESH workspace id (the target must be empty): call `WorkspaceDO.importSnapshot(prefix)` on
    `idFromName('<new id>')` (operator route lands in Phase 3; until then a one-off `wrangler` script).
-3. It verifies every table's sha256 and row count BEFORE writing; on mismatch it returns `{ ok: false, reason }` and writes nothing. The hash proves **integrity** (corruption, truncation), not authenticity: anyone with write access to the bucket can rewrite a file and its manifest together. If tampering enters scope, switch the manifest hash to HMAC with a secret.
+3. It verifies every table's sha256 and row count BEFORE writing; on mismatch it returns `{ ok: false, reason }` and writes nothing. The hash proves **integrity** (corruption, truncation); the HMAC signature (above) proves the manifest was written by us.
    Restored `body_r2_key` values still point at the source workspace's `bodies/<old id>/…` objects, which stay valid; erasing in the restored workspace deletes them.
    The restored workspace arms its own nightly backup alarm.
 4. Point the phone number's D1 row (`phone_numbers.workspace_id`) at the restored id.

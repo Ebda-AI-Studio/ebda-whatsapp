@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import { labelForUrl, track } from './inflight';
 import type { JWK } from 'jose';
 
 export type GraphCall = { url: string; method: string; body: any; headers: Record<string, string> };
@@ -27,7 +28,7 @@ export function stubGraph(
   opts: { jwks?: JWK[]; delayMs?: number; before?: (call: GraphCall) => Promise<void> | void; other?: (url: string, init: RequestInit | undefined) => Promise<Response> | Response | undefined } = {},
 ) {
   const calls: GraphCall[] = [];
-  const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+  const spy = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => track(labelForUrl(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url), (async () => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (opts.jwks && url === JWKS_URL) return new Response(JSON.stringify({ keys: opts.jwks }), { headers: { 'content-type': 'application/json' } });
     const alt = opts.other?.(url, init);
@@ -51,6 +52,6 @@ export function stubGraph(
     if (mediaLookup && r.status === 200 && !(r.json && typeof r.json === 'object' && 'url' in r.json)) r = defaultGraphReply(call, calls.length);
     if (r.body !== undefined) return new Response(r.body, { status: r.status, headers: r.headers });
     return new Response(JSON.stringify(r.json ?? null), { status: r.status, headers: { 'content-type': 'application/json' } });
-  });
+  })()));
   return { calls, restore: () => spy.mockRestore() };
 }
