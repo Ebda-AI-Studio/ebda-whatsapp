@@ -84,7 +84,10 @@ export interface OperatorApi {
   instapayQueue(): Promise<OperatorInstapay[]>;
   /** A signed link that opens the proof for a couple of minutes. */
   instapayProofLink(id: string): Promise<{ url: string; expiresAt: number }>;
-  confirmInstapay(id: string): Promise<OperatorInstapay & { needsSecond?: true }>;
+  /** `bankRef` = the bank's own transaction reference read from the proof (optional). A re-used one answers 409 `duplicate_reference` and holds the request; a held request answers 409 `held`. */
+  confirmInstapay(id: string, bankRef?: string): Promise<OperatorInstapay & { needsSecond?: true }>;
+  /** C2: lifts a duplicate hold after a person compared both transfers (a reason of 5+ characters; audited). */
+  releaseInstapay(id: string, reason: string): Promise<OperatorInstapay>;
   rejectInstapay(id: string, reason: string): Promise<OperatorInstapay>;
   adjustments(): Promise<Adjustment[]>;
   createAdjustment(workspaceId: string, amountMinor: number, reason: string): Promise<Adjustment>;

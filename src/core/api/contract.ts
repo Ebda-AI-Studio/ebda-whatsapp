@@ -466,7 +466,12 @@ export const instapayViewDto = z.object({ enabled: z.boolean(), payee: instapayP
 export const instapayCreatedDto = instapayRequestDto.extend({ payee: instapayPayeeDto });
 export const operatorInstapayDto = instapayRequestDto.extend({
   workspaceId: z.string(), createdBy: z.string(), proofAt: z.number().int().nullable(), firstApprover: z.string().nullable(), decidedBy: z.string().nullable(), proofMime: z.string().nullable(),
+  /** C2: set while the request cannot be confirmed because its image or bank reference was seen on another request (`heldOf`). */
+  heldReason: z.enum(['duplicate_image', 'duplicate_reference']).nullable().optional(), heldOf: z.string().nullable().optional(), bankRef: z.string().nullable().optional(),
 });
+/** Confirming may carry the bank's own transaction reference, read from the proof (optional; a re-used one is refused). */
+export const instapayConfirm = z.object({ bankRef: z.string().trim().min(1).max(60).optional() }).strict();
+export const instapayRelease = z.object({ reason: z.string().trim().min(5).max(300) });
 export const instapayReject = z.object({ reason: z.string().trim().min(3).max(300) });
 export const refundRequestCreate = z.object({ amountMinor: z.number().int().min(5000), note: z.string().trim().max(500).optional() });
 /** An operator refunded the card in the provider's dashboard to pay a manual payout and links that refund to the request. `orderId` (the top-up) is optional. */

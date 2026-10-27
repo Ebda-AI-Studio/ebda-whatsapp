@@ -99,7 +99,7 @@ describe('a purchase sets the package\'s own period', () => {
     const r = await createInstapayRequest(env, { workspaceId: ws, userId: 'merchant-1', sessionId: 's1', input: { kind: 'package', packageId: 'growth-yearly' }, payee: PAYEE });
     if (!r.ok) throw new Error(r.reason);
     expect(r.request.amountMinor).toBe(1341000);
-    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...crypto.getRandomValues(new Uint8Array(4))]); // unique per upload: an identical image on two requests is a held duplicate (C2)
     await storeProof(env, { workspaceId: ws, requestId: r.request.id, sessionId: 's1', bytes: png.buffer.slice(0) as ArrayBuffer, contentType: 'image/png' }, Date.now());
     const first = await confirmInstapay(env, { id: r.request.id, actor: OP1 });
     if (first.ok && first.needsSecond) await confirmInstapay(env, { id: r.request.id, actor: OP2 });

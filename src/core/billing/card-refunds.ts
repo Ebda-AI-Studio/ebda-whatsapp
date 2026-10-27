@@ -22,6 +22,7 @@ import { auditOnce } from './package-orders';
 import { APPROVAL_LEASE_MS } from './refunds';
 import { isCardRefundOperation, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { alert } from '../observability';
+import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
 
 /** Rows that count against a top-up's room: the open ones, the planned ones (reserved, not debited yet) and held refunds (real refunds awaiting a match). */
 export const RESERVING = "('planned', 'sending', 'calling', 'pending', 'uncertain', 'held')";
@@ -305,11 +306,16 @@ export async function linkDashboardRefund(env: Env, a: { requestId: string; kash
  * read by id; one without an id is looked for in the provider's refund list for its top-up (same order, same amount, not already ours).
  * Nothing is ever re-sent. One that stays unresolved for 3 days alerts once (`card_refund_stuck`): a person checks the provider's dashboard.
  */
-export async function reconcileCardRefunds(env: Env, provider: PaymentProvider | null, now = Date.now()): Promise<{ settled: number; open: number }> {
+export async function reconcileCardRefunds(env: Env, provider: PaymentProvider | null, now = Date.now(), opts: PassOpts = {}): Promise<{ settled: number; open: number }> {
   const out = { settled: 0, open: 0 };
   if (!provider) return out;
-  const { results } = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE state IN ${OPEN} AND source = 'api' AND updated_at < ? ORDER BY created_at LIMIT 100`).bind(now - RECONCILE_AFTER_MS).all<CardRefundRow>();
-  for (const row of results) {
+  const size = opts.page ?? DRAIN_PAGE;
+  await drainKeyset<CardRefundRow, [number, string]>({
+    name: 'reconcile_card_refunds', pageSize: size, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE state IN ${OPEN} AND source = 'api' AND updated_at < ?1 ${after ? 'AND (created_at > ?2 OR (created_at = ?2 AND id > ?3))' : ''} ORDER BY created_at, id LIMIT ${size}`)
+      .bind(now - RECONCILE_AFTER_MS, ...(after ?? [])).all<CardRefundRow>()).results,
+    cursorOf: (r) => [r.created_at, r.id],
+    handle: async (row) => {
     try {
       let outcome: Outcome | null = null;
       if (row.kashier_refund_id && provider.refundStatus) {
@@ -328,13 +334,14 @@ export async function reconcileCardRefunds(env: Env, provider: PaymentProvider |
           }
         }
       }
-      if (outcome && (await settleCardRefund(env, row.id, outcome, now))) { out.settled++; continue; }
+      if (outcome && (await settleCardRefund(env, row.id, outcome, now))) { out.settled++; return; }
     } catch (err) {
       alert('card_refund_reconcile_failed', { id: row.id, error: err instanceof Error ? err.name : 'error' });
     }
     out.open++;
     if (now - row.created_at > STUCK_AFTER_MS && (await auditOnce(env, 'card_refund_stuck', row.workspace_id, row.id, now))) alert('card_refund_stuck', { id: row.id, workspace: row.workspace_id, state: row.state });
-  }
+    },
+  });
   return out;
 }
 
@@ -458,19 +465,24 @@ export async function reverseUnreversedChunks(env: Env, requestId: string, works
  * (`swept_at`), reverses what is eligible and marks each one it finished (clean or blocked-and-alerted) once it is past the grace window, so a backlog is worked off across
  * passes and older requests never starve behind newer ones.
  */
-export async function sweepAbandonedRefunds(env: Env, now = Date.now(), batch = 200): Promise<{ checked: number; reversed: number }> {
-  const { results } = await env.DB.prepare("SELECT id, workspace_id FROM refund_requests WHERE state = 'abandoned' AND swept_at IS NULL ORDER BY abandoned_at ASC, id ASC LIMIT ?").bind(batch).all<{ id: string; workspace_id: string }>();
+export async function sweepAbandonedRefunds(env: Env, now = Date.now(), batch = DRAIN_PAGE, opts: Pick<PassOpts, 'maxBatches'> = {}): Promise<{ checked: number; reversed: number }> {
   let reversed = 0;
-  for (const r of results) {
-    try {
-      reversed += await reverseUnreversedChunks(env, r.id, r.workspace_id, 'system', now);
-      // A run whose lease ran out may still post a chunk shortly after the abandon: mark clean only after twice its lease.
-      await env.DB.prepare('UPDATE refund_requests SET swept_at = ? WHERE id = ? AND swept_at IS NULL AND abandoned_at < ?').bind(now, r.id, now - 2 * APPROVAL_LEASE_MS).run();
-    } catch (err) {
-      alert('refund_abandon_sweep_failed', { severity: 'P1', requestId: r.id, error: err instanceof Error ? err.name : 'error' });
-    }
-  }
-  return { checked: results.length, reversed };
+  const { handled } = await drainKeyset<{ id: string; workspace_id: string; abandoned_at: number }, [number, string]>({
+    name: 'sweep_abandoned_refunds', pageSize: batch, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT id, workspace_id, abandoned_at FROM refund_requests WHERE state = 'abandoned' AND swept_at IS NULL ${after ? 'AND (abandoned_at > ?1 OR (abandoned_at = ?1 AND id > ?2))' : ''} ORDER BY abandoned_at ASC, id ASC LIMIT ${batch}`)
+      .bind(...(after ?? [])).all<{ id: string; workspace_id: string; abandoned_at: number }>()).results,
+    cursorOf: (r) => [r.abandoned_at, r.id],
+    handle: async (r) => {
+      try {
+        reversed += await reverseUnreversedChunks(env, r.id, r.workspace_id, 'system', now);
+        // A run whose lease ran out may still post a chunk shortly after the abandon: mark clean only after twice its lease.
+        await env.DB.prepare('UPDATE refund_requests SET swept_at = ? WHERE id = ? AND swept_at IS NULL AND abandoned_at < ?').bind(now, r.id, now - 2 * APPROVAL_LEASE_MS).run();
+      } catch (err) {
+        alert('refund_abandon_sweep_failed', { severity: 'P1', requestId: r.id, error: err instanceof Error ? err.name : 'error' });
+      }
+    },
+  });
+  return { checked: handled, reversed };
 }
 
 export type AbandonResult =

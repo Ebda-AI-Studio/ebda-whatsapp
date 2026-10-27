@@ -29,7 +29,9 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2
 const PDF = new TextEncoder().encode('%PDF-1.7\n1 0 obj\n');
 const JPG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46]);
 const WEBP = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50]);
-const bytes = (u: Uint8Array) => u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
+// Every upload gets 4 random trailing bytes: the same image on two requests is now a held duplicate (C2), and these tests reuse a few tiny fixtures.
+const bytes = (u: Uint8Array) => { if (u.byteLength === 0) return u.buffer.slice(0) as ArrayBuffer; const b = new Uint8Array(u.byteLength + 4); b.set(u); crypto.getRandomValues(b.subarray(u.byteLength)); return b.buffer as ArrayBuffer; };
+const uniq = (u: Uint8Array) => new Uint8Array(bytes(u));
 
 const pkgReq = async (ws: string, o: { userId?: string; now?: number; e?: typeof env } = {}) => {
   await seedNumber(`pn-ip-${ws.slice(-6)}`, ws);
@@ -91,7 +93,7 @@ describe('creating a request: the server owns the amount', () => {
     expect((await staff.call('GET', '/wallet/instapay')).status).toBe(403);
     expect((await staff.call('POST', '/wallet/instapay', { kind: 'topup', amountMinor: 5000 })).status).toBe(403);
     const r = await pkgReq(ws);
-    expect((await SELF.fetch(`https://x/api/v1/stores/${ws}/wallet/instapay/${r.id}/proof`, { method: 'PUT', headers: { authorization: `Bearer ${staff.token}`, 'content-type': 'image/png' }, body: PNG })).status).toBe(403);
+    expect((await SELF.fetch(`https://x/api/v1/stores/${ws}/wallet/instapay/${r.id}/proof`, { method: 'PUT', headers: { authorization: `Bearer ${staff.token}`, 'content-type': 'image/png' }, body: uniq(PNG) })).status).toBe(403);
     configureSessionCheck(async () => true);
     const owner = await apiFor(ws);
     expect((await owner.call('POST', '/wallet/instapay', { kind: 'topup', amountMinor: 5000 })).status).toBe(403); // M-135: the store middleware refuses a revoked session on every write, before the route's own money check
@@ -153,10 +155,10 @@ describe('the proof of transfer', () => {
     const put = (body: BodyInit, type: string) => SELF.fetch(`https://x/api/v1/stores/${ws}/wallet/instapay/${r.id}/proof`, { method: 'PUT', headers: { authorization: `Bearer ${owner.token}`, 'content-type': type }, body });
     expect((await put('hello', 'text/plain')).status).toBe(415);
     expect((await put(new Uint8Array(5 * 1024 * 1024 + 1), 'image/png')).status).toBe(413);
-    const ok = await put(PNG, 'image/png');
+    const ok = await put(uniq(PNG), 'image/png');
     expect(ok.status).toBe(200);
     expect(await ok.json()).toMatchObject({ state: 'under_review' });
-    expect((await put(PNG, 'image/png')).status).toBe(409); // already submitted
+    expect((await put(uniq(PNG), 'image/png')).status).toBe(409); // already submitted
   });
   it('a proof for another workspace\'s request, or after the 48 h expiry, is refused', async () => {
     const r = await pkgReq(W(18));
@@ -181,7 +183,7 @@ describe('operator review', () => {
     expect(res.headers.get('content-type')).toBe('image/jpeg');
     expect(res.headers.get('cache-control')).toContain('no-store');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
-    expect(new Uint8Array(await res.arrayBuffer())).toEqual(JPG);
+    expect(new Uint8Array(await res.arrayBuffer()).slice(0, JPG.length)).toEqual(JPG); // (the upload has 4 random trailing bytes)
     vi.spyOn(Date, 'now').mockReturnValue(link.expiresAt + 1000);
     expect((await SELF.fetch(`https://x${link.url}`)).status).toBe(404);
   });

@@ -1091,7 +1091,7 @@ describe('abandoning a partly debited refund request (two operators, money back 
       await real.postWallet({ kind: 'refund', netMinor: -100, ref: `refund:${id}:1`, actor: 'u', note: 'x' });
     }
     const passes = [];
-    for (let i = 0; i < 4; i++) passes.push((await sweepAbandonedRefunds(env, Date.now(), 10)).reversed);
+    for (let i = 0; i < 4; i++) passes.push((await sweepAbandonedRefunds(env, Date.now(), 10, { maxBatches: 1 })).reversed); // a pass BOUNDED to one batch (M-178: an unbounded pass now drains the whole backlog)
     expect(passes).toEqual([10, 10, 5, 0]); // oldest first, each pass takes the next unmarked batch
     expect((await ledger(a.ws)).filter((r) => r.ref.startsWith('refund-reversal:ab-'))).toHaveLength(25);
   });

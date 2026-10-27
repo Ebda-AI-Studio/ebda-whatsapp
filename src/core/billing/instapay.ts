@@ -22,6 +22,7 @@ import { adjustmentThreshold } from './operator';
 import { ORDER_COLS, grantOrder, planPurchase, type PackageOrderRow, type PurchasePlan } from './package-orders';
 import { MAX_TOPUP_MINOR, MIN_TOPUP_MINOR, TOPUP_COLS, credit, type TopupRow } from './topups';
 import { alert } from '../observability';
+import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
 
 export type { InstapayPayee };
 export const INSTAPAY_TTL_MS = 48 * 3_600_000;
@@ -39,18 +40,19 @@ type Row = {
   id: string; reference: string; workspace_id: string; kind: 'package' | 'topup'; package_id: string | null; amount_minor: number; currency: string; state: RequestState;
   created_by: string; created_at: number; expires_at: number; proof_key: string | null; proof_mime: string | null; proof_at: number | null;
   first_approver: string | null; decided_by: string | null; decided_at: number | null; reject_reason: string | null; granted_at: number | null;
+  held_reason: 'duplicate_image' | 'duplicate_reference' | null; held_of: string | null; bank_ref: string | null;
 };
-const COLS = 'id, reference, workspace_id, kind, package_id, amount_minor, currency, state, created_by, created_at, expires_at, proof_key, proof_mime, proof_at, first_approver, decided_by, decided_at, reject_reason, granted_at';
+const COLS = 'id, reference, workspace_id, kind, package_id, amount_minor, currency, state, created_by, created_at, expires_at, proof_key, proof_mime, proof_at, first_approver, decided_by, decided_at, reject_reason, granted_at, held_reason, held_of, bank_ref';
 export type InstapayRequestDto = {
   id: string; reference: string; kind: 'package' | 'topup'; packageId: string | null; amountMinor: number; currency: string; state: RequestState;
   createdAt: number; expiresAt: number; hasProof: boolean; rejectReason: string | null; decidedAt: number | null;
 };
-export type OperatorInstapayDto = InstapayRequestDto & { workspaceId: string; createdBy: string; proofAt: number | null; firstApprover: string | null; decidedBy: string | null; proofMime: string | null };
+export type OperatorInstapayDto = InstapayRequestDto & { workspaceId: string; createdBy: string; proofAt: number | null; firstApprover: string | null; decidedBy: string | null; proofMime: string | null; heldReason: Row['held_reason']; heldOf: string | null; bankRef: string | null };
 const dto = (r: Row): InstapayRequestDto => ({
   id: r.id, reference: r.reference, kind: r.kind, packageId: r.package_id, amountMinor: r.amount_minor, currency: r.currency, state: r.state, createdAt: r.created_at, expiresAt: r.expires_at,
   hasProof: r.proof_key !== null, rejectReason: r.reject_reason, decidedAt: r.decided_at,
 });
-const opDto = (r: Row): OperatorInstapayDto => ({ ...dto(r), workspaceId: r.workspace_id, createdBy: r.created_by, proofAt: r.proof_at, firstApprover: r.first_approver, decidedBy: r.decided_by, proofMime: r.proof_mime });
+const opDto = (r: Row): OperatorInstapayDto => ({ ...dto(r), workspaceId: r.workspace_id, createdBy: r.created_by, proofAt: r.proof_at, firstApprover: r.first_approver, decidedBy: r.decided_by, proofMime: r.proof_mime, heldReason: r.held_reason, heldOf: r.held_of, bankRef: r.bank_ref });
 const get = (env: Env, id: string) => env.DB.prepare(`SELECT ${COLS} FROM instapay_requests WHERE id = ?`).bind(id).first<Row>();
 
 // ---- create ----------------------------------------------------------------------------------------------------------------------
@@ -149,17 +151,49 @@ export async function storeProof(env: Env, a: { workspaceId: string; requestId: 
   const key = `instapay-proof/${r.workspace_id}/${r.id}.${crypto.randomUUID()}.${kind.ext}`; // unique per upload: a losing double-submit deletes only ITS OWN object
   await env.MEDIA.put(key, a.bytes, { httpMetadata: { contentType: kind.mime } });
   // The state change is one conditional write: an expiry (or another upload) that got there first wins and the object is removed again.
-  const moved = await env.DB.prepare("UPDATE instapay_requests SET state = 'under_review', proof_key = ?, proof_mime = ?, proof_bytes = ?, proof_at = ? WHERE id = ? AND state = 'awaiting_proof' AND expires_at > ?")
-    .bind(key, kind.mime, a.bytes.byteLength, now, r.id, now).run();
+  const sha = await sha256Hex(a.bytes);
+  const moved = await env.DB.prepare("UPDATE instapay_requests SET state = 'under_review', proof_key = ?, proof_mime = ?, proof_bytes = ?, proof_at = ?, proof_sha256 = ? WHERE id = ? AND state = 'awaiting_proof' AND expires_at > ?")
+    .bind(key, kind.mime, a.bytes.byteLength, now, sha, r.id, now).run();
   if (!moved.meta.changes) {
     await env.MEDIA.delete(key).catch(() => undefined);
     const cur = await get(env, r.id);
     return { ok: false, reason: cur?.state === 'expired' || (cur && now >= cur.expires_at) ? 'expired' : 'bad_state' };
   }
+  await holdIfDuplicateImage(env, r.id, sha, now);
   // The review deadline is a one-shot check at that moment (the daily pass stays as a backstop): 4 business hours after the proof arrived.
   await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(r.workspace_id)).scheduleInstapayOverdue(r.id, addBusinessMs(now, REVIEW_SLA_BUSINESS_MS))
     .catch((err: unknown) => alert('instapay_sla_not_scheduled', { id: r.id, error: err instanceof Error ? err.name : 'error' }));
   return { ok: true, request: dto((await get(env, r.id))!) };
+}
+
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ---- duplicate proofs (C2) -------------------------------------------------------------------------------------------------------
+
+/**
+ * The same image on another request, in ANY workspace (or the same one twice), means one transfer is being used for two payments. The new request is held; an earlier one
+ * still under review is held too (nobody can tell which is the honest one), a confirmed earlier one is left alone. A held request cannot be confirmed: a person compares
+ * both against the bank app, then releases it (with a reason) or rejects it. P1 alert, once per detection.
+ */
+async function holdIfDuplicateImage(env: Env, id: string, sha: string, now: number): Promise<void> {
+  const { results: twins } = await env.DB.prepare("SELECT id, state, workspace_id FROM instapay_requests WHERE proof_sha256 = ? AND id <> ? AND state IN ('under_review', 'confirmed') ORDER BY proof_at, id LIMIT 10")
+    .bind(sha, id).all<{ id: string; state: string; workspace_id: string }>();
+  if (!twins.length) return;
+  const first = twins[0]!;
+  const stmts = [env.DB.prepare("UPDATE instapay_requests SET held_reason = 'duplicate_image', held_of = ?, held_at = ? WHERE id = ? AND state = 'under_review' AND held_reason IS NULL").bind(first.id, now, id)];
+  for (const t of twins) if (t.state === 'under_review') stmts.push(env.DB.prepare("UPDATE instapay_requests SET held_reason = 'duplicate_image', held_of = ?, held_at = ? WHERE id = ? AND state = 'under_review' AND held_reason IS NULL").bind(id, now, t.id));
+  await env.DB.batch(stmts);
+  const ws = (await env.DB.prepare('SELECT workspace_id FROM instapay_requests WHERE id = ?').bind(id).first<{ workspace_id: string }>())?.workspace_id ?? first.workspace_id;
+  await audit(env, { at: now, actor: 'system', action: 'instapay_held', workspaceId: ws, after: { id, reason: 'duplicate_image', of: twins.map((t) => t.id) } });
+  alert('instapay_duplicate_proof', { severity: 'P1', workspace: ws, id, reason: 'duplicate_image', twins: twins.length });
+}
+
+/** The bank's reference as typed from the proof: no spaces or dashes, upper case, letters and digits only (4 to 40). Null = malformed. */
+export function normaliseBankRef(raw: string): string | null {
+  const t = raw.replace(/[\s-]/g, '').toUpperCase();
+  return /^[A-Z0-9]{4,40}$/.test(t) ? t : null;
 }
 
 // ---- signed, short-lived proof links (operator only) ----------------------------------------------------------------------------
@@ -203,7 +237,7 @@ async function audit(env: Env, a: { at: number; actor: string; action: string; w
 
 export type DecideResult =
   | { ok: true; request: OperatorInstapayDto; needsSecond?: true }
-  | { ok: false; reason: 'not_found' | 'not_reviewable' | 'self_approval_refused' | 'second_approver_required' | 'amount_mismatch' };
+  | { ok: false; reason: 'not_found' | 'not_reviewable' | 'self_approval_refused' | 'second_approver_required' | 'amount_mismatch' | 'held' | 'duplicate_reference' | 'bad_reference' };
 
 /** Grants what the request paid for, through the card payment's own paths. Idempotent: the reference decides, so a retry changes nothing. */
 async function grant(env: Env, r: Row, now: number): Promise<void> {
@@ -228,11 +262,19 @@ async function orderMatches(env: Env, r: Row): Promise<boolean> {
   return !!o && o.amount_minor === r.amount_minor;
 }
 
-export async function confirmInstapay(env: Env, a: { id: string; actor: string }, now = Date.now()): Promise<DecideResult> {
+export async function confirmInstapay(env: Env, a: { id: string; actor: string; bankRef?: string }, now = Date.now()): Promise<DecideResult> {
   const r = await get(env, a.id);
   if (!r) return { ok: false, reason: 'not_found' };
   if (r.state !== 'under_review') return { ok: false, reason: 'not_reviewable' };
   if (r.created_by === a.actor) return { ok: false, reason: 'self_approval_refused' };
+  if (r.held_reason) return { ok: false, reason: 'held' }; // a duplicate: a person releases it first
+  let ref: string | null = null;
+  if (a.bankRef !== undefined) {
+    ref = normaliseBankRef(a.bankRef);
+    if (!ref) return { ok: false, reason: 'bad_reference' };
+    const other = await env.DB.prepare('SELECT id FROM instapay_requests WHERE bank_ref = ? AND id <> ?').bind(ref, r.id).first<{ id: string }>();
+    if (other) return holdForReference(env, r, other.id, now);
+  }
   if (!(await orderMatches(env, r))) {
     alert('instapay_amount_mismatch', { severity: 'P1', id: r.id, workspace: r.workspace_id });
     return { ok: false, reason: 'amount_mismatch' };
@@ -248,8 +290,18 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string }
     }
     if (r.first_approver === a.actor) return { ok: false, reason: 'second_approver_required' };
   }
-  const claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?, decided_at = ? WHERE id = ? AND state = 'under_review'").bind(a.actor, now, r.id).run();
-  if (!claim.meta.changes) return { ok: false, reason: 'not_reviewable' };
+  let claim: D1Result;
+  try {
+    claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?, decided_at = ?, bank_ref = ? WHERE id = ? AND state = 'under_review' AND held_reason IS NULL").bind(a.actor, now, ref, r.id).run();
+  } catch (err) {
+    // The unique index on bank_ref: another request took this reference between our check and our write.
+    if (ref && /UNIQUE/i.test(String(err instanceof Error ? err.message : err))) {
+      const other = await env.DB.prepare('SELECT id FROM instapay_requests WHERE bank_ref = ?').bind(ref).first<{ id: string }>();
+      return holdForReference(env, r, other?.id ?? 'unknown', now);
+    }
+    throw err;
+  }
+  if (!claim.meta.changes) return { ok: false, reason: (await get(env, r.id))?.held_reason ? 'held' : 'not_reviewable' };
   await audit(env, { at: now, actor: a.actor, action: 'instapay_confirmed', workspaceId: r.workspace_id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor } });
   try {
     await grant(env, (await get(env, r.id))!, now);
@@ -257,6 +309,30 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string }
     // The request is confirmed but the grant did not finish: the daily repair finishes it (and the grant is idempotent). Say so loudly.
     alert('instapay_grant_failed', { severity: 'P1', id: r.id, workspace: r.workspace_id, error: err instanceof Error ? err.name : 'error' });
   }
+  return { ok: true, request: opDto((await get(env, r.id))!) };
+}
+
+async function holdForReference(env: Env, r: Row, of: string, now: number): Promise<DecideResult> {
+  await env.DB.prepare("UPDATE instapay_requests SET held_reason = 'duplicate_reference', held_of = ?, held_at = ? WHERE id = ? AND state = 'under_review' AND held_reason IS NULL").bind(of, now, r.id).run();
+  await audit(env, { at: now, actor: 'system', action: 'instapay_held', workspaceId: r.workspace_id, after: { id: r.id, reason: 'duplicate_reference', of } });
+  alert('instapay_duplicate_proof', { severity: 'P1', workspace: r.workspace_id, id: r.id, reason: 'duplicate_reference' });
+  return { ok: false, reason: 'duplicate_reference' };
+}
+
+export type ReleaseResult = { ok: true; request: OperatorInstapayDto } | { ok: false; reason: 'not_found' | 'not_reviewable' | 'not_held' | 'self_approval_refused' | 'reason_required' };
+
+/** A person looked at both transfers in the bank app and says this one is genuine: the hold is lifted (audited with the reason). It can then be confirmed like any other. */
+export async function releaseInstapay(env: Env, a: { id: string; actor: string; reason: string }, now = Date.now()): Promise<ReleaseResult> {
+  const reason = a.reason.trim();
+  if (reason.length < 5) return { ok: false, reason: 'reason_required' };
+  const r = await get(env, a.id);
+  if (!r) return { ok: false, reason: 'not_found' };
+  if (r.state !== 'under_review') return { ok: false, reason: 'not_reviewable' };
+  if (r.created_by === a.actor) return { ok: false, reason: 'self_approval_refused' };
+  if (!r.held_reason) return { ok: false, reason: 'not_held' };
+  const res = await env.DB.prepare("UPDATE instapay_requests SET held_reason = NULL, held_of = NULL, held_at = NULL WHERE id = ? AND state = 'under_review' AND held_reason IS NOT NULL").bind(r.id).run();
+  if (!res.meta.changes) return { ok: false, reason: 'not_held' };
+  await audit(env, { at: now, actor: a.actor, action: 'instapay_released', workspaceId: r.workspace_id, after: { id: r.id, was: r.held_reason, of: r.held_of }, reason });
   return { ok: true, request: opDto((await get(env, r.id))!) };
 }
 
@@ -290,19 +366,25 @@ export async function expireInstapay(env: Env, now = Date.now()): Promise<{ expi
   return { expired: res.meta.changes };
 }
 
-/** A confirmed request whose grant never finished (a crash between the claim and the grant) is completed now, once, and reported. */
-export async function repairInstapay(env: Env, now = Date.now()): Promise<{ granted: number }> {
-  const { results } = await env.DB.prepare(`SELECT ${COLS} FROM instapay_requests WHERE state = 'confirmed' AND granted_at IS NULL ORDER BY decided_at LIMIT 100`).all<Row>();
+/** A confirmed request whose grant never finished (a crash between the claim and the grant) is completed now, once, and reported. Drains every page (M-178). */
+export async function repairInstapay(env: Env, now = Date.now(), opts: PassOpts = {}): Promise<{ granted: number }> {
+  const size = opts.page ?? DRAIN_PAGE;
   let granted = 0;
-  for (const r of results) {
-    try {
-      await grant(env, r, now);
-      granted++;
-      if (await markOnce(env, 'instapay_confirmed_not_granted', r)) alert('instapay_confirmed_not_granted', { severity: 'P1', id: r.id, workspace: r.workspace_id });
-    } catch (err) {
-      if (await markOnce(env, 'instapay_repair_failed', r)) alert('instapay_repair_failed', { severity: 'P1', id: r.id, error: err instanceof Error ? err.name : 'error' }); // once per request, not every daily pass
-    }
-  }
+  await drainKeyset<Row, [number, string]>({
+    name: 'repair_instapay', pageSize: size, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT ${COLS} FROM instapay_requests WHERE state = 'confirmed' AND granted_at IS NULL ${after ? 'AND (coalesce(decided_at, 0) > ?1 OR (coalesce(decided_at, 0) = ?1 AND id > ?2))' : ''} ORDER BY coalesce(decided_at, 0), id LIMIT ${size}`)
+      .bind(...(after ?? [])).all<Row>()).results,
+    cursorOf: (r) => [r.decided_at ?? 0, r.id],
+    handle: async (r) => {
+      try {
+        await grant(env, r, now);
+        granted++;
+        if (await markOnce(env, 'instapay_confirmed_not_granted', r)) alert('instapay_confirmed_not_granted', { severity: 'P1', id: r.id, workspace: r.workspace_id });
+      } catch (err) {
+        if (await markOnce(env, 'instapay_repair_failed', r)) alert('instapay_repair_failed', { severity: 'P1', id: r.id, error: err instanceof Error ? err.name : 'error' }); // once per request, not every daily pass
+      }
+    },
+  });
   return { granted };
 }
 async function markOnce(env: Env, action: string, r: Row): Promise<boolean> {
@@ -324,11 +406,17 @@ export async function overdueOne(env: Env, id: string, now = Date.now()): Promis
   return true;
 }
 
-/** Proofs waiting longer than 4 business hours alert once each (`instapay_proof_overdue`, severity P1): the daily backstop for the scheduled checks. */
-export async function overdueInstapay(env: Env, now = Date.now()): Promise<{ alerted: number }> {
-  const { results } = await env.DB.prepare("SELECT id FROM instapay_requests WHERE state = 'under_review' AND proof_at IS NOT NULL AND overdue_alerted_at IS NULL ORDER BY proof_at LIMIT 200").all<{ id: string }>();
+/** Proofs waiting longer than 4 business hours alert once each (`instapay_proof_overdue`, severity P1): the daily backstop for the scheduled checks. Drains every page. */
+export async function overdueInstapay(env: Env, now = Date.now(), opts: PassOpts = {}): Promise<{ alerted: number }> {
+  const size = opts.page ?? DRAIN_PAGE;
   let alerted = 0;
-  for (const r of results) if (await overdueOne(env, r.id, now)) alerted++;
+  await drainKeyset<{ id: string; proof_at: number }, [number, string]>({
+    name: 'overdue_instapay', pageSize: size, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT id, proof_at FROM instapay_requests WHERE state = 'under_review' AND proof_at IS NOT NULL AND overdue_alerted_at IS NULL ${after ? 'AND (proof_at > ?1 OR (proof_at = ?1 AND id > ?2))' : ''} ORDER BY proof_at, id LIMIT ${size}`)
+      .bind(...(after ?? [])).all<{ id: string; proof_at: number }>()).results,
+    cursorOf: (r) => [r.proof_at, r.id],
+    handle: async (r) => { if (await overdueOne(env, r.id, now)) alerted++; },
+  });
   return { alerted };
 }
 
@@ -340,4 +428,32 @@ export async function rejectionNotice(env: Env, workspaceId: string, now = Date.
 }
 export async function markRejectionsSeen(env: Env, workspaceId: string, now = Date.now()): Promise<void> {
   await env.DB.prepare("UPDATE instapay_requests SET notice_seen_at = ? WHERE workspace_id = ? AND state = 'rejected' AND notice_seen_at IS NULL").bind(now, workspaceId).run();
+}
+
+// ---- proof lifecycle (M-096) -----------------------------------------------------------------------------------------------------
+
+/** A proof image is kept 180 days after the decision (the longest realistic bank-dispute window), then deleted; the hash stays so a re-used transfer is still caught. */
+export const PROOF_RETENTION_MS = 180 * 86_400_000;
+
+/** Daily: deletes the proof of every request decided more than 180 days ago, page by page. An undecided request keeps its proof whatever its age. A refused R2 delete keeps the reference (retried tomorrow) and alerts. */
+export async function purgeInstapayProofs(env: Env, now = Date.now(), opts: PassOpts = {}): Promise<{ deleted: number; failed: number }> {
+  const size = opts.page ?? DRAIN_PAGE;
+  const out = { deleted: 0, failed: 0 };
+  await drainKeyset<{ id: string; proof_key: string; decided_at: number }, [number, string]>({
+    name: 'purge_instapay_proofs', pageSize: size, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT id, proof_key, decided_at FROM instapay_requests WHERE proof_key IS NOT NULL AND decided_at IS NOT NULL AND decided_at < ?1 ${after ? 'AND (decided_at > ?2 OR (decided_at = ?2 AND id > ?3))' : ''} ORDER BY decided_at, id LIMIT ${size}`)
+      .bind(now - PROOF_RETENTION_MS, ...(after ?? [])).all<{ id: string; proof_key: string; decided_at: number }>()).results,
+    cursorOf: (r) => [r.decided_at, r.id],
+    handle: async (r) => {
+      try {
+        await env.MEDIA.delete(r.proof_key);
+        await env.DB.prepare('UPDATE instapay_requests SET proof_key = NULL, proof_mime = NULL WHERE id = ? AND proof_key = ?').bind(r.id, r.proof_key).run();
+        out.deleted++;
+      } catch (err) {
+        out.failed++;
+        alert('instapay_proof_purge_failed', { severity: 'P1', id: r.id, error: err instanceof Error ? err.name : 'error' });
+      }
+    },
+  });
+  return out;
 }

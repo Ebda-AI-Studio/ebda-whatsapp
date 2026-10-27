@@ -34,6 +34,9 @@ A send job exhausted its retries. The message is now `failed` with `error_reason
 ### unhandled_error
 A route threw. Find the event in Sentry (search the route and the time); `route` and `method` are in the message.
 
+### instapay_duplicate_proof (P1), billing_pass_backlog (P1), billing_pass_row_failed (P1), instapay_proof_purge_failed (P1)
+`instapay_duplicate_proof`: an InstaPay request is held because its proof image or bank reference is on another request. Open the operator console's InstaPay queue, view both proofs, compare them with the bank app; release the genuine one (reason required) and reject the other. `billing_pass_backlog`: a daily money pass stopped after 50 pages; the next daily pass continues, look at what makes the backlog (a provider outage?). `billing_pass_row_failed`: one row threw inside a daily pass; the pass continued. `instapay_proof_purge_failed`: R2 refused a proof delete; retried tomorrow. Design: `docs/billing.md`.
+
 ### number_quality_flagged / number_error_spike (P1) and number_restricted (P0)
 Meta flagged a number (FLAGGED counts as red), rated it red, restricted it, or 25 frequency-cap / undeliverable errors hit it in an hour (yellow). The workspace's campaigns on it are already paused (`quality_flagged`) and, for red / restricted, new templates are refused. Look at `phone_numbers.health_*` and the workspace's `number_health_log`; contact the merchant. Recovery never resumes campaigns: the merchant does. See `docs/number-health.md`.
 

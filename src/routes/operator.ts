@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
-  fxPublish, instapayReject, operatorKillSwitch, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
+  fxPublish, instapayReject, operatorKillSwitch, instapayConfirm, instapayRelease, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -16,7 +16,7 @@ import { currentSharedNumber, registerPlatformNumber, sharedEnabled } from '../c
 import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type SharedTemplateFailure } from '../core/shared/shared-templates';
 import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
-import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
+import { confirmInstapay, listForOperator, rejectInstapay, releaseInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
@@ -241,7 +241,19 @@ const decided = (c: { json(b: unknown, s?: 200 | 403 | 404 | 409): Response }, r
   const status = r.reason === 'not_found' ? 404 : r.reason === 'self_approval_refused' ? 403 : 409;
   return c.json({ error: r.reason === 'not_found' ? 'not_found' : status === 403 ? 'forbidden' : 'invalid_request', message: r.reason }, status);
 };
-operatorRoutes.post('/instapay/:id/confirm', async (c) => decided(c, await confirmInstapay(c.env, { id: c.req.param('id'), actor: actor(c) })));
+operatorRoutes.post('/instapay/:id/confirm', async (c) => {
+  const b = instapayConfirm.safeParse(await c.req.json().catch(() => ({})));
+  if (!b.success) return bad(c, 'bank_reference_invalid');
+  return decided(c, await confirmInstapay(c.env, { id: c.req.param('id'), actor: actor(c), ...(b.data.bankRef ? { bankRef: b.data.bankRef } : {}) }));
+});
+operatorRoutes.post('/instapay/:id/release', async (c) => {
+  const b = instapayRelease.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  const r = await releaseInstapay(c.env, { id: c.req.param('id'), actor: actor(c), reason: b.data.reason });
+  if (r.ok) return c.json(r.request);
+  const status = r.reason === 'not_found' ? 404 : r.reason === 'self_approval_refused' ? 403 : 409;
+  return c.json({ error: r.reason === 'not_found' ? 'not_found' : status === 403 ? 'forbidden' : 'invalid_request', message: r.reason }, status);
+});
 operatorRoutes.post('/instapay/:id/reject', async (c) => {
   const b = instapayReject.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, 'reason_required');
