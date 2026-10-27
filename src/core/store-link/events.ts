@@ -13,6 +13,7 @@ import { isLinked, putState, readSettings } from './settings';
 import { acceptVersion, locale, orderRow, rememberBuyerKey, schedulePendingPushes, upsertOrder } from './order-store';
 import { applyConsentChanged, forgetBuyer, recordCheckoutConsent, recordWithdrawal } from './consent';
 import { alert } from '../observability';
+import { funnelOnce } from '../funnel';
 
 export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
 
@@ -129,6 +130,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       if (!acceptVersion(host, 'store:link', at(event.occurredAt))) return { status: 'stale' };
       putState(host, 'linked', event.type === 'store.linked' ? '1' : '0');
       if (event.type === 'store.linked') {
+        funnelOnce(host, 'linked');
         schedulePendingPushes(host, now);
         ensureCatalogReconcile(host, now);
       }

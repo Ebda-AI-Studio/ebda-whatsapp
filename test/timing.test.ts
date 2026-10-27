@@ -8,7 +8,7 @@ import { inboundPayload } from './helpers/payload';
 import { seedNumber } from './helpers/workspace';
 
 function stages(spy: { mock: { calls: unknown[][] } }): string[] {
-  return spy.mock.calls.map((c) => (c[0] as AnalyticsEngineDataPoint).blobs![0] as string);
+  return spy.mock.calls.map((c) => (c[0] as AnalyticsEngineDataPoint).blobs![0] as string).filter((b) => !b.startsWith('funnel.') && b !== 'ai_turn'); // pipeline stages only; funnel and AI-turn points are tested in funnel.test.ts
 }
 
 it('writes one data point per stage for one inbound text', async () => {
@@ -16,7 +16,7 @@ it('writes one data point per stage for one inbound text', async () => {
   const ae = vi.spyOn(env.USAGE, 'writeDataPoint');
   await postWebhook(SELF, inboundPayload('pn-t', [{ id: 'wamid.t1', text: 'hi', ts: Math.floor(Date.now() / 1000) }]));
   expect(stages(ae)).toEqual(['do_stored', 'enqueued', 'webhook_ack']);
-  const point = ae.mock.calls[0]![0] as AnalyticsEngineDataPoint;
+  const point = ae.mock.calls.map((c) => c[0] as AnalyticsEngineDataPoint).find((x) => x.blobs![0] === 'do_stored')!;
   expect(point.blobs).toEqual(['do_stored', 'ws-t']);
   expect(point.indexes).toEqual(['do_stored']);
   expect(point.doubles).toHaveLength(2);

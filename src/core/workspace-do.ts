@@ -37,6 +37,7 @@ import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, p
 import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
 import type { AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
+import { funnelOnce } from './funnel';
 import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
@@ -250,6 +251,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           if (!claimed && !optOut && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
           continue;
         }
+        funnelOnce(this.host(), 'first_inbound');
         result.stored++;
         this.indexMessage(inserted.id, cols.preview);
         if (m.media) {

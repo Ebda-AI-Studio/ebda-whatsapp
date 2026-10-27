@@ -15,6 +15,7 @@ import { roundHalfEvenDiv } from './money';
 import { RefundContention, applyPackageWebhook, auditOnce, findPackageOrder } from './package-orders';
 import { packagesEnabled, paymentProvider, topupsEnabled, type ParsedWebhook, type PaymentProvider } from './payments';
 import { alert } from '../observability';
+import { funnel } from '../funnel';
 
 export const MIN_TOPUP_MINOR = 1000;
 export const MAX_TOPUP_MINOR = 5_000_000;
@@ -80,6 +81,7 @@ export async function credit(env: Env, row: TopupRow, transactionId: string, now
   const r = await stubOf(env, row.workspace_id).postWallet({ kind: 'topup', netMinor: row.amount_minor, ref: walletRef, note: `top-up ${row.order_id}` }, now);
   if (!r.ok && r.reason !== 'duplicate') throw new Error(`top-up credit refused: ${r.reason}`);
   await env.DB.prepare("UPDATE topups SET state = 'paid', paid_at = coalesce(paid_at, ?) WHERE order_id = ? AND state IN ('pending', 'expired', 'failed')").bind(now, row.order_id).run();
+  if (r.ok) funnel(env, 'topup_credited', row.workspace_id);
   return r.ok ? 'credited' : 'duplicate';
 }
 

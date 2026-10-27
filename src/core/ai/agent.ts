@@ -17,7 +17,9 @@ import { agentConfig } from './config';
 import { recordFunnel } from '../bot-funnel';
 import { markHandoff, type HandoffReason } from './handoff';
 import { retrieveKnowledge } from './knowledge';
-import { heartbeatHold, holdCredits, releaseHold, settleHold } from './credits';
+import { AI_TURN_CREDITS, heartbeatHold, holdCredits, releaseHold, settleHold } from './credits';
+import { funnelOnce } from '../funnel';
+import { markAiTurn } from '../timing';
 import { LlmError, type ChatTurn, type LlmProvider, type LlmResponse } from './provider';
 import { getAgentState, providerFor, putAgentState, readAgentSettings, type AgentSettings } from './settings';
 import { MAX_CALLS_PER_ROUND, MAX_TOOL_ROUNDS, runTool, toolDefs, type ToolContext } from './tools';
@@ -245,11 +247,15 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
       }
     }
     let answered = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    const startedAt = Date.now();
+    const turnPoint = (outcome: string) => markAiTurn(host.env, host.workspaceId, { outcome, inputTokens, outputTokens, rounds: answered, ms: Date.now() - startedAt, credits: real.byoKey || answered === 0 ? 0 : AI_TURN_CREDITS });
     // Hold times use the real clock: a turn can outlast the moment it started. Each round tells the hold the turn is still alive.
-    const provider: LlmProvider = { byoKey: real.byoKey, complete: async (r) => { if (!real.byoKey) heartbeatHold(host.sql, holdRef, Date.now()); const out = await real.complete(r); answered++; return out; } };
+    const provider: LlmProvider = { byoKey: real.byoKey, complete: async (r) => { if (!real.byoKey) heartbeatHold(host.sql, holdRef, Date.now()); const out = await real.complete(r); answered++; inputTokens += out.usage?.inputTokens ?? 0; outputTokens += out.usage?.outputTokens ?? 0; return out; } };
     const finishHold = () => {
       if (real.byoKey) return;
-      host.storage.transactionSync(() => (answered > 0 ? settleHold(host.sql, holdRef, Date.now()) : releaseHold(host.sql, holdRef, Date.now())));
+      host.storage.transactionSync(() => (answered > 0 ? settleHold(host.sql, holdRef, Date.now(), host.workspaceId) : releaseHold(host.sql, holdRef, Date.now())));
     };
     let outcome: Outcome;
     try {
@@ -257,10 +263,12 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     } catch (err) {
       finishHold();
       if (err instanceof Aborted) return;
+      turnPoint('error');
       alert('agent_model_failed', { workspace: host.workspaceId, error: errClass(err) });
       return await handoff(host, input, 'provider_error', locale, now);
     }
     finishHold();
+    turnPoint(outcome.kind === 'handoff' ? `handoff:${outcome.reason}` : outcome.kind);
     if (outcome.kind === 'handoff') return await handoff(host, input, outcome.reason, locale, now);
     if (outcome.kind === 'order') {
       host.storage.transactionSync(() => {
@@ -273,6 +281,7 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
       if (turnGone(host, input)) throw new Aborted();
       storeReplies(host, input, [{ key: `${keyPrefix(input)}0`, text: outcome.text }], now);
       recordTurn(host, input, 'reply', now);
+      funnelOnce(host, 'first_ai_reply');
     });
     await deliverStored(host, input);
   } catch (err) {
