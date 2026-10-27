@@ -26,7 +26,8 @@ offboardingRoutes.post('/stores/:storeId/offboarding', async (c) => {
 
 offboardingRoutes.delete('/stores/:storeId/offboarding', async (c) => {
   if (!ownerOnly(c.get('storeRole'))) return c.json({ error: 'forbidden' }, 403);
-  const r = await cancelOffboarding(c.env, { workspaceId: c.req.param('storeId'), actor: c.get('principal').userId });
+  const r = await cancelOffboarding(c.env, { workspaceId: c.req.param('storeId'), actor: c.get('principal').userId, role: c.get('storeRole') === 'super_admin' ? 'operator' : 'owner' });
   if (r.ok) return c.json({ ok: true });
+  if (r.reason === 'operator_requested') return c.json({ error: 'forbidden', message: 'operator_requested' }, 403); // our team started it: only our team cancels it (the guides name the support address)
   return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
 });

@@ -1,7 +1,7 @@
 import { SELF, env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureSessionCheck } from '../src/core/identity/session';
-import { COOLING_OFF_MS, OFFBOARD_TABLES, pseudonymFor, runDueOffboardings } from '../src/core/ops/offboarding';
+import { COOLING_OFF_MS, OFFBOARD_TABLES, pseudonymFor, runDueOffboardings, runOffboarding } from '../src/core/ops/offboarding';
 import { OP1, apiFor, operatorCall, storeId as W, useApiKey } from './helpers/api';
 import { fund } from './helpers/billing';
 import { openChat, own, rows, workspace } from './helpers/workspace';
@@ -102,6 +102,76 @@ describe('requesting, cooling off and cancelling', () => {
     const ok = await ownerCall(ws, 'POST', { confirm: true, acceptWriteOff: true });
     expect(ok.status).toBe(202);
     expect(await d1('SELECT write_off_minor FROM offboarding WHERE workspace_id = ?', ws)).toEqual([{ write_off_minor: 20_000 }]);
+  });
+});
+
+describe('a cancel can never lose a race with the run (security review: TOCTOU)', () => {
+  const untouched = async (ws: string) => {
+    expect((await env.MEDIA.list({ prefix: `media/${ws}/` })).objects).toHaveLength(1);
+    expect(await d1('SELECT 1 FROM workspaces WHERE id = ?', ws)).toHaveLength(1);
+    expect(await rows(ws, 'SELECT 1 FROM contacts')).not.toEqual([]);
+  };
+
+  it('a cancel landing between the read and the claim: nothing is claimed, nothing is erased', async () => {
+    const ws = W(2020);
+    await populate(ws);
+    await ownerCall(ws, 'POST', { confirm: true });
+    const r = await runOffboarding(env, ws, Date.now() + COOLING_OFF_MS + 1000, { afterRead: async () => { expect((await ownerCall(ws, 'DELETE')).status).toBe(200); } });
+    expect(r).toBe('skipped');
+    expect(await d1('SELECT state, steps_done, attempts FROM offboarding WHERE workspace_id = ?', ws)).toEqual([{ state: 'cancelled', steps_done: '', attempts: 0 }]);
+    await untouched(ws);
+  });
+
+  it('a row that is not yet due is skipped even when called directly', async () => {
+    const ws = W(2021);
+    await populate(ws);
+    await ownerCall(ws, 'POST', { confirm: true });
+    expect(await runOffboarding(env, ws, Date.now() + DAY)).toBe('skipped');
+    expect(await d1('SELECT state, attempts FROM offboarding WHERE workspace_id = ?', ws)).toEqual([{ state: 'pending', attempts: 0 }]);
+    await untouched(ws);
+  });
+
+  it('a cancel landing after step 1 stops the run before step 2', async () => {
+    const ws = W(2022);
+    await populate(ws);
+    await operatorCall(OP1, 'POST', `/workspaces/${ws}/offboarding`, { reason: REASON, immediate: true });
+    const seen: string[] = [];
+    const r = await runOffboarding(env, ws, Date.now() + 1000, {
+      beforeStep: async (step) => {
+        seen.push(step);
+        if (step === 'unroute') await env.DB.prepare("UPDATE offboarding SET state = 'cancelled' WHERE workspace_id = ?").bind(ws).run(); // a cancel arrives mid-run
+      },
+    });
+    expect(r).toBe('skipped');
+    expect(seen).toEqual(['suspend', 'unroute']);
+    expect(await d1('SELECT steps_done FROM offboarding WHERE workspace_id = ?', ws)).toEqual([{ steps_done: 'suspend' }]);
+    await untouched(ws);
+    expect(await d1('SELECT 1 FROM phone_numbers WHERE workspace_id = ?', ws)).toHaveLength(1); // step 2 (unroute) did not run
+  });
+});
+
+describe('who may cancel', () => {
+  it('an owner cannot cancel a deletion an operator started: 403, the row is unchanged; the operator can', async () => {
+    const ws = W(2023);
+    await own(ws);
+    await operatorCall(OP1, 'POST', `/workspaces/${ws}/offboarding`, { reason: REASON });
+    const before = await d1('SELECT * FROM offboarding WHERE workspace_id = ?', ws);
+    const r = await ownerCall(ws, 'DELETE');
+    expect(r.status).toBe(403);
+    expect(await r.json()).toMatchObject({ error: 'forbidden', message: 'operator_requested' });
+    expect(await d1('SELECT * FROM offboarding WHERE workspace_id = ?', ws)).toEqual(before);
+    expect((await operatorCall(OP1, 'DELETE', `/workspaces/${ws}/offboarding`, { reason: REASON })).status).toBe(200);
+  });
+
+  it('a suspended workspace may still ask (POST) and read (GET), but not cancel (DELETE)', async () => {
+    const ws = W(2024);
+    await own(ws);
+    expect((await operatorCall(OP1, 'POST', `/workspaces/${ws}/suspend`, { reason: REASON })).status).toBe(200);
+    expect((await ownerCall(ws, 'POST', { confirm: true })).status).toBe(202);
+    expect((await ownerCall(ws, 'GET')).status).toBe(200);
+    const del = await ownerCall(ws, 'DELETE');
+    expect(del.status).toBe(403);
+    expect(await del.json()).toMatchObject({ message: 'workspace_suspended' });
   });
 });
 

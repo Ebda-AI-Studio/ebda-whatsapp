@@ -119,10 +119,12 @@ export async function requestOffboarding(
   return { ok: true, value: (await getOffboarding(env, a.workspaceId))! };
 }
 
-export type CancelResult = { ok: true } | { ok: false; reason: 'not_found' | 'nothing_pending' | 'already_running' };
-export async function cancelOffboarding(env: Env, a: { workspaceId: string; actor: string; reason?: string }, now = Date.now()): Promise<CancelResult> {
-  const row = await env.DB.prepare('SELECT state FROM offboarding WHERE workspace_id = ?').bind(a.workspaceId).first<{ state: string }>();
+export type CancelResult = { ok: true } | { ok: false; reason: 'not_found' | 'nothing_pending' | 'already_running' | 'operator_requested' };
+export async function cancelOffboarding(env: Env, a: { workspaceId: string; actor: string; role: 'owner' | 'operator'; reason?: string }, now = Date.now()): Promise<CancelResult> {
+  const row = await env.DB.prepare('SELECT state, requested_role FROM offboarding WHERE workspace_id = ?').bind(a.workspaceId).first<{ state: string; requested_role: string }>();
   if (!row) return { ok: false, reason: 'not_found' };
+  // A deletion an operator started (a legal or abuse request) is cancelled by an operator only: the owner is told to write to support.
+  if (row.state === 'pending' && row.requested_role === 'operator' && a.role !== 'operator') return { ok: false, reason: 'operator_requested' };
   if (row.state === 'running' || row.state === 'done') return { ok: false, reason: 'already_running' };
   if (row.state !== 'pending') return { ok: false, reason: 'nothing_pending' };
   const res = await env.DB.prepare("UPDATE offboarding SET state = 'cancelled' WHERE workspace_id = ? AND state = 'pending'").bind(a.workspaceId).run();
@@ -216,16 +218,20 @@ async function runStep(env: Env, ws: string, step: Step, pseudo: string, now: nu
   }
 }
 
+/** Test seams: a pause between reading the row and claiming it, and before each destructive step. Production passes none. */
+export type RunHooks = { afterRead?: () => Promise<void>; beforeStep?: (step: Step) => Promise<void> };
+
 /** Runs (or resumes) one workspace's deletion. Never throws. */
-export async function runOffboarding(env: Env, ws: string, now = Date.now()): Promise<'done' | 'failed' | 'held' | 'unfinished' | 'skipped'> {
+export async function runOffboarding(env: Env, ws: string, now = Date.now(), hooks: RunHooks = {}): Promise<'done' | 'failed' | 'held' | 'unfinished' | 'skipped'> {
   const row = await env.DB.prepare('SELECT * FROM offboarding WHERE workspace_id = ?').bind(ws).first<Row>();
   if (!row || (row.state !== 'pending' && row.state !== 'running') || row.execute_after > now) return 'skipped';
+  await hooks.afterRead?.();
   const done = new Set(row.steps_done ? row.steps_done.split(',') : []);
   if (done.size === 0) {
     const held = await heldReason(env, ws, now);
     if (held) {
       const first = row.last_error !== `held:${held}`;
-      await env.DB.prepare('UPDATE offboarding SET last_error = ? WHERE workspace_id = ?').bind(`held:${held}`, ws).run();
+      await env.DB.prepare("UPDATE offboarding SET last_error = ? WHERE workspace_id = ? AND state = 'pending'").bind(`held:${held}`, ws).run();
       if (first) alert('offboarding_held', { workspace: ws, reason: held });
       return 'held';
     }
@@ -235,12 +241,18 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now()): Pr
     alert('offboarding_failed', { workspace: ws, error: 'no_key' });
     return 'failed';
   }
-  await env.DB.batch([
-    env.DB.prepare("UPDATE offboarding SET state = 'running', attempts = attempts + 1, pseudonym = ?, started_at = coalesce(started_at, ?) WHERE workspace_id = ?").bind(pseudo, now, ws),
-    ...(row.state === 'pending' ? [logRow(env, ws, 'system', 'started', now)] : []),
-  ]);
+  // The claim is ONE conditional write: a request cancelled (or not yet due) since we read it is not claimed, and nothing irreversible runs.
+  const claim = await env.DB.prepare(
+    "UPDATE offboarding SET state = 'running', attempts = attempts + 1, pseudonym = ?, started_at = coalesce(started_at, ?) WHERE workspace_id = ? AND state IN ('pending', 'running') AND execute_after <= ?",
+  ).bind(pseudo, now, ws, now).run();
+  if (!claim.meta.changes) return 'skipped';
+  if (row.state === 'pending') await logRow(env, ws, 'system', 'started', now).run();
   for (const step of STEPS) {
     if (done.has(step)) continue;
+    await hooks.beforeStep?.(step);
+    // Re-checked before EVERY step: a cancel that lands mid-run stops the next (irreversible) step.
+    const live = await env.DB.prepare("SELECT 1 FROM offboarding WHERE workspace_id = ? AND state = 'running'").bind(ws).first();
+    if (!live) return 'skipped';
     try {
       const detail = await runStep(env, ws, step, pseudo, now);
       done.add(step);

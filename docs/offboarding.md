@@ -6,11 +6,14 @@ An owner or an operator can delete a workspace. Nothing is deleted at once: a **
 | Who | Call | Notes |
 |---|---|---|
 | Owner | `POST /api/v1/stores/:id/offboarding` `{ confirm: true, acceptWriteOff?, reason? }` | 202 with the status. `confirm` must be literally `true`. The owner cannot skip the wait (a strict schema: `immediate` is a 400). |
-| Owner | `GET` / `DELETE /api/v1/stores/:id/offboarding` | status / cancel (only while `pending`). Allowed while the workspace is suspended. |
+| Owner | `GET` / `DELETE /api/v1/stores/:id/offboarding` | status / cancel (only while `pending`). A suspended workspace may still POST and GET, never DELETE. An owner cannot cancel a deletion an operator started: `403 operator_requested` (the help guide tells them to write to support). |
 | Operator | `POST /api/v1/operator/workspaces/:id/offboarding` `{ reason, immediate?, acceptWriteOff? }` | A reason (5+ characters) is required. `immediate` skips the cooling-off (a legal request). Asking again can only shorten the wait. |
 | Operator | `DELETE .../offboarding` `{ reason }`, `GET .../offboarding`, `GET /operator/offboardings?state=`, `POST /operator/offboardings/run` | cancel, read, list, finish an interrupted run now. |
 
 A wallet balance above zero is refused (`409 wallet_balance_remains`) unless the request carries `acceptWriteOff: true`; the amount is recorded in `offboarding.write_off_minor`. Refund it first through the normal refund path if the merchant wants the money back (WA-REFUND-1 applies to a cancelled plan).
+
+## Race safety (security review)
+The run is claimed with ONE conditional write (`state IN ('pending','running') AND execute_after <= now`, `meta.changes` checked); a row cancelled or not yet due since it was read is `skipped`. The state is re-read (`running`) before EVERY step, so a cancel that lands mid-run stops before the next destructive step. Cancel itself only succeeds on `pending`, so once the claim wins the deletion is irreversible by design.
 
 ## What the run does (daily cron, or "run now")
 Steps are idempotent and recorded in `offboarding.steps_done`; a failed run resumes at the failing step (alert `offboarding_failed`, P1) and a finished one is a no-op.

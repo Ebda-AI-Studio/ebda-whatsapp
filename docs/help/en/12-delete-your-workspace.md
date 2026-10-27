@@ -13,6 +13,6 @@ The store owner can ask us to delete the workspace and everything in it. Support
 - Deleting does not cancel anything at Meta; remove your number from your Meta account yourself if you no longer want it there.
 
 ## Who can do what
-Only the store owner can ask or cancel. Staff cannot.
+Only the store owner can ask or cancel. Staff cannot. If our team started the deletion at your request, only our team can cancel it: write to ahlan@ebda.app.
 
 Last checked: 2026-10-27.

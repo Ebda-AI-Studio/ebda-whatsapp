@@ -10,9 +10,11 @@ export const integratorTokensEnabled = (env: Partial<Pick<Env, 'INTEGRATOR_TOKEN
 export type AuthVars = { principal: Principal; storeRole: 'owner' | 'staff' | 'super_admin' };
 
 /** What a suspended workspace may still do: pay (wallet, packages) and erase a contact (a data-protection right never waits on a suspension). */
-const SUSPENDED_OK = [/^\/api\/v1\/stores\/[^/]+\/wallet(\/|$)/, /^\/api\/v1\/stores\/[^/]+\/packages(\/|$)/, /^\/api\/v1\/stores\/[^/]+\/offboarding$/]; // deleting the workspace is a right a suspension never blocks
+const SUSPENDED_OK = [/^\/api\/v1\/stores\/[^/]+\/wallet(\/|$)/, /^\/api\/v1\/stores\/[^/]+\/packages(\/|$)/];
 export function allowedWhileSuspended(method: string, path: string): boolean {
   if (SUSPENDED_OK.some((re) => re.test(path))) return true;
+  // Asking to delete the workspace is a right a suspension never blocks; cancelling is not (a suspended store may be suspended for abuse).
+  if ((method === 'POST' || method === 'GET') && /^\/api\/v1\/stores\/[^/]+\/offboarding$/.test(path)) return true;
   return method === 'DELETE' && /^\/api\/v1\/stores\/[^/]+\/contacts\/[^/]+$/.test(path);
 }
 

@@ -276,7 +276,7 @@ operatorRoutes.post('/workspaces/:workspaceId/offboarding', async (c) => {
 operatorRoutes.delete('/workspaces/:workspaceId/offboarding', async (c) => {
   const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, 'reason_required');
-  const r = await cancelOffboarding(c.env, { workspaceId: c.req.param('workspaceId')!, actor: actor(c), reason: b.data.reason });
+  const r = await cancelOffboarding(c.env, { workspaceId: c.req.param('workspaceId')!, actor: actor(c), role: 'operator', reason: b.data.reason });
   if (r.ok) return c.json({ ok: true });
   return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
 });
