@@ -21,6 +21,7 @@ import { MONTHS_SQL, announceSubscription, auditStmt, fallbackToStorePlan, runWr
 import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
 import { alert } from '../observability';
 import { frozenForOffboarding, refuseIfOffboarded } from '../ops/offboarded';
+import { reasonStmt } from '../audit-reason';
 import { noteRefundExcess } from './refund-excess';
 
 const SWITCH_KINDS: readonly PurchaseKind[] = ['upgrade', 'queued_switch'];
@@ -251,7 +252,7 @@ async function grantQueuedSwitch(env: Env, row: PackageOrderRow, ref: string, no
 
 /** Appends the audit row only if no row with this action + reason exists. True when this call wrote it (the caller alerts only then). */
 export async function auditOnce(env: Env, action: string, workspaceId: string, reason: string, now: number): Promise<boolean> {
-  const r = await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, ?, ?, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = ? AND reason = ?)')
+  const r = await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) SELECT ?, ?, ?, ?, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = ? AND ref = ?)')
     .bind(now, 'provider', action, workspaceId, JSON.stringify({ orderId: reason }), reason, action, reason).run();
   return r.meta.changes > 0;
 }
@@ -450,8 +451,9 @@ export async function executeYearlyRefund(env: Env, orderId: string, a: { actor:
         WHERE workspace_id = ? AND period_start = ? AND status IN ('active', 'trialing') AND ${open}`).bind(newEnd, now, now, plan.workspace_id, b.periodStart, plan.order_id),
     env.DB.prepare(`UPDATE package_orders SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND ${open}
         AND EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND status = 'cancelled' AND period_end = ?)`).bind(plan.debt_settled_minor, plan.order_id, plan.order_id, plan.workspace_id, newEnd),
-    env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, 'yearly_refund', ?, NULL, ?, ? WHERE EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND status = 'cancelled' AND period_end = ?) AND "+open)
-      .bind(now, a.actor, plan.workspace_id, JSON.stringify({ orderId: plan.order_id, shortenedMonths: plan.shortened_months, debtSettledMinor: plan.debt_settled_minor, cashMinor: plan.cash_minor }), a.reason, plan.workspace_id, newEnd, plan.order_id),
+    reasonStmt(env, { at: now, workspaceId: plan.workspace_id, actor: a.actor, action: 'billing.yearly_refund', reason: a.reason }),
+    env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason_id) SELECT ?, ?, 'yearly_refund', ?, NULL, ?, last_insert_rowid() WHERE EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND status = 'cancelled' AND period_end = ?) AND "+open)
+      .bind(now, a.actor, plan.workspace_id, JSON.stringify({ orderId: plan.order_id, shortenedMonths: plan.shortened_months, debtSettledMinor: plan.debt_settled_minor, cashMinor: plan.cash_minor }), plan.workspace_id, newEnd, plan.order_id),
     env.DB.prepare(`UPDATE package_refund_plans SET applied = 1 WHERE order_id = ? AND EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND status = 'cancelled' AND period_end = ?)`).bind(plan.order_id, plan.workspace_id, newEnd),
   ]);
   const stored = await env.DB.prepare(PLAN_COLS_SQL).bind(plan.order_id).first<PlanRow>();
@@ -518,7 +520,7 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
          WHERE EXISTS (SELECT 1 FROM package_orders WHERE order_id = ? AND status = 'paid' AND refunded_minor = ?) ON CONFLICT DO NOTHING`,
       ).bind(refundRef, oid, r, now, ws, months > 1 ? 0 : r, remainingBefore, oid, before), // frac_num 0: a yearly refund never expires part of the current month's credits
     ];
-    const audit = (note: string) => env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, 'provider', 'subscription_set', ?, NULL, ?, ? WHERE changes() > 0").bind(now, ws, JSON.stringify({ note }), oid);
+    const audit = (note: string) => env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) SELECT ?, 'provider', 'subscription_set', ?, NULL, ?, ? WHERE changes() > 0").bind(now, ws, JSON.stringify({ note }), oid);
     const owner = months > 1
       // yearly: the order owns the running period, or is an upgrade of the order that does (WA-YEARLY-SWITCH-2)
       ? "(SELECT (owns_running = 1 OR (period_owner IS NOT NULL AND period_owner = (SELECT o2.order_id FROM package_orders o2 WHERE o2.workspace_id = package_orders.workspace_id AND o2.owns_running = 1))) FROM package_orders WHERE order_id = ?) = 1"

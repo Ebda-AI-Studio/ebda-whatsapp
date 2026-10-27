@@ -9,7 +9,7 @@ import { DRAIN_PAGE, drainKeyset } from './drain';
  */
 export async function noteRefundExcess(env: Env, a: { kind: 'topup' | 'package'; workspaceId: string; orderId: string; eventRef: string; eventMinor: number; overMinor: number }, now = Date.now()): Promise<void> {
   if (a.overMinor <= 0) return;
-  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, 'provider', 'refund_exceeds_charge', ?, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = 'refund_exceeds_charge' AND reason = ?)")
+  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) SELECT ?, 'provider', 'refund_exceeds_charge', ?, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = 'refund_exceeds_charge' AND ref = ?)")
     .bind(now, a.workspaceId, JSON.stringify({ kind: a.kind, orderId: a.orderId, eventMinor: a.eventMinor, overMinor: a.overMinor }), a.eventRef, a.eventRef).run()
     .catch(() => undefined);
   alert('refund_exceeds_charge', { severity: 'P1', workspace: a.workspaceId, orderId: a.orderId, kind: a.kind, eventMinor: a.eventMinor, overMinor: a.overMinor });

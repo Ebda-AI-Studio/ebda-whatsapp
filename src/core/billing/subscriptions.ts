@@ -99,7 +99,7 @@ export type SetSubscription = {
 export type WriteResult = { version: number; written: boolean; applied: boolean; eventQueued: boolean; pre: number[] };
 
 export const auditStmt = (env: Env, a: { actor: string; workspaceId: string; after: unknown; ref: string }, now: number) =>
-  env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, 'subscription_set', ?, NULL, ?, ? WHERE changes() > 0")
+  env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) SELECT ?, ?, 'subscription_set', ?, NULL, ?, ? WHERE changes() > 0")
     .bind(now, a.actor, a.workspaceId, JSON.stringify(a.after), a.ref);
 
 export async function runWrite(env: Env, write: D1PreparedStatement, audit: D1PreparedStatement, o: WriteOpts, workspaceId: string, now: number): Promise<WriteResult> {

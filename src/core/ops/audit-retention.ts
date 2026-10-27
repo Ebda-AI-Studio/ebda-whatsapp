@@ -1,4 +1,5 @@
 import type { Env } from '../../env';
+import { billingAuditStmts } from '../audit-reason';
 
 /**
  * Ruling AUDIT-RETENTION-1 (docs/erasure-and-audit.md). `audit_log` is append-only by trigger, so the only ways to change or remove a row are the two
@@ -31,8 +32,7 @@ export function pseudonymiseAuditActors(env: Env, workspaceId: string, pseudo: s
 export function purgeAuditStatements(env: Env, a: { actor: string; reason: string; now: number }): D1PreparedStatement[] {
   const cutoff = a.now - AUDIT_RETENTION_YEARS * YEAR_MS;
   return controlled(env, [
-    env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'audit_log_purged', NULL, NULL, ?, ?)")
-      .bind(a.now, a.actor, JSON.stringify({ cutoff, retentionYears: AUDIT_RETENTION_YEARS }), a.reason),
+    ...billingAuditStmts(env, { at: a.now, actor: a.actor, action: 'audit_log_purged', after: { cutoff, retentionYears: AUDIT_RETENTION_YEARS }, reason: a.reason }),
     env.DB.prepare('DELETE FROM audit_log WHERE at < ?').bind(cutoff),
   ]);
 }

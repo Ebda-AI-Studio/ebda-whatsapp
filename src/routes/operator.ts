@@ -250,7 +250,7 @@ operatorRoutes.get('/instapay/:id/proof-link', async (c) => {
   if (!row?.proof_key) return c.json({ error: 'not_found' }, 404);
   const link = await signProofLink(c.env, c.req.param('id'));
   if (!link) return c.json({ error: 'rate_limited', message: 'proof_links_unavailable' }, 503);
-  await c.env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'instapay_proof_viewed', ?, NULL, NULL, ?)").bind(Date.now(), actor(c), row.workspace_id, c.req.param('id')).run();
+  await c.env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) VALUES (?, ?, 'instapay_proof_viewed', ?, NULL, NULL, ?)").bind(Date.now(), actor(c), row.workspace_id, c.req.param('id')).run();
   return c.json(link);
 });
 const decided = (c: { json(b: unknown, s?: 200 | 403 | 404 | 409): Response }, r: DecideResult) => {

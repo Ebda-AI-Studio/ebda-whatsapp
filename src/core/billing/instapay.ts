@@ -21,7 +21,8 @@ import type { InstapayPayee } from './instapay-payee';
 import { adjustmentThreshold } from './operator';
 import { ORDER_COLS, grantOrder, planPurchase, type PackageOrderRow, type PurchasePlan } from './package-orders';
 import { MAX_TOPUP_MINOR, MIN_TOPUP_MINOR, TOPUP_COLS, credit, type TopupRow } from './topups';
-import { alert, maskPhones } from '../observability';
+import { alert } from '../observability';
+import { LAST_REASON_ID, REASON_PLACEHOLDER, billingAudit, reasonStmt } from '../audit-reason';
 import { frozenForOffboarding } from '../ops/offboarded';
 import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
 
@@ -244,8 +245,7 @@ export async function readProof(env: Env, token: string, now = Date.now()): Prom
 // ---- operator decisions ----------------------------------------------------------------------------------------------------------
 
 async function audit(env: Env, a: { at: number; actor: string; action: string; workspaceId: string; after?: unknown; reason?: string }) {
-  await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, ?, ?, NULL, ?, ?)')
-    .bind(a.at, a.actor, a.action, a.workspaceId, a.after === undefined ? null : JSON.stringify(a.after), a.reason ?? null).run();
+  await billingAudit(env, a); // the reason goes to audit_reasons (AUDIT-REASONS-1)
 }
 
 export type DecideResult =
@@ -371,7 +371,7 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
     if (await everReleased(env, r.id, a.actor)) return { ok: false, reason: 'releaser_cannot_approve' };
     return { ok: false, reason: (await get(env, r.id))?.held_reason ? 'held' : 'not_reviewable' };
   }
-  await audit(env, { at: now, actor: a.actor, action: 'instapay_confirmed', workspaceId: r.workspace_id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor, ...(noRefReason !== null ? { noReference: true } : {}) }, ...(noRefReason !== null ? { reason: maskPhones(noRefReason) ?? '' } : {}) });
+  await audit(env, { at: now, actor: a.actor, action: 'instapay_confirmed', workspaceId: r.workspace_id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor, ...(noRefReason !== null ? { noReference: true } : {}) }, ...(noRefReason !== null ? { reason: noRefReason } : {}) });
   if (noRefReason !== null) alert('instapay_no_reference', { workspace: r.workspace_id, id: r.id, amountMinor: r.amount_minor });
   try {
     await grant(env, (await get(env, r.id))!, now);
@@ -411,8 +411,9 @@ export async function releaseInstapay(env: Env, a: { id: string; actor: string; 
   if (!r.held_reason) return { ok: false, reason: 'not_held' };
   if (r.first_approver === a.actor) return { ok: false, reason: 'approver_cannot_release' }; // whoever approved it cannot also clear its hold
   // The release row and the lifted hold are ONE batch; the row names the pair it reviewed (`twin_of`), so a later, different twin holds again.
-  const [rel, res] = await env.DB.batch([
-    env.DB.prepare("INSERT INTO instapay_releases (request_id, actor, reason, held_reason, twin_of, at) SELECT ?1, ?2, ?3, held_reason, held_of, ?4 FROM instapay_requests WHERE id = ?1 AND state = 'under_review' AND held_reason IS NOT NULL AND coalesce(first_approver, '') <> ?2").bind(r.id, a.actor, reason, now),
+  const [, rel, res] = await env.DB.batch([
+    reasonStmt(env, { at: now, workspaceId: r.workspace_id, actor: a.actor, action: 'instapay.release', reason }),
+    env.DB.prepare(`INSERT INTO instapay_releases (request_id, actor, reason, reason_id, held_reason, twin_of, at) SELECT ?1, ?2, ?3, ${LAST_REASON_ID}, held_reason, held_of, ?4 FROM instapay_requests WHERE id = ?1 AND state = 'under_review' AND held_reason IS NOT NULL AND coalesce(first_approver, '') <> ?2`).bind(r.id, a.actor, REASON_PLACEHOLDER, now),
     env.DB.prepare("UPDATE instapay_requests SET held_reason = NULL, held_of = NULL, held_at = NULL WHERE id = ?1 AND state = 'under_review' AND held_reason IS NOT NULL AND coalesce(first_approver, '') <> ?2").bind(r.id, a.actor),
   ]);
   if (!rel!.meta.changes || !res!.meta.changes) return { ok: false, reason: 'not_held' };
@@ -472,7 +473,7 @@ export async function repairInstapay(env: Env, now = Date.now(), opts: PassOpts 
   return { granted };
 }
 async function markOnce(env: Env, action: string, r: Row): Promise<boolean> {
-  const x = await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, ?, ?, NULL, NULL, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = ? AND reason = ?)')
+  const x = await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) SELECT ?, ?, ?, ?, NULL, NULL, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = ? AND ref = ?)')
     .bind(Date.now(), 'system', action, r.workspace_id, r.id, action, r.id).run();
   return x.meta.changes > 0;
 }

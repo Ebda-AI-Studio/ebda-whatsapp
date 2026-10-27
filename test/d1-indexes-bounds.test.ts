@@ -96,7 +96,7 @@ describe('the code never tries: a provider refund past what is left is clamped, 
     expect((await ledger(ws)).map((r) => [r.kind, r.amount_minor])).toEqual([['topup', 1000], ['chargeback', -1000]]); // debited from the EVENT, not from the clamped column
     expect((await all<{ refunded_minor: number }>("SELECT refunded_minor FROM topups WHERE order_id = 'd1-o2'"))[0]!.refunded_minor).toBe(1000);
     expect((await all<{ over_charge_minor: number; amount_minor: number }>("SELECT over_charge_minor, amount_minor FROM card_refunds WHERE kashier_refund_id = 'CB-D1-2'"))[0]).toEqual({ over_charge_minor: 600, amount_minor: 1000 });
-    expect((await all<{ after_json: string }>("SELECT after_json FROM billing_audit WHERE action = 'refund_exceeds_charge' AND reason = 'CB-D1-2'"))[0]!.after_json).toContain('"overMinor":600');
+    expect((await all<{ after_json: string }>("SELECT after_json FROM billing_audit WHERE action = 'refund_exceeds_charge' AND ref = 'CB-D1-2'"))[0]!.after_json).toContain('"overMinor":600');
     expect(spy.mock.calls.some((c) => String(c[0]).includes('"refund_exceeds_charge"') && String(c[0]).includes('"severity":"P1"'))).toBe(true);
     // a replay of the same event changes nothing
     await hook('d1-o2', 'CB-D1-2', '10.00');

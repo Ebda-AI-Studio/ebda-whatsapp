@@ -79,7 +79,7 @@ describe('item 12 (AUDIT-RETENTION-1): actor ids are pseudonymised on offboardin
     expect(res.length).toBeGreaterThan(3);
     expect((await log(ws)).map((r) => r.action)).toEqual(['recent.one']);
     expect(await triggers()).toEqual(['audit_log_no_delete', 'audit_log_no_update']);
-    const entry = await env.DB.prepare("SELECT actor, reason FROM billing_audit WHERE action = 'audit_log_purged'").first<{ actor: string; reason: string }>();
+    const entry = await env.DB.prepare("SELECT b.actor, r.reason FROM billing_audit b JOIN audit_reasons r ON r.id = b.reason_id WHERE b.action = 'audit_log_purged'").first<{ actor: string; reason: string }>();
     expect(entry).toEqual({ actor: OP1, reason: 'yearly purge per AUDIT-RETENTION-1' });
     await expect(env.DB.prepare('DELETE FROM audit_log').run()).rejects.toThrow(/append-only/);
   });

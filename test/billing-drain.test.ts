@@ -68,7 +68,7 @@ describe('the daily passes drain (M-178): more rows than one page are all handle
       await env.DB.prepare("INSERT INTO instapay_requests (id, reference, workspace_id, kind, amount_minor, state, created_by, created_at, expires_at, decided_at) VALUES (?, ?, ?, 'topup', 20000, 'confirmed', 'm', ?, ?, ?)").bind(`rp-${i}`, `WA-REPAIR${i}`, ws, old, old + DAY, old + i).run();
     }
     await repairInstapay(env, Date.now(), { page: 3 });
-    expect((await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'instapay_repair_failed' AND reason LIKE 'rp-%'").first<{ n: number }>())!.n).toBe(8);
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'instapay_repair_failed' AND ref LIKE 'rp-%'").first<{ n: number }>())!.n).toBe(8);
   });
 
   it('sweepAbandonedRefunds works the whole backlog in one pass', async () => {

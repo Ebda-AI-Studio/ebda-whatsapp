@@ -7,23 +7,23 @@ import { RATE_LEAD_MS, SETTINGS_LEAD_MS } from './pricing';
 import { monthRange } from './statement';
 import { alert } from '../observability';
 import { refuseIfOffboarded } from '../ops/offboarded';
+import { LAST_REASON_ID, REASON_PLACEHOLDER, billingAudit, reasonSql, reasonStmt } from '../audit-reason';
 
 const SKEW_MS = 5_000;
 
 export async function audit(env: Env, a: { actor: string; action: string; workspaceId?: string | null; before?: unknown; after?: unknown; reason?: string | null }, now = Date.now()): Promise<void> {
-  await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(now, a.actor, a.action, a.workspaceId ?? null, a.before === undefined ? null : JSON.stringify(a.before), a.after === undefined ? null : JSON.stringify(a.after), a.reason ?? null).run();
+  await billingAudit(env, { ...a, at: now }); // the reason goes to audit_reasons, the immutable row carries its id; before/after never carry text (AUDIT-REASONS-1)
 }
 
 type Settings = { ver: number; effective_from: number; margin_bps: number; credit_limit_minor: number; fx_buffer_bps: number; vat_bps: number; actor: string; reason: string };
 const settingsDto = (r: Settings) => ({ ver: r.ver, effectiveFrom: r.effective_from, marginBps: r.margin_bps, creditLimitMinor: r.credit_limit_minor, fxBufferBps: r.fx_buffer_bps, vatBps: r.vat_bps, actor: r.actor, reason: r.reason });
 
 export async function listSettings(env: Env) {
-  const { results } = await env.DB.prepare('SELECT ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps, actor, reason FROM pricing_settings ORDER BY ver DESC LIMIT 100').all<Settings>();
+  const { results } = await env.DB.prepare(`SELECT s.ver, s.effective_from, s.margin_bps, s.credit_limit_minor, s.fx_buffer_bps, s.vat_bps, s.actor, coalesce(${reasonSql('s', 'r')}, '') AS reason FROM pricing_settings s LEFT JOIN audit_reasons r ON r.id = s.reason_id ORDER BY s.ver DESC LIMIT 100`).all<Settings>();
   return results.map(settingsDto);
 }
 
-const inEffect = async (env: Env, now: number) => env.DB.prepare('SELECT ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps, actor, reason FROM pricing_settings WHERE effective_from <= ? ORDER BY effective_from DESC, ver DESC LIMIT 1').bind(now).first<Settings>();
+const inEffect = async (env: Env, now: number) => env.DB.prepare(`SELECT s.ver, s.effective_from, s.margin_bps, s.credit_limit_minor, s.fx_buffer_bps, s.vat_bps, s.actor, coalesce(${reasonSql('s', 'r')}, '') AS reason FROM pricing_settings s LEFT JOIN audit_reasons r ON r.id = s.reason_id WHERE s.effective_from <= ? ORDER BY s.effective_from DESC, s.ver DESC LIMIT 1`).bind(now).first<Settings>();
 
 export type Publish<T> = { ok: true; value: T } | { ok: false; reason: 'too_soon' | 'vat_locked' };
 
@@ -35,14 +35,17 @@ export async function publishSettings(env: Env, a: { actor: string; effectiveFro
   const before = await inEffect(env, now);
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await env.DB.prepare('INSERT INTO pricing_settings (ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps, actor, reason, created_at) VALUES ((SELECT coalesce(max(ver), 0) + 1 FROM pricing_settings), ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(effective, a.marginBps, a.creditLimitMinor, a.fxBufferBps, a.vatBps, a.actor, a.reason, now).run();
+      await env.DB.batch([
+        reasonStmt(env, { at: now, actor: a.actor, action: 'pricing_settings_published', reason: a.reason }),
+        env.DB.prepare(`INSERT INTO pricing_settings (ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps, actor, reason, reason_id, created_at) VALUES ((SELECT coalesce(max(ver), 0) + 1 FROM pricing_settings), ?, ?, ?, ?, ?, ?, ?, ${LAST_REASON_ID}, ?)`)
+          .bind(effective, a.marginBps, a.creditLimitMinor, a.fxBufferBps, a.vatBps, a.actor, REASON_PLACEHOLDER, now),
+      ]);
       break;
     } catch (err) {
       if (attempt === 2) throw err; // two publishers took the same version number: retry takes the next one
     }
   }
-  const row = (await env.DB.prepare('SELECT ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps, actor, reason FROM pricing_settings WHERE actor = ? AND created_at = ? ORDER BY ver DESC LIMIT 1').bind(a.actor, now).first<Settings>())!;
+  const row = (await env.DB.prepare(`SELECT s.ver, s.effective_from, s.margin_bps, s.credit_limit_minor, s.fx_buffer_bps, s.vat_bps, s.actor, coalesce(${reasonSql('s', 'r')}, '') AS reason FROM pricing_settings s LEFT JOIN audit_reasons r ON r.id = s.reason_id WHERE s.actor = ? AND s.created_at = ? ORDER BY s.ver DESC LIMIT 1`).bind(a.actor, now).first<Settings>())!;
   await audit(env, { actor: a.actor, action: 'pricing_settings_published', before: before ? settingsDto(before) : null, after: settingsDto(row), reason: a.reason }, now);
   return { ok: true, value: settingsDto(row) };
 }
@@ -51,8 +54,11 @@ export async function publishOverride(env: Env, a: { actor: string; workspaceId:
   const effective = a.effectiveFrom ?? now + SETTINGS_LEAD_MS + SKEW_MS;
   if (effective < now + SETTINGS_LEAD_MS - SKEW_MS) return { ok: false, reason: 'too_soon' };
   const before = await env.DB.prepare('SELECT ver, effective_from, margin_bps FROM workspace_pricing_overrides WHERE workspace_id = ? AND effective_from <= ? ORDER BY effective_from DESC, ver DESC LIMIT 1').bind(a.workspaceId, now).first<{ ver: number; effective_from: number; margin_bps: number }>();
-  await env.DB.prepare('INSERT INTO workspace_pricing_overrides (workspace_id, ver, effective_from, margin_bps, actor, reason, created_at) VALUES (?, (SELECT coalesce(max(ver), 0) + 1 FROM workspace_pricing_overrides WHERE workspace_id = ?), ?, ?, ?, ?, ?)')
-    .bind(a.workspaceId, a.workspaceId, effective, a.marginBps, a.actor, a.reason, now).run();
+  await env.DB.batch([
+    reasonStmt(env, { at: now, workspaceId: a.workspaceId, actor: a.actor, action: 'pricing_override_published', reason: a.reason }),
+    env.DB.prepare(`INSERT INTO workspace_pricing_overrides (workspace_id, ver, effective_from, margin_bps, actor, reason, reason_id, created_at) VALUES (?, (SELECT coalesce(max(ver), 0) + 1 FROM workspace_pricing_overrides WHERE workspace_id = ?), ?, ?, ?, ?, ${LAST_REASON_ID}, ?)`)
+      .bind(a.workspaceId, a.workspaceId, effective, a.marginBps, a.actor, REASON_PLACEHOLDER, now),
+  ]);
   const row = (await env.DB.prepare('SELECT ver, effective_from, margin_bps FROM workspace_pricing_overrides WHERE workspace_id = ? ORDER BY ver DESC LIMIT 1').bind(a.workspaceId).first<{ ver: number; effective_from: number; margin_bps: number }>())!;
   const dto = { ver: row.ver, effectiveFrom: row.effective_from, marginBps: row.margin_bps };
   await audit(env, { actor: a.actor, action: 'pricing_override_published', workspaceId: a.workspaceId, before: before ? { ver: before.ver, marginBps: before.margin_bps } : null, after: dto, reason: a.reason }, now);
@@ -60,7 +66,7 @@ export async function publishOverride(env: Env, a: { actor: string; workspaceId:
 }
 
 export async function listOverrides(env: Env, workspaceId: string) {
-  const { results } = await env.DB.prepare('SELECT ver, effective_from, margin_bps, actor, reason FROM workspace_pricing_overrides WHERE workspace_id = ? ORDER BY ver DESC LIMIT 50').bind(workspaceId).all<{ ver: number; effective_from: number; margin_bps: number; actor: string; reason: string }>();
+  const { results } = await env.DB.prepare(`SELECT o.ver, o.effective_from, o.margin_bps, o.actor, coalesce(${reasonSql('o', 'r')}, '') AS reason FROM workspace_pricing_overrides o LEFT JOIN audit_reasons r ON r.id = o.reason_id WHERE o.workspace_id = ? ORDER BY o.ver DESC LIMIT 50`).bind(workspaceId).all<{ ver: number; effective_from: number; margin_bps: number; actor: string; reason: string }>();
   return results.map((r) => ({ ver: r.ver, effectiveFrom: r.effective_from, marginBps: r.margin_bps, actor: r.actor, reason: r.reason }));
 }
 
@@ -200,9 +206,9 @@ export async function publishTrueup(env: Env, a: { actor: string; month: string;
 export async function changeLog(env: Env, f: { before?: number; limit: number; workspaceId?: string }) {
   const where: string[] = [];
   const params: (string | number)[] = [];
-  if (f.before) { where.push('id < ?'); params.push(f.before); }
-  if (f.workspaceId) { where.push('workspace_id = ?'); params.push(f.workspaceId); }
-  const { results } = await env.DB.prepare(`SELECT id, at, actor, action, workspace_id, before_json, after_json, reason FROM billing_audit ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`).bind(...params, f.limit)
+  if (f.before) { where.push('b.id < ?'); params.push(f.before); }
+  if (f.workspaceId) { where.push('b.workspace_id = ?'); params.push(f.workspaceId); }
+  const { results } = await env.DB.prepare(`SELECT b.id, b.at, b.actor, b.action, b.workspace_id, b.before_json, b.after_json, coalesce(${reasonSql('b', 'r')}, b.ref) AS reason FROM billing_audit b LEFT JOIN audit_reasons r ON r.id = b.reason_id ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY b.id DESC LIMIT ?`).bind(...params, f.limit)
     .all<{ id: number; at: number; actor: string; action: string; workspace_id: string | null; before_json: string | null; after_json: string | null; reason: string | null }>();
   return results.map((r) => ({ id: r.id, at: r.at, actor: r.actor, action: r.action, workspaceId: r.workspace_id, before: r.before_json ? JSON.parse(r.before_json) : null, after: r.after_json ? JSON.parse(r.after_json) : null, reason: r.reason }));
 }

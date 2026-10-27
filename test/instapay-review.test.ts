@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { confirmInstapay, createInstapayRequest, rejectInstapay, storeProof } from '../src/core/billing/instapay';
+import { confirmInstapay, createInstapayRequest, rejectInstapay, releaseInstapay, storeProof } from '../src/core/billing/instapay';
 import { configurePayments } from '../src/core/billing/payments';
 import { configureSessionCheck } from '../src/core/identity/session';
 import { OP1, OP2, operatorCall, storeId as W0, useApiKey } from './helpers/api';
@@ -48,7 +48,7 @@ describe('item 7 (DUP-REF-REQUIRED-1): the bank reference is required at confirm
     expect(await confirmInstapay(env, { id: a.id, actor: OP1, noReference: { reason: 'the proof shows no number at all' } })).toMatchObject({ ok: true });
     expect(await row(a.id)).toMatchObject({ state: 'confirmed', bank_ref: null, no_reference: 1 });
     expect(alerts(spy)).toContain('instapay_no_reference');
-    const audited = await env.DB.prepare("SELECT reason, after_json FROM billing_audit WHERE action = 'instapay_confirmed' AND after_json LIKE ?").bind(`%${a.id}%`).first<{ reason: string; after_json: string }>();
+    const audited = await env.DB.prepare("SELECT r.reason, b.after_json FROM billing_audit b JOIN audit_reasons r ON r.id = b.reason_id WHERE b.action = 'instapay_confirmed' AND b.after_json LIKE ?").bind(`%${a.id}%`).first<{ reason: string; after_json: string }>();
     expect(audited).toMatchObject({ reason: 'the proof shows no number at all' });
     expect(audited!.after_json).toContain('"noReference":true');
   });
@@ -105,6 +105,21 @@ describe('security review: two CONCURRENT no-reference confirms credit once', ()
     expect(alerts(spy)).toContain('instapay_duplicate_proof');
     const credits = await env.DB.prepare("SELECT count(*) AS n FROM topups WHERE order_id IN (?, ?) AND state = 'paid'").bind(a.id, b.id).first<{ n: number }>();
     expect(credits!.n).toBe(1);
+  });
+});
+
+describe('AUDIT-REASONS-1: instapay_releases holds no text', () => {
+  it('a release reason with a phone number is in audit_reasons only; the row points at it', async () => {
+    const a = await req(W(20), 20_000, 'rel-same');
+    const b = await req(W(21), 20_000, 'rel-same'); // the same image: held
+    expect((await row(b.id))!.held_reason).toBe('duplicate_image');
+    expect((await releaseInstapay(env, { id: b.id, actor: OP1, reason: 'checked: customer 01001234567 sent both on purpose' })).ok).toBe(true);
+    const rel = await env.DB.prepare('SELECT * FROM instapay_releases WHERE request_id = ?').bind(b.id).first<Record<string, unknown>>();
+    expect(JSON.stringify(rel)).not.toContain('01001234567');
+    expect(rel).toMatchObject({ reason: 'see reason_id' });
+    expect(rel!.reason_id).not.toBeNull();
+    expect((await env.DB.prepare('SELECT reason FROM audit_reasons WHERE id = ?').bind(rel!.reason_id).first<{ reason: string }>())!.reason).toContain('01001234567');
+    void a;
   });
 });
 

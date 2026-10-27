@@ -230,15 +230,32 @@ it('GUARD: no recordAudit call in src names a detail key reason / note / text / 
   }
 });
 
-// offboarding_log is immutable: it stores ids, step names and counts, never free text. A reason goes to audit_reasons and is referenced by `reason_id`.
-it('GUARD: every INSERT INTO offboarding_log in src names no free-text column (reason, note, text, message)', () => {
-  const hits = findMatches(/INSERT INTO offboarding_log/, 'src');
-  expect(hits.length).toBeGreaterThan(0);
-  for (const h of hits) {
-    const [file, line] = h.split(':') as [string, string];
-    const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').split('\n').slice(Number(line) - 1).join(' ');
-    const cols = /INSERT INTO offboarding_log \(([^)]*)\)/.exec(text)?.[1]?.split(',').map((c) => c.trim()) ?? [];
-    expect(cols.length, `${file}:${line}`).toBeGreaterThan(3);
-    expect(cols.filter((c) => /^(reason|note|text|message|body)$/i.test(c)), `${file}:${line}`).toEqual([]);
+// AUDIT-REASONS-1, the whole class: every table the migrations make append-only (a BEFORE UPDATE/DELETE trigger that RAISEs) holds no free text. A reason a person typed goes to
+// audit_reasons and the immutable row carries `reason_id`; the legacy `reason` column may be named only next to `reason_id` (it gets the constant 'see reason_id' where NOT NULL).
+it('GUARD: no INSERT into an append-only table (any table with a no-update trigger) names a free-text column', async () => {
+  const { readdirSync } = await import('node:fs');
+  const dir = new URL('../migrations/d1/', import.meta.url);
+  const immutable = new Set<string>();
+  for (const f of readdirSync(dir).filter((x) => x.endsWith('.sql'))) {
+    for (const m of readFileSync(new URL(f, dir), 'utf8').matchAll(/CREATE TRIGGER \w+ BEFORE UPDATE ON (\w+) BEGIN SELECT RAISE\(ABORT/g)) immutable.add(m[1]!);
   }
+  // the tables the review named must be in the list, or the scan below proves nothing
+  for (const t of ['audit_log', 'offboarding_log', 'operator_actions', 'billing_audit', 'instapay_releases', 'ledger_mirror', 'pricing_settings', 'workspace_pricing_overrides']) expect(immutable.has(t), t).toBe(true);
+  const FREE = /^(reason|note|notes|text|message|body|comment|caption|detail_text)$/i;
+  const { readdirSync: ls, statSync } = await import('node:fs');
+  const files: string[] = [];
+  const walkDir = (d: string): void => { for (const n of ls(d)) { const p = join(d, n); if (statSync(p).isDirectory()) walkDir(p); else if (p.endsWith('.ts')) files.push(p); } };
+  walkDir(join(import.meta.dirname, '..', 'src'));
+  let scanned = 0;
+  const bad: string[] = [];
+  for (const f of files) {
+    for (const m of readFileSync(f, 'utf8').matchAll(/INSERT\s+INTO\s+(\w+)\s*\(([^)]*)\)/g)) {
+      if (!immutable.has(m[1]!)) continue;
+      scanned++;
+      const cols = m[2]!.split(',').map((c) => c.trim());
+      for (const c of cols.filter((x) => FREE.test(x))) if (!(c.toLowerCase() === 'reason' && cols.includes('reason_id'))) bad.push(`${f.split('/src/')[1]}: ${m[1]} names ${c}`);
+    }
+  }
+  expect(scanned).toBeGreaterThan(20);
+  expect(bad, 'an append-only table must not store text: put it in audit_reasons and write reason_id (src/core/audit-reason.ts)').toEqual([]);
 });

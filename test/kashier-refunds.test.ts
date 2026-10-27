@@ -258,7 +258,7 @@ describe('the refund webhook never debits money already debited at approval', ()
     expect(await kinds(ws)).toEqual([['topup', 20000], ['chargeback', -20000]]);
     expect(alertsOf(spy, 'refund_excess_for_review')).toHaveLength(1);
     expect(String(alertsOf(spy, 'refund_excess_for_review')[0]![0])).toContain('"severity":"P1"');
-    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_excess_review' AND reason = 'CB-13'").first()).toEqual({ n: 1 });
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_excess_review' AND ref = 'CB-13'").first()).toEqual({ n: 1 });
     await hookRefund(order, 'CB-13b', '10.00', 'SUCCESS', 'reversal'); // a second one is not silently dropped because the first used the cap
     expect(await kinds(ws)).toEqual([['topup', 20000], ['chargeback', -20000], ['chargeback', -1000]]);
   });
@@ -399,7 +399,7 @@ describe('review round 3: one operation predicate, an idempotent relink credit, 
     expect(await kinds(a.ws)).toEqual([['topup', 20000], ['refund', -15000]]);
     expect(alertsOf(spy, 'refund_id_conflict').length).toBeGreaterThanOrEqual(1);
     expect(String(alertsOf(spy, 'refund_id_conflict')[0]![0])).toContain('"severity":"P1"');
-    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_id_conflict' AND reason = 'TX-OWN43'").first()).toEqual({ n: 1 });
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_id_conflict' AND ref = 'TX-OWN43'").first()).toEqual({ n: 1 });
     // the same collision, but the owner appears after the webhook's read (the insert is ignored)
     const b = await setup(44);
     await decideRefund(OFF, { id: b.id, decision: 'approve', actor: OP1 });
@@ -416,7 +416,7 @@ describe('review round 3: one operation predicate, an idempotent relink credit, 
     expect((await env.DB.prepare("SELECT state FROM card_refunds WHERE id = 'cr:race44'").first())).toEqual({ state: 'pending' });
     expect(await kinds(b.ws)).toEqual([['topup', 20000], ['refund', -15000]]);
     expect(alertsOf(spy, 'refund_id_conflict').some((c) => String(c[0]).includes('"orderId":"' + b.order + '"'))).toBe(true);
-    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_id_conflict' AND reason = 'TX-OWN44'").first()).toEqual({ n: 1 });
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_id_conflict' AND ref = 'TX-OWN44'").first()).toEqual({ n: 1 });
   });
 });
 
@@ -432,7 +432,7 @@ describe('round 4 (Opus check)', () => {
     expect(alertsOf(spy, 'refund_held')).toHaveLength(1);
     expect(String(alertsOf(spy, 'refund_held')[0]![0])).toContain('"severity":"P1"');
     expect(await env.DB.prepare("SELECT source, state, amount_minor FROM card_refunds WHERE kashier_refund_id = 'TX-W50'").first()).toEqual({ source: 'held', state: 'held', amount_minor: 15000 });
-    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_held' AND reason = 'TX-W50'").first()).toEqual({ n: 1 });
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_held' AND ref = 'TX-W50'").first()).toEqual({ n: 1 });
     expect(await refunded(a.order)).toBe(15000);
     // a chargeback of the same amount is a different thing: it still debits in full
     await hookRefund(a.order, 'CB-W50', '150.00', 'SUCCESS', 'reversal');
@@ -495,7 +495,7 @@ describe('round 4 (Opus check)', () => {
     const { applyProviderRefund } = await import('../src/core/billing/card-refunds');
     const ev = { event: 'refund' as const, status: 'SUCCESS' as const, orderId: 'nowhere', transactionId: 'GHOST-56', amountMinor: 1000, currency: 'EGP', operation: 'refund' };
     expect(await applyProviderRefund(env, { order_id: 'o-gone-56', workspace_id: a.ws }, ev, Date.now())).toBe('refund_unmatched');
-    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_unmatched_review' AND reason = 'GHOST-56'").first()).toEqual({ n: 1 });
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE action = 'refund_unmatched_review' AND ref = 'GHOST-56'").first()).toEqual({ n: 1 });
     expect(alertsOf(spy, 'refund_unmatched_no_credit').length).toBeGreaterThanOrEqual(1);
   });
 

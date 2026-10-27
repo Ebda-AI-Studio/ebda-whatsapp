@@ -19,7 +19,7 @@ beforeEach(() => { configureSessionCheck(async () => false); clearIntegrationCac
 afterEach(() => configureSessionCheck(null));
 
 const REASON = 'abuse report 2026-10-27';
-const actions = (ws: string) => env.DB.prepare('SELECT actor, action, reason, detail FROM operator_actions WHERE workspace_id = ? ORDER BY id').bind(ws).all<{ actor: string; action: string; reason: string; detail: string | null }>().then((r) => r.results);
+const actions = (ws: string) => env.DB.prepare('SELECT o.actor, o.action, r.reason, o.detail FROM operator_actions o LEFT JOIN audit_reasons r ON r.id = o.reason_id WHERE o.workspace_id = ? ORDER BY o.id').bind(ws).all<{ actor: string; action: string; reason: string; detail: string | null }>().then((r) => r.results);
 const sendBody = { type: 'text', clientId: crypto.randomUUID(), text: 'hello' };
 
 describe('operator actions: access, reason, audit', () => {

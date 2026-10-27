@@ -71,7 +71,7 @@ describe('PUT /operator/workspaces/:id/subscription', () => {
     expect(await r.json()).toMatchObject({ packageId: 'gold', status: 'active', version: 1 });
     expect(await workspace(ws).getEntitlement()).toMatchObject({ packageId: 'gold', version: 1, aiCredits: 300 });
     expect(await workspace(ws).queueOutbound(conv, 'pn-x', { ...tmpl, clientId: '00000000-0000-4000-8000-00000000a0c2' })).toMatchObject({ ok: true });
-    expect(await env.DB.prepare("SELECT actor, reason, after_json FROM billing_audit WHERE workspace_id = ? AND action = 'subscription_set'").bind(ws).first()).toMatchObject({ actor: 'operator', reason: OP1 });
+    expect(await env.DB.prepare("SELECT actor, ref, after_json FROM billing_audit WHERE workspace_id = ? AND action = 'subscription_set'").bind(ws).first()).toMatchObject({ actor: 'operator', ref: OP1 });
     expect(link.sink.sent.at(-1)).toMatchObject({ type: 'whatsapp.entitlement_changed', storeId: ws, data: { packageId: 'gold', version: 1 } });
   });
 });

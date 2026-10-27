@@ -303,7 +303,7 @@ export async function linkDashboardRefund(env: Env, a: { requestId: string; kash
     }
   }
   await refreshRequest(env, a.requestId);
-  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_dashboard_linked', ?, NULL, ?, ?)")
+  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) VALUES (?, ?, 'refund_dashboard_linked', ?, NULL, ?, ?)")
     .bind(now, a.actor, req.workspace_id, JSON.stringify({ amountMinor: a.amountMinor, ...(adjustment ? { adjustmentId: adjustment.id } : {}) }), `${a.requestId}:${a.kashierRefundId}`).run();
   return { ok: true, ...(adjustment ? { adjustment } : {}) };
 }
@@ -403,7 +403,7 @@ export async function matchHeldRefund(env: Env, a: { refundId: string; actor: st
     env.DB.prepare("UPDATE card_refunds SET state = 'matched', updated_at = ? WHERE id = ? AND state = 'held' AND changes() > 0").bind(now, held.id),
   ]);
   if ((res[0]?.meta.changes ?? 0) !== 1 || (res[1]?.meta.changes ?? 0) !== 1) return { ok: false, reason: 'not_verified' };
-  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_held_matched', ?, NULL, ?, ?)")
+  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) VALUES (?, ?, 'refund_held_matched', ?, NULL, ?, ?)")
     .bind(now, a.actor, held.workspace_id, JSON.stringify({ candidate: cand.id, amountMinor: held.amount_minor }), a.refundId).run();
   return { ok: true };
 }
@@ -427,7 +427,7 @@ export async function markCardRefundFailed(env: Env, a: { requestId: string; car
     if (!taken) return { ok: false, reason: 'refund_exists_at_provider' };
   }
   await settleCardRefund(env, row.id, { to: 'failed' }, now);
-  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'card_refund_marked_failed', ?, NULL, ?, ?)")
+  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) VALUES (?, ?, 'card_refund_marked_failed', ?, NULL, ?, ?)")
     .bind(now, a.actor, row.workspace_id, JSON.stringify({ amountMinor: row.amount_minor }), row.id).run();
   return { ok: true };
 }
@@ -552,7 +552,7 @@ export async function abandonRefundRequest(env: Env, a: { id: string; actor: str
   // 5. finish
   const done = await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', abandoned_at = ?, card_refunded_minor = 0, manual_minor = 0, claimed_by = NULL, lease_until = NULL WHERE id = ? AND state = 'abandoning' AND claimed_by = ?").bind(now, a.id, token).run();
   if (done.meta.changes) {
-    await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_abandoned', ?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) VALUES (?, ?, 'refund_abandoned', ?, ?, ?, ?)")
       .bind(now, a.actor, req.workspace_id, JSON.stringify({ requestedBy: req.abandon_requested_by }), JSON.stringify({ reversedChunks: reversed }), a.id).run();
     // A debit that was in flight in a run when the swap happened lands after the checks above: sweep once more now that the request is closed.
     await reverseUnreversedChunks(env, a.id, req.workspace_id, a.actor, now);

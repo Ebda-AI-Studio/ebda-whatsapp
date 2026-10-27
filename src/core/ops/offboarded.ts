@@ -28,8 +28,8 @@ export async function refuseIfOffboarded(env: Env, ws: string, what: string, ref
   if (!(await isOffboarded(env, ws))) return false;
   try {
     const key = `${what}:${ref}`;
-    const seen = await env.DB.prepare("SELECT 1 FROM billing_audit WHERE action = 'credit_after_offboard' AND workspace_id = ? AND reason = ? LIMIT 1").bind(ws, key).first();
-    if (!seen) await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, 'system', 'credit_after_offboard', ?, NULL, NULL, ?)").bind(now, ws, key).run();
+    const seen = await env.DB.prepare("SELECT 1 FROM billing_audit WHERE action = 'credit_after_offboard' AND workspace_id = ? AND ref = ? LIMIT 1").bind(ws, key).first();
+    if (!seen) await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) VALUES (?, 'system', 'credit_after_offboard', ?, NULL, NULL, ?)").bind(now, ws, key).run();
   } catch { /* the alert below still goes out */ }
   alert('credit_after_offboard', { severity: 'P1', workspace: ws, what, ref });
   return true;
