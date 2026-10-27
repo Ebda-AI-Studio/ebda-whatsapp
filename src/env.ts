@@ -32,6 +32,8 @@ export type Env = {
   /** The platform model's price in USD per million tokens (input / output), for the cost-per-credit log and alert (M-084). Unset = cost unknown, no alert. */
   AI_PRICE_INPUT_USD_PER_M?: string;
   AI_PRICE_OUTPUT_USD_PER_M?: string;
+  /** The public support address shown on the data-deletion page; the brand's supportEmail (pinned to vendor/brand/store-support-email.json). */
+  SUPPORT_EMAIL?: string;
   /** Phase 6: contact-import workflow (one instance per uploaded file). */
   IMPORT_WORKFLOW: Workflow<{ workspaceId: string; importId: string }>;
   /** Phase 6: campaign broadcasts (one instance per campaign generation, id `<campaignId>-<attempt>`). */

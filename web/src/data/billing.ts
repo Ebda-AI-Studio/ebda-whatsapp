@@ -65,7 +65,10 @@ export type PricingSettingsInput = { effectiveFrom: number; marginBps: number; c
 
 /** The super-admin console (/api/v1/operator/*). Every write may answer 503 until the accounts binding exists. */
 export type KillSwitchAction = 'suspend' | 'unsuspend' | 'campaigns/pause' | 'shared-number/evict' | 'shared-number/readmit' | 'integrations/revoke' | 'integrations/restore';
+export type MetaDeletion = { code: string; state: 'queued' | 'done' | 'nothing_found' | 'failed'; receivedAt: number; removedConnections: number; finishedAt: number | null };
 export interface OperatorApi {
+  /** B9: Meta data-deletion requests, newest first (state and counts only). */
+  metaDeletions(): Promise<MetaDeletion[]>;
   /** W2-OPS: the kill-switch card. Every action needs a reason of 5+ characters and is audited with the operator's id. */
   opsStatus(workspaceId: string): Promise<OpsStatusDto>;
   killSwitch(workspaceId: string, action: KillSwitchAction, reason: string): Promise<void>;

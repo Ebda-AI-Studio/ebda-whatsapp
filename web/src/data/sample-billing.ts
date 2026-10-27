@@ -229,6 +229,7 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       record(`adjustment_${decision}d`, a.workspaceId, { state: 'pending' }, { state: a.state }, a.reason);
       return { ...a };
     },
+    metaDeletions: async () => [{ code: 'a'.repeat(32), state: 'nothing_found' as const, receivedAt: BASE - D, removedConnections: 0, finishedAt: BASE - D + 1000 }, { code: 'b'.repeat(32), state: 'done' as const, receivedAt: BASE - 3 * D, removedConnections: 1, finishedAt: BASE - 3 * D + 2000 }],
     changeLog: async () => structuredClone(log),
     async yearlyRefundQuote(orderId) {
       if (!/^yearly-/.test(orderId)) throw new ApiError('not_found', 404);

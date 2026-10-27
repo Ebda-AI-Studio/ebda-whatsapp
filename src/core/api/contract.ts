@@ -605,6 +605,8 @@ export const connectNumberRequest = z.object({
   wabaId: metaId,
   phoneNumberId: metaId,
   businessId: metaId.optional(),
+  /** The app-scoped Facebook user id the browser reports (digits): remembered so Meta's data-deletion callback can find this connection (B9). */
+  fbUserId: z.string().regex(/^[0-9]{1,40}$/).optional(),
 });
 export type ConnectNumberRequest = z.infer<typeof connectNumberRequest>;
 

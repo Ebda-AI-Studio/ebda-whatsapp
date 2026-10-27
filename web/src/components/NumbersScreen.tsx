@@ -73,7 +73,7 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
       if (!cfg || !popup) { setNote({ kind: 'alert', text: t.signupUnavailable }); return; }
       const r = await popup;
       // The code expires 30 seconds after Meta issues it: send it before anything else.
-      const added = await api.connect({ code: r.code, event: r.event, wabaId: r.wabaId, phoneNumberId: r.phoneNumberId, ...(r.businessId ? { businessId: r.businessId } : {}) });
+      const added = await api.connect({ code: r.code, event: r.event, wabaId: r.wabaId, phoneNumberId: r.phoneNumberId, ...(r.businessId ? { businessId: r.businessId } : {}), ...(r.fbUserId ? { fbUserId: r.fbUserId } : {}) });
       setItems((xs) => [...(xs ?? []).filter((x) => x.phoneNumberId !== added.phoneNumberId), added]);
       setAddedId(added.phoneNumberId); // focus moves to the new number
     } catch (e) {

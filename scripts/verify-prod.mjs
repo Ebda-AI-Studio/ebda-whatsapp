@@ -94,6 +94,15 @@ export async function runChecks({ base, expectCommit, expectBrand, peerHealth, v
   } catch (e) {
     add('kashier webhook is served by the Worker', false, `unreachable: ${e.message}`);
   }
+  // Meta's data-deletion callback (B9) must reach the Worker too: an unsigned form post gets the Worker's 400 JSON, never the SPA's HTML.
+  try {
+    const d = await get('/meta/data-deletion', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'signed_request=invalid' });
+    const dBody = (await d.text()).trimStart();
+    const dHtml = /text\/html/i.test(d.headers.get('content-type') ?? '') || dBody.startsWith('<');
+    add('data-deletion callback is served by the Worker and refuses an unsigned post', d.status === 400 && !dHtml, dHtml ? `status ${d.status}, an HTML page: /meta/* is not reaching the Worker` : `status ${d.status}`);
+  } catch (e) {
+    add('data-deletion callback is served by the Worker and refuses an unsigned post', false, `unreachable: ${e.message}`);
+  }
   if (!appSecret) add('webhook accepts signed', null, 'skipped: set META_APP_SECRET');
   else {
     const sig = `sha256=${createHmac('sha256', appSecret).update(empty).digest('hex')}`;

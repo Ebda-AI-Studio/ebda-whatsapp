@@ -215,6 +215,7 @@ export function createApiSource(o: Opts): LiveSource {
       adjustments: async () => (await op('/adjustments', items(adjustmentDto))).items,
       createAdjustment: (workspaceId, amountMinor, reason) => op(`/workspaces/${encodeURIComponent(workspaceId)}/adjustments`, adjustmentDto, post({ amountMinor, reason })),
       decideAdjustment: (id, decision) => op(`/adjustments/${encodeURIComponent(id)}/decision`, adjustmentDto, post({ decision })),
+      metaDeletions: async () => (await op('/meta-deletions', items(z.object({ code: z.string(), state: z.enum(['queued', 'done', 'nothing_found', 'failed']), receivedAt: z.number().int(), removedConnections: z.number().int(), finishedAt: z.number().int().nullable() })))).items,
       changeLog: async () => (await op('/change-log?limit=100', items(changeLogItemDto))).items,
       yearlyRefundQuote: (orderId) => op(`/package-orders/${encodeURIComponent(orderId)}/refund-quote`, z.object({
         orderId: z.string(), packageId: z.string(), periodMonths: z.number(), monthlyMinor: z.number(), unusedMonths: z.number(), grossMinor: z.number(), debtMinor: z.number(), debtSettledMinor: z.number(), refundMinor: z.number(),

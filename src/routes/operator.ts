@@ -292,3 +292,8 @@ operatorRoutes.get('/view-log', async (c) => {
   const { results } = await c.env.DB.prepare('SELECT at, actor, method, route, reason FROM operator_view_log WHERE workspace_id = ? ORDER BY id DESC LIMIT ?').bind(q.data.workspaceId, q.data.limit).all();
   return c.json({ items: results });
 });
+// B9: Meta data-deletion requests, newest first. State and counts only: the Meta user id is never stored, only a hash that is not shown here.
+operatorRoutes.get('/meta-deletions', async (c) => {
+  const { results } = await c.env.DB.prepare('SELECT code, state, received_at AS receivedAt, removed_connections AS removedConnections, finished_at AS finishedAt FROM meta_deletion_requests ORDER BY received_at DESC LIMIT 50').all();
+  return c.json({ items: results });
+});
