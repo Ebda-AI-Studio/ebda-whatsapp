@@ -17,8 +17,6 @@ export const backupManifestSchema = z.object({
   workspaceId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   schemaVersion: z.number().int().positive(),
-  /** When the snapshot was taken (epoch ms). A restore drops everyone erased at or after this time. Absent in older backups: the start of `date` is used (drops more, never less). */
-  takenAt: z.number().int().positive().optional(),
   tables: z.object({
     contacts: tableEntry, conversations: tableEntry, messages: tableEntry, message_status_events: tableEntry,
     notes: tableEntry.optional(), conversation_tags: tableEntry.optional(), templates: tableEntry.optional(), uploads: tableEntry.optional(),

@@ -1,5 +1,5 @@
 import { auditWrites } from './core/audit';
-import { recordErasure } from './core/erasure';
+import { completeErasure, recordErasure } from './core/erasure';
 import * as Sentry from '@sentry/cloudflare';
 import { env as workerEnv } from 'cloudflare:workers';
 import { Hono } from 'hono';
@@ -155,10 +155,12 @@ api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   // The record first (D1, durable, a keyed hash): a restore from an older backup then drops this person. A failure alerts and the erasure still goes ahead.
   await recordErasure(c.env, { workspaceId: storeId, waId: e164.slice(1), actor: c.get('principal').userId });
   const result = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId)).eraseContact(e164.slice(1));
+  await completeErasure(c.env, { workspaceId: storeId, waId: e164.slice(1), completedAt: result.completedAt }); // the Durable Object's clock at the end of the delete
   if (!result.found && result.r2Pending === 0) return c.json({ error: 'contact not found' }, 404);
   const who = c.env.SUITE_BUYER_KEY_SECRET ? await buyerKey(c.env.SUITE_BUYER_KEY_SECRET, e164) : `…${e164.slice(-4)}`;
   console.log(JSON.stringify({ audit: 'contact_erased', storeId, by: c.get('principal').userId, buyer: who, ...result }));
-  return c.json(result);
+  const { completedAt: _done, ...out } = result; // the completion time is for the erasure record, not for the caller
+  return c.json(out);
 });
 api.route('/', messagesRoutes);
 api.route('/', conversationsRoutes);

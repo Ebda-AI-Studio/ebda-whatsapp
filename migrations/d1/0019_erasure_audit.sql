@@ -6,7 +6,9 @@
 CREATE TABLE erasure_records (
   workspace_id TEXT NOT NULL,
   subject_hash TEXT NOT NULL,
+  -- erased_at: the request was stamped (before the Durable Object deletes). completed_at: the Durable Object finished (ITS clock). NULL = never finished.
   erased_at INTEGER NOT NULL,
+  completed_at INTEGER,
   erased_by TEXT NOT NULL,
   PRIMARY KEY (workspace_id, subject_hash)
 ) WITHOUT ROWID;
