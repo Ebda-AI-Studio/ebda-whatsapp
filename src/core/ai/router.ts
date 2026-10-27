@@ -9,6 +9,7 @@ import { recordFunnel } from '../bot-funnel';
 import { frontDeskActive, runFrontDesk, runHoursGate } from '../front-desk';
 import { agentConfig } from './config';
 import { agentActive, handoff, isHumanRequest, runAgentTurn } from './agent';
+import { isSuspended } from '../numbers/health';
 import { handoffActive } from './handoff';
 import { readAgentSettings } from './settings';
 
@@ -19,6 +20,7 @@ export async function runTurn(host: LinkHost, input: BotInput, now: number): Pro
   await serialisedTurn(host, input.from, async () => {
     // WA-NOFREE-1: no package, no bot, no menu, no AI agent (the inbound itself is already stored: reading stays open).
     if (!serviceAllowed(host.sql, now)) return;
+    if (isSuspended(host.sql)) return; // W2-OPS: a suspended store's bot, menu, ordering and agent are all off (the inbound is stored; nothing answers)
     const agentOn = agentActive(host);
     const orderingOn = orderingActive(host);
     if (!agentOn && !orderingOn && !frontDeskActive(host)) return;

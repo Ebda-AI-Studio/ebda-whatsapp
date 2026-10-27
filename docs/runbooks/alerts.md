@@ -34,6 +34,9 @@ A send job exhausted its retries. The message is now `failed` with `error_reason
 ### unhandled_error
 A route threw. Find the event in Sentry (search the route and the time); `route` and `method` are in the message.
 
+### number_quality_flagged / number_error_spike (P1) and number_restricted (P0)
+Meta flagged a number (FLAGGED counts as red), rated it red, restricted it, or 25 frequency-cap / undeliverable errors hit it in an hour (yellow). The workspace's campaigns on it are already paused (`quality_flagged`) and, for red / restricted, new templates are refused. Look at `phone_numbers.health_*` and the workspace's `number_health_log`; contact the merchant. Recovery never resumes campaigns: the merchant does. See `docs/number-health.md`.
+
 ### secret_misconfigured
 `/health` is 503: a secret named in `REQUIRED_SECRETS` is missing or malformed. The key NAMES are in the alert (never values). Fix with `wrangler secret put`.
 

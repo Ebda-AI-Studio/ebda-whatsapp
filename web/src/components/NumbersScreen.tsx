@@ -158,6 +158,12 @@ function NumberCard({ n, focus, t, lang, owner, api, onChange, onError }: { n: N
       {state === 'active' && (n.qualityRating || tier) && (
         <p className="muted number-meta">{[n.qualityRating ? t.quality[n.qualityRating] ?? null : null, tier].filter(Boolean).join(' · ')}</p>
       )}
+      {state === 'active' && n.health && n.health !== 'green' && (
+        <div className="number-health" data-health={n.health}>
+          <p className="flag bad" role="status">{t.numberHealth[n.health]}</p>
+          <p className="campaign-reason">{t.numberHealthHelp[n.health]}</p>
+        </div>
+      )}
       {(n.historySync || n.contactsSync) && (
         <p className="muted small">
           {[n.historySync && t.historySync[n.historySync], n.contactsSync && t.contactsSync[n.contactsSync]].filter(Boolean).join(' · ')}

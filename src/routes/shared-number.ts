@@ -26,6 +26,8 @@ sharedNumberRoutes.post('/stores/:storeId/shared-number/join', async (c) => {
   if (noPlan) return noPlan;
   const st = await joinShared(c.env, c.req.param('storeId')!, body.data.displayName);
   if (!st) return apiError(c, 404, 'not_found'); // no platform number registered yet
+  if (st === 'number_unhealthy') return apiError(c, 409, 'invalid_request', 'number_unhealthy'); // Meta flagged the platform number: no new members for now
+  if (st === 'evicted') return apiError(c, 403, 'forbidden', 'evicted');
   if (st === 'package_required') return apiError(c, 402, 'package_required', 'package_required'); // the plan does not include the shared number
   if (st === 'name_taken') return apiError(c, 409, 'invalid_request', 'display_name_taken'); // another store on the number already looks like this
   console.log(JSON.stringify({ audit: 'shared_number_joined', storeId: c.req.param('storeId'), by: c.get('principal').userId }));

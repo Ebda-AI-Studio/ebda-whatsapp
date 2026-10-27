@@ -13,6 +13,8 @@ import { eraseSharedFor } from './shared/shared-number';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
+import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
 import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText, phoneDigits } from './text-normalise';
@@ -280,6 +282,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.armPending = false;
       await this.arm();
     }
+    for (const f of this.freshQualityErrors.splice(0)) await this.noteSendError(batch.phoneNumberId, f.code, Date.now(), f.template);
     return result;
   }
 
@@ -386,6 +389,13 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.armPending = false;
       await this.arm();
     }
+    // A send on the platform number is counted per member (the denominator of its error rate): ids and a count, nothing else. Not awaited: counting never delays a send.
+    // Only what can produce the counted errors (a business-initiated TEMPLATE) and only the FIRST claim of a job (`claim_attempts` is 1 on a first claim; a deferral gives it back,
+    // a retry or a stale re-claim makes it 2+): a redelivery, a retry or a reply never dilutes the rate.
+    if (result === 'claimed' && jobKind(job) === 'template' && this.sql.exec('SELECT 1 FROM store_state WHERE key = ?', `shared.number:${job.phoneNumberId}`).toArray().length
+      && this.sql.exec<{ claim_attempts: number }>('SELECT claim_attempts FROM messages WHERE idempotency_key = ?', job.idempotencyKey).toArray()[0]?.claim_attempts === 1) {
+      this.ctx.waitUntil(noteSharedSend(this.env, job.phoneNumberId, this.workspaceId, now).catch(() => undefined));
+    }
     return result;
   }
 
@@ -426,6 +436,15 @@ export class WorkspaceDO extends DurableObject<Env> {
     return 'deferred';
   }
 
+  /** Why this send must not leave right now, or null. Suspended stops everything; a red / restricted number stops business-initiated templates only. */
+  private sendRefusal(job: SendJob): 'workspace_suspended' | 'number_restricted' | null {
+    if (isSuspended(this.sql)) return 'workspace_suspended';
+    if (jobKind(job) === 'template' && (blocksTemplates(currentHealth(this.sql, job.phoneNumberId)) || memberBlockedUntil(this.sql, job.phoneNumberId) > Date.now())) return 'number_restricted';
+    return null;
+  }
+
+  private freshQualityErrors: { code: number; template: boolean }[] = [];
+
   private claimRow(job: SendJob, now: number): ClaimResult {
     {
       // WA-NOFREE-1 / WA-GRACE-1: a message that waited in the queue (or an automatic reply) is refused if the plan lapsed meanwhile, whatever its category.
@@ -453,6 +472,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (!existing) {
         // Only auto-reply jobs (no row yet) may create their row; a job created by the API always has one, so a missing row means it was erased.
         if (jobKind(job) !== 'text' || job.idempotencyKey.startsWith('ui:') || !job.text) return 'dropped';
+        if (this.sendRefusal(job)) return 'dropped'; // an auto reply that has no row yet: nothing to settle
         if (this.sql.exec('SELECT 1 FROM erased_keys WHERE key = ?', job.idempotencyKey).toArray().length) {
           this.billing.settleHold(job.idempotencyKey, 'erased', now);
           return 'dropped';
@@ -487,6 +507,22 @@ export class WorkspaceDO extends DurableObject<Env> {
           this.addReleaseOnce(job, now + PARK_MS, 'campaign_paused');
           return 'deferred';
         }
+      }
+      // Operator suspension and a red / restricted number: NEVER-stale gates read from this workspace's own copy on every claim, so the alarms, retries and queued
+      // jobs that never pass the Worker are stopped too (defense in depth next to the Worker's check). Only AFTER the duplicate checks above: a redelivered job
+      // whose message already went to Meta keeps its hold (the charge lands later), and a job another attempt holds is still `in_flight`, never acked away.
+      const refused = this.sendRefusal(job);
+      if (refused && (existing.status === 'queued' || existing.status === 'retry')) {
+        this.sql.exec("UPDATE messages SET status = 'failed', error_reason = ?, updated_at = ? WHERE id = ?", refused, now, existing.id);
+        this.emitMessageStatus(existing.id);
+        this.billing.settleHold(job.idempotencyKey, 'failed', now);
+        return 'dropped';
+      }
+      if (refused && existing.status === 'claimed' && now - existing.updated_at > STALE_CLAIM_MS && existing.claim_attempts < 2) {
+        // A claim nobody finished: it may have reached Meta before the crash, so its hold is NOT released here (a late status settles it); the row just stops being retried.
+        this.sql.exec("UPDATE messages SET status = 'failed', error_reason = ?, updated_at = ? WHERE id = ?", refused, now, existing.id);
+        this.emitMessageStatus(existing.id);
+        return 'dropped';
       }
       if (existing.status === 'queued' || existing.status === 'retry') {
         // A marketing template that waited (tier, throughput or Meta's frequency cap) must honour an opt-out given meanwhile.
@@ -603,6 +639,105 @@ export class WorkspaceDO extends DurableObject<Env> {
     );
   }
 
+  // ---- Number health (W2-META) and the operator kill switch (W2-OPS) ------------------------------------------------------------
+
+  async numberHealth(phoneNumberId: string): Promise<HealthState> {
+    return currentHealth(this.sql, phoneNumberId);
+  }
+
+  /**
+   * Feeds one signal into the number's state machine. A change is logged here, mirrored to D1 (awaited: a failure answers the webhook 5xx so Meta
+   * redelivers, and the mirror only writes when D1 differs, so a redelivery repairs it), and every worsening (and every spike) pauses the number's
+   * running / scheduled campaigns and tells a human. Recovery changes the state and nothing else: a paused campaign is resumed by the merchant.
+   */
+  async applyNumberHealth(phoneNumberId: string, signal: HealthSignal, now = Date.now(), signalAt?: number): Promise<{ from: HealthState; to: HealthState; changed: boolean; paused: number; dropped?: true }> {
+    const from = currentHealth(this.sql, phoneNumberId);
+    const to = nextHealth(from, signal);
+    // Meta retries a webhook for days. ORDERING MAY ONLY DROP A STALE RECOVERY: a Meta-timed signal older than the newest one already applied AND lowering the state is
+    // dropped; a signal that worsens (restricted / red / flagged / spike) is ALWAYS applied, whatever its time. Locally generated signals (spike, a rating read, no Meta time)
+    // never take part in the ordering and never advance the ordering column, so they cannot make a later, earlier-stamped Meta DISABLE look stale.
+    if (signalAt !== undefined && signalAt < lastSignalAt(this.sql, phoneNumberId) && HEALTH_STATES.indexOf(to) < HEALTH_STATES.indexOf(from)) return { from, to: from, changed: false, paused: 0, dropped: true };
+    const source = signalSource(signal);
+    this.ctx.storage.transactionSync(() => {
+      if (signalAt !== undefined) recordSignalAt(this.sql, phoneNumberId, signalAt);
+      if (to !== from) logHealth(this.sql, phoneNumberId, from, to, source, null, now);
+    });
+    await mirrorHealth(this.env.DB, 'phone_numbers', phoneNumberId, to, source, now, signalAt ?? 0);
+    let paused = 0;
+    if (worsened(from, to) || signal.kind === 'spike') paused = await this.pauseCampaignsOn(phoneNumberId, 'quality_flagged', now);
+    const fields = { workspace: this.workspaceId, phoneNumberId, from, to, source, pausedCampaigns: paused };
+    if (signal.kind === 'spike') alert('number_error_spike', fields);
+    else if (worsened(from, to)) {
+      if (to === 'yellow') alert('number_quality_flagged', fields);
+      else alert('number_restricted', fields);
+    }
+    return { from, to, changed: to !== from, paused };
+  }
+
+  /** This store dominated a spike on the platform number: its OWN template sends on that number stop for a day. Nobody else is touched. */
+  async blockSharedSends(phoneNumberId: string, until: number): Promise<void> {
+    blockMember(this.sql, phoneNumberId, until);
+  }
+
+  /**
+   * The platform (shared) number's state, SET on this member's copy by the Worker (never replayed as a signal, never alerting: the one alert is raised at the platform
+   * level). Ordered by Meta's time like every signal. A worsening pauses this store's campaigns on that number.
+   */
+  async syncSharedHealth(phoneNumberId: string, state: HealthState, version: number, now = Date.now()): Promise<void> {
+    const signalAt = version;
+    if (signalAt < lastSignalAt(this.sql, phoneNumberId)) return; // for the platform number this column holds the push version (processing time), not Meta's
+    const from = currentHealth(this.sql, phoneNumberId);
+    this.ctx.storage.transactionSync(() => {
+      recordSignalAt(this.sql, phoneNumberId, signalAt);
+      if (state !== from) logHealth(this.sql, phoneNumberId, from, state, 'shared', null, now);
+    });
+    this.sql.exec("INSERT INTO store_state (key, value) VALUES (?, '1') ON CONFLICT(key) DO NOTHING", `shared.number:${phoneNumberId}`); // this store sends on the platform number: its sends are counted
+    if (worsened(from, state)) await this.pauseCampaignsOn(phoneNumberId, 'quality_flagged', now);
+  }
+
+  /** Counts a Meta quality error (131049 / 131026) for the number; enough of them inside the window is a spike. */
+  async noteSendError(phoneNumberId: string, code: number, now = Date.now(), template = true): Promise<void> {
+    if (!QUALITY_ERROR_CODES.has(code)) return;
+    // The platform number is counted per NUMBER (every member together, in D1) and tripped once at the platform level; an own number is counted here.
+    const shared = await this.env.DB.prepare('SELECT 1 FROM shared_numbers WHERE phone_number_id = ?').bind(phoneNumberId).first();
+    if (shared) {
+      if (!template) return; // sends are counted for templates only, so only a template's failure may count against the rate
+      const verdict = await noteSharedError(this.env, phoneNumberId, this.workspaceId, now);
+      if (verdict.kind === 'platform' || (verdict.kind === 'member' && verdict.platform)) await applySharedHealth(this.env, phoneNumberId, { kind: 'spike' }, undefined, (f) => this.ctx.waitUntil(f()), now);
+      if (verdict.kind === 'member') {
+        // One store produced (nearly) all of it: stop THAT store's templates on the number, not everyone's.
+        if (verdict.workspaceId === this.workspaceId) blockMember(this.sql, phoneNumberId, now + MEMBER_BLOCK_MS);
+        else await this.env.WORKSPACE_DO.get(this.env.WORKSPACE_DO.idFromName(verdict.workspaceId)).blockSharedSends(phoneNumberId, now + MEMBER_BLOCK_MS);
+        alert('number_member_abuse', { workspace: verdict.workspaceId, phoneNumberId, shared: true });
+      } else if (verdict.kind === 'ambiguous') alert('number_error_spike', { phoneNumberId, shared: true, ambiguous: true });
+      return;
+    }
+    if (noteQualityError(this.sql, phoneNumberId, now)) await this.applyNumberHealth(phoneNumberId, { kind: 'spike' }, now);
+  }
+
+  /** running | scheduled -> paused for one reason, on one number (or every number when null). The merchant resumes them; nothing here ever does. */
+  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused', now = Date.now()): Promise<number> {
+    const ids = this.sql
+      .exec<{ id: string }>(`SELECT id FROM campaigns WHERE status IN ('running', 'scheduled') ${phoneNumberId === null ? '' : 'AND phone_number_id = ?'}`, ...(phoneNumberId === null ? [] : [phoneNumberId]))
+      .toArray();
+    let n = 0;
+    for (const { id } of ids) {
+      const r = await pauseCampaign(this.host(), id, reason, now);
+      if (r.ok) { n++; await endInstance(this.host(), id, this.campaignAttempt(id)); }
+    }
+    return n;
+  }
+
+  /** The operator's suspend / unsuspend. Suspending also pauses every campaign (reason operator_paused); unsuspending resumes nothing. */
+  async setSuspended(suspended: boolean, reason: string, now = Date.now()): Promise<{ paused: number }> {
+    setSuspendedFlag(this.sql, suspended, reason);
+    return { paused: suspended ? await this.pauseCampaignsOn(null, 'operator_paused', now) : 0 };
+  }
+
+  async suspended(): Promise<boolean> {
+    return isSuspended(this.sql);
+  }
+
   async throttleReport(phoneNumberId: string, now = Date.now()): Promise<ThrottleReport> {
     const lim = this.limitsFor(phoneNumberId);
     const since = now - TIER_WINDOW_MS;
@@ -617,6 +752,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   async rescheduleFrequencyCap(job: SendJob, now = Date.now()): Promise<'rescheduled' | 'failed'> {
     const deferrals = job.deferrals ?? 0;
     const status = deferrals >= 2 ? 'failed' : 'queued';
+    await this.noteSendError(job.phoneNumberId, 131049, now);
     this.ctx.storage.transactionSync(() => {
       const row = this.sql.exec<{ id: number }>('UPDATE messages SET status = ?, error_code = 131049, updated_at = ? WHERE idempotency_key = ? RETURNING id', status, now, job.idempotencyKey).toArray()[0];
       if (row) this.emitMessageStatus(row.id);
@@ -882,6 +1018,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   async applyStatus(e: StatusEvent): Promise<{ applied: boolean }> {
     await this.ensurePricing();
     const r = this.ctx.storage.transactionSync(() => ({ applied: this.applyStatusSync(e) }));
+    this.freshQualityErrors.length = 0; // no phone number id on this path: only the ingest path counts them
     await this.flushArm();
     return r;
   }
@@ -893,6 +1030,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       e.wamid, e.status, e.ts, e.errorCode ?? null, e.pricing ? JSON.stringify(e.pricing) : null,
     ).rowsWritten > 0;
     if (!isNew) return false;
+    if (e.status === 'failed' && e.errorCode !== undefined && QUALITY_ERROR_CODES.has(e.errorCode)) this.freshQualityErrors.push({ code: e.errorCode, template: this.sql.exec('SELECT 1 FROM messages WHERE wamid = ? AND template_name IS NOT NULL', e.wamid).toArray().length > 0 }); // counted once per NEW event, never for a redelivery
     const applied = this.applyToMessage(e);
     if (applied) this.sql.exec('UPDATE message_status_events SET applied = 1 WHERE wamid = ? AND status = ? AND ts = ?', e.wamid, e.status, e.ts);
     // The money side runs for every NEW event, applied to a message row or not: a late billable status still charges.
@@ -1210,6 +1348,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** draft -> running / scheduled, then starts the workflow. A failed start is retried by the sweep, so the campaign is never left dormant. */
   async sendCampaign(id: string, scheduledAt?: number) {
+    if (this.numberBlocksCampaign(id)) return { ok: false as const, reason: 'number_restricted' as const };
     const now = Date.now();
     const r = await sendCampaign(this.host(), id, scheduledAt, now);
     if (r.ok) await launchCampaign(this.host(), id, now);
@@ -1222,7 +1361,14 @@ export class WorkspaceDO extends DurableObject<Env> {
     return r;
   }
 
+  /** A campaign cannot start or resume while its number is red or restricted: every template would be refused at claim. */
+  private numberBlocksCampaign(id: string): boolean {
+    const row = this.sql.exec<{ phone_number_id: string }>('SELECT phone_number_id FROM campaigns WHERE id = ?', id).toArray()[0];
+    return !!row && blocksTemplates(currentHealth(this.sql, row.phone_number_id));
+  }
+
   async resumeCampaign(id: string) {
+    if (this.numberBlocksCampaign(id)) return { ok: false as const, reason: 'number_restricted' as const };
     const now = Date.now();
     const r = await resumeCampaign(this.host(), id, now);
     if (r.ok) {

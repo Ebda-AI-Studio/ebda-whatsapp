@@ -320,7 +320,18 @@ export const campaignParam = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('link_code') }),
 ]);
 export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled']);
-export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable']);
+export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable', 'quality_flagged', 'operator_paused']);
+/** W2-OPS: every kill-switch action carries a reason (kept in the append-only audit). */
+export const operatorKillSwitch = z.object({ reason: z.string().trim().min(5).max(300) });
+export const healthState = z.enum(['green', 'yellow', 'red', 'restricted']);
+const opsNumberHealth = z.object({ phoneNumberId: z.string(), health: healthState, healthReason: z.string().nullable(), healthAt: z.number().int().nullable() });
+/** GET /operator/workspaces/:id/ops: what the kill-switch card shows for one workspace and for the platform number. */
+export const opsStatusDto = z.object({
+  suspended: z.boolean(), suspendedReason: z.string().nullable(), integrationsRevokedAt: z.number().int().nullable(), evicted: z.boolean(),
+  numbers: z.array(opsNumberHealth), sharedNumber: opsNumberHealth.nullable(),
+  recentActions: z.array(z.object({ at: z.number().int(), actor: z.string(), action: z.string(), reason: z.string() })),
+});
+export type OpsStatusDto = z.infer<typeof opsStatusDto>;
 export const campaignCreate = z.object({
   name: z.string().trim().min(1).max(80),
   template: z.object({ name: z.string().min(1).max(512), language: z.string().min(2).max(10) }),
@@ -598,6 +609,8 @@ export const numberDto = z.object({
   /** The last moment the one-time syncs can still be requested (24 h after onboarding); null when they do not apply. */
   syncDeadlineAt: z.number().int().nullable(),
   lastStatusSyncAt: z.number().int().nullable(),
+  /** W2-META: green = fine; yellow = flagged (campaigns paused); red / restricted = no new template sends. Meta's own rating is `qualityRating`. */
+  health: z.enum(['green', 'yellow', 'red', 'restricted']).optional(),
 });
 export const listNumbersResponse = z.object({ items: z.array(numberDto) });
 /** GET /numbers/signup-config: public Meta ids for launching Embedded Signup in the page. */

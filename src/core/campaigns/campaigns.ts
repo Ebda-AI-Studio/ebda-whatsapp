@@ -174,7 +174,7 @@ export async function createCampaign(host: LinkHost, a: CreateArgs): Promise<Cre
   return { ok: true, campaign: await view(host, read(host, id)!, true) };
 }
 
-export type Transition = { ok: true; campaign: CampaignDto; launch: boolean } | { ok: false; reason: 'not_found' | 'bad_state' | 'invalid_schedule' | 'template_not_approved' | 'empty_audience' };
+export type Transition = { ok: true; campaign: CampaignDto; launch: boolean } | { ok: false; reason: 'not_found' | 'bad_state' | 'invalid_schedule' | 'template_not_approved' | 'empty_audience' | 'number_restricted' };
 
 /** draft -> running (now) or scheduled (a future `scheduledAt`). The caller launches the workflow when `launch` is set. */
 export async function sendCampaign(host: LinkHost, id: string, scheduledAt: number | undefined, now: number): Promise<Transition> {
@@ -215,7 +215,8 @@ export async function pauseCampaign(host: LinkHost, id: string, reason: PauseRea
   if (!c) return { ok: false, reason: 'not_found' };
   if (c.status !== 'running' && c.status !== 'scheduled') return { ok: false, reason: 'bad_state' };
   host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = ?, updated_at = ? WHERE id = ?", reason, now, id);
-  if (reason === 'manual') parkUnsent(host, id, now);
+  // The merchant's own pause, a quality pause and an operator pause all hold what is already queued; the money reasons let reserved pages go out.
+  if (reason === 'manual' || reason === 'quality_flagged' || reason === 'operator_paused') parkUnsent(host, id, now);
   return { ok: true, campaign: await view(host, read(host, id)!, false), launch: false };
 }
 

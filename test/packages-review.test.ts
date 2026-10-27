@@ -285,6 +285,7 @@ describe('minors', () => {
     configureSessionCheck(async () => { throw new Error('down'); });
     const r = await owner.call('POST', '/packages/gold/checkout', {});
     expect(r.status).toBe(503);
-    expect(await r.json()).toMatchObject({ error: 'unavailable' });
+    // M-135: the store middleware answers first, for every write (fail closed), with the same 'unavailable'; the route's own check is the second line of defence.
+    expect(await r.json()).toMatchObject({ error: 'unavailable', message: 'session_check_unavailable' });
   });
 });

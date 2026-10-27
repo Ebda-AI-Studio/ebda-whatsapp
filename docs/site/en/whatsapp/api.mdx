@@ -23,6 +23,7 @@ Authorization: Bearer <access_token>
 - The token names the user, the stores that user belongs to, and the user's role in each: **owner** or **staff**. A request to `/stores/{storeId}/...` succeeds only if the token lists that store. Otherwise the answer is `403 forbidden`.
 - A missing, invalid or expired token gives `401 unauthorized`.
 - Endpoints marked **owner only** answer `403 forbidden` to a staff user.
+- A store our team has suspended answers every write with `403 forbidden` and `message: "workspace_suspended"` (reading, paying and erasing a contact still work). A write with a user token whose session was revoked answers `403 forbidden` / `session_revoked`; if the accounts service cannot be reached it answers `503 unavailable` / `session_check_unavailable` (try again). Starting or resuming a campaign on a number WhatsApp has rated red or restricted answers `409 invalid_request` / `number_restricted`; the number's `health` is on `GET /numbers`.
 
 `GET /stores/{storeId}/me` returns who the token is for:
 

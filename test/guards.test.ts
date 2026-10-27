@@ -174,3 +174,45 @@ it('store-included is only ever written by the Store-plan path (store-plan.ts an
   expect(/export async function startPackageCheckout[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '').toMatch(/FROM packages WHERE id = \? AND active = 1 AND price_minor > 0/);
   expect(readFileSync(new URL('../src/routes/operator.ts', import.meta.url), 'utf8')).toMatch(/store_included_is_store_plan_only/);
 });
+
+// migrate() applies DO_MIGRATIONS by array POSITION past max(_migrations.version): the version IS the index. Numbers go in merge order and are never reserved.
+//  (a) a no-op "placeholder to be replaced later" would be skipped forever on every DO that already ran it;
+//  (b) a `// vNN` label must sit directly above entry NN, so a slot inserted mid-array or a mislabelled entry breaks the numbering the docs and reviews quote.
+it('no DO migration is a no-op or a placeholder (empty, or only SELECT 1)', async () => {
+  const { DO_MIGRATIONS } = await import('../src/core/do-migrations');
+  const noop = DO_MIGRATIONS.map((sql, i) => ({ v: i + 1, sql: sql.replace(/--[^\n]*/g, '').trim() })).filter((m) => m.sql === '' || /^(SELECT\s+1;?\s*)+$/i.test(m.sql));
+  expect(noop.map((m) => `v${m.v}`)).toEqual([]);
+});
+it('every DO migration has a `// vNN` label directly above it that matches its position (contiguous 1..N, none missing)', async () => {
+  const src = readFileSync(join(import.meta.dirname, '..', 'src/core/do-migrations.ts'), 'utf8');
+  const { DO_MIGRATIONS } = await import('../src/core/do-migrations');
+  const start = src.indexOf('DO_MIGRATIONS: readonly string[] = [') + 'DO_MIGRATIONS: readonly string[] = ['.length;
+  let entries = 0;
+  const labels: { label: number; entry: number }[] = [];
+  const labelled = new Set<number>();
+  let pending: number | null = null; // the label seen since the previous entry ended
+  let inTemplate = false;
+  for (let i = start; i < src.length; i++) {
+    const ch = src[i]!;
+    if (inTemplate) { if (ch === '\\') i++; else if (ch === '`') { inTemplate = false; entries++; pending = null; } continue; }
+    if (ch === '/' && src[i + 1] === '/') { // a line comment outside a template: may carry a label, may contain backticks
+      const end = src.indexOf('\n', i);
+      const m = /^\/\/ v(\d+)\b/.exec(src.slice(i, end));
+      if (m) { labels.push({ label: Number(m[1]), entry: entries + 1 }); pending = Number(m[1]); }
+      i = end;
+      continue;
+    }
+    if (ch === '/' && src[i + 1] === '*') { // a block comment: skipped whole (it may hold backticks), a label in it counts the same
+      const end = src.indexOf('*/', i + 2);
+      const m = /^\/\*+\s*v(\d+)\b/.exec(src.slice(i, end));
+      if (m) { labels.push({ label: Number(m[1]), entry: entries + 1 }); pending = Number(m[1]); }
+      i = end + 1;
+      continue;
+    }
+    if (ch === '`') { inTemplate = true; if (pending !== null) labelled.add(entries + 1); continue; }
+    if (ch === ']' && src[i + 1] === ';') break;
+  }
+  expect(entries).toBe(DO_MIGRATIONS.length);
+  expect(labels.filter((l) => l.label !== l.entry)).toEqual([]); // a mislabelled entry, or a slot inserted mid-array
+  expect(DO_MIGRATIONS.map((_, i) => i + 1).filter((n) => !labelled.has(n))).toEqual([]); // an UNLABELLED entry
+});

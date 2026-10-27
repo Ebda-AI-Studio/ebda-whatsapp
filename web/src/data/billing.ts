@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import type { StatementDto, WalletDto } from '../../../src/core/api/contract';
+import type { OpsStatusDto, StatementDto, WalletDto } from '../../../src/core/api/contract';
 import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
 
-export type { StatementDto, WalletDto };
+export type { OpsStatusDto, StatementDto, WalletDto };
 export type CostEstimateDto = z.infer<typeof costEstimateDto>;
 export type TopupDto = z.infer<typeof topupDto>;
 export type PackageDto = z.infer<typeof packageDto>;
@@ -60,7 +60,11 @@ export interface WalletApi {
 export type PricingSettingsInput = { effectiveFrom: number; marginBps: number; creditLimitMinor: number; fxBufferBps: number; vatBps: number; reason: string };
 
 /** The super-admin console (/api/v1/operator/*). Every write may answer 503 until the accounts binding exists. */
+export type KillSwitchAction = 'suspend' | 'unsuspend' | 'campaigns/pause' | 'shared-number/evict' | 'shared-number/readmit' | 'integrations/revoke' | 'integrations/restore';
 export interface OperatorApi {
+  /** W2-OPS: the kill-switch card. Every action needs a reason of 5+ characters and is audited with the operator's id. */
+  opsStatus(workspaceId: string): Promise<OpsStatusDto>;
+  killSwitch(workspaceId: string, action: KillSwitchAction, reason: string): Promise<void>;
   pricingSettings(): Promise<PricingSettings[]>;
   publishPricingSettings(input: PricingSettingsInput): Promise<PricingSettings>;
   rateCards(): Promise<RateCardVersion[]>;

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
+  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -185,6 +185,8 @@ export function createApiSource(o: Opts): LiveSource {
       requestRefund: (amountMinor, note) => call('/wallet/refund-requests', refundRequestDto, post({ amountMinor, ...(note.trim() ? { note: note.trim() } : {}) })),
     },
     operator: {
+      opsStatus: (workspaceId) => op(`/workspaces/${encodeURIComponent(workspaceId)}/ops`, opsStatusDto),
+      killSwitch: async (workspaceId, action, reason) => { await op(`/workspaces/${encodeURIComponent(workspaceId)}/${action}`, done, post({ reason })); },
       pricingSettings: async () => (await op('/pricing-settings', items(pricingSettingsDto))).items,
       publishPricingSettings: (input) => op('/pricing-settings', pricingSettingsDto, post(input)),
       rateCards: async () => (await op('/rate-cards', items(rateCardVersionDto))).items,

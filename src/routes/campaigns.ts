@@ -13,7 +13,7 @@ const owner = managesStore;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const idOf = (c: ApiContext): string | null => (UUID.test(c.req.param('campaignId') ?? '') ? c.req.param('campaignId')! : null);
 
-type Refusal = 'not_found' | 'bad_state' | 'invalid_schedule' | 'template_not_approved' | 'empty_audience';
+type Refusal = 'not_found' | 'bad_state' | 'invalid_schedule' | 'template_not_approved' | 'empty_audience' | 'number_restricted';
 function refuse(c: ApiContext, reason: Refusal): Response {
   if (reason === 'not_found') return apiError(c, 404, 'not_found');
   if (reason === 'template_not_approved') return apiError(c, 409, 'template_not_approved');

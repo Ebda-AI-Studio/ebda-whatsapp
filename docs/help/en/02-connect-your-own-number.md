@@ -24,6 +24,9 @@ There are two ways, and Meta shows you the choice during the flow:
 7. Accept the permissions and choose **Finish**. You return to Ebda WhatsApp automatically. **Do this within a few seconds of the last Meta screen**: the connection code Meta gives us expires after 30 seconds.
 8. Wait a moment. The number appears as **Connected**, with its daily limit and quality rating.
 
+## If WhatsApp flags your number
+WhatsApp watches the quality of every number (how many customers block or report you). If it flags your number or rates it poor, **Numbers** shows a badge and a short explanation, Ebda WhatsApp **pauses your running campaigns** to protect the number, and we also stop sending **new template messages** from it until WhatsApp says it recovered; you can still reply to customers inside the 24-hour window. When the number recovers, **campaigns do not restart by themselves**: check your messages and your audience, then resume the campaign yourself.
+
 ## Your old chats and contacts (Business app numbers)
 When Meta asks, you can share your chat history (up to 180 days) and your contacts with Ebda WhatsApp. This transfer can run **only once, and only within 24 hours of connecting**. If you decline, or miss the 24 hours, you would have to disconnect and connect again to get it. Your contacts come in **without marketing permission**: you can only send them marketing messages after they agree. Old messages are shown in the chats but never open the 24-hour window and never trigger automatic replies.
 
