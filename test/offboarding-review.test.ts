@@ -258,3 +258,56 @@ describe('item 16 (OFFBOARD-2ND-APPROVER-1): an immediate deletion that writes o
     expect((await state(ws)).last_error).toBe('held:second_approval_required');
   });
 });
+
+describe('security review of the fix pass: the second approver and the claim race', () => {
+  const OP3 = '33333333-3333-4333-8333-333333333333';
+  it('1. someone who RELEASED the abuse hold can never be the second approver, in either order; another operator can', async () => {
+    const ws = W(60);
+    await open(ws);
+    await fund(ws, 150_000);
+    await operatorCall(OP1, 'POST', `/workspaces/${ws}/suspend`, { reason: 'abuse report 91' });
+    await op(ws, OP1, 'POST', '', { reason: REASON, immediate: true, acceptWriteOff: true }); // A requests
+    // B approves FIRST, then releases the hold: the release is refused (B already approved) ...
+    expect((await op(ws, OP2, 'POST', '/approve', { reason: 'verified the balance independently' })).status).toBe(200);
+    const rel = await op(ws, OP2, 'POST', '/release-hold', { reason: 'abuse case closed by us' });
+    expect(rel.status).toBe(403);
+    expect(await rel.json()).toMatchObject({ message: 'approver_cannot_release' });
+    // ... and C releases instead: B's approval must NOT count any more (C released; B did not, so it still stands)
+    expect((await op(ws, OP3, 'POST', '/release-hold', { reason: 'abuse case closed by us' })).status).toBe(200);
+    // C released a related hold, so C's own approval would not count; B's counts
+    expect(await runOffboarding(env, ws, Date.now() + 1000)).toBe('done');
+  });
+  it('1b. B releases the hold and then approves: refused; the approval of a releaser recorded any other way is skipped; C approves and it counts', async () => {
+    const ws = W(61);
+    await open(ws);
+    await fund(ws, 150_000);
+    await operatorCall(OP1, 'POST', `/workspaces/${ws}/suspend`, { reason: 'abuse report 92' });
+    await op(ws, OP1, 'POST', '', { reason: REASON, immediate: true, acceptWriteOff: true });
+    expect((await op(ws, OP2, 'POST', '/release-hold', { reason: 'abuse case closed by us' })).status).toBe(200);
+    expect((await op(ws, OP2, 'POST', '/approve', { reason: 'approving what I released' })).status).toBe(403);
+    // a releaser's approval row written by any other path (a race, a direct write) is ignored by the run
+    const row = (await d1<{ execute_after: number; write_off_minor: number; requested_by: string }>('SELECT execute_after, write_off_minor, requested_by FROM offboarding WHERE workspace_id = ?', ws))[0]!;
+    await env.DB.prepare("INSERT INTO offboarding_log (at, workspace_id, actor, action, reason, detail) VALUES (1, ?, ?, 'second_approval', 'forged', ?)").bind(ws, OP2, JSON.stringify({ executeAfter: row.execute_after, writeOffMinor: row.write_off_minor, requestedBy: row.requested_by })).run();
+    expect(await runOffboarding(env, ws, Date.now() + 1000)).toBe('held');
+    expect((await state(ws)).last_error).toBe('held:second_approval_required');
+    expect((await op(ws, OP3, 'POST', '/approve', { reason: 'verified independently' })).status).toBe(200);
+    expect(await runOffboarding(env, ws, Date.now() + 2000)).toBe('done');
+  });
+  it('2. a write-off raised while the row is RUNNING resets the approval: nothing is wiped until a second operator approves the new amount', async () => {
+    const ws = W(62);
+    await open(ws);
+    await fund(ws, 150_000);
+    await op(ws, OP1, 'POST', '', { reason: REASON, immediate: true, acceptWriteOff: true });
+    expect((await op(ws, OP2, 'POST', '/approve', { reason: 'verified the balance independently' })).status).toBe(200);
+    const r = await runOffboarding(env, ws, Date.now() + 1000, { beforeStep: async (step) => { if (step === 'wipe_do') await fund(ws, 100_000); } });
+    expect(r).toBe('held'); // balance grew right before the wipe
+    expect(await state(ws)).toMatchObject({ state: 'running', last_error: 'held:balance_grew' });
+    expect((await op(ws, OP1, 'POST', '', { reason: REASON, immediate: true, acceptWriteOff: true })).status).toBe(202); // the takeover accepts 2,500 EGP
+    expect((await state(ws)).write_off_minor).toBe(250_000);
+    expect(await runOffboarding(env, ws, Date.now() + 2000)).toBe('held');
+    expect((await state(ws)).last_error).toBe('held:second_approval_required');
+    expect(await erased(ws)).toBe(false);
+    expect((await op(ws, OP3, 'POST', '/approve', { reason: 'verified the new amount' })).status).toBe(200);
+    expect(await runOffboarding(env, ws, Date.now() + 3000)).toBe('done');
+  });
+});

@@ -349,7 +349,7 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
   }
   let claim: D1Result;
   try {
-    claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?2, decided_at = ?3, bank_ref = ?4, no_reference = ?5 WHERE id = ?1 AND state = 'under_review' AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2) AND (?4 IS NULL OR NOT EXISTS (SELECT 1 FROM instapay_requests o WHERE o.bank_ref = ?4 AND o.id <> ?1))").bind(r.id, a.actor, now, ref, noRefReason !== null ? 1 : 0).run();
+    claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?2, decided_at = ?3, bank_ref = ?4, no_reference = ?5 WHERE id = ?1 AND state = 'under_review' AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2) AND (?4 IS NULL OR NOT EXISTS (SELECT 1 FROM instapay_requests o WHERE o.bank_ref = ?4 AND o.id <> ?1)) AND (?5 = 0 OR NOT EXISTS (SELECT 1 FROM instapay_requests n WHERE n.no_reference = 1 AND n.state = 'confirmed' AND n.workspace_id = ?6 AND n.amount_minor = ?7 AND n.decided_at > ?8 AND n.id <> ?1))").bind(r.id, a.actor, now, ref, noRefReason !== null ? 1 : 0, r.workspace_id, r.amount_minor, now - NO_REF_WINDOW_MS).run();
   } catch (err) {
     // The unique index on bank_ref: another request took this reference between our check and our write.
     if (ref && /UNIQUE/i.test(String(err instanceof Error ? err.message : err))) {
@@ -359,6 +359,11 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
     throw err;
   }
   if (!claim.meta.changes) {
+    if (noRefReason !== null) {
+      // The claim carries the no-reference twin check itself (two concurrent confirms cannot both pass a SELECT made before either wrote): hold, never fail.
+      const twin = await env.DB.prepare('SELECT id FROM instapay_requests WHERE no_reference = 1 AND state = \'confirmed\' AND workspace_id = ? AND amount_minor = ? AND decided_at > ? AND id <> ? ORDER BY decided_at LIMIT 1').bind(r.workspace_id, r.amount_minor, now - NO_REF_WINDOW_MS, r.id).first<{ id: string }>();
+      if (twin) return holdForReference(env, r, twin.id, now);
+    }
     if (ref) {
       const other = await env.DB.prepare('SELECT id FROM instapay_requests WHERE bank_ref = ? AND id <> ?').bind(ref, r.id).first<{ id: string }>();
       if (other) return holdForReference(env, r, other.id, now); // the UPDATE itself found the reference taken: held + alert, no constraint error

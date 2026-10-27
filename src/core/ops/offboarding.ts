@@ -80,11 +80,12 @@ async function involvedActors(env: Env, ws: string): Promise<Set<string>> {
 }
 /** The approval counts only for the exact request it was given for: any later change of date, write-off or requester voids it. */
 async function approvedBy(env: Env, r: Row): Promise<string | null> {
+  const involved = await involvedActors(env, r.workspace_id); // the requester, everyone who released a hold or accepted a write-off: their approval never counts, whenever it was written
   const { results } = await env.DB.prepare("SELECT actor, detail FROM offboarding_log WHERE workspace_id = ? AND action = 'second_approval' ORDER BY id DESC").bind(r.workspace_id).all<{ actor: string; detail: string | null }>();
   for (const a of results) {
     try {
       const d = JSON.parse(a.detail ?? '{}') as { executeAfter?: number; writeOffMinor?: number; requestedBy?: string };
-      if (d.executeAfter === r.execute_after && d.writeOffMinor === r.write_off_minor && d.requestedBy === r.requested_by && a.actor !== r.requested_by) return a.actor;
+      if (d.executeAfter === r.execute_after && d.writeOffMinor === r.write_off_minor && d.requestedBy === r.requested_by && a.actor !== r.requested_by && !involved.has(a.actor)) return a.actor;
     } catch { /* not ours */ }
   }
   return null;
@@ -104,12 +105,13 @@ export async function approveOffboarding(env: Env, a: { workspaceId: string; act
   return { ok: true };
 }
 
-export type ReleaseHoldResult = { ok: true } | { ok: false; reason: 'not_found' | 'not_held' };
+export type ReleaseHoldResult = { ok: true } | { ok: false; reason: 'not_found' | 'not_held' | 'approver_cannot_release' };
 /** An operator lifts the abuse hold (a suspension for abuse keeps its evidence until a person says it may go). Audited with the reason. */
 export async function releaseAbuseHold(env: Env, a: { workspaceId: string; actor: string; reason: string }, now = Date.now()): Promise<ReleaseHoldResult> {
   const r = await env.DB.prepare("SELECT 1 FROM offboarding WHERE workspace_id = ? AND state IN ('pending', 'running')").bind(a.workspaceId).first();
   if (!r) return { ok: false, reason: 'not_found' };
   if (!(await abuseSuspended(env, a.workspaceId))) return { ok: false, reason: 'not_held' };
+  if (await env.DB.prepare("SELECT 1 FROM offboarding_log WHERE workspace_id = ? AND action = 'second_approval' AND actor = ? LIMIT 1").bind(a.workspaceId, a.actor).first()) return { ok: false, reason: 'approver_cannot_release' };
   await logRow(env, a.workspaceId, a.actor, 'abuse_hold_released', now, a.reason).run();
   return { ok: true };
 }
@@ -386,8 +388,10 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now(), hoo
     if (done.has(step)) continue;
     await hooks.beforeStep?.(step);
     // Re-checked before EVERY step: a cancel that lands mid-run stops the next (irreversible) step.
-    const live = await env.DB.prepare("SELECT 1 FROM offboarding WHERE workspace_id = ? AND state = 'running'").bind(ws).first();
+    const live = await env.DB.prepare("SELECT * FROM offboarding WHERE workspace_id = ? AND state = 'running'").bind(ws).first<Row>();
     if (!live) return 'skipped';
+    // The second approval is checked against the row AS IT IS NOW, before every irreversible step: a write-off raised while the run is in flight voids the approval (review).
+    if (step !== 'suspend' && (await needsApproval(env, live))) return hold('second_approval_required');
     // The point of no return: the balance is read again right before the wipe (a credit may have landed since the first check).
     if (step === 'wipe_do') {
       const grew = await balanceHold(env, row, now);

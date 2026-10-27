@@ -84,7 +84,8 @@ describe('data-subject export (B5)', () => {
     expect(rowsLog.map((r) => r.actor_role)).toEqual(['owner', 'operator']);
     expect(rowsLog[0]!.target_type).toBe('waId');
     expect(rowsLog[0]!.target_id).toMatch(/^[0-9a-f]{32}$/);
-    expect(JSON.parse(rowsLog[1]!.detail!)).toMatchObject({ reason: 'طلب كتابي من صاحبة البيانات' });
+    expect(rowsLog[1]!.detail).not.toContain('طلب كتابي'); // the reason is not in the append-only log (AUDIT-RETENTION-1) ...
+    expect((await env.DB.prepare('SELECT reason FROM audit_reasons WHERE workspace_id = ?').bind(ws).first<{ reason: string }>())!.reason).toBe('طلب كتابي من صاحبة البيانات'); // ... but in the deletable table
     expect(JSON.stringify(await env.DB.prepare('SELECT * FROM audit_log').all())).not.toContain(A);
     expect((await operatorCall(null, 'GET', `/workspaces/${ws}/contacts/${A}/export?reason=abcdef`)).status).toBe(401);
   });

@@ -321,6 +321,7 @@ operatorRoutes.post('/workspaces/:workspaceId/offboarding/release-hold', async (
   if (!b.success) return bad(c, 'reason_required');
   const r = await releaseAbuseHold(c.env, { workspaceId: c.req.param('workspaceId')!, actor: actor(c), reason: b.data.reason });
   if (r.ok) return c.json({ ok: true });
+  if (r.reason === 'approver_cannot_release') return c.json({ error: 'forbidden', message: r.reason }, 403);
   return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
 });
 operatorRoutes.post('/offboardings/run', async (c) => c.json(await runDueOffboardings(c.env))); // finish an interrupted run now instead of waiting for the daily pass

@@ -84,6 +84,30 @@ describe('item 7 (DUP-REF-REQUIRED-1): the bank reference is required at confirm
   });
 });
 
+describe('security review: two CONCURRENT no-reference confirms credit once', () => {
+  it('the pre-check misses (a race): the claim UPDATE itself refuses the second one, which is held; only one credit is made', async () => {
+    const spy = vi.spyOn(console, 'error');
+    const ws = W(8);
+    const a = await req(ws, 30_000, 'race-a');
+    const b = await req(ws, 30_000, 'race-b');
+    const why = { reason: 'the proof shows no number at all' };
+    expect(await confirmInstapay(env, { id: a.id, actor: OP1, noReference: why })).toMatchObject({ ok: true });
+    const real = env.DB.prepare.bind(env.DB);
+    let missed = false;
+    vi.spyOn(env.DB, 'prepare').mockImplementation(((sql: string) => {
+      if (!missed && /no_reference = 1 AND state = 'confirmed'/.test(sql) && /ORDER BY decided_at LIMIT 1/.test(sql)) { missed = true; return { bind: () => ({ first: async () => null }) } as unknown as D1PreparedStatement; }
+      return real(sql);
+    }) as typeof env.DB.prepare);
+    const res = await confirmInstapay(env, { id: b.id, actor: OP2, noReference: why });
+    expect(missed).toBe(true);
+    expect(res).toEqual({ ok: false, reason: 'duplicate_reference' });
+    expect(await row(b.id)).toMatchObject({ state: 'under_review', held_reason: 'duplicate_reference', held_of: a.id, no_reference: 0 });
+    expect(alerts(spy)).toContain('instapay_duplicate_proof');
+    const credits = await env.DB.prepare("SELECT count(*) AS n FROM topups WHERE order_id IN (?, ?) AND state = 'paid'").bind(a.id, b.id).first<{ n: number }>();
+    expect(credits!.n).toBe(1);
+  });
+});
+
 describe('item 14: a rejected request frees its reference', () => {
   const low = { ...env, ADJUSTMENT_APPROVAL_MINOR: '1000' } as typeof env;
   it('a first approval records pending_bank_ref; the rejection clears it, so the same reference confirms on another request', async () => {
