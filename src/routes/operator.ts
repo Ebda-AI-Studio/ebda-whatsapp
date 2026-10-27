@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
-  fxPublish, instapayReject, operatorKillSwitch, auditLogQuery, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
+  fxPublish, instapayReject, operatorKillSwitch, auditLogQuery, exportContactQuery, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -18,7 +18,9 @@ import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
-import { listAudit } from '../core/audit';
+import { listAudit, recordAudit } from '../core/audit';
+import { subjectHash } from '../core/erasure';
+import { waIdParam } from './contacts';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -261,6 +263,21 @@ const killSwitch = (run: (env: Env, a: { actor: string; workspaceId: string; rea
     return c.json({ error: 'not_found' }, 404);
   };
 // T8: the append-only audit log (who did what to which ids). Read-only.
+// B5: a data-subject export on the subject's written request. The operator states why (kept in the audit record); the call is audited like the owner's.
+operatorRoutes.get('/workspaces/:workspaceId/contacts/:waId/export', async (c) => {
+  const workspaceId = c.req.param('workspaceId')!;
+  const reason = z.string().trim().min(5).max(300).safeParse(c.req.query('reason'));
+  const q = exportContactQuery.safeParse({ after: c.req.query('after') ?? undefined, limit: c.req.query('limit') ?? undefined });
+  const waId = waIdParam(c.req.param('waId')!);
+  if (!reason.success || !q.success || !waId) return bad(c, 'reason_required');
+  if (!(await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(workspaceId).first())) return c.json({ error: 'not_found' }, 404);
+  const out = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).exportContact(waId, q.data.after, q.data.limit);
+  if (!out) return c.json({ error: 'not_found' }, 404);
+  await recordAudit(c.env, { workspaceId, actor: actor(c), role: 'operator', action: 'contact.export', targetType: 'waId', targetId: await subjectHash(c.env, workspaceId, waId), detail: { messages: out.messages.length, after: q.data.after, reason: reason.data } });
+  c.header('cache-control', 'no-store');
+  return c.json(out);
+});
+
 operatorRoutes.get('/audit-log', async (c) => {
   const q = auditLogQuery.safeParse(c.req.query());
   if (!q.success) return bad(c, q.error.issues[0]?.message);

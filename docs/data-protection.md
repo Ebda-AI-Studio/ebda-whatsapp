@@ -1,0 +1,31 @@
+# Data protection: retention, export, edit/merge, residency (W2-RETENTION: B4/T7, B5, M-175, T20)
+
+Companion of `docs/erasure-and-audit.md` (erasing a person, the audit log) and `docs/offboarding.md` (deleting a workspace).
+
+## 1. Message retention (B4 / T7)
+- **Window.** `GET/PUT /api/v1/stores/:id/retention` (owner only). `days` is 30 to 3650, or `null` = the platform default of **730 days**. A shorter window is applied within a minute (a purge task is scheduled); the nightly pass keeps it applied.
+- **What is purged** (messages older than the window, a bounded number per pass, 500 per batch and 20 batches, continuing every minute until done): the messages, their R2 bodies and media, `uploads` rows, status events, search rows, AI turn rows. R2 objects are queued in `r2_pending_deletes` in the same transaction and drained after, with the existing retry and `r2_deletes_still_owed` alert.
+- **What stays**: the contact and the (possibly empty) conversation, staff notes, tags, orders, campaign rows, and every money record (wallet ledger, billable sends, payments). Erasing a person is a separate right (`DELETE /contacts/:waId`).
+- **Restore.** A restore from an old backup schedules a purge, so history the window already removed does not come back (the window is itself in the backup's `store_state`; a backup that predates it falls back to the default).
+- **Backups.** Nightly backups live 30 days (R2 lifecycle `expire-30d`); a purged message can exist in a backup for up to 30 days. A person's erasure is stronger: the restore drops them (docs/erasure-and-audit.md).
+- **InstaPay proofs** have their own lifecycle (W2-MONEY): deleted after the decision plus a retention period.
+- **Import files** are deleted when the import ends (7-day R2 lifecycle backstop).
+
+**Ruling RETENTION-DEFAULT-1.** Default 730 days, bounds 30 to 3650, never "forever"; `null` means the default. Cost if wrong: a merchant who needs older chats for a dispute must lengthen the window BEFORE they age out; a purge cannot be undone.
+**Ruling RETENTION-NOTES-1.** Staff notes, tags and orders are not purged by the window: they are the merchant's own records, not the customer's messages. Cost if wrong: personal data in a note outlives its chat; the owner can erase the person.
+
+## 2. Data-subject export (B5 / M-094)
+- `GET /api/v1/stores/:id/contacts/:waId/export?after=&limit=` (owner only; limit 1 to 1000, default 500) returns JSON `{version, generatedAt, subject, messages[], nextAfter, conversation, notes, tags, orders, campaigns}`. `messages` is a page (`after` = the last message id of the previous page; `nextAfter` is null on the last page); the other sections come with the first page only. Long message bodies are read back from R2 in full. Responses are `Cache-Control: no-store`.
+- Operator, on the subject's written request: `GET /api/v1/operator/workspaces/:id/contacts/:waId/export?reason=...` (a reason of 5 to 300 characters is required and kept in the audit record).
+- **Audited**: every call writes `audit_log` action `contact.export` with the keyed hash of the person (never the number) and the number of messages; the operator's reason is in `detail`.
+
+## 3. Contact edit and merge (M-175)
+- `PATCH /contacts/:waId` `{ name }` (owner or staff): a name the merchant sets is kept (WhatsApp's profile name no longer overwrites it; `contacts.name_edited`) and is searchable; `{ name: null }` follows WhatsApp's name again.
+- `POST /contacts/merge` `{ fromWaId, intoWaId }` (owner only): the same person on a new number. Messages, notes, tags, orders and campaign rows move to `into`; unread adds up; the older opt-out of the two wins (a STOP is never lost); consent is `into`'s, else `from`'s; `from` is deleted. It cannot be undone and is audited (the middleware records the call; the numbers are in the body, which is never logged).
+
+**Ruling MERGE-OPTOUT-1.** If either number opted out, the merged contact is opted out. Cost if wrong: a customer who opted out on the old number only is not marketed to on the new one until they opt in again.
+
+## 4. Where the data lives (T20, PDPL residency)
+Facts, as of 2026-10-27 (check Cloudflare's docs before quoting): a Durable Object is created near the first request that reaches it and stays there; a location hint (`wnam, enam, sam, weur, eeur, apac, oc, afr, me`) only biases the choice at creation, it is not a guarantee, and a jurisdiction restriction exists only for `eu` and `fedramp`, not for Egypt. D1 and R2 can be given a location hint at creation; neither can be pinned to a country.
+
+**Ruling RESIDENCY-1 - no residency promise, no hint.** We do not set a location hint (Egyptian workspaces are created by Egyptian requests, which land in the nearest Cloudflare region, normally the Middle East or Europe, and a hint cannot move an existing object), and we do NOT promise that data stays inside Egypt. Processing is on Cloudflare's global network; Meta (WhatsApp) processes the messages outside Egypt by nature of the product. The privacy policy has to say so and name the cross-border transfer; whether Egypt's Personal Data Protection Law (Law 151 of 2020) needs a licence or a consent text for it is a question for the lawyer, not for this code. Cost if wrong: a merchant or regulator who requires in-country storage cannot be served by this product as built; fixing it means self-hosting, not a setting.

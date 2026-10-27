@@ -12,6 +12,8 @@ import { activeNumberFor } from './routing';
 import { eraseSharedFor } from './shared/shared-number';
 import { dropErased } from './erasure';
 import { deleteTargets } from './erasure-targets';
+import { exportContact, mergeContacts, renameContact } from './contact-data';
+import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, retentionView, writeRetentionDays } from './retention';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
@@ -227,7 +229,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       for (const m of batch.inbound) {
         const contactId = this.sql.exec<{ id: number }>(
           `INSERT INTO contacts (wa_id, profile_name, last_inbound_at) VALUES (?, ?, ?)
-           ON CONFLICT(wa_id) DO UPDATE SET profile_name = coalesce(excluded.profile_name, profile_name), last_inbound_at = max(coalesce(last_inbound_at, 0), excluded.last_inbound_at)
+           ON CONFLICT(wa_id) DO UPDATE SET profile_name = CASE WHEN name_edited = 1 THEN profile_name ELSE coalesce(excluded.profile_name, profile_name) END, last_inbound_at = max(coalesce(last_inbound_at, 0), excluded.last_inbound_at)
            RETURNING id`,
           m.from, m.profileName ?? null, m.ts,
         ).one().id;
@@ -1957,7 +1959,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Schedules the nightly backup and R2 drain if they are not pending yet (idempotent; cheap enough for every ingest). */
   private ensureDaily(now: number): boolean {
-    const have = new Set(this.sql.exec<{ kind: string }>("SELECT kind FROM scheduled_tasks WHERE kind IN ('backup', 'r2_drain')").toArray().map((r) => r.kind));
+    const have = new Set(this.sql.exec<{ kind: string }>("SELECT kind FROM scheduled_tasks WHERE kind IN ('backup', 'r2_drain', 'retention_purge')").toArray().map((r) => r.kind));
     let added = false;
     for (const kind of DAILY_KINDS) {
       if (have.has(kind)) continue;
@@ -2045,6 +2047,10 @@ export class WorkspaceDO extends DurableObject<Env> {
         const date = new Intl.DateTimeFormat('en-CA', { timeZone: BACKUP_TIME_ZONE }).format(now);
         await this.exportSnapshot(date);
         return nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
+      }
+      case 'retention_purge': {
+        const r = await this.retentionPurge(now);
+        return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
       }
       case 'r2_drain': {
         const stillOwed = await this.drainR2Deletes();
@@ -2187,6 +2193,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     try {
       const { manifest, erasedSkipped } = await this.importSnapshotOrThrow(prefix);
       // A restored campaign that was running has no workflow in this account's engine: the sweep starts one.
+      addTask(this.sql, 'retention_purge', Date.now() + 60_000); // history the window already deleted must not come back with an old backup
       if (this.sql.exec("SELECT 1 FROM campaigns WHERE status IN ('scheduled', 'running') LIMIT 1").toArray().length) addTask(this.sql, 'campaign_step', Date.now() + 60_000);
       await this.ensureBackupAlarm();
       await this.arm();
@@ -2291,6 +2298,49 @@ export class WorkspaceDO extends DurableObject<Env> {
     const r2Pending = await this.drainR2Deletes();
     if (r2Pending > 0) await this.schedule('r2_drain', Date.now() + 3_600_000); // R2 refused some deletes: try again within the hour
     return { found: found.found, messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys, r2Pending, completedAt: Date.now() };
+  }
+
+  // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------
+
+  async getRetention() {
+    return retentionView(this.sql);
+  }
+
+  /** The owner's window (null = the platform default). A shorter window is applied soon, not at the next night. */
+  async setRetention(days: number | null, now = Date.now()) {
+    this.ctx.storage.transactionSync(() => writeRetentionDays(this.sql, days));
+    await this.schedule('retention_purge', now + 60_000);
+    return retentionView(this.sql);
+  }
+
+  /** Deletes messages older than the window, a bounded number per pass; a backlog continues in a minute. Returns how many went and whether more are due. */
+  async retentionPurge(now = Date.now(), opts: { batch?: number; maxBatches?: number } = {}): Promise<{ deleted: number; more: boolean }> {
+    const cutoff = cutoffFor(this.sql, now);
+    let deleted = 0;
+    for (let i = 0; i < (opts.maxBatches ?? RETENTION_MAX_BATCHES); i++) {
+      const n = this.ctx.storage.transactionSync(() => purgeBatch(this.sql, cutoff, opts.batch ?? RETENTION_BATCH));
+      deleted += n;
+      if (n < (opts.batch ?? RETENTION_BATCH)) break;
+    }
+    if (deleted > 0) {
+      const owed = await this.drainR2Deletes();
+      if (owed > 0) await this.schedule('r2_drain', now + 3_600_000);
+    }
+    const more = hasExpired(this.sql, cutoff);
+    if (more) await this.schedule('retention_purge', now + 60_000);
+    return { deleted, more };
+  }
+
+  async exportContact(waId: string, after: number, limit: number) {
+    return exportContact(this.sql, this.env.MEDIA, waId, after, limit);
+  }
+
+  async renameContact(waId: string, name: string | null) {
+    return this.ctx.storage.transactionSync(() => renameContact(this.sql, waId, name));
+  }
+
+  async mergeContacts(fromWaId: string, intoWaId: string) {
+    return this.ctx.storage.transactionSync(() => mergeContacts(this.sql, fromWaId, intoWaId, (id) => this.emitConversationUpdated(id)));
   }
 
   /** Deletes owed R2 objects in batches; returns how many are still owed (0 when R2 confirmed them all). */

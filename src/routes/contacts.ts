@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
-import { listContactsQuery, setContactTagsRequest } from '../core/api/contract';
+import { exportContactQuery, listContactsQuery, mergeContactsRequest, renameContactRequest, setContactTagsRequest } from '../core/api/contract';
+import { recordAudit } from '../core/audit';
+import { subjectHash } from '../core/erasure';
 import { normaliseE164 } from '../core/phone';
 import { apiError, workspaceStub, type ApiEnv } from './shared';
 
@@ -27,5 +29,45 @@ contactsRoutes.put('/stores/:storeId/contacts/:waId/tags', async (c) => {
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
   const out = await ws.setContactTags(waId, [...new Set(body.data.tags.map((t) => t.toLowerCase()))]);
+  return out ? c.json(out) : apiError(c, 404, 'not_found');
+});
+
+const ownerOnly = (role: string) => role === 'owner' || role === 'super_admin';
+
+/** Data-subject export (B5): one contact's data as JSON, a page of messages at a time. Owner only; every read is audited by the keyed hash, never the number. */
+contactsRoutes.get('/stores/:storeId/contacts/:waId/export', async (c) => {
+  if (!ownerOnly(c.get('storeRole'))) return apiError(c, 403, 'forbidden');
+  const waId = waIdParam(c.req.param('waId'));
+  const q = exportContactQuery.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
+  if (!waId || !q.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const out = await ws.exportContact(waId, q.data.after, q.data.limit);
+  if (!out) return apiError(c, 404, 'not_found');
+  const storeId = c.req.param('storeId')!;
+  await recordAudit(c.env, { workspaceId: storeId, actor: c.get('principal').userId, role: c.get('storeRole') === 'super_admin' ? 'operator' : 'owner', action: 'contact.export', targetType: 'waId', targetId: await subjectHash(c.env, storeId, waId), detail: { messages: out.messages.length, after: q.data.after } });
+  c.header('cache-control', 'no-store');
+  return c.json(out);
+});
+
+/** A name the merchant gives a contact (owner or staff). */
+contactsRoutes.patch('/stores/:storeId/contacts/:waId', async (c) => {
+  const body = renameContactRequest.safeParse(await c.req.json().catch(() => null));
+  const waId = waIdParam(c.req.param('waId'));
+  if (!body.success || !waId) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const out = await ws.renameContact(waId, body.data.name);
+  return out ? c.json(out) : apiError(c, 404, 'not_found');
+});
+
+/** The same person on a new number: fold one contact into the other. Owner only (it cannot be undone). */
+contactsRoutes.post('/stores/:storeId/contacts/merge', async (c) => {
+  if (!ownerOnly(c.get('storeRole'))) return apiError(c, 403, 'forbidden');
+  const body = mergeContactsRequest.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const out = await ws.mergeContacts(body.data.fromWaId, body.data.intoWaId);
   return out ? c.json(out) : apiError(c, 404, 'not_found');
 });

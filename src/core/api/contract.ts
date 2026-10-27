@@ -153,6 +153,7 @@ export const storeLinkSettingsResponse = z.object({
 /** The merchant-written part of the settings (service menu, business hours, location): what the Bot screen edits. */
 /** The Meta catalog of the store link: its id (null = none yet) and when a sync last succeeded. */
 export const catalogStatusDto = z.object({ catalogId: z.string().nullable(), lastSyncAt: z.number().int().nullable() });
+export type RetentionDto = z.infer<typeof retentionDto>;
 export type CatalogStatusDto = z.infer<typeof catalogStatusDto>;
 /** Strict on purpose: the business is never taken from the client (a business id in the body is a 400). */
 export const provisionCatalogRequest = z.object({ name: z.string().trim().min(1).max(100).optional() }).strict();
@@ -259,6 +260,16 @@ export const listContactsQuery = z.object({
 });
 export const listContactsResponse = z.object({ items: z.array(contactDto), nextCursor: z.string().nullable() });
 export const setContactTagsRequest = z.object({ tags: z.array(tagName).max(10) });
+/** PATCH /contacts/:waId: a name the merchant gives the contact (null = follow WhatsApp's name again). */
+export const renameContactRequest = z.object({ name: z.string().trim().min(1).max(100).nullable() }).strict();
+/** POST /contacts/merge: the same person on a new number. Both are WhatsApp ids (digits). */
+export const mergeContactsRequest = z.object({ fromWaId: z.string().regex(/^[1-9]\d{7,14}$/), intoWaId: z.string().regex(/^[1-9]\d{7,14}$/) }).strict().refine((b) => b.fromWaId !== b.intoWaId);
+/** GET /contacts/:waId/export (B5): a page of the person's messages. */
+export const exportContactQuery = z.object({ after: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(1000).default(500) });
+/** PUT /retention (B4): the owner's message window in days; null = the platform default. */
+export const retentionRequest = z.object({ days: z.number().int().min(30).max(3650).nullable() }).strict();
+export const retentionDto = z.object({ days: z.number().int().nullable(), effectiveDays: z.number().int(), defaultDays: z.number().int(), minDays: z.number().int(), maxDays: z.number().int() });
+export const contactSummaryDto = z.object({ waId: z.string(), name: z.string().nullable(), optedOut: z.boolean() });
 export const importMapping = z.object({ phone: z.string().min(1).max(100).optional(), name: z.string().min(1).max(100).optional(), tags: z.string().min(1).max(100).optional() });
 /** The multipart text fields next to the `file` part. `consented` must be the literal string "true" to grant marketing consent. */
 export const createImportFields = z.object({ consented: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'), mapping: z.string().max(1000).optional() });

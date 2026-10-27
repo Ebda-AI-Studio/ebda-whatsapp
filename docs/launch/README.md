@@ -120,6 +120,9 @@ Subscribe the Meta app to `phone_number_quality_update` and `account_update` (al
 ### Erasure record and audit log (W2-ERASE)
 Apply D1 migration `0019_erasure_audit.sql` before the deploy. Erased contacts are remembered (keyed hash, D1) and dropped from any restore; every state-changing call is in the append-only `audit_log`, read in the operator console's "Action log" tab. Design and rulings ERASE-ORDER-1 / ERASE-HASH-1 / AUDIT-OPEN-1 / AUDIT-SKIP-1: `docs/erasure-and-audit.md`.
 
+### Retention, export, edit/merge (W2-RETENTION)
+No D1 migration; Durable Object migration v36 (index on `messages.created_at`, `contacts.name_edited`), applied on first access. A daily `retention_purge` task per workspace deletes messages older than the owner's window (default 730 days). Data-subject export, contact rename and merge are on the Contacts screen. Position on data residency (RESIDENCY-1), retention and merge rulings: `docs/data-protection.md`.
+
 ### Request guards (security, `src/core/request-guards.ts`, one middleware before every route)
 - Body size is checked before the body is read (`Content-Length`) and counted while it is read (chunked, no length): `/meta/webhook` and `/kashier/webhook` 256 KB, JSON API 1 MB, uploads keep their own limits (media 50 MB, imports 10 MB, InstaPay proof 5 MB, plus the multipart envelope). Over: `413 {"error":"payload_too_large"}`.
 - Content-type allow-list when a body is present: webhooks and API writes `application/json`; media and imports `multipart/form-data`; the InstaPay proof jpeg/png/webp/pdf. Anything else: `415 {"error":"unsupported_media"}`.

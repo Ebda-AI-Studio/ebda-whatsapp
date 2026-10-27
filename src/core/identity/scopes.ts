@@ -73,6 +73,12 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/shared-number/join`]: 'person_only',
   [`POST ${S}/shared-number/leave`]: 'person_only',
 
+  [`GET ${S}/retention`]: 'person_only', // message retention window
+  [`PUT ${S}/retention`]: 'person_only',
+  [`GET ${S}/contacts/:waId/export`]: 'person_only', // data-subject export
+  [`PATCH ${S}/contacts/:waId`]: 'person_only', // contact edit
+  [`POST ${S}/contacts/merge`]: 'person_only',
+
   [`GET ${S}/wallet`]: 'person_only',
   [`GET ${S}/wallet/estimate`]: 'person_only',
   [`GET ${S}/wallet/statement`]: 'person_only',
