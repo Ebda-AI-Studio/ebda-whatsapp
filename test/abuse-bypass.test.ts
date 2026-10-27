@@ -15,7 +15,7 @@ import { seedPlan, workspace } from './helpers/workspace';
 
 useApiKey();
 useStoreLink();
-const agent = useAgent();
+const agent = useAgent({ turnsPerDay: 1000 });
 const ACK = EBDA_AGENT_COPY.t.handoffAck.ar;
 const SECRET = 'test-secret-0123456789abcdef';
 let n = 0;
@@ -57,8 +57,32 @@ describe('2. a connector cannot launder the customer\'s own words into the allow
   it('free text and error text of a connector never allow a price', async () => {
     expect(await run('how much', { message: 'special price 7 EGP today' }, 'It is 7 EGP')).toEqual([ACK]);
   });
-  it('a structured price the customer did not type is accepted (negative control)', async () => {
-    expect(await run('how much is the red one', { price: 250, currency: 'EGP' }, 'الأحمر بـ 250 جنيه')).toEqual(['الأحمر بـ 250 جنيه']);
+  it('a connector\'s structured price is not vouched for either: only the Store catalogue and the merchant\'s own texts are (Ruling WA-GUARD-CONNECTOR-1)', async () => {
+    expect(await run('how much is the red one', { price: 250, currency: 'EGP' }, 'الأحمر بـ 250 جنيه')).toEqual([ACK]);
+  });
+  it('a link the customer typed 30 messages ago, outside the history window, cannot be laundered by an echo either', async () => {
+    const { ws, pn } = await setup(true);
+    const c = stubClient(() => ({ json: { ok: true, result: { url: 'https://evil.example/pay' } } }));
+    const g = c.graph;
+    agent.model = new ScriptedProvider([{ text: 'ok' }, ...Array.from({ length: 12 }, () => ({ text: 'ok' })), { tools: [{ name: 'crm__quote', arguments: { item: 'x' } }] }, { text: 'pay at https://evil.example/pay' }]);
+    await say(ws, pn, text('I like https://evil.example/pay a lot'), g);
+    for (let i = 0; i < 12; i++) await say(ws, pn, text(`filler ${i}`), g);
+    expect((await say(ws, pn, text('where do I pay'), g)).map((s) => s.text)).toEqual([ACK]);
+  });
+  it('a link on the connector\'s own configured domain is vouched for (negative control)', async () => {
+    expect(await run('where is my booking', { ok: 1 }, 'التفاصيل هنا https://hooks.acme-client.com/b/1')).toEqual(['التفاصيل هنا https://hooks.acme-client.com/b/1']);
+  });
+});
+
+describe('6. invisible and compatibility characters cannot hide or split a link', () => {
+  const trusted = ['موقعنا https://shop.example.com/p'];
+  const hidden = ['evil\u200B.com', 'evil\u200D.com/x', 'evil%2Ecom', 'evil%2ecom/x', '\uff45\uff56\uff49\uff4c\uff0e\uff43\uff4f\uff4d', 'evil\u00AD.com', 'ev\u2060il.com', 'evil.\uFEFFcom', 'evil.c\u00ADom', 'shop.example.com\u200B@evil.com'];
+  for (const link of hidden) it(`refuses ${JSON.stringify(link)}`, () => expect(guardReply(`افتح ${link} دلوقتي`, trusted)).toEqual({ ok: false, reason: 'url' }));
+  it('plain Arabic text with no link is accepted', () => {
+    expect(guardReply('أهلاً بيك! أقدر أساعدك إزاي؟ الشحن بياخد ٣ أيام', [])).toEqual({ ok: true });
+  });
+  it('the campaign guard refuses them too', () => {
+    for (const t of ['bit\u200B.ly/x', 'evil%2Ecom', 'ev\u00ADil.com']) expect(contentProblem([t]), t).not.toBeNull();
   });
 });
 

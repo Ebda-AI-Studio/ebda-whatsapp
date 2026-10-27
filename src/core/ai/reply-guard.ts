@@ -4,10 +4,10 @@
  * catalogue result of this turn or in the merchant's own texts, (3) a refund / discount / free-shipping / guarantee promise of a
  * class the merchant's own texts never mention, or (4) a recital of the rules.
  *
- * What is TRUSTED: the merchant's persona, FAQ and knowledge chunks (free text they wrote), and the STRUCTURED fields of tool results (JSON
- * numbers, and link / url fields). Never trusted: anything the customer typed, a connector's free-text or error fields, or any value of a
- * connector result that the customer's own message or the tool-call arguments also contain (a connector can echo its input, so an echoed
- * value proves nothing). Known cost: a reply that restates a sum the model computed itself (2 x 110) is refused too; totals come from the
+ * What is TRUSTED, structurally: the merchant's persona, FAQ and knowledge chunks (text they wrote), the domains of their configured connectors,
+ * and the JSON numbers / link fields of the platform's own Store tools. Never trusted: anything the customer typed, and anything a connector
+ * returns (it can echo what a customer typed at any point of the conversation). A link that only exists after normalisation (invisible
+ * characters, an encoded dot, full-width forms) is refused. Known cost: a reply that restates a sum the model computed itself (2 x 110) is refused too; totals come from the
  * ordering flow. A sentence whose period has no space after it ("تمام.شكرا") reads as a host and is refused too: a person answers it.
  */
 import { findUrls, hostUnder } from '../url-extract';
@@ -28,7 +28,7 @@ function numbersOf(text: string): Set<number> {
   for (const m of asciiDigits(text).matchAll(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g)) out.add(num(m[0]));
   return out;
 }
-const hostsOf = (text: string): string[] => findUrls(asciiDigits(text)).flatMap((u) => (u.host && !u.ip ? [u.host] : []));
+const hostsOf = (text: string): string[] => findUrls(asciiDigits(text)).flatMap((u) => (u.host && !u.ip && !u.obscured ? [u.host] : []));
 
 /** What the reply is checked against. */
 export class Trusted {
@@ -37,28 +37,20 @@ export class Trusted {
   readonly hosts = new Set<string>();
   /** Free text the merchant wrote (persona, FAQ, knowledge): numbers, link hosts and promise classes in it are all vouched for. */
   addText(...t: string[]): void { this.text.push(...t); }
+  /** Hosts the merchant configured (a connector's own base domain). */
+  addHosts(hosts: string[]): void { for (const h of hosts) this.hosts.add(h.toLowerCase()); }
   /**
-   * A tool result (the JSON the model is shown). Only structured fields count: JSON numbers and string fields that are links. For a
-   * connector (`echoCheck` = everything the customer typed plus the call arguments) a value that also appears there is dropped, and a
-   * failed call (`error` / `ok:false`) adds nothing.
+   * A result of the platform's OWN tools (the Store's catalogue and orders): its JSON numbers and its link / url string fields.
+   * Never a connector's result: a connector can echo what a customer typed, at any point of the conversation, so connector output
+   * vouches for nothing (Ruling WA-GUARD-CONNECTOR-1). The structural rule replaces any "does the customer's text contain it" heuristic.
    */
-  addToolResult(content: string, echoCheck: string | null): void {
+  addStoreResult(content: string): void {
     let data: unknown;
     try { data = JSON.parse(content); } catch { return; }
-    if (echoCheck !== null) {
-      const o = data as { ok?: unknown; error?: unknown; result?: unknown } | null;
-      if (!o || o.ok !== true || o.error !== undefined) return;
-      data = o.result;
-    }
-    const echoedNumbers = echoCheck === null ? new Set<number>() : numbersOf(echoCheck);
-    const echoedHosts = new Set(echoCheck === null ? [] : hostsOf(echoCheck));
     const walk = (v: unknown, key: string, depth: number): void => {
       if (depth > 6 || v === null) return;
-      if (typeof v === 'number' && Number.isFinite(v)) { if (!echoedNumbers.has(v)) this.numbers.add(v); return; }
-      if (typeof v === 'string') {
-        if (/^(?:link|url|href)$/i.test(key)) for (const h of hostsOf(v)) if (![...echoedHosts].some((e) => hostUnder(h, e))) this.hosts.add(h);
-        return;
-      }
+      if (typeof v === 'number' && Number.isFinite(v)) { this.numbers.add(v); return; }
+      if (typeof v === 'string') { if (/^(?:link|url|href)$/i.test(key)) for (const h of hostsOf(v)) this.hosts.add(h); return; }
       if (Array.isArray(v)) { for (const x of v.slice(0, 50)) walk(x, key, depth + 1); return; }
       if (typeof v === 'object') for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 50)) walk(x, k, depth + 1);
     };
@@ -90,7 +82,7 @@ export function guardReply(reply: string, trustedIn: Trusted | string[], protect
   // 1. links: every link-looking token, parsed as a browser would; an IP address or an unparsable token is never allowed
   const allowedHosts = new Set([...hostsOf(trustedText), ...trusted.hosts]);
   for (const u of findUrls(asciiDigits(reply))) {
-    if (u.host === null || u.ip || ![...allowedHosts].some((a) => hostUnder(u.host, a))) return { ok: false, reason: 'url' };
+    if (u.host === null || u.ip || u.obscured || ![...allowedHosts].some((a) => hostUnder(u.host, a))) return { ok: false, reason: 'url' };
   }
   // 2. prices
   const known = new Set([...numbersOf(trustedText), ...trusted.numbers]);

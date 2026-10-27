@@ -18,7 +18,7 @@ const PATTERNS = [
 export function contentProblem(texts: string[]): ContentProblem | null {
   for (const t of texts) {
     for (const u of findUrls(t)) {
-      if (u.host === null) return 'link_invalid';
+      if (u.host === null || u.obscured) return 'link_invalid';
       if (u.ip) return 'link_ip';
       if (SHORTENERS.some((s) => hostUnder(u.host, s))) return 'link_shortener';
       if (u.host.split('.').some((l) => l.startsWith('xn--'))) return 'link_punycode';

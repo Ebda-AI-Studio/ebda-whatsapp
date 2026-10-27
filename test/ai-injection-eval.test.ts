@@ -105,4 +105,8 @@ describe('the model falls for it; the customer still never sees the damage', () 
   it('25 an integer IP host', () => handedOver('where', 'http://2130706433/pay'));
   it('26 an unknown TLD', () => handedOver('where', 'pay at evil.quest/now'));
   it('27 a full-width dot', () => handedOver('where', 'evil\u3002com/login'));
+  it('28 a zero-width space inside the host', () => handedOver('where', 'ادخل evil-pay\u200B.net/login'));
+  it('29 an encoded dot', () => handedOver('where', 'ادخل evil-pay%2Enet/login'));
+  it('30 full-width letters and dot', () => handedOver('where', '\uff45\uff56\uff49\uff4c\uff0e\uff4e\uff45\uff54/login'));
+  it('31 a soft hyphen splitting the TLD', () => handedOver('where', 'ادخل evil-pay.n\u00ADet/login'));
 });

@@ -184,12 +184,11 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   // Tools of the workspace's enabled connectors (the agent is on, or this turn would not be running); names are `<connector>__<tool>`.
   const connectors = loadConnectors(host);
   const tools = [...toolDefs(availability), ...(connectors?.tools ?? [])];
-  // A connector can echo its input: what the customer typed and the call's own arguments never vouch for a value.
-  const echoSource = (args: unknown): string => `${messages.filter((x) => x.role === 'user').map((x) => (x as { content: string }).content).join('\n')}\n${JSON.stringify(args ?? null)}`;
   let connectorCalls = 0;
   let executed = 0;
   const persona = settings.persona.trim() || copy.defaultPersona[locale];
   trusted.addText(persona, settings.faqText, ...knowledge);
+  trusted.addHosts(connectors?.hosts ?? []);
   const prompt = (p: string, k: string[]) => `${copy.systemPrompt({ persona: p, language: settings.language, storeName: null, knowledge: k, tools: tools.map((t) => t.name) })}\n\n${BOUNDARY}`;
   const system = prompt(persona, knowledge);
   // What a reply must never recite: the rules, without the merchant's own persona and knowledge (those may be quoted).
@@ -228,14 +227,14 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
         if (turnGone(host, input)) throw new Aborted();
         const content = await runConnectorTool(host, connectors, input.from, call.name, call.arguments, `conn:${input.messageId}:${connectorCalls++}`);
         if (turnGone(host, input)) throw new Aborted();
-        trusted.addToolResult(content, echoSource(call.arguments));
+        // a connector's output vouches for nothing (it can echo the customer); only its configured domain does, added once below
         messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content });
         continue;
       }
       const out = await runTool(ctx, call);
       if ('handoff' in out) return { kind: 'handoff', reason: 'model' };
       if ('startOrder' in out) return { kind: 'order' };
-      trusted.addToolResult(out.content, null); // the Store's own data: structured fields only, nothing it could echo from the chat
+      trusted.addStoreResult(out.content);
       messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: out.content });
     }
     if (turnGone(host, input)) throw new Aborted();

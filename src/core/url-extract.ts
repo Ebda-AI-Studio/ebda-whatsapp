@@ -3,7 +3,8 @@
  * really open (userinfo, backslashes, full-width dots, IDN, integer / hex IP forms and unknown TLDs all resolve the way the browser resolves them).
  * Shared by the AI reply guard and the campaign content guard.
  */
-export type FoundUrl = { host: string; scheme: string | null; ip: boolean; raw: string } | { host: null; scheme: null; ip: false; raw: string };
+/** `obscured`: the link only exists after normalisation (invisible characters, an encoded dot, compatibility forms): callers fail closed on it. */
+export type FoundUrl = ({ host: string; scheme: string | null; ip: boolean; raw: string } | { host: null; scheme: null; ip: false; raw: string }) & { obscured: boolean };
 
 const DOTS = /[\u3002\uff0e\uff61]/g;
 // scheme?, then a run of host-ish characters with at least one dot, then an optional path. Userinfo (@) is part of the run on purpose.
@@ -12,8 +13,20 @@ const TOKEN = /(?:[a-z][a-z0-9+.-]*:(?:\/\/|\\\\|\/\\|\\\/))?[\p{L}\p{N}_@%+~:[\
 const IPV4 = /^\d+(?:\.\d+){3}$/;
 const HEXISH = /(?:^|\.)0x[0-9a-f]*(?:\.|$)/i;
 
+/** What a person or a browser reads: NFKC (full-width forms), no format / invisible characters, percent-encoded dots decoded. */
+export const normaliseForLinks = (text: string): string =>
+  text.normalize('NFKC').replace(/[\p{Cf}\u00ad\u200b-\u200d\u2060\ufeff]/gu, '').replace(/%2e/gi, '.');
+
+type Scanned = { host: string | null; scheme: string | null; ip: boolean; raw: string };
+
 export function findUrls(text: string): FoundUrl[] {
-  const out: FoundUrl[] = [];
+  const norm = normaliseForLinks(text);
+  const rawHosts = new Set(scan(text).map((u) => u.host));
+  return scan(norm).map((u) => ({ ...u, obscured: u.host === null ? norm !== text : !rawHosts.has(u.host) }) as FoundUrl);
+}
+
+function scan(text: string): Scanned[] {
+  const out: Scanned[] = [];
   for (const m of text.matchAll(TOKEN)) {
     let raw = m[0].replace(DOTS, '.').replace(/\\/g, '/').replace(/[.,;:!?؟،]+$/u, '');
     const schemeMatch = /^([a-z][a-z0-9+.-]*):\/\//i.exec(raw);

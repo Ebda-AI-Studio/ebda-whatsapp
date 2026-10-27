@@ -24,7 +24,8 @@ function build(host: Host, row: ConnectorRow): Connector {
     : odooConnector({ env: host.env, workspaceId: host.workspaceId, id: row.id, config: row.config, updatedAt: row.updatedAt, secret });
 }
 
-export type ConnectorSet = { tools: ToolDef[]; owns(name: string): boolean; call(name: string, args: unknown, ctx: ConnectorCtx): Promise<ToolResult> };
+/** `hosts`: the domains of the enabled connectors' configured URLs (the only links a connector may be the source of). */
+export type ConnectorSet = { tools: ToolDef[]; hosts: string[]; owns(name: string): boolean; call(name: string, args: unknown, ctx: ConnectorCtx): Promise<ToolResult> };
 
 /** Null when no connector is enabled. The caller has already established that the agent is on. */
 export function loadConnectors(host: Host): ConnectorSet | null {
@@ -34,8 +35,10 @@ export function loadConnectors(host: Host): ConnectorSet | null {
   const tools: ToolDef[] = [];
   for (const [id, c] of byId) for (const t of c.tools) tools.push({ ...t, name: `${id}${TOOL_SEP}${t.name}` });
   const names = new Set(tools.map((t) => t.name));
+  const hosts = rows.flatMap((r) => { try { return [new URL(r.config.url).hostname.toLowerCase()]; } catch { return []; } });
   return {
     tools,
+    hosts,
     owns: (name) => names.has(name),
     async call(name, args, ctx) {
       const at = name.indexOf(TOOL_SEP);
