@@ -34,6 +34,9 @@ A send job exhausted its retries. The message is now `failed` with `error_reason
 ### unhandled_error
 A route threw. Find the event in Sentry (search the route and the time); `route` and `method` are in the message.
 
+### refund_exceeds_charge (P1)
+A provider refund or chargeback pushed an order's refunded total past what was charged (for example a chargeback after a partial refund). Nothing was rejected: the wallet was debited / the package revoked from the event, and the part beyond the charge is in `card_refunds.over_charge_minor` or `package_refunds.over_charge_minor` and the `billing_audit` row `refund_exceeds_charge` (reason = the provider's transaction id). Reconcile it with the provider dashboard (was money returned twice?) and with the merchant. `unclamped: true` in the alert means a row has `refunded_minor > amount_minor` anyway (a writer that does not clamp): find it, `test/refund-writers.test.ts` should have caught it. Design: `docs/billing.md`.
+
 ### number_quality_flagged / number_error_spike (P1) and number_restricted (P0)
 Meta flagged a number (FLAGGED counts as red), rated it red, restricted it, or 25 frequency-cap / undeliverable errors hit it in an hour (yellow). The workspace's campaigns on it are already paused (`quality_flagged`) and, for red / restricted, new templates are refused. Look at `phone_numbers.health_*` and the workspace's `number_health_log`; contact the merchant. Recovery never resumes campaigns: the merchant does. See `docs/number-health.md`.
 

@@ -63,21 +63,6 @@ describe('indexes on the hot workspace_id lookups (M-057)', () => {
 });
 
 describe('refunded can never exceed charged (M-138), and no external money fact is ever rejected (MONEY-FACT-1)', () => {
-  it('CI guard: EVERY writer of topups.refunded_minor / package_orders.refunded_minor clamps with MIN(amount_minor, ...)', async () => {
-    const { readdirSync, readFileSync } = await import('node:fs');
-    const dir = new URL('../src/core/billing/', import.meta.url);
-    const writers: string[] = [];
-    for (const f of readdirSync(dir).filter((x) => x.endsWith('.ts'))) {
-      const text = readFileSync(new URL(f, dir), 'utf8');
-      for (const m of text.matchAll(/UPDATE\s+(topups|package_orders)\s+SET\s+([\s\S]{0,400}?)\bWHERE\b/g)) {
-        if (!/refunded_minor\s*=/.test(m[2]!)) continue;
-        writers.push(`${f}: ${/refunded_minor\s*=\s*MIN\(\s*amount_minor\s*,/i.test(m[2]!) ? 'clamped' : 'UNCLAMPED'}`);
-      }
-    }
-    expect(writers.length).toBeGreaterThanOrEqual(8); // card-refunds x4, package-orders x4 (a refactor that hides a writer from this scan must update it)
-    expect(writers.filter((w) => w.endsWith('UNCLAMPED')), 'a refunded_minor writer without MIN(amount_minor, ...)').toEqual([]);
-  });
-
   it('there is NO trigger that aborts a refund write (it would reject a real provider event)', async () => {
     const t = await all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'trigger' AND (tbl_name IN ('topups', 'package_orders', 'card_refunds', 'package_refunds'))");
     expect(t).toEqual([]);
