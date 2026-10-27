@@ -78,12 +78,39 @@ describe('the operator finishes the rotation', () => {
     expect(first).toMatchObject({ ok: true, rotated: 1 });
     let guard = 0;
     while ((await rotationStatus(e)).onPrevious > 0 && guard++ < 50) await rotateTokenKey(e, 50);
-    expect(await rotationStatus(e)).toMatchObject({ onPrevious: 0, unreadable: 0 });
+    expect(await rotationStatus(e)).toMatchObject({ onPrevious: 0, unreadable: 0, complete: true });
     expect(await rotateTokenKey(e, 50)).toMatchObject({ ok: true, rotated: 0 });
     // with the old key gone everything still opens
     clearTokenCaches();
     expect(await graphTokenFor(at({ TOKEN_ENC_KEY: NEW }), { wabaId: 'waba-r6' })).toBe('tok-r6');
     expect(await decryptSecret((await env.DB.prepare('SELECT pin_enc FROM phone_numbers WHERE phone_number_id = ?').bind('pn-r5').first<{ pin_enc: string }>())!.pin_enc, NEW, 'ws-r5')).toBe('123456');
+  });
+  it('M-173 follow-up: 5,001 credential rows with the LAST one on the old key are NOT complete; after the re-encrypt pass they are', async () => {
+    const ws = 'ws-bigrot';
+    await env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, 1)').bind(ws, ws).run();
+    await env.DB.prepare("DELETE FROM waba_credentials WHERE waba_id LIKE 'big-%'").run();
+    const newEnc = await encryptSecret('t', NEW, ws);
+    const oldEnc = await encryptSecret('t', OLD, ws);
+    const ins = (id: string, enc: string) => env.DB.prepare("INSERT INTO waba_credentials (waba_id, workspace_id, token_enc, kind, created_at, updated_at) VALUES (?, ?, ?, 'own', 1, 1)").bind(id, ws, enc);
+    for (let i = 0; i < 5000; i += 100) await env.DB.batch(Array.from({ length: 100 }, (_, j) => ins(`big-${String(i + j).padStart(5, '0')}`, newEnc)));
+    await ins('big-99999', oldEnc).run(); // the 5,001st, last in id order
+    const e = at({ TOKEN_ENC_KEY: NEW, TOKEN_ENC_KEY_PREVIOUS: OLD });
+    // other tests' rows are all on the current key or removed by now; only the big table matters here
+    await env.DB.prepare("DELETE FROM waba_credentials WHERE waba_id NOT LIKE 'big-%'").run();
+    await env.DB.prepare('UPDATE phone_numbers SET pin_enc = NULL').run();
+    const st = await rotationStatus(e);
+    expect(st.total).toBe(5001);
+    expect(st).toMatchObject({ onPrevious: 1, complete: false, truncated: false });
+    // a pass that stops at its budget says so, even when everything it looked at was fine
+    const part = await rotationStatus(e, { budget: 1000 });
+    expect(part).toMatchObject({ onPrevious: 0, complete: false, truncated: true });
+    expect(part.nextCursor).toBe('token:big-00999');
+    expect(await rotationStatus(e, { budget: 10_000, cursor: part.nextCursor! })).toMatchObject({ onPrevious: 1, complete: false }); // a continuation cannot vouch for what is before it
+    // the re-encrypt pass walks past the 5,000 rows already on the current key and reaches the last one
+    expect(await rotateTokenKey(e, 100)).toMatchObject({ ok: true, rotated: 1, remaining: 0, complete: true }); // it walked past the 5,000 current-key rows, found the last one and left nothing behind
+    expect(await rotationStatus(e)).toMatchObject({ onPrevious: 0, unreadable: 0, complete: true, truncated: false });
+    expect(await rotateTokenKey(e, 100)).toMatchObject({ ok: true, rotated: 0, complete: true });
+    await env.DB.prepare("DELETE FROM waba_credentials WHERE waba_id LIKE 'big-%'").run();
   });
   it('rotate refuses to run without a previous key, or with the same key twice (nothing to rotate)', async () => {
     await expect(rotateTokenKey(at({ TOKEN_ENC_KEY: NEW }), 10)).resolves.toMatchObject({ ok: false, reason: 'no_previous_key' });
