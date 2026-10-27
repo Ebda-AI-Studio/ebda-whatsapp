@@ -15,6 +15,7 @@ Content for help.ebda.app (plan task 8.5). One file per topic, same slug in `ar/
 | 09 | wallet-top-ups-and-refunds | Wallet, top-ups, overdraft, refunds (WA-TOPUP-FEE-1, WA-OVERDRAFT-1, WA-REFUND-1) |
 | 10 | meta-fees-explained | Per-category Meta fees, who pays (WA-BILL-1, WA-MARGIN-1) |
 | 11 | service-menu-hours-and-location | The bot's service menu, opening hours with the away message, and sending your location |
+| 12 | delete-your-workspace | Owner-initiated workspace deletion, the 14-day wait, what is kept (OFFBOARD-1) |
 
 ## Publishing note (for the Store session's `apps/help`)
 - Files are plain Markdown with relative links between guides (`NN-slug.md`); they are published as the **Ebda WhatsApp** section of the suite help site: Arabic `https://help.ebda.app/whatsapp/<slug>/`, English `https://help.ebda.app/en/whatsapp/<slug>/` (Store repo `apps/help` imports them as `content/{ar,en}/whatsapp/<slug>.mdx`, frontmatter `section: "Ebda WhatsApp"`). Arabic is the default locale; render RTL. The inbox links to exactly this shape (`helpUrl` in `web/brands/ebda/brand.ts`), where the slug is the file name without its `NN-` prefix (a test reads this folder, so a renamed guide fails it).

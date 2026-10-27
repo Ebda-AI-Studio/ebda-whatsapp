@@ -323,6 +323,10 @@ export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused',
 export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable', 'quality_flagged', 'operator_paused']);
 /** W2-OPS: every kill-switch action carries a reason (kept in the append-only audit). */
 export const operatorKillSwitch = z.object({ reason: z.string().trim().min(5).max(300) });
+/** W2-OFFBOARD: an owner asks to delete the workspace (explicit confirmation; a wallet balance has to be given up explicitly). Strict: an owner cannot skip the cooling-off. */
+export const offboardingRequest = z.object({ confirm: z.literal(true), acceptWriteOff: z.boolean().optional(), reason: z.string().trim().min(5).max(300).optional() }).strict();
+/** An operator asks (a reason is required and audited); `immediate` skips the cooling-off. */
+export const operatorOffboardingRequest = z.object({ reason: z.string().trim().min(5).max(300), immediate: z.boolean().optional(), acceptWriteOff: z.boolean().optional() }).strict();
 export const healthState = z.enum(['green', 'yellow', 'red', 'restricted']);
 const opsNumberHealth = z.object({ phoneNumberId: z.string(), health: healthState, healthReason: z.string().nullable(), healthAt: z.number().int().nullable() });
 /** GET /operator/workspaces/:id/ops: what the kill-switch card shows for one workspace and for the platform number. */

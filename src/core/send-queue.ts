@@ -1,3 +1,4 @@
+import { isOffboarding } from './ops/offboarding';
 import { z } from 'zod';
 
 const link = z.object({ link: z.string() });
@@ -110,6 +111,8 @@ export async function consumeSendBatch(batch: MessageBatch<unknown>, env: Env): 
       || (sharedEnabled(env) && (await isActiveMember(env, job.workspaceId, job.phoneNumberId)));
     if (!mayUse) {
       console.warn('send queue: sender number not owned by workspace or inactive; dropped');
+      if (await isOffboarding(env, job.workspaceId)) { msg.ack(); continue; } // the workspace is being deleted: there is nothing left to fail
+
       // The message can never leave: fail it (and release its wallet hold) instead of leaving a 'queued' orphan.
       await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(job.workspaceId)).failUnsendable(job.idempotencyKey, 'sender_unavailable');
       msg.ack();

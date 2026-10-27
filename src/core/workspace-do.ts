@@ -126,6 +126,8 @@ export class WorkspaceDO extends DurableObject<Env> {
   private readonly billing: Billing;
   private pricingPull: Promise<void> | null = null;
   private pricingPulledAt = 0;
+  /** Set once the workspace was deleted (OFFBOARD-1): the storage holds only a tombstone and nothing recreates the schema. */
+  private offboarded = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -135,6 +137,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     // 'ping' from a hibernated client is answered without waking the DO.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     ctx.blockConcurrencyWhile(async () => {
+      if (await ctx.storage.get('offboarded')) { this.offboarded = true; return; }
       migrate(ctx.storage);
       this.reindexIfEmpty();
       this.reindexContactsIfEmpty();
@@ -1986,6 +1989,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   private alarmRun: Promise<unknown> | null = null;
 
   async alarm(): Promise<void> {
+    if (this.offboarded) return;
     const run = this.drainDueTasks(Date.now());
     this.alarmRun = run;
     try {
@@ -2298,6 +2302,34 @@ export class WorkspaceDO extends DurableObject<Env> {
     const r2Pending = await this.drainR2Deletes();
     if (r2Pending > 0) await this.schedule('r2_drain', Date.now() + 3_600_000); // R2 refused some deletes: try again within the hour
     return { found: found.found, messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys, r2Pending };
+  }
+
+  /**
+   * Workspace deletion (OFFBOARD-1): removes this workspace's vectors, closes its sockets, cancels the alarm and erases ALL storage, leaving one
+   * tombstone so a stray call can never recreate the schema. Idempotent. R2 objects are deleted by the caller (by prefix), after this.
+   */
+  async offboardWipe(): Promise<{ vectors: number }> {
+    if (this.offboarded) return { vectors: 0 };
+    let vectors = 0;
+    const v = this.env.VECTORIZE;
+    if (v) {
+      const ids = [
+        ...this.sql.exec<{ vec_id: string }>('SELECT vec_id FROM kb_chunks').toArray(),
+        ...this.sql.exec<{ vec_id: string }>('SELECT vec_id FROM catalog_vectors').toArray(),
+      ].map((r) => r.vec_id);
+      for (let i = 0; i < ids.length; i += 500) {
+        await v.deleteByIds(ids.slice(i, i + 500));
+        vectors += Math.min(500, ids.length - i);
+      }
+    }
+    for (const sock of this.ctx.getWebSockets()) {
+      try { sock.close(1001, 'workspace deleted'); } catch { /* already closed */ }
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    await this.ctx.storage.put('offboarded', Date.now());
+    this.offboarded = true;
+    return { vectors };
   }
 
   /** Deletes owed R2 objects in batches; returns how many are still owed (0 when R2 confirmed them all). */

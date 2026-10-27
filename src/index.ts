@@ -1,3 +1,5 @@
+import { runDueOffboardings } from './core/ops/offboarding';
+import { offboardingRoutes } from './routes/offboarding';
 import * as Sentry from '@sentry/cloudflare';
 import { env as workerEnv } from 'cloudflare:workers';
 import { Hono } from 'hono';
@@ -174,6 +176,7 @@ api.route('/', instapayRoutes);
 api.route('/', instapayProofRoutes);
 api.route('/', packageRoutes);
 api.route('/', sharedNumberRoutes);
+api.route('/', offboardingRoutes);
 app.route('/api/v1', api);
 /** The /api/v1 routes, exported so a test can walk them (every store route needs a scope decision in core/identity/scopes.ts). */
 export const apiRoutes = api;
@@ -311,6 +314,7 @@ export async function dailyBilling(env: Env): Promise<void> {
   await repairInstapay(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await overdueInstapay(env).catch((err) => alert('instapay_overdue_check_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairPackageOrders(env).catch((err) => alert('package_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await runDueOffboardings(env).catch((err) => alert('offboarding_failed', { error: err instanceof Error ? err.name : 'error' }));
   await sweepShared(env).catch((err) => alert('shared_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));
 }
 
