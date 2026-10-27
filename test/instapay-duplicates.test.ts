@@ -125,3 +125,69 @@ describe('over HTTP', () => {
     expect((await operatorCall(OP2, 'POST', `/instapay/${b.id}/confirm`, { bankRef: 'HTTP-REF-1' })).status).toBe(200);
   });
 });
+
+const low = { ...env, ADJUSTMENT_APPROVAL_MINOR: '10000' } as typeof env; // the 200 EGP top-ups need two operators here
+const OP3 = '33333333-3333-4333-8333-333333333333';
+
+describe('review findings: separation of duties, the bank reference across two approvals, an atomic hold', () => {
+  it('the operator who RELEASES a held duplicate can neither first-approve nor confirm it; another operator can', async () => {
+    const a = await req(W(20));
+    const b = await req(W(21));
+    await upload(W(20), a.id, 'sod-dup');
+    await upload(W(21), b.id, 'sod-dup');
+    expect((await releaseInstapay(env, { id: b.id, actor: OP1, reason: 'checked both transfers in the bank app' })).ok).toBe(true);
+    expect(await state(b.id)).toMatchObject({ held_reason: null });
+    expect(await confirmInstapay(env, { id: b.id, actor: OP1 })).toEqual({ ok: false, reason: 'releaser_cannot_approve' });
+    expect((await env.DB.prepare('SELECT released_by FROM instapay_requests WHERE id = ?').bind(b.id).first<{ released_by: string }>())!.released_by).toBe(OP1);
+    expect((await confirmInstapay(env, { id: b.id, actor: OP2 })).ok).toBe(true);
+    // and as a FIRST approval of a two-approval amount
+    const c = await req(W(22));
+    const d = await req(W(23));
+    await upload(W(22), c.id, 'sod-two');
+    await upload(W(23), d.id, 'sod-two');
+    await releaseInstapay(low, { id: d.id, actor: OP1, reason: 'checked both transfers in the bank app' });
+    expect(await confirmInstapay(low, { id: d.id, actor: OP1, bankRef: 'SOD-REF-1' })).toEqual({ ok: false, reason: 'releaser_cannot_approve' });
+    expect(await confirmInstapay(low, { id: d.id, actor: OP2, bankRef: 'SOD-REF-1' })).toMatchObject({ ok: true, needsSecond: true });
+    expect(await confirmInstapay(low, { id: d.id, actor: OP1, bankRef: 'SOD-REF-1' })).toEqual({ ok: false, reason: 'releaser_cannot_approve' }); // not as the second approver either
+    expect(await confirmInstapay(low, { id: d.id, actor: OP3, bankRef: 'SOD-REF-1' })).toMatchObject({ ok: true });
+  });
+
+  it('a two-approval amount needs the bank reference at the FIRST approval, kept for the second, who must give the same one; the duplicate check runs at both', async () => {
+    const a = await req(W(24));
+    const b = await req(W(25));
+    await upload(W(24), a.id, 'two-a');
+    await upload(W(25), b.id, 'two-b');
+    expect(await confirmInstapay(low, { id: a.id, actor: OP1 })).toEqual({ ok: false, reason: 'bank_reference_required' });
+    expect(await confirmInstapay(low, { id: a.id, actor: OP1, bankRef: 'ip 5500 7766' })).toMatchObject({ ok: true, needsSecond: true });
+    expect((await env.DB.prepare('SELECT pending_bank_ref FROM instapay_requests WHERE id = ?').bind(a.id).first<{ pending_bank_ref: string }>())!.pending_bank_ref).toBe('IP55007766');
+    expect(await confirmInstapay(low, { id: a.id, actor: OP2 })).toEqual({ ok: false, reason: 'bank_reference_required' }); // the second approver reads it from the proof too
+    expect(await confirmInstapay(low, { id: a.id, actor: OP2, bankRef: 'IP5500-9999' })).toEqual({ ok: false, reason: 'reference_mismatch' });
+    expect((await state(a.id))!.state).toBe('under_review');
+    expect(await confirmInstapay(low, { id: a.id, actor: OP2, bankRef: 'IP5500 7766' })).toMatchObject({ ok: true });
+    expect(await state(a.id)).toMatchObject({ state: 'confirmed', bank_ref: 'IP55007766' });
+    // a reference already used elsewhere, given at the FIRST approval, holds the request at once
+    expect(await confirmInstapay(low, { id: b.id, actor: OP1, bankRef: 'IP5500-7766' })).toEqual({ ok: false, reason: 'duplicate_reference' });
+    expect(await state(b.id)).toMatchObject({ held_reason: 'duplicate_reference', held_of: a.id });
+  });
+
+  it('the hold is set in the SAME statement as the upload: even when the follow-up write fails the new duplicate is held', async () => {
+    const a = await req(W(26));
+    const b = await req(W(27));
+    await upload(W(26), a.id, 'atomic');
+    vi.spyOn(env.DB, 'batch').mockRejectedValue(new Error('d1 blinked')); // the old shape's second write
+    const res = await upload(W(27), b.id, 'atomic');
+    expect(res.ok).toBe(true);
+    expect(await state(b.id)).toMatchObject({ state: 'under_review', held_reason: 'duplicate_image', held_of: a.id });
+  });
+
+  it('confirm re-checks twins before claiming: an unheld twin (the old failure shape) is refused and held now', async () => {
+    const a = await req(W(28));
+    const b = await req(W(29));
+    await upload(W(28), a.id, 'recheck');
+    await upload(W(29), b.id, 'recheck');
+    await env.DB.prepare('UPDATE instapay_requests SET held_reason = NULL, held_of = NULL, held_at = NULL WHERE id IN (?, ?)').bind(a.id, b.id).run(); // simulate holds that never got written
+    expect(await confirmInstapay(env, { id: a.id, actor: OP1 })).toEqual({ ok: false, reason: 'held' });
+    expect((await state(a.id))!.held_reason).toBe('duplicate_image');
+    expect((await state(a.id))!.state).toBe('under_review');
+  });
+});

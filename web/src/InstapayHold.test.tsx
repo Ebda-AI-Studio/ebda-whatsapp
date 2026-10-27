@@ -51,4 +51,14 @@ describe('InstaPay review: duplicates (C2)', () => {
     expect(confirm).toHaveBeenLastCalledWith('ip-ok', 'IP 4471 0098');
     expect((await screen.findByRole('alert')).textContent).toBe(t.opIpDupRef);
   });
+
+  it('explains the two-approval rules: the reference is required, must match the first approver\'s, and the releaser cannot approve', async () => {
+    const { source, card } = await openQueue([item({ id: 'ip-two' })]);
+    const confirm = vi.spyOn(source.operator!, 'confirmInstapay');
+    for (const [detail, text] of [['bank_reference_required', t.opIpRefRequired], ['reference_mismatch', t.opIpRefMismatch], ['releaser_cannot_approve', t.opIpReleaser]] as const) {
+      confirm.mockRejectedValueOnce(new ApiError('invalid_request', 409, detail));
+      await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.opIpConfirm })));
+      expect((await screen.findByRole('alert')).textContent).toBe(text);
+    }
+  });
 });

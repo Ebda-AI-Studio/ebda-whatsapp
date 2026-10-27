@@ -233,11 +233,12 @@ describe('operator review', () => {
     const ws = W(35);
     const r = await topupReq(ws, 20000);
     await proof(ws, r.id);
-    expect(await confirmInstapay(lowThreshold, { id: r.id, actor: OP1 })).toMatchObject({ ok: true, needsSecond: true });
+    expect(await confirmInstapay(lowThreshold, { id: r.id, actor: OP1 })).toEqual({ ok: false, reason: 'bank_reference_required' }); // two approvals = the bank reference at both (W2-MONEY)
+    expect(await confirmInstapay(lowThreshold, { id: r.id, actor: OP1, bankRef: 'BK-35-0001' })).toMatchObject({ ok: true, needsSecond: true });
     expect(await ledger(ws)).toEqual([]);
-    expect(await confirmInstapay(lowThreshold, { id: r.id, actor: OP1 })).toEqual({ ok: false, reason: 'second_approver_required' });
+    expect(await confirmInstapay(lowThreshold, { id: r.id, actor: OP1, bankRef: 'BK-35-0001' })).toEqual({ ok: false, reason: 'second_approver_required' });
     expect(await ledger(ws)).toEqual([]);
-    expect(await confirmInstapay(lowThreshold, { id: r.id, actor: OP2 })).toMatchObject({ ok: true });
+    expect(await confirmInstapay(lowThreshold, { id: r.id, actor: OP2, bankRef: 'BK-35-0001' })).toMatchObject({ ok: true });
     expect((await ledger(ws)).map((x) => x.amount_minor)).toEqual([20000]);
     expect((await row(r.id))).toMatchObject({ state: 'confirmed', first_approver: OP1, decided_by: OP2 });
   });

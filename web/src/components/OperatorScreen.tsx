@@ -39,6 +39,9 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
       if (e.detail === 'duplicate_reference') return t.opIpDupRef;
       if (e.detail === 'held') return t.opIpHeldRefused;
       if (e.detail === 'bad_reference') return t.opIpBadRef;
+      if (e.detail === 'bank_reference_required') return t.opIpRefRequired;
+      if (e.detail === 'reference_mismatch') return t.opIpRefMismatch;
+      if (e.detail === 'releaser_cannot_approve') return t.opIpReleaser;
       if (e.detail === 'too_soon' && lead) return t.opTooSoon(num(lead, lang));
     }
     return t.opFailed;

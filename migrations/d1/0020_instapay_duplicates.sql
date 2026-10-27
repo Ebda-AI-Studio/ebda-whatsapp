@@ -8,6 +8,11 @@ ALTER TABLE instapay_requests ADD COLUMN bank_ref TEXT;
 ALTER TABLE instapay_requests ADD COLUMN held_reason TEXT;
 ALTER TABLE instapay_requests ADD COLUMN held_of TEXT;
 ALTER TABLE instapay_requests ADD COLUMN held_at INTEGER;
+-- Separation of duties: the operator who releases a hold may not approve or confirm that request.
+ALTER TABLE instapay_requests ADD COLUMN released_by TEXT;
+ALTER TABLE instapay_requests ADD COLUMN released_at INTEGER;
+-- The bank reference the FIRST approver read from the proof (normalised). The second approver has to give the same one.
+ALTER TABLE instapay_requests ADD COLUMN pending_bank_ref TEXT;
 -- Lookups by hash and by reference (partial: most rows have neither).
 CREATE INDEX instapay_requests_proof_sha ON instapay_requests (proof_sha256) WHERE proof_sha256 IS NOT NULL;
 CREATE UNIQUE INDEX instapay_requests_bank_ref ON instapay_requests (bank_ref) WHERE bank_ref IS NOT NULL;
