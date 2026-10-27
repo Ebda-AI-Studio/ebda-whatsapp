@@ -18,7 +18,7 @@ Companion of `docs/erasure-and-audit.md` (erasing a person, the audit log) and `
 ## 2. Data-subject export (B5 / M-094)
 - `GET /api/v1/stores/:id/contacts/:waId/export?after=&limit=` (owner only; limit 1 to 1000, default 500) returns JSON `{version, generatedAt, subject, messages[], nextAfter, conversation, notes, tags, orders, campaigns}`. `messages` is a page (`after` = the last message id of the previous page; `nextAfter` is null on the last page); the other sections come with the first page only. Long message bodies are read back from R2 in full. Responses are `Cache-Control: no-store`.
 - The store route is the OWNER's alone (not even a super admin: `403`) and re-checks the session like a write. Operator, on the subject's written request: `GET /api/v1/operator/workspaces/:id/contacts/:waId/export?reason=...` (a reason of 5 to 300 characters is required and kept in the audit record).
-- **Audited**: every call writes `audit_log` action `contact.export` with the keyed hash of the person (never the number) and the number of messages; the operator's reason is NOT in the append-only log: it is stored, phone numbers masked, in the deletable `audit_reasons` table (docs/erasure-and-audit.md).
+- **Audited**: every call writes `audit_log` action `contact.export` with the keyed hash of the person (never the number) and the number of messages; the operator's reason is NOT in the append-only log: it is stored in the deletable `audit_reasons` table (docs/erasure-and-audit.md).
 
 ## 3. Contact edit and merge (M-175)
 - `PATCH /contacts/:waId` `{ name }` (owner or staff): a name the merchant sets is kept (WhatsApp's profile name no longer overwrites it; `contacts.name_edited`) and is searchable; `{ name: null }` follows WhatsApp's name again.

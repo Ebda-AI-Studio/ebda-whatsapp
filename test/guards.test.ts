@@ -229,3 +229,16 @@ it('GUARD: no recordAudit call in src names a detail key reason / note / text / 
     expect(detail, `${file}:${line}`).not.toMatch(/\b(reason|note|text|message|body)\b\s*[:,}]/);
   }
 });
+
+// offboarding_log is immutable: it stores ids, step names and counts, never free text. A reason goes to audit_reasons and is referenced by `reason_id`.
+it('GUARD: every INSERT INTO offboarding_log in src names no free-text column (reason, note, text, message)', () => {
+  const hits = findMatches(/INSERT INTO offboarding_log/, 'src');
+  expect(hits.length).toBeGreaterThan(0);
+  for (const h of hits) {
+    const [file, line] = h.split(':') as [string, string];
+    const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').split('\n').slice(Number(line) - 1).join(' ');
+    const cols = /INSERT INTO offboarding_log \(([^)]*)\)/.exec(text)?.[1]?.split(',').map((c) => c.trim()) ?? [];
+    expect(cols.length, `${file}:${line}`).toBeGreaterThan(3);
+    expect(cols.filter((c) => /^(reason|note|text|message|body)$/i.test(c)), `${file}:${line}`).toEqual([]);
+  }
+});

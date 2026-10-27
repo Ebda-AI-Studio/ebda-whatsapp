@@ -19,6 +19,7 @@ import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { confirmInstapay, listForOperator, rejectInstapay, releaseInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
+import { eraseContactFlow } from '../core/contact-erase';
 import { purgeAuditLog } from '../core/ops/audit-retention';
 import { approveOffboarding, cancelOffboarding, getOffboardingWithLog, listOffboardings, releaseAbuseHold, requestOffboarding, runDueOffboardings } from '../core/ops/offboarding';
 import { listAudit, recordAudit } from '../core/audit';
@@ -346,6 +347,17 @@ operatorRoutes.post('/audit-log/purge', async (c) => {
   const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, 'reason_required');
   return c.json(await purgeAuditLog(c.env, { actor: actor(c), reason: b.data.reason }));
+});
+
+// STORE-ROUTES-OWNER-1: an operator erases a contact on the data subject's written request. The reason is required and kept (phone-free structure) in audit_reasons.
+operatorRoutes.delete('/workspaces/:workspaceId/contacts/:waId', async (c) => {
+  const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
+  const waId = waIdParam(c.req.param('waId')!);
+  if (!b.success || !waId) return bad(c, 'reason_required');
+  const workspaceId = c.req.param('workspaceId')!;
+  const r = await eraseContactFlow(c.env, { storeId: workspaceId, waIdParam: waId, actor: actor(c) });
+  if (r.status === 200) await recordAudit(c.env, { workspaceId, actor: actor(c), role: 'operator', action: 'contact.erase', targetType: 'waId', targetId: await subjectHash(c.env, workspaceId, waId), reason: b.data.reason });
+  return c.json(r.body, r.status);
 });
 
 operatorRoutes.get('/audit-log', async (c) => {

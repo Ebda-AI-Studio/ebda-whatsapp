@@ -17,7 +17,7 @@ const log = (ws: string) => env.DB.prepare('SELECT * FROM audit_log WHERE worksp
 const triggers = () => env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'audit_log' ORDER BY name").all<{ name: string }>().then((r) => r.results.map((x) => x.name));
 
 describe('item 6: no free text in the append-only audit_log', () => {
-  it('an operator export keeps its reason in audit_reasons (phones masked), never in audit_log.detail', async () => {
+  it('an operator export keeps its reason in audit_reasons (deletable), never in audit_log.detail', async () => {
     const ws = W(1);
     await own(ws);
     await openChat(ws, '201001234567');
@@ -28,8 +28,8 @@ describe('item 6: no free text in the append-only audit_log', () => {
     expect(exp.detail).not.toMatch(/reason|subject called|2010/);
     expect(JSON.parse(exp.detail!)).toEqual({ messages: expect.any(Number), after: 0 });
     const kept = await env.DB.prepare('SELECT actor, action, reason FROM audit_reasons WHERE workspace_id = ?').bind(ws).all<{ actor: string; action: string; reason: string }>();
-    expect(kept.results).toEqual([{ actor: OP1, action: 'contact.export', reason: 'subject called from [phone] asking for a copy' }]);
-    expect(JSON.stringify(await env.DB.prepare('SELECT * FROM audit_log').all())).not.toMatch(/2010\d{7}/);
+    expect(kept.results).toEqual([{ actor: OP1, action: 'contact.export', reason: 'subject called from 201009998877 asking for a copy' }]);
+    expect(JSON.stringify(await env.DB.prepare('SELECT * FROM audit_log').all())).not.toMatch(/2010\d{7}/); // the append-only log never sees it
   });
 
   it('recordAudit drops a detail key named reason / note / text / message / body, so a new caller cannot put free text there', async () => {

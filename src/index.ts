@@ -1,7 +1,7 @@
 import { runDueOffboardings } from './core/ops/offboarding';
 import { offboardingRoutes } from './routes/offboarding';
 import { auditWrites } from './core/audit';
-import { completeErasure, recordErasure } from './core/erasure';
+import { eraseContactFlow } from './core/contact-erase';
 import { reconcileRefundBounds } from './core/billing/refund-excess';
 import * as Sentry from '@sentry/cloudflare';
 import { env as workerEnv } from 'cloudflare:workers';
@@ -147,24 +147,11 @@ api.get('/stores/:storeId/me', (c) => {
   return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env) } });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
-  const role = c.get('storeRole');
-  if (role !== 'owner' && role !== 'super_admin') return c.json({ error: 'forbidden' }, 403);
+  // The member's own right to erase (STORE-ROUTES-OWNER-1): a super admin uses the operator route, which needs a stated reason.
+  if (c.get('storeRole') !== 'owner') return c.json({ error: 'forbidden' }, 403);
   // Hono has already percent-decoded the param; decoding again would turn a literal % into a 500.
-  const e164 = normaliseE164(c.req.param('waId'));
-  if (!e164) return c.json({ error: 'invalid phone number' }, 400);
-  const storeId = c.req.param('storeId');
-  // For Ebda Store stores the workspace id is the store id (Phase 1 ruling). Never touch a DO for an unregistered workspace.
-  const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(storeId).first();
-  if (!known) return c.json({ error: 'workspace not found' }, 404);
-  // The record first (D1, durable, a keyed hash): a restore from an older backup then drops this person. A failure alerts and the erasure still goes ahead.
-  await recordErasure(c.env, { workspaceId: storeId, waId: e164.slice(1), actor: c.get('principal').userId });
-  const result = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId)).eraseContact(e164.slice(1));
-  await completeErasure(c.env, { workspaceId: storeId, waId: e164.slice(1), completedAt: result.completedAt }); // the Durable Object's clock at the end of the delete
-  if (!result.found && result.r2Pending === 0) return c.json({ error: 'contact not found' }, 404);
-  const who = c.env.SUITE_BUYER_KEY_SECRET ? await buyerKey(c.env.SUITE_BUYER_KEY_SECRET, e164) : `…${e164.slice(-4)}`;
-  console.log(JSON.stringify({ audit: 'contact_erased', storeId, by: c.get('principal').userId, buyer: who, ...result }));
-  const { completedAt: _done, ...out } = result; // the completion time is for the erasure record, not for the caller
-  return c.json(out);
+  const r = await eraseContactFlow(c.env, { storeId: c.req.param('storeId'), waIdParam: c.req.param('waId'), actor: c.get('principal').userId });
+  return c.json(r.body, r.status);
 });
 api.route('/', messagesRoutes);
 api.route('/', conversationsRoutes);

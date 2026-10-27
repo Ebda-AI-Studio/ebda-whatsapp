@@ -54,6 +54,8 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
       return c.json({ error, ...extra }, status);
     };
     if (!membership && !principal.superAdmin) return refuse('forbidden', 403);
+    // STORE-ROUTES-OWNER-1: a platform super admin who is not a member READS store routes (support) but never WRITES through them: an operator write has an /operator route that requires a reason and is audited.
+    if (write && principal.superAdmin && !membership) return refuse('forbidden', 403, { message: 'operator_route_required' });
     // M-135: a person token is revocation-checked on EVERY write, not only on money actions (fail closed: an unreachable accounts service refuses it).
     // A read that hands over a person's whole data is checked like a write; which reads those are is a named list (scopes.ts), and every read route must be on one list or the other.
     const sensitiveRead = !write && SESSION_CHECKED_READS.has(`GET ${routed}`);
@@ -90,7 +92,7 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
       if (!allowed) return refuse('plan_feature', 403, { feature: 'api' });
     }
     c.set('principal', principal);
-    c.set('storeRole', principal.superAdmin ? 'super_admin' : membership!.role);
+    c.set('storeRole', membership ? membership.role : 'super_admin');
     await next();
   };
 }

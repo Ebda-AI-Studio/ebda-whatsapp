@@ -74,7 +74,7 @@ describe('requesting, cooling off and cancelling', () => {
     const s = (await r.json()) as { executeAfter: number; requestedRole: string };
     expect(s.requestedRole).toBe('operator');
     expect(s.executeAfter).toBeLessThanOrEqual(Date.now());
-    expect(await d1('SELECT actor, action, reason FROM offboarding_log WHERE workspace_id = ?', ws)).toEqual([{ actor: OP1, action: 'requested', reason: REASON }]);
+    expect(await d1('SELECT l.actor, l.action, r.reason FROM offboarding_log l LEFT JOIN audit_reasons r ON r.id = l.reason_id WHERE l.workspace_id = ?', ws)).toEqual([{ actor: OP1, action: 'requested', reason: REASON }]);
     expect((await operatorCall(null, 'POST', `/workspaces/${ws}/offboarding`, { reason: REASON })).status).toBe(401);
   });
 
@@ -210,7 +210,7 @@ describe('operator read view', () => {
 });
 
 describe('operator takeover: audit and money', () => {
-  const logs = (ws: string) => d1<{ action: string; actor: string; reason: string | null; detail: string | null }>('SELECT action, actor, reason, detail FROM offboarding_log WHERE workspace_id = ? ORDER BY id', ws);
+  const logs = (ws: string) => d1<{ action: string; actor: string; reason: string | null; detail: string | null }>('SELECT l.action, l.actor, r.reason, l.detail FROM offboarding_log l LEFT JOIN audit_reasons r ON r.id = l.reason_id WHERE l.workspace_id = ? ORDER BY l.id', ws);
   const op = (ws: string, body: Record<string, unknown>) => operatorCall(OP1, 'POST', `/workspaces/${ws}/offboarding`, { reason: REASON, ...body });
 
   it('every changing path writes exactly one log row with the previous values; a no-op writes none', async () => {
@@ -224,7 +224,8 @@ describe('operator takeover: audit and money', () => {
     expect((await op(ws, {})).status).toBe(202);
     let l = await logs(ws);
     expect(l.map((x) => x.action)).toEqual(['requested', 'taken_over']);
-    expect(JSON.parse(l[1]!.detail!)).toMatchObject({ taken_over: true, expedited: false, previous: { requested_role: 'owner', requested_by: ownerRow.requested_by, reason: null, execute_after: ownerRow.execute_after }, new: { requested_role: 'operator', requested_by: OP1, reason: REASON } });
+    expect(JSON.parse(l[1]!.detail!)).toMatchObject({ taken_over: true, expedited: false, previous: { requested_role: 'owner', requested_by: ownerRow.requested_by, execute_after: ownerRow.execute_after }, new: { requested_role: 'operator', requested_by: OP1 } });
+    expect(l[1]!.reason).toBe(REASON); // through reason_id -> audit_reasons
 
     // 2. the same request again: nothing changes, nothing is written
     expect((await op(ws, {})).status).toBe(202);
@@ -234,7 +235,9 @@ describe('operator takeover: audit and money', () => {
     expect((await op(ws, { reason: 'second reason for the file' })).status).toBe(202);
     l = await logs(ws);
     expect(l.map((x) => x.action)).toEqual(['requested', 'taken_over', 'operator_changed']);
-    expect(JSON.parse(l[2]!.detail!)).toMatchObject({ taken_over: false, expedited: false, previous: { reason: REASON }, new: { reason: 'second reason for the file' } });
+    expect(JSON.parse(l[2]!.detail!)).toMatchObject({ taken_over: false, expedited: false, previous: { requested_by: OP1 }, new: { requested_by: OP1 } });
+    expect(l[2]!.detail).not.toContain('second reason'); // the reasons are in audit_reasons, never in the immutable log
+    expect(l[2]!.reason).toBe('second reason for the file'); // ... and the log row points at it
 
     // 4. bringing the date forward: one row, expedited
     expect((await op(ws, { reason: 'second reason for the file', immediate: true })).status).toBe(202);

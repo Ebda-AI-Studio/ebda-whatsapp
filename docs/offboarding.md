@@ -48,7 +48,7 @@ Steps are idempotent and recorded in `offboarding.steps_done`; a failed run resu
 
 ## What is kept, and why
 `src/core/ops/offboarding.ts` `OFFBOARD_TABLES` decides every D1 table that names a workspace (a test walks the schema, so a new table fails CI until someone decides).
-- **Audit log actors (AUDIT-RETENTION-1)**: in the SAME `d1` batch, `audit_log.actor` of the workspace's owner/staff rows becomes the same pseudonym (operators and integration clients stay), through the controlled procedure that drops and re-creates the append-only triggers inside the batch (`src/core/ops/audit-retention.ts`). `audit_reasons` (the operators' free-text reasons, phones masked) is deleted with the workspace.
+- **Audit log actors (AUDIT-RETENTION-1)**: in the SAME `d1` batch, `audit_log.actor` of the workspace's owner/staff rows becomes the same pseudonym (operators and integration clients stay), through the controlled procedure that drops and re-creates the append-only triggers inside the batch (`src/core/ops/audit-retention.ts`). `audit_reasons` (the free-text reasons of operators and owners, including the ones behind `offboarding_log` rows) is deleted with the workspace; `offboarding_log` holds only the `reason_id` (D1 migration 0023), never text, and `offboarding.reason` is cleared when the run finishes or the request is cancelled (AUDIT-REASONS-1).
 - **Money records (tax, refunds, disputes)** `topups, package_orders, package_refund_plans, instapay_requests, refund_requests, card_refunds, wallet_adjustments, shared_number_usage`: `workspace_id` becomes a **keyed-HMAC pseudonym** `del_<32 hex>` (HMAC-SHA-256 over the id, key HKDF-derived from `TOKEN_ENC_KEY`, label `offboard-pseudonym/v1`), the merchant's user id in `created_by` / `requested_by` becomes the same pseudonym, free text (`note`) and the InstaPay proof reference are cleared. Amounts, dates and operator ids stay.
 - **Immutable ledgers** `ledger_mirror`, `billing_audit` (UPDATE/DELETE are blocked by trigger) and the **audit trails** `operator_actions`, `offboarding`, `offboarding_log` keep the opaque workspace id.
 - Everything else (numbers, tokens, subscriptions, routing, all DO data, all R2 objects) is deleted.
@@ -62,7 +62,7 @@ Steps are idempotent and recorded in `offboarding.steps_done`; a failed run resu
 **Ruling OFFBOARD-KEY-1 - a deletion is refused (`no_key`) when `TOKEN_ENC_KEY` is missing.** It is a required secret; without it money records could not be pseudonymised. Cost if wrong: none (the secret is checked by `/health`).
 
 ## Audit
-`offboarding_log` (append-only): `requested`, `expedited`, `cancelled`, `started`, `step_done` (step name and counts), `completed`, with actor and reason. No phone number or message text is ever written.
+`offboarding_log` (append-only): `requested`, `taken_over`, `operator_changed`, `write_off_accepted`, `second_approval`, `abuse_hold_released`, `cancelled`, `started`, `step_done` (step name and counts), `completed`, with actor and a `reason_id` pointing at `audit_reasons`. No free text, phone number or message text is ever written; the operator view joins the reason in while the workspace exists.
 
 ## Not covered here
 The Store's own account deletion drives the owner path (it calls the same endpoint through the owner's session); there is no Store-to-WhatsApp event for it yet. Cloudflare's own copy (R2 versions do not exist; D1 Time Travel keeps 30 days of history and cannot be edited) is covered in the data-residency note in `docs/data-protection.md` once W2-RETENTION lands.

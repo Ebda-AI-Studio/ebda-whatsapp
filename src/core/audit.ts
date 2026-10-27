@@ -33,7 +33,7 @@ export async function recordAudit(env: Env, e: AuditEntry, now = Date.now()): Pr
     const stmts = [
       env.DB.prepare('INSERT INTO audit_log (at, workspace_id, actor, actor_role, action, target_type, target_id, detail, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .bind(now, e.workspaceId ?? null, e.actor, e.role, e.action.slice(0, 200), e.targetType ?? null, targetId, detail && Object.keys(detail).length ? JSON.stringify(detail) : null, e.status ?? 200),
-      ...(e.reason && e.workspaceId ? [env.DB.prepare('INSERT INTO audit_reasons (at, workspace_id, actor, action, reason) VALUES (?, ?, ?, ?, ?)').bind(now, e.workspaceId, e.actor, e.action.slice(0, 200), (maskPhones(e.reason) ?? '').slice(0, 300))] : []),
+      ...(e.reason && e.workspaceId ? [env.DB.prepare('INSERT INTO audit_reasons (at, workspace_id, actor, action, reason) VALUES (?, ?, ?, ?, ?)').bind(now, e.workspaceId, e.actor, e.action.slice(0, 200), e.reason.slice(0, 300))] : []),
     ];
     await env.DB.batch(stmts);
     console.log(JSON.stringify({ audit: 'action', workspace: e.workspaceId ?? null, role: e.role, action: e.action, status: e.status ?? 200 }));

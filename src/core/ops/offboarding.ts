@@ -64,8 +64,20 @@ const dto = (r: Row, needsSecondApproval = false): OffboardingStatus => ({
   writeOffMinor: r.write_off_minor, stepsDone: r.steps_done ? r.steps_done.split(',') : [], attempts: r.attempts, lastError: r.last_error, finishedAt: r.finished_at, needsSecondApproval,
 });
 const stub = (env: Env, ws: string) => env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(ws));
-const logRow = (env: Env, ws: string, actor: string, action: string, now: number, reason?: string | null, detail?: string) =>
-  env.DB.prepare('INSERT INTO offboarding_log (at, workspace_id, actor, action, reason, detail) VALUES (?, ?, ?, ?, ?, ?)').bind(now, ws, actor, action, reason ?? null, detail ?? null);
+/**
+ * The statements that record one step of a request. `offboarding_log` is immutable and holds NO free text (ids, actions, counts, numbers only): an operator's or owner's
+ * reason goes to the deletable `audit_reasons` and the log row points at it by `reason_id` (the two inserts run back to back in one batch, so `last_insert_rowid()` is the
+ * reason just written). A workspace deletion removes the reasons; the ids stay and point at nothing. `detail` must never carry text: callers pass numbers and flags.
+ */
+const logRows = (env: Env, ws: string, actor: string, action: string, now: number, reason?: string | null, detail?: string, onlyIf?: { sql: string; binds: unknown[] }): D1PreparedStatement[] => {
+  const text = reason?.trim() || null;
+  const cond = onlyIf ? ` WHERE ${onlyIf.sql}` : '';
+  const binds = onlyIf?.binds ?? [];
+  return [
+    ...(text ? [env.DB.prepare(`INSERT INTO audit_reasons (at, workspace_id, actor, action, reason) SELECT ?, ?, ?, ?, ?${cond}`).bind(now, ws, actor, `offboarding.${action}`, text.slice(0, 500), ...binds)] : []),
+    env.DB.prepare(`INSERT INTO offboarding_log (at, workspace_id, actor, action, reason_id, detail) SELECT ?, ?, ?, ?, ${text ? 'last_insert_rowid()' : 'NULL'}, ?${cond}`).bind(now, ws, actor, action, detail ?? null, ...binds),
+  ];
+};
 
 
 // ---- second approver (OFFBOARD-2ND-APPROVER-1) and operator holds -----------------------------------------------------------------
@@ -101,7 +113,7 @@ export async function approveOffboarding(env: Env, a: { workspaceId: string; act
   if (!approvalRule(env, r)) return { ok: false, reason: 'not_required' };
   if (a.actor === r.requested_by) return { ok: false, reason: 'requester_cannot_approve' };
   if ((await involvedActors(env, a.workspaceId)).has(a.actor)) return { ok: false, reason: 'releaser_cannot_approve' };
-  await logRow(env, a.workspaceId, a.actor, 'second_approval', now, a.reason, JSON.stringify({ executeAfter: r.execute_after, writeOffMinor: r.write_off_minor, requestedBy: r.requested_by })).run();
+  await env.DB.batch(logRows(env, a.workspaceId, a.actor, 'second_approval', now, a.reason, JSON.stringify({ executeAfter: r.execute_after, writeOffMinor: r.write_off_minor, requestedBy: r.requested_by })));
   return { ok: true };
 }
 
@@ -112,7 +124,7 @@ export async function releaseAbuseHold(env: Env, a: { workspaceId: string; actor
   if (!r) return { ok: false, reason: 'not_found' };
   if (!(await abuseSuspended(env, a.workspaceId))) return { ok: false, reason: 'not_held' };
   if (await env.DB.prepare("SELECT 1 FROM offboarding_log WHERE workspace_id = ? AND action = 'second_approval' AND actor = ? LIMIT 1").bind(a.workspaceId, a.actor).first()) return { ok: false, reason: 'approver_cannot_release' };
-  await logRow(env, a.workspaceId, a.actor, 'abuse_hold_released', now, a.reason).run();
+  await env.DB.batch(logRows(env, a.workspaceId, a.actor, 'abuse_hold_released', now, a.reason));
   return { ok: true };
 }
 async function abuseSuspended(env: Env, ws: string): Promise<boolean> {
@@ -128,7 +140,7 @@ export async function getOffboarding(env: Env, ws: string): Promise<OffboardingS
 export async function getOffboardingWithLog(env: Env, ws: string): Promise<(OffboardingStatus & { log: { at: number; actor: string; action: string; reason: string | null }[] }) | null> {
   const st = await getOffboarding(env, ws);
   if (!st) return null;
-  const { results } = await env.DB.prepare('SELECT at, actor, action, reason FROM offboarding_log WHERE workspace_id = ? ORDER BY id DESC LIMIT 50').bind(ws).all<{ at: number; actor: string; action: string; reason: string | null }>();
+  const { results } = await env.DB.prepare('SELECT l.at, l.actor, l.action, r.reason FROM offboarding_log l LEFT JOIN audit_reasons r ON r.id = l.reason_id WHERE l.workspace_id = ? ORDER BY l.id DESC LIMIT 50').bind(ws).all<{ at: number; actor: string; action: string; reason: string | null }>();
   return { ...st, log: results.reverse() };
 }
 export async function listOffboardings(env: Env, state?: string): Promise<OffboardingStatus[]> {
@@ -172,7 +184,7 @@ export async function requestOffboarding(
         const detail = JSON.stringify({ previous: { write_off_minor: existing.write_off_minor }, new: { write_off_minor: balance } });
         const [upd] = await env.DB.batch([
           env.DB.prepare("UPDATE offboarding SET write_off_minor = ?, requested_by = ?, last_error = NULL WHERE workspace_id = ? AND state = 'running' AND write_off_minor = ?").bind(balance, a.actor, a.workspaceId, existing.write_off_minor),
-          logRow(env, a.workspaceId, a.actor, 'write_off_accepted', now, a.reason, detail),
+          ...logRows(env, a.workspaceId, a.actor, 'write_off_accepted', now, a.reason, detail),
         ]);
         if (!upd!.meta.changes) return { ok: false, reason: 'already_running' };
         return { ok: true, value: (await getOffboarding(env, a.workspaceId))! };
@@ -198,16 +210,15 @@ export async function requestOffboarding(
     const takenOver = existing.requested_role !== 'operator';
     const expedited = after < existing.execute_after;
     if (!takenOver && !expedited && existing.requested_by === a.actor && existing.reason === reason && writeOff === existing.write_off_minor) return { ok: true, value: dto(existing) }; // nothing changes: nothing is written
-    const detail = JSON.stringify({
-      previous: { requested_role: existing.requested_role, requested_by: existing.requested_by, reason: existing.reason, execute_after: existing.execute_after, write_off_minor: existing.write_off_minor },
-      new: { requested_role: 'operator', requested_by: a.actor, reason, execute_after: after, write_off_minor: writeOff },
+    const detail = JSON.stringify({ // numbers, ids and flags only: the reasons are in audit_reasons
+      previous: { requested_role: existing.requested_role, requested_by: existing.requested_by, execute_after: existing.execute_after, write_off_minor: existing.write_off_minor },
+      new: { requested_role: 'operator', requested_by: a.actor, execute_after: after, write_off_minor: writeOff },
       taken_over: takenOver, expedited,
     });
     const [upd] = await env.DB.batch([
       env.DB.prepare("UPDATE offboarding SET requested_role = 'operator', requested_by = ?, reason = ?, execute_after = ?, write_off_minor = ? WHERE workspace_id = ? AND state = 'pending'").bind(a.actor, reason, after, writeOff, a.workspaceId),
       // The log row is written only if the update above applied (the same batch, so a run that claimed the row in between leaves no false entry).
-      env.DB.prepare("INSERT INTO offboarding_log (at, workspace_id, actor, action, reason, detail) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM offboarding WHERE workspace_id = ? AND state = 'pending' AND requested_by = ? AND requested_role = 'operator')")
-        .bind(now, a.workspaceId, a.actor, takenOver ? 'taken_over' : 'operator_changed', reason, detail, a.workspaceId, a.actor),
+      ...logRows(env, a.workspaceId, a.actor, takenOver ? 'taken_over' : 'operator_changed', now, reason, detail, { sql: "EXISTS (SELECT 1 FROM offboarding WHERE workspace_id = ? AND state = 'pending' AND requested_by = ? AND requested_role = 'operator')", binds: [a.workspaceId, a.actor] }),
     ]);
     if (!upd!.meta.changes) return { ok: false, reason: 'already_running' };
     return { ok: true, value: (await getOffboarding(env, a.workspaceId))! };
@@ -221,7 +232,7 @@ export async function requestOffboarding(
        ON CONFLICT(workspace_id) DO UPDATE SET state = 'pending', requested_by = excluded.requested_by, requested_role = excluded.requested_role, reason = excluded.reason, requested_at = excluded.requested_at,
          execute_after = excluded.execute_after, write_off_minor = excluded.write_off_minor, started_at = NULL, finished_at = NULL, steps_done = '', attempts = 0, last_error = NULL`,
     ).bind(a.workspaceId, a.actor, a.role, a.reason ?? null, now, executeAfter, writeOff),
-    logRow(env, a.workspaceId, a.actor, 'requested', now, a.reason, writeOff ? `write_off_minor=${writeOff}` : undefined),
+    ...logRows(env, a.workspaceId, a.actor, 'requested', now, a.reason, writeOff ? `write_off_minor=${writeOff}` : undefined),
   ]);
   console.log(JSON.stringify({ audit: 'offboarding_requested', workspace: a.workspaceId, role: a.role, immediate: executeAfter === now }));
   return { ok: true, value: (await getOffboarding(env, a.workspaceId))! };
@@ -235,9 +246,9 @@ export async function cancelOffboarding(env: Env, a: { workspaceId: string; acto
   if (row.state === 'pending' && row.requested_role === 'operator' && a.role !== 'operator') return { ok: false, reason: 'operator_requested' };
   if (row.state === 'running' || row.state === 'done') return { ok: false, reason: 'already_running' };
   if (row.state !== 'pending') return { ok: false, reason: 'nothing_pending' };
-  const res = await env.DB.prepare("UPDATE offboarding SET state = 'cancelled' WHERE workspace_id = ? AND state = 'pending'").bind(a.workspaceId).run();
+  const res = await env.DB.prepare("UPDATE offboarding SET state = 'cancelled', reason = NULL WHERE workspace_id = ? AND state = 'pending'").bind(a.workspaceId).run();
   if (!res.meta.changes) return { ok: false, reason: 'already_running' }; // the run started between our read and our write
-  await logRow(env, a.workspaceId, a.actor, 'cancelled', now, a.reason).run();
+  await env.DB.batch(logRows(env, a.workspaceId, a.actor, 'cancelled', now, a.reason));
   return { ok: true };
 }
 
@@ -383,7 +394,7 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now(), hoo
     "UPDATE offboarding SET state = 'running', attempts = attempts + 1, pseudonym = ?, started_at = coalesce(started_at, ?) WHERE workspace_id = ? AND state IN ('pending', 'running') AND execute_after <= ?",
   ).bind(pseudo, now, ws, now).run();
   if (!claim.meta.changes) return 'skipped';
-  if (row.state === 'pending') await logRow(env, ws, 'system', 'started', now).run();
+  if (row.state === 'pending') await env.DB.batch(logRows(env, ws, 'system', 'started', now));
   for (const step of STEPS) {
     if (done.has(step)) continue;
     await hooks.beforeStep?.(step);
@@ -402,7 +413,7 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now(), hoo
       done.add(step);
       await env.DB.batch([
         env.DB.prepare('UPDATE offboarding SET steps_done = ?, last_error = NULL WHERE workspace_id = ?').bind(STEPS.filter((s) => done.has(s)).join(','), ws),
-        logRow(env, ws, 'system', 'step_done', now, null, detail ? `${step} ${detail}` : step),
+        ...logRows(env, ws, 'system', 'step_done', now, null, detail ? `${step} ${detail}` : step),
       ]);
     } catch (err) {
       const unfinished = err instanceof Unfinished;
@@ -412,8 +423,8 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now(), hoo
     }
   }
   await env.DB.batch([
-    env.DB.prepare("UPDATE offboarding SET state = 'done', finished_at = ?, last_error = NULL WHERE workspace_id = ?").bind(now, ws),
-    logRow(env, ws, 'system', 'completed', now),
+    env.DB.prepare("UPDATE offboarding SET state = 'done', finished_at = ?, last_error = NULL, reason = NULL WHERE workspace_id = ?").bind(now, ws), // the request row keeps no free text either
+    ...logRows(env, ws, 'system', 'completed', now),
   ]);
   console.log(JSON.stringify({ audit: 'offboarding_completed', workspace: ws }));
   return 'done';
