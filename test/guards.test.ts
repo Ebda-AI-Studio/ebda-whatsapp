@@ -175,10 +175,36 @@ it('store-included is only ever written by the Store-plan path (store-plan.ts an
   expect(readFileSync(new URL('../src/routes/operator.ts', import.meta.url), 'utf8')).toMatch(/store_included_is_store_plan_only/);
 });
 
-// migrate() applies DO_MIGRATIONS by array POSITION past max(_migrations.version). A no-op placeholder "to be replaced later" is therefore silently skipped on every
-// Durable Object that already ran it. Reserve a number by not taking it, never by holding its slot.
-it('no DO migration is a no-op (an empty statement or a bare SELECT): a placeholder would be skipped forever on every DO that already ran it', async () => {
+// migrate() applies DO_MIGRATIONS by array POSITION past max(_migrations.version): the version IS the index. Numbers go in merge order and are never reserved.
+//  (a) a no-op "placeholder to be replaced later" would be skipped forever on every DO that already ran it;
+//  (b) a `// vNN` label must sit directly above entry NN, so a slot inserted mid-array or a mislabelled entry breaks the numbering the docs and reviews quote.
+it('no DO migration is a no-op or a placeholder (empty, or only SELECT 1)', async () => {
   const { DO_MIGRATIONS } = await import('../src/core/do-migrations');
-  const noop = DO_MIGRATIONS.map((sql, i) => ({ v: i + 1, sql: sql.replace(/--[^\n]*/g, '').trim() })).filter((m) => m.sql === '' || /^SELECT\s+[\w'"*]+\s*;?$/i.test(m.sql));
+  const noop = DO_MIGRATIONS.map((sql, i) => ({ v: i + 1, sql: sql.replace(/--[^\n]*/g, '').trim() })).filter((m) => m.sql === '' || /^(SELECT\s+1;?\s*)+$/i.test(m.sql));
   expect(noop.map((m) => `v${m.v}`)).toEqual([]);
+});
+it('every `// vNN` label in do-migrations.ts sits directly above entry NN, in order (versions are contiguous 1..N)', async () => {
+  const src = readFileSync(join(import.meta.dirname, '..', 'src/core/do-migrations.ts'), 'utf8');
+  const { DO_MIGRATIONS } = await import('../src/core/do-migrations');
+  const start = src.indexOf('DO_MIGRATIONS: readonly string[] = [') + 'DO_MIGRATIONS: readonly string[] = ['.length;
+  let entries = 0;
+  const labels: { label: number; entry: number }[] = [];
+  let inTemplate = false;
+  for (let i = start; i < src.length; i++) {
+    const ch = src[i]!;
+    if (inTemplate) { if (ch === '\\') i++; else if (ch === '`') { inTemplate = false; entries++; } continue; }
+    if (ch === '/' && src[i + 1] === '/') { // a comment outside a template: may carry a label, may contain backticks
+      const end = src.indexOf('\n', i);
+      const m = /^\/\/ v(\d+)\b/.exec(src.slice(i, end));
+      if (m) labels.push({ label: Number(m[1]), entry: entries + 1 });
+      i = end;
+      continue;
+    }
+    if (ch === '`') { inTemplate = true; continue; }
+    if (ch === ']' && src[i + 1] === ';') break;
+  }
+  expect(entries).toBe(DO_MIGRATIONS.length);
+  expect(labels.length).toBeGreaterThan(20);
+  expect(labels.filter((l) => l.label !== l.entry)).toEqual([]);
+  expect(labels.map((l) => l.label)).toEqual([...labels.map((l) => l.label)].sort((a, b) => a - b));
 });
