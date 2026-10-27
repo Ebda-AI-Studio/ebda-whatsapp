@@ -163,6 +163,25 @@ describe('who may cancel', () => {
     expect((await operatorCall(OP1, 'DELETE', `/workspaces/${ws}/offboarding`, { reason: REASON })).status).toBe(200);
   });
 
+  it('an operator taking over a pending owner request makes it the operator\'s: the owner can no longer cancel it, and an owner asking again never downgrades it', async () => {
+    const ws = W(2025);
+    await own(ws);
+    expect((await ownerCall(ws, 'POST', { confirm: true })).status).toBe(202);
+    const owner = (await d1<{ execute_after: number }>('SELECT execute_after FROM offboarding WHERE workspace_id = ?', ws))[0]!;
+    expect((await operatorCall(OP1, 'POST', `/workspaces/${ws}/offboarding`, { reason: REASON })).status).toBe(202);
+    const row = await d1<{ requested_role: string; requested_by: string; reason: string; execute_after: number }>('SELECT requested_role, requested_by, reason, execute_after FROM offboarding WHERE workspace_id = ?', ws);
+    expect(row[0]).toMatchObject({ requested_role: 'operator', requested_by: OP1, reason: REASON });
+    expect(row[0]!.execute_after).toBeLessThanOrEqual(owner.execute_after);
+    await ownerCall(ws, 'POST', { confirm: true }); // an owner asking again
+    const before = await d1('SELECT * FROM offboarding WHERE workspace_id = ?', ws);
+    expect((before[0] as { requested_role: string }).requested_role).toBe('operator');
+    const r = await ownerCall(ws, 'DELETE');
+    expect(r.status).toBe(403);
+    expect(await r.json()).toMatchObject({ message: 'operator_requested' });
+    expect(await d1('SELECT * FROM offboarding WHERE workspace_id = ?', ws)).toEqual(before);
+    expect((await d1<{ action: string }>('SELECT action FROM offboarding_log WHERE workspace_id = ? ORDER BY id', ws)).map((l) => l.action)).toContain('taken_over');
+  });
+
   it('a suspended workspace may still ask (POST) and read (GET), but not cancel (DELETE)', async () => {
     const ws = W(2024);
     await own(ws);

@@ -97,12 +97,15 @@ export async function requestOffboarding(
   if (existing?.state === 'done') return { ok: false, reason: 'already_deleted' };
   const executeAfter = a.immediate && a.role === 'operator' ? now : now + COOLING_OFF_MS;
   if (existing?.state === 'pending') {
-    // Asking again changes nothing, except that an operator may shorten the wait (a legal request) with a reason.
-    if (executeAfter < existing.execute_after) {
-      await env.DB.batch([env.DB.prepare('UPDATE offboarding SET execute_after = ? WHERE workspace_id = ?').bind(executeAfter, a.workspaceId), logRow(env, a.workspaceId, a.actor, 'expedited', now, a.reason)]);
-      return { ok: true, value: dto({ ...existing, execute_after: executeAfter }) };
-    }
-    return { ok: true, value: dto(existing) };
+    // An owner asking again changes nothing, and never downgrades an operator-owned row. An operator asking takes the row over in ONE statement
+    // (role, requester, reason) so the owner can no longer cancel it, and may only shorten the wait.
+    if (a.role !== 'operator') return { ok: true, value: dto(existing) };
+    const after = Math.min(existing.execute_after, executeAfter);
+    const res = await env.DB.prepare("UPDATE offboarding SET requested_role = 'operator', requested_by = ?, reason = ?, execute_after = ? WHERE workspace_id = ? AND state = 'pending'").bind(a.actor, a.reason ?? null, after, a.workspaceId).run();
+    if (!res.meta.changes) return { ok: false, reason: 'already_running' };
+    const log = existing.requested_role !== 'operator' ? 'taken_over' : after < existing.execute_after ? 'expedited' : null;
+    if (log) await logRow(env, a.workspaceId, a.actor, log, now, a.reason).run();
+    return { ok: true, value: dto({ ...existing, requested_role: 'operator', requested_by: a.actor, reason: a.reason ?? null, execute_after: after }) };
   }
   const balance = (await stub(env, a.workspaceId).walletView(now)).balanceMinor;
   if (balance > 0 && !a.acceptWriteOff) return { ok: false, reason: 'wallet_balance_remains' };

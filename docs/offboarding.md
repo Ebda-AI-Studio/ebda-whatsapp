@@ -12,6 +12,8 @@ An owner or an operator can delete a workspace. Nothing is deleted at once: a **
 
 A wallet balance above zero is refused (`409 wallet_balance_remains`) unless the request carries `acceptWriteOff: true`; the amount is recorded in `offboarding.write_off_minor`. Refund it first through the normal refund path if the merchant wants the money back (WA-REFUND-1 applies to a cancelled plan).
 
+An operator asking while an owner request is pending TAKES IT OVER in one statement (role, requester, reason, the earlier of the two dates; log `taken_over`), so the owner can no longer cancel it; an owner asking never downgrades an operator-owned row.
+
 ## Race safety (security review)
 The run is claimed with ONE conditional write (`state IN ('pending','running') AND execute_after <= now`, `meta.changes` checked); a row cancelled or not yet due since it was read is `skipped`. The state is re-read (`running`) before EVERY step, so a cancel that lands mid-run stops before the next destructive step. Cancel itself only succeeds on `pending`, so once the claim wins the deletion is irreversible by design.
 
