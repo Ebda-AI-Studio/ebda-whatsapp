@@ -63,6 +63,7 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
       </header>
       <div className="settings wide operator-layout">
         <p className="muted intro">{t.opIntro}</p>
+        <ViewAsCard t={t} />
         <div className="chips" role="group" aria-label={t.opTitle}>
           {TABS.filter((k) => k !== 'shared' || source.sharedTemplates).map((k) => <button key={k} type="button" className="chip" aria-pressed={tab === k} onClick={() => { setTab(k); setNote(null); }}>{t.opTabs[k]}</button>)}
         </div>
@@ -611,5 +612,19 @@ function KillSwitchPanel({ t, lang, api, run, fail }: PanelProps) {
         )}
       </Card>
     </>
+  );
+}
+
+/** T35: open a merchant's workspace read-only. The page asks for a reason and the server writes an audit row for every request. */
+function ViewAsCard({ t }: { t: Strings }) {
+  const [id, setId] = useState('');
+  const ok = /^[A-Za-z0-9_-]{1,64}$/.test(id.trim());
+  return (
+    <section className="view-as-card" aria-labelledby="view-as-title">
+      <h2 id="view-as-title">{t.viewAsTitle}</h2>
+      <p className="muted">{t.viewAsHelp}</p>
+      <label>{t.viewAsWorkspace}<input value={id} onChange={(e) => setId(e.target.value)} dir="ltr" autoComplete="off" /></label>
+      {ok ? <a className="btn" href={`/?store=${encodeURIComponent(id.trim())}&viewAs=1`}>{t.viewAsOpen}</a> : <span className="muted">{t.viewAsNeedsId}</span>}
+    </section>
   );
 }

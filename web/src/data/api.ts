@@ -17,6 +17,8 @@ export class ApiError extends Error {
 type Opts = {
   baseUrl: string; storeId: string; getToken: () => Promise<string>;
   fetchImpl?: typeof fetch; userNames: Record<string, string>; currentUserId: string;
+  /** T35: look at this workspace as an operator, read-only; `reason` is sent with every request and written to the audit log. */
+  viewAs?: { reason: string };
 };
 
 /** The live inbox source: every response is validated against the shared contract. */
@@ -31,6 +33,7 @@ export function createApiSource(o: Opts): LiveSource {
   async function call<S extends z.ZodTypeAny>(path: string, schema: S, init: RequestInit = {}, base: string = root): Promise<z.infer<S>> {
     const headers = new Headers(init.headers);
     headers.set('authorization', `Bearer ${await o.getToken()}`);
+    if (o.viewAs) { headers.set('x-view-as-merchant', '1'); headers.set('x-view-as-reason', o.viewAs.reason); }
     if (init.body && !(init.body instanceof FormData)) headers.set('content-type', 'application/json');
     const res = await f(`${base}${path}`, { ...init, headers });
     const json = await res.json().catch(() => null);
@@ -53,6 +56,7 @@ export function createApiSource(o: Opts): LiveSource {
 
   const source: LiveSource = {
     kind: 'live',
+    ...(o.viewAs ? { viewAs: true } : {}),
     // Off until the server says the store link is bound (GET /me → capabilities): never offer an action that would 404.
     capabilities: { codOutcome: false },
     // Least privilege until GET /me answers: spending actions stay hidden.
