@@ -38,6 +38,19 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     const membership = principal.stores.find((s) => s.id === storeId);
     if (!membership && !principal.superAdmin) return c.json({ error: 'forbidden' }, 403);
     const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
+    // T35: an operator looking at a merchant's workspace to help them. Read-only, a reason on every request, audited BEFORE it is served (no audit, no view).
+    if (c.req.header('x-view-as-merchant') === '1') {
+      if (!principal.superAdmin) return c.json({ error: 'forbidden', message: 'view_as_operators_only' }, 403);
+      const reason = (c.req.header('x-view-as-reason') ?? '').trim();
+      if (reason.length < 10 || reason.length > 200) return c.json({ error: 'invalid_request', message: 'view_as_reason_required' }, 400);
+      const route = new URL(c.req.url).pathname.replace(/^\/api\/v1/, '').replace(/\/\d{6,}(?=\/|$)/g, '/:id');
+      try {
+        await c.env.DB.prepare('INSERT INTO operator_view_log (at, actor, workspace_id, method, route, reason) VALUES (?, ?, ?, ?, ?, ?)').bind(Date.now(), principal.userId, storeId ?? '', c.req.method, route.slice(0, 300), reason).run();
+      } catch {
+        return c.json({ error: 'unavailable', message: 'view_as_audit_unavailable' }, 503);
+      }
+      if (write || c.req.header('upgrade')?.toLowerCase() === 'websocket') return c.json({ error: 'forbidden', message: 'view_as_read_only' }, 403);
+    }
     // M-135: a person token is revocation-checked on EVERY write, not only on money actions (fail closed: an unreachable accounts service refuses it).
     if (write && !principal.integration) {
       const s = await writeSessionState(c.env, principal.sessionId);

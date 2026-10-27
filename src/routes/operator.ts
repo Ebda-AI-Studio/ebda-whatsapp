@@ -270,3 +270,11 @@ operatorRoutes.post('/workspaces/:workspaceId/shared-number/evict', killSwitch(e
 operatorRoutes.post('/workspaces/:workspaceId/shared-number/readmit', killSwitch(readmitToSharedNumber));
 operatorRoutes.post('/workspaces/:workspaceId/integrations/revoke', killSwitch(revokeIntegrations));
 operatorRoutes.post('/workspaces/:workspaceId/integrations/restore', killSwitch(restoreIntegrations));
+
+// T35: the trail of operator "view as merchant" reads of one workspace, newest first (docs/support.md).
+operatorRoutes.get('/view-log', async (c) => {
+  const q = z.object({ workspaceId: z.string().min(1).max(64), limit: z.coerce.number().int().min(1).max(200).default(50) }).safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
+  if (!q.success) return bad(c);
+  const { results } = await c.env.DB.prepare('SELECT at, actor, method, route, reason FROM operator_view_log WHERE workspace_id = ? ORDER BY id DESC LIMIT ?').bind(q.data.workspaceId, q.data.limit).all();
+  return c.json({ items: results });
+});
