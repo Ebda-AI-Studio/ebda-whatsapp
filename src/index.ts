@@ -17,7 +17,7 @@ import { operatorRoutes } from './routes/operator';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { TIER_LIMITS } from './core/throttle';
-import { BUYER_KEY_PROBE_E164, buyerKey } from './core/buyer-key';
+import { buyerKey, buyerKeyProbe } from './core/buyer-key';
 import { messagesRoutes } from './routes/messages';
 import { conversationsRoutes } from './routes/conversations';
 import { mediaRoutes } from './routes/media';
@@ -200,10 +200,10 @@ app.get('/health', async (c) => {
     alert('secret_misconfigured', { severity: 'P1', keys: problems });
     return c.json({ ok: false, status: 'misconfigured', service: PACK.service, commit }, 503);
   }
-  // D4: a value DERIVED from SUITE_BUYER_KEY_SECRET (the buyer key of a fixed probe number), so scripts/verify-prod.mjs can prove it equals Ebda Store's
+  // D4: a value DERIVED from SUITE_BUYER_KEY_SECRET (16 hex of an HMAC over a fixed non-phone string, see buyer-key.ts), so scripts/verify-prod.mjs can prove it equals Ebda Store's
   // without the secret leaving either Worker. Absent when the secret is unset.
   const secret = c.env.SUITE_BUYER_KEY_SECRET;
-  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(secret ? { buyerKeyVector: await buyerKey(secret, BUYER_KEY_PROBE_E164) } : {}) });
+  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(secret ? { buyerKeyVector: await buyerKeyProbe(secret) } : {}) });
 });
 
 app.get('/meta/webhook', (c) => {

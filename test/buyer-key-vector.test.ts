@@ -1,7 +1,8 @@
 import { createExecutionContext, env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import worker from '../src/index';
-import { BUYER_KEY_PROBE_E164, buyerKey } from '../src/core/buyer-key';
+import { BUYER_KEY_PROBE_INPUT, buyerKeyProbe } from '../src/core/buyer-key';
+import { isE164, normaliseE164 } from '../src/core/phone';
 // @ts-expect-error plain .mjs script, no types
 import { runChecks } from '../scripts/verify-prod.mjs';
 
@@ -14,11 +15,31 @@ const health = async (over: Record<string, unknown>) => {
   return { status: res.status, text: await res.text() };
 };
 
-it('/health publishes the buyer key of the probe number, never the secret', async () => {
+it('the probe input is the exact pinned string and can never be read as a phone number', () => {
+  expect(BUYER_KEY_PROBE_INPUT).toBe('suite-buyer-key-probe:v1');
+  expect(normaliseE164(BUYER_KEY_PROBE_INPUT)).toBeNull();
+  expect(isE164(BUYER_KEY_PROBE_INPUT)).toBe(false);
+});
+
+it('/health publishes 16 hex derived from the probe string, never the secret and nothing derived from a phone number', async () => {
   const r = await health({ SUITE_BUYER_KEY_SECRET: SECRET });
   expect(r.status).toBe(200);
-  expect(JSON.parse(r.text).buyerKeyVector).toBe(await buyerKey(SECRET, BUYER_KEY_PROBE_E164));
+  const v = JSON.parse(r.text).buyerKeyVector as string;
+  expect(v).toMatch(/^[0-9a-f]{16}$/);
+  expect(v).toBe(await buyerKeyProbe(SECRET));
   expect(r.text).not.toContain(SECRET);
+  expect(r.text).not.toMatch(/[0-9a-f]{32,}/); // no full buyer-key-sized value anywhere in the public body
+});
+
+it('pinned vector: HMAC-SHA256(secret, "suite-buyer-key-probe:v1") as hex, first 16 characters', async () => {
+  const { createHmac } = await import('node:crypto');
+  expect(await buyerKeyProbe(SECRET)).toBe(createHmac('sha256', SECRET).update('suite-buyer-key-probe:v1').digest('hex').slice(0, 16));
+});
+
+it('two Workers with the same secret agree and different secrets differ', async () => {
+  expect(await buyerKeyProbe(SECRET)).toBe(await buyerKeyProbe(SECRET));
+  expect(await buyerKeyProbe(SECRET)).not.toBe(await buyerKeyProbe('t'.repeat(32)));
+  expect(JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: SECRET })).text).buyerKeyVector).toBe(JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: SECRET })).text).buyerKeyVector);
 });
 
 it('without the secret there is no vector (and no empty string that two unset Workers would "agree" on)', async () => {
@@ -34,13 +55,13 @@ const fake = (self: Record<string, unknown>, peer?: Record<string, unknown> | 'd
 };
 const check = async (self: Record<string, unknown>, peer?: Record<string, unknown> | 'down', peerHealth: string | undefined = 'https://peer.test/health') =>
   (await runChecks({ base: 'https://wa.test', peerHealth, fetchImpl: fake(self, peer) })).find((c: { name: string }) => c.name === 'suite buyer key equal on both Workers');
-const V = 'a'.repeat(64);
+const V = 'a'.repeat(16);
 
 it('verify-prod passes when both Workers publish the same vector', async () => {
   expect(await check({ buyerKeyVector: V }, { buyerKeyVector: V })).toMatchObject({ ok: true });
 });
 it('verify-prod FAILS when the vectors differ, and says what that means', async () => {
-  const c = await check({ buyerKeyVector: V }, { buyerKeyVector: 'b'.repeat(64) });
+  const c = await check({ buyerKeyVector: V }, { buyerKeyVector: 'b'.repeat(16) });
   expect(c).toMatchObject({ ok: false });
   expect(c.detail).toMatch(/different/i);
   expect(c.detail).not.toContain(V);

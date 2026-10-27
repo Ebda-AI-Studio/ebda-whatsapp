@@ -216,3 +216,8 @@ it('every DO migration has a `// vNN` label directly above it that matches its p
   expect(labels.filter((l) => l.label !== l.entry)).toEqual([]); // a mislabelled entry, or a slot inserted mid-array
   expect(DO_MIGRATIONS.map((_, i) => i + 1).filter((n) => !labelled.has(n))).toEqual([]); // an UNLABELLED entry
 });
+
+// D4 follow-up: a value published on a public route must never be derived from something shaped like a real person's phone number.
+it('no string literal in src (outside tests and vectors) is an Egyptian E.164 mobile number', () => {
+  expect(findMatches(/['"`]\+20\d{9,10}['"`]/, 'src')).toEqual([]);
+});

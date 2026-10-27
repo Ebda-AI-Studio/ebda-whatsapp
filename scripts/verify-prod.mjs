@@ -34,8 +34,8 @@ export async function runChecks({ base, expectCommit, expectBrand, peerHealth, v
   else if (health) add('health commit', !!health.commit && (String(health.commit).startsWith(expectCommit) || expectCommit.startsWith(String(health.commit))), `running ${health.commit || '(empty)'}, expected ${expectCommit}`);
   else add('health commit', false, 'no health answer');
 
-  // D4: SUITE_BUYER_KEY_SECRET must be identical on this Worker and on Ebda Store. Each publishes a value DERIVED from it on /health (the buyer key of a
-  // fixed probe number); the two are compared here. The secret is never an input of this script and never printed, and neither is the vector.
+  // D4: SUITE_BUYER_KEY_SECRET must be identical on this Worker and on Ebda Store. Each publishes a value DERIVED from it on /health (16 hex of an HMAC over a
+  // fixed non-phone string); the two are compared here. The secret is never an input of this script and never printed, and neither is the vector.
   {
     const name = 'suite buyer key equal on both Workers';
     if (!peerHealth) add(name, null, 'skipped: pass --peer-health <url of the other Worker\'s /health> (Ebda Store)');

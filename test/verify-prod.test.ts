@@ -12,8 +12,8 @@ function fakeDeploy(over: { kashierServedByAssets?: boolean; commit?: string; no
   const sec: Record<string, string> = over.noHsts ? {} : { 'strict-transport-security': 'max-age=63072000', 'x-content-type-options': 'nosniff' };
   return async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
-    if (u.host === 'peer.test') return new Response(JSON.stringify({ buyerKeyVector: 'v'.repeat(64) }));
-    if (u.pathname === '/health') return new Response(JSON.stringify({ ok: true, service: 'ebda-wa', commit: over.commit ?? COMMIT, buyerKeyVector: 'v'.repeat(64) }), { headers: sec });
+    if (u.host === 'peer.test') return new Response(JSON.stringify({ buyerKeyVector: 'v'.repeat(16) }));
+    if (u.pathname === '/health') return new Response(JSON.stringify({ ok: true, service: 'ebda-wa', commit: over.commit ?? COMMIT, buyerKeyVector: 'v'.repeat(16) }), { headers: sec });
     if (u.pathname === '/') return new Response('<html></html>', { headers: { ...sec, 'content-security-policy': over.csp ?? "default-src 'self'; frame-ancestors 'none'" } });
     if (u.pathname === '/brand.json') return over.brand === null ? new Response('<html></html>') : new Response(JSON.stringify({ brand: over.brand ?? 'ebda' }));
     if (u.pathname === '/meta/webhook' && (init.method ?? 'GET') === 'GET') {
