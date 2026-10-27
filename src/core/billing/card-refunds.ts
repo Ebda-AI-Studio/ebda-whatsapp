@@ -23,6 +23,7 @@ import { APPROVAL_LEASE_MS } from './refunds';
 import { isCardRefundOperation, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { alert } from '../observability';
 import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
+import { noteRefundExcess } from './refund-excess';
 
 /** Rows that count against a top-up's room: the open ones, the planned ones (reserved, not debited yet) and held refunds (real refunds awaiting a match). */
 export const RESERVING = "('planned', 'sending', 'calling', 'pending', 'uncertain', 'held')";
@@ -122,7 +123,7 @@ export async function settleCardRefund(env: Env, id: string, o: Outcome, now: nu
   const first = refundId === null ? upd.bind(state, now, id) : upd.bind(state, refundId, now, id);
   const stmts = [first];
   if (o.to === 'succeeded') {
-    stmts.push(env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + (SELECT amount_minor FROM card_refunds WHERE id = ?) WHERE order_id = (SELECT order_id FROM card_refunds WHERE id = ?) AND changes() > 0').bind(id, id));
+    stmts.push(env.DB.prepare('UPDATE topups SET refunded_minor = MIN(amount_minor, refunded_minor + (SELECT amount_minor FROM card_refunds WHERE id = ?)) WHERE order_id = (SELECT order_id FROM card_refunds WHERE id = ?) AND changes() > 0').bind(id, id));
   }
   const res = await env.DB.batch(stmts);
   const moved = (res[0]?.meta.changes ?? 0) > 0;
@@ -187,7 +188,7 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
         return 'refund_held';
       }
     }
-    const top = await env.DB.prepare('SELECT amount_minor, fee_minor FROM topups WHERE order_id = ?').bind(t.order_id).first<{ amount_minor: number; fee_minor: number }>();
+    const top = await env.DB.prepare('SELECT amount_minor, fee_minor, refunded_minor FROM topups WHERE order_id = ?').bind(t.order_id).first<{ amount_minor: number; fee_minor: number; refunded_minor: number }>();
     const credited = top?.amount_minor ?? 0;
     const debit = Math.min(ev.amountMinor, credited);
     if (debit <= 0) {
@@ -196,11 +197,14 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
       return 'refund_unmatched';
     }
     excess = ev.amountMinor - debit;
+    // MONEY-FACT-1: the refund is recorded and debited in full; only the bookkeeping column is clamped, and what lies beyond the charge is reported.
+    const over = Math.max(0, (top?.refunded_minor ?? 0) + debit - credited);
     const res = await env.DB.batch([
-      env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, note) VALUES (?, NULL, ?, ?, ?, 'webhook', 'succeeded', ?, ?, ?, ?) ON CONFLICT DO NOTHING")
-        .bind(`wh:${ev.transactionId}`, t.order_id, t.workspace_id, debit, ev.transactionId, now, now, excess > 0 ? `excess_minor=${excess};fee_minor=${top?.fee_minor ?? 0}` : null),
-      env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(debit, t.order_id),
+      env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, note, over_charge_minor) VALUES (?, NULL, ?, ?, ?, 'webhook', 'succeeded', ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")
+        .bind(`wh:${ev.transactionId}`, t.order_id, t.workspace_id, debit, ev.transactionId, now, now, excess > 0 ? `excess_minor=${excess};fee_minor=${top?.fee_minor ?? 0}` : null, over),
+      env.DB.prepare('UPDATE topups SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND changes() > 0').bind(debit, t.order_id),
     ]);
+    if ((res[0]?.meta.changes ?? 0) > 0) await noteRefundExcess(env, { kind: 'topup', workspaceId: t.workspace_id, orderId: t.order_id, eventRef: ev.transactionId, eventMinor: ev.amountMinor, overMinor: over }, now);
     row = (await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(ev.transactionId).first<CardRefundRow>())!;
     // Another path took this refund id between our read and our write: it owns the money (the wallet was debited at approval), nothing is posted here.
     if (!(res[0]?.meta.changes ?? 0) && row.source !== 'webhook') return reconcileOwned(env, t, ev, row, isCardRefund, now);
@@ -289,7 +293,7 @@ export async function linkDashboardRefund(env: Env, a: { requestId: string; kash
       await env.DB.batch([
         env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'dashboard', 'linked', ?, ?, ?)")
           .bind(`dash:${a.kashierRefundId}`, a.requestId, topup.order_id, req.workspace_id, a.amountMinor, a.kashierRefundId, now, now),
-        env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(a.amountMinor, topup.order_id),
+        env.DB.prepare('UPDATE topups SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND changes() > 0').bind(a.amountMinor, topup.order_id),
       ]);
     } catch {
       return { ok: false, reason: 'already_linked' }; // the provider's refund id is unique
@@ -374,7 +378,7 @@ export async function matchHeldRefund(env: Env, a: { refundId: string; actor: st
   const both = cand.kashier_refund_id !== null && listed.some((r) => r.refundId === cand.kashier_refund_id && r.status === 'SUCCESS' && isCardRefundOperation(r.operation));
   if (both) {
     // A real second refund. Debit it as the unknown refund it is: held row -> webhook row (in one guarded batch), then the wallet (idempotent ref).
-    const top = await env.DB.prepare('SELECT amount_minor FROM topups WHERE order_id = ?').bind(held.order_id).first<{ amount_minor: number }>();
+    const top = await env.DB.prepare('SELECT amount_minor, refunded_minor FROM topups WHERE order_id = ?').bind(held.order_id).first<{ amount_minor: number; refunded_minor: number }>();
     const debit = Math.min(held.amount_minor, top?.amount_minor ?? 0);
     if (debit > 0) {
       // Money first (the ref is idempotent per Kashier transaction, so a retry cannot debit twice), THEN the state flip: if the wallet post
@@ -382,10 +386,11 @@ export async function matchHeldRefund(env: Env, a: { refundId: string; actor: st
       const r = await stubOf(env, held.workspace_id).postWallet({ kind: 'chargeback', netMinor: -debit, ref: `chargeback:${a.refundId}`, note: `provider refund of ${held.order_id}: operator review` }, now);
       if (!r.ok && r.reason !== 'duplicate') throw new Error(`refund debit refused: ${r.reason}`);
       await env.DB.batch([
-        env.DB.prepare("UPDATE card_refunds SET source = 'webhook', state = 'succeeded', amount_minor = ?, updated_at = ? WHERE id = ? AND source = 'held' AND state = 'held'").bind(debit, now, held.id),
-        env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(debit, held.order_id),
+        env.DB.prepare("UPDATE card_refunds SET source = 'webhook', state = 'succeeded', amount_minor = ?, updated_at = ?, over_charge_minor = ? WHERE id = ? AND source = 'held' AND state = 'held'").bind(debit, now, Math.max(0, (top?.refunded_minor ?? 0) + debit - (top?.amount_minor ?? 0)), held.id),
+        env.DB.prepare('UPDATE topups SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND changes() > 0').bind(debit, held.order_id),
       ]);
     }
+    await noteRefundExcess(env, { kind: 'topup', workspaceId: held.workspace_id, orderId: held.order_id, eventRef: a.refundId, eventMinor: held.amount_minor, overMinor: Math.max(0, (top?.refunded_minor ?? 0) + debit - (top?.amount_minor ?? 0)) }, now);
     alert('refund_held_debited', { severity: 'P1', workspace: held.workspace_id, orderId: held.order_id, refundId: a.refundId, candidate: cand.id, debitedMinor: debit });
     return { ok: false, reason: 'separate_refund_debited' };
   }
