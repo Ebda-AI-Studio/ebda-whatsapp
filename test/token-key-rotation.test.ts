@@ -128,3 +128,23 @@ describe('the operator finishes the rotation', () => {
     expect(await ok.json()).toMatchObject({ onPrevious: expect.any(Number), unreadable: expect.any(Number), previousKeyConfigured: false });
   });
 });
+
+describe('rotation review items', () => {
+  it('status is never complete when only TOKEN_ENC_KEY_PREVIOUS is set', async () => {
+    const e = at({ TOKEN_ENC_KEY: undefined, TOKEN_ENC_KEY_PREVIOUS: OLD });
+    expect((await rotationStatus(e)).complete).toBe(false);
+  });
+
+  it('POST /token-key/rotate needs a reason, and the reason is kept in audit_reasons, not in the audit row', async () => {
+    const REASON = 'scheduled yearly rotation, ticket 77';
+    const noReason = await operatorCall(OP1, 'POST', '/token-key/rotate', {});
+    expect(noReason.status).toBe(400);
+    const ok = await operatorCall(OP1, 'POST', '/token-key/rotate', { reason: REASON });
+    expect([200, 409]).toContain(ok.status);
+    const a = await env.DB.prepare("SELECT detail FROM audit_log WHERE action = 'token_key.rotate'").all<{ detail: string | null }>();
+    expect(a.results.length).toBeGreaterThan(0);
+    expect(JSON.stringify(a.results)).not.toContain('yearly');
+    const r = await env.DB.prepare("SELECT reason FROM audit_reasons WHERE action = 'token_key.rotate'").all<{ reason: string }>();
+    expect(r.results.map((x) => x.reason)).toContain(REASON);
+  });
+});

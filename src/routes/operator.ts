@@ -24,7 +24,7 @@ import { eraseContactFlow } from '../core/contact-erase';
 import { purgeAuditLog } from '../core/ops/audit-retention';
 import { approveOffboarding, cancelOffboarding, getOffboardingWithLog, listOffboardings, releaseAbuseHold, requestOffboarding, runDueOffboardings } from '../core/ops/offboarding';
 import { listAudit, recordAudit } from '../core/audit';
-import { reasonSql } from '../core/audit-reason';
+import { PLATFORM_WORKSPACE, reasonSql } from '../core/audit-reason';
 import { subjectHash } from '../core/erasure';
 import { waIdParam } from './contacts';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
@@ -387,9 +387,10 @@ operatorRoutes.get('/token-key/status', async (c) => {
   return c.json(await rotationStatus(c.env, { ...(q.data.cursor ? { cursor: q.data.cursor } : {}), ...(q.data.budget ? { budget: q.data.budget } : {}) }));
 });
 operatorRoutes.post('/token-key/rotate', async (c) => {
-  const body = z.object({ batch: z.number().int().min(1).max(500).optional(), cursor: z.string().max(200).optional() }).safeParse(await c.req.json().catch(() => ({})));
+  const body = z.object({ batch: z.number().int().min(1).max(500).optional(), cursor: z.string().max(200).optional(), reason: z.string().trim().min(10).max(200) }).safeParse(await c.req.json().catch(() => ({})));
   if (!body.success) return c.json({ error: 'invalid_request' }, 400);
   const r = await rotateTokenKey(c.env, body.data.batch ?? 100, body.data.cursor ? { cursor: body.data.cursor } : {});
+  await recordAudit(c.env, { workspaceId: PLATFORM_WORKSPACE, actor: actor(c), role: 'operator', action: 'token_key.rotate', reason: body.data.reason, status: r.ok ? 200 : 409 }); // the reason goes to audit_reasons (AUDIT-REASONS-1)
   console.log(JSON.stringify({ audit: 'token_key_rotate', by: c.get('principal').userId, ...(r.ok ? { rotated: r.rotated, remaining: r.remaining, unreadable: r.unreadable, complete: r.complete } : { refused: r.reason }) }));
   return r.ok ? c.json(r) : c.json({ error: 'invalid_request', message: r.reason }, 409);
 });

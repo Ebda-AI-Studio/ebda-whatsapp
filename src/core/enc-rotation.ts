@@ -73,7 +73,8 @@ export async function rotationStatus(env: Env, opts: { budget?: number; cursor?:
   });
   const truncated = next !== null;
   // A continuation pass cannot vouch for rows before its cursor: only a pass that started at the beginning and ended exhausted can be complete.
-  const complete = !truncated && !opts.cursor && onPrevious === 0 && unreadable === 0;
+  // With only TOKEN_ENC_KEY_PREVIOUS set the old key is the "current" one (index 0): nothing is on the previous key, but nothing was rotated either.
+  const complete = !!env.TOKEN_ENC_KEY && !!env.TOKEN_ENC_KEY_PREVIOUS && !truncated && !opts.cursor && onPrevious === 0 && unreadable === 0;
   return { onPrevious, unreadable, total, previousKeyConfigured: keys.length > 1, complete, truncated, nextCursor: next };
 }
 

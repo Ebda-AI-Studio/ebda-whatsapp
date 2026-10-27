@@ -194,6 +194,13 @@ it('overlapping task runs never execute the same task twice (lease)', async () =
   expect(g.calls.length).toBe(1);
 });
 
+it('an mp4 is recognised by its ftyp brand: mov, m4a and heic are not mp4', async () => {
+  const { sniffMime } = await import('../src/core/media');
+  const brand = (b: string) => bytesOf([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, ...[...b].map((c) => c.charCodeAt(0))]);
+  for (const ok of ['isom', 'mp42', 'avc1']) expect(sniffMime(brand(ok)), ok).toBe('video/mp4');
+  for (const no of ['qt  ', 'M4A ', 'heic']) expect(sniffMime(brand(no)), no).toBeNull();
+});
+
 // M-134: the bytes decide, not the declared type.
 it('sniffs the real type from the bytes: a file whose bytes do not match its declared type is unsupported_media and never reaches Meta', async () => {
   const store = W(407);
