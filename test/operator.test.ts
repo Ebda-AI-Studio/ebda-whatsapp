@@ -285,10 +285,10 @@ describe('state-changing operator routes check the session (fail closed)', () =>
     configureSessionCheck(null); // no override and no ACCOUNTS binding in this environment
     expect((await operatorCall(OP1, method, path, body)).status).toBe(503);
   });
-  it('reads need no session check; a healthy session passes the check', async () => {
+  it('only the listed global-configuration reads skip the check (test/operator-session.test.ts walks all routes); a healthy session passes the check', async () => {
     configureSessionCheck(null);
-    expect((await operatorCall(OP1, 'GET', '/pricing-settings')).status).toBe(200);
-    expect((await operatorCall(OP1, 'GET', '/change-log')).status).toBe(200);
+    expect((await operatorCall(OP1, 'GET', '/pricing-settings')).status).toBe(200); // listed: no personal data
+    expect((await operatorCall(OP1, 'GET', '/change-log')).status).toBe(503); // everything else fails closed without a working session check
     configureSessionCheck(async () => false);
     expect((await operatorCall(OP1, 'PUT', '/numbers/pn-nobody/funding', { funding: 'merchant_card', reason: 'session check' })).status).toBe(404); // past the check, then the normal answer
   });

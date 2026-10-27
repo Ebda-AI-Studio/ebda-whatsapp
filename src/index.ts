@@ -1,3 +1,8 @@
+import { runDueOffboardings } from './core/ops/offboarding';
+import { offboardingRoutes } from './routes/offboarding';
+import { auditWrites } from './core/audit';
+import { eraseContactFlow } from './core/contact-erase';
+import { reconcileRefundBounds } from './core/billing/refund-excess';
 import * as Sentry from '@sentry/cloudflare';
 import { env as workerEnv } from 'cloudflare:workers';
 import { Hono } from 'hono';
@@ -34,6 +39,7 @@ import { proofRoutes } from './routes/proof';
 import { agentRoutes } from './routes/agent';
 import { connectorRoutes } from './routes/connectors';
 import { contactsRoutes } from './routes/contacts';
+import { retentionRoutes } from './routes/retention';
 import { importsRoutes } from './routes/imports';
 import { segmentsRoutes } from './routes/segments';
 import { campaignsRoutes } from './routes/campaigns';
@@ -42,7 +48,7 @@ import { numbersRoutes } from './routes/numbers';
 import { reconcileEntitlements } from './core/billing/subscriptions';
 import { repairPackageOrders } from './core/billing/package-orders';
 import { reconcileCardRefunds, sweepAbandonedRefunds } from './core/billing/card-refunds';
-import { expireInstapay, overdueInstapay, repairInstapay } from './core/billing/instapay';
+import { expireInstapay, overdueInstapay, purgeInstapayProofs, repairInstapay } from './core/billing/instapay';
 import { paymentProvider } from './core/billing/payments';
 import { handleProviderWebhook, reconfirmUnconfirmed, repairTopups } from './core/billing/topups';
 import { packageRoutes } from './routes/packages';
@@ -134,6 +140,7 @@ const getVerifier = (env: Env): IdentityVerifier => (verifier ??= selectVerifier
 const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
 api.use('/operator/*', requireSuperAdmin(getVerifier));
+api.use('*', auditWrites()); // every state-changing call: who, what, which ids (src/core/audit.ts)
 api.use('*', apiContentTypes()); // after auth: 401/403 first, then 415 for a body type the route class does not take
 api.route('/operator', operatorRoutes);
 api.get('/stores/:storeId/me', (c) => {
@@ -141,20 +148,12 @@ api.get('/stores/:storeId/me', (c) => {
   return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env) } });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
+  // The member's own right to erase (STORE-ROUTES-OWNER-1): the owner, or a super admin who is a MEMBER of the store (requireStoreAccess already refused a non-member's write; that operator uses the operator route, which needs a stated reason).
   const role = c.get('storeRole');
   if (role !== 'owner' && role !== 'super_admin') return c.json({ error: 'forbidden' }, 403);
   // Hono has already percent-decoded the param; decoding again would turn a literal % into a 500.
-  const e164 = normaliseE164(c.req.param('waId'));
-  if (!e164) return c.json({ error: 'invalid phone number' }, 400);
-  const storeId = c.req.param('storeId');
-  // For Ebda Store stores the workspace id is the store id (Phase 1 ruling). Never touch a DO for an unregistered workspace.
-  const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(storeId).first();
-  if (!known) return c.json({ error: 'workspace not found' }, 404);
-  const result = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId)).eraseContact(e164.slice(1));
-  if (!result.found && result.r2Pending === 0) return c.json({ error: 'contact not found' }, 404);
-  const who = c.env.SUITE_BUYER_KEY_SECRET ? await buyerKey(c.env.SUITE_BUYER_KEY_SECRET, e164) : `…${e164.slice(-4)}`;
-  console.log(JSON.stringify({ audit: 'contact_erased', storeId, by: c.get('principal').userId, buyer: who, ...result }));
-  return c.json(result);
+  const r = await eraseContactFlow(c.env, { storeId: c.req.param('storeId'), waIdParam: c.req.param('waId'), actor: c.get('principal').userId });
+  return c.json(r.body, r.status);
 });
 api.route('/', messagesRoutes);
 api.route('/', conversationsRoutes);
@@ -166,6 +165,7 @@ api.route('/', proofRoutes);
 api.route('/', agentRoutes);
 api.route('/', connectorRoutes);
 api.route('/', contactsRoutes);
+api.route('/', retentionRoutes);
 api.route('/', importsRoutes);
 api.route('/', segmentsRoutes);
 api.route('/', campaignsRoutes);
@@ -175,6 +175,7 @@ api.route('/', instapayRoutes);
 api.route('/', instapayProofRoutes);
 api.route('/', packageRoutes);
 api.route('/', sharedNumberRoutes);
+api.route('/', offboardingRoutes);
 app.route('/api/v1', api);
 /** The /api/v1 routes, exported so a test can walk them (every store route needs a scope decision in core/identity/scopes.ts). */
 export const apiRoutes = api;
@@ -334,9 +335,12 @@ export async function dailyBilling(env: Env): Promise<void> {
   await reconcileCardRefunds(env, paymentProvider(env)).catch((err) => alert('card_refund_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await sweepAbandonedRefunds(env).catch((err) => alert('refund_abandon_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));
   await expireInstapay(env).catch((err) => alert('instapay_expiry_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await purgeInstapayProofs(env).catch((err) => alert('instapay_proof_purge_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairInstapay(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await overdueInstapay(env).catch((err) => alert('instapay_overdue_check_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairPackageOrders(env).catch((err) => alert('package_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await runDueOffboardings(env).catch((err) => alert('offboarding_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await reconcileRefundBounds(env).catch((err) => alert('refund_exceeds_charge', { error: err instanceof Error ? err.name : 'error', reconcileFailed: true }));
   await sweepShared(env).catch((err) => alert('shared_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));
 }
 

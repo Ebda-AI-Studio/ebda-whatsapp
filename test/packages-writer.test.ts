@@ -17,8 +17,8 @@ describe('setSubscription: the one writer', () => {
     const b = await setSubscription(env, base(ws, { status: 'past_due' }));
     expect([a.version, b.version]).toEqual([1, 2]);
     expect(await workspace(ws).getEntitlement()).toMatchObject({ version: 2, packageId: 'store-included', status: 'past_due' });
-    const audit = await env.DB.prepare("SELECT actor, action, reason FROM billing_audit WHERE workspace_id = ? AND action = 'subscription_set' ORDER BY id").bind(ws).all();
-    expect(audit.results).toEqual([{ actor: 'operator', action: 'subscription_set', reason: 'op-1' }, { actor: 'operator', action: 'subscription_set', reason: 'op-1' }]);
+    const audit = await env.DB.prepare("SELECT actor, action, ref FROM billing_audit WHERE workspace_id = ? AND action = 'subscription_set' ORDER BY id").bind(ws).all();
+    expect(audit.results).toEqual([{ actor: 'operator', action: 'subscription_set', ref: 'op-1' }, { actor: 'operator', action: 'subscription_set', ref: 'op-1' }]);
     expect((await env.DB.prepare('SELECT source FROM workspace_subscriptions WHERE workspace_id = ?').bind(ws).first<{ source: string }>())?.source).toBe('operator');
   });
 

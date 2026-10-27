@@ -22,6 +22,9 @@ import { auditOnce } from './package-orders';
 import { APPROVAL_LEASE_MS } from './refunds';
 import { isCardRefundOperation, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { alert } from '../observability';
+import { refuseIfOffboarded } from '../ops/offboarded';
+import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
+import { noteRefundExcess } from './refund-excess';
 
 /** Rows that count against a top-up's room: the open ones, the planned ones (reserved, not debited yet) and held refunds (real refunds awaiting a match). */
 export const RESERVING = "('planned', 'sending', 'calling', 'pending', 'uncertain', 'held')";
@@ -121,7 +124,7 @@ export async function settleCardRefund(env: Env, id: string, o: Outcome, now: nu
   const first = refundId === null ? upd.bind(state, now, id) : upd.bind(state, refundId, now, id);
   const stmts = [first];
   if (o.to === 'succeeded') {
-    stmts.push(env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + (SELECT amount_minor FROM card_refunds WHERE id = ?) WHERE order_id = (SELECT order_id FROM card_refunds WHERE id = ?) AND changes() > 0').bind(id, id));
+    stmts.push(env.DB.prepare('UPDATE topups SET refunded_minor = MIN(amount_minor, refunded_minor + (SELECT amount_minor FROM card_refunds WHERE id = ?)) WHERE order_id = (SELECT order_id FROM card_refunds WHERE id = ?) AND changes() > 0').bind(id, id));
   }
   const res = await env.DB.batch(stmts);
   const moved = (res[0]?.meta.changes ?? 0) > 0;
@@ -186,7 +189,7 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
         return 'refund_held';
       }
     }
-    const top = await env.DB.prepare('SELECT amount_minor, fee_minor FROM topups WHERE order_id = ?').bind(t.order_id).first<{ amount_minor: number; fee_minor: number }>();
+    const top = await env.DB.prepare('SELECT amount_minor, fee_minor, refunded_minor FROM topups WHERE order_id = ?').bind(t.order_id).first<{ amount_minor: number; fee_minor: number; refunded_minor: number }>();
     const credited = top?.amount_minor ?? 0;
     const debit = Math.min(ev.amountMinor, credited);
     if (debit <= 0) {
@@ -195,11 +198,14 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
       return 'refund_unmatched';
     }
     excess = ev.amountMinor - debit;
+    // MONEY-FACT-1: the refund is recorded and debited in full; only the bookkeeping column is clamped, and what lies beyond the charge is reported.
+    const over = Math.max(0, (top?.refunded_minor ?? 0) + debit - credited);
     const res = await env.DB.batch([
-      env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, note) VALUES (?, NULL, ?, ?, ?, 'webhook', 'succeeded', ?, ?, ?, ?) ON CONFLICT DO NOTHING")
-        .bind(`wh:${ev.transactionId}`, t.order_id, t.workspace_id, debit, ev.transactionId, now, now, excess > 0 ? `excess_minor=${excess};fee_minor=${top?.fee_minor ?? 0}` : null),
-      env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(debit, t.order_id),
+      env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at, note, over_charge_minor) VALUES (?, NULL, ?, ?, ?, 'webhook', 'succeeded', ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")
+        .bind(`wh:${ev.transactionId}`, t.order_id, t.workspace_id, debit, ev.transactionId, now, now, excess > 0 ? `excess_minor=${excess};fee_minor=${top?.fee_minor ?? 0}` : null, over),
+      env.DB.prepare('UPDATE topups SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND changes() > 0').bind(debit, t.order_id),
     ]);
+    if ((res[0]?.meta.changes ?? 0) > 0) await noteRefundExcess(env, { kind: 'topup', workspaceId: t.workspace_id, orderId: t.order_id, eventRef: ev.transactionId, eventMinor: ev.amountMinor, overMinor: over }, now);
     row = (await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE kashier_refund_id = ?`).bind(ev.transactionId).first<CardRefundRow>())!;
     // Another path took this refund id between our read and our write: it owns the money (the wallet was debited at approval), nothing is posted here.
     if (!(res[0]?.meta.changes ?? 0) && row.source !== 'webhook') return reconcileOwned(env, t, ev, row, isCardRefund, now);
@@ -209,6 +215,8 @@ export async function applyProviderRefund(env: Env, t: TopupLite, ev: ParsedWebh
       alert('refund_excess_for_review', { severity: 'P1', workspace: t.workspace_id, orderId: t.order_id, refundId: ev.transactionId, excessMinor: unexplained, chargeback: !!ev.chargeback });
     }
   }
+  // A deleted workspace has no wallet to debit (and addressing its pseudonym would create a ghost): the refund fact is recorded above; a person reconciles it.
+  if (await refuseIfOffboarded(env, t.workspace_id, 'provider_refund', ev.transactionId, now)) return 'refunded';
   // Same ref on every path and replay: a second delivery posts nothing.
   const r = await stubOf(env, t.workspace_id).postWallet({ kind: 'chargeback', netMinor: -row.amount_minor, ref: `chargeback:${ev.transactionId}`, note: `provider refund of ${t.order_id}: operator review` }, now);
   if (r.ok) alert('topup_refunded_by_provider', { workspace: t.workspace_id, orderId: t.order_id });
@@ -288,14 +296,14 @@ export async function linkDashboardRefund(env: Env, a: { requestId: string; kash
       await env.DB.batch([
         env.DB.prepare("INSERT INTO card_refunds (id, request_id, order_id, workspace_id, amount_minor, source, state, kashier_refund_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'dashboard', 'linked', ?, ?, ?)")
           .bind(`dash:${a.kashierRefundId}`, a.requestId, topup.order_id, req.workspace_id, a.amountMinor, a.kashierRefundId, now, now),
-        env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(a.amountMinor, topup.order_id),
+        env.DB.prepare('UPDATE topups SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND changes() > 0').bind(a.amountMinor, topup.order_id),
       ]);
     } catch {
       return { ok: false, reason: 'already_linked' }; // the provider's refund id is unique
     }
   }
   await refreshRequest(env, a.requestId);
-  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_dashboard_linked', ?, NULL, ?, ?)")
+  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) VALUES (?, ?, 'refund_dashboard_linked', ?, NULL, ?, ?)")
     .bind(now, a.actor, req.workspace_id, JSON.stringify({ amountMinor: a.amountMinor, ...(adjustment ? { adjustmentId: adjustment.id } : {}) }), `${a.requestId}:${a.kashierRefundId}`).run();
   return { ok: true, ...(adjustment ? { adjustment } : {}) };
 }
@@ -305,11 +313,16 @@ export async function linkDashboardRefund(env: Env, a: { requestId: string; kash
  * read by id; one without an id is looked for in the provider's refund list for its top-up (same order, same amount, not already ours).
  * Nothing is ever re-sent. One that stays unresolved for 3 days alerts once (`card_refund_stuck`): a person checks the provider's dashboard.
  */
-export async function reconcileCardRefunds(env: Env, provider: PaymentProvider | null, now = Date.now()): Promise<{ settled: number; open: number }> {
+export async function reconcileCardRefunds(env: Env, provider: PaymentProvider | null, now = Date.now(), opts: PassOpts = {}): Promise<{ settled: number; open: number }> {
   const out = { settled: 0, open: 0 };
   if (!provider) return out;
-  const { results } = await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE state IN ${OPEN} AND source = 'api' AND updated_at < ? ORDER BY created_at LIMIT 100`).bind(now - RECONCILE_AFTER_MS).all<CardRefundRow>();
-  for (const row of results) {
+  const size = opts.page ?? DRAIN_PAGE;
+  await drainKeyset<CardRefundRow, [number, string]>({
+    name: 'reconcile_card_refunds', pageSize: size, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT ${COLS} FROM card_refunds WHERE state IN ${OPEN} AND source = 'api' AND updated_at < ?1 ${after ? 'AND (created_at > ?2 OR (created_at = ?2 AND id > ?3))' : ''} ORDER BY created_at, id LIMIT ${size}`)
+      .bind(now - RECONCILE_AFTER_MS, ...(after ?? [])).all<CardRefundRow>()).results,
+    cursorOf: (r) => [r.created_at, r.id],
+    handle: async (row) => {
     try {
       let outcome: Outcome | null = null;
       if (row.kashier_refund_id && provider.refundStatus) {
@@ -328,13 +341,14 @@ export async function reconcileCardRefunds(env: Env, provider: PaymentProvider |
           }
         }
       }
-      if (outcome && (await settleCardRefund(env, row.id, outcome, now))) { out.settled++; continue; }
+      if (outcome && (await settleCardRefund(env, row.id, outcome, now))) { out.settled++; return; }
     } catch (err) {
       alert('card_refund_reconcile_failed', { id: row.id, error: err instanceof Error ? err.name : 'error' });
     }
     out.open++;
     if (now - row.created_at > STUCK_AFTER_MS && (await auditOnce(env, 'card_refund_stuck', row.workspace_id, row.id, now))) alert('card_refund_stuck', { id: row.id, workspace: row.workspace_id, state: row.state });
-  }
+    },
+  });
   return out;
 }
 
@@ -367,18 +381,20 @@ export async function matchHeldRefund(env: Env, a: { refundId: string; actor: st
   const both = cand.kashier_refund_id !== null && listed.some((r) => r.refundId === cand.kashier_refund_id && r.status === 'SUCCESS' && isCardRefundOperation(r.operation));
   if (both) {
     // A real second refund. Debit it as the unknown refund it is: held row -> webhook row (in one guarded batch), then the wallet (idempotent ref).
-    const top = await env.DB.prepare('SELECT amount_minor FROM topups WHERE order_id = ?').bind(held.order_id).first<{ amount_minor: number }>();
+    const top = await env.DB.prepare('SELECT amount_minor, refunded_minor FROM topups WHERE order_id = ?').bind(held.order_id).first<{ amount_minor: number; refunded_minor: number }>();
     const debit = Math.min(held.amount_minor, top?.amount_minor ?? 0);
     if (debit > 0) {
       // Money first (the ref is idempotent per Kashier transaction, so a retry cannot debit twice), THEN the state flip: if the wallet post
       // throws, the row is still `held` and the retry finds it.
+      if (await refuseIfOffboarded(env, held.workspace_id, 'provider_refund', a.refundId, now)) return { ok: false, reason: 'separate_refund_debited' };
       const r = await stubOf(env, held.workspace_id).postWallet({ kind: 'chargeback', netMinor: -debit, ref: `chargeback:${a.refundId}`, note: `provider refund of ${held.order_id}: operator review` }, now);
       if (!r.ok && r.reason !== 'duplicate') throw new Error(`refund debit refused: ${r.reason}`);
       await env.DB.batch([
-        env.DB.prepare("UPDATE card_refunds SET source = 'webhook', state = 'succeeded', amount_minor = ?, updated_at = ? WHERE id = ? AND source = 'held' AND state = 'held'").bind(debit, now, held.id),
-        env.DB.prepare('UPDATE topups SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND changes() > 0').bind(debit, held.order_id),
+        env.DB.prepare("UPDATE card_refunds SET source = 'webhook', state = 'succeeded', amount_minor = ?, updated_at = ?, over_charge_minor = ? WHERE id = ? AND source = 'held' AND state = 'held'").bind(debit, now, Math.max(0, (top?.refunded_minor ?? 0) + debit - (top?.amount_minor ?? 0)), held.id),
+        env.DB.prepare('UPDATE topups SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND changes() > 0').bind(debit, held.order_id),
       ]);
     }
+    await noteRefundExcess(env, { kind: 'topup', workspaceId: held.workspace_id, orderId: held.order_id, eventRef: a.refundId, eventMinor: held.amount_minor, overMinor: Math.max(0, (top?.refunded_minor ?? 0) + debit - (top?.amount_minor ?? 0)) }, now);
     alert('refund_held_debited', { severity: 'P1', workspace: held.workspace_id, orderId: held.order_id, refundId: a.refundId, candidate: cand.id, debitedMinor: debit });
     return { ok: false, reason: 'separate_refund_debited' };
   }
@@ -387,7 +403,7 @@ export async function matchHeldRefund(env: Env, a: { refundId: string; actor: st
     env.DB.prepare("UPDATE card_refunds SET state = 'matched', updated_at = ? WHERE id = ? AND state = 'held' AND changes() > 0").bind(now, held.id),
   ]);
   if ((res[0]?.meta.changes ?? 0) !== 1 || (res[1]?.meta.changes ?? 0) !== 1) return { ok: false, reason: 'not_verified' };
-  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_held_matched', ?, NULL, ?, ?)")
+  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) VALUES (?, ?, 'refund_held_matched', ?, NULL, ?, ?)")
     .bind(now, a.actor, held.workspace_id, JSON.stringify({ candidate: cand.id, amountMinor: held.amount_minor }), a.refundId).run();
   return { ok: true };
 }
@@ -411,7 +427,7 @@ export async function markCardRefundFailed(env: Env, a: { requestId: string; car
     if (!taken) return { ok: false, reason: 'refund_exists_at_provider' };
   }
   await settleCardRefund(env, row.id, { to: 'failed' }, now);
-  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'card_refund_marked_failed', ?, NULL, ?, ?)")
+  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) VALUES (?, ?, 'card_refund_marked_failed', ?, NULL, ?, ?)")
     .bind(now, a.actor, row.workspace_id, JSON.stringify({ amountMinor: row.amount_minor }), row.id).run();
   return { ok: true };
 }
@@ -458,19 +474,24 @@ export async function reverseUnreversedChunks(env: Env, requestId: string, works
  * (`swept_at`), reverses what is eligible and marks each one it finished (clean or blocked-and-alerted) once it is past the grace window, so a backlog is worked off across
  * passes and older requests never starve behind newer ones.
  */
-export async function sweepAbandonedRefunds(env: Env, now = Date.now(), batch = 200): Promise<{ checked: number; reversed: number }> {
-  const { results } = await env.DB.prepare("SELECT id, workspace_id FROM refund_requests WHERE state = 'abandoned' AND swept_at IS NULL ORDER BY abandoned_at ASC, id ASC LIMIT ?").bind(batch).all<{ id: string; workspace_id: string }>();
+export async function sweepAbandonedRefunds(env: Env, now = Date.now(), batch = DRAIN_PAGE, opts: Pick<PassOpts, 'maxBatches'> = {}): Promise<{ checked: number; reversed: number }> {
   let reversed = 0;
-  for (const r of results) {
-    try {
-      reversed += await reverseUnreversedChunks(env, r.id, r.workspace_id, 'system', now);
-      // A run whose lease ran out may still post a chunk shortly after the abandon: mark clean only after twice its lease.
-      await env.DB.prepare('UPDATE refund_requests SET swept_at = ? WHERE id = ? AND swept_at IS NULL AND abandoned_at < ?').bind(now, r.id, now - 2 * APPROVAL_LEASE_MS).run();
-    } catch (err) {
-      alert('refund_abandon_sweep_failed', { severity: 'P1', requestId: r.id, error: err instanceof Error ? err.name : 'error' });
-    }
-  }
-  return { checked: results.length, reversed };
+  const { handled } = await drainKeyset<{ id: string; workspace_id: string; abandoned_at: number }, [number, string]>({
+    name: 'sweep_abandoned_refunds', pageSize: batch, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT id, workspace_id, abandoned_at FROM refund_requests WHERE state = 'abandoned' AND swept_at IS NULL ${after ? 'AND (abandoned_at > ?1 OR (abandoned_at = ?1 AND id > ?2))' : ''} ORDER BY abandoned_at ASC, id ASC LIMIT ${batch}`)
+      .bind(...(after ?? [])).all<{ id: string; workspace_id: string; abandoned_at: number }>()).results,
+    cursorOf: (r) => [r.abandoned_at, r.id],
+    handle: async (r) => {
+      try {
+        reversed += await reverseUnreversedChunks(env, r.id, r.workspace_id, 'system', now);
+        // A run whose lease ran out may still post a chunk shortly after the abandon: mark clean only after twice its lease.
+        await env.DB.prepare('UPDATE refund_requests SET swept_at = ? WHERE id = ? AND swept_at IS NULL AND abandoned_at < ?').bind(now, r.id, now - 2 * APPROVAL_LEASE_MS).run();
+      } catch (err) {
+        alert('refund_abandon_sweep_failed', { severity: 'P1', requestId: r.id, error: err instanceof Error ? err.name : 'error' });
+      }
+    },
+  });
+  return { checked: handled, reversed };
 }
 
 export type AbandonResult =
@@ -531,7 +552,7 @@ export async function abandonRefundRequest(env: Env, a: { id: string; actor: str
   // 5. finish
   const done = await env.DB.prepare("UPDATE refund_requests SET state = 'abandoned', abandoned_at = ?, card_refunded_minor = 0, manual_minor = 0, claimed_by = NULL, lease_until = NULL WHERE id = ? AND state = 'abandoning' AND claimed_by = ?").bind(now, a.id, token).run();
   if (done.meta.changes) {
-    await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_abandoned', ?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) VALUES (?, ?, 'refund_abandoned', ?, ?, ?, ?)")
       .bind(now, a.actor, req.workspace_id, JSON.stringify({ requestedBy: req.abandon_requested_by }), JSON.stringify({ reversedChunks: reversed }), a.id).run();
     // A debit that was in flight in a run when the swap happened lands after the checks above: sweep once more now that the request is closed.
     await reverseUnreversedChunks(env, a.id, req.workspace_id, a.actor, now);

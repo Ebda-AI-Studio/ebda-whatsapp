@@ -330,6 +330,8 @@ describe('route walk: every non-GET store route is decided (sends and number set
     'POST /stores/:storeId/store-link/catalog/provision', 'POST /stores/:storeId/packages/:packageId/checkout', 'DELETE /stores/:storeId/segments/:segmentId',
     'POST /stores/:storeId/segments', 'POST /stores/:storeId/segments/preview', 'PUT /stores/:storeId/segments/:segmentId', 'POST /stores/:storeId/shared-number/leave',
     'POST /stores/:storeId/wallet/refund-requests', 'POST /stores/:storeId/wallet/topups', 'PUT /stores/:storeId/digest',
+    'POST /stores/:storeId/offboarding', 'DELETE /stores/:storeId/offboarding', // deleting the workspace needs no plan (a lapsed merchant can still leave)
+    'PUT /stores/:storeId/retention', 'PATCH /stores/:storeId/contacts/:waId', 'POST /stores/:storeId/contacts/merge', // data rights and housekeeping: no message leaves
     // Template management talks to Meta's template catalog, not to a customer: no message leaves.
     'POST /stores/:storeId/templates/sync', 'POST /stores/:storeId/templates', 'POST /stores/:storeId/templates/install-defaults',
   ]);

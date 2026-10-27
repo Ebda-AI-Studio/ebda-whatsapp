@@ -168,6 +168,21 @@ describe('I5: a provider refund or chargeback revokes the package', () => {
     expect(err.mock.calls.some((c) => String(c[0]).includes('"package_chargeback"'))).toBe(true);
   });
 
+  it('MONEY-FACT-1: a 500 package, a 300 refund, then a 500 chargeback: the package is revoked, refunded_minor stops at 500, the 300 excess is recorded and alerted', async () => {
+    const ws = W(61);
+    await buyGold(ws, Date.now() - DAY);
+    const o = (await env.DB.prepare('SELECT order_id FROM package_orders WHERE workspace_id = ?').bind(ws).first<{ order_id: string }>())!;
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect((await hook(o.order_id, 'TX-PART', '300.00', { event: 'partial_refund' })).status).toBe(200);
+    expect((await sub(ws))!.status).not.toBe('cancelled'); // a partial refund shortens, it does not cancel
+    expect((await hook(o.order_id, 'TX-CB61', '500.00', { event: 'reversal' })).status).toBe(200); // never a failed write for a real chargeback
+    expect(await order(o.order_id)).toMatchObject({ status: 'charged_back' });
+    expect((await sub(ws))!.status).toBe('cancelled'); // revoked from the EVENT, whatever the clamped column says
+    expect((await env.DB.prepare('SELECT refunded_minor FROM package_orders WHERE order_id = ?').bind(o.order_id).first<{ refunded_minor: number }>())!.refunded_minor).toBe(50000);
+    expect((await env.DB.prepare("SELECT amount_minor, over_charge_minor FROM package_refunds WHERE order_id = ? AND amount_minor = 50000").bind(o.order_id).first())).toEqual({ amount_minor: 50000, over_charge_minor: 30000 }); // the event in full
+    expect(err.mock.calls.some((c) => String(c[0]).includes('"refund_exceeds_charge"') && String(c[0]).includes('"overMinor":30000'))).toBe(true);
+  });
+
   it('refunding an early-renewal order removes only the queued period; the running one and its credits stay', async () => {
     const ws = W(7);
     await buyGold(ws, Date.now() - 10 * DAY);

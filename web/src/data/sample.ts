@@ -1,3 +1,4 @@
+import { ApiError } from './api';
 import type {
   AgentSettingsDto, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
@@ -126,6 +127,7 @@ export function createSampleSource(): InboxSource {
     location: null,
   };
   let catalog: CatalogStatusDto = { catalogId: null, lastSyncAt: null };
+  let retentionDays: number | null = null;
   const contacts: ContactDto[] = [
     ...SEEDS.map((x): ContactDto => ({ waId: x.waId, name: x.name, optedOut: false, tags: x.tags.filter((t) => t !== 'needs_human' && t !== 'cod_pending'), consent: x.id % 2 ? { source: 'keyword_start', at: BASE - 10 * D } : null, lastInboundAt: BASE - x.ago })),
     ...structuredClone(MORE_CONTACTS),
@@ -307,6 +309,26 @@ export function createSampleSource(): InboxSource {
       },
       imports: async () => imports.map((i) => ({ ...i })),
       rejects: async () => [{ line: 14, reason: 'invalid_phone' }, { line: 37, reason: 'duplicate_in_file' }],
+      async renameContact(waId, name) {
+        const c = contacts.find((x) => x.waId === waId);
+        if (!c) throw new ApiError('not_found', 404);
+        if (name !== null) c.name = name;
+        return { waId, name: c.name, optedOut: c.optedOut };
+      },
+      async exportContact(waId) {
+        if (!contacts.some((x) => x.waId === waId)) throw new ApiError('not_found', 404);
+        return { version: 1, subject: { waId }, messages: [], nextAfter: null };
+      },
+      async mergeContacts(fromWaId, intoWaId) {
+        const i = contacts.findIndex((x) => x.waId === fromWaId);
+        if (i < 0 || !contacts.some((x) => x.waId === intoWaId)) throw new ApiError('not_found', 404);
+        contacts.splice(i, 1);
+      },
+      retention: async () => ({ days: retentionDays, effectiveDays: retentionDays ?? 730, defaultDays: 730, minDays: 30, maxDays: 3650 }),
+      async setRetention(days) {
+        retentionDays = days;
+        return { days, effectiveDays: days ?? 730, defaultDays: 730, minDays: 30, maxDays: 3650 };
+      },
     },
     subscribe(onEvent) {
       listeners.add(onEvent);

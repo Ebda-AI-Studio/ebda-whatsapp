@@ -1,6 +1,6 @@
 import { Upload, Users } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import type { ContactDto, ImportDto } from '../../../src/core/api/contract';
+import type { ContactDto, ImportDto, RetentionDto } from '../../../src/core/api/contract';
 import type { ContactsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { relativeTime } from '../lib/format';
@@ -20,11 +20,13 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
   const [attempt, setAttempt] = useState(0);
   const [imports, setImports] = useState<ImportDto[]>([]);
   const owner = source.role !== 'staff';
+  const [selected, setSelected] = useState<ContactDto | null>(null);
+  const [attemptList, setAttemptList] = useState(0);
 
   // Typing uses the shared search hook (from the first character, 150 ms pause, older answers dropped); the plain list loads at once.
   // The opted-out chip and a retry re-run the same query.
   const fetchSearch = useCallback((q: string, signal: AbortSignal) => api.list({ q, ...(optedOut ? { optedOut: true } : {}) }, signal).then((r) => r.items), [api, optedOut]);
-  const search = useTypeahead<ContactDto>(fetchSearch, { deps: [api, optedOut, attempt] });
+  const search = useTypeahead<ContactDto>(fetchSearch, { deps: [api, optedOut, attempt, attemptList] });
   const q = search.query;
   const searching = q.trim() !== '';
   useEffect(() => {
@@ -32,7 +34,7 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
     let stale = false;
     void api.list({ ...(optedOut ? { optedOut: true } : {}) }).then((r) => { if (!stale) { setItems(r.items); setFailed(false); } }, () => { if (!stale) setFailed(true); });
     return () => { stale = true; };
-  }, [api, searching, optedOut, attempt]);
+  }, [api, searching, optedOut, attempt, attemptList]);
   // null = nothing to show yet. While a newer search loads the previous results stay (no blanking on every keystroke).
   const shown = searching ? (search.status === 'loading' && search.results.length === 0 ? null : search.results) : items;
   const listFailed = searching ? search.status === 'error' : failed;
@@ -59,7 +61,7 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
       <div className="settings wide contacts-layout">
         <section aria-label={t.contactsTitle}>
           {/* Enter has nothing to open here (a contact has no detail view yet); the keys still move the active row for screen readers. */}
-          <SearchBox t={t} lang={lang} label={t.searchContacts} query={q} onQuery={search.setQuery} status={searching ? search.status : 'idle'} count={shown?.length ?? 0} listId={LIST_ID} activeIndex={active} onActiveIndex={setActive} onPick={() => undefined} />
+          <SearchBox t={t} lang={lang} label={t.searchContacts} query={q} onQuery={search.setQuery} status={searching ? search.status : 'idle'} count={shown?.length ?? 0} listId={LIST_ID} activeIndex={active} onActiveIndex={setActive} onPick={(i) => { if (shown?.[i]) setSelected(shown[i]!); }} />
           <div className="chips" role="group" aria-label={t.contactsTitle}>
             <button type="button" className="chip" aria-pressed={!optedOut} onClick={() => setOptedOut(false)}>{t.filterAllContacts}</button>
             <button type="button" className="chip" aria-pressed={optedOut} onClick={() => setOptedOut(true)}>{t.filterOptedOut}</button>
@@ -70,7 +72,7 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
             : (
               <ul className="contact-list" id={LIST_ID} role="listbox" aria-label={t.contactsTitle}>
                 {shown.map((c, i) => (
-                  <li key={c.waId} id={optionId(LIST_ID, i)} role="option" aria-selected={i === active} data-active={i === active} className="contact-row">
+                  <li key={c.waId} id={optionId(LIST_ID, i)} role="option" aria-selected={i === active || selected?.waId === c.waId} data-active={i === active} className="contact-row" onClick={() => setSelected(c)}>
                     <div className="contact-main">
                       <b dir="auto">{c.name ? <Highlight text={c.name} query={q} /> : t.noName}</b>
                       <span className="muted small" dir="ltr">+{c.waId.slice(0, -4).replace(/\d/g, '•')}{c.waId.slice(-4)}</span>
@@ -93,6 +95,10 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
               </ul>
             )}
         </section>
+        <div className="contact-side">
+          <CustomerTools t={t} api={api} owner={owner} contact={selected} onRenamed={(name) => { setSelected((c) => (c ? { ...c, name } : c)); setAttemptList((a) => a + 1); }} onMerged={() => { setSelected(null); setAttemptList((a) => a + 1); }} />
+          {owner && <RetentionCard t={t} api={api} />}
+        </div>
         {owner && <ImportPanel t={t} lang={lang} api={api} imports={imports} failed={importsFailed} onRetry={() => void loadImports()} onStarted={() => void loadImports()} />}
       </div>
     </main>
@@ -177,5 +183,96 @@ function ImportPanel({ t, lang, api, imports, failed, onRetry, onStarted }: { t:
         </>
       )}
     </aside>
+  );
+}
+
+// ---- Customer data tools: rename, export (B5), merge (M-175) ----------------------------------------------------------------------
+
+/** What the owner types: any form of an Egyptian or international number, as WhatsApp's id (digits, country code first). */
+export function toWaId(raw: string): string | null {
+  let d = raw.replace(/[^\d]/g, '');
+  if (d.startsWith('00')) d = d.slice(2);
+  if (/^01\d{9}$/.test(d)) d = `20${d.slice(1)}`;
+  return /^[1-9]\d{7,14}$/.test(d) ? d : null;
+}
+
+function CustomerTools({ t, api, owner, contact, onRenamed, onMerged }: { t: Strings; api: ContactsApi; owner: boolean; contact: ContactDto | null; onRenamed: (name: string) => void; onMerged: () => void }) {
+  const [name, setName] = useState('');
+  const [into, setInto] = useState('');
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'alert'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setName(contact?.name ?? ''); setInto(''); }, [contact?.waId, contact?.name]);
+  useEffect(() => { if (contact) setMsg(null); }, [contact?.waId]); // a message about the last action stays until another customer is picked
+  const run = async (fn: () => Promise<void>, ok: string) => {
+    setBusy(true); setMsg(null);
+    try { await fn(); setMsg({ kind: 'ok', text: ok }); } catch { setMsg({ kind: 'alert', text: t.cdFailed }); } finally { setBusy(false); }
+  };
+  const target = toWaId(into);
+  const download = async () => {
+    const data = await api.exportContact(contact!.waId);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `customer-data-${contact!.waId.slice(-4)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <section className="import-panel" aria-labelledby="cd-title">
+      <h2 id="cd-title">{t.cdTitle}</h2>
+      {!contact ? <p className="muted small">{t.cdSelect}</p> : (
+        <>
+          <p dir="auto"><b>{contact.name ?? t.noName}</b> <span className="muted small" dir="ltr">+{contact.waId.slice(0, -4).replace(/\d/g, '•')}{contact.waId.slice(-4)}</span></p>
+          <label className="field"><span>{t.cdName}</span><input dir="auto" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></label>
+          <div className="settings-actions">
+            <button type="button" className="btn primary" disabled={busy || name.trim() === ''} onClick={() => void run(async () => { const r = await api.renameContact(contact.waId, name.trim()); onRenamed(r.name ?? name.trim()); }, t.cdSaved)}>{t.cdSave}</button>
+          </div>
+          {owner && (
+            <>
+              <div className="settings-actions"><button type="button" className="btn" disabled={busy} onClick={() => void run(download, '')}>{t.cdExport}</button></div>
+              <small className="muted">{t.cdExportHint}</small>
+              <h3 className="pane-sub">{t.cdMergeTitle}</h3>
+              <p className="muted small">{t.cdMergeWarn}</p>
+              <label className="field"><span>{t.cdMergeInto}</span><input dir="ltr" inputMode="tel" value={into} onChange={(e) => setInto(e.target.value)} /></label>
+              <div className="settings-actions">
+                <button type="button" className="btn danger" disabled={busy || !target || target === contact.waId} onClick={() => void run(async () => { await api.mergeContacts(contact.waId, target!); onMerged(); }, t.cdMerged)}>{t.cdMergeGo}</button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+      {msg && msg.text !== '' && <p role={msg.kind === 'alert' ? 'alert' : 'status'} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
+    </section>
+  );
+}
+
+function RetentionCard({ t, api }: { t: Strings; api: ContactsApi }) {
+  const [view, setView] = useState<RetentionDto | null>(null);
+  const [days, setDays] = useState('730');
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'alert'; text: string } | null>(null);
+  useEffect(() => { void api.retention().then((v) => { setView(v); setDays(String(v.effectiveDays)); }, () => undefined); }, [api]);
+  const options = Object.keys(t.rtOptions).map(Number);
+  if (view && !options.includes(view.effectiveDays)) options.push(view.effectiveDays);
+  options.sort((a, b) => a - b);
+  const save = async () => {
+    setMsg(null);
+    try {
+      const n = Number(days);
+      const v = await api.setRetention(n === (view?.defaultDays ?? 730) ? null : n);
+      setView(v); setMsg({ kind: 'ok', text: t.rtSaved });
+    } catch { setMsg({ kind: 'alert', text: t.cdFailed }); }
+  };
+  return (
+    <section className="import-panel" aria-labelledby="rt-title">
+      <h2 id="rt-title">{t.rtTitle}</h2>
+      <p className="muted small">{t.rtHelp}</p>
+      <label className="field">
+        <select aria-label={t.rtTitle} value={days} onChange={(e) => setDays(e.target.value)} disabled={!view}>
+          {options.map((d) => <option key={d} value={d}>{t.rtOptions[d] ?? `${d}`}</option>)}
+        </select>
+      </label>
+      <div className="settings-actions"><button type="button" className="btn primary" disabled={!view} onClick={() => void save()}>{t.rtSave}</button></div>
+      {msg && <p role={msg.kind === 'alert' ? 'alert' : 'status'} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
+    </section>
   );
 }

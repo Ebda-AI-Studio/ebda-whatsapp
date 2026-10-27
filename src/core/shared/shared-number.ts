@@ -8,6 +8,7 @@
  * D1 keeps no message content and no raw phone number: a customer is a keyed hash (customerKey). Funding of the number is `platform_line`
  * (the wallet pays Meta, WA-FUND-1), written explicitly at setup; a number with no funding row cannot send (fail closed, see billing/pricing).
  */
+import { billingAuditStmts } from '../audit-reason';
 import type { Env } from '../../env';
 import type { SharedNumberCopy } from '../../brand';
 import { z } from 'zod';
@@ -77,8 +78,7 @@ export async function registerPlatformNumber(env: Env, a: { phoneNumberId: strin
        ON CONFLICT(phone_number_id) DO UPDATE SET waba_id = excluded.waba_id, display_phone = coalesce(excluded.display_phone, display_phone)`,
     ).bind(a.phoneNumberId, a.wabaId, a.displayPhone ?? null, now),
     fundingStatement(env.DB, a.phoneNumberId, 'platform_line', now),
-    env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, ?, NULL, ?, ?, ?)')
-      .bind(now, a.actor, 'shared_number_registered', before ? JSON.stringify({ wabaId: before.waba_id }) : null, JSON.stringify({ phoneNumberId: a.phoneNumberId, wabaId: a.wabaId, funding: 'platform_line' }), a.reason),
+    ...billingAuditStmts(env, { at: now, actor: a.actor, action: 'shared_number_registered', before: before ? { wabaId: before.waba_id } : null, after: { phoneNumberId: a.phoneNumberId, wabaId: a.wabaId, funding: 'platform_line' }, reason: a.reason }),
   ]);
   return 'ok';
 }
@@ -317,7 +317,7 @@ const parkedMessage = z.object({
   order: z.unknown().optional(),
 }).loose();
 
-const parkedPrefix = (pn: string, key: string) => `shared-parked/${pn}/${key}/`;
+export const parkedPrefix = (pn: string, key: string) => `shared-parked/${pn}/${key}/`;
 const listMarkerKey = (pn: string, key: string) => `shared-list/${pn}/${key}`;
 const noRouteKey = (pn: string, key: string) => `shared-noroute/${pn}/${key}`;
 

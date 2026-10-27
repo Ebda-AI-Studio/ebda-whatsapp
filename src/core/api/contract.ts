@@ -89,6 +89,8 @@ export const apiError = z.object({
   message: z.string().optional(),
   /** plan_feature: which plan feature the package lacks (the client shows the upgrade CTA for it). */
   feature: z.enum(['campaigns', 'order_in_chat', 'api']).optional(),
+  /** write_off_required: the wallet balance the requester has to agree to give up (piasters). */
+  amountMinor: z.number().int().optional(),
 });
 
 export const templateDto = z.object({
@@ -158,6 +160,7 @@ export const storeLinkSettingsResponse = z.object({
 /** The merchant-written part of the settings (service menu, business hours, location): what the Bot screen edits. */
 /** The Meta catalog of the store link: its id (null = none yet) and when a sync last succeeded. */
 export const catalogStatusDto = z.object({ catalogId: z.string().nullable(), lastSyncAt: z.number().int().nullable() });
+export type RetentionDto = z.infer<typeof retentionDto>;
 export type CatalogStatusDto = z.infer<typeof catalogStatusDto>;
 /** Strict on purpose: the business is never taken from the client (a business id in the body is a 400). */
 export const provisionCatalogRequest = z.object({ name: z.string().trim().min(1).max(100).optional() }).strict();
@@ -264,6 +267,16 @@ export const listContactsQuery = z.object({
 });
 export const listContactsResponse = z.object({ items: z.array(contactDto), nextCursor: z.string().nullable() });
 export const setContactTagsRequest = z.object({ tags: z.array(tagName).max(10) });
+/** PATCH /contacts/:waId: a name the merchant gives the contact (null = follow WhatsApp's name again). */
+export const renameContactRequest = z.object({ name: z.string().trim().min(1).max(100).nullable() }).strict();
+/** POST /contacts/merge: the same person on a new number. Both are WhatsApp ids (digits). */
+export const mergeContactsRequest = z.object({ fromWaId: z.string().regex(/^[1-9]\d{7,14}$/), intoWaId: z.string().regex(/^[1-9]\d{7,14}$/) }).strict().refine((b) => b.fromWaId !== b.intoWaId);
+/** GET /contacts/:waId/export (B5): a page of the person's messages. */
+export const exportContactQuery = z.object({ after: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(1000).default(500) });
+/** PUT /retention (B4): the owner's message window in days; null = the platform default. */
+export const retentionRequest = z.object({ days: z.number().int().min(30).max(3650).nullable() }).strict();
+export const retentionDto = z.object({ days: z.number().int().nullable(), effectiveDays: z.number().int(), defaultDays: z.number().int(), minDays: z.number().int(), maxDays: z.number().int() });
+export const contactSummaryDto = z.object({ waId: z.string(), name: z.string().nullable(), optedOut: z.boolean() });
 export const importMapping = z.object({ phone: z.string().min(1).max(100).optional(), name: z.string().min(1).max(100).optional(), tags: z.string().min(1).max(100).optional() });
 /** The multipart text fields next to the `file` part. `consented` must be the literal string "true" to grant marketing consent. */
 export const createImportFields = z.object({ consented: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'), wording: z.string().trim().min(1).max(500).optional(), mapping: z.string().max(1000).optional() });
@@ -328,6 +341,30 @@ export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused',
 export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable', 'quality_flagged', 'operator_paused']);
 /** W2-OPS: every kill-switch action carries a reason (kept in the append-only audit). */
 export const operatorKillSwitch = z.object({ reason: z.string().trim().min(5).max(300) });
+/** W2-OFFBOARD: an owner asks to delete the workspace (explicit confirmation; a wallet balance has to be given up explicitly). Strict: an owner cannot skip the cooling-off. */
+export const offboardingRequest = z.object({ confirm: z.literal(true), acceptWriteOff: z.boolean().optional(), reason: z.string().trim().min(5).max(300).optional() }).strict();
+/** GET /stores/:id/offboarding. `none` = nothing asked yet; the other fields exist from `pending` on. */
+export const offboardingDto = z.object({
+  state: z.enum(['none', 'pending', 'running', 'done', 'cancelled']), requestedRole: z.enum(['owner', 'operator']).optional(),
+  requestedAt: z.number().int().optional(), executeAfter: z.number().int().optional(), writeOffMinor: z.number().int().optional(),
+});
+/** GET /operator/workspaces/:id/offboarding and the list: the status plus the audit trail of the request (previous values are in `detail`). */
+export const operatorOffboardingDto = z.object({
+  workspaceId: z.string(), state: z.enum(['pending', 'running', 'done', 'cancelled']), requestedBy: z.string(), requestedRole: z.enum(['owner', 'operator']), reason: z.string().nullable(),
+  requestedAt: z.number().int(), executeAfter: z.number().int(), writeOffMinor: z.number().int(), stepsDone: z.array(z.string()), attempts: z.number().int(), lastError: z.string().nullable(), finishedAt: z.number().int().nullable(), needsSecondApproval: z.boolean().optional(),
+  log: z.array(z.object({ at: z.number().int(), actor: z.string(), action: z.string(), reason: z.string().nullable() })).optional(),
+});
+/** An operator asks (a reason is required and audited); `immediate` skips the cooling-off. */
+export const operatorOffboardingRequest = z.object({ reason: z.string().trim().min(5).max(300), immediate: z.boolean().optional(), acceptWriteOff: z.boolean().optional() }).strict();
+/** GET /operator/audit-log (T8): filters and a cursor (`before` = the smallest id already seen). */
+export const auditLogQuery = z.object({
+  workspaceId: z.string().min(1).max(100).optional(), actor: z.string().min(1).max(100).optional(), action: z.string().min(1).max(200).optional(),
+  before: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+export const auditLogItemDto = z.object({
+  id: z.number().int(), at: z.number().int(), workspaceId: z.string().nullable(), actor: z.string(), actorRole: z.enum(['owner', 'staff', 'operator', 'integration', 'system']),
+  action: z.string(), targetType: z.string().nullable(), targetId: z.string().nullable(), status: z.number().int(),
+});
 export const healthState = z.enum(['green', 'yellow', 'red', 'restricted']);
 const opsNumberHealth = z.object({ phoneNumberId: z.string(), health: healthState, healthReason: z.string().nullable(), healthAt: z.number().int().nullable() });
 /** GET /operator/workspaces/:id/ops: what the kill-switch card shows for one workspace and for the platform number. */
@@ -488,7 +525,15 @@ export const instapayViewDto = z.object({ enabled: z.boolean(), payee: instapayP
 export const instapayCreatedDto = instapayRequestDto.extend({ payee: instapayPayeeDto });
 export const operatorInstapayDto = instapayRequestDto.extend({
   workspaceId: z.string(), createdBy: z.string(), proofAt: z.number().int().nullable(), firstApprover: z.string().nullable(), decidedBy: z.string().nullable(), proofMime: z.string().nullable(),
+  /** C2: set while the request cannot be confirmed because its image or bank reference was seen on another request (`heldOf`). */
+  heldReason: z.enum(['duplicate_image', 'duplicate_reference']).nullable().optional(), heldOf: z.string().nullable().optional(), bankRef: z.string().nullable().optional(),
 });
+/** Confirming may carry the bank's own transaction reference, read from the proof (optional; a re-used one is refused). */
+/** DUP-REF-REQUIRED-1: the bank reference is required for every amount; a proof that shows none is confirmed with `noReference: true` and a reason (audited). */
+export const instapayConfirm = z.object({ bankRef: z.string().trim().min(1).max(60).optional(), noReference: z.literal(true).optional(), reason: z.string().trim().min(5).max(300).optional() }).strict()
+  .refine((b) => !b.noReference || (!b.bankRef && !!b.reason), { message: 'no_reference_needs_reason' })
+  .refine((b) => b.noReference || !b.reason, { message: 'reason_only_with_no_reference' });
+export const instapayRelease = z.object({ reason: z.string().trim().min(5).max(300) });
 export const instapayReject = z.object({ reason: z.string().trim().min(3).max(300) });
 export const refundRequestCreate = z.object({ amountMinor: z.number().int().min(5000), note: z.string().trim().max(500).optional() });
 /** An operator refunded the card in the provider's dashboard to pay a manual payout and links that refund to the request. `orderId` (the top-up) is optional. */

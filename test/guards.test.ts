@@ -78,7 +78,7 @@ it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / IN
   const sets = { P0: setOf('P0_ALERTS'), P1: setOf('P1_ALERTS'), INFO: setOf('INFO_ALERTS') };
   expect(sets.P0.size).toBeGreaterThan(5);
   expect(sets.P1.size).toBeGreaterThan(40);
-  expect(sets.INFO.size).toBe(24); // 20 + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low
+  expect(sets.INFO.size).toBe(25); // 20 + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
   const used = new Set<string>();
   for (const hit of findMatches(/\balert\(/, 'src')) {
     const [file, line] = hit.split(':') as [string, string];
@@ -220,4 +220,47 @@ it('every DO migration has a `// vNN` label directly above it that matches its p
 // D4 follow-up: a value published on a public route must never be derived from something shaped like a real person's phone number.
 it('no string literal in src (outside tests and vectors) is an Egyptian E.164 mobile number', () => {
   expect(findMatches(/['"`]\+20\d{9,10}['"`]/, 'src')).toEqual([]);
+});
+
+// AUDIT-RETENTION-1 (review item 6): the audit log is append-only, so free text (which can hold a phone number) never goes into `detail`; an operator's reason goes to audit_reasons.
+it('GUARD: no recordAudit call in src names a detail key reason / note / text / message / body', () => {
+  const hits = findMatches(/recordAudit\(/, 'src');
+  expect(hits.length).toBeGreaterThan(1);
+  for (const h of hits) {
+    const [file, line] = h.split(':') as [string, string];
+    if (file.endsWith('core/audit.ts')) continue;
+    const call = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').split('\n').slice(Number(line) - 1, Number(line) + 3).join(' ');
+    const detail = /detail:\s*\{([^}]*)\}/.exec(call)?.[1] ?? '';
+    expect(detail, `${file}:${line}`).not.toMatch(/\b(reason|note|text|message|body)\b\s*[:,}]/);
+  }
+});
+
+// AUDIT-REASONS-1, the whole class: every table the migrations make append-only (a BEFORE UPDATE/DELETE trigger that RAISEs) holds no free text. A reason a person typed goes to
+// audit_reasons and the immutable row carries `reason_id`; the legacy `reason` column may be named only next to `reason_id` (it gets the constant 'see reason_id' where NOT NULL).
+it('GUARD: no INSERT into an append-only table (any table with a no-update trigger) names a free-text column', async () => {
+  const { readdirSync } = await import('node:fs');
+  const dir = new URL('../migrations/d1/', import.meta.url);
+  const immutable = new Set<string>();
+  for (const f of readdirSync(dir).filter((x) => x.endsWith('.sql'))) {
+    for (const m of readFileSync(new URL(f, dir), 'utf8').matchAll(/CREATE TRIGGER \w+ BEFORE UPDATE ON (\w+) BEGIN SELECT RAISE\(ABORT/g)) immutable.add(m[1]!);
+  }
+  // the tables the review named must be in the list, or the scan below proves nothing
+  for (const t of ['audit_log', 'offboarding_log', 'operator_actions', 'billing_audit', 'instapay_releases', 'ledger_mirror', 'pricing_settings', 'workspace_pricing_overrides']) expect(immutable.has(t), t).toBe(true);
+  const FREE = /^(reason|note|notes|text|message|body|comment|caption|detail_text)$/i;
+  const { readdirSync: ls, statSync } = await import('node:fs');
+  const files: string[] = [];
+  const walkDir = (d: string): void => { for (const n of ls(d)) { const p = join(d, n); if (statSync(p).isDirectory()) walkDir(p); else if (p.endsWith('.ts')) files.push(p); } };
+  walkDir(join(import.meta.dirname, '..', 'src'));
+  let scanned = 0;
+  const bad: string[] = [];
+  for (const f of files) {
+    for (const m of readFileSync(f, 'utf8').matchAll(/INSERT\s+INTO\s+(\w+)\s*\(([^)]*)\)/g)) {
+      if (!immutable.has(m[1]!)) continue;
+      scanned++;
+      const cols = m[2]!.split(',').map((c) => c.trim());
+      for (const c of cols.filter((x) => FREE.test(x))) if (!(c.toLowerCase() === 'reason' && cols.includes('reason_id'))) bad.push(`${f.split('/src/')[1]}: ${m[1]} names ${c}`);
+    }
+  }
+  expect(scanned).toBeGreaterThan(20);
+  expect(bad, 'an append-only table must not store text: put it in audit_reasons and write reason_id (src/core/audit-reason.ts)').toEqual([]);
 });

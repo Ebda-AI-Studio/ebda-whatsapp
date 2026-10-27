@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { DigestDto, OpsStatusDto, StatementDto, WalletDto } from '../../../src/core/api/contract';
-import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
+import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto, auditLogItemDto, offboardingDto, operatorOffboardingDto } from '../../../src/core/api/contract';
 
 export type { DigestDto, OpsStatusDto, StatementDto, WalletDto };
 export type CostEstimateDto = z.infer<typeof costEstimateDto>;
@@ -14,6 +14,8 @@ export type InstapayCreated = z.infer<typeof instapayCreatedDto>;
 export type OperatorInstapay = z.infer<typeof operatorInstapayDto>;
 export type PricingSettings = z.infer<typeof pricingSettingsDto>;
 export type ChangeLogItem = z.infer<typeof changeLogItemDto>;
+export type AuditLogItem = z.infer<typeof auditLogItemDto>;
+export type AuditFilter = { workspaceId?: string; actor?: string; action?: string; before?: number };
 
 // The operator lists below have no shared DTO in contract.ts (the server builds them inline), so the web client pins their shape here
 // and validates every response against it, exactly like it does for the shared DTOs.
@@ -32,6 +34,8 @@ export type Adjustment = z.infer<typeof adjustmentDto>;
 export type BillingCategory = 'marketing' | 'utility' | 'authentication' | 'service';
 
 /** The merchant's wallet (Phase 7). Reads are open to every role; topping up and refunds are the owner's. */
+export type OffboardingView = z.infer<typeof offboardingDto>;
+export type OperatorOffboarding = z.infer<typeof operatorOffboardingDto>;
 export interface WalletApi {
   wallet(): Promise<WalletDto>;
   /** The weekly usage digest (counts only). `{ enabled: false }` after the owner switched it off. */
@@ -59,6 +63,11 @@ export interface WalletApi {
   uploadInstapayProof(requestId: string, file: File): Promise<InstapayRequest>;
   refundRequests(): Promise<RefundRequest[]>;
   requestRefund(amountMinor: number, note: string): Promise<RefundRequest>;
+  /** OFFBOARD-1 (owner): delete the workspace after a 14-day cooling-off. A wallet balance has to be given up explicitly (`acceptWriteOff`), else 409 `wallet_balance_remains`. */
+  offboarding(): Promise<OffboardingView>;
+  requestOffboarding(opts: { acceptWriteOff?: true }): Promise<OffboardingView>;
+  /** Only while pending and only if the owner asked: an operator-started deletion answers 403 `operator_requested`. */
+  cancelOffboarding(): Promise<void>;
 }
 
 export type PricingSettingsInput = { effectiveFrom: number; marginBps: number; creditLimitMinor: number; fxBufferBps: number; vatBps: number; reason: string };
@@ -91,12 +100,27 @@ export interface OperatorApi {
   instapayQueue(): Promise<OperatorInstapay[]>;
   /** A signed link that opens the proof for a couple of minutes. */
   instapayProofLink(id: string): Promise<{ url: string; expiresAt: number }>;
-  confirmInstapay(id: string): Promise<OperatorInstapay & { needsSecond?: true }>;
+  /** `bankRef` = the bank's own transaction reference read from the proof (REQUIRED for every amount; DUP-REF-REQUIRED-1). A proof that truly shows none is confirmed with `noReferenceReason` (5+ characters, audited; sends `noReference: true`). A re-used one answers 409 `duplicate_reference` and holds the request; a held request answers 409 `held`. */
+  confirmInstapay(id: string, bankRef?: string, noReferenceReason?: string): Promise<OperatorInstapay & { needsSecond?: true }>;
+  /** C2: lifts a duplicate hold after a person compared both transfers (a reason of 5+ characters; audited). */
+  releaseInstapay(id: string, reason: string): Promise<OperatorInstapay>;
   rejectInstapay(id: string, reason: string): Promise<OperatorInstapay>;
   adjustments(): Promise<Adjustment[]>;
   createAdjustment(workspaceId: string, amountMinor: number, reason: string): Promise<Adjustment>;
   decideAdjustment(id: string, decision: 'approve' | 'reject'): Promise<Adjustment>;
   changeLog(): Promise<ChangeLogItem[]>;
+  /** OFFBOARD-1: every workspace deletion asked for (newest first), one with its audit trail, request (a reason is required; `immediate` skips the 14-day wait), cancel. */
+  offboardings(): Promise<OperatorOffboarding[]>;
+  offboarding(workspaceId: string): Promise<OperatorOffboarding>;
+  /** 409 `write_off_required` carries `amountMinor`: resend with `acceptWriteOff` to give up that balance. */
+  requestOffboarding(workspaceId: string, body: { reason: string; immediate?: true; acceptWriteOff?: true }): Promise<OperatorOffboarding>;
+  cancelOffboarding(workspaceId: string, reason: string): Promise<void>;
+  /** OFFBOARD-2ND-APPROVER-1: a second operator approves an immediate deletion that writes off >= 1,000 EGP. */
+  approveOffboarding(workspaceId: string, reason: string): Promise<void>;
+  /** OFFBOARD-ABUSE-1: lifts the abuse hold with a reason. */
+  releaseOffboardingHold(workspaceId: string, reason: string): Promise<void>;
+  /** T8: who did what to which ids (append-only). Newest first; pass `before` (the smallest id seen) for the next page. */
+  auditLog(filter: AuditFilter): Promise<AuditLogItem[]>;
   /** A yearly package order: what can be refunded now (unused whole months x price/12, current month kept, wallet debt settled first). */
   yearlyRefundQuote(orderId: string): Promise<YearlyRefundQuoteView>;
   /** Cancels the yearly plan at the end of the current month and settles the wallet debt first. Idempotent: a replay returns the same figures. */

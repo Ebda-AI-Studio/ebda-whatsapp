@@ -1,5 +1,6 @@
 import type { Env } from '../../env';
 import { isEvicted, leaveShared } from '../shared/shared-number';
+import { LAST_REASON_ID, REASON_PLACEHOLDER, reasonSql, reasonStmt } from '../audit-reason';
 
 /**
  * The operator kill switch (W2-OPS). Every action takes an actor (the super admin) and a reason, writes ONE append-only `operator_actions` row
@@ -15,8 +16,12 @@ const stub = (env: Env, ws: string) => env.WORKSPACE_DO.get(env.WORKSPACE_DO.idF
 async function known(env: Env, ws: string): Promise<boolean> {
   return !!(await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(ws).first());
 }
-function audit(env: Env, a: { actor: string; action: Action; workspaceId: string; reason: string; now: number }): D1PreparedStatement {
-  return env.DB.prepare('INSERT INTO operator_actions (at, actor, action, workspace_id, reason) VALUES (?, ?, ?, ?, ?)').bind(a.now, a.actor, a.action, a.workspaceId, a.reason);
+/** The operator's reason goes to `audit_reasons`; the immutable row carries `reason_id` and the constant in the NOT NULL legacy column (AUDIT-REASONS-1). */
+function audit(env: Env, a: { actor: string; action: Action; workspaceId: string; reason: string; now: number }): D1PreparedStatement[] {
+  return [
+    reasonStmt(env, { at: a.now, workspaceId: a.workspaceId, actor: a.actor, action: `operator.${a.action}`, reason: a.reason }),
+    env.DB.prepare(`INSERT INTO operator_actions (at, actor, action, workspace_id, reason, reason_id) VALUES (?, ?, ?, ?, ?, ${LAST_REASON_ID})`).bind(a.now, a.actor, a.action, a.workspaceId, REASON_PLACEHOLDER),
+  ];
 }
 /** Counts and ids only, never a phone number or a message. */
 const note = (action: Action | 'suspend_partial', ws: string, actor: string, extra: Record<string, unknown> = {}) => console.log(JSON.stringify({ audit: `operator_${action}`, workspace: ws, actor, ...extra }));
@@ -28,7 +33,7 @@ export async function suspendWorkspace(env: Env, a: { actor: string; workspaceId
   if (ws.suspended_at === null) {
     await env.DB.batch([
       env.DB.prepare('UPDATE workspaces SET suspended_at = ?, suspended_reason = ? WHERE id = ?').bind(now, a.reason, a.workspaceId),
-      audit(env, { ...a, action: 'suspend', now }),
+      ...audit(env, { ...a, action: 'suspend', now }),
     ]);
   }
   try {
@@ -43,7 +48,7 @@ export async function suspendWorkspace(env: Env, a: { actor: string; workspaceId
 
 export async function unsuspendWorkspace(env: Env, a: { actor: string; workspaceId: string; reason: string }, now = Date.now()): Promise<Result> {
   if (!(await known(env, a.workspaceId))) return { ok: false, reason: 'not_found' };
-  await env.DB.prepare('INSERT INTO operator_actions (at, actor, action, workspace_id, reason) VALUES (?, ?, ?, ?, ?)').bind(now, a.actor, 'unsuspend', a.workspaceId, a.reason).run();
+  await env.DB.batch(audit(env, { ...a, action: 'unsuspend', now }));
   await stub(env, a.workspaceId).setSuspended(false, a.reason, now);
   await env.DB.prepare('UPDATE workspaces SET suspended_at = NULL, suspended_reason = NULL WHERE id = ?').bind(a.workspaceId).run();
   note('unsuspend', a.workspaceId, a.actor);
@@ -52,7 +57,7 @@ export async function unsuspendWorkspace(env: Env, a: { actor: string; workspace
 
 export async function pauseAllCampaigns(env: Env, a: { actor: string; workspaceId: string; reason: string }, now = Date.now()): Promise<Result<{ paused: number }>> {
   if (!(await known(env, a.workspaceId))) return { ok: false, reason: 'not_found' };
-  await audit(env, { ...a, action: 'pause_campaigns', now }).run();
+  await env.DB.batch(audit(env, { ...a, action: 'pause_campaigns', now }));
   const paused = await stub(env, a.workspaceId).pauseCampaignsOn(null, 'operator_paused', now);
   note('pause_campaigns', a.workspaceId, a.actor, { paused });
   return { ok: true, value: { paused } };
@@ -60,7 +65,7 @@ export async function pauseAllCampaigns(env: Env, a: { actor: string; workspaceI
 
 export async function evictFromSharedNumber(env: Env, a: { actor: string; workspaceId: string; reason: string }, now = Date.now()): Promise<Result> {
   if (!(await known(env, a.workspaceId))) return { ok: false, reason: 'not_found' };
-  await audit(env, { ...a, action: 'evict_shared', now }).run();
+  await env.DB.batch(audit(env, { ...a, action: 'evict_shared', now }));
   await leaveShared(env, a.workspaceId);
   note('evict_shared', a.workspaceId, a.actor);
   return { ok: true, value: {} };
@@ -68,7 +73,7 @@ export async function evictFromSharedNumber(env: Env, a: { actor: string; worksp
 
 export async function readmitToSharedNumber(env: Env, a: { actor: string; workspaceId: string; reason: string }, now = Date.now()): Promise<Result> {
   if (!(await known(env, a.workspaceId))) return { ok: false, reason: 'not_found' };
-  await audit(env, { ...a, action: 'readmit_shared', now }).run();
+  await env.DB.batch(audit(env, { ...a, action: 'readmit_shared', now }));
   note('readmit_shared', a.workspaceId, a.actor);
   return { ok: true, value: {} };
 }
@@ -78,7 +83,7 @@ export async function revokeIntegrations(env: Env, a: { actor: string; workspace
   if (!(await known(env, a.workspaceId))) return { ok: false, reason: 'not_found' };
   await env.DB.batch([
     env.DB.prepare('UPDATE workspaces SET integrations_revoked_at = ? WHERE id = ?').bind(now, a.workspaceId),
-    audit(env, { ...a, action: 'revoke_integrations', now }),
+    ...audit(env, { ...a, action: 'revoke_integrations', now }),
   ]);
   note('revoke_integrations', a.workspaceId, a.actor);
   return { ok: true, value: {} };
@@ -88,7 +93,7 @@ export async function restoreIntegrations(env: Env, a: { actor: string; workspac
   if (!(await known(env, a.workspaceId))) return { ok: false, reason: 'not_found' };
   await env.DB.batch([
     env.DB.prepare('UPDATE workspaces SET integrations_revoked_at = NULL WHERE id = ?').bind(a.workspaceId),
-    audit(env, { ...a, action: 'restore_integrations', now }),
+    ...audit(env, { ...a, action: 'restore_integrations', now }),
   ]);
   note('restore_integrations', a.workspaceId, a.actor);
   return { ok: true, value: {} };
@@ -106,7 +111,7 @@ export async function opsStatus(env: Env, workspaceId: string): Promise<Workspac
   if (!ws) return null;
   const numbers = await env.DB.prepare("SELECT phone_number_id, health_state, health_reason, health_at FROM phone_numbers WHERE workspace_id = ? AND status = 'active' ORDER BY rowid").bind(workspaceId).all<{ phone_number_id: string; health_state: string; health_reason: string | null; health_at: number | null }>();
   const shared = await env.DB.prepare('SELECT phone_number_id, health_state, health_reason, health_at FROM shared_numbers ORDER BY created_at, rowid LIMIT 1').first<{ phone_number_id: string; health_state: string; health_reason: string | null; health_at: number | null }>();
-  const recent = await env.DB.prepare('SELECT at, actor, action, reason FROM operator_actions WHERE workspace_id = ? ORDER BY id DESC LIMIT 20').bind(workspaceId).all<{ at: number; actor: string; action: string; reason: string }>();
+  const recent = await env.DB.prepare(`SELECT o.at, o.actor, o.action, coalesce(${reasonSql('o', 'r')}, '') AS reason FROM operator_actions o LEFT JOIN audit_reasons r ON r.id = o.reason_id WHERE o.workspace_id = ? ORDER BY o.id DESC LIMIT 20`).bind(workspaceId).all<{ at: number; actor: string; action: string; reason: string }>();
   return {
     suspended: ws.suspended_at !== null, suspendedReason: ws.suspended_reason, integrationsRevokedAt: ws.integrations_revoked_at, evicted: await isEvicted(env, workspaceId),
     numbers: numbers.results.map((n) => ({ phoneNumberId: n.phone_number_id, health: n.health_state, healthReason: n.health_reason, healthAt: n.health_at })),

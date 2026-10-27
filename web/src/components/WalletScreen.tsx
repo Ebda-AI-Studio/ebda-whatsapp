@@ -3,7 +3,7 @@ import { BRAND } from '@brand';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { StatementDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
-import type { InstapayCreated, InstapayRequest, InstapayView, PackageDto, RefundRequest, DigestDto, TopupDto, WalletApi, WalletDto } from '../data/billing';
+import type { InstapayCreated, InstapayRequest, InstapayView, PackageDto, RefundRequest, DigestDto, TopupDto, WalletApi, WalletDto, OffboardingView } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -163,6 +163,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
         <DigestCard t={t} lang={lang} api={api} owner={owner} />
         {canSeeStatement && <StatementCard t={t} lang={lang} api={api} now={now} />}
         {owner && <RefundCard t={t} lang={lang} api={api} />}
+        {owner && typeof wallet === 'object' && wallet !== null && <OffboardingCard t={t} lang={lang} api={api} balanceMinor={Math.max(0, wallet.balanceMinor)} />}
       </div>
     </main>
   );
@@ -189,7 +190,7 @@ function TopupCard({ t, lang, api, wallet, pending, note, go, now, onStarted, ca
     if (minor === null || minor < MIN_TOPUP_MINOR || minor > MAX_TOPUP_MINOR) { setError(t.wTopupBadAmount); return; }
     setBusy(true);
     setError(null);
-    try { setOrder(await api.topup(minor)); } catch { setError(t.wTopupError); } finally { setBusy(false); }
+    try { setOrder(await api.topup(minor)); } catch (err) { setError(err instanceof ApiError && err.detail === 'offboarding_pending' ? t.wOffFrozen : t.wTopupError); } finally { setBusy(false); }
   };
   const pay = () => {
     // Only an https checkout page is ever opened; anything else from the server is refused, never followed.
@@ -244,6 +245,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
   const [note, setNote] = useState<'waiting' | 'activated' | 'failed' | null>(() => (readPendingPackage(now()) ? 'waiting' : null));
   const [error, setError] = useState(false);
   const [queued, setQueued] = useState(false); // WA-YEARLY-SWITCH-2: a queued period cannot be switched
+  const [frozen, setFrozen] = useState(false); // OFFBOARD-FREEZE-1: a deletion is pending, purchases are paused
   const [busy, setBusy] = useState<string | null>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
@@ -280,6 +282,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
     setBusy(id);
     setError(false);
     setQueued(false);
+    setFrozen(false);
     try {
       const o = await api.buyPackage(id);
       // Only an https checkout page is ever opened; anything else from the server is refused, never followed.
@@ -292,7 +295,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
       setNote('waiting');
       go(o.checkoutUrl);
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'yearly_queued') setQueued(true); else setError(true);
+      if (err instanceof ApiError && err.code === 'yearly_queued') setQueued(true); else if (err instanceof ApiError && err.detail === 'offboarding_pending') setFrozen(true); else setError(true);
     } finally { setBusy(null); }
   };
 
@@ -318,6 +321,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
           </ul>
         )}
       {queued && <p role="alert" className="error-text">{t.wYearlyQueued(BRAND.supportEmail ?? t.wSupport)}</p>}
+      {frozen && <p role="alert" className="error-text">{t.wOffFrozen}</p>}
       {error && <p role="alert" className="error-text">{t.wPackageError}</p>}
       {note === 'waiting' && pending && <p role="status" className="muted">{t.wPackageWaiting}</p>}
       {note === 'activated' && <p role="status" className="wallet-ok">{t.wPackageActivated}</p>}
@@ -506,7 +510,7 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
       input = { kind: 'topup', amountMinor: minor };
     }
     setBusy(true);
-    try { setCreated(await api.createInstapay(input)); load(); } catch (err) { setMsg({ kind: 'alert', text: err instanceof ApiError && err.code === 'yearly_queued' ? t.wYearlyQueued(BRAND.supportEmail ?? t.wSupport) : t.wIpError }); } finally { setBusy(false); }
+    try { setCreated(await api.createInstapay(input)); load(); } catch (err) { setMsg({ kind: 'alert', text: err instanceof ApiError && err.code === 'yearly_queued' ? t.wYearlyQueued(BRAND.supportEmail ?? t.wSupport) : err instanceof ApiError && err.detail === 'offboarding_pending' ? t.wOffFrozen : t.wIpError }); } finally { setBusy(false); }
   };
 
   const upload = async (id: string, file: File | undefined) => {
@@ -610,6 +614,73 @@ function DigestCard({ t, lang, api, owner }: { t: Strings; lang: Lang; api: Wall
       {owner && d !== 'error' && (
         <button type="button" className="btn" disabled={busy} onClick={() => void toggle(!d.enabled)}>{d.enabled ? t.dgSwitchOff : t.dgSwitchOn}</button>
       )}
+    </section>
+  );
+}
+
+// ---- Delete the workspace (OFFBOARD-1): 14-day cooling-off, the balance given up explicitly, cancel while it is ours to cancel -----------
+
+function OffboardingCard({ t, lang, api, balanceMinor }: { t: Strings; lang: Lang; api: WalletApi; balanceMinor: number }) {
+  const [view, setView] = useState<OffboardingView>({ state: 'none' });
+  const [asking, setAsking] = useState(false);
+  const [accept, setAccept] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+  useEffect(() => { api.offboarding().then(setView, () => undefined); }, [api]);
+
+  const request = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      setView(await api.requestOffboarding(balanceMinor > 0 ? { acceptWriteOff: true } : {}));
+      setAsking(false); setAccept(false);
+    } catch (err) {
+      setMsg(err instanceof ApiError && err.detail === 'wallet_balance_remains' ? t.offBalanceChanged : t.offError);
+    } finally { setBusy(false); }
+  };
+  const cancel = async () => {
+    setBusy(true); setMsg(null);
+    try { await api.cancelOffboarding(); setView({ state: 'cancelled' }); } catch { setMsg(t.offError); void api.offboarding().then(setView, () => undefined); } finally { setBusy(false); }
+  };
+
+  const waiting = view.state === 'pending';
+  const ours = waiting && view.requestedRole === 'operator';
+  return (
+    <section className="wallet-card" aria-labelledby="off-title">
+      <h2 id="off-title">{t.offTitle}</h2>
+      {waiting && !ours && (
+        <>
+          <p>{t.offPending(dateTime(view.executeAfter ?? 0, lang))}</p>
+          {(view.writeOffMinor ?? 0) > 0 && <p className="muted">{t.offWriteOff(money(view.writeOffMinor!))}</p>}
+          <div className="settings-actions"><button type="button" className="btn" disabled={busy} onClick={() => void cancel()}>{t.offCancel}</button></div>
+        </>
+      )}
+      {ours && (
+        <>
+          <p>{t.offPending(dateTime(view.executeAfter ?? 0, lang))}</p>
+          <p role="note">{t.offOperator(BRAND.supportEmail ?? t.wSupport)}</p>
+        </>
+      )}
+      {view.state === 'running' && <p>{t.offRunning}</p>}
+      {(view.state === 'none' || view.state === 'cancelled') && !asking && (
+        <div className="settings-actions"><button type="button" className="btn" onClick={() => setAsking(true)}>{t.offAsk}</button></div>
+      )}
+      {(view.state === 'none' || view.state === 'cancelled') && asking && (
+        <>
+          <p>{t.offWhat}</p>
+          {balanceMinor > 0 && (
+            <>
+              <p><b>{t.offBalance(money(balanceMinor))}</b></p>
+              <label className="field check"><input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} /> <span>{t.offGiveUp(money(balanceMinor))}</span></label>
+            </>
+          )}
+          <div className="settings-actions">
+            <button type="button" className="btn primary" disabled={busy || (balanceMinor > 0 && !accept)} onClick={() => void request()}>{t.offConfirm}</button>
+            <button type="button" className="btn" disabled={busy} onClick={() => { setAsking(false); setAccept(false); setMsg(null); }}>{t.offBack}</button>
+          </div>
+        </>
+      )}
+      {msg && <p role="alert" className="error-text">{msg}</p>}
     </section>
   );
 }
