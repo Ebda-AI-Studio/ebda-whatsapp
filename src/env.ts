@@ -94,4 +94,11 @@ export type Env = {
   /** Var: comma-separated secret names this deployment must have (checked by /health, see core/secrets-check.ts). */
   REQUIRED_SECRETS?: string;
   SENTRY_DSN?: string;
+  /** Secrets for the out-of-band alert channel (core/observability.ts alert()); unset = log + Sentry only. */
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_ALERT_CHAT_ID?: string;
+  /** Var: label shown in alerts (default "production"). */
+  ENVIRONMENT?: string;
+  /** Var: the product name shown first in an alert (the brand's, so core code names no brand). */
+  ALERT_PRODUCT?: string;
 };

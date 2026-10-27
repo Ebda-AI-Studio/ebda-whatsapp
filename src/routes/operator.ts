@@ -40,6 +40,7 @@ operatorRoutes.post('/pricing-settings', async (c) => {
   const b = pricingSettingsPublish.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, b.error.issues[0]?.message);
   const r = await publishSettings(c.env, { actor: actor(c), ...b.data });
+  if (!r.ok && r.reason === 'vat_locked') return c.json({ error: 'vat_locked', message: 'VAT is 0 (Ruling VAT-0); a change needs a new ruling' }, 400);
   return r.ok ? c.json(r.value, 201) : c.json({ error: 'invalid_request', message: r.reason }, 400);
 });
 

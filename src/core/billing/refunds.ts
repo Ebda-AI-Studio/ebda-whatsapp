@@ -16,6 +16,7 @@ import type { z } from 'zod';
 import type { refundRequestDto } from '../api/contract';
 import { claimForCall, completeDebitPhase, holdsRequest, openCardRefund, refreshRequest, reverseUnreversedChunks, settleCardRefund } from './card-refunds';
 import { paymentProvider, refundsEnabled } from './payments';
+import { alert } from '../observability';
 
 export type RefundRequestDto = z.infer<typeof refundRequestDto>;
 export const MIN_REFUND_MINOR = 5000;
@@ -141,7 +142,7 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     }
     if (!posted.ok && posted.reason !== 'duplicate') {
       await release();
-      console.error(JSON.stringify({ alert: 'refund_debit_incomplete', severity: 'P1', requestId: a.id, workspace: req.workspace_id }));
+      alert('refund_debit_incomplete', { severity: 'P1', requestId: a.id, workspace: req.workspace_id });
       return { ok: false, reason: 'insufficient_balance' };
     }
     // The row is written BEFORE the provider is asked: a refund webhook that arrives mid-call (or an answer we never see) is then matched to this
@@ -161,7 +162,7 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     if (claim === 'busy') continue; // another run owns this row, or this run lost its lease
     if (claim === 'over') {
       // The top-up no longer has room for this refund (another approval's refunds came first): nothing is sent, it becomes a manual payout.
-      console.error(JSON.stringify({ alert: 'card_refund_over_refundable', severity: 'P1', requestId: a.id, workspace: req.workspace_id, cardRefundId: row.id, amountMinor: row.amount_minor }));
+      alert('card_refund_over_refundable', { severity: 'P1', requestId: a.id, workspace: req.workspace_id, cardRefundId: row.id, amountMinor: row.amount_minor });
       continue; // claimForCall already failed the row in one atomic statement and refreshed the request
     }
     const r = await provider.refund({ transactionId: c.transaction_id, amountMinor: row.amount_minor, reason: `refund-request:${a.id}:${n}` }).catch(() => ({ ok: false as const, reason: 'uncertain' as const }));
@@ -170,7 +171,7 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
       // so the row is settled without the id, and a person is told (P1) because that other row may already have debited this money.
       await settleCardRefund(env, row.id, r.status === 'PENDING' ? { to: 'pending', refundId: r.refundId } : { to: 'succeeded', refundId: r.refundId }, now).catch(async () => {
         const owner = await env.DB.prepare('SELECT source FROM card_refunds WHERE kashier_refund_id = ?').bind(r.refundId).first<{ source: string }>();
-        console.error(JSON.stringify({ alert: 'refund_id_conflict', severity: 'P1', requestId: a.id, workspace: req.workspace_id, refundId: r.refundId, ownedBy: owner?.source ?? null }));
+        alert('refund_id_conflict', { severity: 'P1', requestId: a.id, workspace: req.workspace_id, refundId: r.refundId, ownedBy: owner?.source ?? null });
         return settleCardRefund(env, row.id, r.status === 'PENDING' ? { to: 'uncertain' } : { to: 'succeeded' }, now);
       });
     } else {

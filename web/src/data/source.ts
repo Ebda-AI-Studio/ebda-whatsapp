@@ -44,7 +44,7 @@ export interface NumbersApi {
 export type ContactsQuery = { q?: string; tag?: string; optedOut?: boolean; cursor?: string | null };
 
 export interface ContactsApi {
-  list(query: ContactsQuery): Promise<{ items: ContactDto[]; nextCursor: string | null }>;
+  list(query: ContactsQuery, signal?: AbortSignal): Promise<{ items: ContactDto[]; nextCursor: string | null }>;
   /** Uploads a CSV for import. `consented` must reflect the owner's explicit tick: it is the marketing consent on record. */
   importCsv(file: File, consented: boolean): Promise<string>;
   imports(): Promise<ImportDto[]>;

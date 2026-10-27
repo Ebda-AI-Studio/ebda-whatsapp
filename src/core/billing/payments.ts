@@ -14,6 +14,7 @@
  */
 import type { Env } from '../../env';
 import { KashierUnconfirmedError, TRANSACTION_ID, classifyKashierTransaction, kashierTransactionDetailsPath } from './kashier-confirm';
+import { alert } from '../observability';
 
 export type ProviderEvent = 'pay' | 'refund' | 'other';
 export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string; /** A chargeback (Kashier's `reversal` operation). Only ever set by `confirm`, from Kashier's own record. */ chargeback?: true; /** Kashier's own operation for the transaction (refund, partial_refund, void, reversal, pay...), set only by `confirm`. */ operation?: string; /** `kashier:<transactionId>:<status>`: built from SIGNED values only, never from the unsigned `event` label. */ eventKey?: string };
@@ -198,7 +199,7 @@ export class KashierProvider implements PaymentProvider {
       }
       const paid = confirmed.filter((c) => c.status === 'SUCCESS');
       if (paid.length > 1) {
-        console.error(JSON.stringify({ alert: 'inquiry_multiple_success', orderId, count: paid.length }));
+        alert('inquiry_multiple_success', { orderId, count: paid.length });
         return 'unavailable';
       }
       if (paid.length === 1) return { status: 'SUCCESS', transactionId: paid[0]!.transactionId, amountMinor: paid[0]!.amountMinor, currency: paid[0]!.currency };

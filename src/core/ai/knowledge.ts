@@ -5,7 +5,7 @@
  * plain catalog search, never an error towards the customer.
  */
 import { BACKUP_TIME_ZONE, nextLocalHour, sha256Hex } from '../backup';
-import { errClass } from '../observability';
+import { errClass, alert } from '../observability';
 import { serviceAllowed } from '../billing/entitlements';
 import { addTask } from '../scheduler';
 import type { CatalogRow } from '../store-bridge';
@@ -97,7 +97,7 @@ export async function runKbIndex(host: LinkHost, now: number): Promise<number | 
   const embed = cfg.embedder(host.env);
   const count = host.sql.exec<{ n: number }>('SELECT count(*) AS n FROM kb_chunks WHERE version = ?', version).one().n;
   if (count > 0 && (!store || !embed)) {
-    console.error(JSON.stringify({ alert: 'kb_index_unavailable', workspace: host.workspaceId }));
+    alert('kb_index_unavailable', { workspace: host.workspaceId });
     return undefined; // no index bound: the agent runs without a knowledge base; saving the FAQ again after binding retries
   }
   for (let b = 0; b < BATCHES_PER_RUN; b++) {
@@ -138,7 +138,7 @@ export async function retrieveKnowledge(host: LinkHost, query: string): Promise<
     const byId = new Map(rows.map((r) => [r.vec_id, r.text]));
     return good.map((h) => byId.get(h.id)).filter((t): t is string => !!t).slice(0, KB_TOP);
   } catch (err) {
-    console.error(JSON.stringify({ alert: 'kb_retrieve_failed', workspace: host.workspaceId, error: errClass(err) }));
+    alert('kb_retrieve_failed', { workspace: host.workspaceId, error: errClass(err) });
     return [];
   }
 }
@@ -214,7 +214,7 @@ export async function catalogCandidates(host: LinkHost, query: string): Promise<
     const ids = [...new Set(hits.filter((h) => h.score >= KB_MIN_SCORE).map((h) => h.metadata?.productId).filter((x): x is string => !!x))];
     return ids.length ? ids : null;
   } catch (err) {
-    console.error(JSON.stringify({ alert: 'catalog_vector_search_failed', workspace: host.workspaceId, error: errClass(err) }));
+    alert('catalog_vector_search_failed', { workspace: host.workspaceId, error: errClass(err) });
     return null;
   }
 }

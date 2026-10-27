@@ -10,6 +10,7 @@ import { outboundStoreEventSchema } from '../api/store-events';
 import { storeLink } from '../store-link';
 import { uuidFromKey } from '../store-link/orders';
 import type { EntitlementEvent } from './entitlements';
+import { alert } from '../observability';
 
 export const STORE_INCLUDED = 'store-included';
 /** `col` (ms) plus N whole calendar months, N being a SQL expression. */
@@ -36,7 +37,6 @@ export const toEvent = (r: SubRow): EntitlementEvent => ({
 const SELECT = `SELECT s.workspace_id, s.package_id, s.status, s.period_start, s.period_end, s.cancelled_at, s.version, p.ai_credits, p.max_members, p.feat_campaigns, p.feat_order_in_chat, p.feat_api, p.priority_support, s.past_due_since, p.period_months
   FROM workspace_subscriptions s LEFT JOIN packages p ON p.id = s.package_id`;
 
-const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
 const errName = (err: unknown) => (err instanceof Error ? err.name : 'error');
 
 /** Pushes one workspace's current subscription. Called after every change to its row; a failed push is repaired by the daily reconcile. */

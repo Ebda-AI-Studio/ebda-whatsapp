@@ -50,7 +50,7 @@ export function monthOptions(now: number, count = 12): string[] {
 }
 
 const monthLabel = (month: string, lang: Lang) =>
-  new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG' : 'en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)) - 1, 1));
+  new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)) - 1, 1));
 
 export function WalletScreen({ t, lang, source, api, now, go = (u) => window.location.assign(u) }: Props) {
   const [wallet, setWallet] = useState<WalletDto | null | 'error'>(null);
@@ -400,7 +400,7 @@ function StatementCard({ t, lang, api, now }: { t: Strings; lang: Lang; api: Wal
             <>
               <h3 className="pane-sub">{t.wCardCosts}</h3>
               <ul className="wallet-totals">
-                {st.cardCosts.map((c) => <li key={c.category}>{t.wCardCostLine(t.billCategories[c.category] ?? c.category, num(c.count, lang), new Intl.NumberFormat(lang === 'ar' ? 'ar-EG' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(c.usdMicros / 1_000_000))}</li>)}
+                {st.cardCosts.map((c) => <li key={c.category}>{t.wCardCostLine(t.billCategories[c.category] ?? c.category, num(c.count, lang), new Intl.NumberFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(c.usdMicros / 1_000_000))}</li>)}
               </ul>
             </>
           )}

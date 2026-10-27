@@ -10,8 +10,8 @@ import { verifyMetaSignature } from './core/meta/signature';
 import { extractCoexistence, extractEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
-import { scrubEvent } from './core/observability';
-import { consumeSendBatch, type SendJob } from './core/send-queue';
+import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/observability';
+import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
 import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
 import { operatorRoutes } from './routes/operator';
 import type { IdentityVerifier } from './core/identity/verifier';
@@ -50,6 +50,7 @@ import { instapayProofRoutes, instapayRoutes } from './routes/instapay';
 import { sharedNumberRoutes } from './routes/shared-number';
 import { handleSharedEvent, sharedEnabled, sharedNumberById, sweepShared } from './core/shared/shared-number';
 import { secretProblems } from './core/secrets-check';
+import { apiContentTypes, requestGuards } from './core/request-guards';
 import { applySharedTemplateEvent } from './core/shared/shared-templates';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
@@ -60,8 +61,14 @@ if (PACK.storeLink) configureStoreLink(PACK.storeLink);
 // Without the copy the agent reports itself inactive for every workspace (agentActive), however its settings are.
 configureAgent({ copy: PACK.agentCopy });
 const STORE_EVENTS_QUEUE = 'ebda-wa-events';
+const SEND_DLQ_QUEUE = 'ebda-wa-send-dlq';
 
-export { WorkspaceDO } from './core/workspace-do';
+import { WorkspaceDO as WorkspaceDOBase } from './core/workspace-do';
+/** The workspace Durable Object, wrapped so its fetch / alarm / RPC errors reach Sentry (iceberg E2). Same class name and methods for the bindings. */
+export const WorkspaceDO = Sentry.instrumentDurableObjectWithSentry(
+  (env: Env) => ({ dsn: env.SENTRY_DSN, release: env.COMMIT_SHA, beforeSend: scrubEvent, tracesSampleRate: 0 }),
+  WorkspaceDOBase,
+);
 export { CampaignWorkflow, ImportWorkflow } from './core/campaigns/workflows';
 
 /**
@@ -75,6 +82,20 @@ export class WhatsAppOtp extends WorkerEntrypoint<Env> {
 }
 
 const app = new Hono<{ Bindings: Env }>();
+// Every request tells alert() the secrets and how to outlive the response (iceberg E1).
+app.use('*', async (c, next) => {
+  let waitUntil: (p: Promise<unknown>) => void = () => undefined;
+  try { const ctx = c.executionCtx; waitUntil = (p) => ctx.waitUntil(p); } catch { /* no execution context (a test calling app.fetch directly) */ }
+  bindAlerts({ env: c.env, waitUntil });
+  await next();
+});
+// A route that threw: Sentry sees the exception (iceberg E2), a human is paged once per route class, the caller gets a JSON 500 with nothing in it.
+app.onError((err, c) => {
+  captureError(err);
+  const storeId = c.req.param('storeId');
+  alert('unhandled_error', { severity: 'P1', ...(storeId ? { workspace: storeId } : {}), route: c.req.routePath, method: c.req.method, error: errClass(err) });
+  return c.json({ error: 'internal' }, 500);
+});
 // Everything the Worker answers itself (API, webhook, health, tracked links) is JSON, text or a redirect: nothing may load or
 // frame it. The page policy lives in web/brands/<brand>/public/_headers (served by static assets, one per brand).
 const SECURITY_HEADERS: Record<string, string> = {
@@ -101,6 +122,9 @@ app.use('*', async (c, next) => {
   }
 });
 
+// Body-size cap, content-type allow-list and the public-route limits, before any route (src/core/request-guards.ts).
+app.use('*', requestGuards());
+
 // One verifier per isolate so the JWKS cache survives across requests.
 let verifier: IdentityVerifier | undefined;
 const getVerifier = (env: Env): IdentityVerifier => (verifier ??= selectVerifier(env).verifier);
@@ -108,6 +132,7 @@ const getVerifier = (env: Env): IdentityVerifier => (verifier ??= selectVerifier
 const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
 api.use('/operator/*', requireSuperAdmin(getVerifier));
+api.use('*', apiContentTypes()); // after auth: 401/403 first, then 415 for a body type the route class does not take
 api.route('/operator', operatorRoutes);
 api.get('/stores/:storeId/me', (c) => {
   const p = c.get('principal');
@@ -171,7 +196,7 @@ app.get('/health', (c) => {
   // A malformed or missing secret fails health (so verify-prod catches it at deploy); the key names go to the alert line only.
   const problems = secretProblems(c.env as unknown as Record<string, unknown>);
   if (problems.length) {
-    console.error(JSON.stringify({ alert: 'secret_misconfigured', severity: 'P1', keys: problems }));
+    alert('secret_misconfigured', { severity: 'P1', keys: problems });
     return c.json({ ok: false, status: 'misconfigured', service: PACK.service, commit }, 503);
   }
   return c.json({ ok: true, status: 'ok', service: PACK.service, commit });
@@ -274,16 +299,16 @@ app.post('/meta/webhook', async (c) => {
 
 /** The daily control-plane pass. Each step is independent: one failing never skips the rest. */
 export async function dailyBilling(env: Env): Promise<void> {
-  await reconcileEntitlements(env).catch((err) => console.error(JSON.stringify({ alert: 'entitlement_reconcile_failed', error: err instanceof Error ? err.name : 'error' })));
-  await repairTopups(env).catch((err) => console.error(JSON.stringify({ alert: 'topup_repair_failed', error: err instanceof Error ? err.name : 'error' })));
-  await reconfirmUnconfirmed(env).catch((err) => console.error(JSON.stringify({ alert: 'webhook_reconfirm_failed', error: err instanceof Error ? err.name : 'error' })));
-  await reconcileCardRefunds(env, paymentProvider(env)).catch((err) => console.error(JSON.stringify({ alert: 'card_refund_reconcile_failed', error: err instanceof Error ? err.name : 'error' })));
-  await sweepAbandonedRefunds(env).catch((err) => console.error(JSON.stringify({ alert: 'refund_abandon_sweep_failed', error: err instanceof Error ? err.name : 'error' })));
-  await expireInstapay(env).catch((err) => console.error(JSON.stringify({ alert: 'instapay_expiry_failed', error: err instanceof Error ? err.name : 'error' })));
-  await repairInstapay(env).catch((err) => console.error(JSON.stringify({ alert: 'instapay_repair_failed', error: err instanceof Error ? err.name : 'error' })));
-  await overdueInstapay(env).catch((err) => console.error(JSON.stringify({ alert: 'instapay_overdue_check_failed', error: err instanceof Error ? err.name : 'error' })));
-  await repairPackageOrders(env).catch((err) => console.error(JSON.stringify({ alert: 'package_repair_failed', error: err instanceof Error ? err.name : 'error' })));
-  await sweepShared(env).catch((err) => console.error(JSON.stringify({ alert: 'shared_sweep_failed', error: err instanceof Error ? err.name : 'error' })));
+  await reconcileEntitlements(env).catch((err) => alert('entitlement_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await repairTopups(env).catch((err) => alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await reconfirmUnconfirmed(env).catch((err) => alert('webhook_reconfirm_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await reconcileCardRefunds(env, paymentProvider(env)).catch((err) => alert('card_refund_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await sweepAbandonedRefunds(env).catch((err) => alert('refund_abandon_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await expireInstapay(env).catch((err) => alert('instapay_expiry_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await repairInstapay(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await overdueInstapay(env).catch((err) => alert('instapay_overdue_check_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await repairPackageOrders(env).catch((err) => alert('package_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await sweepShared(env).catch((err) => alert('shared_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));
 }
 
 let warnedNoDsn = false;
@@ -298,10 +323,14 @@ export default Sentry.withSentry((env: Env) => {
   fetch: app.fetch,
   /** Daily (the only cron; no polling): re-send subscriptions so a lost push heals. Idempotent by construction. */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(dailyBilling(env));
+    bindAlerts({ env, waitUntil: (p) => ctx.waitUntil(p) });
+    // The log line is the proof of a real tick (the cron can't be waited on): see docs/runbooks/rollback.md.
+    ctx.waitUntil(dailyBilling(env).then(() => console.log(JSON.stringify({ cron: 'daily_billing', done: true }))));
   },
-  async queue(batch: MessageBatch<unknown>, env: Env, _ctx: ExecutionContext): Promise<void> {
+  async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
+    bindAlerts({ env, waitUntil: (p) => ctx.waitUntil(p) });
     if (batch.queue === STORE_EVENTS_QUEUE) await consumeStoreEvents(batch, env);
+    else if (batch.queue === SEND_DLQ_QUEUE) await consumeSendDlq(batch, env);
     else await consumeSendBatch(batch, env);
   },
 } satisfies ExportedHandler<Env>);

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { connectNumberRequest, listNumbersResponse, signupConfigDto } from '../core/api/contract';
 import { SignupConfigError, connectNumber, disconnectNumber, listNumbers, refreshNumber, resumeSetup, signupEnabled, type NumberResult } from '../core/numbers/numbers';
 import { apiError, planRequired, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
+import { alert } from '../core/observability';
 
 const owner = managesStore;
 const PN = /^[0-9]{1,30}$/;
@@ -31,7 +32,7 @@ async function guarded(c: ApiContext, run: (workspaceId: string) => Promise<Numb
     return reply(c, await run(c.req.param('storeId')!));
   } catch (err) {
     if (err instanceof SignupConfigError) {
-      console.error(JSON.stringify({ alert: 'signup_not_configured', missing: err.missing }));
+      alert('signup_not_configured', { missing: err.missing });
       return apiError(c, 503, 'signup_unavailable', 'signup_not_configured');
     }
     throw err;
@@ -49,7 +50,7 @@ numbersRoutes.get('/stores/:storeId/numbers/signup-config', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
   if (!(await workspaceStub(c))) return apiError(c, 404, 'not_found');
   if (!c.env.META_APP_ID || !c.env.EMBEDDED_SIGNUP_CONFIG_ID) {
-    console.error(JSON.stringify({ alert: 'signup_not_configured', missing: [!c.env.META_APP_ID && 'META_APP_ID', !c.env.EMBEDDED_SIGNUP_CONFIG_ID && 'EMBEDDED_SIGNUP_CONFIG_ID'].filter(Boolean) }));
+    alert('signup_not_configured', { missing: [!c.env.META_APP_ID && 'META_APP_ID', !c.env.EMBEDDED_SIGNUP_CONFIG_ID && 'EMBEDDED_SIGNUP_CONFIG_ID'].filter(Boolean) });
     return apiError(c, 503, 'signup_unavailable', 'signup_not_configured');
   }
   const body: typeof signupConfigDto._output = { appId: c.env.META_APP_ID, configId: c.env.EMBEDDED_SIGNUP_CONFIG_ID, graphVersion: c.env.META_GRAPH_VERSION };

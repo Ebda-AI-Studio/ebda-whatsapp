@@ -21,13 +21,13 @@ import { ensureAdjustmentApplied, requestAdjustment } from './operator';
 import { auditOnce } from './package-orders';
 import { APPROVAL_LEASE_MS } from './refunds';
 import { isCardRefundOperation, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
+import { alert } from '../observability';
 
 /** Rows that count against a top-up's room: the open ones, the planned ones (reserved, not debited yet) and held refunds (real refunds awaiting a match). */
 export const RESERVING = "('planned', 'sending', 'calling', 'pending', 'uncertain', 'held')";
 export const OPEN = "('sending', 'calling', 'pending', 'uncertain')";
 const STUCK_AFTER_MS = 3 * 86_400_000;
 const RECONCILE_AFTER_MS = 15 * 60_000;
-const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
 const stubOf = (env: Env, workspaceId: string) => env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId));
 
 export type CardRefundRow = {
@@ -467,7 +467,7 @@ export async function sweepAbandonedRefunds(env: Env, now = Date.now(), batch = 
       // A run whose lease ran out may still post a chunk shortly after the abandon: mark clean only after twice its lease.
       await env.DB.prepare('UPDATE refund_requests SET swept_at = ? WHERE id = ? AND swept_at IS NULL AND abandoned_at < ?').bind(now, r.id, now - 2 * APPROVAL_LEASE_MS).run();
     } catch (err) {
-      console.error(JSON.stringify({ alert: 'refund_abandon_sweep_failed', severity: 'P1', requestId: r.id, error: err instanceof Error ? err.name : 'error' }));
+      alert('refund_abandon_sweep_failed', { severity: 'P1', requestId: r.id, error: err instanceof Error ? err.name : 'error' });
     }
   }
   return { checked: results.length, reversed };

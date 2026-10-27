@@ -115,9 +115,9 @@ function PricingPanel({ t, lang, api, now, run, fail }: PanelProps) {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const marginBps = parseScaled(f.margin, 2), creditLimitMinor = parseScaled(f.overdraft, 2), fxBufferBps = parseScaled(f.fx, 2), vatBps = parseScaled(f.vat, 2);
+    const marginBps = parseScaled(f.margin, 2), creditLimitMinor = parseScaled(f.overdraft, 2), fxBufferBps = parseScaled(f.fx, 2), vatBps = 0; // Ruling VAT-0: always 0 (the server refuses anything else)
     const effectiveFrom = fromLocalInput(f.at);
-    if (marginBps === null || creditLimitMinor === null || fxBufferBps === null || vatBps === null || marginBps > 100_000 || creditLimitMinor > 10_000_000 || fxBufferBps > 10_000 || vatBps > 10_000) return fail(t.opBadNumber);
+    if (marginBps === null || creditLimitMinor === null || fxBufferBps === null || marginBps > 100_000 || creditLimitMinor > 10_000_000 || fxBufferBps > 10_000) return fail(t.opBadNumber);
     if (f.reason.trim().length < 5) return fail(t.opReasonShort);
     if (effectiveFrom === null || effectiveFrom < now() + SETTINGS_LEAD_H * HOUR) return fail(t.opTooSoon(num(SETTINGS_LEAD_H, lang)));
     if (await run(async () => { await api.publishPricingSettings({ effectiveFrom, marginBps, creditLimitMinor, fxBufferBps, vatBps, reason: f.reason.trim() }); }, SETTINGS_LEAD_H)) { setF((x) => ({ ...x, reason: '' })); reload(); }
@@ -145,7 +145,7 @@ function PricingPanel({ t, lang, api, now, run, fail }: PanelProps) {
           <label className="field"><span>{t.opMargin}</span><input inputMode="decimal" dir="ltr" value={f.margin} onChange={set('margin')} /></label>
           <label className="field"><span>{t.opOverdraft}</span><input inputMode="decimal" dir="ltr" value={f.overdraft} onChange={set('overdraft')} /></label>
           <label className="field"><span>{t.opFxBuffer}</span><input inputMode="decimal" dir="ltr" value={f.fx} onChange={set('fx')} /></label>
-          <label className="field"><span>{t.opVat}</span><input inputMode="decimal" dir="ltr" value={f.vat} onChange={set('vat')} /></label>
+          <label className="field"><span>{t.opVat}</span><input inputMode="decimal" dir="ltr" value="0" readOnly aria-describedby="op-vat-locked" /><small id="op-vat-locked">{t.opVatLocked}</small></label>
           <label className="field"><span>{t.opEffective}</span><input type="datetime-local" value={f.at} onChange={set('at')} /></label>
           <label className="field op-wide"><span>{t.opReason}</span><input dir="auto" maxLength={500} value={f.reason} onChange={set('reason')} /></label>
           <div className="settings-actions op-wide"><button type="submit" className="btn primary">{t.opPublishSettings}</button></div>

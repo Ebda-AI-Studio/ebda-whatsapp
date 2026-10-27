@@ -20,7 +20,7 @@ describe('campaigns', () => {
     await openCampaigns();
     const running = screen.getByRole('article', { name: /عروض العيد/ });
     expect(within(running).getByText('شغالة')).toBeTruthy();
-    expect(within(running).getByText(/٨٦٠ من ١٬٢٤٠|860 من 1,240|٨٦٠ من ١٢٤٠/)).toBeTruthy();
+    expect(within(running).getByText(/860 من 1٬240|860 من 1,240|860 من 1240/)).toBeTruthy();
     const paused = screen.getByRole('article', { name: /تخفيضات نص الشهر/ });
     expect(within(paused).getByText('المحفظة فاضية. اشحن رصيد وكمّل الحملة.')).toBeTruthy();
   });
@@ -37,9 +37,9 @@ describe('campaigns', () => {
     await act(async () => fireEvent.change(screen.getByLabelText('اختار قالب معتمد'), { target: { value: 'eid_offer|ar' } }));
     // Only approved marketing templates are offered.
     expect(screen.queryByRole('option', { name: /تأكيد الدفع عند الاستلام/ })).toBeNull();
-    fireEvent.change(screen.getByLabelText('نوع المتغير ١'), { target: { value: 'name' } });
+    fireEvent.change(screen.getByLabelText('نوع المتغير 1'), { target: { value: 'name' } });
     fireEvent.change(screen.getByLabelText('لو مفيش اسم، اكتب'), { target: { value: 'يا فندم' } });
-    fireEvent.change(screen.getByLabelText('نوع المتغير ٢'), { target: { value: 'link' } });
+    fireEvent.change(screen.getByLabelText('نوع المتغير 2'), { target: { value: 'link' } });
     fireEvent.change(screen.getByLabelText('اللينك بيودّي على'), { target: { value: 'https://example.com/friday' } });
 
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'راجع التكلفة' })));
@@ -63,7 +63,7 @@ describe('campaigns', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حملة جديدة' })));
     fireEvent.change(screen.getByLabelText('اسم الحملة (ليك إنت بس)'), { target: { value: 'x' } });
     await act(async () => fireEvent.change(screen.getByLabelText('اختار قالب معتمد'), { target: { value: 'back_in_stock|ar' } }));
-    fireEvent.change(screen.getByLabelText('نوع المتغير ١'), { target: { value: 'text' } });
+    fireEvent.change(screen.getByLabelText('نوع المتغير 1'), { target: { value: 'text' } });
     fireEvent.change(screen.getByLabelText('النص'), { target: { value: 'أهلًا' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'راجع التكلفة' })));
     await screen.findByRole('heading', { name: 'راجع وابعت' });
@@ -113,7 +113,7 @@ describe('campaigns', () => {
     expect(screen.queryByText(/^هتوصل لـ/)).toBeNull();
     fireEvent.change(screen.getByLabelText('اسم الحملة (ليك إنت بس)'), { target: { value: 'x' } });
     await act(async () => fireEvent.change(screen.getByLabelText('اختار قالب معتمد'), { target: { value: 'back_in_stock|ar' } }));
-    fireEvent.change(screen.getByLabelText('نوع المتغير ١'), { target: { value: 'text' } });
+    fireEvent.change(screen.getByLabelText('نوع المتغير 1'), { target: { value: 'text' } });
     fireEvent.change(screen.getByLabelText('النص'), { target: { value: 'أهلًا' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'راجع التكلفة' })));
     const review = (await screen.findByRole('heading', { name: 'راجع وابعت' })).closest('section')!;
@@ -126,7 +126,7 @@ describe('campaigns', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حملة جديدة' })));
     fireEvent.change(screen.getByLabelText('اسم الحملة (ليك إنت بس)'), { target: { value: 'x' } });
     await act(async () => fireEvent.change(screen.getByLabelText('اختار قالب معتمد'), { target: { value: 'back_in_stock|ar' } }));
-    fireEvent.change(screen.getByLabelText('نوع المتغير ١'), { target: { value: 'link' } });
+    fireEvent.change(screen.getByLabelText('نوع المتغير 1'), { target: { value: 'link' } });
     fireEvent.change(screen.getByLabelText('اللينك بيودّي على'), { target: { value: 'http://example.com' } });
     expect((screen.getByRole('button', { name: 'راجع التكلفة' }) as HTMLButtonElement).disabled).toBe(true);
   });
@@ -138,7 +138,7 @@ describe('campaigns', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حملة جديدة' })));
     fireEvent.change(screen.getByLabelText('اسم الحملة (ليك إنت بس)'), { target: { value: 'x' } });
     await act(async () => fireEvent.change(screen.getByLabelText('اختار قالب معتمد'), { target: { value: 'back_in_stock|ar' } }));
-    fireEvent.change(screen.getByLabelText('نوع المتغير ١'), { target: { value: 'text' } });
+    fireEvent.change(screen.getByLabelText('نوع المتغير 1'), { target: { value: 'text' } });
     fireEvent.change(screen.getByLabelText('النص'), { target: { value: 'أهلًا' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'راجع التكلفة' })));
     expect((await screen.findByRole('alert')).textContent).toContain('القالب ده مبقاش معتمد');
@@ -178,8 +178,8 @@ describe('contacts', () => {
     await openContacts();
     expect(await screen.findByText('نورا حسن')).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'طلبوا يوقفوا الرسايل' })));
-    const list = screen.getByRole('list', { name: 'العملاء' });
-    expect(within(list).getAllByRole('listitem')).toHaveLength(1);
+    const list = screen.getByRole('listbox', { name: 'العملاء' });
+    expect(within(list).getAllByRole('option')).toHaveLength(1);
     expect(within(list).getByText('مصطفى عادل')).toBeTruthy();
   });
 

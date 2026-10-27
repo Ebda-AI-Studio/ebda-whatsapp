@@ -1,6 +1,6 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import type { Env } from '../../env';
-import { errClass } from '../observability';
+import { errClass, alert } from '../observability';
 import { runImportChunk } from './import-run';
 import type { PageResult, StartResult } from './campaigns';
 
@@ -21,7 +21,7 @@ export class ImportWorkflow extends WorkflowEntrypoint<Env, ImportParams> {
       await step.do('give-up', () => this.fail(workspaceId, importId, 'too_many_steps'));
       return { status: 'failed' };
     } catch (err) {
-      console.error(JSON.stringify({ alert: 'import_workflow_failed', workspace: workspaceId, error: errClass(err) }));
+      alert('import_workflow_failed', { workspace: workspaceId, error: errClass(err) });
       await step.do('fail', () => this.fail(workspaceId, importId, 'internal_error'));
       return { status: 'failed' };
     }

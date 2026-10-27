@@ -9,8 +9,9 @@ it('serves the inbox SPA from web/dist with deep-link fallback', () => {
   expect(cfg.assets).toMatchObject({ directory: 'web/dist', binding: 'ASSETS', not_found_handling: 'single-page-application' });
 });
 
-it('keeps the API, Meta webhook, health and tracked links (/t/*) on the Worker', () => {
-  expect(cfg.assets.run_worker_first).toEqual(['/api/*', '/meta/*', '/health', '/t/*']);
+it('keeps the API, Meta webhook, the card provider\'s webhook (/kashier/*), health and tracked links (/t/*) on the Worker', () => {
+  // /kashier/* must be here: otherwise the SPA fallback answers the provider's POST with HTML and no payment is ever confirmed (iceberg C1).
+  expect(cfg.assets.run_worker_first).toEqual(['/api/*', '/meta/*', '/kashier/*', '/health', '/t/*']);
 });
 
 it('serves the SPA with security headers: CSP limited to itself and the identity host, no framing, HSTS, nosniff', () => {

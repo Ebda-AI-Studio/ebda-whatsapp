@@ -2,6 +2,7 @@ import type { LinkHost } from '../store-link/host';
 import type { ColumnMap, ImportRejectReason } from './csv';
 import { MAX_TAGS_PER_CONTACT } from './csv';
 import { indexContactName } from '../contact-index';
+import { normaliseText, phoneDigits } from '../text-normalise';
 
 /** Hard limits of one import: file size is checked at the edge, rows here. */
 export const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
@@ -189,11 +190,15 @@ export function listContacts(host: LinkHost, q: ContactQuery): { items: ContactI
     params.push(q.tag, q.tag);
   }
   if (q.q) {
-    const digits = q.q.replace(/\D/g, '');
-    const like = `%${q.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
-    where.push(digits.length >= 3 ? "(c.wa_id LIKE ? OR c.profile_name LIKE ? ESCAPE '\\')" : "c.profile_name LIKE ? ESCAPE '\\'");
-    if (digits.length >= 3) params.push(`${digits}%`);
-    params.push(like);
+    // Same matching as the conversation search: every typed word is a prefix of a name word (contacts_fts, through the shared normaliser, so
+    // hamza / taa marbuta / yaa variants and diacritics are insensitive), OR the typed digits (Arabic-Indic folded, 3 or more) occur in wa_id.
+    // The query is only a bound parameter or a quoted letters/digits token (normaliseText leaves nothing else); an unmatchable one finds nothing.
+    const tokens = normaliseText(q.q).split(' ').filter(Boolean).slice(0, 8);
+    const digits = phoneDigits(q.q);
+    const any: string[] = [];
+    if (tokens.length) { any.push('c.id IN (SELECT rowid FROM contacts_fts WHERE contacts_fts MATCH ?)'); params.push(tokens.map((t) => `"${t}"*`).join(' ')); }
+    if (digits.length >= 3) { any.push('instr(c.wa_id, ?) > 0'); params.push(digits); }
+    where.push(any.length ? `(${any.join(' OR ')})` : '0');
   }
   const rows = host.sql.exec<{ id: number; wa_id: string; profile_name: string | null; opted_out_at: number | null; consent_source: string | null; consent_at: number | null; last_inbound_at: number | null }>(
     `SELECT c.id, c.wa_id, c.profile_name, c.opted_out_at, c.consent_source, c.consent_at, c.last_inbound_at FROM contacts c ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY c.id DESC LIMIT ?`,

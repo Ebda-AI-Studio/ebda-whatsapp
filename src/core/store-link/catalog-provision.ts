@@ -6,6 +6,7 @@ import { bridgeFor } from '../store-link';
 import { catalogBelongsToWaba } from './catalog';
 import type { LinkHost } from './host';
 import { getState, putState, readSettings } from './settings';
+import { alert } from '../observability';
 
 export const CATALOG_NAME_MAX = 100;
 export const provisionRequest = provisionCatalogRequest;
@@ -66,7 +67,7 @@ export async function provisionCatalog(host: LinkHost, a: { name?: string; wabaI
       clearPending(host);
       return { ok: false, code: 'missing_permission', retryable: false };
     }
-    console.error(JSON.stringify({ alert: 'catalog_provision_failed', workspace: host.workspaceId, retryable: r.retryable, code: r.code ?? null }));
+    alert('catalog_provision_failed', { workspace: host.workspaceId, retryable: r.retryable, code: r.code ?? null });
     return { ok: false, code: 'meta_error', retryable: r.retryable };
   };
 
@@ -74,7 +75,7 @@ export async function provisionCatalog(host: LinkHost, a: { name?: string; wabaI
   const owns = await listOwnedWabas({ ...auth, businessId: a.businessId });
   if (!owns.ok) return fail(owns);
   if (!owns.value.includes(a.wabaId)) {
-    console.error(JSON.stringify({ alert: 'catalog_business_mismatch', workspace: host.workspaceId }));
+    alert('catalog_business_mismatch', { workspace: host.workspaceId });
     clearPending(host);
     return { ok: false, code: 'business_mismatch', retryable: false };
   }

@@ -5,8 +5,8 @@
 import type { Env } from '../../env';
 import { RATE_LEAD_MS, SETTINGS_LEAD_MS } from './pricing';
 import { monthRange } from './statement';
+import { alert } from '../observability';
 
-const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
 const SKEW_MS = 5_000;
 
 export async function audit(env: Env, a: { actor: string; action: string; workspaceId?: string | null; before?: unknown; after?: unknown; reason?: string | null }, now = Date.now()): Promise<void> {
@@ -24,9 +24,11 @@ export async function listSettings(env: Env) {
 
 const inEffect = async (env: Env, now: number) => env.DB.prepare('SELECT ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps, actor, reason FROM pricing_settings WHERE effective_from <= ? ORDER BY effective_from DESC, ver DESC LIMIT 1').bind(now).first<Settings>();
 
-export type Publish<T> = { ok: true; value: T } | { ok: false; reason: 'too_soon' };
+export type Publish<T> = { ok: true; value: T } | { ok: false; reason: 'too_soon' | 'vat_locked' };
 
 export async function publishSettings(env: Env, a: { actor: string; effectiveFrom?: number; marginBps: number; creditLimitMinor: number; fxBufferBps: number; vatBps: number; reason: string }, now = Date.now()): Promise<Publish<ReturnType<typeof settingsDto>>> {
+  // Ruling VAT-0: no VAT is charged (the provider is not VAT-registered). A VAT above 0 needs a new ruling and a code change, not a form.
+  if (a.vatBps !== 0) return { ok: false, reason: 'vat_locked' };
   const effective = a.effectiveFrom ?? now + SETTINGS_LEAD_MS + SKEW_MS;
   if (effective < now + SETTINGS_LEAD_MS - SKEW_MS) return { ok: false, reason: 'too_soon' };
   const before = await inEffect(env, now);

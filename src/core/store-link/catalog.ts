@@ -8,6 +8,7 @@ import type { Env } from '../../env';
 import { graphTokenFor, TokenUnavailable } from '../numbers/token';
 import type { LinkHost } from './host';
 import { getState, putState, readSettings } from './settings';
+import { alert } from '../observability';
 
 /** Nightly full reconcile runs after the 02:00 backup. */
 export const RECONCILE_HOUR_LOCAL = 3;
@@ -53,7 +54,7 @@ export async function verifiedAuth(host: LinkHost): Promise<Ready | null> {
   const catalogId = readSettings(host).catalogId;
   if (!catalogId) return null;
   const refuse = (why: string): null => {
-    console.error(JSON.stringify({ alert: 'catalog_not_linked', workspace: host.workspaceId, why }));
+    alert('catalog_not_linked', { workspace: host.workspaceId, why });
     return null;
   };
   const wabaId = getState(host, 'catalog.waba');
@@ -166,7 +167,7 @@ export async function runCatalogReconcile(host: LinkHost, now: number, opts: { a
   let extras = rows.length ? have.value.filter((id) => !wanted.has(id)) : [];
   // A wrong catalog, a half-read Store list or a bug must not be able to empty a live catalog in one automatic run.
   if (!opts.allowMassDelete && extras.length > MASS_DELETE_MIN && extras.length > have.value.length * MASS_DELETE_SHARE) {
-    console.error(JSON.stringify({ alert: 'catalog_mass_delete_refused', workspace: host.workspaceId, extras: extras.length, inCatalog: have.value.length }));
+    alert('catalog_mass_delete_refused', { workspace: host.workspaceId, extras: extras.length, inCatalog: have.value.length });
     extras = [];
   }
   for (const id of extras) requests.push({ method: 'DELETE', data: { id } });

@@ -12,6 +12,7 @@ import { ensureCatalogReconcile } from './catalog';
 import { isLinked, putState, readSettings } from './settings';
 import { acceptVersion, locale, orderRow, rememberBuyerKey, schedulePendingPushes, upsertOrder } from './order-store';
 import { applyConsentChanged, forgetBuyer, recordCheckoutConsent, recordWithdrawal } from './consent';
+import { alert } from '../observability';
 
 export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
 
@@ -193,7 +194,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       const totalMinor = d.totalMinor ?? have?.total_minor ?? pre.codLookup?.totalMinor;
       const currency = d.currency ?? have?.currency ?? pre.codLookup?.currency ?? 'EGP';
       if (!orderNumber || totalMinor === undefined || totalMinor === null) {
-        console.error(JSON.stringify({ alert: 'cod_request_details_missing', workspace: host.workspaceId }));
+        alert('cod_request_details_missing', { workspace: host.workspaceId });
         return { status: 'skipped', detail: 'details_missing' };
       }
       if (!copy || !opts.phoneNumberId) return { status: 'skipped', detail: copy ? 'no_number' : 'no_copy' };

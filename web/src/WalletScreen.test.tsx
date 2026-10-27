@@ -286,7 +286,7 @@ describe('wallet: refund requests', () => {
 describe('wallet: low balance banner in the inbox', () => {
   async function inbox(source: InboxSource) {
     render(<App source={source} now={now} />);
-    await screen.findByRole('list', { name: 'المحادثات' });
+    await screen.findByRole('listbox', { name: 'المحادثات' });
   }
 
   it('shows nothing while the wallet is healthy', async () => {
@@ -432,7 +432,7 @@ describe('wallet: renew reminder in the inbox', () => {
   const DAY_MS = 86_400_000;
   async function inbox(source: InboxSource) {
     render(<App source={source} now={now} />);
-    await screen.findByRole('list', { name: 'المحادثات' });
+    await screen.findByRole('listbox', { name: 'المحادثات' });
   }
   const plan = (packageId: string, days: number) => ({ plan: { packageId, status: 'active' as const, periodEnd: now() + days * DAY_MS, cancelledAt: null } });
 

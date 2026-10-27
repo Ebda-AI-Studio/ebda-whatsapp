@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 import { buyerKey } from '../buyer-key';
-import { errClass } from '../observability';
+import { errClass, alert } from '../observability';
 import { isE164 } from '../phone';
 import type { LinkHost } from '../store-link/host';
 import type { CatalogRow, StoreBridge } from '../store-bridge';
@@ -84,7 +84,7 @@ export async function runTool(ctx: ToolContext, call: ToolCall): Promise<ToolOut
         return err('unknown_tool');
     }
   } catch (e) {
-    console.error(JSON.stringify({ alert: 'agent_tool_failed', workspace: ctx.host.workspaceId, tool: call.name.slice(0, 40), error: errClass(e) }));
+    alert('agent_tool_failed', { workspace: ctx.host.workspaceId, tool: call.name.slice(0, 40), error: errClass(e) });
     return err('tool_failed');
   }
 }

@@ -1,12 +1,12 @@
 import { segmentCriteria, type CampaignDto, type CampaignParam, type SegmentCriteria } from '../api/contract';
-import { errClass } from '../observability';
+import { errClass, alert } from '../observability';
 import { addTask } from '../scheduler';
 import { cleanParam, queueTemplate } from '../store-link/outbound';
 import type { LinkHost } from '../store-link/host';
 import { componentsSchema, renderTemplate } from '../templates';
 import { DEFAULT_TIER, TIER_WINDOW_MS } from '../throttle';
 import { buyerKey } from '../buyer-key';
-import { campaignLinks, newCode, validateTrackedUrl, withUtm } from './links';
+import { campaignLinks, newSignedCode, validateTrackedUrl, withUtm } from './links';
 import { audiencePage, getSegment, previewAudience } from './segments';
 import { featureAllowed, marketingBlocked, serviceAllowed } from '../billing/entitlements';
 import { countryOf } from '../billing/country';
@@ -158,7 +158,7 @@ export async function createCampaign(host: LinkHost, a: CreateArgs): Promise<Cre
   if (!wantsLink && a.linkUrl !== undefined) return { ok: false, reason: 'invalid_params', message: 'link_param_required' };
   if (a.linkUrl !== undefined) {
     const base = campaignLinks().baseUrl(host.env);
-    if (!base) return { ok: false, reason: 'invalid_params', message: 'tracking_unavailable' };
+    if (!base || !campaignLinks().signingSecret(host.env)) return { ok: false, reason: 'invalid_params', message: 'tracking_unavailable' };
     linkUrl = validateTrackedUrl(a.linkUrl, base);
     if (!linkUrl) return { ok: false, reason: 'invalid_params', message: 'link_url_invalid' };
   }
@@ -356,7 +356,9 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
     return stop('plan_blocked');
   }
   // The origin was known when the campaign was made; if it is gone the deployment is misconfigured. Nothing is touched: ask again later.
-  const baseUrl = c.link_url ? campaignLinks().baseUrl(host.env) : null;
+  const linkSecret = c.link_url ? campaignLinks().signingSecret(host.env) : undefined;
+  // No signing secret = no tracked links (fail closed): a link the edge cannot verify would be refused there anyway.
+  const baseUrl = c.link_url && linkSecret ? campaignLinks().baseUrl(host.env) : null;
   if (c.link_url && !baseUrl) return { state: 'retry', reason: 'tracking_unavailable' };
   const cap = capacity(host, c, now);
   if (cap.room <= 0) return { state: 'wait', until: cap.until };
@@ -375,7 +377,7 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
       reservedMinor = (await wallet.walletEstimate(host.workspaceId, c.category, ctx)) * rows.length;
       res = await wallet.walletReserve(host.workspaceId, ref, reservedMinor, ctx);
     } catch (err) {
-      console.error(JSON.stringify({ alert: 'campaign_wallet_unavailable', workspace: host.workspaceId, error: errClass(err) }));
+      alert('campaign_wallet_unavailable', { workspace: host.workspaceId, error: errClass(err) });
       return { state: 'retry', reason: 'wallet_unavailable' };
     }
     if (!res.ok) {
@@ -394,11 +396,13 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
   }
   const specs = JSON.parse(c.params) as CampaignParam[];
   const exhausted = rows.length < limit;
+  // Codes are signed with Web Crypto (async): mint this page's before the synchronous transaction, use them inside.
+  const fresh = baseUrl && linkSecret ? await Promise.all(rows.map(() => newSignedCode(host.workspaceId, linkSecret))) : [];
   const result = host.storage.transactionSync((): PageResult => {
     let queued = 0;
     for (const r of rows) {
       const idem = recipientKey(id, r.id);
-      const code = baseUrl ? linkCodeFor(host, id, r.id, now) : null;
+      const code = baseUrl ? linkCodeFor(host, id, r.id, now, fresh) : null;
       const q = queueTemplate(host, {
         waId: r.waId, phoneNumberId: c.phone_number_id, name: c.template_name, language: c.template_language,
         params: resolveParams(specs, r.name, baseUrl && code ? { baseUrl, code } : undefined), idempotencyKey: idem, requireConsent: true, campaign: true, profileName: r.name, now,
@@ -422,16 +426,17 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
   await host.arm();
   if (result.state === 'done') {
     // The page is queued and final; a wallet that cannot be told now is told by the sweep. Failing here would only make the step ask again.
-    await settleWallet(host, id).catch((err) => console.error(JSON.stringify({ alert: 'campaign_wallet_settle_failed', workspace: host.workspaceId, error: errClass(err) })));
+    await settleWallet(host, id).catch((err) => alert('campaign_wallet_settle_failed', { workspace: host.workspaceId, error: errClass(err) }));
   }
   return result;
 }
 
 /** The recipient's link code: the one already made for this campaign and contact, else a new one. Call inside a transaction. */
-function linkCodeFor(host: LinkHost, campaignId: string, contactId: number, now: number): string {
+function linkCodeFor(host: LinkHost, campaignId: string, contactId: number, now: number, fresh: string[]): string {
   const have = host.sql.exec<{ code: string }>('SELECT code FROM campaign_links WHERE campaign_id = ? AND contact_id = ?', campaignId, contactId).toArray()[0];
   if (have) return have.code;
-  const code = newCode(host.workspaceId);
+  const code = fresh.pop();
+  if (!code) throw new Error('no pre-minted link code left for this page');
   host.sql.exec('INSERT INTO campaign_links (code, campaign_id, contact_id, created_at) VALUES (?, ?, ?, ?)', code, campaignId, contactId, now);
   return code;
 }
@@ -460,7 +465,7 @@ export async function launchCampaign(host: LinkHost, id: string, now: number): P
   try {
     await host.env.CAMPAIGN_WORKFLOW.create({ id: `${id}-${row.attempt}`, params: { workspaceId: host.workspaceId, campaignId: id, attempt: row.attempt } });
   } catch (err) {
-    console.error(JSON.stringify({ alert: 'campaign_launch_failed', workspace: host.workspaceId, attempt: row.attempt, error: errClass(err) }));
+    alert('campaign_launch_failed', { workspace: host.workspaceId, attempt: row.attempt, error: errClass(err) });
   }
 }
 
@@ -498,7 +503,7 @@ export async function sweepCampaigns(host: LinkHost, now: number): Promise<numbe
     if (alive) continue;
     if (c.attempt >= MAX_ATTEMPTS) {
       host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = 'internal_error', updated_at = ? WHERE id = ? AND status IN ('scheduled', 'running')", now, c.id);
-      console.error(JSON.stringify({ alert: 'campaign_paused_internal_error', workspace: host.workspaceId, campaign: c.id }));
+      alert('campaign_paused_internal_error', { workspace: host.workspaceId, campaign: c.id });
     } else {
       await launchCampaign(host, c.id, now);
     }
@@ -507,7 +512,7 @@ export async function sweepCampaigns(host: LinkHost, now: number): Promise<numbe
     try {
       await settleWallet(host, c.id);
     } catch (err) {
-      console.error(JSON.stringify({ alert: 'campaign_wallet_settle_failed', workspace: host.workspaceId, error: errClass(err) }));
+      alert('campaign_wallet_settle_failed', { workspace: host.workspaceId, error: errClass(err) });
     }
   }
   const stillActive = host.sql.exec<{ n: number }>("SELECT count(*) AS n FROM campaigns WHERE status IN ('scheduled', 'running')").one().n;

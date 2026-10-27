@@ -2,7 +2,7 @@ import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { campaignDto } from '../src/core/api/contract';
 import { buyerKey } from '../src/core/buyer-key';
-import { configureCampaignLinks, isAutomatedFetch, newCode, parseCode, validateTrackedUrl, withUtm, type LinkConfig } from '../src/core/campaigns/links';
+import { configureCampaignLinks, isAutomatedFetch, newSignedCode, parseCode, validateTrackedUrl, withUtm, type LinkConfig } from '../src/core/campaigns/links';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import { BUYER_SECRET } from './helpers/store-link';
 import { holdAlarm, registerWorkspace, seedContacts, seedTemplate } from './helpers/campaigns';
@@ -11,7 +11,8 @@ import { exec, rows, workspace } from './helpers/workspace';
 useApiKey();
 const BASE = 'https://wa.test';
 let previous: LinkConfig | undefined;
-beforeEach(() => { previous = configureCampaignLinks({ baseUrl: () => BASE, buyerSecret: () => BUYER_SECRET }); });
+const LINK_SECRET = 'link-signing-secret-for-tests-0123456789';
+beforeEach(() => { previous = configureCampaignLinks({ baseUrl: () => BASE, buyerSecret: () => BUYER_SECRET, signingSecret: () => LINK_SECRET }); });
 afterEach(() => { if (previous) configureCampaignLinks(previous); });
 
 const BODY_LINK = JSON.stringify([{ type: 'BODY', text: 'أهلا {{1}} شوف العرض {{2}}' }]);
@@ -33,17 +34,17 @@ it('UTM is added where missing and the merchant\'s own values are kept; Arabic n
   expect(new URL(withUtm('https://shop.example.com/', '!!!', 'abcdef12-0000')).searchParams.get('utm_campaign')).toBe('abcdef12');
 });
 
-it('codes are 128 random bits, unique, unguessable in shape and carry the workspace', () => {
+it('codes are 128 random bits plus a MAC, unique, unguessable in shape and carry the workspace', async () => {
   const ws = W(660);
-  const codes = new Set(Array.from({ length: 2000 }, () => newCode(ws)));
+  const codes = new Set(await Promise.all(Array.from({ length: 2000 }, () => newSignedCode(ws, LINK_SECRET))));
   expect(codes.size).toBe(2000);
   const one = [...codes][0]!;
   const parsed = parseCode(one)!;
   expect(parsed.workspaceId).toBe(ws);
-  const secret = one.slice(ws.length + 1);
-  expect(secret).toMatch(/^[A-Za-z0-9_-]{22}$/);
-  expect(Math.floor((secret.length * 6) / 8) * 8).toBeGreaterThanOrEqual(96); // decodes to 16 bytes
-  for (const bad of ['', 'nodot', `${ws}.short`, `${ws}.${'a'.repeat(23)}`, `.${'a'.repeat(22)}`, `${ws}.${'a'.repeat(21)}!`]) expect(parseCode(bad), bad).toBeNull();
+  const [, rand, mac] = one.split('.') as [string, string, string];
+  expect(rand).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  expect(mac).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  for (const bad of ['', 'nodot', `${ws}.short`, `${ws}.${'a'.repeat(22)}`, `${ws}.${'a'.repeat(23)}.${'b'.repeat(22)}`, `.${'a'.repeat(22)}.${'b'.repeat(22)}`, `${ws}.${'a'.repeat(21)}!.${'b'.repeat(22)}`]) expect(parseCode(bad), bad).toBeNull();
 });
 
 it('automated fetches (link previews, crawlers, HEAD) are told apart from people', () => {
@@ -68,7 +69,7 @@ it('a campaign with links needs a destination and a link parameter together, a s
   expect(await msg({ ...body, params: [{ kind: 'name', fallback: 'x' }, { kind: 'text', value: 'plain' }] })).toBe('link_param_required');
   expect(await msg({ ...body, linkUrl: 'http://shop.example.com/' })).toBe('link_url_invalid');
   expect(await msg({ ...body, linkUrl: 'https://wa.test/t/x' })).toBe('link_url_invalid');
-  configureCampaignLinks({ baseUrl: () => null, buyerSecret: () => BUYER_SECRET });
+  configureCampaignLinks({ baseUrl: () => null, buyerSecret: () => BUYER_SECRET, signingSecret: () => LINK_SECRET });
   expect(await msg(body)).toBe('tracking_unavailable');
 });
 
@@ -146,7 +147,7 @@ it('link-preview bots and HEAD requests are redirected but never counted', async
 it('without the buyer secret the click is still recorded, with an empty buyerKey', async () => {
   const ws = W(665);
   const { links } = await sentCampaign(ws, 1);
-  configureCampaignLinks({ baseUrl: () => BASE, buyerSecret: () => undefined });
+  configureCampaignLinks({ baseUrl: () => BASE, buyerSecret: () => undefined, signingSecret: () => LINK_SECRET });
   const spy = vi.spyOn(env.LINK_CLICKS!, 'writeDataPoint');
   expect((await hit(links[0]!.code)).status).toBe(302);
   expect(spy.mock.calls[0]![0]!.blobs![2]).toBe('');

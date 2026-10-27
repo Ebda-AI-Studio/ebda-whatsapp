@@ -1,7 +1,7 @@
 /** The connectors a turn may use: enabled ones only, tool names prefixed with the connector id (`<id>__<tool>`). */
 import type { Env } from '../../env';
 import { buyerKey } from '../buyer-key';
-import { errClass } from '../observability';
+import { errClass, alert } from '../observability';
 import { isE164 } from '../phone';
 import { storeLink } from '../store-link';
 import type { ToolDef } from '../ai/provider';
@@ -84,9 +84,9 @@ export async function runConnectorTool(host: Host, set: ConnectorSet, from: stri
     const ctx = await connectorCtx(host, from, idempotencyKey);
     res = ctx ? await set.call(name, args, ctx) : { ok: false, error: 'unavailable' };
   } catch (e) {
-    console.error(JSON.stringify({ alert: 'connector_call_crashed', workspace: host.workspaceId, tool: name.slice(0, 60), error: errClass(e) }));
+    alert('connector_call_crashed', { workspace: host.workspaceId, tool: name.slice(0, 60), error: errClass(e) });
     res = { ok: false, error: 'unavailable' };
   }
-  if (!res.ok) console.error(JSON.stringify({ alert: 'connector_call_failed', workspace: host.workspaceId, tool: name.slice(0, 60), error: res.error }));
+  if (!res.ok) alert('connector_call_failed', { workspace: host.workspaceId, tool: name.slice(0, 60), error: res.error });
   return toolContent(res);
 }

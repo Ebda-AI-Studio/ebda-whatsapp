@@ -16,8 +16,8 @@ import type { WalletDto } from './data/billing';
 import type { ConversationFilter, InboxSource } from './data/source';
 import { STRINGS, type Lang } from './i18n';
 
-const SEARCH_DEBOUNCE_MS = 150;
 import { formatMoney } from './lib/format';
+import { useTypeahead } from './lib/useTypeahead';
 
 type Props = { source: InboxSource; now?: () => number; initialLang?: Lang };
 
@@ -26,7 +26,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const [view, setView] = useState<View>('inbox');
   const t = STRINGS[lang];
   const [filter, setFilter] = useState<ConversationFilter>('all');
-  const [query, setQuery] = useState('');
+  const [reloadTick, setReloadTick] = useState(0);
   const [items, setItems] = useState<ConversationDto[]>([]);
   const [totalUnread, setTotalUnread] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -57,31 +57,34 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
 
-  // Latest request wins: a newer refresh aborts the one in flight, and an answer that still arrives for an older one is dropped.
+  // Search as you type (shared hook): from the first character, 150 ms after typing pauses, the previous request aborted, an older answer never shown.
+  // The filter and a live-reload tick re-run the same query; with an empty box the plain list below is shown instead.
+  const fetchSearch = useCallback((q: string, signal: AbortSignal) => source.listConversations(filter, q, signal), [source, filter]);
+  const search = useTypeahead<ConversationDto>(fetchSearch, { deps: [source, filter, reloadTick] });
+  const query = search.query;
+  const searching = query.trim() !== '';
+  const shown = searching ? search.results : items;
+
+  // The plain list (empty search box). Latest request wins: a newer refresh aborts the one in flight, and an older answer is dropped.
   const latest = useRef<{ seq: number; ctrl: AbortController | null }>({ seq: 0, ctrl: null });
   const refresh = useCallback(async () => {
+    if (searching) { setReloadTick((n) => n + 1); return; } // a live update while searching re-runs the search
     latest.current.ctrl?.abort();
     const ctrl = new AbortController();
     const seq = ++latest.current.seq;
     latest.current.ctrl = ctrl;
     try {
-      const list = await source.listConversations(filter, query, ctrl.signal);
+      const list = await source.listConversations(filter, '', ctrl.signal);
       if (seq !== latest.current.seq) return;
       setItems(list);
       // The unread total is only knowable from the unfiltered list; keep the last value under a filter.
-      if (filter === 'all' && !query.trim()) setTotalUnread(list.reduce((n, c) => n + c.unread, 0));
+      if (filter === 'all') setTotalUnread(list.reduce((n, c) => n + c.unread, 0));
       setError(false);
     } catch {
       if (seq === latest.current.seq) setError(true);
     }
-  }, [source, filter, query]);
-
-  // Search as you type: from the first character, once typing pauses for 150 ms; an empty box or a filter change loads at once.
-  useEffect(() => {
-    if (!query.trim()) { void refresh(); return; }
-    const id = setTimeout(() => void refresh(), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [refresh, query]);
+  }, [source, filter, searching]);
+  useEffect(() => { if (!searching) void refresh(); }, [refresh, searching]);
   const [templatesFailed, setTemplatesFailed] = useState(false);
   const loadTemplates = useCallback(() => { void source.templates().then((ts) => { setTemplates(ts); setTemplatesFailed(false); }, () => setTemplatesFailed(true)); }, [source]);
   useEffect(loadTemplates, [loadTemplates]);
@@ -112,14 +115,14 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     return lines;
   }, [walletDto, t, lang, now]);
 
-  const selected = useMemo(() => items.find((c) => c.id === selectedId) ?? null, [items, selectedId]);
+  const selected = useMemo(() => shown.find((c) => c.id === selectedId) ?? items.find((c) => c.id === selectedId) ?? null, [shown, items, selectedId]);
 
   const open = useCallback(async (id: number) => {
     setSelectedId(id);
     setOrders(null);
     setOrdersFailed(false);
     setMessages([]);
-    const conv = items.find((c) => c.id === id);
+    const conv = shown.find((c) => c.id === id) ?? items.find((c) => c.id === id);
     // Messages, read receipt and orders load in parallel: nothing waits on anything else.
     [...pending.current.keys()].forEach((k) => flushRef.current(k)); // a decision on the previous chat is sent, never lost
     // Messages, read receipt and orders load in parallel and independently: one failing never blanks the others.
@@ -131,7 +134,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
       setError(true);
     }
     void refresh();
-  }, [source, refresh, items]);
+  }, [source, refresh, shown, items]);
 
   useEffect(() => source.onReload?.(() => {
     void refresh();
@@ -248,14 +251,14 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
         : view === 'numbers' && source.numbers ? <NumbersScreen t={t} lang={lang} source={source} api={source.numbers} />
         : view === 'contacts' && source.contacts ? <ContactsScreen t={t} lang={lang} source={source} api={source.contacts} now={now} /> : (
         <>
-      <ConversationList t={t} lang={lang} now={now()} items={items} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} onFilter={setFilter} onQuery={setQuery} onOpen={open} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} notice={walletNotice} onOpenWallet={() => setView('wallet')} />
+      <ConversationList t={t} lang={lang} now={now()} items={shown} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} searchStatus={searching ? search.status : 'idle'} onFilter={setFilter} onQuery={search.setQuery} onOpen={open} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} notice={walletNotice} onOpenWallet={() => setView('wallet')} />
       <div className="center">
         {!online && <p className="notice offline" role="status">{t.offline}</p>}
         {error && <p className="notice offline" role="alert">{t.loadError} <button type="button" className="btn ghost" onClick={() => void refresh()}>{t.retry}</button></p>}
         {templatesFailed && <p className="notice offline" role="alert">{t.dataLoadError} <button type="button" className="btn ghost" onClick={loadTemplates}>{t.retry}</button></p>}
         <ChatPane t={t} lang={lang} now={now()} conversation={selected} source={source} userNames={source.userNames} currentOrder={orders?.[0] ?? null} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onSendMedia={sendMedia} onRetry={retry} onBack={() => setSelectedId(null)} onShowOrders={() => setOrdersOpen(true)} onTakeOver={source.assign ? () => void takeOver() : undefined} />
       </div>
-      <OrderPane key={selectedId ?? 'none'} t={t} lang={lang} orders={selected ? orders : null} failed={ordersFailed} onRetry={() => { const conv = items.find((c) => c.id === selectedId); if (!conv) return; setOrdersFailed(false); void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrdersFailed(true)); }} hasChat={!!selected} canDecide={source.capabilities.codOutcome} onConfirm={(o) => recordOutcome(o, 'confirmed')} onRefuse={(o) => recordOutcome(o, 'refused')} onClose={() => setOrdersOpen(false)} />
+      <OrderPane key={selectedId ?? 'none'} t={t} lang={lang} orders={selected ? orders : null} failed={ordersFailed} onRetry={() => { const conv = shown.find((c) => c.id === selectedId) ?? items.find((c) => c.id === selectedId); if (!conv) return; setOrdersFailed(false); void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrdersFailed(true)); }} hasChat={!!selected} canDecide={source.capabilities.codOutcome} onConfirm={(o) => recordOutcome(o, 'confirmed')} onRefuse={(o) => recordOutcome(o, 'refused')} onClose={() => setOrdersOpen(false)} />
         </>
       )}
       {toast && (

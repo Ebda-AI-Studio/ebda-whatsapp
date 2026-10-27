@@ -1,12 +1,16 @@
-import { Search } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import type { ConversationDto } from '../../../src/core/api/contract';
 import type { ConversationFilter } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { relativeTime } from '../lib/format';
+import { Highlight } from './Highlight';
+import { SearchBox, optionId, type SearchStatus } from './SearchBox';
 
 type Props = {
   t: Strings; lang: Lang; now: number;
   items: ConversationDto[]; selectedId: number | null; filter: ConversationFilter; query: string; totalUnread: number;
+  /** State of the search that produced `items` (idle when the box is empty). */
+  searchStatus: SearchStatus;
   onFilter: (f: ConversationFilter) => void; onQuery: (q: string) => void; onOpen: (id: number) => void; onToggleLang: () => void;
   /** Calm wallet notices (low balance, debt, marketing paused); empty = nothing to say. */
   notice?: string[]; onOpenWallet?: () => void;
@@ -18,7 +22,13 @@ export function initials(name: string | null): string {
   return (name ?? '؟').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('');
 }
 
-export function ConversationList({ t, lang, now, items, selectedId, filter, query, totalUnread, onFilter, onQuery, onOpen, onToggleLang, notice = [], onOpenWallet }: Props) {
+const LIST_ID = 'conversation-results';
+
+export function ConversationList({ t, lang, now, items, selectedId, filter, query, totalUnread, searchStatus, onFilter, onQuery, onOpen, onToggleLang, notice = [], onOpenWallet }: Props) {
+  // The keyboard-active row (-1 = none); a new result list starts with none active.
+  const [active, setActive] = useState(-1);
+  useEffect(() => setActive(-1), [items]);
+  useEffect(() => { if (active >= 0) document.getElementById(optionId(LIST_ID, active))?.scrollIntoView?.({ block: 'nearest' }); }, [active]);
   return (
     <section className="list-pane" aria-labelledby="list-title">
       <div className="list-head">
@@ -34,11 +44,7 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
             <button key={f} type="button" className="chip" aria-pressed={filter === f} onClick={() => onFilter(f)}>{t[f]}</button>
           ))}
         </div>
-        <label className="search">
-          <Search size={17} aria-hidden />
-          <span className="vh">{t.search}</span>
-          <input type="search" placeholder={t.search} value={query} onChange={(e) => onQuery(e.target.value)} />
-        </label>
+        <SearchBox t={t} lang={lang} label={t.search} query={query} onQuery={onQuery} status={searchStatus} count={items.length} listId={LIST_ID} activeIndex={active} onActiveIndex={setActive} onPick={(i) => { const c = items[i]; if (c) onOpen(c.id); }} />
       </div>
       {notice.length > 0 && (
         <div className="wallet-banner" data-banner="wallet" role="status">
@@ -46,19 +52,19 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
           <a href="#wallet" onClick={(e) => { e.preventDefault(); onOpenWallet?.(); }}>{t.wBannerLink}</a>
         </div>
       )}
-      <ul className="rows" aria-label={t.conversations}>
-        {items.length === 0 && <li className="empty">{t.noResults}</li>}
-        {items.map((c) => (
-          <li key={c.id}>
-            <button type="button" className="row" aria-current={c.id === selectedId} onClick={() => onOpen(c.id)}>
+      <ul className="rows" id={LIST_ID} role="listbox" aria-label={t.conversations}>
+        {items.length === 0 && <li className="empty" role="presentation">{t.noResults}</li>}
+        {items.map((c, i) => (
+          <li key={c.id} role="presentation">
+            <button type="button" role="option" id={optionId(LIST_ID, i)} className="row" aria-selected={i === active} data-active={i === active} aria-current={c.id === selectedId} onClick={() => onOpen(c.id)}>
               <span className="avatar" data-selected={c.id === selectedId} aria-hidden>{initials(c.contact.name)}{c.tags.includes('cod_pending') && c.id !== selectedId && <span className="lit" title={t.codPending} />}</span>
               <span className="row-body">
                 <span className="row-top">
-                  <span className="row-name" dir="auto">{c.contact.name ?? `+${c.contact.waId}`}</span>
+                  <span className="row-name" dir="auto"><Highlight text={c.contact.name ?? `+${c.contact.waId}`} query={query} /></span>
                   {c.lastMessage && <span className="muted">{relativeTime(c.lastMessage.at, now, lang)}</span>}
                 </span>
                 <span className="row-bottom">
-                  <span className="row-preview" dir="auto">{c.lastMessage?.preview ?? ''}</span>
+                  <span className="row-preview" dir="auto"><Highlight text={c.lastMessage?.preview ?? ''} query={query} /></span>
                   {c.tags.includes('needs_human') && <span className="human-chip">{t.needsHuman}</span>}
                   {c.unread > 0 && <span className="pill">{num(c.unread, lang)}<span className="vh"> {t.unread}</span></span>}
                 </span>

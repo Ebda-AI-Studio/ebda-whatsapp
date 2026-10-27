@@ -1,6 +1,7 @@
 import type {
   AgentSettingsDto, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
+import { normaliseText } from '../../../src/core/text-normalise';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
 import type { SharedTemplatesApi } from './shared-templates';
 import type { InboxSource } from './source';
@@ -52,7 +53,7 @@ const TEMPLATES: TemplateDto[] = [
   { name: 'cod_confirmation', language: 'ar', category: 'UTILITY', status: 'APPROVED', bodyText: 'أهلًا {{1}}، عندك طلب رقم {{2}} بإجمالي {{3}}. تحب نأكده؟', paramCount: 3, rejectedReason: null },
   { name: 'shipping_update', language: 'ar', category: 'UTILITY', status: 'APPROVED', bodyText: 'طلبك {{1}} اتشحن، وتقدر تتابعه من هنا: {{2}}', paramCount: 2, rejectedReason: null },
   { name: 'order_confirmation', language: 'ar', category: 'UTILITY', status: 'APPROVED', bodyText: 'شكرًا يا {{1}}، طلبك {{2}} اتأكد وهيوصلك خلال {{3}} أيام.', paramCount: 3, rejectedReason: null },
-  { name: 'eid_offer', language: 'ar', category: 'MARKETING', status: 'APPROVED', bodyText: 'كل سنة وانت طيب يا {{1}}! خصم ٢٠٪ على كل حاجة لحد آخر الأسبوع: {{2}}', paramCount: 2, rejectedReason: null },
+  { name: 'eid_offer', language: 'ar', category: 'MARKETING', status: 'APPROVED', bodyText: 'كل سنة وانت طيب يا {{1}}! خصم 20٪ على كل حاجة لحد آخر الأسبوع: {{2}}', paramCount: 2, rejectedReason: null },
   { name: 'back_in_stock', language: 'ar', category: 'MARKETING', status: 'APPROVED', bodyText: 'المنتج اللي كنت مستنيه رجع تاني يا {{1}}.', paramCount: 1, rejectedReason: null },
 ];
 
@@ -82,7 +83,7 @@ const CAMPAIGNS: CampaignDto[] = [
 ];
 const SEGMENTS: SegmentDto[] = [
   { id: 1, name: 'عملاء VIP', criteria: { tags: { any: ['vip'] } }, createdAt: BASE - 30 * D, updatedAt: BASE - 30 * D },
-  { id: 2, name: 'كلمونا آخر ٣٠ يوم', criteria: { lastInboundAfter: BASE - 30 * D }, createdAt: BASE - 20 * D, updatedAt: BASE - 20 * D },
+  { id: 2, name: 'كلمونا آخر 30 يوم', criteria: { lastInboundAfter: BASE - 30 * D }, createdAt: BASE - 20 * D, updatedAt: BASE - 20 * D },
 ];
 const sampleNumber = (p: Partial<NumberDto> & Pick<NumberDto, 'phoneNumberId' | 'displayPhone'>): NumberDto => ({
   wabaId: 'waba-sample-1', verifiedName: 'متجر منى', kind: 'own', onboarding: 'cloud_api', status: 'active', registration: 'registered', qualityRating: 'GREEN',
@@ -91,7 +92,7 @@ const sampleNumber = (p: Partial<NumberDto> & Pick<NumberDto, 'phoneNumberId' | 
 });
 const NUMBERS: NumberDto[] = [
   sampleNumber({ phoneNumberId: 'pn-sample-1', displayPhone: '+20 100 555 0101', onboarding: 'business_app', registration: 'not_needed', isOnBizApp: true, historySync: 'received', contactsSync: 'received', throughputLevel: null }),
-  sampleNumber({ phoneNumberId: 'pn-sample-2', displayPhone: '+20 100 555 0202', verifiedName: 'متجر منى - فرع ٢', status: 'disconnected', registration: 'failed', qualityRating: null, messagingLimitTier: null, connectedAt: BASE - 2 * H }),
+  sampleNumber({ phoneNumberId: 'pn-sample-2', displayPhone: '+20 100 555 0202', verifiedName: 'متجر منى - فرع 2', status: 'disconnected', registration: 'failed', qualityRating: null, messagingLimitTier: null, connectedAt: BASE - 2 * H }),
 ];
 
 // Illustrative per-message cost for the sample estimate (piasters); the live figure comes from the wallet.
@@ -288,9 +289,11 @@ export function createSampleSource(): InboxSource {
     sharedTemplates: createSampleSharedTemplates(),
     contacts: {
       async list(q) {
-        const query = q.q?.trim() ?? '';
+        const query = normaliseText(q.q ?? '');
+        const digits = query.replace(/\D/g, '');
+        // Same matching as the server (name tokens by prefix through the shared normaliser, phone by digits), so sample mode behaves like the real one.
         const items = contacts
-          .filter((c) => !query || (c.name ?? '').includes(query) || c.waId.includes(query.replace(/\D/g, '') || '\u0000'))
+          .filter((c) => !query || query.split(' ').every((qt) => normaliseText(c.name ?? '').split(' ').some((w) => w.startsWith(qt))) || (digits.length >= 3 && c.waId.includes(digits)))
           .filter((c) => !q.tag || (c.tags ?? []).includes(q.tag))
           .filter((c) => q.optedOut === undefined || c.optedOut === q.optedOut);
         return { items: items.map((c) => ({ ...c })), nextCursor: null };

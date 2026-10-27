@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { findMatches } from './helpers/grep';
 
@@ -45,10 +47,10 @@ const LEGAL_PINS: Record<string, string> = {
   'docs/legal/README.md': '3e2ac6be2d00104de0be887baab908784ba2468e0e97761579646c2640b8cf31',
   'docs/legal/ar/whatsapp-dpa.md': '43dfa98c3dc681bc047ff7f04738279a326d6e71d80d9c1afbb75bb2c0975e51',
   'docs/legal/ar/whatsapp-privacy.md': '93cc40cde3913d7f0c31bcbe5c93a1b63e5676250528b282b8ff45a9f4e59cc8',
-  'docs/legal/ar/whatsapp-terms.md': '83ff0b9a36f3fbda22adec3f1be5813190e855a8ce780587130c4ff93b0efbca',
+  'docs/legal/ar/whatsapp-terms.md': '4038e770687b89d5d0b7005b33c48812d2e595860efb194c72b0bcb2e8e4e3e8',
   'docs/legal/en/whatsapp-dpa.md': '8cfe9328d4478c1150c2c445835b0761c4a7f90849301d69dbe4e777b7f4a65a',
   'docs/legal/en/whatsapp-privacy.md': '139b5484f759014a0245ebbbf90b3a504aebf324717f98bbd3426397ade7008a',
-  'docs/legal/en/whatsapp-terms.md': 'c4d72c46ca6a74b57eabf2c5ec86e89edf08b94ac06ac07c4287da3eeea064d8',
+  'docs/legal/en/whatsapp-terms.md': '155f31f7b3a46b80d2cc8b7980193ff3b9a4704ae04e4306b004cbaebf7c325a',
 };
 it('legal pages are pinned: a change needs a new pin AND a message to the Store session, which publishes them', async () => {
   const { readFileSync, readdirSync } = await import('node:fs');
@@ -63,6 +65,85 @@ it('legal pages are pinned: a change needs a new pin AND a message to the Store 
 // (e.g. an integration principal), so routes ask "is this an owner or a super admin?" through managesStore() instead.
 it('routes never decide owner powers with a negative role check', () => {
   expect(findMatches(/!==?\s*'staff'|'staff'\s*!==?/, 'src')).toEqual([]);
+});
+
+// ---- Alerts: every name has a decided severity (W1-OBS) ----
+it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS, so a new name fails CI until someone picks its severity', async () => {
+  const { readFileSync } = await import('node:fs');
+  const obs = readFileSync(new URL('../src/core/observability.ts', import.meta.url), 'utf8');
+  const setOf = (name: string): Set<string> => {
+    const body = new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\);`).exec(obs)?.[1] ?? '';
+    return new Set([...body.replace(/\/\/[^\n]*/g, '').matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1]!));
+  };
+  const sets = { P0: setOf('P0_ALERTS'), P1: setOf('P1_ALERTS'), INFO: setOf('INFO_ALERTS') };
+  expect(sets.P0.size).toBeGreaterThan(5);
+  expect(sets.P1.size).toBeGreaterThan(40);
+  expect(sets.INFO.size).toBe(20);
+  const used = new Set<string>();
+  for (const hit of findMatches(/\balert\(/, 'src')) {
+    const [file, line] = hit.split(':') as [string, string];
+    if (file.endsWith('core/observability.ts')) continue;
+    const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').split('\n').slice(Number(line) - 1).join('\n');
+    // The first argument: up to the first comma at depth 0 (a ternary may name several alerts).
+    let depth = 0;
+    let arg = '';
+    for (const ch of text.slice(text.indexOf('alert(') + 6)) {
+      if ('([{'.includes(ch)) depth++;
+      else if (')]}'.includes(ch)) { if (depth === 0) break; depth--; }
+      else if (ch === ',' && depth === 0) break;
+      arg += ch;
+    }
+    for (const m of arg.matchAll(/'([a-z0-9_]+)'/g)) used.add(m[1]!);
+  }
+  expect(used.size).toBeGreaterThan(60);
+  const wrong = [...used].filter((n) => [sets.P0, sets.P1, sets.INFO].filter((s) => s.has(n)).length !== 1);
+  expect(wrong, 'alert names with no severity (or more than one): add each to exactly one set in observability.ts').toEqual([]);
+  for (const a of ['P0', 'P1'] as const) for (const b of ['P1', 'INFO'] as const) if (a !== b) expect([...sets[a]].filter((n) => sets[b].has(n)), `${a} and ${b} overlap`).toEqual([]);
+});
+
+// DIGITS-1 (Ahmad): Western digits 0-9 everywhere a person reads a number. Never Arabic-Indic (٠-٩) or Persian (۰-۹), in the Arabic UI too.
+// 1) Intl / toLocale* may name an Arabic locale only with the latin numbering system (`ar-EG-u-nu-latn`).
+it('DIGITS-1: no Arabic locale reaches Intl / toLocale* without -u-nu-latn (it would print ٠-٩)', () => {
+  const call = /Intl\.(NumberFormat|DateTimeFormat|RelativeTimeFormat|ListFormat|PluralRules)\(|toLocale(Date|Time)?String\(/;
+  const arabicLocale = /['"`]ar(-[A-Za-z]{2})?(-u-[A-Za-z0-9-]+)?['"`]\s*[,)]|['"`]ar-[A-Za-z]{2}(-u-[A-Za-z0-9-]+)?['"`]/g;
+  const hits: string[] = [];
+  for (const scope of ['src', 'web/src']) {
+    for (const m of findMatches(call, scope)) {
+      const [file, line] = m.split(':') as [string, string];
+      if (/\.test\.tsx?$/.test(file)) continue;
+      const text = readFileSync(join(import.meta.dirname, '..', file), 'utf8').split('\n')[Number(line) - 1]!;
+      for (const lit of text.match(arabicLocale) ?? []) if (!lit.includes('nu-latn')) hits.push(`${m}  ${lit}`);
+    }
+  }
+  expect(hits).toEqual([]);
+});
+
+// 2) No Arabic-Indic / Persian digit in anything a user can read. INPUT-side code may still name them (it must ACCEPT what people type),
+// listed by path with the reason; test files (vectors, expectations of typed input) are not scanned.
+const ARABIC_DIGIT = /[٠-٩۰-۹]/;
+const INPUT_SIDE: Record<string, string> = {
+  'src/core/text-normalise.ts': 'normaliseText / phoneDigits fold typed ٠-٩ and ۰-۹ to 0-9 (input side)',
+  'src/core/phone.ts': 'normaliseE164 accepts digits typed in Arabic-Indic or Persian form (input side)',
+  'src/core/shared/shared-number.ts': 'customer key folds typed digits before hashing (input side)',
+  'web/src/lib/rates.ts': 'parses a price typed with Arabic-Indic digits (input side)',
+  'web/src/components/WalletScreen.tsx': 'parses an amount typed with Arabic-Indic digits (input side)',
+};
+const WHOLLY_INPUT = new Set(['src/core/text-normalise.ts', 'src/core/phone.ts']);
+it('DIGITS-1: no ٠-٩ / ۰-۹ in code, copy, templates, brands, help, legal or site docs (except the input-side normalisers)', () => {
+  const hits: string[] = [];
+  for (const scope of ['src', 'web', 'docs/help', 'docs/legal', 'docs/site']) {
+    for (const m of findMatches(ARABIC_DIGIT, scope)) {
+      const [file, line] = m.split(':') as [string, string];
+      if (/\.test\.tsx?$/.test(file) || !/\.(tsx?|mjs|js|json|html|css|svg|md|mdx|txt)$/.test(file)) continue; // tests are not user-facing; images are binary
+      if (INPUT_SIDE[file]) {
+        const text = readFileSync(join(import.meta.dirname, '..', file), 'utf8').split('\n')[Number(line) - 1]!;
+        // Files that are wholly input normalisers may name the digits anywhere (also in their comments); mixed files only in the conversion tables.
+        if (WHOLLY_INPUT.has(file) || /\[٠-٩|\[۰-۹|'٠١٢٣٤٥٦٧٨٩'|'۰۱۲۳۴۵۶۷۸۹'/.test(text)) continue;
+      }
+      hits.push(m);
+    }
+  }
+  expect(hits).toEqual([]);
 });
 
 // ---- WA-NOFREE-1: there is no free plan ----

@@ -18,8 +18,8 @@ import { addMonthsUtc, partialRefundCut, upgradePriceMinor, yearlyRefundQuote, t
 import { sessionState } from '../identity/session';
 import { packagesEnabled, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { MONTHS_SQL, announceSubscription, auditStmt, fallbackToStorePlan, runWrite, setSubscription } from './subscriptions';
+import { alert } from '../observability';
 
-const alert = (what: string, extra: Record<string, unknown> = {}) => console.error(JSON.stringify({ alert: what, ...extra }));
 const errName = (err: unknown) => (err instanceof Error ? err.name : 'error');
 export const PENDING_EXPIRES_AFTER_MS = 24 * 3_600_000;
 

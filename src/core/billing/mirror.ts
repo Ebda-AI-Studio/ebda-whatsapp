@@ -4,6 +4,7 @@
  * compares the two sums per workspace; any difference is an alert, never an automatic fix (the DO is the truth).
  */
 import type { Env } from '../../env';
+import { alert } from '../observability';
 
 type Sql = DurableObjectStorage['sql'];
 const BATCH = 50;
@@ -42,7 +43,7 @@ export async function checkMirror(env: Env, sql: Sql, workspaceId: string): Prom
     const d1Sum = theirs?.s ?? 0;
     const d1Rows = theirs?.n ?? 0;
     const equal = mine.s === d1Sum && mine.n === d1Rows;
-    if (!equal) console.error(JSON.stringify({ alert: 'ledger_mirror_mismatch', workspace: workspaceId, ledger, doSum: mine.s, d1Sum, doRows: mine.n, d1Rows }));
+    if (!equal) alert('ledger_mirror_mismatch', { workspace: workspaceId, ledger, doSum: mine.s, d1Sum, doRows: mine.n, d1Rows });
     out.push({ ledger, doSum: mine.s, d1Sum, doRows: mine.n, d1Rows, equal });
   }
   return out;

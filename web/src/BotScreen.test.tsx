@@ -33,7 +33,7 @@ describe('Bot settings screen', () => {
     await open();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'أضف سؤال' })));
     await type('الاسم بالعربي', 'س'.repeat(25));
-    expect(screen.getAllByText('٢٥ من ٢٤').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('25 من 24').length).toBeGreaterThan(0);
     expect((screen.getByRole('button', { name: 'حفظ' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole('alert').textContent).toContain('فيه حاجة مش مظبوطة');
   });
@@ -44,8 +44,8 @@ describe('Bot settings screen', () => {
     await source.saveBotSettings!({ ...(await source.botSettings!()), menu: { enabled: true, items } });
     await open(source);
     expect((screen.getByRole('button', { name: 'أضف سؤال' }) as HTMLButtonElement).disabled).toBe(true);
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'تحت: السؤال ١' })));
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'احذف: السؤال ٨' })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'تحت: السؤال 1' })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'احذف: السؤال 8' })));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حفظ' })));
     expect((await source.botSettings!()).menu.items.map((i) => i.id)).toEqual(['q2', 'q1', 'q3', 'q4', 'q5', 'q6', 'q7']);
   });
@@ -68,12 +68,12 @@ describe('Bot settings screen', () => {
     const source = await open();
     await type('اسم المكان', 'متجر الورد');
     expect((screen.getByRole('button', { name: 'حفظ' }) as HTMLButtonElement).disabled).toBe(true); // half filled
-    await type('العنوان', '١٢ شارع التحرير');
+    await type('العنوان', '12 شارع التحرير');
     await type('خط العرض', '30.0381');
     await type('خط الطول', '31.2122');
     expect(screen.getByRole('link', { name: 'افتح على الخريطة' }).getAttribute('href')).toBe('https://maps.google.com/?q=30.0381,31.2122');
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حفظ' })));
-    expect((await source.botSettings!()).location).toEqual({ name: 'متجر الورد', address: '١٢ شارع التحرير', latitude: 30.0381, longitude: 31.2122 });
+    expect((await source.botSettings!()).location).toEqual({ name: 'متجر الورد', address: '12 شارع التحرير', latitude: 30.0381, longitude: 31.2122 });
     await act(async () => fireEvent.change(screen.getByLabelText('خط العرض'), { target: { value: '95' } }));
     expect((screen.getByRole('button', { name: 'حفظ' }) as HTMLButtonElement).disabled).toBe(true);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'امسح العنوان' })));
@@ -182,13 +182,13 @@ describe('Bot results (funnel)', () => {
     await open();
     const list = await screen.findByRole('list', { name: 'خطوات الطلب' });
     expect(within(list).getAllByRole('listitem')).toHaveLength(5);
-    expect(row('بدأوا محادثة').textContent).toContain('١٢٠');
-    expect(row('شافوا المنتجات').textContent).toMatch(/٩٦.*٨٠٪/);
-    expect(row('ضافوا للسلة').textContent).toMatch(/٥٤.*٥٦٪/);
-    expect(row('دخلوا الدفع').textContent).toMatch(/٣١.*٥٧٪/);
-    expect(row('كملوا الطلب').textContent).toMatch(/٢٢.*٧١٪/);
+    expect(row('بدأوا محادثة').textContent).toContain('120');
+    expect(row('شافوا المنتجات').textContent).toMatch(/96.*80٪/);
+    expect(row('ضافوا للسلة').textContent).toMatch(/54.*56٪/);
+    expect(row('دخلوا الدفع').textContent).toMatch(/31.*57٪/);
+    expect(row('كملوا الطلب').textContent).toMatch(/22.*71٪/);
     expect(row('بدأوا محادثة').textContent).not.toContain('٪'); // the first step has nothing before it
-    expect(screen.getByText(/فتحوا القايمة/).textContent).toContain('٤٠');
+    expect(screen.getByText(/فتحوا القايمة/).textContent).toContain('40');
   });
 
   it('7 days by default; the 30 and 90 day switches load again', async () => {
@@ -197,12 +197,12 @@ describe('Bot results (funnel)', () => {
     await open(source);
     await screen.findByRole('list', { name: 'خطوات الطلب' });
     expect(spy).toHaveBeenLastCalledWith(7);
-    expect(screen.getByRole('button', { name: 'آخر ٧ يوم' }).getAttribute('aria-pressed')).toBe('true');
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'آخر ٣٠ يوم' })));
+    expect(screen.getByRole('button', { name: 'آخر 7 يوم' }).getAttribute('aria-pressed')).toBe('true');
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'آخر 30 يوم' })));
     expect(spy).toHaveBeenLastCalledWith(30);
-    expect(screen.getByRole('button', { name: 'آخر ٣٠ يوم' }).getAttribute('aria-pressed')).toBe('true');
-    expect(row('بدأوا محادثة').textContent).toContain('٥٢٠');
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'آخر ٩٠ يوم' })));
+    expect(screen.getByRole('button', { name: 'آخر 30 يوم' }).getAttribute('aria-pressed')).toBe('true');
+    expect(row('بدأوا محادثة').textContent).toContain('520');
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'آخر 90 يوم' })));
     expect(spy).toHaveBeenLastCalledWith(90);
   });
 
