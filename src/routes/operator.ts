@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
+import { routePath } from 'hono/route';
 import { z } from 'zod';
 import {
-  fxPublish, instapayReject, operatorKillSwitch, operatorOffboardingRequest, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish, auditLogQuery,
+  fxPublish, instapayReject, operatorKillSwitch, operatorOffboardingRequest, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish, auditLogQuery, exportContactQuery,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -19,17 +20,29 @@ import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchH
 import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
 import { cancelOffboarding, getOffboardingWithLog, listOffboardings, requestOffboarding, runDueOffboardings } from '../core/ops/offboarding';
-import { listAudit } from '../core/audit';
+import { listAudit, recordAudit } from '../core/audit';
+import { subjectHash } from '../core/erasure';
+import { waIdParam } from './contacts';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
 /** /api/v1/operator/*, mounted behind requireSuperAdmin. Errors are {error, message?}. */
 export const operatorRoutes = new Hono<E>();
-// Every state-changing operator action re-checks that the session was not revoked, and fails closed (accounts binding missing or erroring = refused).
+/**
+ * FAIL CLOSED: every operator request (GET included) re-checks that the session was not revoked, and an unreachable accounts service refuses it.
+ * Only the reads named here skip the check; each is global price configuration with no personal data, so it keeps working while the accounts service is down.
+ * A route added later is checked by default; `test/operator-session.test.ts` walks every registered route and fails if one differs from this list.
+ */
+export const OPERATOR_READS_WITHOUT_SESSION_CHECK: Readonly<Record<string, string>> = {
+  'GET /operator/pricing-settings': 'platform price settings: global configuration, no personal data',
+  'GET /operator/pricing-overrides/:workspaceId': 'a margin per workspace id: configuration, no personal data',
+  'GET /operator/rate-cards': 'Meta rate cards: global configuration, no personal data',
+  'GET /operator/fx-rates': 'exchange rates: global configuration, no personal data',
+  'GET /operator/shared-templates': 'the platform number\'s template catalogue: no personal data',
+};
 operatorRoutes.use('*', async (c, next) => {
-  // Reads that return personal data (the InstaPay review list and proof images) re-check the session too; other reads keep working while the accounts service is down.
-  const personal = c.req.path.includes('/instapay') || c.req.path.includes('/package-orders'); // the refund quote shows a merchant's wallet debt: re-check the session
-  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && !personal) return next();
+  const pattern = routePath(c, -1).replace(/^\/api\/v1/, '');
+  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && `GET ${pattern}` in OPERATOR_READS_WITHOUT_SESSION_CHECK) return next();
   const s = await sessionState(c.env, c.get('principal').sessionId);
   if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
   if (s === 'unavailable') return c.json({ error: 'rate_limited', message: 'session_check_unavailable' }, 503);
@@ -283,6 +296,21 @@ operatorRoutes.delete('/workspaces/:workspaceId/offboarding', async (c) => {
 });
 operatorRoutes.post('/offboardings/run', async (c) => c.json(await runDueOffboardings(c.env))); // finish an interrupted run now instead of waiting for the daily pass
 // T8: the append-only audit log (who did what to which ids). Read-only.
+// B5: a data-subject export on the subject's written request. The operator states why (kept in the audit record); the call is audited like the owner's.
+operatorRoutes.get('/workspaces/:workspaceId/contacts/:waId/export', async (c) => {
+  const workspaceId = c.req.param('workspaceId')!;
+  const reason = z.string().trim().min(5).max(300).safeParse(c.req.query('reason'));
+  const q = exportContactQuery.safeParse({ after: c.req.query('after') ?? undefined, limit: c.req.query('limit') ?? undefined });
+  const waId = waIdParam(c.req.param('waId')!);
+  if (!reason.success || !q.success || !waId) return bad(c, 'reason_required');
+  if (!(await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(workspaceId).first())) return c.json({ error: 'not_found' }, 404);
+  const out = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).exportContact(waId, q.data.after, q.data.limit);
+  if (!out) return c.json({ error: 'not_found' }, 404);
+  await recordAudit(c.env, { workspaceId, actor: actor(c), role: 'operator', action: 'contact.export', targetType: 'waId', targetId: await subjectHash(c.env, workspaceId, waId), detail: { messages: out.messages.length, after: q.data.after, reason: reason.data } });
+  c.header('cache-control', 'no-store');
+  return c.json(out);
+});
+
 operatorRoutes.get('/audit-log', async (c) => {
   const q = auditLogQuery.safeParse(c.req.query());
   if (!q.success) return bad(c, q.error.issues[0]?.message);

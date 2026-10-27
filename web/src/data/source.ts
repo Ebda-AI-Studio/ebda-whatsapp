@@ -1,6 +1,6 @@
 import type {
   AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
-  RealtimeEvent, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
+  RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
 } from '../../../src/core/api/contract';
 
 import type { OperatorApi, WalletApi } from './billing';
@@ -49,6 +49,15 @@ export interface ContactsApi {
   importCsv(file: File, consented: boolean): Promise<string>;
   imports(): Promise<ImportDto[]>;
   rejects(importId: string): Promise<{ line: number; reason: string }[]>;
+  /** A name the merchant gives a contact (null = follow WhatsApp's name again). */
+  renameContact(waId: string, name: string | null): Promise<{ waId: string; name: string | null; optedOut: boolean }>;
+  /** B5: all of one contact's data (every page of messages joined). Owner only. */
+  exportContact(waId: string): Promise<unknown>;
+  /** M-175: the same person on a new number. Owner only; cannot be undone. */
+  mergeContacts(fromWaId: string, intoWaId: string): Promise<void>;
+  /** B4: how long messages are kept (owner only). `days: null` = the platform default. */
+  retention(): Promise<RetentionDto>;
+  setRetention(days: number | null): Promise<RetentionDto>;
 }
 
 /** Where the inbox reads from: the live API (contract.ts) or labelled sample data. */

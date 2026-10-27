@@ -76,7 +76,7 @@ it('history lands in its conversations with the original timestamps and statuses
   // no 24 h window, no unread, no auto reply, no bot/agent work, nothing sent
   expect(await rows(ws, 'SELECT c.unread, c.last_message_at, ct.last_inbound_at FROM conversations c JOIN contacts ct ON ct.id = c.contact_id')).toEqual([{ unread: 0, last_message_at: TS - 86400 * 28, last_inbound_at: null }]);
   expect(env.SEND_QUEUE.sendBatch).not.toHaveBeenCalled();
-  expect(await rows(ws, "SELECT 1 FROM scheduled_tasks WHERE kind NOT IN ('backup', 'r2_drain')")).toEqual([]);
+  expect(await rows(ws, "SELECT 1 FROM scheduled_tasks WHERE kind NOT IN ('backup', 'r2_drain', 'retention_purge')")).toEqual([]);
   expect(graph!.calls).toHaveLength(0);
   expect((await row(pn))!.history_sync).toBe('received');
 });

@@ -469,6 +469,10 @@ export const DO_MIGRATIONS: readonly string[] = [
   // v35 (P2 yearly): the billing period length (1 or 12 months) of the workspace's package, carried by the entitlement event. A period longer than a month
   // gets its AI credits one month at a time (credit_month tasks), never 12x at once.
   `ALTER TABLE entitlements ADD COLUMN period_months INTEGER NOT NULL DEFAULT 1;`,
+  // v36 (W2-RETENTION): the retention purge finds old messages by time, and a merchant-edited contact name must not be overwritten by WhatsApp's profile name.
+  `CREATE INDEX messages_created ON messages (created_at);
+   ALTER TABLE contacts ADD COLUMN name_edited INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE events ADD COLUMN at INTEGER;`, // events.at: the realtime log is purged by age too
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

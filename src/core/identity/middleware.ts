@@ -2,20 +2,24 @@ import type { MiddlewareHandler } from 'hono';
 import type { Env } from '../../env';
 import { integrationState } from './integration';
 import { writeSessionState } from './session';
-import { gateFor } from './scopes';
+import { routePath } from 'hono/route';
+import { SESSION_CHECKED_READS, gateForRoute } from './scopes';
 import { IdentityError, type IdentityVerifier, type Principal } from './verifier';
 
 export const integratorTokensEnabled = (env: Partial<Pick<Env, 'INTEGRATOR_TOKENS_ENABLED'>> | undefined): boolean => env?.INTEGRATOR_TOKENS_ENABLED === '1' || env?.INTEGRATOR_TOKENS_ENABLED?.toLowerCase() === 'true';
 
 export type AuthVars = { principal: Principal; storeRole: 'owner' | 'staff' | 'super_admin' };
 
-/** What a suspended workspace may still do: pay (wallet, packages) and erase a contact (a data-protection right never waits on a suspension). */
-const SUSPENDED_OK = [/^\/api\/v1\/stores\/[^/]+\/wallet(\/|$)/, /^\/api\/v1\/stores\/[^/]+\/packages(\/|$)/];
-export function allowedWhileSuspended(method: string, path: string): boolean {
-  if (SUSPENDED_OK.some((re) => re.test(path))) return true;
+/**
+ * What a suspended workspace may still do: pay (wallet, packages) and erase a contact (a data-protection right never waits on a suspension).
+ * Decided on the ROUTED pattern (`/stores/:storeId/wallet/topups`, as Hono matched it), never on the raw URL: an encoded or odd spelling of a path reaches the
+ * same handler and must get the same answer.
+ */
+export function allowedWhileSuspended(method: string, pattern: string): boolean {
+  for (const prefix of ['/stores/:storeId/wallet', '/stores/:storeId/packages']) if (pattern === prefix || pattern.startsWith(`${prefix}/`)) return true;
   // Asking to delete the workspace is a right a suspension never blocks; cancelling is not (a suspended store may be suspended for abuse).
-  if ((method === 'POST' || method === 'GET') && /^\/api\/v1\/stores\/[^/]+\/offboarding$/.test(path)) return true;
-  return method === 'DELETE' && /^\/api\/v1\/stores\/[^/]+\/contacts\/[^/]+$/.test(path);
+  if ((method === 'POST' || method === 'GET') && pattern === '/stores/:storeId/offboarding') return true;
+  return method === 'DELETE' && pattern === '/stores/:storeId/contacts/:waId';
 }
 
 /** Requires a valid bearer token whose principal may act on the `:storeId` route param. */
@@ -40,8 +44,11 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     const membership = principal.stores.find((s) => s.id === storeId);
     if (!membership && !principal.superAdmin) return c.json({ error: 'forbidden' }, 403);
     const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
+    const routed = routePath(c, -1).replace(/^\/api\/v1/, ''); // the pattern of the handler that WILL answer; every decision below uses it
     // M-135: a person token is revocation-checked on EVERY write, not only on money actions (fail closed: an unreachable accounts service refuses it).
-    if (write && !principal.integration) {
+    // A read that hands over a person's whole data is checked like a write; which reads those are is a named list (scopes.ts), and every read route must be on one list or the other.
+    const sensitiveRead = !write && SESSION_CHECKED_READS.has(`GET ${routed}`);
+    if ((write || sensitiveRead) && !principal.integration) {
       const s = await writeSessionState(c.env, principal.sessionId);
       if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
       if (s === 'unavailable') return c.json({ error: 'unavailable', message: 'session_check_unavailable' }, 503);
@@ -51,7 +58,7 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     if (storeId && (write || principal.integration)) {
       const flags = await c.env.DB.prepare('SELECT suspended_at, integrations_revoked_at FROM workspaces WHERE id = ?').bind(storeId).first<{ suspended_at: number | null; integrations_revoked_at: number | null }>();
       if (principal.integration && flags?.integrations_revoked_at != null) return c.json({ error: 'unauthorized' }, 401); // the operator revoked this store's integrations: EVERY server token is refused (a client re-mints every few minutes, so an issue-time cut-off would not hold) until the operator restores them
-      if (write && flags?.suspended_at != null && !principal.superAdmin && !allowedWhileSuspended(c.req.method, new URL(c.req.url).pathname)) return c.json({ error: 'forbidden', message: 'workspace_suspended' }, 403);
+      if (write && flags?.suspended_at != null && !principal.superAdmin && !allowedWhileSuspended(c.req.method, routed)) return c.json({ error: 'forbidden', message: 'workspace_suspended' }, 403);
     }
     if (principal.integration) {
       // A merchant's server: still valid right now (fail closed), then the route map decides (default deny). Revoked first, so a revoked
@@ -59,7 +66,7 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
       const state = await integrationState(c.env, principal.integration.clientId);
       if (state === 'revoked') return c.json({ error: 'unauthorized' }, 401);
       if (state === 'unavailable') return c.json({ error: 'rate_limited', message: 'session_check_unavailable' }, 503);
-      const gate = gateFor(c.req.method, new URL(c.req.url).pathname.replace(/^\/api\/v1/, ''));
+      const gate = gateForRoute(c.req.method, routed);
       if (gate === null || gate === 'person_only' || (gate !== 'any' && !principal.integration.scopes.includes(gate))) return c.json({ error: 'forbidden' }, 403);
       if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
         // No message content, no phone numbers: who, where, and under which scope.

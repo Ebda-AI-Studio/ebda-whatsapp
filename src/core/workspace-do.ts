@@ -12,6 +12,8 @@ import { activeNumberFor } from './routing';
 import { eraseSharedFor } from './shared/shared-number';
 import { dropErased } from './erasure';
 import { deleteTargets } from './erasure-targets';
+import { exportContact, mergeContacts, renameContact } from './contact-data';
+import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, writeRetentionDays } from './retention';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
@@ -230,7 +232,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       for (const m of batch.inbound) {
         const contactId = this.sql.exec<{ id: number }>(
           `INSERT INTO contacts (wa_id, profile_name, last_inbound_at) VALUES (?, ?, ?)
-           ON CONFLICT(wa_id) DO UPDATE SET profile_name = coalesce(excluded.profile_name, profile_name), last_inbound_at = max(coalesce(last_inbound_at, 0), excluded.last_inbound_at)
+           ON CONFLICT(wa_id) DO UPDATE SET profile_name = CASE WHEN name_edited = 1 THEN profile_name ELSE coalesce(excluded.profile_name, profile_name) END, last_inbound_at = max(coalesce(last_inbound_at, 0), excluded.last_inbound_at)
            RETURNING id`,
           m.from, m.profileName ?? null, m.ts,
         ).one().id;
@@ -1666,7 +1668,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Appends an event (inside the caller's transaction) and schedules a push to open sockets once it has committed. */
   private recordEvent(payload: Record<string, unknown>): void {
-    const seq = this.sql.exec<{ seq: number }>('INSERT INTO events (payload) VALUES (?) RETURNING seq', JSON.stringify(payload)).one().seq;
+    const seq = this.sql.exec<{ seq: number }>('INSERT INTO events (payload, at) VALUES (?, ?) RETURNING seq', JSON.stringify(payload), Date.now()).one().seq;
     if (seq > EVENTS_KEPT) this.sql.exec('DELETE FROM events WHERE seq <= ?', seq - EVENTS_KEPT);
     if (this.flushScheduled) return;
     this.flushScheduled = true;
@@ -1960,7 +1962,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Schedules the nightly backup and R2 drain if they are not pending yet (idempotent; cheap enough for every ingest). */
   private ensureDaily(now: number): boolean {
-    const have = new Set(this.sql.exec<{ kind: string }>("SELECT kind FROM scheduled_tasks WHERE kind IN ('backup', 'r2_drain')").toArray().map((r) => r.kind));
+    const have = new Set(this.sql.exec<{ kind: string }>("SELECT kind FROM scheduled_tasks WHERE kind IN ('backup', 'r2_drain', 'retention_purge')").toArray().map((r) => r.kind));
     let added = false;
     for (const kind of DAILY_KINDS) {
       if (have.has(kind)) continue;
@@ -2049,6 +2051,10 @@ export class WorkspaceDO extends DurableObject<Env> {
         const date = new Intl.DateTimeFormat('en-CA', { timeZone: BACKUP_TIME_ZONE }).format(now);
         await this.exportSnapshot(date);
         return nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
+      }
+      case 'retention_purge': {
+        const r = await this.retentionPurge(now);
+        return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
       }
       case 'r2_drain': {
         const stillOwed = await this.drainR2Deletes();
@@ -2191,6 +2197,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     try {
       const { manifest, erasedSkipped } = await this.importSnapshotOrThrow(prefix);
       // A restored campaign that was running has no workflow in this account's engine: the sweep starts one.
+      addTask(this.sql, 'retention_purge', Date.now() + 60_000); // history the window already deleted must not come back with an old backup
       if (this.sql.exec("SELECT 1 FROM campaigns WHERE status IN ('scheduled', 'running') LIMIT 1").toArray().length) addTask(this.sql, 'campaign_step', Date.now() + 60_000);
       await this.ensureBackupAlarm();
       await this.arm();
@@ -2276,11 +2283,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       // What is left of the customer goes through the ONE list the restore also filters by (src/core/erasure-targets.ts). The rows that hold keys to other
       // rows (agent turns, search, events) are removed first, because the list's `messages` step removes the rows they are found through.
-      if (conv) {
-        this.sql.exec('DELETE FROM agent_turns WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
-        this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
-        this.sql.exec("DELETE FROM events WHERE json_extract(payload, '$.conversationId') = ? OR json_extract(payload, '$.conversation.id') = ?", conv.id, conv.id);
-      }
+      if (conv) this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id); // (the list below removes the rows it is found through)
       this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       deleteTargets(this.sql, { waId, contactId: contact.id, convId: conv?.id ?? null });
       this.sql.exec('DELETE FROM contacts_fts WHERE rowid = ?', contact.id);
@@ -2323,6 +2326,50 @@ export class WorkspaceDO extends DurableObject<Env> {
     await this.ctx.storage.put('offboarded', Date.now());
     this.offboarded = true;
     return { vectors };
+  }
+
+  // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------
+
+  async getRetention() {
+    return retentionView(this.sql);
+  }
+
+  /** The owner's window (null = the platform default). A shorter window is applied soon, not at the next night. */
+  async setRetention(days: number | null, now = Date.now()) {
+    this.ctx.storage.transactionSync(() => writeRetentionDays(this.sql, days));
+    await this.schedule('retention_purge', now + 60_000);
+    return retentionView(this.sql);
+  }
+
+  /** Deletes messages older than the window, a bounded number per pass; a backlog continues in a minute. Returns how many went and whether more are due. */
+  async retentionPurge(now = Date.now(), opts: { batch?: number; maxBatches?: number } = {}): Promise<{ deleted: number; more: boolean }> {
+    const cutoff = cutoffFor(this.sql, now);
+    let deleted = 0;
+    for (let i = 0; i < (opts.maxBatches ?? RETENTION_MAX_BATCHES); i++) {
+      const n = this.ctx.storage.transactionSync(() => purgeBatch(this.sql, cutoff, opts.batch ?? RETENTION_BATCH));
+      deleted += n;
+      if (n < (opts.batch ?? RETENTION_BATCH)) break;
+    }
+    this.ctx.storage.transactionSync(() => purgeOldEvents(this.sql, cutoff)); // the realtime log is capped by age too, not only by count
+    if (deleted > 0) {
+      const owed = await this.drainR2Deletes();
+      if (owed > 0) await this.schedule('r2_drain', now + 3_600_000);
+    }
+    const more = hasExpired(this.sql, cutoff);
+    if (more) await this.schedule('retention_purge', now + 60_000);
+    return { deleted, more };
+  }
+
+  async exportContact(waId: string, after: number, limit: number) {
+    return exportContact(this.sql, this.env.MEDIA, waId, after, limit);
+  }
+
+  async renameContact(waId: string, name: string | null) {
+    return this.ctx.storage.transactionSync(() => renameContact(this.sql, waId, name));
+  }
+
+  async mergeContacts(fromWaId: string, intoWaId: string) {
+    return this.ctx.storage.transactionSync(() => mergeContacts(this.sql, fromWaId, intoWaId, (id) => this.emitConversationUpdated(id)));
   }
 
   /** Deletes owed R2 objects in batches; returns how many are still owed (0 when R2 confirmed them all). */

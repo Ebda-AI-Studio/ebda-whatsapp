@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, offboardingDto, operatorOffboardingDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse, auditLogItemDto,
+  opsStatusDto, offboardingDto, operatorOffboardingDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -159,6 +159,20 @@ export function createApiSource(o: Opts): LiveSource {
       },
       imports: async () => (await call('/imports', listImportsResponse)).items,
       rejects: async (id) => (await call(`/imports/${encodeURIComponent(id)}/rejects`, importRejectsResponse)).items,
+      renameContact: (waId, name) => call(`/contacts/${encodeURIComponent(waId)}`, contactSummaryDto, { method: 'PATCH', body: JSON.stringify({ name }) }),
+      async exportContact(waId) {
+        const page = z.object({ messages: z.array(z.unknown()), nextAfter: z.number().int().nullable() }).loose();
+        let out = await call(`/contacts/${encodeURIComponent(waId)}/export?limit=500`, page);
+        const messages = [...out.messages];
+        while (out.nextAfter !== null) {
+          out = await call(`/contacts/${encodeURIComponent(waId)}/export?limit=500&after=${out.nextAfter}`, page);
+          messages.push(...out.messages);
+        }
+        return { ...out, messages, nextAfter: null };
+      },
+      mergeContacts: async (fromWaId, intoWaId) => { await call('/contacts/merge', z.unknown(), post({ fromWaId, intoWaId })); },
+      retention: () => call('/retention', retentionDto),
+      setRetention: (days) => call('/retention', retentionDto, { method: 'PUT', body: JSON.stringify({ days }) }),
     },
     wallet: {
       wallet: () => call('/wallet', walletDto),
