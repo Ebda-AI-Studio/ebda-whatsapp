@@ -79,6 +79,8 @@ Every InstaPay payment waits for a person: an operator opens **Operator -> Queue
 ## 9. CI back on (Ahmad decides, Claude sets up)
 CI is paused by Ahmad's instruction. To resume: bring the Umbra runner for this repo online, set repo variable `EBDA_RUNS_ON` to `["self-hosted","umbra-ebda"]` (JSON), and confirm the remote Actions cache stays off on the self-hosted runner. Branch protection: require `ci` + `gitleaks` on `main`.
 
+**Ruling WA-CI-STALL-1 (2026-10-27): a test that times out on the CI VM but runs fast on a laptop is a stall, not slowness; do not raise the timeout.** Seen once: kashier-refunds "HIGH: a chunk whose card refund row may have sent money…" hit the 60 s CI deadline (setup 397 s, VM under I/O pressure) and takes 245 ms locally. **Trigger: a second stall of any test within 7 days → add per-test deadline diagnostics** (which await is pending when the deadline fires), never a timeout bump. Cost if wrong: a real hang in the refund path is treated as CI noise until it repeats.
+
 ## 10. Merge order (Claude, after Ahmad's go)
 1. `feat/phase4-7` → `main` in one PR: it already carries Phases 4-9 (store link, AI agent, campaigns, billing and its screens, own numbers, shared number, operator console, connectors, brand packs, white-label kit) and the final whole-branch review fixes.
 2. Launch is joint with Ebda Store (LAUNCH-SUITE-1): accounts.ebda.app live first, then this deploy; the Store session holds the launch gate.
