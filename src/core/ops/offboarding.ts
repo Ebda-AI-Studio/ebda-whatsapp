@@ -85,7 +85,7 @@ export async function pseudonymFor(env: Env, ws: string): Promise<string | null>
   return `del_${[...mac.slice(0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
 }
 
-export type RequestResult = { ok: true; value: OffboardingStatus } | { ok: false; reason: 'not_found' | 'wallet_balance_remains' | 'already_running' | 'already_deleted' | 'no_key' };
+export type RequestResult = { ok: true; value: OffboardingStatus } | { ok: false; reason: 'not_found' | 'wallet_balance_remains' | 'already_running' | 'already_deleted' | 'no_key' } | { ok: false; reason: 'write_off_required'; amountMinor: number };
 export async function requestOffboarding(
   env: Env, a: { workspaceId: string; actor: string; role: 'owner' | 'operator'; reason?: string; immediate?: boolean; acceptWriteOff?: boolean }, now = Date.now(),
 ): Promise<RequestResult> {
@@ -97,15 +97,34 @@ export async function requestOffboarding(
   if (existing?.state === 'done') return { ok: false, reason: 'already_deleted' };
   const executeAfter = a.immediate && a.role === 'operator' ? now : now + COOLING_OFF_MS;
   if (existing?.state === 'pending') {
-    // An owner asking again changes nothing, and never downgrades an operator-owned row. An operator asking takes the row over in ONE statement
-    // (role, requester, reason) so the owner can no longer cancel it, and may only shorten the wait.
+    // An owner asking again changes nothing, and never downgrades an operator-owned row.
     if (a.role !== 'operator') return { ok: true, value: dto(existing) };
+    // An operator asking TAKES IT OVER in one conditional statement (role, requester, reason, the earlier of the two dates, the write-off), so the owner can no
+    // longer cancel it. The balance is read again: it may have grown since the owner accepted a write-off, and the operator has to accept the new amount.
     const after = Math.min(existing.execute_after, executeAfter);
-    const res = await env.DB.prepare("UPDATE offboarding SET requested_role = 'operator', requested_by = ?, reason = ?, execute_after = ? WHERE workspace_id = ? AND state = 'pending'").bind(a.actor, a.reason ?? null, after, a.workspaceId).run();
-    if (!res.meta.changes) return { ok: false, reason: 'already_running' };
-    const log = existing.requested_role !== 'operator' ? 'taken_over' : after < existing.execute_after ? 'expedited' : null;
-    if (log) await logRow(env, a.workspaceId, a.actor, log, now, a.reason).run();
-    return { ok: true, value: dto({ ...existing, requested_role: 'operator', requested_by: a.actor, reason: a.reason ?? null, execute_after: after }) };
+    const balance = Math.max(0, (await stub(env, a.workspaceId).walletView(now)).balanceMinor);
+    let writeOff = existing.write_off_minor;
+    if (balance > writeOff) {
+      if (!a.acceptWriteOff) return { ok: false, reason: 'write_off_required', amountMinor: balance };
+      writeOff = balance;
+    }
+    const reason = a.reason ?? null;
+    const takenOver = existing.requested_role !== 'operator';
+    const expedited = after < existing.execute_after;
+    if (!takenOver && !expedited && existing.requested_by === a.actor && existing.reason === reason && writeOff === existing.write_off_minor) return { ok: true, value: dto(existing) }; // nothing changes: nothing is written
+    const detail = JSON.stringify({
+      previous: { requested_role: existing.requested_role, requested_by: existing.requested_by, reason: existing.reason, execute_after: existing.execute_after, write_off_minor: existing.write_off_minor },
+      new: { requested_role: 'operator', requested_by: a.actor, reason, execute_after: after, write_off_minor: writeOff },
+      taken_over: takenOver, expedited,
+    });
+    const [upd] = await env.DB.batch([
+      env.DB.prepare("UPDATE offboarding SET requested_role = 'operator', requested_by = ?, reason = ?, execute_after = ?, write_off_minor = ? WHERE workspace_id = ? AND state = 'pending'").bind(a.actor, reason, after, writeOff, a.workspaceId),
+      // The log row is written only if the update above applied (the same batch, so a run that claimed the row in between leaves no false entry).
+      env.DB.prepare("INSERT INTO offboarding_log (at, workspace_id, actor, action, reason, detail) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM offboarding WHERE workspace_id = ? AND state = 'pending' AND requested_by = ? AND requested_role = 'operator')")
+        .bind(now, a.workspaceId, a.actor, takenOver ? 'taken_over' : 'operator_changed', reason, detail, a.workspaceId, a.actor),
+    ]);
+    if (!upd!.meta.changes) return { ok: false, reason: 'already_running' };
+    return { ok: true, value: dto({ ...existing, requested_role: 'operator', requested_by: a.actor, reason, execute_after: after, write_off_minor: writeOff }) };
   }
   const balance = (await stub(env, a.workspaceId).walletView(now)).balanceMinor;
   if (balance > 0 && !a.acceptWriteOff) return { ok: false, reason: 'wallet_balance_remains' };

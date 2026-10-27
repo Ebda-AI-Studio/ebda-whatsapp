@@ -21,7 +21,7 @@ offboardingRoutes.post('/stores/:storeId/offboarding', async (c) => {
   const r = await requestOffboarding(c.env, { workspaceId: c.req.param('storeId'), actor: c.get('principal').userId, role: 'owner', ...b.data });
   if (r.ok) return c.json(r.value, 202);
   if (r.reason === 'not_found') return c.json({ error: 'not_found' }, 404);
-  return c.json({ error: 'invalid_request', message: r.reason }, 409);
+  return c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
 });
 
 offboardingRoutes.delete('/stores/:storeId/offboarding', async (c) => {
@@ -29,5 +29,5 @@ offboardingRoutes.delete('/stores/:storeId/offboarding', async (c) => {
   const r = await cancelOffboarding(c.env, { workspaceId: c.req.param('storeId'), actor: c.get('principal').userId, role: c.get('storeRole') === 'super_admin' ? 'operator' : 'owner' });
   if (r.ok) return c.json({ ok: true });
   if (r.reason === 'operator_requested') return c.json({ error: 'forbidden', message: 'operator_requested' }, 403); // our team started it: only our team cancels it (the guides name the support address)
-  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
 });

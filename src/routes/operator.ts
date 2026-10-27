@@ -173,7 +173,7 @@ operatorRoutes.post('/trueups', async (c) => {
   const b = trueupPublish.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c);
   const r = await publishTrueup(c.env, { actor: actor(c), ...b.data });
-  return r.ok ? c.json(r.trueup, 201) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+  return r.ok ? c.json(r.trueup, 201) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
 });
 
 operatorRoutes.get('/workspaces/:workspaceId/wallet', async (c) => {
@@ -215,7 +215,7 @@ operatorRoutes.post('/package-orders/:orderId/yearly-refund', async (c) => {
   const body = z.object({ reason: z.string().trim().min(5).max(500) }).safeParse(await c.req.json().catch(() => null));
   if (!body.success) return bad(c, 'reason_required');
   const r = await executeYearlyRefund(c.env, c.req.param('orderId'), { actor: actor(c), reason: body.data.reason });
-  if (!r.ok) return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+  if (!r.ok) return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
   console.log(JSON.stringify({ audit: 'operator_yearly_refund', orderId: r.orderId, shortenedMonths: r.shortenedMonths, debtSettledMinor: r.debtSettledMinor, cashRefundMinor: r.cashRefundMinor, actor: actor(c) }));
   const { ok: _ok, ...out } = r;
   return c.json(out);
@@ -271,14 +271,14 @@ operatorRoutes.post('/workspaces/:workspaceId/offboarding', async (c) => {
   if (!b.success) return bad(c, 'reason_required');
   const r = await requestOffboarding(c.env, { workspaceId: c.req.param('workspaceId')!, actor: actor(c), role: 'operator', ...b.data });
   if (r.ok) return c.json(r.value, 202);
-  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
 });
 operatorRoutes.delete('/workspaces/:workspaceId/offboarding', async (c) => {
   const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, 'reason_required');
   const r = await cancelOffboarding(c.env, { workspaceId: c.req.param('workspaceId')!, actor: actor(c), role: 'operator', reason: b.data.reason });
   if (r.ok) return c.json({ ok: true });
-  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
 });
 operatorRoutes.post('/offboardings/run', async (c) => c.json(await runDueOffboardings(c.env))); // finish an interrupted run now instead of waiting for the daily pass
 

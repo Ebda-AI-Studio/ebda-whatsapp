@@ -194,6 +194,69 @@ describe('who may cancel', () => {
   });
 });
 
+describe('operator takeover: audit and money', () => {
+  const logs = (ws: string) => d1<{ action: string; actor: string; reason: string | null; detail: string | null }>('SELECT action, actor, reason, detail FROM offboarding_log WHERE workspace_id = ? ORDER BY id', ws);
+  const op = (ws: string, body: Record<string, unknown>) => operatorCall(OP1, 'POST', `/workspaces/${ws}/offboarding`, { reason: REASON, ...body });
+
+  it('every changing path writes exactly one log row with the previous values; a no-op writes none', async () => {
+    const ws = W(2030);
+    await own(ws);
+    await ownerCall(ws, 'POST', { confirm: true });
+    const ownerRow = (await d1<{ requested_by: string; execute_after: number }>('SELECT requested_by, execute_after FROM offboarding WHERE workspace_id = ?', ws))[0]!;
+    expect((await logs(ws)).length).toBe(1);
+
+    // 1. takeover (same date)
+    expect((await op(ws, {})).status).toBe(202);
+    let l = await logs(ws);
+    expect(l.map((x) => x.action)).toEqual(['requested', 'taken_over']);
+    expect(JSON.parse(l[1]!.detail!)).toMatchObject({ taken_over: true, expedited: false, previous: { requested_role: 'owner', requested_by: ownerRow.requested_by, reason: null, execute_after: ownerRow.execute_after }, new: { requested_role: 'operator', requested_by: OP1, reason: REASON } });
+
+    // 2. the same request again: nothing changes, nothing is written
+    expect((await op(ws, {})).status).toBe(202);
+    expect((await logs(ws)).length).toBe(2);
+
+    // 3. a different reason: one row, with the previous reason
+    expect((await op(ws, { reason: 'second reason for the file' })).status).toBe(202);
+    l = await logs(ws);
+    expect(l.map((x) => x.action)).toEqual(['requested', 'taken_over', 'operator_changed']);
+    expect(JSON.parse(l[2]!.detail!)).toMatchObject({ taken_over: false, expedited: false, previous: { reason: REASON }, new: { reason: 'second reason for the file' } });
+
+    // 4. bringing the date forward: one row, expedited
+    expect((await op(ws, { reason: 'second reason for the file', immediate: true })).status).toBe(202);
+    l = await logs(ws);
+    expect(l).toHaveLength(4);
+    expect(JSON.parse(l[3]!.detail!)).toMatchObject({ taken_over: false, expedited: true, previous: { execute_after: ownerRow.execute_after } });
+  });
+
+  it('a takeover that also brings the date forward is ONE row flagged both ways', async () => {
+    const ws = W(2031);
+    await own(ws);
+    await ownerCall(ws, 'POST', { confirm: true });
+    expect((await op(ws, { immediate: true })).status).toBe(202);
+    const l = await logs(ws);
+    expect(l.map((x) => x.action)).toEqual(['requested', 'taken_over']);
+    expect(JSON.parse(l[1]!.detail!)).toMatchObject({ taken_over: true, expedited: true });
+  });
+
+  it('a balance that grew after the owner accepted a write-off has to be accepted again by the operator', async () => {
+    const ws = W(2032);
+    await own(ws);
+    await fund(ws, 100);
+    expect((await ownerCall(ws, 'POST', { confirm: true, acceptWriteOff: true })).status).toBe(202);
+    expect(await d1('SELECT write_off_minor FROM offboarding WHERE workspace_id = ?', ws)).toEqual([{ write_off_minor: 100 }]);
+    await fund(ws, 400); // the balance is 500 now
+    const refused = await op(ws, {});
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ message: 'write_off_required', amountMinor: 500 });
+    expect(await d1('SELECT requested_role, write_off_minor FROM offboarding WHERE workspace_id = ?', ws)).toEqual([{ requested_role: 'owner', write_off_minor: 100 }]);
+    expect((await logs(ws)).length).toBe(1);
+    expect((await op(ws, { acceptWriteOff: true })).status).toBe(202);
+    expect(await d1('SELECT requested_role, write_off_minor FROM offboarding WHERE workspace_id = ?', ws)).toEqual([{ requested_role: 'operator', write_off_minor: 500 }]);
+    const l = await logs(ws);
+    expect(JSON.parse(l[1]!.detail!)).toMatchObject({ previous: { write_off_minor: 100 }, new: { write_off_minor: 500 } });
+  });
+});
+
 describe('the deletion itself', () => {
   it('does nothing before the cooling-off ends; then erases the DO, every R2 prefix, and the D1 rows; keeps pseudonymised money', async () => {
     const ws = W(2010);
