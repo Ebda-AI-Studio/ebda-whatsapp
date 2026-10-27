@@ -1,6 +1,7 @@
 import type { Env } from '../../env';
 import type { ConnectNumberRequest, NumberDto } from '../api/contract';
-import { decryptSecret, encryptSecret } from '../ai/secrets';
+import { encryptSecret } from '../ai/secrets';
+import { decryptAny, tokenKeys } from '../enc-keys';
 import { recordNumberFunding } from '../billing/funding';
 import { listOwnedWabas } from '../meta/catalog-api';
 import { TIER_LIMITS } from '../throttle';
@@ -239,7 +240,7 @@ async function completeSetup(env: Env, workspaceId: string, phoneNumberId: strin
   }
 
   if (row.onboarding === 'cloud_api' && row.registration !== 'registered') {
-    const pin = row.pin_enc ? await decryptSecret(row.pin_enc, cfg.encKey, workspaceId) : null;
+    const pin = row.pin_enc ? ((await decryptAny(row.pin_enc, tokenKeys(env), workspaceId))?.value ?? null) : null;
     if (!pin) return fail(400, 'signup_failed', 'pin_unreadable', await reload());
     const reg = await registerNumber(env, token, phoneNumberId, pin);
     if (!reg.ok || !reg.value.success) {

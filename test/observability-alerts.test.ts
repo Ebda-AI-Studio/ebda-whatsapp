@@ -6,7 +6,7 @@ import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import { exec, openChat, own, rows, workspace } from './helpers/workspace';
 
 useApiKey();
-const SECRETS = { TELEGRAM_BOT_TOKEN: '123456:AAF-test-token', TELEGRAM_ALERT_CHAT_ID: '-1001234567', ALERT_PRODUCT: 'Ebda WhatsApp' };
+const SECRETS = { TELEGRAM_BOT_TOKEN: '123456:AAF-test-token', TELEGRAM_ALERT_CHAT_ID: '-1001234567', ALERT_PRODUCT: 'Ebda WhatsApp', RUNBOOK_BASE_URL: 'https://github.com/Whisky-11/ebda-whatsapp/blob/main/docs/runbooks/alerts' };
 const PHONE = '201001234567';
 
 type Harness = { telegram: { url: string; body: Record<string, string> }[]; messages: { message: string; level: string }[]; exceptions: unknown[]; waits: Promise<unknown>[]; flush(): Promise<void> };
@@ -29,6 +29,23 @@ function harness(e: Record<string, string> = SECRETS, over: { fetchFails?: boole
 beforeEach(() => resetAlerts());
 afterEach(() => { resetAlerts(); vi.restoreAllMocks(); });
 
+describe('T25: the alert payload links its own incident runbook as a URL', () => {
+  it('every P0 and P1 message names the runbook file of that alert; RUNBOOK_BASE_URL overrides the base', async () => {
+    const h = harness({ ...SECRETS, RUNBOOK_BASE_URL: 'https://runbooks.example/wa' });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    alert('ledger_mirror_mismatch', { workspace: 'ws-1' });
+    await h.flush();
+    expect(h.telegram[0]!.body.text).toContain('runbook=https://runbooks.example/wa/ledger_mirror_mismatch.md');
+  });
+  it('without a base URL the alert names the repo-relative file', async () => {
+    const h = harness({ TELEGRAM_BOT_TOKEN: SECRETS.TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_CHAT_ID: SECRETS.TELEGRAM_ALERT_CHAT_ID });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    alert('send_dlq', { workspace: 'ws-1' });
+    await h.flush();
+    expect(h.telegram[0]!.body.text).toContain('runbook=docs/runbooks/alerts/send_dlq.md');
+  });
+});
+
 describe('alert(): P0 / P1 reach a human, info stays in the logs', () => {
   it('P1: a Sentry EVENT (captureMessage, level warning) and one Telegram sendMessage with name, severity, workspace and the runbook; the JSON log line is kept', async () => {
     const h = harness();
@@ -46,7 +63,7 @@ describe('alert(): P0 / P1 reach a human, info stays in the logs', () => {
     expect(text).toContain('entitlement_push_failed');
     expect(text).toContain('P1');
     expect(text).toContain('0a1b2c3d'); // the workspace, shortened
-    expect(text).toContain('docs/runbooks/alerts.md');
+    expect(text).toContain('runbook=https://github.com/Whisky-11/ebda-whatsapp/blob/main/docs/runbooks/alerts/entitlement_push_failed.md');
     expect(log).toHaveBeenCalledWith(JSON.stringify({ alert: 'entitlement_push_failed', severity: 'P1', workspace: '0a1b2c3d-1111-4222-8333-444455556666', error: 'DOException' }));
   });
   it('P0 is a Sentry error event; a known money alert is P1/P0 without the caller saying so; info (and an unknown name) is console only', async () => {

@@ -3,7 +3,7 @@
  * number connect or agent save. Returns the NAMES of the problem keys (never a value). A key that is set must be well-formed; a key
  * listed in the `REQUIRED_SECRETS` var (comma-separated, per deployment) must also be set.
  */
-const B64_32 = ['TOKEN_ENC_KEY', 'AGENT_SECRETS_KEY'] as const; // AES-256 keys: base64 or base64url of exactly 32 bytes
+const B64_32 = ['TOKEN_ENC_KEY', 'TOKEN_ENC_KEY_PREVIOUS', 'AGENT_SECRETS_KEY'] as const; // AES-256 keys: base64 or base64url of exactly 32 bytes
 const MIN_32_CHARS = ['PROOF_URL_SECRET', 'SUITE_BUYER_KEY_SECRET'] as const; // HMAC/HKDF input: at least 32 characters
 
 function decodedLength(v: string): number | null {

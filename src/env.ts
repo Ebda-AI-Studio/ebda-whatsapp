@@ -80,6 +80,8 @@ export type Env = {
   EMBEDDED_SIGNUP_CONFIG_ID?: string;
   /** Base64 of 32 random bytes: encrypts business tokens and registration PINs (AES-GCM). Required while the switch is on. */
   TOKEN_ENC_KEY?: string;
+  /** M-173: during a TOKEN_ENC_KEY rotation, the key being retired. Reads try it after TOKEN_ENC_KEY; writes never use it. Remove it once the rotation status shows 0 rows on it. */
+  TOKEN_ENC_KEY_PREVIOUS?: string;
   COMMIT_SHA?: string;
   IDENTITY_ISSUER: string;
   IDENTITY_JWKS_URL: string;
@@ -101,4 +103,6 @@ export type Env = {
   ENVIRONMENT?: string;
   /** Var: the product name shown first in an alert (the brand's, so core code names no brand). */
   ALERT_PRODUCT?: string;
+  /** T25: where docs/runbooks/alerts/<name>.md is served from (an https URL); unset = the repo-relative path in the alert text. */
+  RUNBOOK_BASE_URL?: string;
 };

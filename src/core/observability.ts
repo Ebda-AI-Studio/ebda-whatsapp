@@ -72,7 +72,7 @@ export function safeMessage(err: unknown, max = 200): string {
 
 export type AlertSeverity = 'P0' | 'P1' | 'info';
 export type AlertFields = { severity?: AlertSeverity; workspace?: string } & Record<string, unknown>;
-export type AlertEnv = { TELEGRAM_BOT_TOKEN?: string; TELEGRAM_ALERT_CHAT_ID?: string; ENVIRONMENT?: string; ALERT_PRODUCT?: string; [k: string]: unknown };
+export type AlertEnv = { TELEGRAM_BOT_TOKEN?: string; TELEGRAM_ALERT_CHAT_ID?: string; RUNBOOK_BASE_URL?: string; ENVIRONMENT?: string; ALERT_PRODUCT?: string; [k: string]: unknown };
 type SentryLevel = 'error' | 'warning';
 type AlertDeps = {
   env: AlertEnv;
@@ -149,12 +149,16 @@ const PHONE_ANYWHERE = /[0-9\u0660-\u0669\u06f0-\u06f9]{8,}/g;
 
 const shortWorkspace = (ws: string): string => (ws.length > 8 ? `${ws.slice(0, 8)}…` : ws);
 
+/** T25: the incident runbook of ONE alert, as a URL a phone can open (docs/runbooks/alerts/<name>.md; test/alert-runbooks.test.ts proves every P0/P1 name has one). The base URL is the var RUNBOOK_BASE_URL (wrangler.jsonc); unset = the repo-relative path. */
+const runbookUrl = (name: string, env: AlertEnv): string =>
+  `${typeof env.RUNBOOK_BASE_URL === 'string' && /^https:\/\//.test(env.RUNBOOK_BASE_URL) ? env.RUNBOOK_BASE_URL.replace(/\/$/, '') : 'docs/runbooks/alerts'}/${name}.md`;
+
 function telegramText(name: string, sev: AlertSeverity, workspace: string | undefined, fields: string[], suppressed: number, env: AlertEnv): string {
   const lines = [
     `${sev === 'P0' ? '🔴' : '🟠'} ${env.ALERT_PRODUCT ?? 'WhatsApp'}: ${name}`,
     `[${sev} ${workspace ? 'WORKSPACE' : 'PLATFORM'}]`,
     ...(workspace ? [`workspace=${shortWorkspace(workspace)}`] : []),
-    `env=${env.ENVIRONMENT ?? 'production'} · runbook=docs/runbooks/alerts.md#${name}`,
+    `env=${env.ENVIRONMENT ?? 'production'} · runbook=${runbookUrl(name, env)}`,
     ...fields,
     ...(suppressed > 0 ? [`(suppressed ${suppressed} more since the last alert)`] : []),
   ];
