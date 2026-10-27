@@ -134,7 +134,7 @@ it('refuses types outside the allow-list with unsupported_media and files over t
   const big = await api.call('POST', '/media', upload('big.jpg', 'image/jpeg', new Uint8Array(5 * 1024 * 1024 + 1)));
   expect(big.status).toBe(413);
   expect((await api.call('POST', '/media', undefined)).status).toBe(411);
-  expect((await api.call('POST', '/media', { not: 'form' })).status).toBe(400);
+  expect((await api.call('POST', '/media', { not: 'form' })).status).toBe(415); // JSON on an upload route: refused by the content-type allow-list
   expect(g.calls).toHaveLength(0); // nothing reached Meta
   // the ogg/opus parameter is accepted in either spelling
   g.restore();

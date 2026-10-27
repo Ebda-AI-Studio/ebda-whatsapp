@@ -30,6 +30,8 @@ While card payment is not switched on for your account, you pay by InstaPay tran
 3. Pay on the Kashier page. The package turns on when Kashier confirms the payment, not when you return to the page. Until then you see "waiting for confirmation".
 4. A package runs for **one month** and does **not renew by itself**. A week before it ends, the inbox shows a reminder with a link to the wallet; buy again to renew. If you renew early, the new month starts the day the current one ends (you do not lose days), and the AI credits of a month are valid for that month only; the new month brings a fresh amount.
 
+**There is no free plan.** Without a package in good standing you can still sign in, read your inbox, see the packages and buy one, but you cannot send any message (replies, order and COD confirmations and one-time codes included), use the AI agent, or connect a number. The app tells you "a package is required". If a renewal fails your package becomes **past due**: replies and confirmations keep working for up to **7 days** (or until the package period ends, whichever comes first), marketing campaigns stop at once, and then sending stops until you pay.
+
 *Notes:* if your store plan already includes WhatsApp, you get the included package automatically. A package you bought is never replaced by a change in the store plan while it is running. Support can also assign a package to your account.
 
 ## Overdraft

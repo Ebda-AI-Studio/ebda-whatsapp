@@ -3,9 +3,9 @@ import { STRINGS, num, type Lang } from '../i18n';
 
 export function formatMoney(minor: number, currency: string, lang: Lang): string {
   const digits = minor % 100 === 0 ? 0 : 2; // whole pounds stay clean; piasters are never rounded away
-  const value = new Intl.NumberFormat(lang === 'ar' ? 'ar-EG' : 'en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: lang !== 'ar' || minor >= 1_000_000 }).format(minor / 100);
+  const value = new Intl.NumberFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: lang !== 'ar' || minor >= 1_000_000 }).format(minor / 100);
   if (currency === 'EGP') return lang === 'ar' ? `${value} ج.م` : `EGP ${value}`;
-  return new Intl.NumberFormat(lang === 'ar' ? 'ar-EG' : 'en-US', { style: 'currency', currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(minor / 100);
+  return new Intl.NumberFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-US', { style: 'currency', currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(minor / 100);
 }
 
 export function relativeTime(at: number, now: number, lang: Lang): string {
@@ -15,11 +15,11 @@ export function relativeTime(at: number, now: number, lang: Lang): string {
   const h = Math.floor(min / 60);
   if (h < 24) return lang === 'ar' ? `${num(h, lang)} ${t.hoursShort}` : `${h}${t.hoursShort}`;
   if (h < 48) return t.yesterday;
-  return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG' : 'en-GB', { day: 'numeric', month: 'short' }).format(at);
+  return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'short' }).format(at);
 }
 
 export function clockTime(at: number, lang: Lang): string {
-  return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG' : 'en-GB', { hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Cairo' }).format(at);
+  return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Cairo' }).format(at);
 }
 
 export type WindowState = { state: 'open' | 'closing' | 'closed'; label: string };

@@ -50,6 +50,7 @@ import { instapayProofRoutes, instapayRoutes } from './routes/instapay';
 import { sharedNumberRoutes } from './routes/shared-number';
 import { handleSharedEvent, sharedEnabled, sharedNumberById, sweepShared } from './core/shared/shared-number';
 import { secretProblems } from './core/secrets-check';
+import { apiContentTypes, requestGuards } from './core/request-guards';
 import { applySharedTemplateEvent } from './core/shared/shared-templates';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
@@ -121,6 +122,9 @@ app.use('*', async (c, next) => {
   }
 });
 
+// Body-size cap, content-type allow-list and the public-route limits, before any route (src/core/request-guards.ts).
+app.use('*', requestGuards());
+
 // One verifier per isolate so the JWKS cache survives across requests.
 let verifier: IdentityVerifier | undefined;
 const getVerifier = (env: Env): IdentityVerifier => (verifier ??= selectVerifier(env).verifier);
@@ -128,6 +132,7 @@ const getVerifier = (env: Env): IdentityVerifier => (verifier ??= selectVerifier
 const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
 api.use('/operator/*', requireSuperAdmin(getVerifier));
+api.use('*', apiContentTypes()); // after auth: 401/403 first, then 415 for a body type the route class does not take
 api.route('/operator', operatorRoutes);
 api.get('/stores/:storeId/me', (c) => {
   const p = c.get('principal');
@@ -319,7 +324,8 @@ export default Sentry.withSentry((env: Env) => {
   /** Daily (the only cron; no polling): re-send subscriptions so a lost push heals. Idempotent by construction. */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     bindAlerts({ env, waitUntil: (p) => ctx.waitUntil(p) });
-    ctx.waitUntil(dailyBilling(env));
+    // The log line is the proof of a real tick (the cron can't be waited on): see docs/runbooks/rollback.md.
+    ctx.waitUntil(dailyBilling(env).then(() => console.log(JSON.stringify({ cron: 'daily_billing', done: true }))));
   },
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
     bindAlerts({ env, waitUntil: (p) => ctx.waitUntil(p) });

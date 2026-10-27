@@ -1,0 +1,77 @@
+name: cf-deploy
+
+# A deploy needs a human go: this workflow runs ONLY when someone dispatches it (Actions -> cf-deploy -> Run workflow).
+# All of the logic (account guard, "commit is on main" guard, D1 migrations, deploy, verify) is in scripts/deploy.sh, the same script Ahmad's Mac runs.
+#
+# SECURITY (Ruling WA-DEPLOY-1): do NOT add CLOUDFLARE_API_TOKEN to GitHub secrets until the repo has environment protection (required reviewer +
+# main-only deployment branches). Whisky-11 is on the Free plan with a private repo, where those rules do not exist, so a dispatch from a branch with an
+# edited copy of this file could read any secret it can reference. Until then deploys run from the Mac: `bash scripts/deploy.sh`. This workflow is kept
+# ready (environment `production`, step-scoped secrets, no lifecycle scripts) and is inert without the secret.
+on:
+  workflow_dispatch:
+
+# One deploy at a time, and never cancel one halfway (a cancelled deploy is a half-migrated production).
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  deploy:
+    name: Migrate, deploy, verify
+    # Inert until the plan supports environment protection (required reviewers, main-only): then configure it on `production` and add the secrets THERE.
+    environment: production
+    # Umbra self-hosted runner when the repo variable EBDA_RUNS_ON is set, else GitHub-hosted (same rule as ci.yml; a JSON value, not a bare label).
+    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # scripts/deploy.sh proves the commit is an ancestor of origin/main
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Remote Actions cache only on hosted runners; on Umbra ~/.npm is already local (it pulled 14 GB in 44 min once).
+          cache: ${{ vars.EBDA_RUNS_ON == '' && 'npm' || '' }}
+      # No lifecycle scripts, and no secret in the environment of anything that runs repo or dependency code except wrangler itself (the Deploy step).
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - name: Build the web app (assets)
+        run: npm run build:web
+      - name: Deploy (guards, D1 migrations, deploy, verify)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+          META_VERIFY_TOKEN: ${{ secrets.META_VERIFY_TOKEN }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+        shell: bash
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "::error title=No Cloudflare token::CLOUDFLARE_API_TOKEN is not set. By design (WA-DEPLOY-1) it stays unset until environment protection exists; deploy from the Mac with scripts/deploy.sh."
+            exit 1
+          fi
+          bash scripts/deploy.sh
+      - name: Notify failure (Telegram)
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHORT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          # The text carries the commit and the run link only: no phone, no secret, no message content.
+          if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_ALERT_CHAT_ID}" ]; then
+            echo "::warning title=No Telegram secrets::the deploy failed but TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID are not set, so nobody was messaged."
+            exit 0
+          fi
+          curl -sS --max-time 15 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_ALERT_CHAT_ID}" \
+            --data-urlencode "text=🔴 Ebda WhatsApp: deploy FAILED at ${SHORT_SHA:0:7}. Production may be half-migrated or unverified: ${RUN_URL}" >/dev/null || true

@@ -11,7 +11,7 @@ import { OP1, OP2, adminToken, apiFor, operatorCall, storeId as W0, useApiKey } 
 import { ledger } from './helpers/billing';
 import { testKashier } from './helpers/kashier';
 import { useStoreLink } from './helpers/store-link';
-import { openChat, rows, seedNumber, workspace } from './helpers/workspace';
+import { exec, openChat, rows, seedNumber, workspace } from './helpers/workspace';
 
 useApiKey();
 useStoreLink();
@@ -51,6 +51,16 @@ const audits = async (ws: string) => (await env.DB.prepare("SELECT count(*) AS n
 const lowThreshold = { ...env, ADJUSTMENT_APPROVAL_MINOR: '10000' } as typeof env;
 
 describe('creating a request: the server owns the amount', () => {
+  it('WA-NOFREE-1: a workspace with NO package can still pay by InstaPay (a merchant must be able to buy), for a package and for a top-up', async () => {
+    const ws = W(98);
+    await seedNumber(`pn-ip-${ws.slice(-6)}`, ws);
+    await exec(ws, 'DELETE FROM entitlements');
+    expect(await workspace(ws).getEntitlement()).toBeNull();
+    const p = await createInstapayRequest(env, { workspaceId: ws, userId: 'merchant-1', sessionId: 's1', input: { kind: 'package', packageId: 'gold' }, payee: PAYEE });
+    const t = await createInstapayRequest(env, { workspaceId: ws, userId: 'merchant-1', sessionId: 's1', input: { kind: 'topup', amountMinor: 20000 }, payee: PAYEE });
+    expect([p.ok, t.ok]).toEqual([true, true]);
+  });
+
   it('a package request costs packages.price_minor, has a human-typable reference and a 48 h expiry, and shows the configured payee', async () => {
     const ws = W(1);
     const now = Date.now();

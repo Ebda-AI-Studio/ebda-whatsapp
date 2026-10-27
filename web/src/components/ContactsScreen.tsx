@@ -1,15 +1,19 @@
-import { Search, Upload, Users } from 'lucide-react';
+import { Upload, Users } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { ContactDto, ImportDto } from '../../../src/core/api/contract';
 import type { ContactsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { relativeTime } from '../lib/format';
+import { useTypeahead } from '../lib/useTypeahead';
+import { Highlight } from './Highlight';
 import { LoadError } from './LoadError';
+import { SearchBox, optionId } from './SearchBox';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: ContactsApi; now: () => number };
 
+const LIST_ID = 'contact-results';
+
 export function ContactsScreen({ t, lang, source, api, now }: Props) {
-  const [q, setQ] = useState('');
   const [optedOut, setOptedOut] = useState(false);
   const [items, setItems] = useState<ContactDto[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -17,13 +21,24 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
   const [imports, setImports] = useState<ImportDto[]>([]);
   const owner = source.role !== 'staff';
 
+  // Typing uses the shared search hook (from the first character, 150 ms pause, older answers dropped); the plain list loads at once.
+  // The opted-out chip and a retry re-run the same query.
+  const fetchSearch = useCallback((q: string, signal: AbortSignal) => api.list({ q, ...(optedOut ? { optedOut: true } : {}) }, signal).then((r) => r.items), [api, optedOut]);
+  const search = useTypeahead<ContactDto>(fetchSearch, { deps: [api, optedOut, attempt] });
+  const q = search.query;
+  const searching = q.trim() !== '';
   useEffect(() => {
+    if (searching) return;
     let stale = false;
-    const run = () => void api.list({ q, ...(optedOut ? { optedOut: true } : {}) }).then((r) => { if (!stale) { setItems(r.items); setFailed(false); } }, () => { if (!stale) setFailed(true); });
-    // Typing is debounced; a filter tap fetches at once.
-    const id = q ? setTimeout(run, 250) : (run(), undefined);
-    return () => { stale = true; clearTimeout(id); };
-  }, [api, q, optedOut, attempt]);
+    void api.list({ ...(optedOut ? { optedOut: true } : {}) }).then((r) => { if (!stale) { setItems(r.items); setFailed(false); } }, () => { if (!stale) setFailed(true); });
+    return () => { stale = true; };
+  }, [api, searching, optedOut, attempt]);
+  // null = nothing to show yet. While a newer search loads the previous results stay (no blanking on every keystroke).
+  const shown = searching ? (search.status === 'loading' && search.results.length === 0 ? null : search.results) : items;
+  const listFailed = searching ? search.status === 'error' : failed;
+  const [active, setActive] = useState(-1);
+  useEffect(() => setActive(-1), [shown]);
+  useEffect(() => { if (active >= 0) document.getElementById(optionId(LIST_ID, active))?.scrollIntoView?.({ block: 'nearest' }); }, [active]);
 
   const [importsFailed, setImportsFailed] = useState(false);
   const loadImports = useCallback(() => api.imports().then((x) => { setImports(x); setImportsFailed(false); }, () => setImportsFailed(true)), [api]);
@@ -43,23 +58,21 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
       </header>
       <div className="settings wide contacts-layout">
         <section aria-label={t.contactsTitle}>
-          <label className="search">
-            <Search size={18} aria-hidden />
-            <input type="search" dir="auto" value={q} placeholder={t.searchContacts} aria-label={t.searchContacts} onChange={(e) => setQ(e.target.value)} />
-          </label>
+          {/* Enter has nothing to open here (a contact has no detail view yet); the keys still move the active row for screen readers. */}
+          <SearchBox t={t} lang={lang} label={t.searchContacts} query={q} onQuery={search.setQuery} status={searching ? search.status : 'idle'} count={shown?.length ?? 0} listId={LIST_ID} activeIndex={active} onActiveIndex={setActive} onPick={() => undefined} />
           <div className="chips" role="group" aria-label={t.contactsTitle}>
             <button type="button" className="chip" aria-pressed={!optedOut} onClick={() => setOptedOut(false)}>{t.filterAllContacts}</button>
             <button type="button" className="chip" aria-pressed={optedOut} onClick={() => setOptedOut(true)}>{t.filterOptedOut}</button>
           </div>
-          {failed ? <LoadError t={t} onRetry={() => { setFailed(false); setAttempt((a) => a + 1); }} />
-            : items === null ? <div className="placeholder">…</div>
-            : items.length === 0 ? <p className="empty-note">{t.contactsEmpty}</p>
+          {listFailed ? <LoadError t={t} onRetry={() => { setFailed(false); setAttempt((a) => a + 1); }} />
+            : shown === null ? <div className="placeholder">…</div>
+            : shown.length === 0 ? <p className="empty-note">{t.contactsEmpty}</p>
             : (
-              <ul className="contact-list" aria-label={t.contactsTitle}>
-                {items.map((c) => (
-                  <li key={c.waId} className="contact-row">
+              <ul className="contact-list" id={LIST_ID} role="listbox" aria-label={t.contactsTitle}>
+                {shown.map((c, i) => (
+                  <li key={c.waId} id={optionId(LIST_ID, i)} role="option" aria-selected={i === active} data-active={i === active} className="contact-row">
                     <div className="contact-main">
-                      <b dir="auto">{c.name ?? t.noName}</b>
+                      <b dir="auto">{c.name ? <Highlight text={c.name} query={q} /> : t.noName}</b>
                       <span className="muted small" dir="ltr">+{c.waId.slice(0, -4).replace(/\d/g, '•')}{c.waId.slice(-4)}</span>
                     </div>
                     <div className="contact-tags">

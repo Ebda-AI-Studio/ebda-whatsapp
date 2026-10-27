@@ -45,6 +45,7 @@ jobs:
         env:
           # 60 s per test on the shared VM (host memory pressure stalled it for 84 s and 343 s on 2026-10-25); local runs keep 20 s.
           VITEST_TEST_TIMEOUT: '60000'
+          VITEST_ASYNC_TIMEOUT: '20000'
         run: |
           start=$(date +%s)
           rc=0

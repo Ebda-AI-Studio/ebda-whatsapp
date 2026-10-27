@@ -9,7 +9,7 @@ import {
   changeLog, decideAdjustment, listAdjustments, listFx, listOverrides, listRateCards, listSettings, publishFx, publishOverride, publishRateCard, publishSettings, publishTrueup,
   requestAdjustment, setFunding,
 } from '../core/billing/operator';
-import { setSubscription } from '../core/billing/subscriptions';
+import { STORE_INCLUDED, setSubscription } from '../core/billing/subscriptions';
 import { currentSharedNumber, registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
 import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type SharedTemplateFailure } from '../core/shared/shared-templates';
 import { submitTemplateRequest } from './templates';
@@ -38,6 +38,7 @@ operatorRoutes.post('/pricing-settings', async (c) => {
   const b = pricingSettingsPublish.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, b.error.issues[0]?.message);
   const r = await publishSettings(c.env, { actor: actor(c), ...b.data });
+  if (!r.ok && r.reason === 'vat_locked') return c.json({ error: 'vat_locked', message: 'VAT is 0 (Ruling VAT-0); a change needs a new ruling' }, 400);
   return r.ok ? c.json(r.value, 201) : c.json({ error: 'invalid_request', message: r.reason }, 400);
 });
 
@@ -187,6 +188,10 @@ operatorRoutes.put('/workspaces/:workspaceId/subscription', async (c) => {
     c.env.DB.prepare('SELECT 1 FROM packages WHERE id = ?').bind(b.data.packageId).first(),
   ]);
   if (!ws || !pkg) return c.json({ error: 'not_found' }, 404);
+  // WA-NOFREE-1: the free package belongs to the Store plan alone; an operator assigns a paid package (a deal or a goodwill extension of one).
+  if (b.data.packageId === STORE_INCLUDED) return bad(c, 'store_included_is_store_plan_only');
+  // An in-effect status needs a future end: the workspace would deny it anyway (WA-CANCEL-1), so refuse the contradiction instead of storing it.
+  if ((b.data.status === 'active' || b.data.status === 'trialing') && b.data.periodEnd <= Date.now()) return bad(c, 'period_end_in_the_past');
   const r = await setSubscription(c.env, { workspaceId, packageId: b.data.packageId, status: b.data.status, periodStart: Date.now(), periodEnd: b.data.periodEnd, source: 'operator', ref: actor(c), reason: b.data.reason });
   console.log(JSON.stringify({ audit: 'operator_subscription_set', workspace: workspaceId, packageId: b.data.packageId, status: b.data.status, version: r.version, actor: actor(c) }));
   return c.json({ packageId: b.data.packageId, status: b.data.status, periodEnd: b.data.periodEnd, version: r.version, applied: r.applied });

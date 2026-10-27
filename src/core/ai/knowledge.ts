@@ -6,6 +6,7 @@
  */
 import { BACKUP_TIME_ZONE, nextLocalHour, sha256Hex } from '../backup';
 import { errClass, alert } from '../observability';
+import { serviceAllowed } from '../billing/entitlements';
 import { addTask } from '../scheduler';
 import type { CatalogRow } from '../store-bridge';
 import { bridgeFor } from '../store-link';
@@ -90,6 +91,8 @@ export async function runKbIndex(host: LinkHost, now: number): Promise<number | 
   const cfg = agentConfig();
   const version = num(getAgentState(host.sql, 'kb.version'));
   if (!version) return undefined;
+  // Background Workers AI spend stops with the package (WA-NOFREE-1). Dropped, not retried: the next FAQ save (or a new package then a save) indexes again.
+  if (!serviceAllowed(host.sql, now)) return undefined;
   const store = cfg.vectors(host.env);
   const embed = cfg.embedder(host.env);
   const count = host.sql.exec<{ n: number }>('SELECT count(*) AS n FROM kb_chunks WHERE version = ?', version).one().n;
@@ -146,6 +149,7 @@ const catalogDoc = (r: CatalogRow): string => [r.title, r.titleAr, r.brand, r.de
 
 /** Asks for a (debounced) refresh of the catalog index. Does nothing while the agent is off, so no embedding spend. */
 export function scheduleCatalogEmbed(host: Pick<LinkHost, 'sql'>, now: number, delayMs = 60_000): void {
+  if (!serviceAllowed(host.sql, now)) return; // no package, no background AI spend (WA-NOFREE-1)
   if (agentConfig().copy && readAgentSettings(host.sql).enabled) addTask(host.sql, 'catalog_embed', now + delayMs);
 }
 
@@ -153,6 +157,7 @@ export function scheduleCatalogEmbed(host: Pick<LinkHost, 'sql'>, now: number, d
 export async function runCatalogEmbed(host: LinkHost, now: number): Promise<number | undefined> {
   const next = nextLocalHour(now + 3_600_000, CATALOG_EMBED_HOUR_LOCAL, BACKUP_TIME_ZONE);
   if (!agentConfig().copy || !readAgentSettings(host.sql).enabled) return undefined;
+  if (!serviceAllowed(host.sql, now)) return next; // no package, no embedding spend (WA-NOFREE-1); the nightly chain survives
   const cfg = agentConfig();
   const store = cfg.vectors(host.env);
   const embed = cfg.embedder(host.env);

@@ -65,17 +65,30 @@ describe('entitlements: expiry task', () => {
 });
 
 describe('entitlements: past_due blocks marketing only', () => {
-  it.each(['past_due', 'cancelled', 'expired'] as const)('%s: marketing template refused, utility template and text allowed', async (status) => {
-    const ws = W(10 + ['past_due', 'cancelled', 'expired'].indexOf(status));
+  it('past_due (inside its grace): marketing template refused, utility template and text allowed', async () => {
+    const ws = W(10);
     await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
     await seedTemplate(ws, { name: 'upd', category: 'UTILITY', components: JSON.stringify([{ type: 'BODY', text: 'hi' }]) });
     await own(ws);
     const conv = await openChat(ws);
-    await workspace(ws).applyEntitlement(ev({ status }));
+    await workspace(ws).applyEntitlement(ev({ status: 'past_due', pastDueSince: Date.now() - DAY }));
     const tmpl = (name: string, n: number) => ({ type: 'template' as const, clientId: `00000000-0000-4000-8000-00000000a0${n}`, name, language: 'ar', params: name === 'promo' ? ['a', 'b'] : [] });
     expect(await workspace(ws).queueOutbound(conv, 'pn-x', tmpl('promo', 1))).toMatchObject({ ok: false, reason: 'plan_blocked' });
     expect(await workspace(ws).queueOutbound(conv, 'pn-x', tmpl('upd', 2))).toMatchObject({ ok: true });
     expect(await workspace(ws).queueOutbound(conv, 'pn-x', { type: 'text', clientId: '00000000-0000-4000-8000-00000000a003', text: 'hello' })).toMatchObject({ ok: true });
+  });
+
+  it.each(['cancelled', 'expired'] as const)('%s: WA-NOFREE-1 refuses every category, not only marketing (plan_required)', async (status) => {
+    const ws = W(status === 'cancelled' ? 11 : 12);
+    await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
+    await seedTemplate(ws, { name: 'upd', category: 'UTILITY', components: JSON.stringify([{ type: 'BODY', text: 'hi' }]) });
+    await own(ws);
+    const conv = await openChat(ws);
+    await workspace(ws).applyEntitlement(ev({ status, periodEnd: Date.now() - 1000 })); // WA-CANCEL-1: cancelled lapses only once its paid period has ended
+    const tmpl = (name: string, n: number) => ({ type: 'template' as const, clientId: `00000000-0000-4000-8000-00000000a0${n}`, name, language: 'ar', params: name === 'promo' ? ['a', 'b'] : [] });
+    expect(await workspace(ws).queueOutbound(conv, 'pn-x', tmpl('promo', 1))).toMatchObject({ ok: false, reason: 'plan_required' });
+    expect(await workspace(ws).queueOutbound(conv, 'pn-x', tmpl('upd', 2))).toMatchObject({ ok: false, reason: 'plan_required' });
+    expect(await workspace(ws).queueOutbound(conv, 'pn-x', { type: 'text', clientId: '00000000-0000-4000-8000-00000000a003', text: 'hello' })).toMatchObject({ ok: false, reason: 'plan_required' });
   });
 
   it('a marketing message queued before the plan lapsed fails at claim with plan_blocked', async () => {
@@ -90,7 +103,7 @@ describe('entitlements: past_due blocks marketing only', () => {
     expect(await rows(ws, "SELECT status, error_reason FROM messages WHERE idempotency_key = 'ui:00000000-0000-4000-8000-00000000b001'")).toEqual([{ status: 'failed', error_reason: 'plan_blocked' }]);
   });
 
-  it('no entitlement on record blocks marketing (fail closed) but not utility, service or the inbox', async () => {
+  it('no entitlement on record refuses every send (WA-NOFREE-1) but the inbox is still readable', async () => {
     const ws = W(21);
     await seedTemplate(ws, { name: 'promo', category: 'MARKETING' });
     await seedTemplate(ws, { name: 'util', category: 'UTILITY', components: JSON.stringify([{ type: 'BODY', text: 'hi' }]) });
@@ -98,9 +111,10 @@ describe('entitlements: past_due blocks marketing only', () => {
     await exec(ws, 'DELETE FROM entitlements'); // the test helpers give every workspace a baseline plan; this one has none
     const conv = await openChat(ws);
     const send = (clientId: string, body: Record<string, unknown>) => workspace(ws).queueOutbound(conv, 'pn-x', { clientId, ...body } as never);
-    expect(await send('00000000-0000-4000-8000-00000000b002', { type: 'template', name: 'promo', language: 'ar', params: ['a', 'b'] })).toMatchObject({ ok: false, reason: 'plan_blocked' });
-    expect(await send('00000000-0000-4000-8000-00000000b003', { type: 'template', name: 'util', language: 'ar', params: [] })).toMatchObject({ ok: true });
-    expect(await send('00000000-0000-4000-8000-00000000b004', { type: 'text', text: 'hello' })).toMatchObject({ ok: true });
+    expect(await send('00000000-0000-4000-8000-00000000b002', { type: 'template', name: 'promo', language: 'ar', params: ['a', 'b'] })).toMatchObject({ ok: false, reason: 'plan_required' });
+    expect(await send('00000000-0000-4000-8000-00000000b003', { type: 'template', name: 'util', language: 'ar', params: [] })).toMatchObject({ ok: false, reason: 'plan_required' });
+    expect(await send('00000000-0000-4000-8000-00000000b004', { type: 'text', text: 'hello' })).toMatchObject({ ok: false, reason: 'plan_required' });
+    expect((await workspace(ws).listConversations({ filter: 'all', userId: 'u', limit: 10 })).items).toHaveLength(1); // reading stays open
   });
 });
 
