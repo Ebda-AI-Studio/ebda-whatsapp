@@ -159,6 +159,25 @@ describe('cart and checkout paths', () => {
     expect((await sessionOf(ws)).data).toContain('"cart":[]');
   });
 
+  it('W2-OPS: a customer mid-order on a SUSPENDED store gets no Store order and no answer', async () => {
+    const { ws, pn } = await setup(97);
+    const g = stubGraph();
+    await say(ws, pn, text('hi'), g);
+    await say(ws, pn, tapList('v:v2'), g);
+    await say(ws, pn, tapBtn('q:2'), g);
+    await say(ws, pn, tapBtn('cart:checkout'), g);
+    const ask = await say(ws, pn, tapBtn('pay:cod'), g);
+    expect(ask[0]!.body.text.body).toContain('عنوان التوصيل'); // mid-order: the bot is waiting for the address
+    await workspace(ws).setSuspended(true, 'abuse report 2026-10-27');
+    const out = await say(ws, pn, text('المعادي، شارع 9 عمارة 4'), g);
+    expect(out).toEqual([]);
+    expect(link.fake.orders.size).toBe(0);
+    expect(await rows(ws, 'SELECT 1 FROM store_orders')).toHaveLength(0);
+    await workspace(ws).setSuspended(false, 'resolved with the owner');
+    const done = await say(ws, pn, text('المعادي، شارع 9 عمارة 4'), g); // unsuspended: the same typed address completes the order
+    expect(done[0]!.body.text.body).toMatch(/طلبك رقم/);
+  });
+
   it('a quantity can be typed (Arabic digits too) and the same product merges into one line', async () => {
     const { ws, pn } = await setup(11);
     const g = stubGraph();

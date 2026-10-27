@@ -4,6 +4,7 @@
  * after every await before a write, replies go out directly 150 ms apart inside the 24 h window only, and a replayed task
  * does not call the model again (the finished turn is recorded in the same transaction as its replies).
  */
+import { isSuspended } from '../numbers/health';
 import { WINDOW_MS } from '../dto';
 import { errClass, alert } from '../observability';
 import { turnGone, orderingActive, runBotTurnLocked, type BotInput } from '../ordering/bot';
@@ -26,7 +27,8 @@ const HISTORY_MESSAGES = 8;
 const HISTORY_CHARS = 500;
 export const REPLY_MAX_CHARS = 1500;
 
-export const agentActive = (host: Pick<LinkHost, 'sql'>): boolean => agentConfig().copy !== null && readAgentSettings(host.sql).enabled;
+// A suspended workspace's agent is off (W2-OPS): it would otherwise keep spending AI credits and queueing replies that every send gate then refuses.
+export const agentActive = (host: Pick<LinkHost, 'sql'>): boolean => agentConfig().copy !== null && readAgentSettings(host.sql).enabled && !isSuspended(host.sql);
 
 class Aborted extends Error {}
 

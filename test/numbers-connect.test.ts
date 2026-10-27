@@ -161,6 +161,18 @@ it('a plain registration failure is kept as failed and retried with the SAME sto
   expect(pins[0]).toBe(pins[1]);
 });
 
+it('refuses the platform (shared) number\'s id (409) before spending the code, and writes no phone_numbers row for it', async () => {
+  await env.DB.prepare("INSERT INTO shared_numbers (phone_number_id, waba_id, display_phone, created_at) VALUES ('7700190', '7700191', '+20 100 555 0001', 1)").run();
+  const api = await apiFor(W(511));
+  graph = graphStub(meta('7700192', '7700190')); // a different WABA, but the platform number's id
+  const res = await connect(api, '7700192', '7700190');
+  expect(res.status).toBe(409);
+  expect(await res.json()).toMatchObject({ error: 'number_conflict' });
+  expect(graph.calls).toHaveLength(0); // refused before the code was spent
+  expect(await env.DB.prepare("SELECT 1 FROM phone_numbers WHERE phone_number_id = '7700190'").first()).toBeNull();
+  await env.DB.prepare("DELETE FROM shared_numbers WHERE phone_number_id = '7700190'").run();
+});
+
 it('refuses a number or WABA that belongs to another workspace (409) before spending the code', async () => {
   await seedOwnNumber('8107', W(509), '9107');
   const other = await apiFor(W(510));

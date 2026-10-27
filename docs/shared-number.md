@@ -44,6 +44,8 @@ Only for the number found in `shared_numbers` while the switch is on. Per messag
 6. No route → one generic reply per customer per 24 h (`shared-noroute/…` marker); nothing is stored in any store.
 Erasing a contact (`eraseSharedFor`) drops this store's routes (so it is no longer a candidate or offered in the pick list) and removes the sender's parked messages (`shared-parked/<number>/<customer_key>/`) through `r2_pending_deletes` ONLY for a number where this store is the sole candidate; parked messages are shared by every candidate store, so while another store is still a candidate they stay for it (queued before the routes are deleted, retried until R2 confirms).
 
+While the platform number is not green (Meta flagged, rated it red or restricted it) nobody new can join (`409 number_unhealthy`) and `GET /shared-number` says `available: false`; the operator can evict a store (`POST /operator/workspaces/:id/shared-number/evict`) and readmit it. Details: `docs/number-health.md`.
+
 Opt-out (`STOP`, the other opt-out words and a Stop button tap): routed → that store; ambiguous → every active store that wrote to the customer (safe direction), no list, nothing parked; no route → silent, nothing stored.
 Statuses (`sent/delivered/read/failed`) are routed by the message id in `shared_sent`; an unknown id is dropped with a warning.
 A failing platform send (list, generic reply) that Meta marks retryable fails the webhook (5xx) so Meta redelivers; every step is idempotent on the message id. A permanent failure is logged and dropped.

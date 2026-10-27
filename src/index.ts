@@ -7,7 +7,7 @@ import { selectVerifier } from './identity-select';
 import { configureAgent } from './core/ai/config';
 import { signupEnabled } from './core/numbers/numbers';
 import { verifyMetaSignature } from './core/meta/signature';
-import { extractCoexistence, extractEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
+import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
 import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/observability';
@@ -52,6 +52,7 @@ import { handleSharedEvent, sharedEnabled, sharedNumberById, sweepShared } from 
 import { secretProblems } from './core/secrets-check';
 import { apiContentTypes, requestGuards } from './core/request-guards';
 import { applySharedTemplateEvent } from './core/shared/shared-templates';
+import { applyAccountEvent, applyHealthEvent } from './core/numbers/health-events';
 
 // The Store link: how to reach the Store, and the words customers see. Inert until STORE_BRIDGE is bound.
 // The brand pack (BRAND var; unset = the suite brand) is chosen once per isolate, before any request: copy, templates, agent words,
@@ -240,6 +241,8 @@ app.post('/meta/webhook', async (c) => {
     if (number && tier !== undefined) await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(number.workspaceId)).setNumberLimits(number.phoneNumberId, { tier });
     if (number) await c.env.DB.prepare('UPDATE phone_numbers SET messaging_limit_tier = ? WHERE phone_number_id = ?').bind(u.currentLimit, number.phoneNumberId).run();
   }
+  for (const q of extractQualityEvents(payload)) await applyHealthEvent(c.env, q.wabaId, q.displayPhone, { kind: 'quality', event: q.event }, q.at, (f) => c.executionCtx.waitUntil(f()));
+  for (const a of extractAccountEvents(payload)) await applyAccountEvent(c.env, a.wabaId, a.restricted ? { kind: 'restricted' } : { kind: 'restriction_lifted' }, a.at, (f) => c.executionCtx.waitUntil(f()));
   for (const u of extractNameUpdates(payload)) {
     const number = await numberForDisplayPhone(c.env.DB, u.wabaId, u.displayPhone);
     if (!number) continue;

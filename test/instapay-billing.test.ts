@@ -94,7 +94,7 @@ describe('creating a request: the server owns the amount', () => {
     expect((await SELF.fetch(`https://x/api/v1/stores/${ws}/wallet/instapay/${r.id}/proof`, { method: 'PUT', headers: { authorization: `Bearer ${staff.token}`, 'content-type': 'image/png' }, body: PNG })).status).toBe(403);
     configureSessionCheck(async () => true);
     const owner = await apiFor(ws);
-    expect((await owner.call('POST', '/wallet/instapay', { kind: 'topup', amountMinor: 5000 })).status).toBe(401);
+    expect((await owner.call('POST', '/wallet/instapay', { kind: 'topup', amountMinor: 5000 })).status).toBe(403); // M-135: the store middleware refuses a revoked session on every write, before the route's own money check
   });
   it('switched off or without a payee it is unavailable and writes nothing', async () => {
     const ws = W(4);

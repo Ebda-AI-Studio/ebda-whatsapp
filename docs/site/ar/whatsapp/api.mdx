@@ -23,6 +23,7 @@ Authorization: Bearer <access_token>
 - التوكن بيحدد المستخدم، والمتاجر اللي ينتمي لها، ودوره في كل متجر: **owner** (صاحب المتجر) أو **staff** (موظف). الطلب على `/stores/{storeId}/...` بينجح بس لو التوكن فيه المتجر ده. غير كده الرد `403 forbidden`.
 - توكن ناقص أو غلط أو منتهي بيرجّع `401 unauthorized`.
 - الـ endpoints المكتوب عليها **للمالك فقط** بترد `403 forbidden` لو المستخدم موظف.
+- المتجر اللي فريقنا وقّفه بيرد على كل كتابة بـ `403 forbidden` و`message: "workspace_suspended"` (القراءة والدفع ومسح بيانات عميل بيفضلوا شغّالين). الكتابة بتوكن مستخدم جلسته اتلغت بترد `403 forbidden` / `session_revoked`، ولو خدمة الحسابات مش متاحة بترد `503 unavailable` / `session_check_unavailable` (جرّب تاني). بدء حملة أو استكمالها على رقم واتساب قيّمه أحمر أو قيّده بيرد `409 invalid_request` / `number_restricted`، وحالة الرقم `health` موجودة في `GET /numbers`.
 
 `GET /stores/{storeId}/me` بيرجّع التوكن ده بتاع مين:
 
