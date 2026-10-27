@@ -174,3 +174,11 @@ it('store-included is only ever written by the Store-plan path (store-plan.ts an
   expect(/export async function startPackageCheckout[\s\S]*?\n}\n/.exec(orders)?.[0] ?? '').toMatch(/FROM packages WHERE id = \? AND active = 1 AND price_minor > 0/);
   expect(readFileSync(new URL('../src/routes/operator.ts', import.meta.url), 'utf8')).toMatch(/store_included_is_store_plan_only/);
 });
+
+// migrate() applies DO_MIGRATIONS by array POSITION past max(_migrations.version). A no-op placeholder "to be replaced later" is therefore silently skipped on every
+// Durable Object that already ran it. Reserve a number by not taking it, never by holding its slot.
+it('no DO migration is a no-op (an empty statement or a bare SELECT): a placeholder would be skipped forever on every DO that already ran it', async () => {
+  const { DO_MIGRATIONS } = await import('../src/core/do-migrations');
+  const noop = DO_MIGRATIONS.map((sql, i) => ({ v: i + 1, sql: sql.replace(/--[^\n]*/g, '').trim() })).filter((m) => m.sql === '' || /^SELECT\s+[\w'"*]+\s*;?$/i.test(m.sql));
+  expect(noop.map((m) => `v${m.v}`)).toEqual([]);
+});

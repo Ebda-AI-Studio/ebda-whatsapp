@@ -440,10 +440,7 @@ export const DO_MIGRATIONS: readonly string[] = [
    ALTER TABLE entitlements ADD COLUMN lim_priority_support INTEGER NOT NULL DEFAULT 0;`,
   // v33 (WA-GRACE-1): when the control plane saw the subscription first fail to renew. NULL = never past_due (or unknown: serviceAllowed then bounds the grace from updated_at).
   `ALTER TABLE entitlements ADD COLUMN past_due_since INTEGER;`,
-  // v34 is registered to the packages work (#32). Until it merges this is a no-op placeholder so this migration keeps its registered number v35: #32 REPLACES this
-  // statement (do not renumber, do not append a second one).
-  `SELECT 1;`,
-  // v35 (W2-META number health): the state of each number is its latest log row (no row = green); the log is the audit of every change.
+  // v34 (W2-META number health): the state of each number is its latest log row (no row = green); the log is the audit of every change.
   // number_health_events counts the Meta errors that signal a sender-quality problem (131049 frequency cap, 131026 undeliverable) per number in
   // 10-minute buckets, for the spike guard. No phone number, no message content.
   `CREATE TABLE number_health_log (

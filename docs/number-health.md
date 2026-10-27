@@ -1,6 +1,6 @@
 # Number health and the operator kill switch (W2-META, W2-OPS)
 
-Source of truth: `src/core/numbers/health.ts` (state machine), `src/core/numbers/health-events.ts` (webhooks to states), `src/core/ops/kill-switch.ts` (operator actions), `src/core/identity/middleware.ts` (the Worker-side gates). Schema: D1 `0017_number_health_killswitch`, DO migration v35.
+Source of truth: `src/core/numbers/health.ts` (state machine), `src/core/numbers/health-events.ts` (webhooks to states), `src/core/ops/kill-switch.ts` (operator actions), `src/core/identity/middleware.ts` (the Worker-side gates). Schema: D1 `0017_number_health_killswitch`, DO migration v34.
 
 ## State machine (per phone number)
 `green` / `yellow` / `red` / `restricted`. Inputs: `phone_number_quality_update` (`event`), `account_update`, the quality rating read on a status refresh (`refreshNumber`), and the spike guard.
