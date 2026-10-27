@@ -50,3 +50,7 @@ A campaign with `linkUrl` (https, a real host, no credentials, not this service)
 
 ## Not here yet
 The Campaigns and Contacts screens (controller). The old product's CSV/Excel `.xlsx` import is not ported (CSV only).
+
+## Abuse limits (W2-ABUSE: F5)
+- **New-workspace cap.** For the first 14 days after a workspace's Durable Object first ran, at most 250 campaign recipients are queued in any rolling 24 h across all its campaigns (`NEW_WORKSPACE_CAP`, applied in `capacity()` next to the Meta tier). Pacing waits; nothing is dropped. Ruling WA-NEWCAP-1 - the cap lifts by itself and has no operator override yet. Cost if wrong: a legitimate big first campaign takes several days; an operator override is a small follow-up.
+- **Content guard (`content-guard.ts`).** Creating a campaign is refused with `invalid_request` and message `content_blocked:<code>` when the rendered text, any free-text parameter or name fallback, or the tracked link's destination has a link shortener (its host or any subdomain, `link_shortener`), an IP host in any spelling (the URL parser resolves integer, hex and octal forms, `link_ip`), a punycode host (`link_punycode`), a plain-http link (`link_not_https`) or a scam / unregulated-finance phrase (`pattern`). INFO alert `campaign_content_blocked`.

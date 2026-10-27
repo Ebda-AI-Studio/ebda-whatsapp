@@ -130,3 +130,6 @@ Business verified · a package on record (Store plan with WhatsApp, a purchase o
 **Ruling WA-SUPPORT-1 (Ahmad, 2026-10-27): support is email, the suite's public address `ahlan@ebda.app`** (the Store's `supportEmail` brand constant, vendored in `vendor/brand/store-support-email.json` pinned to a Store commit). The web brand carries it as `supportEmail` (null for other brands, which fall back to the word "support"). Every error copy and help guide that sends a person to us names it; `test/white-label.test.ts` fails on a bare "contact support" or a different `@ebda.app` address. Cost if wrong: if the Store changes its address, ours stays stale until someone re-vendors it (the pin records the Store commit to compare against).
 
 **Ruling WA-YEARLY-REFUND-MONTH-1 (Ahmad, 2026-10-27): a yearly refund never includes the current month.** The whole months left after it are refunded at the yearly price ÷ 12, capped at what was paid for that year, debt first. Terms 6.5 (en + ar) and help guide 09 say so. Cost if wrong: none for us; a merchant who expected the current month back is told so before buying.
+
+## Media type is checked from the bytes (M-134)
+`POST /stores/:storeId/media` compares the first bytes of the file (JPEG, PNG, PDF, MP4 `ftyp`, Ogg `OpusHead`) with the declared type; a mismatch is `415 unsupported_media` and nothing reaches Meta.

@@ -60,3 +60,6 @@ name pointing at a private or loopback address would pass them. On Cloudflare Wo
 outbound `fetch` runs on Cloudflare's network, not inside the client's or our private network, so there is no internal service
 behind such an address to hit. Operators who want a hard list set `AGENT_ALLOWED_HOSTS`. Revisit if connectors ever run anywhere
 other than Workers.
+
+## Error text is masked (M-177)
+The `message` of a failed call is the client system's free text. Before the model reads it, phones, card-like numbers and e-mails in it are masked (`maskForModel`). Only the fixed `error` code and the masked text reach the model.

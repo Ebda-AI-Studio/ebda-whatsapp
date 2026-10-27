@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { MAX_DOCUMENT_BYTES, UPLOAD_OVERHEAD_BYTES, canonicalMime, outboundMediaFor, safeFilename } from '../core/media';
+import { MAX_DOCUMENT_BYTES, UPLOAD_OVERHEAD_BYTES, canonicalMime, normaliseMime, outboundMediaFor, safeFilename, sniffMime } from '../core/media';
 import { senderNumber, apiError, bizToken, intParam, planRequired, workspaceStub, type ApiEnv } from './shared';
 
 export const mediaRoutes = new Hono<ApiEnv>();
@@ -62,6 +62,8 @@ mediaRoutes.post('/stores/:storeId/media', async (c) => {
   if (!ws || !number) return apiError(c, 404, 'not_found');
   const noPlan = await planRequired(c, ws);
   if (noPlan) return noPlan;
+  // M-134: the bytes must be what the declared type says.
+  if (sniffMime(new Uint8Array(await file.slice(0, 64).arrayBuffer())) !== normaliseMime(file.type)) return apiError(c, 415, 'unsupported_media');
   const token = await bizToken(c, { phoneNumberId: number.phoneNumberId });
   if (!token) return apiError(c, 503, 'rate_limited', 'token_unavailable');
   const mime = canonicalMime(file.type);

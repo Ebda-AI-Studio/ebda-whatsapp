@@ -96,3 +96,6 @@ A PERSON token never carries `client` or `role: "integration"`. Every product's 
 4. Rate limits: the 61st issue in an hour gets 429. N wrong secrets from one IP do not block the real client calling from another IP.
 5. Timing: an unknown id takes the same path as a known one (assert the dummy compare runs).
 6. Product: an integration token on an owner-only route gets 403, and the route-scope walk is complete.
+
+## API rate limits (W2-ABUSE, F4)
+After a token is verified, every `/api/v1/stores/:storeId/*` request spends a token from a per-workspace bucket (20/s, burst 100) and, for an integrator token, first from a per-CLIENT bucket (5/s, burst 30; keyed by the client id, so re-minting a token does not reset it). Over a limit: `429 {"error":"rate_limited"}` with `Retry-After`. Platform operators are not limited by a store's bucket. The buckets live in each isolate (bounded-stale; see `src/core/api-rate.ts`).
