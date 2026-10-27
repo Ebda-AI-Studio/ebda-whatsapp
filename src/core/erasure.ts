@@ -108,6 +108,7 @@ export async function dropErased(env: Env, workspaceId: string, files: BackupFil
       case 'conversation_id': return convIds.has(r.conversation_id as number);
       case 'wamid': return wamids.has(String(r.wamid));
       case 'store_state_key': return stateKeys.has(String(r.key));
+      case 'message_id': case 'event_payload': return false; // not part of a backup (AI turn outcomes and the realtime log are operational)
     }
   };
   for (const t of ERASURE_TARGETS) {

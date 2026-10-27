@@ -13,7 +13,7 @@ import { eraseSharedFor } from './shared/shared-number';
 import { dropErased } from './erasure';
 import { deleteTargets } from './erasure-targets';
 import { exportContact, mergeContacts, renameContact } from './contact-data';
-import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, retentionView, writeRetentionDays } from './retention';
+import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, writeRetentionDays } from './retention';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
@@ -1665,7 +1665,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Appends an event (inside the caller's transaction) and schedules a push to open sockets once it has committed. */
   private recordEvent(payload: Record<string, unknown>): void {
-    const seq = this.sql.exec<{ seq: number }>('INSERT INTO events (payload) VALUES (?) RETURNING seq', JSON.stringify(payload)).one().seq;
+    const seq = this.sql.exec<{ seq: number }>('INSERT INTO events (payload, at) VALUES (?, ?) RETURNING seq', JSON.stringify(payload), Date.now()).one().seq;
     if (seq > EVENTS_KEPT) this.sql.exec('DELETE FROM events WHERE seq <= ?', seq - EVENTS_KEPT);
     if (this.flushScheduled) return;
     this.flushScheduled = true;
@@ -2279,11 +2279,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       // What is left of the customer goes through the ONE list the restore also filters by (src/core/erasure-targets.ts). The rows that hold keys to other
       // rows (agent turns, search, events) are removed first, because the list's `messages` step removes the rows they are found through.
-      if (conv) {
-        this.sql.exec('DELETE FROM agent_turns WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
-        this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
-        this.sql.exec("DELETE FROM events WHERE json_extract(payload, '$.conversationId') = ? OR json_extract(payload, '$.conversation.id') = ?", conv.id, conv.id);
-      }
+      if (conv) this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id); // (the list below removes the rows it is found through)
       this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       deleteTargets(this.sql, { waId, contactId: contact.id, convId: conv?.id ?? null });
       this.sql.exec('DELETE FROM contacts_fts WHERE rowid = ?', contact.id);
@@ -2322,6 +2318,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       deleted += n;
       if (n < (opts.batch ?? RETENTION_BATCH)) break;
     }
+    this.ctx.storage.transactionSync(() => purgeOldEvents(this.sql, cutoff)); // the realtime log is capped by age too, not only by count
     if (deleted > 0) {
       const owed = await this.drainR2Deletes();
       if (owed > 0) await this.schedule('r2_drain', now + 3_600_000);

@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { routePath } from 'hono/route';
 import { z } from 'zod';
 import {
   fxPublish, instapayReject, operatorKillSwitch, auditLogQuery, exportContactQuery, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
@@ -26,11 +27,21 @@ import { decideRefund, listRefundRequests, markManualPaid } from '../core/billin
 type E = { Bindings: Env; Variables: AuthVars };
 /** /api/v1/operator/*, mounted behind requireSuperAdmin. Errors are {error, message?}. */
 export const operatorRoutes = new Hono<E>();
-// Every state-changing operator action re-checks that the session was not revoked, and fails closed (accounts binding missing or erroring = refused).
+/**
+ * FAIL CLOSED: every operator request (GET included) re-checks that the session was not revoked, and an unreachable accounts service refuses it.
+ * Only the reads named here skip the check; each is global price configuration with no personal data, so it keeps working while the accounts service is down.
+ * A route added later is checked by default; `test/operator-session.test.ts` walks every registered route and fails if one differs from this list.
+ */
+export const OPERATOR_READS_WITHOUT_SESSION_CHECK: Readonly<Record<string, string>> = {
+  'GET /operator/pricing-settings': 'platform price settings: global configuration, no personal data',
+  'GET /operator/pricing-overrides/:workspaceId': 'a margin per workspace id: configuration, no personal data',
+  'GET /operator/rate-cards': 'Meta rate cards: global configuration, no personal data',
+  'GET /operator/fx-rates': 'exchange rates: global configuration, no personal data',
+  'GET /operator/shared-templates': 'the platform number\'s template catalogue: no personal data',
+};
 operatorRoutes.use('*', async (c, next) => {
-  // Reads that return personal data (the InstaPay review list and proof images) re-check the session too; other reads keep working while the accounts service is down.
-  const personal = c.req.path.includes('/instapay') || c.req.path.includes('/package-orders'); // the refund quote shows a merchant's wallet debt: re-check the session
-  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && !personal) return next();
+  const pattern = routePath(c, -1).replace(/^\/api\/v1/, '');
+  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && `GET ${pattern}` in OPERATOR_READS_WITHOUT_SESSION_CHECK) return next();
   const s = await sessionState(c.env, c.get('principal').sessionId);
   if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
   if (s === 'unavailable') return c.json({ error: 'rate_limited', message: 'session_check_unavailable' }, 503);

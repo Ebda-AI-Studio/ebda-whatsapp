@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import { ERASURE_TARGETS } from '../src/core/erasure-targets';
 import { DEFAULT_RETENTION_DAYS } from '../src/core/retention';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import { fund } from './helpers/billing';
@@ -105,5 +106,61 @@ describe('the purge', () => {
     expect(await wamids(target)).toHaveLength(3);
     await workspace(target).runDueTasks(Date.now() + 2 * 60_000);
     expect(await wamids(target)).toEqual([`wamid.new.${ws}.0`]);
+  });
+});
+
+describe('what a purge leaves behind (review)', () => {
+  const pending = (ws: string) => rows<{ key: string }>(ws, 'SELECT key FROM r2_pending_deletes').then((r) => r.map((x) => x.key));
+
+  it('an R2 object two messages share is kept until the LAST one is purged, then queued once', async () => {
+    const ws = W(4010);
+    await own(ws);
+    const nowS = Math.floor(Date.now() / 1000);
+    await workspace(ws).ingest({ phoneNumberId: 'pn-x', inbound: [
+      { wamid: `wamid.x.${ws}`, from: A, ts: nowS - 400 * 86400, type: 'text', text: 'قديمة' },
+      { wamid: `wamid.y.${ws}`, from: A, ts: nowS - 40 * 86400, type: 'text', text: 'أحدث' },
+    ], statuses: [], receivedAt: Date.now() });
+    await env.MEDIA.put(`media/${ws}/shared`, 'campaign image');
+    await exec(ws, "UPDATE messages SET media_r2_key = ?, media_mime = 'image/jpeg' WHERE wamid LIKE 'wamid.%'", `media/${ws}/shared`);
+    await exec(ws, "INSERT INTO uploads (id, meta_media_id, mime, size, r2_key, created_at) VALUES ('u-shared', 'm', 'image/jpeg', 3, ?, 1)", `media/${ws}/shared`);
+    await workspace(ws).setRetention(90); // purges the 400-day-old one only
+    expect(await workspace(ws).retentionPurge(Date.now())).toMatchObject({ deleted: 1 });
+    expect(await pending(ws)).toEqual([]); // not queued: the newer message still points at it
+    expect(await env.MEDIA.get(`media/${ws}/shared`)).not.toBeNull();
+    expect(await rows(ws, 'SELECT 1 FROM uploads')).toHaveLength(1);
+    expect(await rows(ws, 'SELECT media_r2_key FROM messages')).toEqual([{ media_r2_key: `media/${ws}/shared` }]);
+    await workspace(ws).setRetention(30); // now the 40-day-old one goes too
+    expect(await workspace(ws).retentionPurge(Date.now())).toMatchObject({ deleted: 1 });
+    expect(await env.MEDIA.get(`media/${ws}/shared`)).toBeNull(); // queued once and drained
+    expect(await rows(ws, 'SELECT 1 FROM uploads')).toEqual([]);
+  });
+
+  it('realtime events about a purged message go too (by message id and by age), and so does everything else in the shared list', async () => {
+    const ws = W(4011);
+    await seed(ws, 2, 1);
+    await workspace(ws).setRetention(90);
+    const old = await rows<{ id: number; wamid: string }>(ws, "SELECT id, wamid FROM messages WHERE wamid LIKE 'wamid.old.%'");
+    const fresh = await rows<{ id: number }>(ws, "SELECT id FROM messages WHERE wamid LIKE 'wamid.new.%'");
+    for (const m of old) await exec(ws, "INSERT INTO agent_turns (message_id, outcome, at) VALUES (?, 'replied', 1)", m.id);
+    await exec(ws, "INSERT INTO events (payload, at) VALUES (?, ?)", JSON.stringify({ type: 'message.status', conversationId: 1, messageId: old[0]!.id, status: 'read' }), Date.now());
+    await exec(ws, "INSERT INTO events (payload, at) VALUES (?, ?)", JSON.stringify({ type: 'message.created', conversationId: 1, message: { id: old[1]!.id, text: 'سر قديم' } }), Date.now());
+    await exec(ws, "INSERT INTO events (payload, at) VALUES (?, ?)", JSON.stringify({ type: 'message.status', conversationId: 1, messageId: fresh[0]!.id, status: 'read' }), Date.now());
+    await exec(ws, "INSERT INTO events (payload, at) VALUES ('{\"type\":\"x\"}', ?)", Date.now() - 400 * DAY); // old by AGE, mentions no message
+    await exec(ws, "INSERT INTO events (payload, at) VALUES ('{\"type\":\"y\"}', ?)", Date.now());
+    await workspace(ws).retentionPurge(Date.now());
+
+    const ids = old.map((m) => m.id);
+    const wamidsOld = old.map((m) => m.wamid);
+    for (const t of ERASURE_TARGETS.filter((x) => x.purge)) {
+      const n = await rows<{ n: number }>(ws, t.by === 'wamid' ? `SELECT count(*) AS n FROM ${t.table} WHERE wamid IN (${wamidsOld.map(() => '?').join(',')})` : t.by === 'message_id' ? `SELECT count(*) AS n FROM ${t.table} WHERE message_id IN (${ids.map(() => '?').join(',')})`
+        : t.by === 'event_payload' ? `SELECT count(*) AS n FROM events WHERE json_extract(payload, '$.messageId') IN (${ids.map(() => '?').join(',')}) OR json_extract(payload, '$.message.id') IN (${ids.map(() => '?').join(',')}) OR json_extract(payload, '$.type') IN ('x')`
+          : `SELECT count(*) AS n FROM ${t.table} WHERE id IN (${ids.map(() => '?').join(',')})`,
+      ...(t.by === 'wamid' ? wamidsOld : t.by === 'event_payload' ? [...ids, ...ids] : ids));
+      expect(n[0]!.n, `${t.table} still holds a purged message`).toBe(0);
+    }
+    const left = await rows<{ payload: string }>(ws, 'SELECT payload FROM events');
+    expect(left.map((e) => JSON.parse(e.payload).type)).toContain('y'); // an unrelated fresh event survives
+    expect(JSON.stringify(left)).not.toContain('سر قديم');
+    expect(left.some((e) => JSON.parse(e.payload).messageId === fresh[0]!.id)).toBe(true); // and the fresh message's own event
   });
 });

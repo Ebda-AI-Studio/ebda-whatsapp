@@ -36,7 +36,8 @@ const ownerOnly = (role: string) => role === 'owner' || role === 'super_admin';
 
 /** Data-subject export (B5): one contact's data as JSON, a page of messages at a time. Owner only; every read is audited by the keyed hash, never the number. */
 contactsRoutes.get('/stores/:storeId/contacts/:waId/export', async (c) => {
-  if (!ownerOnly(c.get('storeRole'))) return apiError(c, 403, 'forbidden');
+  // The owner alone. An operator uses the operator route, which needs a stated reason and audits it.
+  if (c.get('storeRole') !== 'owner') return apiError(c, 403, 'forbidden');
   const waId = waIdParam(c.req.param('waId'));
   const q = exportContactQuery.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
   if (!waId || !q.success) return apiError(c, 400, 'invalid_request');
@@ -45,7 +46,7 @@ contactsRoutes.get('/stores/:storeId/contacts/:waId/export', async (c) => {
   const out = await ws.exportContact(waId, q.data.after, q.data.limit);
   if (!out) return apiError(c, 404, 'not_found');
   const storeId = c.req.param('storeId')!;
-  await recordAudit(c.env, { workspaceId: storeId, actor: c.get('principal').userId, role: c.get('storeRole') === 'super_admin' ? 'operator' : 'owner', action: 'contact.export', targetType: 'waId', targetId: await subjectHash(c.env, storeId, waId), detail: { messages: out.messages.length, after: q.data.after } });
+  await recordAudit(c.env, { workspaceId: storeId, actor: c.get('principal').userId, role: 'owner', action: 'contact.export', targetType: 'waId', targetId: await subjectHash(c.env, storeId, waId), detail: { messages: out.messages.length, after: q.data.after } });
   c.header('cache-control', 'no-store');
   return c.json(out);
 });

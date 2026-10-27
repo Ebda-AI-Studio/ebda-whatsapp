@@ -30,3 +30,6 @@ Append-only D1 table `audit_log` (triggers forbid UPDATE and DELETE): `at, works
 **Ruling AUDIT-SKIP-1 - sends, reads and uploads are not audited.** They are the product's volume; who sent a message is on the message (`author`). Cost if wrong: an abusive staff member's sends are not in this log, only in the workspace.
 
 Retention: the log is kept; a workspace deletion keeps it too (it holds only opaque ids). A retention period for it is a legal decision for the lawyer review.
+
+## Operator session check (review)
+Every operator request, GET included, re-checks that the session was not revoked, and an unreachable accounts service refuses it (503). Only the reads named in `OPERATOR_READS_WITHOUT_SESSION_CHECK` (src/routes/operator.ts: global price configuration and the platform template catalogue, each with its reason) skip it; a new route is checked by default and `test/operator-session.test.ts` walks every registered operator route to prove it. On the store side the export read is checked like a write (**Ruling READ-SESSION-1**: other store reads stay unchecked, they are the inbox's volume and a revoked token expires within minutes; a new read of the export's weight must be added to the pattern in `requireStoreAccess`. Cost if wrong: a revoked staff session can read the inbox until its token expires.)

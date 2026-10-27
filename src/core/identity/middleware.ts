@@ -39,7 +39,10 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     if (!membership && !principal.superAdmin) return c.json({ error: 'forbidden' }, 403);
     const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
     // M-135: a person token is revocation-checked on EVERY write, not only on money actions (fail closed: an unreachable accounts service refuses it).
-    if (write && !principal.integration) {
+    // A read that hands over a person's whole data is checked like a write (Ruling READ-SESSION-1: the other store reads stay unchecked; they are the inbox's volume and a revoked
+    // token still expires within minutes. Every NEW read of that weight goes in this pattern; the operator side is the opposite, checked unless listed).
+    const sensitiveRead = !write && /^\/api\/v1\/stores\/[^/]+\/contacts\/[^/]+\/export$/.test(new URL(c.req.url).pathname);
+    if ((write || sensitiveRead) && !principal.integration) {
       const s = await writeSessionState(c.env, principal.sessionId);
       if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
       if (s === 'unavailable') return c.json({ error: 'unavailable', message: 'session_check_unavailable' }, 503);

@@ -1,3 +1,5 @@
+import { ERASURE_TARGETS } from './erasure-targets';
+
 /**
  * Message retention (B4 / T7, PDPL data minimisation). A workspace keeps its messages for `retention_days` (platform default 2 years, owner-set between 30 days and
  * 10 years; never "forever"), then a daily purge deletes older MESSAGES with everything hanging off them: R2 bodies and media, uploads, status events, search
@@ -37,25 +39,45 @@ export function writeRetentionDays(sql: SqlStorage, days: number | null): void {
 export const cutoffFor = (sql: SqlStorage, now: number): number => now - retentionView(sql).effectiveDays * DAY;
 
 /**
- * Deletes up to `batch` messages older than `cutoff`, inside the caller's transaction, with their dependants. R2 keys are queued in `r2_pending_deletes`
- * (the same table `eraseContact` uses, drained after the transaction). Returns how many messages went.
+ * Deletes up to `batch` messages older than `cutoff`, inside the caller's transaction, with everything the shared list (erasure-targets.ts) marks `purge`
+ * (status events, AI turns, realtime events, the message row itself), their search rows, and the conversation-updated events that show them as the last message.
+ * An R2 key (and its uploads row) is queued for deletion only when NO remaining message still points at it: a campaign image is shared by many messages.
+ * Returns how many messages went.
  */
 export function purgeBatch(sql: SqlStorage, cutoff: number, batch: number): number {
-  const msgs = sql.exec<{ id: number; wamid: string | null; body_r2_key: string | null; media_r2_key: string | null }>(
-    'SELECT id, wamid, body_r2_key, media_r2_key FROM messages WHERE created_at < ? ORDER BY created_at LIMIT ?', cutoff, batch,
+  const msgs = sql.exec<{ id: number; wamid: string | null; conversation_id: number; body_r2_key: string | null; media_r2_key: string | null }>(
+    'SELECT id, wamid, conversation_id, body_r2_key, media_r2_key FROM messages WHERE created_at < ? ORDER BY created_at LIMIT ?', cutoff, batch,
   ).toArray();
+  const keys = new Set<string>();
+  const conversations = new Set<number>();
   for (const m of msgs) {
-    for (const k of [m.body_r2_key, m.media_r2_key]) {
-      if (!k) continue;
-      sql.exec('INSERT OR IGNORE INTO r2_pending_deletes (key) VALUES (?)', k);
-      sql.exec('DELETE FROM uploads WHERE r2_key = ?', k);
-    }
-    if (m.wamid) sql.exec('DELETE FROM message_status_events WHERE wamid = ?', m.wamid);
-    sql.exec('DELETE FROM agent_turns WHERE message_id = ?', m.id);
+    for (const k of [m.body_r2_key, m.media_r2_key]) if (k) keys.add(k);
+    conversations.add(m.conversation_id);
     sql.exec('DELETE FROM messages_fts WHERE rowid = ?', m.id);
-    sql.exec('DELETE FROM messages WHERE id = ?', m.id);
+    for (const t of ERASURE_TARGETS) {
+      if (!t.purge) continue;
+      switch (t.by) {
+        case 'wamid': if (m.wamid) sql.exec(`DELETE FROM ${t.table} WHERE wamid = ?`, m.wamid); break;
+        case 'message_id': sql.exec(`DELETE FROM ${t.table} WHERE message_id = ?`, m.id); break;
+        case 'event_payload': sql.exec(`DELETE FROM ${t.table} WHERE json_extract(payload, '$.messageId') = ? OR json_extract(payload, '$.message.id') = ?`, m.id, m.id); break;
+        case 'conversation_id': sql.exec(`DELETE FROM ${t.table} WHERE id = ?`, m.id); break; // the message row itself
+        default: break;
+      }
+    }
+  }
+  // A conversation-updated event carries the last message's preview: drop them, a client re-reads the list.
+  for (const c of conversations) sql.exec("DELETE FROM events WHERE json_extract(payload, '$.type') = 'conversation.updated' AND json_extract(payload, '$.conversation.id') = ?", c);
+  for (const k of keys) {
+    if (sql.exec('SELECT 1 FROM messages WHERE body_r2_key = ?1 OR media_r2_key = ?1 LIMIT 1', k).toArray().length) continue; // still referenced
+    sql.exec('INSERT OR IGNORE INTO r2_pending_deletes (key) VALUES (?)', k);
+    sql.exec('DELETE FROM uploads WHERE r2_key = ?', k);
   }
   return msgs.length;
+}
+
+/** The realtime log keeps no event older than the window (rows from before `at` existed have no age and go too: they are only resync history). */
+export function purgeOldEvents(sql: SqlStorage, cutoff: number): void {
+  sql.exec('DELETE FROM events WHERE at IS NULL OR at < ?', cutoff);
 }
 
 export const hasExpired = (sql: SqlStorage, cutoff: number): boolean => sql.exec('SELECT 1 FROM messages WHERE created_at < ? LIMIT 1', cutoff).toArray().length > 0;

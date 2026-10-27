@@ -1,9 +1,12 @@
 import { SELF, env } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { configureSessionCheck } from '../src/core/identity/session';
 import { OP1, apiFor, operatorCall, storeId as W, useApiKey } from './helpers/api';
 import { exec, own, rows, workspace } from './helpers/workspace';
 
 useApiKey();
+beforeEach(() => { configureSessionCheck(async () => false); });
+afterEach(() => configureSessionCheck(null));
 const A = '201001234567';
 const B = '201007654321';
 const nowS = () => Math.floor(Date.now() / 1000);
