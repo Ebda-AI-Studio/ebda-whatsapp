@@ -250,4 +250,42 @@ describe('review findings: separation of duties, the bank reference across two a
     await env.DB.prepare('UPDATE instapay_requests SET held_reason = NULL WHERE id = ?').bind(w.id).run(); // w was never reviewed against y
     expect(await confirmInstapay(env, { id: w.id, actor: OP2 })).toEqual({ ok: false, reason: 'held' });
   });
+
+  it('a duplicate reference that slips past the first check is caught IN the conditional UPDATE: held + alert, never a constraint error', async () => {
+    const spy = vi.spyOn(console, 'error');
+    const a = await req(W(41));
+    const b = await req(W(42));
+    await upload(W(41), a.id, 'race-a');
+    await upload(W(42), b.id, 'race-b');
+    expect((await confirmInstapay(env, { id: a.id, actor: OP1, bankRef: 'RACE-REF-9' })).ok).toBe(true);
+    // the application-level check misses the other request (a race), so only the UPDATE itself can stop it
+    const real = env.DB.prepare.bind(env.DB);
+    let missed = false;
+    vi.spyOn(env.DB, 'prepare').mockImplementation(((sql: string) => {
+      if (!missed && /bank_ref = \?1 OR pending_bank_ref = \?1/.test(sql)) { missed = true; return { bind: () => ({ first: async () => null }) } as unknown as D1PreparedStatement; }
+      return real(sql);
+    }) as typeof env.DB.prepare);
+    const res = await confirmInstapay(env, { id: b.id, actor: OP2, bankRef: 'race ref 9' });
+    expect(missed).toBe(true);
+    expect(res).toEqual({ ok: false, reason: 'duplicate_reference' });
+    expect(await state(b.id)).toMatchObject({ state: 'under_review', held_reason: 'duplicate_reference', held_of: a.id, bank_ref: null });
+    expect(alerts(spy)).toContain('instapay_duplicate_proof');
+  });
+
+  it('the same for a FIRST approval (pending reference)', async () => {
+    const a = await req(W(43));
+    const b = await req(W(44));
+    await upload(W(43), a.id, 'race-c');
+    await upload(W(44), b.id, 'race-d');
+    expect((await confirmInstapay(low, { id: a.id, actor: OP1, bankRef: 'PEND-REF-3' })).ok).toBe(true);
+    const real = env.DB.prepare.bind(env.DB);
+    let missed = false;
+    vi.spyOn(env.DB, 'prepare').mockImplementation(((sql: string) => {
+      if (!missed && /bank_ref = \?1 OR pending_bank_ref = \?1/.test(sql)) { missed = true; return { bind: () => ({ first: async () => null }) } as unknown as D1PreparedStatement; }
+      return real(sql);
+    }) as typeof env.DB.prepare);
+    expect(await confirmInstapay(low, { id: b.id, actor: OP2, bankRef: 'pend-ref-3' })).toEqual({ ok: false, reason: 'duplicate_reference' });
+    expect(await state(b.id)).toMatchObject({ held_reason: 'duplicate_reference', held_of: a.id });
+    expect((await env.DB.prepare('SELECT first_approver, pending_bank_ref FROM instapay_requests WHERE id = ?').bind(b.id).first())).toEqual({ first_approver: null, pending_bank_ref: null });
+  });
 });

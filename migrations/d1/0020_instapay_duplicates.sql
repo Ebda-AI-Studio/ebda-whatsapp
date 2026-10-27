@@ -1,6 +1,7 @@
 -- W2-MONEY (C2, M-096). InstaPay duplicate-proof detection and the proof lifecycle.
 -- proof_sha256: SHA-256 of the uploaded image/PDF. It outlives the image (the image is deleted 180 days after the decision) so a re-used transfer is still caught.
 ALTER TABLE instapay_requests ADD COLUMN proof_sha256 TEXT;
+-- DEPLOY SAFETY: bank_ref is a NEW column (NULL on every existing row) and the unique index below is PARTIAL over it, so it cannot fail to build on production data (test/migration-0020.test.ts replays the migrations on seeded rows).
 -- bank_ref: the bank's own transaction reference, typed by the operator from the proof when confirming (upper case, no spaces or dashes). Unique across workspaces among confirmed requests.
 ALTER TABLE instapay_requests ADD COLUMN bank_ref TEXT;
 -- held_reason: 'duplicate_image' | 'duplicate_reference'. While set, the request cannot be confirmed (it can be rejected, or released by an operator with a reason).

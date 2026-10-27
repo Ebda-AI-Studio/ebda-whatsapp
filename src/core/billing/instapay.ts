@@ -271,7 +271,8 @@ async function orderMatches(env: Env, r: Row): Promise<boolean> {
   return !!o && o.amount_minor === r.amount_minor;
 }
 
-export async function confirmInstapay(env: Env, a: { id: string; actor: string; bankRef?: string }, now = Date.now()): Promise<DecideResult> {
+export async function confirmInstapay(env: Env, a: { id: string; actor: string; bankRef?: string }, now = Date.now(), depth = 0): Promise<DecideResult> {
+  if (depth > 2) return { ok: false, reason: 'not_reviewable' }; // looked again twice: something keeps changing under us
   const r = await get(env, a.id);
   if (!r) return { ok: false, reason: 'not_found' };
   if (r.state !== 'under_review') return { ok: false, reason: 'not_reviewable' };
@@ -311,18 +312,23 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
   }
   if (needsTwo) {
     if (r.first_approver === null) {
-      const first = await env.DB.prepare("UPDATE instapay_requests SET first_approver = ?2, first_approved_at = ?3, pending_bank_ref = ?4 WHERE id = ?1 AND state = 'under_review' AND first_approver IS NULL AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2)").bind(r.id, a.actor, now, ref).run();
+      const first = await env.DB.prepare("UPDATE instapay_requests SET first_approver = ?2, first_approved_at = ?3, pending_bank_ref = ?4 WHERE id = ?1 AND state = 'under_review' AND first_approver IS NULL AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2) AND (?4 IS NULL OR NOT EXISTS (SELECT 1 FROM instapay_requests o WHERE (o.bank_ref = ?4 OR o.pending_bank_ref = ?4) AND o.id <> ?1))").bind(r.id, a.actor, now, ref).run();
       if (first.meta.changes) {
         await audit(env, { at: now, actor: a.actor, action: 'instapay_first_approval', workspaceId: r.workspace_id, after: { id: r.id, amountMinor: r.amount_minor } });
         return { ok: true, needsSecond: true, request: opDto((await get(env, r.id))!) };
       }
-      return confirmInstapay(env, a, now); // someone recorded the first approval, or a hold / release landed, between our read and write: look again
+      if (ref) {
+        // The reference was taken between our check and our write (the statement above carries the check too): hold, never fail.
+        const other = await env.DB.prepare('SELECT id FROM instapay_requests WHERE (bank_ref = ?1 OR pending_bank_ref = ?1) AND id <> ?2 LIMIT 1').bind(ref, r.id).first<{ id: string }>();
+        if (other) return holdForReference(env, r, other.id, now);
+      }
+      return confirmInstapay(env, a, now, depth + 1); // someone recorded the first approval, or a hold / release landed, between our read and write: look again
     }
     if (r.first_approver === a.actor) return { ok: false, reason: 'second_approver_required' };
   }
   let claim: D1Result;
   try {
-    claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?2, decided_at = ?3, bank_ref = ?4 WHERE id = ?1 AND state = 'under_review' AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2)").bind(r.id, a.actor, now, ref).run();
+    claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?2, decided_at = ?3, bank_ref = ?4 WHERE id = ?1 AND state = 'under_review' AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2) AND (?4 IS NULL OR NOT EXISTS (SELECT 1 FROM instapay_requests o WHERE o.bank_ref = ?4 AND o.id <> ?1))").bind(r.id, a.actor, now, ref).run();
   } catch (err) {
     // The unique index on bank_ref: another request took this reference between our check and our write.
     if (ref && /UNIQUE/i.test(String(err instanceof Error ? err.message : err))) {
@@ -332,6 +338,10 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
     throw err;
   }
   if (!claim.meta.changes) {
+    if (ref) {
+      const other = await env.DB.prepare('SELECT id FROM instapay_requests WHERE bank_ref = ? AND id <> ?').bind(ref, r.id).first<{ id: string }>();
+      if (other) return holdForReference(env, r, other.id, now); // the UPDATE itself found the reference taken: held + alert, no constraint error
+    }
     if (await everReleased(env, r.id, a.actor)) return { ok: false, reason: 'releaser_cannot_approve' };
     return { ok: false, reason: (await get(env, r.id))?.held_reason ? 'held' : 'not_reviewable' };
   }
