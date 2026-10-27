@@ -24,6 +24,7 @@
     "IDENTITY_AUDIENCE": "whatsapp",
     // Shown first in Telegram alerts (one Ebda AI Studio bot serves every product).
     "ALERT_PRODUCT": "Ebda WhatsApp",
+    // Workers AI price of the default model @cf/meta/llama-3.3-70b-instruct-fp8-fast, USD per million tokens; verified 2026-10-27 against https://developers.cloudflare.com/workers-ai/platform/pricing/
     "AI_PRICE_INPUT_USD_PER_M": "0.293",
     "AI_PRICE_OUTPUT_USD_PER_M": "2.253",
     // This Worker's public origin: tracked campaign links and Store proof links are built on it.
