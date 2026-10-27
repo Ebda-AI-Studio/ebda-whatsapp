@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
-  fxPublish, instapayReject, operatorKillSwitch, operatorOffboardingRequest, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
+  fxPublish, instapayReject, operatorKillSwitch, operatorOffboardingRequest, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish, auditLogQuery,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -19,6 +19,7 @@ import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchH
 import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
 import { cancelOffboarding, getOffboardingWithLog, listOffboardings, requestOffboarding, runDueOffboardings } from '../core/ops/offboarding';
+import { listAudit } from '../core/audit';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -281,6 +282,12 @@ operatorRoutes.delete('/workspaces/:workspaceId/offboarding', async (c) => {
   return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
 });
 operatorRoutes.post('/offboardings/run', async (c) => c.json(await runDueOffboardings(c.env))); // finish an interrupted run now instead of waiting for the daily pass
+// T8: the append-only audit log (who did what to which ids). Read-only.
+operatorRoutes.get('/audit-log', async (c) => {
+  const q = auditLogQuery.safeParse(c.req.query());
+  if (!q.success) return bad(c, q.error.issues[0]?.message);
+  return c.json({ items: await listAudit(c.env, q.data) });
+});
 
 operatorRoutes.get('/workspaces/:workspaceId/ops', async (c) => {
   const st = await opsStatus(c.env, c.req.param('workspaceId'));

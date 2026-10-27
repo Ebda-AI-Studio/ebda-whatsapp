@@ -197,7 +197,7 @@ const ar = {
   wBannerLow: 'رصيد المحفظة قليل. اشحن علشان الخدمات اللي بتتخصم منها تفضل شغالة.', wBannerDebt: (a: string) => `عليك مديونية ${a} في المحفظة.`, wBannerLink: 'افتح المحفظة',
   costCard: 'واتساب بيحاسب كارتك مباشرة على الرسايل دي، ومفيش حاجة هتتخصم من المحفظة.',
   opNav: 'لوحة التشغيل', opTitle: 'لوحة التشغيل', opIntro: 'أسعار المحافظ والمراجعات. كل تغيير بيتسجّل باسمك وبسببه.',
-  opTabs: { pricing: 'التسعير', rates: 'أسعار ميتا والصرف', account: 'حساب عميل', queues: 'الاسترداد والتسويات', log: 'سجل التغييرات', shared: 'قوالب الرقم المشترك', killswitch: 'إيقاف طارئ', offboarding: 'مسح مساحة' } as Record<string, string>,
+  opTabs: { pricing: 'التسعير', rates: 'أسعار ميتا والصرف', account: 'حساب عميل', queues: 'الاسترداد والتسويات', log: 'سجل التغييرات', shared: 'قوالب الرقم المشترك', killswitch: 'إيقاف طارئ', offboarding: 'مسح مساحة', audit: 'سجل الإجراءات' } as Record<string, string>,
   opSharedTitle: 'قوالب الرقم المشترك', opSharedHelp: 'دي قوالب حساب واتساب بتاع المنصة. المتاجر مبتشوفهاش ومبتعدّلهاش، وبتستخدم منها بس القوالب المعتمدة من نوع خدمي أو تحقق.', opSharedSync: 'تحديث من ميتا',
   opSharedSynced: (up: string, gone: string) => `اتحدّث: ${up} قالب، واتشال ${gone}.`, opSharedEmpty: 'مفيش قوالب لسه. اضغط تحديث من ميتا أو ابعت قالب جديد.',
   opSharedName: 'اسم القالب', opSharedLang: 'اللغة', opSharedCategory: 'النوع', opSharedStatus: 'الحالة', opSharedStores: 'للمتاجر',
@@ -243,6 +243,7 @@ const ar = {
   opManualPaid: 'اتحوّل يدوي', opLinkLabel: 'رقم الاسترداد من لوحة كاشير', opLinkButton: 'اتردّت من لوحة كاشير', opRefundLine: (c: string, m: string) => `اترد على الكارت ${c} • يدوي ${m}`, opRequestedBy: (a: string) => `طلبه ${a}`,
   opAdjList: 'التسويات', opAdjEmpty: 'مفيش تسويات.', adjStates: { pending: 'مستنية موافقة', approved: 'اتنفّذت', rejected: 'اترفضت' } as Record<string, string>,
   opOwnRequest: 'ده طلبك، ولازم مشرف تاني يوافق عليه أو يرفضه.', opSecondApprover: 'لازم مشرف تاني يوافق على الطلب ده.',
+  opAuditTitle: 'سجل الإجراءات', opAuditEmpty: 'مفيش إجراءات متسجلة بالفلاتر دي.', opAuditIntro: 'مين عمل إيه وعلى أنهي رقم تعريف ومتى. من غير أرقام تليفونات ولا رسائل.', opAuditWorkspace: 'رقم تعريف المتجر', opAuditActor: 'المنفّذ', opAuditAction: 'الإجراء', opAuditApply: 'طبّق الفلاتر', opAuditMore: 'أقدم', opAuditDenied: 'اترفض',
   opLogTitle: 'سجل التغييرات', opLogEmpty: 'مفيش تغييرات متسجلة.', opBefore: 'قبل', opAfter: 'بعد',
 };
 
@@ -424,7 +425,7 @@ const en: typeof ar = {
   wBannerLow: 'The wallet balance is low. Top up so the services paid from it keep running.', wBannerDebt: (a) => `You owe ${a} in the wallet.`, wBannerLink: 'Open the wallet',
   costCard: 'WhatsApp bills your card directly for these messages; nothing is taken from the wallet.',
   opNav: 'Operations', opTitle: 'Operations', opIntro: 'Wallet pricing and reviews. Every change is recorded under your name with its reason.',
-  opTabs: { pricing: 'Pricing', rates: 'Meta rates and FX', account: 'One account', queues: 'Refunds and adjustments', log: 'Change log', shared: 'Shared number templates', killswitch: 'Kill switch', offboarding: 'Delete a workspace' } as Record<string, string>,
+  opTabs: { pricing: 'Pricing', rates: 'Meta rates and FX', account: 'One account', queues: 'Refunds and adjustments', log: 'Change log', shared: 'Shared number templates', killswitch: 'Kill switch', offboarding: 'Delete a workspace', audit: 'Action log' } as Record<string, string>,
   opSharedTitle: 'Shared number templates', opSharedHelp: 'These are the platform WhatsApp account\'s templates. Stores cannot see or change them, and may use only approved utility or authentication ones.', opSharedSync: 'Sync from Meta',
   opSharedSynced: (up: string, gone: string) => `Synced: ${up} templates, ${gone} removed.`, opSharedEmpty: 'No templates yet. Sync from Meta or submit a new one.',
   opSharedName: 'Template name', opSharedLang: 'Language', opSharedCategory: 'Category', opSharedStatus: 'Status', opSharedStores: 'For stores',
@@ -470,6 +471,7 @@ const en: typeof ar = {
   opManualPaid: 'Paid out by hand', opLinkLabel: 'Refund id from the Kashier dashboard', opLinkButton: 'Refunded in the Kashier dashboard', opRefundLine: (c, m) => `Refunded to card ${c} • by hand ${m}`, opRequestedBy: (a) => `Requested by ${a}`,
   opAdjList: 'Adjustments', opAdjEmpty: 'No adjustments.', adjStates: { pending: 'Waiting for approval', approved: 'Applied', rejected: 'Rejected' } as Record<string, string>,
   opOwnRequest: 'This is your request; another super admin has to approve or reject it.', opSecondApprover: 'Another super admin has to approve this request.',
+  opAuditTitle: 'Action log', opAuditEmpty: 'No actions recorded for these filters.', opAuditIntro: 'Who did what to which id, and when. No phone numbers and no messages.', opAuditWorkspace: 'Store id', opAuditActor: 'Actor', opAuditAction: 'Action', opAuditApply: 'Apply filters', opAuditMore: 'Older', opAuditDenied: 'denied',
   opLogTitle: 'Change log', opLogEmpty: 'No changes recorded.', opBefore: 'Before', opAfter: 'After',
 };
 

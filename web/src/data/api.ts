@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, offboardingDto, operatorOffboardingDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
+  opsStatusDto, offboardingDto, operatorOffboardingDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse, auditLogItemDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -216,6 +216,11 @@ export function createApiSource(o: Opts): LiveSource {
       requestOffboarding: (ws, body) => op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, operatorOffboardingDto, post(body)),
       cancelOffboarding: async (ws, reason) => { await op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, done, { method: 'DELETE', body: JSON.stringify({ reason }) }); },
       changeLog: async () => (await op('/change-log?limit=100', items(changeLogItemDto))).items,
+      auditLog: async (f) => {
+        const q = new URLSearchParams({ limit: '100' });
+        for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== '') q.set(k, String(v));
+        return (await op(`/audit-log?${q}`, items(auditLogItemDto))).items;
+      },
       yearlyRefundQuote: (orderId) => op(`/package-orders/${encodeURIComponent(orderId)}/refund-quote`, z.object({
         orderId: z.string(), packageId: z.string(), periodMonths: z.number(), monthlyMinor: z.number(), unusedMonths: z.number(), grossMinor: z.number(), debtMinor: z.number(), debtSettledMinor: z.number(), refundMinor: z.number(),
       }).loose()),

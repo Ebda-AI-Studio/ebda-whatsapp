@@ -10,6 +10,8 @@ import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
 import { activeNumberFor } from './routing';
 import { eraseSharedFor } from './shared/shared-number';
+import { dropErased } from './erasure';
+import { deleteTargets } from './erasure-targets';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
@@ -113,7 +115,7 @@ const byteLength = (s: string) => new TextEncoder().encode(s).byteLength;
 /** R2 accepts at most 1000 keys per delete call. */
 export const R2_DELETE_BATCH = 1000;
 
-export type EraseResult = { found: boolean; messages: number; statusEvents: number; r2Objects: number; r2Pending: number };
+export type EraseResult = { found: boolean; messages: number; statusEvents: number; r2Objects: number; r2Pending: number; /** When the Durable Object finished (its own clock): the erasure record is completed with it. */ completedAt: number };
 
 /** One tenant's data: a SQLite-backed Durable Object per workspace. */
 export class WorkspaceDO extends DurableObject<Env> {
@@ -2185,20 +2187,20 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** Restores a snapshot into THIS workspace, which must be empty. Verifies counts and hashes before writing anything. */
-  async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest } | { ok: false; reason: string }> {
+  async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest; erasedSkipped?: number } | { ok: false; reason: string }> {
     try {
-      const manifest = await this.importSnapshotOrThrow(prefix);
+      const { manifest, erasedSkipped } = await this.importSnapshotOrThrow(prefix);
       // A restored campaign that was running has no workflow in this account's engine: the sweep starts one.
       if (this.sql.exec("SELECT 1 FROM campaigns WHERE status IN ('scheduled', 'running') LIMIT 1").toArray().length) addTask(this.sql, 'campaign_step', Date.now() + 60_000);
       await this.ensureBackupAlarm();
       await this.arm();
-      return { ok: true, manifest };
+      return { ok: true, manifest, ...(erasedSkipped ? { erasedSkipped } : {}) };
     } catch (e) {
       return { ok: false, reason: (e as Error).message };
     }
   }
 
-  private async importSnapshotOrThrow(prefix: string): Promise<BackupManifest> {
+  private async importSnapshotOrThrow(prefix: string): Promise<{ manifest: BackupManifest; erasedSkipped: number }> {
     const manifestObj = await this.env.BACKUPS.get(`${prefix}manifest.json`);
     if (!manifestObj) throw new Error('backup manifest not found');
     const parsed = backupManifestSchema.safeParse(await manifestObj.json().catch(() => null));
@@ -2218,6 +2220,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (rows.length !== entry.rows) throw new Error(`backup row count mismatch: ${t}`);
       files.push({ t, rows });
     }
+    // Everyone erased after this backup was taken is dropped before a single row is written (B3): an erased contact never comes back.
+    const erasedSkipped = await dropErased(this.env, manifest.workspaceId, files);
     this.ctx.storage.transactionSync(() => {
       for (const t of BACKUP_TABLES) {
         if (this.sql.exec(`SELECT 1 FROM ${t} LIMIT 1`).toArray().length) throw new Error('restore target workspace is not empty');
@@ -2232,7 +2236,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
     });
     this.rebuildFts();
-    return manifest;
+    return { manifest, erasedSkipped };
   }
 
   /**
@@ -2267,30 +2271,19 @@ export class WorkspaceDO extends DurableObject<Env> {
           keys++;
         }
         if (!m.wamid) continue;
-        // Count first: rowsWritten also counts index entries, so it is not a row count.
+        // Count first (the delete is the shared list's, below): rowsWritten also counts index entries, so it is not a row count.
         statusEvents += this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM message_status_events WHERE wamid = ?', m.wamid).one().n;
-        this.sql.exec('DELETE FROM message_status_events WHERE wamid = ?', m.wamid);
       }
-      this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
-      this.sql.exec('DELETE FROM contact_tags WHERE contact_id = ?', contact.id);
-      this.sql.exec('DELETE FROM campaign_recipients WHERE contact_id = ?', contact.id);
-      this.sql.exec('DELETE FROM campaign_links WHERE contact_id = ?', contact.id);
-      this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
-      this.sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', waId);
-      this.sql.exec('DELETE FROM agent_handoffs WHERE wa_id = ?', waId);
-      this.sql.exec('DELETE FROM store_state WHERE key = ?', `away:${waId}`);
-      if (conv) this.sql.exec('DELETE FROM agent_turns WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
-      this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
+      // What is left of the customer goes through the ONE list the restore also filters by (src/core/erasure-targets.ts). The rows that hold keys to other
+      // rows (agent turns, search, events) are removed first, because the list's `messages` step removes the rows they are found through.
       if (conv) {
+        this.sql.exec('DELETE FROM agent_turns WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
         this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
         this.sql.exec("DELETE FROM events WHERE json_extract(payload, '$.conversationId') = ? OR json_extract(payload, '$.conversation.id') = ?", conv.id, conv.id);
-        this.sql.exec('DELETE FROM notes WHERE conversation_id = ?', conv.id);
-        this.sql.exec('DELETE FROM conversation_tags WHERE conversation_id = ?', conv.id);
-        this.sql.exec('DELETE FROM messages WHERE conversation_id = ?', conv.id);
-        this.sql.exec('DELETE FROM conversations WHERE id = ?', conv.id);
       }
+      this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
+      deleteTargets(this.sql, { waId, contactId: contact.id, convId: conv?.id ?? null });
       this.sql.exec('DELETE FROM contacts_fts WHERE rowid = ?', contact.id);
-      this.sql.exec('DELETE FROM contacts WHERE id = ?', contact.id);
       return { found: true, keys, messages: msgs.length, statusEvents };
     });
     // After the delete (a turn recording a step checks the message still exists, so nothing new can land): their unrolled analytics markers go too.
@@ -2301,7 +2294,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     for (const imp of this.sql.exec<{ id: string }>("SELECT id FROM imports WHERE status IN ('pending', 'running')").toArray()) failImport(this.host(), imp.id, 'contact_erased', Date.now());
     const r2Pending = await this.drainR2Deletes();
     if (r2Pending > 0) await this.schedule('r2_drain', Date.now() + 3_600_000); // R2 refused some deletes: try again within the hour
-    return { found: found.found, messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys, r2Pending };
+    return { found: found.found, messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys, r2Pending, completedAt: Date.now() };
   }
 
   /**

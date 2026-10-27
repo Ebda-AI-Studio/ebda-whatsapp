@@ -29,6 +29,7 @@ export const OFFBOARD_TABLES = {
     phone_numbers: 'workspace_id', waba_credentials: 'workspace_id', shared_number_members: 'workspace_id', shared_routes: 'workspace_id', shared_sent: 'workspace_id',
     shared_number_sends: 'workspace_id', shared_number_strikes: 'workspace_id', shared_number_errors: 'workspace_id', workspace_subscriptions: 'workspace_id',
     store_plan_applied: 'workspace_id',
+    erasure_records: 'workspace_id', // the workspace's backups are erased with it, so nothing is left for a restore to bring back
   } as Record<string, string>,
   keep: {
     topups: { people: ['created_by'], clear: [] },
@@ -41,7 +42,7 @@ export const OFFBOARD_TABLES = {
     shared_number_usage: { people: [], clear: [] },
   } as Record<string, { people: string[]; clear: string[] }>,
   // Immutable by trigger (a row can be neither updated nor deleted): they keep the opaque workspace id, which names no one once everything above is erased.
-  audit: ['operator_actions', 'offboarding', 'offboarding_log', 'ledger_mirror', 'billing_audit', 'workspace_pricing_overrides'],
+  audit: ['operator_actions', 'offboarding', 'offboarding_log', 'ledger_mirror', 'billing_audit', 'workspace_pricing_overrides', 'audit_log'],
 };
 
 export type OffboardingStatus = {

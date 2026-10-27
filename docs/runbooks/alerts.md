@@ -36,6 +36,8 @@ A route threw. Find the event in Sentry (search the route and the time); `route`
 
 ### offboarding_failed / offboarding_held (P1)
 A workspace deletion stopped. `GET /api/v1/operator/workspaces/:id/offboarding` shows `stepsDone` and `lastError` (the failing step and the error class, never its text). `held:<reason>` = money in flight (an open refund, card refund or payment): settle or reject it and the daily pass continues; `unfinished:r2` = more than 20,000 objects, it continues on the next pass. Re-run now with `POST /api/v1/operator/offboardings/run`. Steps are idempotent. Design: `docs/offboarding.md`.
+### audit_write_failed / erasure_record_failed (P1)
+`audit_write_failed`: an action went through but its `audit_log` row did not (D1 trouble). The Worker log has the line `{audit:"action"}` for it; check D1, then note the gap. `erasure_record_failed`: a contact was erased but its erasure record was not written, so a restore could bring the person back. Re-run `DELETE /api/v1/stores/:id/contacts/:waId` for the same contact (idempotent, rewrites the record) and confirm a row in `erasure_records`. Design: `docs/erasure-and-audit.md`.
 
 ### number_quality_flagged / number_error_spike (P1) and number_restricted (P0)
 Meta flagged a number (FLAGGED counts as red), rated it red, restricted it, or 25 frequency-cap / undeliverable errors hit it in an hour (yellow). The workspace's campaigns on it are already paused (`quality_flagged`) and, for red / restricted, new templates are refused. Look at `phone_numbers.health_*` and the workspace's `number_health_log`; contact the merchant. Recovery never resumes campaigns: the merchant does. See `docs/number-health.md`.

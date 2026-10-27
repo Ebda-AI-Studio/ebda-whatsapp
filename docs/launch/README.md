@@ -119,6 +119,8 @@ Subscribe the Meta app to `phone_number_quality_update` and `account_update` (al
 
 ### Workspace deletion (OFFBOARD-1)
 Owner and operator deletion with a 14-day cooling-off, run by the daily pass (`runDueOffboardings`); design, API, what is kept and the rulings OFFBOARD-AUDIT-1 / OFFBOARD-PROOF-1 / OFFBOARD-HOLD-1 / OFFBOARD-KEY-1 are in `docs/offboarding.md`. Apply D1 migration `0018_offboarding.sql` before the deploy. Alerts `offboarding_failed` and `offboarding_held` are P1.
+### Erasure record and audit log (W2-ERASE)
+Apply D1 migration `0019_erasure_audit.sql` before the deploy. Erased contacts are remembered (keyed hash, D1) and dropped from any restore; every state-changing call is in the append-only `audit_log`, read in the operator console's "Action log" tab. Design and rulings ERASE-ORDER-1 / ERASE-HASH-1 / AUDIT-OPEN-1 / AUDIT-SKIP-1: `docs/erasure-and-audit.md`.
 
 ### Request guards (security, `src/core/request-guards.ts`, one middleware before every route)
 - Body size is checked before the body is read (`Content-Length`) and counted while it is read (chunked, no length): `/meta/webhook` and `/kashier/webhook` 256 KB, JSON API 1 MB, uploads keep their own limits (media 50 MB, imports 10 MB, InstaPay proof 5 MB, plus the multipart envelope). Over: `413 {"error":"payload_too_large"}`.
