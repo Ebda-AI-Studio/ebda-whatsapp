@@ -1,4 +1,5 @@
 import { Download, Wallet } from 'lucide-react';
+import { BRAND } from '@brand';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { StatementDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
@@ -313,11 +314,11 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
             ))}
           </ul>
         )}
-      {queued && <p role="alert" className="error-text">{t.wYearlyQueued}</p>}
+      {queued && <p role="alert" className="error-text">{t.wYearlyQueued(BRAND.supportEmail ?? t.wSupport)}</p>}
       {error && <p role="alert" className="error-text">{t.wPackageError}</p>}
       {note === 'waiting' && pending && <p role="status" className="muted">{t.wPackageWaiting}</p>}
       {note === 'activated' && <p role="status" className="wallet-ok">{t.wPackageActivated}</p>}
-      {note === 'failed' && <p role="alert" className="error-text">{t.wPackageFailed}</p>}
+      {note === 'failed' && <p role="alert" className="error-text">{t.wPackageFailed(BRAND.supportEmail ?? t.wSupport)}</p>}
     </section>
   );
 }
@@ -502,7 +503,7 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
       input = { kind: 'topup', amountMinor: minor };
     }
     setBusy(true);
-    try { setCreated(await api.createInstapay(input)); load(); } catch (err) { setMsg({ kind: 'alert', text: err instanceof ApiError && err.code === 'yearly_queued' ? t.wYearlyQueued : t.wIpError }); } finally { setBusy(false); }
+    try { setCreated(await api.createInstapay(input)); load(); } catch (err) { setMsg({ kind: 'alert', text: err instanceof ApiError && err.code === 'yearly_queued' ? t.wYearlyQueued(BRAND.supportEmail ?? t.wSupport) : t.wIpError }); } finally { setBusy(false); }
   };
 
   const upload = async (id: string, file: File | undefined) => {

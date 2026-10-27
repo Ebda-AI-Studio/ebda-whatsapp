@@ -72,3 +72,20 @@ describe('white-label deploy', () => {
     expect(suite).toContain('"IDENTITY_ISSUER": "https://accounts.ebda.app"');
   }, 60_000);
 });
+
+// WA-SUPPORT-1 (Ahmad): support is the Store's public email. It is vendored from the Store's brand constant (vendor/brand/store-support-email.json,
+// pinned to a Store commit), and the Ebda brand, the help guides and the copy must all use that one address.
+it('the Ebda support email is the vendored Store address, and no copy or guide says "contact support" without it', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  const vendored = JSON.parse(read('vendor/brand/store-support-email.json')) as { supportEmail: string; storeCommit: string };
+  expect(vendored.supportEmail).toMatch(/^[a-z0-9.]+@[a-z0-9.-]+\.[a-z]+$/);
+  expect(vendored.storeCommit).toMatch(/^[0-9a-f]{40}$/);
+  expect(/supportEmail: '([^']+)'/.exec(read('web/brands/ebda/brand.ts'))?.[1]).toBe(vendored.supportEmail);
+  const guides = ['ar', 'en'].flatMap((l) => readdirSync(new URL(`../docs/help/${l}/`, import.meta.url)).map((f) => `docs/help/${l}/${f}`));
+  for (const f of [...guides, 'web/src/i18n.ts']) {
+    const text = read(f);
+    expect(/contact support|send [^.]* to support|كلّم الدعم|من الدعم/i.test(text), f).toBe(false);
+    for (const m of text.matchAll(/[a-z0-9.]+@ebda\.app/g)) if (!m[0].startsWith('privacy@')) expect(m[0], f).toBe(vendored.supportEmail);
+  }
+});

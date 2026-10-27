@@ -347,7 +347,7 @@ describe('wallet: packages (owner)', () => {
     const card = await screen.findByRole('region', { name: t.wPackagesTitle });
     const gold = (await within(card).findByText('Gold')).closest('li')!;
     await act(async () => fireEvent.click(within(gold).getByRole('button', { name: t.wPackageBuy })));
-    expect(await screen.findByText(t.wYearlyQueued)).toBeTruthy();
+    expect(await screen.findByText(t.wYearlyQueued('ahlan@ebda.app'))).toBeTruthy();
     expect(go).not.toHaveBeenCalled();
   });
 
@@ -395,7 +395,7 @@ describe('wallet: packages (owner)', () => {
     source.wallet!.packageOrderState = async (orderId) => ({ orderId, state, packageId: 'gold', amountMinor: 50000 });
     store.set('wallet.pendingPackage', JSON.stringify({ orderId: 'P-1', at: now() }));
     render(<WalletScreen {...props(source)} />);
-    expect(await screen.findByText(t.wPackageFailed)).toBeTruthy();
+    expect(await screen.findByText(t.wPackageFailed('ahlan@ebda.app'))).toBeTruthy();
     expect(store.get('wallet.pendingPackage')).toBeUndefined();
   });
 

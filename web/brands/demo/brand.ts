@@ -11,4 +11,5 @@ export const BRAND: WebBrand = {
   oidc: { issuer: 'https://login.demo-company.example/realms/main', clientId: 'demo-inbox' },
   helpUrl: null,
   storeName: null,
+  supportEmail: null,
 };
