@@ -49,9 +49,14 @@ it('the vector is published only for a long secret (an offline-guessing oracle o
   expect('buyerKeyVector' in JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: undefined })).text)).toBe(false);
 });
 
-// TODO(vendor): the Store publishes tests/vectors/ebda-wa/buyer-key-probe.json {secret, message, vector} (SHA256SUMS-listed). Once the controller confirms it is on the
-// Store's main, vendor it byte for byte as vendor/vectors/buyer-key-probe.json, pin its sha256 here, and replace this skip with the pinned-vector test.
-it.skip('the vendored Store probe vector (pending: the Store file is not on its main yet)', () => undefined);
+// The Store's probe vector (tests/vectors/ebda-wa/buyer-key-probe.json on its main; sha256 a38b2f9b58b3eb5cdbd0df21eecea0098109583a040bcbe8a90ca76826605cad). The values are
+// inlined here until the file is vendored byte for byte as vendor/vectors/buyer-key-probe.json with a sha pin test.
+it('the Store\'s published probe vector: same secret, same message, same 16 hex', async () => {
+  const secret = 'ebda-suite-buyer-key-probe-test-v1-secret-padded-to-at-least-64-characters';
+  expect(secret.length).toBe(74);
+  expect(BUYER_KEY_PROBE_INPUT).toBe('suite-buyer-key-probe:v1');
+  expect(await buyerKeyProbe(secret)).toBe('86d0c030d93ab7a2');
+});
 
 it('without the secret there is no vector (and no empty string that two unset Workers would "agree" on)', async () => {
   const r = await health({ SUITE_BUYER_KEY_SECRET: undefined });
