@@ -15,6 +15,8 @@ import { roundHalfEvenDiv } from './money';
 import { RefundContention, applyPackageWebhook, auditOnce, findPackageOrder } from './package-orders';
 import { packagesEnabled, paymentProvider, topupsEnabled, type ParsedWebhook, type PaymentProvider } from './payments';
 import { alert } from '../observability';
+import { frozenForOffboarding, refuseIfOffboarded } from '../ops/offboarded';
+import { drainKeyset, type PassOpts } from './drain';
 
 export const MIN_TOPUP_MINOR = 1000;
 export const MAX_TOPUP_MINOR = 5_000_000;
@@ -36,9 +38,10 @@ export function feeFor(env: Env, amountMinor: number): number {
 
 export type StartResult =
   | { ok: true; orderId: string; amountMinor: number; feeMinor: number; totalMinor: number; checkoutUrl: string }
-  | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'invalid_amount' };
+  | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'invalid_amount' | 'offboarding' };
 
 export async function startTopup(env: Env, a: { workspaceId: string; userId: string; sessionId: string; amountMinor: number; returnUrl?: string }, now = Date.now()): Promise<StartResult> {
+  if (await frozenForOffboarding(env, a.workspaceId)) return { ok: false, reason: 'offboarding' }; // OFFBOARD-FREEZE-1
   if (!topupsEnabled(env)) return { ok: false, reason: 'disabled' };
   const provider = paymentProvider(env);
   // Without the Kashier secret key every webhook would be refused: do not let customers pay for a credit that could never arrive.
@@ -71,7 +74,9 @@ export async function getTopup(env: Env, workspaceId: string, orderId: string): 
  * while empty): a second SUCCESS carrying another transaction id is `conflict` and credits nothing, so two different payments (or a refund
  * relabelled as a payment) can never both credit one order. Throws if the workspace could not be reached (the caller answers 5xx).
  */
-export async function credit(env: Env, row: TopupRow, transactionId: string, now: number, walletRef = `kashier:${transactionId}`): Promise<'credited' | 'duplicate' | 'conflict'> {
+export async function credit(env: Env, row: TopupRow, transactionId: string, now: number, walletRef = `kashier:${transactionId}`): Promise<'credited' | 'duplicate' | 'conflict' | 'offboarded'> {
+  // A late confirmation for a deleted workspace credits nothing and never addresses its (pseudonymous) Durable Object: a person refunds it (credit_after_offboard, P1).
+  if (await refuseIfOffboarded(env, row.workspace_id, 'topup', row.order_id, now)) return 'offboarded';
   const claim = await env.DB.prepare('UPDATE topups SET transaction_id = ? WHERE order_id = ? AND transaction_id IS NULL').bind(transactionId, row.order_id).run();
   if (claim.meta.changes !== 1) {
     const cur = await env.DB.prepare('SELECT transaction_id FROM topups WHERE order_id = ?').bind(row.order_id).first<{ transaction_id: string | null }>();
@@ -129,6 +134,7 @@ async function applyTopupWebhook(env: Env, t: TopupRow, ev: ParsedWebhook, now: 
       alert('duplicate_success', { kind: 'topup', workspace: t.workspace_id, eventKey: ev.eventKey });
       return 'duplicate_success';
     }
+    if (c === 'offboarded') return 'offboarded_manual_refund'; // credit_after_offboard (P1) was raised: the money is refunded by hand
     // Another path (the webhook or a repair) already credited this transaction: nothing was credited now, so nothing follows from it.
     return c === 'duplicate' ? 'duplicate' : 'credited';
   }
@@ -210,46 +216,58 @@ export async function handleProviderWebhook(env: Env, raw: string, signature: st
  * after 14 attempts it is `abandoned` and alerts `webhook_unconfirmed_abandoned` once (the structured alert line the alert bridge turns into
  * a notice, like every other money alert here). Only open, due rows are read, so finished or abandoned rows never take a slot.
  */
-export async function reconfirmUnconfirmed(env: Env, provider: PaymentProvider | null = paymentProvider(env), now = Date.now()): Promise<{ resolved: number; pending: number; aged: number; abandoned: number }> {
+export async function reconfirmUnconfirmed(env: Env, provider: PaymentProvider | null = paymentProvider(env), now = Date.now(), opts: PassOpts = {}): Promise<{ resolved: number; pending: number; aged: number; abandoned: number }> {
   const out = { resolved: 0, pending: 0, aged: 0, abandoned: 0 };
   if (!provider) return out;
-  const { results } = await env.DB.prepare("SELECT event_key, raw_body, signature, first_seen, attempts, aged_alerted FROM unconfirmed_webhooks WHERE status = 'open' AND next_attempt_at <= ? ORDER BY next_attempt_at LIMIT ?").bind(now, PASS_LIMIT).all<{ event_key: string; raw_body: string; signature: string; first_seen: number; attempts: number; aged_alerted: number }>();
-  for (const r of results) {
+  type U = { event_key: string; raw_body: string; signature: string; first_seen: number; attempts: number; aged_alerted: number; next_attempt_at: number };
+  const size = opts.page ?? PASS_LIMIT;
+  await drainKeyset<U, [number, string]>({
+    name: 'reconfirm_unconfirmed', pageSize: size, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT event_key, raw_body, signature, first_seen, attempts, aged_alerted, next_attempt_at FROM unconfirmed_webhooks WHERE status = 'open' AND next_attempt_at <= ?1 ${after ? 'AND (next_attempt_at > ?2 OR (next_attempt_at = ?2 AND event_key > ?3))' : ''} ORDER BY next_attempt_at, event_key LIMIT ${size}`)
+      .bind(now, ...(after ?? [])).all<U>()).results,
+    cursorOf: (r) => [r.next_attempt_at, r.event_key],
+    handle: async (r) => {
     const res = await handleProviderWebhook(env, r.raw_body, r.signature, provider, now).catch(() => ({ status: 500 as const, body: 'error' }));
     const cur = await env.DB.prepare('SELECT status FROM unconfirmed_webhooks WHERE event_key = ?').bind(r.event_key).first<{ status: string }>();
-    if (cur?.status !== 'open') { out.resolved++; continue; }
+    if (cur?.status !== 'open') { out.resolved++; return; }
     const attempts = r.attempts + 1;
     if (attempts >= MAX_ATTEMPTS || res.status === 401) {
       await closeUnconfirmed(env, r.event_key, 'abandoned', 'abandoned', now);
       await env.DB.prepare('UPDATE unconfirmed_webhooks SET attempts = ? WHERE event_key = ?').bind(attempts, r.event_key).run();
       alert('webhook_unconfirmed_abandoned', { eventKey: r.event_key, firstSeen: r.first_seen, attempts });
       out.abandoned++;
-      continue;
+      return;
     }
     const aged = r.aged_alerted === 0 && now - r.first_seen > AGED_AFTER_MS;
     if (aged) { alert('webhook_unconfirmed_aged', { eventKey: r.event_key, firstSeen: r.first_seen, lastStatus: res.status }); out.aged++; }
     await env.DB.prepare('UPDATE unconfirmed_webhooks SET attempts = ?, next_attempt_at = ?, aged_alerted = ? WHERE event_key = ?').bind(attempts, now + RETRY_EVERY_MS, aged ? 1 : r.aged_alerted, r.event_key).run();
     out.pending++;
-  }
+    },
+  });
   await env.DB.prepare("DELETE FROM unconfirmed_webhooks WHERE status != 'open' AND resolved_at < ?").bind(now - KEEP_CLOSED_MS).run();
   return out;
 }
 
 /** Daily: ask the provider about top-ups still pending after REPAIR_AFTER_MS; credit what was paid, close what failed or is a week old. */
-export async function repairTopups(env: Env, provider: PaymentProvider | null = paymentProvider(env), now = Date.now()): Promise<{ checked: number; credited: number; unsupported: boolean }> {
+export async function repairTopups(env: Env, provider: PaymentProvider | null = paymentProvider(env), now = Date.now(), opts: PassOpts = {}): Promise<{ checked: number; credited: number; unsupported: boolean }> {
   if (!topupsEnabled(env) || !provider) return { checked: 0, credited: 0, unsupported: false };
-  const { results } = await env.DB.prepare(`SELECT ${TOPUP_COLS} FROM topups WHERE provider = 'kashier' AND state = 'pending' AND created_at < ? ORDER BY created_at LIMIT 200`).bind(now - REPAIR_AFTER_MS).all<TopupRow>();
+  const size = opts.page ?? 200;
   let credited = 0;
   let unsupported = false;
-  for (const row of results) {
+  const { handled } = await drainKeyset<TopupRow, [number, string]>({
+    name: 'repair_topups', pageSize: size, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT ${TOPUP_COLS} FROM topups WHERE provider = 'kashier' AND state = 'pending' AND created_at < ?1 ${after ? 'AND (created_at > ?2 OR (created_at = ?2 AND order_id > ?3))' : ''} ORDER BY created_at, order_id LIMIT ${size}`)
+      .bind(now - REPAIR_AFTER_MS, ...(after ?? [])).all<TopupRow>()).results,
+    cursorOf: (r) => [r.created_at, r.order_id],
+    handle: async (row) => {
     if (now - row.created_at > EXPIRE_AFTER_MS) {
       await env.DB.prepare("UPDATE topups SET state = 'expired' WHERE order_id = ? AND state = 'pending'").bind(row.order_id).run();
-      continue;
+      return;
     }
     const q = await provider.inquire(row.order_id);
-    if (q === 'unsupported') { unsupported = true; continue; }
-    if (q === 'unavailable' || q.status === 'PENDING') continue;
-    if (q.status === 'SUCCESS' && !q.transactionId) continue;
+    if (q === 'unsupported') { unsupported = true; return; }
+    if (q === 'unavailable' || q.status === 'PENDING') return;
+    if (q.status === 'SUCCESS' && !q.transactionId) return;
     // The webhook's own apply path (claim on the transaction id, amount/currency check with its alert), so there is no second way to credit.
     const ev: ParsedWebhook = { event: 'pay', status: q.status, orderId: row.order_id, transactionId: q.transactionId ?? `none:${row.order_id}`, amountMinor: q.amountMinor ?? -1, currency: q.currency ?? '', eventKey: `kashier:${q.transactionId ?? row.order_id}:${q.status}` };
     try {
@@ -257,7 +275,8 @@ export async function repairTopups(env: Env, provider: PaymentProvider | null = 
     } catch (err) {
       alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' });
     }
-  }
+      },
+  });
   if (unsupported) alert('topup_inquiry_unsupported');
-  return { checked: results.length, credited, unsupported };
+  return { checked: handled, credited, unsupported };
 }

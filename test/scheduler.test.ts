@@ -38,12 +38,12 @@ it('runs every due task even when one fails, records the failure with backoff, a
   vi.spyOn(env.BACKUPS, 'put').mockRejectedValue(new Error('bucket missing'));
   const spy = vi.mocked(env.SEND_QUEUE.sendBatch);
   const r = await ws.runDueTasks(now);
-  expect(r).toEqual({ ran: 3, failed: 1 });
+  expect(r).toEqual({ ran: 4, failed: 1 }); // backup (fails), r2_drain, retention_purge and the send release
   expect(spy).toHaveBeenCalledTimes(1);
   expect(spy.mock.calls[0]![0]).toEqual([{ body: job }]);
   expect(await rows('ws-sc3', 'SELECT key FROM r2_pending_deletes')).toEqual([]); // drain ran despite the failed backup
   const left = await tasks('ws-sc3');
-  expect(left.map((x) => x.kind).sort()).toEqual(['backup', 'r2_drain']);
+  expect(left.map((x) => x.kind).sort()).toEqual(['backup', 'r2_drain', 'retention_purge']);
   expect(left.find((x) => x.kind === 'backup')).toEqual({ kind: 'backup', due_at: now + backoffMs(1), attempts: 1 });
   expect(left.find((x) => x.kind === 'r2_drain')!.due_at).toBeGreaterThan(now); // rescheduled for the next night
   expect(await alarmOf('ws-sc3')).toBe(Math.min(...left.map((x) => x.due_at)));
@@ -70,7 +70,7 @@ it('alarm() restores the daily tasks when a workspace had an alarm but no task r
   await exec('ws-sc5', 'DELETE FROM scheduled_tasks');
   await runInDurableObject(workspace('ws-sc5'), (_i, s) => s.storage.setAlarm(Date.now() + 1000));
   expect(await runDurableObjectAlarm(workspace('ws-sc5'))).toBe(true);
-  expect((await tasks('ws-sc5')).map((x) => x.kind).sort()).toEqual(['backup', 'r2_drain']);
+  expect((await tasks('ws-sc5')).map((x) => x.kind).sort()).toEqual(['backup', 'r2_drain', 'retention_purge']);
   expect(await alarmOf('ws-sc5')).toBeTypeOf('number');
 });
 

@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../data/api';
-import type { Adjustment, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView } from '../data/billing';
+import type { OperatorOffboarding, Adjustment, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView, AuditFilter, AuditLogItem } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -17,7 +17,7 @@ type PanelProps = { t: Strings; lang: Lang; api: OperatorApi; now: () => number;
 const HOUR = 3_600_000;
 const SETTINGS_LEAD_H = 1;
 const RATE_LEAD_H = 24;
-const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared', 'killswitch'] as const;
+const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared', 'killswitch', 'offboarding', 'audit'] as const;
 type Tab = (typeof TABS)[number];
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -36,6 +36,12 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
       if (e.status === 503) return t.opGuard;
       if (e.status === 403 && e.detail === 'session_revoked') return t.opRevoked;
       if (e.detail === 'second_approver_required') return t.opSecondApprover;
+      if (e.detail === 'duplicate_reference') return t.opIpDupRef;
+      if (e.detail === 'held') return t.opIpHeldRefused;
+      if (e.detail === 'bad_reference') return t.opIpBadRef;
+      if (e.detail === 'bank_reference_required') return t.opIpRefRequired;
+      if (e.detail === 'reference_mismatch') return t.opIpRefMismatch;
+      if (e.detail === 'releaser_cannot_approve') return t.opIpReleaser;
       if (e.detail === 'too_soon' && lead) return t.opTooSoon(num(lead, lang));
     }
     return t.opFailed;
@@ -73,6 +79,8 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
         {tab === 'queues' && <QueuesPanel {...panel} />}
         {tab === 'log' && <LogPanel {...panel} />}
         {tab === 'killswitch' && <KillSwitchPanel {...panel} />}
+        {tab === 'offboarding' && <OffboardingOpPanel {...panel} />}
+        {tab === 'audit' && <AuditPanel {...panel} />}
         {tab === 'shared' && source.sharedTemplates && <SharedTemplatesPanel t={t} lang={lang} api={source.sharedTemplates} run={run} fail={fail} />}
       </div>
     </main>
@@ -491,18 +499,143 @@ function LogPanel({ t, lang, api }: PanelProps) {
   );
 }
 
+// ---- Workspace deletion (OFFBOARD-1): request, delete now, take over, cancel; the status and the request's log -----------------------
+
+function OffboardingOpPanel({ t, lang, api }: PanelProps) {
+  const [ws, setWs] = useState('');
+  const [reason, setReason] = useState('');
+  const [accept, setAccept] = useState(false);
+  const [needed, setNeeded] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [st, setSt] = useState<OperatorOffboarding | null>(null);
+  const list = useList<OperatorOffboarding>(api.offboardings);
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const ready = ws.trim() !== '' && reason.trim().length >= 5;
+
+  const show = async () => { try { setSt(await api.offboarding(ws.trim())); } catch { setSt(null); } };
+  const request = (immediate: boolean) => async () => {
+    setMsg(null);
+    try {
+      await api.requestOffboarding(ws.trim(), { reason: reason.trim(), ...(immediate ? { immediate: true as const } : {}), ...(accept ? { acceptWriteOff: true as const } : {}) });
+      setNeeded(false); setAccept(false);
+      await show(); list.reload();
+    } catch (e) {
+      if (e instanceof ApiError && e.detail === 'write_off_required') { setNeeded(true); setMsg(t.offOpWriteOffNeeded(money(e.amountMinor ?? 0))); } else setMsg(t.offOpFailed);
+    }
+  };
+  const cancel = async () => {
+    setMsg(null);
+    try { await api.cancelOffboarding(ws.trim(), reason.trim()); await show(); list.reload(); } catch { setMsg(t.offOpFailed); }
+  };
+  const approve = async () => {
+    setMsg(null);
+    try { await api.approveOffboarding(ws.trim(), reason.trim()); setMsg(t.offOpApproved); await show(); list.reload(); } catch { setMsg(t.offOpFailed); }
+  };
+  const release = async () => {
+    setMsg(null);
+    try { await api.releaseOffboardingHold(ws.trim(), reason.trim()); await show(); list.reload(); } catch { setMsg(t.offOpFailed); }
+  };
+  const heldKey = st?.lastError?.startsWith('held:') ? st.lastError.slice(5) : null;
+
+  return (
+    <>
+      <Card id="op-off" title={t.offOpTitle}>
+        <form className="wallet-form op-grid" onSubmit={(e) => { e.preventDefault(); void show(); }}>
+          <label className="field"><span>{t.offOpWorkspace}</span><input dir="ltr" value={ws} onChange={(e) => setWs(e.target.value)} /></label>
+          <label className="field op-wide"><span>{t.offOpReason}</span><input dir="auto" maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+          <div className="settings-actions op-wide"><button type="submit" className="btn" disabled={!ws.trim()}>{t.offOpLoad}</button></div>
+        </form>
+        {needed && <label className="field check"><input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} /> <span>{t.offOpAccept}</span></label>}
+        <div className="settings-actions">
+          <button type="button" className="btn danger" disabled={!ready} onClick={() => void request(false)()}>{t.offOpRequest}</button>
+          <button type="button" className="btn danger" disabled={!ready} onClick={() => void request(true)()}>{t.offOpNow}</button>
+          {st?.state === 'pending' && <button type="button" className="btn" disabled={!ready} onClick={() => void cancel()}>{t.offCancel}</button>}
+          {st?.needsSecondApproval && <button type="button" className="btn" disabled={!ready} onClick={() => void approve()}>{t.offOpApprove}</button>}
+          {heldKey === 'suspended_abuse' && <button type="button" className="btn" disabled={!ready} onClick={() => void release()}>{t.offOpRelease}</button>}
+        </div>
+        {msg && <p role="alert" className="error-text">{msg}</p>}
+        {st && (
+          <div aria-live="polite">
+            <p><span className="flag" data-ok={st.state !== 'running'}>{t.offOpState[st.state] ?? st.state}</span> <span className="muted">{st.requestedRole === 'operator' ? t.opBy(st.requestedBy) : st.requestedBy}</span></p>
+            {st.state === 'pending' && <p>{t.offPending(dateTime(st.executeAfter, lang))}</p>}
+            {st.writeOffMinor > 0 && <p className="muted">{t.offWriteOff(money(st.writeOffMinor))}</p>}
+            {st.stepsDone.length > 0 && <p className="muted"><b>{t.offOpSteps}:</b> <bdi dir="ltr">{st.stepsDone.join(', ')}</bdi></p>}
+            {st.needsSecondApproval && <p className="error-text" role="note">{t.offOpApproval}</p>}
+            {st.lastError && <p className="error-text"><bdi dir="ltr">{st.lastError}</bdi>{heldKey && t.offOpHeldWhy[heldKey] ? <> {t.offOpHeldWhy[heldKey]}</> : null}</p>}
+            <h3 className="pane-sub">{t.offOpLog}</h3>
+            <ul className="wallet-rows">
+              {(st.log ?? []).map((l, i) => <li key={i}><span className="wallet-row-main"><b>{l.action}</b> <span className="muted">• {dateTime(l.at, lang)} • <bdi dir="ltr">{l.actor}</bdi></span></span>{l.reason && <p className="muted" dir="auto">{l.reason}</p>}</li>)}
+            </ul>
+          </div>
+        )}
+      </Card>
+      <Card id="op-off-list" title={t.offOpListTitle}>
+        {list.error && <p className="error-text">{t.opLoadError}</p>}
+        {list.items?.length === 0 && <p className="muted">{t.offOpNone}</p>}
+        <ul className="wallet-rows">
+          {list.items?.map((o) => <li key={o.workspaceId}><span className="wallet-row-main"><bdi dir="ltr">{o.workspaceId}</bdi> <span className="muted">• {t.offOpState[o.state] ?? o.state} • {dateTime(o.executeAfter, lang)}</span></span></li>)}
+        </ul>
+      </Card>
+    </>
+  );
+}
+
+// ---- Action log (T8): who did what to which ids ---------------------------------------------------------------------------------
+
+function AuditPanel({ t, lang, api }: PanelProps) {
+  const [form, setForm] = useState({ workspaceId: '', actor: '', action: '' });
+  const [filter, setFilter] = useState<AuditFilter>({});
+  const [items, setItems] = useState<AuditLogItem[] | null>(null);
+  const [error, setError] = useState(false);
+  const load = useCallback((f: AuditFilter, append: boolean) => {
+    api.auditLog(f).then((x) => { setItems((cur) => (append && cur ? [...cur, ...x] : x)); setError(false); }, () => setError(true));
+  }, [api]);
+  useEffect(() => { load(filter, false); }, [filter, load]);
+  const apply = (e: FormEvent) => { e.preventDefault(); setFilter({ ...(form.workspaceId.trim() ? { workspaceId: form.workspaceId.trim() } : {}), ...(form.actor.trim() ? { actor: form.actor.trim() } : {}), ...(form.action.trim() ? { action: form.action.trim() } : {}) }); };
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  return (
+    <Card id="op-audit" title={t.opAuditTitle}>
+      <p className="muted">{t.opAuditIntro}</p>
+      <form className="wallet-form op-inline" onSubmit={apply}>
+        <label className="field"><span>{t.opAuditWorkspace}</span><input dir="ltr" value={form.workspaceId} onChange={set('workspaceId')} /></label>
+        <label className="field"><span>{t.opAuditActor}</span><input dir="ltr" value={form.actor} onChange={set('actor')} /></label>
+        <label className="field"><span>{t.opAuditAction}</span><input dir="ltr" value={form.action} onChange={set('action')} /></label>
+        <button type="submit" className="btn">{t.opAuditApply}</button>
+      </form>
+      {error && <p className="error-text">{t.opLoadError}</p>}
+      {items?.length === 0 && <p className="muted">{t.opAuditEmpty}</p>}
+      <ul className="wallet-rows op-rows">
+        {items?.map((l) => (
+          <li key={l.id}>
+            <span className="wallet-row-main"><span className="muted">{dateTime(l.at, lang)}</span> • <b><bdi dir="ltr">{l.actor}</bdi></b> <span className="muted">({l.actorRole})</span> • <bdi dir="ltr">{l.action}</bdi>{l.status === 403 && <span className="error-text"> • {t.opAuditDenied}</span>}</span>
+            <span className="muted">{l.workspaceId && <bdi dir="ltr">{l.workspaceId}</bdi>}{l.targetType && <> • <bdi dir="ltr">{l.targetType}={l.targetId}</bdi></>}</span>
+          </li>
+        ))}
+      </ul>
+      {items && items.length >= 100 && <button type="button" className="btn" onClick={() => load({ ...filter, before: items[items.length - 1]!.id }, true)}>{t.opAuditMore}</button>}
+    </Card>
+  );
+}
+
 // ---- InstaPay transfers: review the proof, confirm or reject --------------------------------------------------------------------
 
 function InstapayReview({ t, lang, api, source, run }: PanelProps) {
   const list = useList<OperatorInstapay>(api.instapayQueue);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [refs, setRefs] = useState<Record<string, string>>({});
+  const [releases, setReleases] = useState<Record<string, string>>({});
+  const [noRef, setNoRef] = useState<Record<string, boolean>>({});
+  const [noRefWhy, setNoRefWhy] = useState<Record<string, string>>({});
   const money = (m: number) => formatMoney(m, 'EGP', lang);
   const view = (r: OperatorInstapay) => async () => {
     await run(async () => { const link = await api.instapayProofLink(r.id); window.open(link.url, '_blank', 'noopener,noreferrer'); });
   };
   const confirm = (r: OperatorInstapay) => async () => {
-    await run(async () => { const next = await api.confirmInstapay(r.id); setNotes((n) => ({ ...n, [r.id]: next.needsSecond ? t.opIpSecond : '' })); list.reload(); });
+    await run(async () => { const ref = (refs[r.id] ?? '').trim(); const next = noRef[r.id] ? await api.confirmInstapay(r.id, undefined, (noRefWhy[r.id] ?? '').trim()) : await api.confirmInstapay(r.id, ref); setNotes((n) => ({ ...n, [r.id]: next.needsSecond ? t.opIpSecond : '' })); list.reload(); });
+  };
+  const release = (r: OperatorInstapay) => async () => {
+    await run(async () => { await api.releaseInstapay(r.id, (releases[r.id] ?? '').trim()); list.reload(); });
   };
   const reject = (r: OperatorInstapay) => async () => {
     await run(async () => { await api.rejectInstapay(r.id, (reasons[r.id] ?? '').trim()); list.reload(); });
@@ -521,14 +654,21 @@ function InstapayReview({ t, lang, api, source, run }: PanelProps) {
                 <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status="pending">{t.instapayStates[r.state] ?? r.state}</span>
                 <span className="muted op-line"><bdi dir="ltr">{r.workspaceId}</bdi> • {t.opIpLine(t.opIpKinds[r.kind] ?? r.kind, r.reference)} • {r.proofAt ? dateTime(r.proofAt, lang) : ''}</span>
                 {r.firstApprover && <span className="muted op-line">{t.opIpFirstBy(r.firstApprover)}</span>}
+                {r.heldReason && <span className="error-text op-line" role="note">{t.opIpHeld(t.opIpHeldReasons[r.heldReason] ?? r.heldReason)}{r.heldOf ? <> • <bdi dir="ltr">{t.opIpHeldOf(r.heldOf)}</bdi></> : null}</span>}
                 {notes[r.id] && <span className="campaign-reason">{notes[r.id]}</span>}
               </span>
               {mine ? <p className="muted">{t.opIpOwn}</p> : (
                 <div className="op-actions">
                   <label className="field"><span>{t.opIpReason}</span><input dir="auto" maxLength={300} value={reasons[r.id] ?? ''} onChange={(e) => setReasons({ ...reasons, [r.id]: e.target.value })} /></label>
+                  {r.heldReason && <label className="field"><span>{t.opIpReleaseReason}</span><input dir="auto" maxLength={300} value={releases[r.id] ?? ''} onChange={(e) => setReleases({ ...releases, [r.id]: e.target.value })} /></label>}
+                  {!r.heldReason && !noRef[r.id] && <label className="field"><span>{t.opIpBankRef}</span><input dir="ltr" maxLength={60} value={refs[r.id] ?? ''} onChange={(e) => setRefs({ ...refs, [r.id]: e.target.value })} /></label>}
+                  {!r.heldReason && <label className="field check"><input type="checkbox" checked={!!noRef[r.id]} onChange={(e) => setNoRef({ ...noRef, [r.id]: e.target.checked })} /> <span>{t.opIpNoRef}</span></label>}
+                  {!r.heldReason && noRef[r.id] && <label className="field"><span>{t.opIpNoRefReason}</span><input dir="auto" maxLength={300} value={noRefWhy[r.id] ?? ''} onChange={(e) => setNoRefWhy({ ...noRefWhy, [r.id]: e.target.value })} /></label>}
                   <div className="campaign-actions">
                     <button type="button" className="btn" onClick={() => void view(r)()}>{t.opIpView}</button>
-                    <button type="button" className="btn primary" onClick={() => void confirm(r)()}>{t.opIpConfirm}</button>
+                    {r.heldReason
+                      ? <button type="button" className="btn primary" disabled={(releases[r.id] ?? '').trim().length < 5} onClick={() => void release(r)()}>{t.opIpRelease}</button>
+                      : <button type="button" className="btn primary" disabled={noRef[r.id] ? (noRefWhy[r.id] ?? '').trim().length < 5 : (refs[r.id] ?? '').trim().length < 4} onClick={() => void confirm(r)()}>{t.opIpConfirm}</button>}
                     <button type="button" className="btn quiet" disabled={(reasons[r.id] ?? '').trim().length < 3} onClick={() => void reject(r)()}>{t.opIpReject}</button>
                   </div>
                 </div>

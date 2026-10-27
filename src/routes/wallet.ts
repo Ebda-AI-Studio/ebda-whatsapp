@@ -62,6 +62,7 @@ walletRoutes.post('/stores/:storeId/wallet/topups', async (c) => {
   const r = await startTopup(c.env, { workspaceId: c.req.param('storeId')!, userId: p.userId, sessionId: p.sessionId, amountMinor: body.data.amountMinor });
   if (r.ok) return c.json({ orderId: r.orderId, state: 'pending', amountMinor: r.amountMinor, feeMinor: r.feeMinor, totalMinor: r.totalMinor, checkoutUrl: r.checkoutUrl }, 201);
   if (r.reason === 'invalid_amount') return apiError(c, 400, 'invalid_request', r.reason);
+  if (r.reason === 'offboarding') return apiError(c, 409, 'invalid_request', 'offboarding_pending'); // OFFBOARD-FREEZE-1: the owner cancels the deletion first
   if (r.reason === 'session_revoked') return apiError(c, 401, 'unauthorized');
   return apiError(c, 503, r.reason === 'unavailable' ? 'unavailable' : 'rate_limited', r.reason); // disabled / unavailable: nothing was written
 });

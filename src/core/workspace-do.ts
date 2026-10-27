@@ -10,6 +10,10 @@ import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
 import { activeNumberFor } from './routing';
 import { eraseSharedFor } from './shared/shared-number';
+import { dropErased } from './erasure';
+import { deleteTargets } from './erasure-targets';
+import { exportContact, mergeContacts, renameContact } from './contact-data';
+import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
@@ -113,7 +117,7 @@ const byteLength = (s: string) => new TextEncoder().encode(s).byteLength;
 /** R2 accepts at most 1000 keys per delete call. */
 export const R2_DELETE_BATCH = 1000;
 
-export type EraseResult = { found: boolean; messages: number; statusEvents: number; r2Objects: number; r2Pending: number };
+export type EraseResult = { found: boolean; messages: number; statusEvents: number; r2Objects: number; r2Pending: number; /** When the Durable Object finished (its own clock): the erasure record is completed with it. */ completedAt: number };
 
 /** One tenant's data: a SQLite-backed Durable Object per workspace. */
 export class WorkspaceDO extends DurableObject<Env> {
@@ -126,6 +130,11 @@ export class WorkspaceDO extends DurableObject<Env> {
   private readonly billing: Billing;
   private pricingPull: Promise<void> | null = null;
   private pricingPulledAt = 0;
+  /** Set once the workspace was deleted (OFFBOARD-1): the storage holds only a tombstone and nothing recreates the schema. */
+  private offboarded = false;
+  /** Set at the START of a deletion: new snapshots are refused and the wipe waits for the ones in flight (so no backup lands after the backups were listed). */
+  private offboarding = false;
+  private readonly snapshotRuns = new Set<Promise<unknown>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -135,6 +144,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     // 'ping' from a hibernated client is answered without waking the DO.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     ctx.blockConcurrencyWhile(async () => {
+      if (await ctx.storage.get('offboarded')) { this.offboarded = true; return; }
       migrate(ctx.storage);
       this.reindexIfEmpty();
       this.reindexContactsIfEmpty();
@@ -225,7 +235,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       for (const m of batch.inbound) {
         const contactId = this.sql.exec<{ id: number }>(
           `INSERT INTO contacts (wa_id, profile_name, last_inbound_at) VALUES (?, ?, ?)
-           ON CONFLICT(wa_id) DO UPDATE SET profile_name = coalesce(excluded.profile_name, profile_name), last_inbound_at = max(coalesce(last_inbound_at, 0), excluded.last_inbound_at)
+           ON CONFLICT(wa_id) DO UPDATE SET profile_name = CASE WHEN name_edited = 1 THEN profile_name ELSE coalesce(excluded.profile_name, profile_name) END, last_inbound_at = max(coalesce(last_inbound_at, 0), excluded.last_inbound_at)
            RETURNING id`,
           m.from, m.profileName ?? null, m.ts,
         ).one().id;
@@ -1661,7 +1671,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Appends an event (inside the caller's transaction) and schedules a push to open sockets once it has committed. */
   private recordEvent(payload: Record<string, unknown>): void {
-    const seq = this.sql.exec<{ seq: number }>('INSERT INTO events (payload) VALUES (?) RETURNING seq', JSON.stringify(payload)).one().seq;
+    const seq = this.sql.exec<{ seq: number }>('INSERT INTO events (payload, at) VALUES (?, ?) RETURNING seq', JSON.stringify(payload), Date.now()).one().seq;
     if (seq > EVENTS_KEPT) this.sql.exec('DELETE FROM events WHERE seq <= ?', seq - EVENTS_KEPT);
     if (this.flushScheduled) return;
     this.flushScheduled = true;
@@ -1955,7 +1965,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Schedules the nightly backup and R2 drain if they are not pending yet (idempotent; cheap enough for every ingest). */
   private ensureDaily(now: number): boolean {
-    const have = new Set(this.sql.exec<{ kind: string }>("SELECT kind FROM scheduled_tasks WHERE kind IN ('backup', 'r2_drain')").toArray().map((r) => r.kind));
+    const have = new Set(this.sql.exec<{ kind: string }>("SELECT kind FROM scheduled_tasks WHERE kind IN ('backup', 'r2_drain', 'retention_purge')").toArray().map((r) => r.kind));
     let added = false;
     for (const kind of DAILY_KINDS) {
       if (have.has(kind)) continue;
@@ -1986,6 +1996,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   private alarmRun: Promise<unknown> | null = null;
 
   async alarm(): Promise<void> {
+    if (this.offboarded || this.offboarding) return;
     const run = this.drainDueTasks(Date.now());
     this.alarmRun = run;
     try {
@@ -2043,6 +2054,10 @@ export class WorkspaceDO extends DurableObject<Env> {
         const date = new Intl.DateTimeFormat('en-CA', { timeZone: BACKUP_TIME_ZONE }).format(now);
         await this.exportSnapshot(date);
         return nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
+      }
+      case 'retention_purge': {
+        const r = await this.retentionPurge(now);
+        return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
       }
       case 'r2_drain': {
         const stillOwed = await this.drainR2Deletes();
@@ -2165,6 +2180,17 @@ export class WorkspaceDO extends DurableObject<Env> {
    * (fine for the spike's metadata-only rows; streaming export is a Phase 3 follow-up).
    */
   async exportSnapshot(date: string): Promise<BackupManifest> {
+    if (this.offboarding || this.offboarded) throw new Error('workspace is being deleted');
+    const run = this.writeSnapshot(date);
+    this.snapshotRuns.add(run);
+    try {
+      return await run;
+    } finally {
+      this.snapshotRuns.delete(run);
+    }
+  }
+
+  private async writeSnapshot(date: string): Promise<BackupManifest> {
     const workspaceId = this.workspaceId;
     const dumps = this.ctx.storage.transactionSync(() =>
       BACKUP_TABLES.map((t) => ({ t, rows: this.sql.exec(`SELECT * FROM ${t} ORDER BY ${BACKUP_ORDER[t]}`).toArray() as Record<string, unknown>[] })),
@@ -2181,20 +2207,21 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** Restores a snapshot into THIS workspace, which must be empty. Verifies counts and hashes before writing anything. */
-  async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest } | { ok: false; reason: string }> {
+  async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest; erasedSkipped?: number } | { ok: false; reason: string }> {
     try {
-      const manifest = await this.importSnapshotOrThrow(prefix);
+      const { manifest, erasedSkipped } = await this.importSnapshotOrThrow(prefix);
       // A restored campaign that was running has no workflow in this account's engine: the sweep starts one.
+      addTask(this.sql, 'retention_purge', Date.now() + 60_000); // history the window already deleted must not come back with an old backup
       if (this.sql.exec("SELECT 1 FROM campaigns WHERE status IN ('scheduled', 'running') LIMIT 1").toArray().length) addTask(this.sql, 'campaign_step', Date.now() + 60_000);
       await this.ensureBackupAlarm();
       await this.arm();
-      return { ok: true, manifest };
+      return { ok: true, manifest, ...(erasedSkipped ? { erasedSkipped } : {}) };
     } catch (e) {
       return { ok: false, reason: (e as Error).message };
     }
   }
 
-  private async importSnapshotOrThrow(prefix: string): Promise<BackupManifest> {
+  private async importSnapshotOrThrow(prefix: string): Promise<{ manifest: BackupManifest; erasedSkipped: number }> {
     const manifestObj = await this.env.BACKUPS.get(`${prefix}manifest.json`);
     if (!manifestObj) throw new Error('backup manifest not found');
     const parsed = backupManifestSchema.safeParse(await manifestObj.json().catch(() => null));
@@ -2214,6 +2241,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (rows.length !== entry.rows) throw new Error(`backup row count mismatch: ${t}`);
       files.push({ t, rows });
     }
+    // Everyone erased after this backup was taken is dropped before a single row is written (B3): an erased contact never comes back.
+    const erasedSkipped = await dropErased(this.env, manifest.workspaceId, files);
     this.ctx.storage.transactionSync(() => {
       for (const t of BACKUP_TABLES) {
         if (this.sql.exec(`SELECT 1 FROM ${t} LIMIT 1`).toArray().length) throw new Error('restore target workspace is not empty');
@@ -2228,7 +2257,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
     });
     this.rebuildFts();
-    return manifest;
+    return { manifest, erasedSkipped };
   }
 
   /**
@@ -2258,35 +2287,22 @@ export class WorkspaceDO extends DurableObject<Env> {
         if (m.direction === 'in' && m.wamid) this.sql.exec('INSERT OR IGNORE INTO erased_keys (key) VALUES (?)', `reply:${m.wamid}`);
         for (const k of [m.body_r2_key, m.media_r2_key]) {
           if (!k) continue;
+          // RETENTION's rule: a key another conversation's message still points at (a campaign image sent to many contacts) is kept, with its uploads row.
+          if (conv && stillReferenced(this.sql, k, conv.id)) continue;
           this.sql.exec('INSERT OR IGNORE INTO r2_pending_deletes (key) VALUES (?)', k);
           this.sql.exec('DELETE FROM uploads WHERE r2_key = ?', k);
           keys++;
         }
         if (!m.wamid) continue;
-        // Count first: rowsWritten also counts index entries, so it is not a row count.
+        // Count first (the delete is the shared list's, below): rowsWritten also counts index entries, so it is not a row count.
         statusEvents += this.sql.exec<{ n: number }>('SELECT count(*) AS n FROM message_status_events WHERE wamid = ?', m.wamid).one().n;
-        this.sql.exec('DELETE FROM message_status_events WHERE wamid = ?', m.wamid);
       }
-      this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
-      this.sql.exec('DELETE FROM contact_tags WHERE contact_id = ?', contact.id);
-      this.sql.exec('DELETE FROM campaign_recipients WHERE contact_id = ?', contact.id);
-      this.sql.exec('DELETE FROM campaign_links WHERE contact_id = ?', contact.id);
-      this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
-      this.sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', waId);
-      this.sql.exec('DELETE FROM agent_handoffs WHERE wa_id = ?', waId);
-      this.sql.exec('DELETE FROM store_state WHERE key = ?', `away:${waId}`);
-      if (conv) this.sql.exec('DELETE FROM agent_turns WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
+      // What is left of the customer goes through the ONE list the restore also filters by (src/core/erasure-targets.ts). The rows that hold keys to other
+      // rows (agent turns, search, events) are removed first, because the list's `messages` step removes the rows they are found through.
+      if (conv) this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id); // (the list below removes the rows it is found through)
       this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
-      if (conv) {
-        this.sql.exec('DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE conversation_id = ?)', conv.id);
-        this.sql.exec("DELETE FROM events WHERE json_extract(payload, '$.conversationId') = ? OR json_extract(payload, '$.conversation.id') = ?", conv.id, conv.id);
-        this.sql.exec('DELETE FROM notes WHERE conversation_id = ?', conv.id);
-        this.sql.exec('DELETE FROM conversation_tags WHERE conversation_id = ?', conv.id);
-        this.sql.exec('DELETE FROM messages WHERE conversation_id = ?', conv.id);
-        this.sql.exec('DELETE FROM conversations WHERE id = ?', conv.id);
-      }
+      deleteTargets(this.sql, { waId, contactId: contact.id, convId: conv?.id ?? null });
       this.sql.exec('DELETE FROM contacts_fts WHERE rowid = ?', contact.id);
-      this.sql.exec('DELETE FROM contacts WHERE id = ?', contact.id);
       return { found: true, keys, messages: msgs.length, statusEvents };
     });
     // After the delete (a turn recording a step checks the message still exists, so nothing new can land): their unrolled analytics markers go too.
@@ -2297,7 +2313,82 @@ export class WorkspaceDO extends DurableObject<Env> {
     for (const imp of this.sql.exec<{ id: string }>("SELECT id FROM imports WHERE status IN ('pending', 'running')").toArray()) failImport(this.host(), imp.id, 'contact_erased', Date.now());
     const r2Pending = await this.drainR2Deletes();
     if (r2Pending > 0) await this.schedule('r2_drain', Date.now() + 3_600_000); // R2 refused some deletes: try again within the hour
-    return { found: found.found, messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys, r2Pending };
+    return { found: found.found, messages: found.messages, statusEvents: found.statusEvents, r2Objects: found.keys, r2Pending, completedAt: Date.now() };
+  }
+
+  /**
+   * Workspace deletion (OFFBOARD-1): removes this workspace's vectors, closes its sockets, cancels the alarm and erases ALL storage, leaving one
+   * tombstone so a stray call can never recreate the schema. Idempotent. R2 objects are deleted by the caller (by prefix), after this.
+   */
+  async offboardWipe(): Promise<{ vectors: number }> {
+    if (this.offboarded) return { vectors: 0 };
+    // From here no new alarm run or backup starts, and the ones already running finish BEFORE anything is erased (their R2 writes are then visible to the caller's backups step).
+    this.offboarding = true;
+    await Promise.allSettled([this.alarmRun, ...this.snapshotRuns]);
+    let vectors = 0;
+    const v = this.env.VECTORIZE;
+    if (v) {
+      const ids = [
+        ...this.sql.exec<{ vec_id: string }>('SELECT vec_id FROM kb_chunks').toArray(),
+        ...this.sql.exec<{ vec_id: string }>('SELECT vec_id FROM catalog_vectors').toArray(),
+      ].map((r) => r.vec_id);
+      for (let i = 0; i < ids.length; i += 500) {
+        await v.deleteByIds(ids.slice(i, i + 500));
+        vectors += Math.min(500, ids.length - i);
+      }
+    }
+    for (const sock of this.ctx.getWebSockets()) {
+      try { sock.close(1001, 'workspace deleted'); } catch { /* already closed */ }
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    await this.ctx.storage.put('offboarded', Date.now());
+    this.offboarded = true;
+    return { vectors };
+  }
+
+  // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------
+
+  async getRetention() {
+    return retentionView(this.sql);
+  }
+
+  /** The owner's window (null = the platform default). A shorter window is applied soon, not at the next night. */
+  async setRetention(days: number | null, now = Date.now()) {
+    this.ctx.storage.transactionSync(() => writeRetentionDays(this.sql, days));
+    await this.schedule('retention_purge', now + 60_000);
+    return retentionView(this.sql);
+  }
+
+  /** Deletes messages older than the window, a bounded number per pass; a backlog continues in a minute. Returns how many went and whether more are due. */
+  async retentionPurge(now = Date.now(), opts: { batch?: number; maxBatches?: number } = {}): Promise<{ deleted: number; more: boolean }> {
+    const cutoff = cutoffFor(this.sql, now);
+    let deleted = 0;
+    for (let i = 0; i < (opts.maxBatches ?? RETENTION_MAX_BATCHES); i++) {
+      const n = this.ctx.storage.transactionSync(() => purgeBatch(this.sql, cutoff, opts.batch ?? RETENTION_BATCH));
+      deleted += n;
+      if (n < (opts.batch ?? RETENTION_BATCH)) break;
+    }
+    this.ctx.storage.transactionSync(() => purgeOldEvents(this.sql, cutoff)); // the realtime log is capped by age too, not only by count
+    if (deleted > 0) {
+      const owed = await this.drainR2Deletes();
+      if (owed > 0) await this.schedule('r2_drain', now + 3_600_000);
+    }
+    const more = hasExpired(this.sql, cutoff);
+    if (more) await this.schedule('retention_purge', now + 60_000);
+    return { deleted, more };
+  }
+
+  async exportContact(waId: string, after: number, limit: number) {
+    return exportContact(this.sql, this.env.MEDIA, waId, after, limit);
+  }
+
+  async renameContact(waId: string, name: string | null) {
+    return this.ctx.storage.transactionSync(() => renameContact(this.sql, waId, name));
+  }
+
+  async mergeContacts(fromWaId: string, intoWaId: string) {
+    return this.ctx.storage.transactionSync(() => mergeContacts(this.sql, fromWaId, intoWaId, (id) => this.emitConversationUpdated(id)));
   }
 
   /** Deletes owed R2 objects in batches; returns how many are still owed (0 when R2 confirmed them all). */

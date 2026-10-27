@@ -104,6 +104,16 @@ describe('wallet: top-up', () => {
     expect(screen.getByRole('status').textContent).toContain(t.wTopupWaiting);
   });
 
+  it('OFFBOARD-FREEZE-1: a top-up refused because a deletion is pending says so (and how to continue), not a generic failure', async () => {
+    const source = createSampleSource();
+    source.wallet!.topup = async () => { throw new ApiError('invalid_request', 409, 'offboarding_pending'); };
+    render(<WalletScreen t={t} lang="ar" source={source} api={source.wallet!} now={now} go={vi.fn()} />);
+    const card = await screen.findByRole('region', { name: t.wTopupTitle });
+    fireEvent.change(within(card).getByLabelText(t.wTopupAmount), { target: { value: '100' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wTopupContinue })));
+    expect((await screen.findByRole('alert')).textContent).toContain(t.wOffFrozen);
+  });
+
   it('refuses a checkout URL that is not https', async () => {
     const source = createSampleSource();
     source.wallet!.topup = async (a) => ({ orderId: 'T-9', state: 'pending', amountMinor: a, feeMinor: 0, totalMinor: a, checkoutUrl: 'javascript:alert(1)' });

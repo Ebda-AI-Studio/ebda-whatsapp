@@ -73,6 +73,15 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/shared-number/join`]: 'person_only',
   [`POST ${S}/shared-number/leave`]: 'person_only',
 
+  [`GET ${S}/offboarding`]: 'person_only', // workspace deletion
+  [`POST ${S}/offboarding`]: 'person_only',
+  [`DELETE ${S}/offboarding`]: 'person_only',
+  [`GET ${S}/retention`]: 'person_only', // message retention window
+  [`PUT ${S}/retention`]: 'person_only',
+  [`GET ${S}/contacts/:waId/export`]: 'person_only', // data-subject export
+  [`PATCH ${S}/contacts/:waId`]: 'person_only', // contact edit
+  [`POST ${S}/contacts/merge`]: 'person_only',
+
   [`GET ${S}/wallet`]: 'person_only',
   [`GET ${S}/wallet/estimate`]: 'person_only',
   [`GET ${S}/wallet/statement`]: 'person_only',
@@ -117,3 +126,56 @@ export function gateFor(method: string, path: string): Gate | null {
   const m = method.toUpperCase() === 'HEAD' ? 'GET' : method.toUpperCase();
   return compiled.find((r) => r.method === m && r.re.test(path))?.gate ?? null;
 }
+
+/** The gate for a ROUTED pattern (`/stores/:storeId/...`, as Hono matched it): the request's raw URL never decides anything. Null = no route in the map (default deny). */
+export function gateForRoute(method: string, pattern: string): Gate | null {
+  const m = method.toUpperCase() === 'HEAD' ? 'GET' : method.toUpperCase();
+  return ROUTE_SCOPES[`${m} ${pattern}`] ?? null;
+}
+
+/**
+ * Store READS that re-check the session like a write (a revoked token must not read this). Every other store read is listed in SESSION_UNCHECKED_READS with its reason;
+ * `test/route-decisions.test.ts` fails when a read route is in neither, so a new read cannot be added without a decision. (Operator routes are the opposite and cheaper
+ * to get right: checked unless listed.)
+ */
+export const SESSION_CHECKED_READS: ReadonlySet<string> = new Set(['GET /stores/:storeId/contacts/:waId/export', 'GET /stores/:storeId/offboarding']); // the deletion status names the balance being given up
+export const SESSION_UNCHECKED_READS: Readonly<Record<string, string>> = {
+  'GET /stores/:storeId/me': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/conversations': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/conversations/:conversationId/messages': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/messages/:messageId/body': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/media/:messageId': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/search': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/events': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/throttle': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/templates': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/contacts': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/contacts/:waId/orders': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/campaigns': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/campaigns/:campaignId': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/segments': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/segments/:segmentId': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/segments/:segmentId/preview': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/ws': "WebSocket upgrade: the token is verified once at the upgrade; a revoked session's socket is closed by the realtime layer",
+  'GET /stores/:storeId/conversations/:conversationId/notes': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/agent': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/connectors': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/store-link/settings': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/bot/funnel': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/store-link/catalog': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/numbers': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/numbers/signup-config': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/shared-number': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/retention': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/wallet': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
+  'GET /stores/:storeId/wallet/estimate': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
+  'GET /stores/:storeId/wallet/statement': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
+  'GET /stores/:storeId/wallet/refund-requests': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
+  'GET /stores/:storeId/wallet/topups/:orderId': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
+  'GET /stores/:storeId/wallet/instapay': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
+  'GET /stores/:storeId/packages': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
+  'GET /stores/:storeId/packages/orders/:orderId': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
+  'GET /stores/:storeId/imports': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/imports/:importId': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/imports/:importId/rejects': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+};

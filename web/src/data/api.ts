@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
+  opsStatusDto, offboardingDto, operatorOffboardingDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -9,7 +9,7 @@ import type { InboxSource } from './source';
 
 export class ApiError extends Error {
   /** `detail` = the server's machine reason for a 409 (e.g. `empty_audience`), when it sends one. */
-  constructor(public readonly code: string, public readonly status: number, public readonly detail?: string) {
+  constructor(public readonly code: string, public readonly status: number, public readonly detail?: string, public readonly amountMinor?: number) {
     super(code);
   }
 }
@@ -36,7 +36,7 @@ export function createApiSource(o: Opts): LiveSource {
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       const err = apiError.safeParse(json);
-      throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined);
+      throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined, err.success ? err.data.amountMinor : undefined);
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) throw new Error(`response does not match the contract: ${path}`);
@@ -159,6 +159,20 @@ export function createApiSource(o: Opts): LiveSource {
       },
       imports: async () => (await call('/imports', listImportsResponse)).items,
       rejects: async (id) => (await call(`/imports/${encodeURIComponent(id)}/rejects`, importRejectsResponse)).items,
+      renameContact: (waId, name) => call(`/contacts/${encodeURIComponent(waId)}`, contactSummaryDto, { method: 'PATCH', body: JSON.stringify({ name }) }),
+      async exportContact(waId) {
+        const page = z.object({ messages: z.array(z.unknown()), nextAfter: z.number().int().nullable() }).loose();
+        let out = await call(`/contacts/${encodeURIComponent(waId)}/export?limit=500`, page);
+        const messages = [...out.messages];
+        while (out.nextAfter !== null) {
+          out = await call(`/contacts/${encodeURIComponent(waId)}/export?limit=500&after=${out.nextAfter}`, page);
+          messages.push(...out.messages);
+        }
+        return { ...out, messages, nextAfter: null };
+      },
+      mergeContacts: async (fromWaId, intoWaId) => { await call('/contacts/merge', z.unknown(), post({ fromWaId, intoWaId })); },
+      retention: () => call('/retention', retentionDto),
+      setRetention: (days) => call('/retention', retentionDto, { method: 'PUT', body: JSON.stringify({ days }) }),
     },
     wallet: {
       wallet: () => call('/wallet', walletDto),
@@ -170,6 +184,9 @@ export function createApiSource(o: Opts): LiveSource {
       },
       estimate: (category, count) => call(`/wallet/estimate?category=${category}&count=${count}`, costEstimateDto),
       topup: (amountMinor) => call('/wallet/topups', topupDto, post({ amountMinor })),
+      offboarding: () => call('/offboarding', offboardingDto),
+      requestOffboarding: (opts) => call('/offboarding', offboardingDto, post({ confirm: true, ...opts })),
+      cancelOffboarding: async () => { await call('/offboarding', done, { method: 'DELETE' }); },
       topupState: (orderId) => call(`/wallet/topups/${encodeURIComponent(orderId)}`, topupDto),
       packages: async () => (await call('/packages', items(packageDto))).items,
       buyPackage: (packageId) => call(`/packages/${encodeURIComponent(packageId)}/checkout`, packageOrderDto, post({})),
@@ -203,12 +220,24 @@ export function createApiSource(o: Opts): LiveSource {
       markRefundPaid: async (id) => { await op(`/refund-requests/${encodeURIComponent(id)}/manual-paid`, done, { method: 'POST' }); },
       instapayQueue: async () => (await op('/instapay?state=under_review', items(operatorInstapayDto))).items,
       instapayProofLink: (id) => op(`/instapay/${encodeURIComponent(id)}/proof-link`, z.object({ url: z.string(), expiresAt: z.number().int() })),
-      confirmInstapay: (id) => op(`/instapay/${encodeURIComponent(id)}/confirm`, operatorInstapayDto.extend({ needsSecond: z.literal(true).optional() }), post({})),
+      confirmInstapay: (id, bankRef, noReferenceReason) => op(`/instapay/${encodeURIComponent(id)}/confirm`, operatorInstapayDto.extend({ needsSecond: z.literal(true).optional() }), post(noReferenceReason ? { noReference: true, reason: noReferenceReason } : bankRef ? { bankRef } : {})),
+      releaseInstapay: (id, reason) => op(`/instapay/${encodeURIComponent(id)}/release`, operatorInstapayDto, post({ reason })),
       rejectInstapay: (id, reason) => op(`/instapay/${encodeURIComponent(id)}/reject`, operatorInstapayDto, post({ reason })),
       adjustments: async () => (await op('/adjustments', items(adjustmentDto))).items,
       createAdjustment: (workspaceId, amountMinor, reason) => op(`/workspaces/${encodeURIComponent(workspaceId)}/adjustments`, adjustmentDto, post({ amountMinor, reason })),
       decideAdjustment: (id, decision) => op(`/adjustments/${encodeURIComponent(id)}/decision`, adjustmentDto, post({ decision })),
+      offboardings: async () => (await op('/offboardings', items(operatorOffboardingDto))).items,
+      offboarding: (ws) => op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, operatorOffboardingDto),
+      requestOffboarding: (ws, body) => op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, operatorOffboardingDto, post(body)),
+      cancelOffboarding: async (ws, reason) => { await op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, done, { method: 'DELETE', body: JSON.stringify({ reason }) }); },
+      approveOffboarding: async (ws, reason) => { await op(`/workspaces/${encodeURIComponent(ws)}/offboarding/approve`, done, post({ reason })); },
+      releaseOffboardingHold: async (ws, reason) => { await op(`/workspaces/${encodeURIComponent(ws)}/offboarding/release-hold`, done, post({ reason })); },
       changeLog: async () => (await op('/change-log?limit=100', items(changeLogItemDto))).items,
+      auditLog: async (f) => {
+        const q = new URLSearchParams({ limit: '100' });
+        for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== '') q.set(k, String(v));
+        return (await op(`/audit-log?${q}`, items(auditLogItemDto))).items;
+      },
       yearlyRefundQuote: (orderId) => op(`/package-orders/${encodeURIComponent(orderId)}/refund-quote`, z.object({
         orderId: z.string(), packageId: z.string(), periodMonths: z.number(), monthlyMinor: z.number(), unusedMonths: z.number(), grossMinor: z.number(), debtMinor: z.number(), debtSettledMinor: z.number(), refundMinor: z.number(),
       }).loose()),

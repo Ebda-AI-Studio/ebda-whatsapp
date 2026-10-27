@@ -18,7 +18,11 @@ import { addMonthsUtc, monthsStarted, partialRefundCut, periodLengthMonths, upgr
 import { sessionState } from '../identity/session';
 import { packagesEnabled, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { MONTHS_SQL, announceSubscription, auditStmt, fallbackToStorePlan, runWrite, setSubscription } from './subscriptions';
+import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
 import { alert } from '../observability';
+import { frozenForOffboarding, refuseIfOffboarded } from '../ops/offboarded';
+import { reasonStmt } from '../audit-reason';
+import { noteRefundExcess } from './refund-excess';
 
 const SWITCH_KINDS: readonly PurchaseKind[] = ['upgrade', 'queued_switch'];
 
@@ -84,9 +88,10 @@ export async function planPurchase(env: Env, workspaceId: string, packageId: str
 
 export type StartPackageResult =
   | { ok: true; orderId: string; amountMinor: number; checkoutUrl: string }
-  | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'unknown_package' | 'yearly_queued' };
+  | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'unknown_package' | 'yearly_queued' | 'offboarding' };
 
 export async function startPackageCheckout(env: Env, a: { workspaceId: string; userId: string; sessionId: string; packageId: string }, now = Date.now()): Promise<StartPackageResult> {
+  if (await frozenForOffboarding(env, a.workspaceId)) return { ok: false, reason: 'offboarding' }; // OFFBOARD-FREEZE-1
   if (!packagesEnabled(env)) return { ok: false, reason: 'disabled' };
   const provider = paymentProvider(env);
   // Without the Kashier secret key every webhook would be refused: do not let customers pay for something that can never be granted.
@@ -138,6 +143,7 @@ const orderPaidUngranted = (orderId: string, ref: string) => ({
  * running package, queued behind it), so a later refund knows what to take back.
  */
 export async function grantOrder(env: Env, row: PackageOrderRow, ref: string, now: number, opts: { claim: boolean }): Promise<'granted' | 'replay'> {
+  if (await refuseIfOffboarded(env, row.workspace_id, 'package_order', row.order_id, now)) return 'replay'; // nothing granted: credit_after_offboard (P1), a person refunds it
   if (row.kind === 'upgrade') return grantUpgrade(env, row, ref, now, opts);
   if (row.kind === 'queued_switch' && (await yearlyRunning(env, row.workspace_id, now))) return grantQueuedSwitch(env, row, ref, now, opts);
   // (A queued switch whose yearly period ended before it was paid is just a purchase at its own full price: it falls through.)
@@ -246,7 +252,7 @@ async function grantQueuedSwitch(env: Env, row: PackageOrderRow, ref: string, no
 
 /** Appends the audit row only if no row with this action + reason exists. True when this call wrote it (the caller alerts only then). */
 export async function auditOnce(env: Env, action: string, workspaceId: string, reason: string, now: number): Promise<boolean> {
-  const r = await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, ?, ?, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = ? AND reason = ?)')
+  const r = await env.DB.prepare('INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) SELECT ?, ?, ?, ?, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM billing_audit WHERE action = ? AND ref = ?)')
     .bind(now, 'provider', action, workspaceId, JSON.stringify({ orderId: reason }), reason, action, reason).run();
   return r.meta.changes > 0;
 }
@@ -381,16 +387,22 @@ async function postPlanDebt(env: Env, p: Pick<PlanRow, 'order_id' | 'workspace_i
 }
 
 /** Daily: an applied plan whose debt credit never reached the wallet (the call failed after the D1 batch) is posted now. Same fixed ref, so it can only ever land once. */
-async function repairRefundPlans(env: Env, now: number): Promise<void> {
-  const { results } = await env.DB.prepare('SELECT order_id, workspace_id, debt_settled_minor, actor FROM package_refund_plans WHERE applied = 1 AND debt_settled_minor > 0 AND debt_posted = 0 LIMIT 100')
-    .all<Pick<PlanRow, 'order_id' | 'workspace_id' | 'debt_settled_minor' | 'actor'>>();
-  for (const p of results) {
-    try {
-      await postPlanDebt(env, p, now);
-    } catch (err) {
-      alert('yearly_refund_debt_not_posted', { severity: 'P1', workspace: p.workspace_id, orderId: p.order_id, error: errName(err) });
-    }
-  }
+async function repairRefundPlans(env: Env, now: number, opts: PassOpts = {}): Promise<void> {
+  type P = Pick<PlanRow, 'order_id' | 'workspace_id' | 'debt_settled_minor' | 'actor'>;
+  const size = opts.page ?? DRAIN_PAGE;
+  await drainKeyset<P, string>({
+    name: 'repair_refund_plans', pageSize: size, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT order_id, workspace_id, debt_settled_minor, actor FROM package_refund_plans WHERE applied = 1 AND debt_settled_minor > 0 AND debt_posted = 0 ${after ? 'AND order_id > ?' : ''} ORDER BY order_id LIMIT ${size}`)
+      .bind(...(after ? [after] : [])).all<P>()).results,
+    cursorOf: (p) => p.order_id,
+    handle: async (p) => {
+      try {
+        await postPlanDebt(env, p, now);
+      } catch (err) {
+        alert('yearly_refund_debt_not_posted', { severity: 'P1', workspace: p.workspace_id, orderId: p.order_id, error: errName(err) });
+      }
+    },
+  });
 }
 
 /**
@@ -437,10 +449,11 @@ export async function executeYearlyRefund(env: Env, orderId: string, a: { actor:
       .bind(plan.order_id, plan.workspace_id, plan.shortened_months, plan.debt_settled_minor, plan.cash_minor, b.periodStart, newEnd, a.actor, a.reason, now, plan.workspace_id, plan.order_id, plan.order_id, q.refundedMinor, plan.workspace_id, b.periodStart, b.periodEnd),
     env.DB.prepare(`UPDATE workspace_subscriptions SET period_end = min(period_end, ?), status = 'cancelled', cancelled_at = ?, version = version + 1, updated_at = ?
         WHERE workspace_id = ? AND period_start = ? AND status IN ('active', 'trialing') AND ${open}`).bind(newEnd, now, now, plan.workspace_id, b.periodStart, plan.order_id),
-    env.DB.prepare(`UPDATE package_orders SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND ${open}
+    env.DB.prepare(`UPDATE package_orders SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND ${open}
         AND EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND status = 'cancelled' AND period_end = ?)`).bind(plan.debt_settled_minor, plan.order_id, plan.order_id, plan.workspace_id, newEnd),
-    env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, 'yearly_refund', ?, NULL, ?, ? WHERE EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND status = 'cancelled' AND period_end = ?) AND "+open)
-      .bind(now, a.actor, plan.workspace_id, JSON.stringify({ orderId: plan.order_id, shortenedMonths: plan.shortened_months, debtSettledMinor: plan.debt_settled_minor, cashMinor: plan.cash_minor }), a.reason, plan.workspace_id, newEnd, plan.order_id),
+    reasonStmt(env, { at: now, workspaceId: plan.workspace_id, actor: a.actor, action: 'billing.yearly_refund', reason: a.reason }),
+    env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason_id) SELECT ?, ?, 'yearly_refund', ?, NULL, ?, last_insert_rowid() WHERE EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND status = 'cancelled' AND period_end = ?) AND "+open)
+      .bind(now, a.actor, plan.workspace_id, JSON.stringify({ orderId: plan.order_id, shortenedMonths: plan.shortened_months, debtSettledMinor: plan.debt_settled_minor, cashMinor: plan.cash_minor }), plan.workspace_id, newEnd, plan.order_id),
     env.DB.prepare(`UPDATE package_refund_plans SET applied = 1 WHERE order_id = ? AND EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND status = 'cancelled' AND period_end = ?)`).bind(plan.order_id, plan.workspace_id, newEnd),
   ]);
   const stored = await env.DB.prepare(PLAN_COLS_SQL).bind(plan.order_id).first<PlanRow>();
@@ -507,7 +520,7 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
          WHERE EXISTS (SELECT 1 FROM package_orders WHERE order_id = ? AND status = 'paid' AND refunded_minor = ?) ON CONFLICT DO NOTHING`,
       ).bind(refundRef, oid, r, now, ws, months > 1 ? 0 : r, remainingBefore, oid, before), // frac_num 0: a yearly refund never expires part of the current month's credits
     ];
-    const audit = (note: string) => env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, 'provider', 'subscription_set', ?, NULL, ?, ? WHERE changes() > 0").bind(now, ws, JSON.stringify({ note }), oid);
+    const audit = (note: string) => env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, ref) SELECT ?, 'provider', 'subscription_set', ?, NULL, ?, ? WHERE changes() > 0").bind(now, ws, JSON.stringify({ note }), oid);
     const owner = months > 1
       // yearly: the order owns the running period, or is an upgrade of the order that does (WA-YEARLY-SWITCH-2)
       ? "(SELECT (owns_running = 1 OR (period_owner IS NOT NULL AND period_owner = (SELECT o2.order_id FROM package_orders o2 WHERE o2.workspace_id = package_orders.workspace_id AND o2.owns_running = 1))) FROM package_orders WHERE order_id = ?) = 1"
@@ -516,7 +529,7 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
       // A full refund of an UPGRADE order undoes the upgrade only: the subscription goes back to the package it was bought from, for the rest of the same
       // period. It never cancels or rolls the period (that belongs to the order that owns it), and "full" is measured over this order alone.
       stmts.push(
-        env.DB.prepare(`UPDATE package_orders SET status = ?, refunded_minor = refunded_minor + ? WHERE order_id = ? AND status = 'paid' AND ${g.sql}`).bind(ev.chargeback ? 'charged_back' : 'refunded', r, oid, ...g.binds),
+        env.DB.prepare(`UPDATE package_orders SET status = ?, refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND status = 'paid' AND ${g.sql}`).bind(ev.chargeback ? 'charged_back' : 'refunded', r, oid, ...g.binds),
         // ...but only the period the upgrade was GRANTED in: an upgrade of an earlier period (or one that was paid and never granted) must not downgrade today's period.
         env.DB.prepare(`UPDATE workspace_subscriptions SET package_id = ?, version = version + 1, updated_at = ? WHERE workspace_id = ? AND package_id = ? AND period_end > ? AND period_start = ? AND status IN ('active', 'trialing')
             AND EXISTS (SELECT 1 FROM package_orders WHERE order_id = ? AND granted_at IS NOT NULL) AND ${g.sql} RETURNING version`)
@@ -525,7 +538,7 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
       );
     } else if (full) {
       stmts.push(
-        env.DB.prepare(`UPDATE package_orders SET status = ?, refunded_minor = refunded_minor + ? WHERE order_id = ? AND status = 'paid' AND ${g.sql}`).bind(ev.chargeback ? 'charged_back' : 'refunded', r, oid, ...g.binds),
+        env.DB.prepare(`UPDATE package_orders SET status = ?, refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND status = 'paid' AND ${g.sql}`).bind(ev.chargeback ? 'charged_back' : 'refunded', r, oid, ...g.binds),
         // (a) it paid for a queued period: remove just that one
         env.DB.prepare(`UPDATE package_orders SET queued_seq = queued_seq - 1 WHERE workspace_id = ? AND queued_seq > (SELECT queued_seq FROM package_orders WHERE order_id = ?) AND ${g.sql}`).bind(ws, oid, ...g.binds),
         env.DB.prepare(`UPDATE workspace_subscriptions SET queued_periods = queued_periods - 1, version = version + 1, updated_at = ? WHERE workspace_id = ? AND queued_periods > 0 AND (SELECT queued_seq FROM package_orders WHERE order_id = ?) IS NOT NULL AND ${g.sql} RETURNING version`).bind(now, ws, oid, ...g.binds),
@@ -550,7 +563,7 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
     } else {
       const remainingAfter = remainingBefore - r;
       stmts.push(
-        env.DB.prepare(`UPDATE package_orders SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND ${g.sql}`).bind(r, oid, ...g.binds),
+        env.DB.prepare(`UPDATE package_orders SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND ${g.sql}`).bind(r, oid, ...g.binds),
         months > 1
           // yearly: the new end was computed from the subscription row read above; the statement only applies if that row is still the one it was computed from
           ? env.DB.prepare(`UPDATE workspace_subscriptions SET period_end = min(period_end, ?), version = version + 1, updated_at = ?
@@ -562,9 +575,12 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
         env.DB.prepare('UPDATE package_refunds SET shortened = 1, cut_value_minor = ? WHERE refund_ref = ? AND changes() > 0').bind(yearly?.cutValueMinor ?? 0, refundRef),
       );
     }
+    const over = Math.max(0, before + r - amount); // MONEY-FACT-1: the event is acted on in full (`full` above comes from the event, not the clamped column); the excess is recorded and reported
+    stmts.push(env.DB.prepare('UPDATE package_refunds SET over_charge_minor = ? WHERE refund_ref = ?').bind(over, refundRef));
     stmts.push(env.DB.prepare('UPDATE package_refunds SET applied = 1 WHERE refund_ref = ?').bind(refundRef));
     const res = await env.DB.batch(stmts);
     if (res[0]!.meta.changes === 0) continue; // another refund of this order committed first: decide again on the new total
+    await noteRefundExcess(env, { kind: 'package', workspaceId: ws, orderId: oid, eventRef: refundRef, eventMinor: r, overMinor: over }, now);
     alert(full ? (ev.chargeback ? 'package_chargeback' : 'package_refunded') : 'package_partial_refund', { workspace: ws, orderId: oid, amountMinor: r, eventKey: ev.eventKey });
     const subAfter = await env.DB.prepare('SELECT version FROM workspace_subscriptions WHERE workspace_id = ?').bind(ws).first<{ version: number }>();
     if (subAfter && subAfter.version !== subBefore?.version) await announceSubscription(env, ws, now);
@@ -632,35 +648,46 @@ export const INQUIRE_UNTIL_MS = 7 * 86_400_000;
  * nothing and the order is asked again tomorrow. (2) A `paid` order that was never granted (no batch ran) is granted now and reported.
  * (3) Pending orders older than 24 h expire (a payment that still arrives is granted, see `grantOrder`).
  */
-export async function repairPackageOrders(env: Env, now = Date.now(), provider: PaymentProvider | null = paymentProvider(env)): Promise<{ granted: number; expired: number; confirmed: number }> {
+export async function repairPackageOrders(env: Env, now = Date.now(), provider: PaymentProvider | null = paymentProvider(env), opts: PassOpts = {}): Promise<{ granted: number; expired: number; confirmed: number }> {
+  const size = opts.page ?? 200;
+  const more = opts.maxBatches ? { maxBatches: opts.maxBatches } : {};
   let granted = 0;
   let confirmed = 0;
   if (packagesEnabled(env) && provider) {
-    const { results: stuck } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE provider = 'kashier' AND status IN ('pending', 'expired') AND created_at < ? AND created_at > ? ORDER BY created_at LIMIT 200`)
-      .bind(now - REPAIR_AFTER_MS, now - INQUIRE_UNTIL_MS).all<PackageOrderRow>();
-    for (const row of stuck) {
+    await drainKeyset<PackageOrderRow, [number, string]>({
+      name: 'repair_package_orders_inquire', pageSize: size, ...more,
+      page: async (after) => (await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE provider = 'kashier' AND status IN ('pending', 'expired') AND created_at < ?1 AND created_at > ?2 ${after ? 'AND (created_at > ?3 OR (created_at = ?3 AND order_id > ?4))' : ''} ORDER BY created_at, order_id LIMIT ${size}`)
+        .bind(now - REPAIR_AFTER_MS, now - INQUIRE_UNTIL_MS, ...(after ?? [])).all<PackageOrderRow>()).results,
+      cursorOf: (r) => [r.created_at, r.order_id],
+      handle: async (row) => {
+        try {
+          const q = await provider.inquire(row.order_id);
+          if (q === 'unsupported' || q === 'unavailable' || q.status === 'PENDING') return;
+          if (q.status === 'SUCCESS' && !q.transactionId) return;
+          const ev: ParsedWebhook = { event: 'pay', status: q.status, orderId: row.order_id, transactionId: q.transactionId ?? `none:${row.order_id}`, amountMinor: q.amountMinor ?? -1, currency: q.currency ?? '', eventKey: `kashier:${q.transactionId ?? row.order_id}:${q.status}` };
+          if ((await applyPackageWebhook(env, row, ev, now)) === 'granted') confirmed++;
+        } catch (err) {
+          alert('package_repair_failed', { orderId: row.order_id, error: errName(err) });
+        }
+      },
+    });
+  }
+  await drainKeyset<PackageOrderRow, [number, string]>({
+    name: 'repair_package_orders_grant', pageSize: size, ...more,
+    page: async (after) => (await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE status = 'paid' AND granted_at IS NULL AND provider_ref IS NOT NULL ${after ? 'AND (created_at > ?1 OR (created_at = ?1 AND order_id > ?2))' : ''} ORDER BY created_at, order_id LIMIT ${size}`)
+      .bind(...(after ?? [])).all<PackageOrderRow>()).results,
+    cursorOf: (r) => [r.created_at, r.order_id],
+    handle: async (row) => {
+      // (A stale or expired switch order is reported once by `staleOrReplay`, not again every day.)
+      if (!SWITCH_KINDS.includes(row.kind)) alert('package_paid_not_granted', { workspace: row.workspace_id, orderId: row.order_id });
       try {
-        const q = await provider.inquire(row.order_id);
-        if (q === 'unsupported' || q === 'unavailable' || q.status === 'PENDING') continue;
-        if (q.status === 'SUCCESS' && !q.transactionId) continue;
-        const ev: ParsedWebhook = { event: 'pay', status: q.status, orderId: row.order_id, transactionId: q.transactionId ?? `none:${row.order_id}`, amountMinor: q.amountMinor ?? -1, currency: q.currency ?? '', eventKey: `kashier:${q.transactionId ?? row.order_id}:${q.status}` };
-        if ((await applyPackageWebhook(env, row, ev, now)) === 'granted') confirmed++;
+        if ((await grantOrder(env, row, row.provider_ref!, now, { claim: false })) === 'granted') granted++;
       } catch (err) {
         alert('package_repair_failed', { orderId: row.order_id, error: errName(err) });
       }
-    }
-  }
-  const { results } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE status = 'paid' AND granted_at IS NULL AND provider_ref IS NOT NULL ORDER BY created_at LIMIT 200`).all<PackageOrderRow>();
-  for (const row of results) {
-    // (A stale or expired switch order is reported once by `staleOrReplay`, not again every day.)
-    if (!SWITCH_KINDS.includes(row.kind)) alert('package_paid_not_granted', { workspace: row.workspace_id, orderId: row.order_id });
-    try {
-      if ((await grantOrder(env, row, row.provider_ref!, now, { claim: false })) === 'granted') granted++;
-    } catch (err) {
-      alert('package_repair_failed', { orderId: row.order_id, error: errName(err) });
-    }
-  }
-  await repairRefundPlans(env, now);
+    },
+  });
+  await repairRefundPlans(env, now, opts);
   // A switch quote whose period has ended can never be granted at its price: expire it now rather than after a day.
   await env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE provider = 'kashier' AND status = 'pending' AND kind IN ('upgrade', 'queued_switch') AND quoted_period_end <= ?").bind(now).run();
   const exp = await env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE provider = 'kashier' AND status = 'pending' AND created_at < ?").bind(now - PENDING_EXPIRES_AFTER_MS).run();

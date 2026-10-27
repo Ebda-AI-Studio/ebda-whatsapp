@@ -17,6 +17,7 @@ import type { refundRequestDto } from '../api/contract';
 import { claimForCall, completeDebitPhase, holdsRequest, openCardRefund, refreshRequest, reverseUnreversedChunks, settleCardRefund } from './card-refunds';
 import { paymentProvider, refundsEnabled } from './payments';
 import { alert } from '../observability';
+import { billingAudit } from '../audit-reason';
 
 export type RefundRequestDto = z.infer<typeof refundRequestDto>;
 export const MIN_REFUND_MINOR = 5000;
@@ -75,7 +76,7 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
     if (req.state !== 'pending') return { ok: false, reason: 'not_pending' };
     const closed = await env.DB.prepare("UPDATE refund_requests SET state = 'rejected', decided_by = ?, decided_at = ?, decision_note = ?, card_refunded_minor = 0, manual_minor = 0 WHERE id = ? AND state = 'pending'").bind(a.actor, now, a.note ?? null, a.id).run();
     if (!closed.meta.changes) return { ok: false, reason: 'not_pending' };
-    await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_rejected', ?, ?, ?, ?)").bind(now, a.actor, req.workspace_id, JSON.stringify({ state: 'pending', amountMinor: req.amount_minor }), JSON.stringify({ state: 'rejected' }), a.note ?? null).run();
+    await billingAudit(env, { at: now, actor: a.actor, action: 'refund_rejected', workspaceId: req.workspace_id, before: { state: 'pending', amountMinor: req.amount_minor }, after: { state: 'rejected' }, reason: a.note });
     return { ok: true, request: dto((await env.DB.prepare(`SELECT ${COLS} FROM refund_requests WHERE id = ?`).bind(a.id).first<Row>())!) };
   }
   // A run whose debit phase was cut short (`processing`, debits not complete) may be run again: every effect below is idempotent.
@@ -182,13 +183,13 @@ export async function decideRefund(env: Env, a: { id: string; decision: 'approve
   // The split is derived from the card_refunds rows: card = confirmed, open = waiting for the provider (state stays `processing`), manual = the rest.
   await refreshRequest(env, a.id);
   const out = (await env.DB.prepare(`SELECT ${COLS} FROM refund_requests WHERE id = ?`).bind(a.id).first<Row>())!;
-  await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) VALUES (?, ?, 'refund_approved', ?, ?, ?, ?)").bind(now, a.actor, req.workspace_id, JSON.stringify({ state: 'pending', amountMinor: req.amount_minor }), JSON.stringify({ cardMinor: out.card_refunded_minor, manualMinor: out.manual_minor, state: out.state }), a.note ?? null).run();
+  await billingAudit(env, { at: now, actor: a.actor, action: 'refund_approved', workspaceId: req.workspace_id, before: { state: 'pending', amountMinor: req.amount_minor }, after: { cardMinor: out.card_refunded_minor, manualMinor: out.manual_minor, state: out.state }, reason: a.note });
   return { ok: true, request: dto(out) };
 }
 
 /** The operator confirms a manual (bank/InstaPay) payout was made after the identity check. */
 export async function markManualPaid(env: Env, id: string, actor: string, now = Date.now()): Promise<boolean> {
   const r = await env.DB.prepare("UPDATE refund_requests SET state = 'paid' WHERE id = ? AND state = 'manual_payout'").bind(id).run();
-  if (r.meta.changes) await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, reason) VALUES (?, ?, 'refund_manual_paid', ?)").bind(now, actor, id).run();
+  if (r.meta.changes) await env.DB.prepare("INSERT INTO billing_audit (at, actor, action, ref) VALUES (?, ?, 'refund_manual_paid', ?)").bind(now, actor, id).run();
   return r.meta.changes > 0;
 }
