@@ -8,9 +8,20 @@ ALTER TABLE instapay_requests ADD COLUMN bank_ref TEXT;
 ALTER TABLE instapay_requests ADD COLUMN held_reason TEXT;
 ALTER TABLE instapay_requests ADD COLUMN held_of TEXT;
 ALTER TABLE instapay_requests ADD COLUMN held_at INTEGER;
--- Separation of duties: the operator who releases a hold may not approve or confirm that request.
-ALTER TABLE instapay_requests ADD COLUMN released_by TEXT;
-ALTER TABLE instapay_requests ADD COLUMN released_at INTEGER;
+-- Separation of duties: EVERY release of a hold is a row here (append-only). An operator who ever released a request may not first-approve or confirm it, and an operator who
+-- first-approved a request may not release it. `twin_of` is the other request the release reviewed: a release clears only that pair, a NEW duplicate holds again.
+CREATE TABLE instapay_releases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_id TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  held_reason TEXT NOT NULL,
+  twin_of TEXT,
+  at INTEGER NOT NULL
+);
+CREATE INDEX instapay_releases_request ON instapay_releases (request_id, actor);
+CREATE TRIGGER instapay_releases_no_update BEFORE UPDATE ON instapay_releases BEGIN SELECT RAISE(ABORT, 'instapay_releases are append-only'); END;
+CREATE TRIGGER instapay_releases_no_delete BEFORE DELETE ON instapay_releases BEGIN SELECT RAISE(ABORT, 'instapay_releases are append-only'); END;
 -- The bank reference the FIRST approver read from the proof (normalised). The second approver has to give the same one.
 ALTER TABLE instapay_requests ADD COLUMN pending_bank_ref TEXT;
 -- Lookups by hash and by reference (partial: most rows have neither).

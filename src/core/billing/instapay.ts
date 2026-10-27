@@ -41,9 +41,9 @@ type Row = {
   created_by: string; created_at: number; expires_at: number; proof_key: string | null; proof_mime: string | null; proof_at: number | null;
   first_approver: string | null; decided_by: string | null; decided_at: number | null; reject_reason: string | null; granted_at: number | null;
   held_reason: 'duplicate_image' | 'duplicate_reference' | null; held_of: string | null; bank_ref: string | null;
-  released_by: string | null; pending_bank_ref: string | null; proof_sha256: string | null;
+  pending_bank_ref: string | null; proof_sha256: string | null;
 };
-const COLS = 'id, reference, workspace_id, kind, package_id, amount_minor, currency, state, created_by, created_at, expires_at, proof_key, proof_mime, proof_at, first_approver, decided_by, decided_at, reject_reason, granted_at, held_reason, held_of, bank_ref, released_by, pending_bank_ref, proof_sha256';
+const COLS = 'id, reference, workspace_id, kind, package_id, amount_minor, currency, state, created_by, created_at, expires_at, proof_key, proof_mime, proof_at, first_approver, decided_by, decided_at, reject_reason, granted_at, held_reason, held_of, bank_ref, pending_bank_ref, proof_sha256';
 export type InstapayRequestDto = {
   id: string; reference: string; kind: 'package' | 'topup'; packageId: string | null; amountMinor: number; currency: string; state: RequestState;
   createdAt: number; expiresAt: number; hasProof: boolean; rejectReason: string | null; decidedAt: number | null;
@@ -190,7 +190,7 @@ async function announceDuplicate(env: Env, id: string, sha: string, now: number)
   if (mine?.held_reason !== 'duplicate_image') return;
   try {
     await env.DB.batch([
-      env.DB.prepare("UPDATE instapay_requests SET held_reason = 'duplicate_image', held_of = ?, held_at = ? WHERE proof_sha256 = ? AND id <> ? AND state = 'under_review' AND held_reason IS NULL AND released_by IS NULL").bind(id, now, sha, id),
+      env.DB.prepare("UPDATE instapay_requests SET held_reason = 'duplicate_image', held_of = ?, held_at = ? WHERE proof_sha256 = ? AND id <> ? AND state = 'under_review' AND held_reason IS NULL").bind(id, now, sha, id), // whatever an earlier release cleared: THIS twin is new
     ]);
     await audit(env, { at: now, actor: 'system', action: 'instapay_held', workspaceId: mine.workspace_id, after: { id, reason: 'duplicate_image', of: mine.held_of } });
     alert('instapay_duplicate_proof', { severity: 'P1', workspace: mine.workspace_id, id, reason: 'duplicate_image' });
@@ -277,16 +277,18 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
   if (r.state !== 'under_review') return { ok: false, reason: 'not_reviewable' };
   if (r.created_by === a.actor) return { ok: false, reason: 'self_approval_refused' };
   if (r.held_reason) return { ok: false, reason: 'held' }; // a duplicate: a person releases it first
-  if (r.released_by === a.actor) return { ok: false, reason: 'releaser_cannot_approve' }; // the person who cleared the hold never also credits the money
-  // Defence in depth: a twin that is not held (a hold that never got written) is held NOW, unless a person already released this request.
-  if (r.released_by === null && r.proof_sha256) {
-    const twin = await env.DB.prepare("SELECT id FROM instapay_requests WHERE proof_sha256 = ? AND id <> ? AND state IN ('under_review', 'confirmed') ORDER BY proof_at, id LIMIT 1").bind(r.proof_sha256, r.id).first<{ id: string }>();
-    if (twin) {
-      await env.DB.prepare("UPDATE instapay_requests SET held_reason = 'duplicate_image', held_of = ?, held_at = ? WHERE id = ? AND state = 'under_review' AND held_reason IS NULL").bind(twin.id, now, r.id).run();
-      await audit(env, { at: now, actor: 'system', action: 'instapay_held', workspaceId: r.workspace_id, after: { id: r.id, reason: 'duplicate_image', of: twin.id } });
-      alert('instapay_duplicate_proof', { severity: 'P1', workspace: r.workspace_id, id: r.id, reason: 'duplicate_image' });
-      return { ok: false, reason: 'held' };
-    }
+  // Separation of duties: nobody who EVER released this request (not only the last releaser) may first-approve or confirm it.
+  if (await everReleased(env, r.id, a.actor)) return { ok: false, reason: 'releaser_cannot_approve' };
+  // Defence in depth: a twin that no release has reviewed and that is not held is held NOW (both requests), whatever was released before.
+  const fresh = r.proof_sha256 ? await unreviewedTwin(env, r) : null;
+  if (fresh) {
+    await env.DB.batch([
+      env.DB.prepare("UPDATE instapay_requests SET held_reason = 'duplicate_image', held_of = ?, held_at = ? WHERE id = ? AND state = 'under_review' AND held_reason IS NULL").bind(fresh.id, now, r.id),
+      env.DB.prepare("UPDATE instapay_requests SET held_reason = 'duplicate_image', held_of = ?, held_at = ? WHERE id = ? AND state = 'under_review' AND held_reason IS NULL").bind(r.id, now, fresh.id),
+    ]);
+    await audit(env, { at: now, actor: 'system', action: 'instapay_held', workspaceId: r.workspace_id, after: { id: r.id, reason: 'duplicate_image', of: fresh.id } });
+    alert('instapay_duplicate_proof', { severity: 'P1', workspace: r.workspace_id, id: r.id, reason: 'duplicate_image' });
+    return { ok: false, reason: 'held' };
   }
   const needsTwo = r.amount_minor >= adjustmentThreshold(env);
   let ref: string | null = null;
@@ -309,18 +311,18 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
   }
   if (needsTwo) {
     if (r.first_approver === null) {
-      const first = await env.DB.prepare("UPDATE instapay_requests SET first_approver = ?, first_approved_at = ?, pending_bank_ref = ? WHERE id = ? AND state = 'under_review' AND first_approver IS NULL").bind(a.actor, now, ref, r.id).run();
+      const first = await env.DB.prepare("UPDATE instapay_requests SET first_approver = ?2, first_approved_at = ?3, pending_bank_ref = ?4 WHERE id = ?1 AND state = 'under_review' AND first_approver IS NULL AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2)").bind(r.id, a.actor, now, ref).run();
       if (first.meta.changes) {
         await audit(env, { at: now, actor: a.actor, action: 'instapay_first_approval', workspaceId: r.workspace_id, after: { id: r.id, amountMinor: r.amount_minor } });
         return { ok: true, needsSecond: true, request: opDto((await get(env, r.id))!) };
       }
-      return confirmInstapay(env, a, now); // someone recorded the first approval between our read and write: look again
+      return confirmInstapay(env, a, now); // someone recorded the first approval, or a hold / release landed, between our read and write: look again
     }
     if (r.first_approver === a.actor) return { ok: false, reason: 'second_approver_required' };
   }
   let claim: D1Result;
   try {
-    claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?, decided_at = ?, bank_ref = ? WHERE id = ? AND state = 'under_review' AND held_reason IS NULL").bind(a.actor, now, ref, r.id).run();
+    claim = await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = ?2, decided_at = ?3, bank_ref = ?4 WHERE id = ?1 AND state = 'under_review' AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2)").bind(r.id, a.actor, now, ref).run();
   } catch (err) {
     // The unique index on bank_ref: another request took this reference between our check and our write.
     if (ref && /UNIQUE/i.test(String(err instanceof Error ? err.message : err))) {
@@ -329,7 +331,10 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
     }
     throw err;
   }
-  if (!claim.meta.changes) return { ok: false, reason: (await get(env, r.id))?.held_reason ? 'held' : 'not_reviewable' };
+  if (!claim.meta.changes) {
+    if (await everReleased(env, r.id, a.actor)) return { ok: false, reason: 'releaser_cannot_approve' };
+    return { ok: false, reason: (await get(env, r.id))?.held_reason ? 'held' : 'not_reviewable' };
+  }
   await audit(env, { at: now, actor: a.actor, action: 'instapay_confirmed', workspaceId: r.workspace_id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor } });
   try {
     await grant(env, (await get(env, r.id))!, now);
@@ -340,6 +345,15 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
   return { ok: true, request: opDto((await get(env, r.id))!) };
 }
 
+async function everReleased(env: Env, id: string, actor: string): Promise<boolean> {
+  return !!(await env.DB.prepare('SELECT 1 FROM instapay_releases WHERE request_id = ? AND actor = ? LIMIT 1').bind(id, actor).first());
+}
+/** A request with the same image that no release of THIS request reviewed (a release clears only the pair it looked at). */
+async function unreviewedTwin(env: Env, r: Row): Promise<{ id: string } | null> {
+  return env.DB.prepare("SELECT o.id FROM instapay_requests o WHERE o.proof_sha256 = ?1 AND o.id <> ?2 AND o.state IN ('under_review', 'confirmed') AND o.id NOT IN (SELECT twin_of FROM instapay_releases WHERE request_id = ?2 AND twin_of IS NOT NULL) ORDER BY o.proof_at, o.id LIMIT 1")
+    .bind(r.proof_sha256, r.id).first<{ id: string }>();
+}
+
 async function holdForReference(env: Env, r: Row, of: string, now: number): Promise<DecideResult> {
   await env.DB.prepare("UPDATE instapay_requests SET held_reason = 'duplicate_reference', held_of = ?, held_at = ? WHERE id = ? AND state = 'under_review' AND held_reason IS NULL").bind(of, now, r.id).run();
   await audit(env, { at: now, actor: 'system', action: 'instapay_held', workspaceId: r.workspace_id, after: { id: r.id, reason: 'duplicate_reference', of } });
@@ -347,7 +361,7 @@ async function holdForReference(env: Env, r: Row, of: string, now: number): Prom
   return { ok: false, reason: 'duplicate_reference' };
 }
 
-export type ReleaseResult = { ok: true; request: OperatorInstapayDto } | { ok: false; reason: 'not_found' | 'not_reviewable' | 'not_held' | 'self_approval_refused' | 'reason_required' };
+export type ReleaseResult = { ok: true; request: OperatorInstapayDto } | { ok: false; reason: 'not_found' | 'not_reviewable' | 'not_held' | 'self_approval_refused' | 'reason_required' | 'approver_cannot_release' };
 
 /** A person looked at both transfers in the bank app and says this one is genuine: the hold is lifted (audited with the reason). It can then be confirmed like any other. */
 export async function releaseInstapay(env: Env, a: { id: string; actor: string; reason: string }, now = Date.now()): Promise<ReleaseResult> {
@@ -358,8 +372,13 @@ export async function releaseInstapay(env: Env, a: { id: string; actor: string; 
   if (r.state !== 'under_review') return { ok: false, reason: 'not_reviewable' };
   if (r.created_by === a.actor) return { ok: false, reason: 'self_approval_refused' };
   if (!r.held_reason) return { ok: false, reason: 'not_held' };
-  const res = await env.DB.prepare("UPDATE instapay_requests SET held_reason = NULL, held_of = NULL, held_at = NULL, released_by = ?, released_at = ? WHERE id = ? AND state = 'under_review' AND held_reason IS NOT NULL").bind(a.actor, now, r.id).run();
-  if (!res.meta.changes) return { ok: false, reason: 'not_held' };
+  if (r.first_approver === a.actor) return { ok: false, reason: 'approver_cannot_release' }; // whoever approved it cannot also clear its hold
+  // The release row and the lifted hold are ONE batch; the row names the pair it reviewed (`twin_of`), so a later, different twin holds again.
+  const [rel, res] = await env.DB.batch([
+    env.DB.prepare("INSERT INTO instapay_releases (request_id, actor, reason, held_reason, twin_of, at) SELECT ?1, ?2, ?3, held_reason, held_of, ?4 FROM instapay_requests WHERE id = ?1 AND state = 'under_review' AND held_reason IS NOT NULL AND coalesce(first_approver, '') <> ?2").bind(r.id, a.actor, reason, now),
+    env.DB.prepare("UPDATE instapay_requests SET held_reason = NULL, held_of = NULL, held_at = NULL WHERE id = ?1 AND state = 'under_review' AND held_reason IS NOT NULL AND coalesce(first_approver, '') <> ?2").bind(r.id, a.actor),
+  ]);
+  if (!rel!.meta.changes || !res!.meta.changes) return { ok: false, reason: 'not_held' };
   await audit(env, { at: now, actor: a.actor, action: 'instapay_released', workspaceId: r.workspace_id, after: { id: r.id, was: r.held_reason, of: r.held_of }, reason });
   return { ok: true, request: opDto((await get(env, r.id))!) };
 }

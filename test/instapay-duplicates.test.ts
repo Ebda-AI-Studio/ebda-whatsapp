@@ -138,7 +138,7 @@ describe('review findings: separation of duties, the bank reference across two a
     expect((await releaseInstapay(env, { id: b.id, actor: OP1, reason: 'checked both transfers in the bank app' })).ok).toBe(true);
     expect(await state(b.id)).toMatchObject({ held_reason: null });
     expect(await confirmInstapay(env, { id: b.id, actor: OP1 })).toEqual({ ok: false, reason: 'releaser_cannot_approve' });
-    expect((await env.DB.prepare('SELECT released_by FROM instapay_requests WHERE id = ?').bind(b.id).first<{ released_by: string }>())!.released_by).toBe(OP1);
+    expect((await env.DB.prepare('SELECT actor, twin_of FROM instapay_releases WHERE request_id = ?').bind(b.id).all<{ actor: string; twin_of: string }>()).results).toEqual([{ actor: OP1, twin_of: a.id }]);
     expect((await confirmInstapay(env, { id: b.id, actor: OP2 })).ok).toBe(true);
     // and as a FIRST approval of a two-approval amount
     const c = await req(W(22));
@@ -189,5 +189,65 @@ describe('review findings: separation of duties, the bank reference across two a
     expect(await confirmInstapay(env, { id: a.id, actor: OP1 })).toEqual({ ok: false, reason: 'held' });
     expect((await state(a.id))!.held_reason).toBe('duplicate_image');
     expect((await state(a.id))!.state).toBe('under_review');
+  });
+
+  it('EVERY release counts, not the last: A releases, a new twin holds it again, B releases, and A still cannot approve; an approver cannot release', async () => {
+    const w = await req(W(30));
+    const x = await req(W(31));
+    await upload(W(30), w.id, 'every-release');
+    await upload(W(31), x.id, 'every-release');
+    expect((await releaseInstapay(env, { id: x.id, actor: OP1, reason: 'A looked at both transfers' })).ok).toBe(true);
+    const y = await req(W(32));
+    await upload(W(32), y.id, 'every-release'); // a NEW twin: x is held again
+    expect((await state(x.id))!.held_reason).toBe('duplicate_image');
+    expect((await releaseInstapay(env, { id: x.id, actor: OP2, reason: 'B looked at the new one too' })).ok).toBe(true);
+    expect(await confirmInstapay(env, { id: x.id, actor: OP1 })).toEqual({ ok: false, reason: 'releaser_cannot_approve' }); // A released it once, B released it last
+    expect(await confirmInstapay(env, { id: x.id, actor: OP2 })).toEqual({ ok: false, reason: 'releaser_cannot_approve' });
+    expect((await confirmInstapay(env, { id: x.id, actor: OP3 })).ok).toBe(true);
+    // an approver cannot release the request they first-approved
+    const c = await req(W(33));
+    const d = await req(W(34));
+    await upload(W(33), c.id, 'approver-release');
+    await upload(W(34), d.id, 'approver-release');
+    await releaseInstapay(low, { id: d.id, actor: OP2, reason: 'checked both in the bank app' });
+    expect(await confirmInstapay(low, { id: d.id, actor: OP1, bankRef: 'APR-REL-1' })).toMatchObject({ ok: true, needsSecond: true });
+    const e = await req(W(35));
+    await upload(W(35), e.id, 'approver-release'); // a new twin holds d again
+    expect((await state(d.id))!.held_reason).toBe('duplicate_image');
+    expect(await releaseInstapay(low, { id: d.id, actor: OP1, reason: 'I approved it, now I release it' })).toEqual({ ok: false, reason: 'approver_cannot_release' });
+  });
+
+  it('the database enforces it too: the first-approval and confirm statements refuse a releaser or a held request (meta.changes = 0)', async () => {
+    const a = await req(W(36));
+    const b = await req(W(37));
+    await upload(W(36), a.id, 'sql-guard');
+    await upload(W(37), b.id, 'sql-guard');
+    await releaseInstapay(low, { id: b.id, actor: OP1, reason: 'checked both in the bank app' });
+    const first = await env.DB.prepare("UPDATE instapay_requests SET first_approver = ?2 WHERE id = ?1 AND state = 'under_review' AND first_approver IS NULL AND held_reason IS NULL AND NOT EXISTS (SELECT 1 FROM instapay_releases WHERE request_id = ?1 AND actor = ?2)").bind(b.id, OP1).run();
+    expect(first.meta.changes).toBe(0); // the SQL shape the code uses
+    expect((await env.DB.prepare('SELECT first_approver FROM instapay_requests WHERE id = ?').bind(b.id).first<{ first_approver: string | null }>())!.first_approver).toBeNull();
+    await expect(env.DB.prepare("UPDATE instapay_releases SET actor = 'x'").run()).rejects.toThrow(/append-only/);
+    await expect(env.DB.prepare('DELETE FROM instapay_releases').run()).rejects.toThrow(/append-only/);
+  });
+
+  it('a release clears only the pair it reviewed: a NEW duplicate arriving afterwards holds BOTH requests and alerts again', async () => {
+    const spy = vi.spyOn(console, 'error');
+    const w = await req(W(38));
+    const x = await req(W(39));
+    await upload(W(38), w.id, 'new-twin-after');
+    await upload(W(39), x.id, 'new-twin-after');
+    await releaseInstapay(env, { id: x.id, actor: OP1, reason: 'checked both in the bank app' });
+    await releaseInstapay(env, { id: w.id, actor: OP1, reason: 'checked both in the bank app' });
+    expect(await state(x.id)).toMatchObject({ held_reason: null });
+    spy.mockClear();
+    const y = await req(W(40));
+    await upload(W(40), y.id, 'new-twin-after');
+    expect((await state(y.id))!.held_reason).toBe('duplicate_image');
+    expect(await state(x.id)).toMatchObject({ held_reason: 'duplicate_image', held_of: y.id }); // x was released for w; y is another
+    expect(alerts(spy)).toContain('instapay_duplicate_proof');
+    // and confirm's own re-check holds an unheld request that has an UNREVIEWED twin even after a release
+    await releaseInstapay(env, { id: x.id, actor: OP1, reason: 'checked x against y as well' });
+    await env.DB.prepare('UPDATE instapay_requests SET held_reason = NULL WHERE id = ?').bind(w.id).run(); // w was never reviewed against y
+    expect(await confirmInstapay(env, { id: w.id, actor: OP2 })).toEqual({ ok: false, reason: 'held' });
   });
 });
