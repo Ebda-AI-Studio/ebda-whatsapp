@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { KashierProvider, configurePayments } from '../src/core/billing/payments';
 import { handleProviderWebhook } from '../src/core/billing/topups';
+import { reconcileRefundBounds } from '../src/core/billing/refund-excess';
 import { configureSessionCheck } from '../src/core/identity/session';
 import { storeId as W0, useApiKey } from './helpers/api';
 import { fund, ledger } from './helpers/billing';
@@ -61,18 +62,34 @@ describe('indexes on the hot workspace_id lookups (M-057)', () => {
   });
 });
 
-describe('refunded can never exceed charged (M-138)', () => {
-  it('the database refuses it: topups and package_orders, on insert and on update', async () => {
+describe('refunded can never exceed charged (M-138), and no external money fact is ever rejected (MONEY-FACT-1)', () => {
+  it('CI guard: EVERY writer of topups.refunded_minor / package_orders.refunded_minor clamps with MIN(amount_minor, ...)', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const dir = new URL('../src/core/billing/', import.meta.url);
+    const writers: string[] = [];
+    for (const f of readdirSync(dir).filter((x) => x.endsWith('.ts'))) {
+      const text = readFileSync(new URL(f, dir), 'utf8');
+      for (const m of text.matchAll(/UPDATE\s+(topups|package_orders)\s+SET\s+([\s\S]{0,400}?)\bWHERE\b/g)) {
+        if (!/refunded_minor\s*=/.test(m[2]!)) continue;
+        writers.push(`${f}: ${/refunded_minor\s*=\s*MIN\(\s*amount_minor\s*,/i.test(m[2]!) ? 'clamped' : 'UNCLAMPED'}`);
+      }
+    }
+    expect(writers.length).toBeGreaterThanOrEqual(8); // card-refunds x4, package-orders x4 (a refactor that hides a writer from this scan must update it)
+    expect(writers.filter((w) => w.endsWith('UNCLAMPED')), 'a refunded_minor writer without MIN(amount_minor, ...)').toEqual([]);
+  });
+
+  it('there is NO trigger that aborts a refund write (it would reject a real provider event)', async () => {
+    const t = await all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'trigger' AND (tbl_name IN ('topups', 'package_orders', 'card_refunds', 'package_refunds'))");
+    expect(t).toEqual([]);
+  });
+
+  it('the reconcile pass reports any order that is over-refunded anyway (it should never find one)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const ws = W(1);
     await seedNumber(`pn-d1-${ws.slice(-6)}`, ws);
-    await env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('d1p', 'D1', 1000, 0, 1, 1)").run();
-    await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, total_minor, state, created_by, created_at, refunded_minor) VALUES ('d1-t1', ?, 1000, 1000, 'paid', 'u', 1, 1000)").bind(ws).run(); // equal is fine
-    await expect(env.DB.prepare('UPDATE topups SET refunded_minor = 1001 WHERE order_id = ?').bind('d1-t1').run()).rejects.toThrow(/refunded exceeds charged/);
-    await expect(env.DB.prepare('UPDATE topups SET amount_minor = 999 WHERE order_id = ?').bind('d1-t1').run()).rejects.toThrow(/refunded exceeds charged/);
-    await expect(env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, total_minor, state, created_by, created_at, refunded_minor) VALUES ('d1-t2', ?, 1000, 1000, 'paid', 'u', 1, 1001)").bind(ws).run()).rejects.toThrow(/refunded exceeds charged/);
-    await env.DB.prepare("INSERT INTO package_orders (order_id, workspace_id, package_id, amount_minor, status, created_by, created_at, refunded_minor) VALUES ('d1-p1', ?, 'd1p', 1000, 'paid', 'u', 1, 1000)").bind(ws).run();
-    await expect(env.DB.prepare('UPDATE package_orders SET refunded_minor = refunded_minor + 1 WHERE order_id = ?').bind('d1-p1').run()).rejects.toThrow(/refunded exceeds charged/);
-    await expect(env.DB.prepare("INSERT INTO package_orders (order_id, workspace_id, package_id, amount_minor, status, created_by, created_at, refunded_minor) VALUES ('d1-p2', ?, 'd1p', 1000, 'paid', 'u', 1, 1001)").bind(ws).run()).rejects.toThrow(/refunded exceeds charged/);
+    await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, total_minor, state, created_by, created_at, refunded_minor) VALUES ('d1-over', ?, 1000, 1000, 'paid', 'u', 1, 1500)").bind(ws).run();
+    expect((await reconcileRefundBounds(env)).over).toBeGreaterThanOrEqual(1);
+    expect(spy.mock.calls.some((c) => String(c[0]).includes('refund_exceeds_charge'))).toBe(true);
   });
 });
 
@@ -82,17 +99,34 @@ describe('the code never tries: a provider refund past what is left is clamped, 
   afterEach(() => { configureSessionCheck(null); configurePayments((e) => (e.KASHIER_MERCHANT_ID && e.KASHIER_API_KEY ? new KashierProvider(e.KASHIER_MERCHANT_ID, e.KASHIER_API_KEY) : null)); vi.restoreAllMocks(); });
   const hook = async (order: string, tx: string, egp: string) => { const { body, sig } = await signedWebhook({ merchantOrderId: order, transactionId: tx, amount: egp, status: 'SUCCESS' }, 'refund'); return handleProviderWebhook(env, body, sig, kashier); };
 
-  it('two unknown provider refunds that together exceed the top-up: refunded_minor stops at the charged amount, both are debited, neither is lost', async () => {
+  it('a 1,000 charge, a 600 refund, then a 1,000 chargeback: the wallet is debited the chargeback in full, refunded_minor stops at 1,000, the 600 excess is recorded and alerted', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const ws = W(2);
     await seedNumber(`pn-d1-${ws.slice(-6)}`, ws);
-    await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, transaction_id, paid_at) VALUES ('d1-o2', ?, 20000, 0, 20000, 'EGP', 'paid', 'u', 1, 'TX-D1-2', 2)").bind(ws).run();
+    await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, transaction_id, paid_at, refunded_minor) VALUES ('d1-o2', ?, 1000, 0, 1000, 'EGP', 'paid', 'u', 1, 'TX-D1-2', 2, 600)").bind(ws).run(); // the 600 refund was already booked
     kashierLedger.set('TX-D1-2', { operation: 'pay', status: 'SUCCESS', orderId: 'd1-o2' });
-    await fund(ws, 20000, 'kashier:TX-D1-2');
-    expect((await hook('d1-o2', 'P-D1-a', '150.00')).status).toBe(200);
-    expect((await hook('d1-o2', 'P-D1-b', '100.00')).status).toBe(200); // 50 left on the top-up, 100 refunded by the provider
-    expect((await all<{ refunded_minor: number }>("SELECT refunded_minor FROM topups WHERE order_id = 'd1-o2'"))[0]!.refunded_minor).toBe(20000); // clamped, not 25000
-    expect((await ledger(ws)).map((r) => [r.kind, r.amount_minor])).toEqual([['topup', 20000], ['chargeback', -15000], ['chargeback', -10000]]); // the wallet still lost what the provider took back
-    void spy;
+    await fund(ws, 1000, 'kashier:TX-D1-2');
+    const res = await hook('d1-o2', 'CB-D1-2', '10.00'); // a chargeback of the full 1,000
+    expect(res.status).toBe(200); // never a failed write for a real provider event
+    expect((await ledger(ws)).map((r) => [r.kind, r.amount_minor])).toEqual([['topup', 1000], ['chargeback', -1000]]); // debited from the EVENT, not from the clamped column
+    expect((await all<{ refunded_minor: number }>("SELECT refunded_minor FROM topups WHERE order_id = 'd1-o2'"))[0]!.refunded_minor).toBe(1000);
+    expect((await all<{ over_charge_minor: number; amount_minor: number }>("SELECT over_charge_minor, amount_minor FROM card_refunds WHERE kashier_refund_id = 'CB-D1-2'"))[0]).toEqual({ over_charge_minor: 600, amount_minor: 1000 });
+    expect((await all<{ after_json: string }>("SELECT after_json FROM billing_audit WHERE action = 'refund_exceeds_charge' AND reason = 'CB-D1-2'"))[0]!.after_json).toContain('"overMinor":600');
+    expect(spy.mock.calls.some((c) => String(c[0]).includes('"refund_exceeds_charge"') && String(c[0]).includes('"severity":"P1"'))).toBe(true);
+    // a replay of the same event changes nothing
+    await hook('d1-o2', 'CB-D1-2', '10.00');
+    expect((await ledger(ws)).length).toBe(2);
+  });
+
+  it('two unknown provider refunds that together exceed the top-up: refunded_minor stops at the charged amount, both are debited, neither is lost', async () => {
+    const ws = W(3);
+    await seedNumber(`pn-d1-${ws.slice(-6)}`, ws);
+    await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, transaction_id, paid_at) VALUES ('d1-o3', ?, 20000, 0, 20000, 'EGP', 'paid', 'u', 1, 'TX-D1-3', 2)").bind(ws).run();
+    kashierLedger.set('TX-D1-3', { operation: 'pay', status: 'SUCCESS', orderId: 'd1-o3' });
+    await fund(ws, 20000, 'kashier:TX-D1-3');
+    expect((await hook('d1-o3', 'P-D1-a', '150.00')).status).toBe(200);
+    expect((await hook('d1-o3', 'P-D1-b', '100.00')).status).toBe(200);
+    expect((await all<{ refunded_minor: number }>("SELECT refunded_minor FROM topups WHERE order_id = 'd1-o3'"))[0]!.refunded_minor).toBe(20000);
+    expect((await ledger(ws)).map((r) => [r.kind, r.amount_minor])).toEqual([['topup', 20000], ['chargeback', -15000], ['chargeback', -10000]]);
   });
 });

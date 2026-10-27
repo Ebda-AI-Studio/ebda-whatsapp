@@ -1,3 +1,4 @@
+import { reconcileRefundBounds } from './core/billing/refund-excess';
 import * as Sentry from '@sentry/cloudflare';
 import { env as workerEnv } from 'cloudflare:workers';
 import { Hono } from 'hono';
@@ -311,6 +312,7 @@ export async function dailyBilling(env: Env): Promise<void> {
   await repairInstapay(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await overdueInstapay(env).catch((err) => alert('instapay_overdue_check_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairPackageOrders(env).catch((err) => alert('package_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await reconcileRefundBounds(env).catch((err) => alert('refund_exceeds_charge', { error: err instanceof Error ? err.name : 'error', reconcileFailed: true }));
   await sweepShared(env).catch((err) => alert('shared_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));
 }
 

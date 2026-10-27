@@ -19,6 +19,7 @@ import { sessionState } from '../identity/session';
 import { packagesEnabled, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { MONTHS_SQL, announceSubscription, auditStmt, fallbackToStorePlan, runWrite, setSubscription } from './subscriptions';
 import { alert } from '../observability';
+import { noteRefundExcess } from './refund-excess';
 
 const SWITCH_KINDS: readonly PurchaseKind[] = ['upgrade', 'queued_switch'];
 
@@ -437,7 +438,7 @@ export async function executeYearlyRefund(env: Env, orderId: string, a: { actor:
       .bind(plan.order_id, plan.workspace_id, plan.shortened_months, plan.debt_settled_minor, plan.cash_minor, b.periodStart, newEnd, a.actor, a.reason, now, plan.workspace_id, plan.order_id, plan.order_id, q.refundedMinor, plan.workspace_id, b.periodStart, b.periodEnd),
     env.DB.prepare(`UPDATE workspace_subscriptions SET period_end = min(period_end, ?), status = 'cancelled', cancelled_at = ?, version = version + 1, updated_at = ?
         WHERE workspace_id = ? AND period_start = ? AND status IN ('active', 'trialing') AND ${open}`).bind(newEnd, now, now, plan.workspace_id, b.periodStart, plan.order_id),
-    env.DB.prepare(`UPDATE package_orders SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND ${open}
+    env.DB.prepare(`UPDATE package_orders SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND ${open}
         AND EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND status = 'cancelled' AND period_end = ?)`).bind(plan.debt_settled_minor, plan.order_id, plan.order_id, plan.workspace_id, newEnd),
     env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, 'yearly_refund', ?, NULL, ?, ? WHERE EXISTS (SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND status = 'cancelled' AND period_end = ?) AND "+open)
       .bind(now, a.actor, plan.workspace_id, JSON.stringify({ orderId: plan.order_id, shortenedMonths: plan.shortened_months, debtSettledMinor: plan.debt_settled_minor, cashMinor: plan.cash_minor }), a.reason, plan.workspace_id, newEnd, plan.order_id),
@@ -516,7 +517,7 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
       // A full refund of an UPGRADE order undoes the upgrade only: the subscription goes back to the package it was bought from, for the rest of the same
       // period. It never cancels or rolls the period (that belongs to the order that owns it), and "full" is measured over this order alone.
       stmts.push(
-        env.DB.prepare(`UPDATE package_orders SET status = ?, refunded_minor = refunded_minor + ? WHERE order_id = ? AND status = 'paid' AND ${g.sql}`).bind(ev.chargeback ? 'charged_back' : 'refunded', r, oid, ...g.binds),
+        env.DB.prepare(`UPDATE package_orders SET status = ?, refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND status = 'paid' AND ${g.sql}`).bind(ev.chargeback ? 'charged_back' : 'refunded', r, oid, ...g.binds),
         // ...but only the period the upgrade was GRANTED in: an upgrade of an earlier period (or one that was paid and never granted) must not downgrade today's period.
         env.DB.prepare(`UPDATE workspace_subscriptions SET package_id = ?, version = version + 1, updated_at = ? WHERE workspace_id = ? AND package_id = ? AND period_end > ? AND period_start = ? AND status IN ('active', 'trialing')
             AND EXISTS (SELECT 1 FROM package_orders WHERE order_id = ? AND granted_at IS NOT NULL) AND ${g.sql} RETURNING version`)
@@ -525,7 +526,7 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
       );
     } else if (full) {
       stmts.push(
-        env.DB.prepare(`UPDATE package_orders SET status = ?, refunded_minor = refunded_minor + ? WHERE order_id = ? AND status = 'paid' AND ${g.sql}`).bind(ev.chargeback ? 'charged_back' : 'refunded', r, oid, ...g.binds),
+        env.DB.prepare(`UPDATE package_orders SET status = ?, refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND status = 'paid' AND ${g.sql}`).bind(ev.chargeback ? 'charged_back' : 'refunded', r, oid, ...g.binds),
         // (a) it paid for a queued period: remove just that one
         env.DB.prepare(`UPDATE package_orders SET queued_seq = queued_seq - 1 WHERE workspace_id = ? AND queued_seq > (SELECT queued_seq FROM package_orders WHERE order_id = ?) AND ${g.sql}`).bind(ws, oid, ...g.binds),
         env.DB.prepare(`UPDATE workspace_subscriptions SET queued_periods = queued_periods - 1, version = version + 1, updated_at = ? WHERE workspace_id = ? AND queued_periods > 0 AND (SELECT queued_seq FROM package_orders WHERE order_id = ?) IS NOT NULL AND ${g.sql} RETURNING version`).bind(now, ws, oid, ...g.binds),
@@ -550,7 +551,7 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
     } else {
       const remainingAfter = remainingBefore - r;
       stmts.push(
-        env.DB.prepare(`UPDATE package_orders SET refunded_minor = refunded_minor + ? WHERE order_id = ? AND ${g.sql}`).bind(r, oid, ...g.binds),
+        env.DB.prepare(`UPDATE package_orders SET refunded_minor = MIN(amount_minor, refunded_minor + ?) WHERE order_id = ? AND ${g.sql}`).bind(r, oid, ...g.binds),
         months > 1
           // yearly: the new end was computed from the subscription row read above; the statement only applies if that row is still the one it was computed from
           ? env.DB.prepare(`UPDATE workspace_subscriptions SET period_end = min(period_end, ?), version = version + 1, updated_at = ?
@@ -562,9 +563,12 @@ async function refundOrder(env: Env, row0: PackageOrderRow, ev: ParsedWebhook, n
         env.DB.prepare('UPDATE package_refunds SET shortened = 1, cut_value_minor = ? WHERE refund_ref = ? AND changes() > 0').bind(yearly?.cutValueMinor ?? 0, refundRef),
       );
     }
+    const over = Math.max(0, before + r - amount); // MONEY-FACT-1: the event is acted on in full (`full` above comes from the event, not the clamped column); the excess is recorded and reported
+    stmts.push(env.DB.prepare('UPDATE package_refunds SET over_charge_minor = ? WHERE refund_ref = ?').bind(over, refundRef));
     stmts.push(env.DB.prepare('UPDATE package_refunds SET applied = 1 WHERE refund_ref = ?').bind(refundRef));
     const res = await env.DB.batch(stmts);
     if (res[0]!.meta.changes === 0) continue; // another refund of this order committed first: decide again on the new total
+    await noteRefundExcess(env, { kind: 'package', workspaceId: ws, orderId: oid, eventRef: refundRef, eventMinor: r, overMinor: over }, now);
     alert(full ? (ev.chargeback ? 'package_chargeback' : 'package_refunded') : 'package_partial_refund', { workspace: ws, orderId: oid, amountMinor: r, eventKey: ev.eventKey });
     const subAfter = await env.DB.prepare('SELECT version FROM workspace_subscriptions WHERE workspace_id = ?').bind(ws).first<{ version: number }>();
     if (subAfter && subAfter.version !== subBefore?.version) await announceSubscription(env, ws, now);
