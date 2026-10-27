@@ -508,3 +508,21 @@ describe('AI credits: what one is and when it is low (M-084)', () => {
     expect(screen.getByText(t.wAiCreditsLow('8', '30'))).toBeTruthy();
   });
 });
+
+describe('weekly digest (T13)', () => {
+  it('shows the week in counts and the balance, and the owner can switch it off and on', async () => {
+    await openWallet();
+    const card = await screen.findByRole('region', { name: t.dgTitle });
+    expect(card.textContent).toContain(t.dgCustomers);
+    expect(card.textContent).toContain(t.dgSpend);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: t.dgSwitchOff })));
+    expect(await screen.findByText(t.dgOff)).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: t.dgSwitchOn })));
+    expect((await screen.findByRole('region', { name: t.dgTitle })).textContent).toContain(t.dgCustomers);
+  });
+  it('staff see the digest but not the switch', async () => {
+    await openWallet(withWallet({}, 'staff'));
+    await screen.findByRole('region', { name: t.dgTitle });
+    expect(screen.queryByRole('button', { name: t.dgSwitchOff })).toBeNull();
+  });
+});

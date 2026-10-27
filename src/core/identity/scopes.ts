@@ -51,6 +51,9 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/conversations/:conversationId/read`]: 'person_only',
   [`PUT ${S}/conversations/:conversationId/tags`]: 'person_only',
 
+  [`GET ${S}/digest`]: 'person_only', // the merchant's own usage summary
+  [`PUT ${S}/digest`]: 'person_only',
+
   [`GET ${S}/agent`]: 'person_only',
   [`PUT ${S}/agent`]: 'person_only',
   [`GET ${S}/connectors`]: 'person_only',

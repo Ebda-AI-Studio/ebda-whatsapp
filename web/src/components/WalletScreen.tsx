@@ -3,7 +3,7 @@ import { BRAND } from '@brand';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { StatementDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
-import type { InstapayCreated, InstapayRequest, InstapayView, PackageDto, RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/billing';
+import type { InstapayCreated, InstapayRequest, InstapayView, PackageDto, RefundRequest, DigestDto, TopupDto, WalletApi, WalletDto } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -160,6 +160,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
         )}
         {owner && <PackagesCard t={t} lang={lang} api={api} go={go} now={now} onActivated={() => void api.wallet().then(setWallet, () => undefined)} />}
         {owner && <InstapayCard t={t} lang={lang} api={api} />}
+        <DigestCard t={t} lang={lang} api={api} owner={owner} />
         {canSeeStatement && <StatementCard t={t} lang={lang} api={api} now={now} />}
         {owner && <RefundCard t={t} lang={lang} api={api} />}
       </div>
@@ -570,6 +571,44 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
             </li>
           ))}
         </ul>
+      )}
+    </section>
+  );
+}
+
+/** The weekly usage digest (T13): counts and amounts only, in the app; the owner can switch it off. */
+function DigestCard({ t, lang, api, owner }: { t: Strings; lang: Lang; api: WalletApi; owner: boolean }) {
+  const [d, setD] = useState<DigestDto | null | 'error'>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => { api.digest().then(setD, () => setD('error')); }, [api]);
+  useEffect(load, [load]);
+  if (d === null) return null;
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const toggle = async (enabled: boolean) => {
+    setBusy(true);
+    try { await api.setDigest(enabled); load(); } finally { setBusy(false); }
+  };
+  return (
+    <section className="wallet-digest" aria-labelledby="w-digest-title">
+      <h2 id="w-digest-title">{t.dgTitle}</h2>
+      {d === 'error' ? <p className="muted">{t.dgError}</p> : !d.enabled ? <p className="muted">{t.dgOff}</p> : (
+        <>
+          <p className="muted">{t.dgRange(dateTime(d.from, lang), dateTime(d.to, lang))}</p>
+          <dl className="wallet-figures">
+            <div><dt>{t.dgCustomers}</dt><dd>{num(d.customersWrote, lang)}</dd></div>
+            <div><dt>{t.dgIn}</dt><dd>{num(d.messagesIn, lang)}</dd></div>
+            <div><dt>{t.dgOut}</dt><dd>{num(d.messagesOut, lang)}</dd></div>
+            <div><dt>{t.dgFailed}</dt><dd>{num(d.failed, lang)}</dd></div>
+            <div><dt>{t.dgAi}</dt><dd>{num(d.aiReplies, lang)}</dd></div>
+            <div><dt>{t.dgHandoffs}</dt><dd>{num(d.handoffs, lang)}</dd></div>
+            <div><dt>{t.dgSpend}</dt><dd>{money(d.spendMinor)}</dd></div>
+            <div><dt>{t.dgBalance}</dt><dd>{money(d.balanceMinor)}</dd></div>
+          </dl>
+          {(d.lowBalance || d.aiCredits.low) && <p className="campaign-reason" role="status">{t.dgLow}</p>}
+        </>
+      )}
+      {owner && d !== 'error' && (
+        <button type="button" className="btn" disabled={busy} onClick={() => void toggle(!d.enabled)}>{d.enabled ? t.dgSwitchOff : t.dgSwitchOn}</button>
       )}
     </section>
   );

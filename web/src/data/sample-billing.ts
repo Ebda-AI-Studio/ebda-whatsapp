@@ -1,4 +1,4 @@
-import type { OpsStatusDto, InstapayRequest, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, WalletDto } from './billing';
+import type { OpsStatusDto, InstapayRequest, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, DigestDto, WalletDto } from './billing';
 import { ApiError } from './api';
 
 // Sample billing data for preview only (the app labels the whole source as sample). Amounts are invented; nothing here is real money.
@@ -62,6 +62,12 @@ export function createSampleWallet(): WalletApi {
   const instapayItems: InstapayRequest[] = [
     { id: 'ip-0', reference: 'WA-K7M2Q9XD', kind: 'package', packageId: 'gold', amountMinor: 50000, currency: 'EGP', state: 'rejected', createdAt: BASE - 5 * D, expiresAt: BASE - 3 * D, hasProof: true, rejectReason: 'المبلغ في الإيصال أقل من المطلوب', decidedAt: BASE - 4 * D },
   ];
+  const digestState = { on: true };
+  const sampleDigest: DigestDto = {
+    enabled: true, from: BASE - 7 * D, to: BASE, customersWrote: 41, messagesIn: 96, messagesOut: 133, delivered: 118, failed: 4, aiReplies: 52, aiCreditsUsed: 52, handoffs: 6,
+    campaignRecipients: 200, optOuts: 2, spendMinor: 7450, topupsMinor: 10000, balanceMinor: 18500, availableMinor: 16000, lowBalance: false,
+    aiCredits: { available: 480, low: false, lowThreshold: 30, allowance: 300 },
+  };
   const wallet: WalletDto = {
     balanceMinor: 18500, heldMinor: 2500, availableMinor: 16000, debtMinor: 0, creditLimitMinor: 5000, currency: 'EGP',
     funding: [{ phoneNumberId: 'pn-sample-1', displayPhone: '+20 100 555 0101', funding: 'merchant_card' }, { phoneNumberId: 'pn-sample-shared', displayPhone: '+20 100 555 0900', funding: 'platform_line' }],
@@ -70,6 +76,8 @@ export function createSampleWallet(): WalletApi {
   };
   return {
     wallet: async () => structuredClone(wallet),
+    digest: async () => structuredClone(digestState.on ? sampleDigest : ({ enabled: false } as const)),
+    async setDigest(enabled) { digestState.on = enabled; },
     statement: async (month) => sampleStatement(month),
     async statementCsv(month) {
       const s = sampleStatement(month);

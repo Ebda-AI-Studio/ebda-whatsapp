@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { costEstimateQuery, refundRequestCreate, statementQuery, topupRequest, type WalletDto } from '../core/api/contract';
+import { costEstimateQuery, digestSettings, refundRequestCreate, statementQuery, topupRequest, type WalletDto } from '../core/api/contract';
 import { statementCsv } from '../core/billing/statement';
 import { topupsEnabled } from '../core/billing/payments';
 import { rejectionNotice } from '../core/billing/instapay';
@@ -86,4 +86,20 @@ walletRoutes.post('/stores/:storeId/wallet/refund-requests', async (c) => {
 walletRoutes.get('/stores/:storeId/wallet/refund-requests', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
   return c.json({ items: await listRefundRequests(c.env, { workspaceId: c.req.param('storeId')! }) });
+});
+
+// T13: the weekly digest. Everyone in the store may read it; only the owner (or the operator) switches it off. Counts only, never a person's data.
+walletRoutes.get('/stores/:storeId/digest', async (c) => {
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  return c.json(await ws.weeklyDigest());
+});
+walletRoutes.put('/stores/:storeId/digest', async (c) => {
+  if (!owner(c)) return apiError(c, 403, 'forbidden');
+  const body = digestSettings.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  await ws.setDigestEnabled(body.data.enabled);
+  return c.json({ enabled: body.data.enabled });
 });

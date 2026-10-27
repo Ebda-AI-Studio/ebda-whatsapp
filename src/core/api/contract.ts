@@ -420,6 +420,20 @@ export const walletDto = z.object({
 });
 export type WalletDto = z.infer<typeof walletDto>;
 
+/** T13: the weekly usage digest. Counts and amounts only. `{ enabled: false }` when the owner switched it off. */
+export const digestDto = z.union([
+  z.object({ enabled: z.literal(false) }),
+  z.object({
+    enabled: z.literal(true), from: z.number().int(), to: z.number().int(),
+    customersWrote: z.number().int(), messagesIn: z.number().int(), messagesOut: z.number().int(), delivered: z.number().int(), failed: z.number().int(),
+    aiReplies: z.number().int(), aiCreditsUsed: z.number().int(), handoffs: z.number().int(), campaignRecipients: z.number().int(), optOuts: z.number().int(),
+    spendMinor: z.number().int(), topupsMinor: z.number().int(), balanceMinor: z.number().int(), availableMinor: z.number().int(), lowBalance: z.boolean(),
+    aiCredits: z.object({ available: z.number().int(), low: z.boolean(), lowThreshold: z.number().int(), allowance: z.number().int() }),
+  }),
+]);
+export type DigestDto = z.infer<typeof digestDto>;
+export const digestSettings = z.object({ enabled: z.boolean() });
+
 export const walletMoney = z.object({ count: z.number().int(), netMinor: z.number().int(), vatMinor: z.number().int(), amountMinor: z.number().int() });
 export const statementRowDto = z.object({
   at: z.number().int(), kind: z.string(), netMinor: z.number().int(), vatMinor: z.number().int(), amountMinor: z.number().int(), balanceAfterMinor: z.number().int(),
