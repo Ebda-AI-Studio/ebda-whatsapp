@@ -187,5 +187,5 @@ it.runIf(env.BENCH === '1')('speed: listing 50 of 5,000 conversations and openin
   for (let i = 0; i < 20; i++) chats.push(await time('?limit=50', `/conversations/${bigConv.id}/messages`));
   console.log('PERF inbox', JSON.stringify({ listP95: p95(lists), filteredP95: p95(filtered), chatP95: p95(chats) }));
   const unit = await baselineMs(() => time('', '/me'));
-  expect([['list', lists], ['filtered', filtered], ['chat', chats]].map(([n, xs]) => overBudget(n as string, p95(xs as number[]), unit, BUDGET_RATIO.read, env.BENCH_ABSOLUTE_MS)).filter(Boolean)).toEqual([]);
+  expect([['list', lists, BUDGET_RATIO.read], ['filtered', filtered, BUDGET_RATIO.filtered], ['chat', chats, BUDGET_RATIO.read]].map(([n, xs, r]) => overBudget(n as string, p95(xs as number[]), unit, r as number, env.BENCH_ABSOLUTE_MS)).filter(Boolean)).toEqual([]);
 });

@@ -317,7 +317,7 @@ describe('route walk: every non-GET store route is decided (sends and number set
     'POST /stores/:storeId/conversations/:conversationId/messages', 'POST /stores/:storeId/media', 'POST /stores/:storeId/numbers/connect',
     'POST /stores/:storeId/numbers/:phoneNumberId/register', 'POST /stores/:storeId/shared-number/join',
   ]);
-  // Decided: cannot send a WhatsApp message or set a number up, or are gated by the campaigns feature (plan_feature, see package-limits-review).
+  // Decided: cannot send a WhatsApp message or set a number up, or are gated by the campaigns feature (plan_feature, see package-feature-gates-campaigns-ordering).
   const NOT_SENDING = new Set([
     'PUT /stores/:storeId/agent', 'DELETE /stores/:storeId/contacts/:waId', 'DELETE /stores/:storeId/campaigns/:campaignId',
     'POST /stores/:storeId/campaigns', 'POST /stores/:storeId/campaigns/:campaignId/send', 'POST /stores/:storeId/campaigns/:campaignId/resume',

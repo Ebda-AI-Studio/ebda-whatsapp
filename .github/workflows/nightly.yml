@@ -36,4 +36,4 @@ jobs:
       - name: Benches (fixed-ratio budget)
         env:
           BENCH: '1'
-        run: npx vitest run test/perf.test.ts test/inbox-api.test.ts --reporter=verbose
+        run: npx vitest run test/perf.test.ts test/inbox-api.test.ts test/scale-spike.test.ts --reporter=verbose

@@ -136,3 +136,14 @@ it('the key is discovered per table: rowid tables page on rowid, WITHOUT ROWID t
   expect(r.wr).toBe(7);
   expect(String(r.view)).toMatch(/no usable key/);
 });
+
+it('the export YIELDS between chunks: another request to the same workspace is answered before a many-chunk export finishes', async () => {
+  const ws = 'ws-ck9';
+  await seed(ws, 60);
+  await knobs(ws, (k) => { k.backupChunkRows = 1; });
+  const order: string[] = [];
+  const exporting = workspace(ws).exportSnapshot('2026-10-27').then(() => order.push('export'));
+  const other = workspace(ws).walletView().then(() => order.push('other'));
+  await Promise.all([exporting, other]);
+  expect(order).toEqual(['other', 'export']); // the export is hundreds of chunks long; the quick call did not wait for all of them
+});

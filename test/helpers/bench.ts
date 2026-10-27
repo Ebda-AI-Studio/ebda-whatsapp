@@ -2,10 +2,10 @@
  * Bench budgets that are FIXED, not runner-sized (M-176). A wall-clock budget in milliseconds measures the machine: the nightly job used to pass a 10x "runner-sized"
  * budget, which certifies nothing. Instead every bench measures a baseline on the SAME machine in the SAME run (the mean of 200 trivial authenticated calls through
  * the same Worker -> Hono -> auth path) and each budget is a FIXED MULTIPLE of it. A slower runner moves the baseline and the measurement together; a regression (a lost
- * index, an N+1) moves only the measurement. The multiples were set at about 3x the ratios measured locally on 2026-10-27 (reads 3-4x, send-enqueue 5-6x).
+ * index, an N+1) moves only the measurement. The multiples were set at about 3x the ratios measured locally on 2026-10-27 (reads 3-5x, filtered inbox lists (mine / unassigned / unread, which scan more) 8-13x, send-enqueue 5-6x; a request made while a 500k-row export runs 100-120x because it waits for one chunk).
  * The absolute product budget (150 ms p95) is certified only where the machine is known: `node scripts/bench-local.mjs` sets BENCH_ABSOLUTE_MS.
  */
-export const BUDGET_RATIO = { read: 12, send: 20 } as const;
+export const BUDGET_RATIO = { read: 12, send: 20, filtered: 36, during: 300 } as const;
 
 export const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
 export const p95Of = (xs: number[]): number => [...xs].sort((a, b) => a - b)[Math.max(0, Math.ceil(xs.length * 0.95) - 1)]!;

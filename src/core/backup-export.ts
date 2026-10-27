@@ -15,7 +15,7 @@ import { alert } from './observability';
  *    while the table was read) raises `backup_export_mismatch`, throws, and writes neither the table file nor the manifest: a partial backup never reads as complete.
  * The files and hashes are byte-identical to the one-shot export. Consistency model: per row, not per workspace (Ruling WA-BACKUP-CHUNK-1 in docs/runbooks/backup-restore.md).
  */
-export const DEFAULT_CHUNK_ROWS = 2_000;
+export const DEFAULT_CHUNK_ROWS = 500;
 /** R2 multipart parts must be at least 5 MiB (except the last). */
 export const PART_BYTES = 5 * 1024 * 1024;
 
@@ -110,6 +110,8 @@ export async function exportTable(d: ExportDeps): Promise<{ rows: number; sha256
       chunk++;
       while (pendingBytes >= PART_BYTES) await flushPart();
       await d.afterChunk?.(d.table, chunk);
+      // A real yield: reading SQL is synchronous, and an await on an already-settled promise lets no other request in. A zero-delay timer does.
+      await new Promise<void>((r) => setTimeout(r, 0));
       if (batch.length < d.chunkRows) break;
     }
     // Positive count match BEFORE anything is finalised: the table file does not exist, and no manifest follows, unless the rows written equal the rows the table holds.
