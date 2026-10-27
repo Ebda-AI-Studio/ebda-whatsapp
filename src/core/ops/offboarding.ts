@@ -154,9 +154,9 @@ export async function isOffboarding(env: Env, ws: string): Promise<boolean> {
   return !!(await env.DB.prepare("SELECT 1 FROM offboarding WHERE workspace_id = ? AND state IN ('running', 'done')").bind(ws).first());
 }
 
-/** The id the money records of a deleted workspace move to: HMAC-SHA-256 under a key derived (HKDF) from TOKEN_ENC_KEY, truncated to 128 bits. Null = no key (fail closed). */
+/** The id the money records of a deleted workspace move to: HMAC-SHA-256 under a key derived (HKDF) from ERASURE_HMAC_KEY (ERASURE-KEY-1: never rotated, unlike TOKEN_ENC_KEY), truncated to 128 bits. Null = no key (fail closed). */
 export async function pseudonymFor(env: Env, ws: string): Promise<string | null> {
-  const secret = env.TOKEN_ENC_KEY;
+  const secret = env.ERASURE_HMAC_KEY;
   if (!secret) return null;
   const enc = new TextEncoder();
   const base = await crypto.subtle.importKey('raw', enc.encode(secret), 'HKDF', false, ['deriveBits']);
@@ -384,14 +384,15 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now(), hoo
     const grew = await balanceHold(env, row, now);
     if (grew) return hold(grew);
   }
-  const pseudo = await pseudonymFor(env, ws);
+  // ERASURE-KEY-1: the pseudonym is computed ONCE and stored; a retry (even after a key change) reuses the stored one, so money records never end up under two ids.
+  const pseudo = row.pseudonym ?? await pseudonymFor(env, ws);
   if (!pseudo) {
     alert('offboarding_failed', { workspace: ws, error: 'no_key' });
     return 'failed';
   }
   // The claim is ONE conditional write: a request cancelled (or not yet due) since we read it is not claimed, and nothing irreversible runs.
   const claim = await env.DB.prepare(
-    "UPDATE offboarding SET state = 'running', attempts = attempts + 1, pseudonym = ?, started_at = coalesce(started_at, ?) WHERE workspace_id = ? AND state IN ('pending', 'running') AND execute_after <= ?",
+    "UPDATE offboarding SET state = 'running', attempts = attempts + 1, pseudonym = coalesce(pseudonym, ?), started_at = coalesce(started_at, ?) WHERE workspace_id = ? AND state IN ('pending', 'running') AND execute_after <= ?",
   ).bind(pseudo, now, ws, now).run();
   if (!claim.meta.changes) return 'skipped';
   if (row.state === 'pending') await env.DB.batch(logRows(env, ws, 'system', 'started', now));

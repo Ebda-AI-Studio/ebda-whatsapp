@@ -4,6 +4,8 @@
 derives the InstaPay proof-link signing key. Rotate it on a schedule you decide (at least yearly), after any suspected exposure, and when a person who held it leaves.
 `AGENT_SECRETS_KEY` (merchants' own model keys) is a different key with its own procedure; this one does not touch it.
 
+**`ERASURE_HMAC_KEY` is NEVER rotated and is not part of this procedure** (ERASURE-KEY-1): the erasure records, the offboarding pseudonyms and the audit target ids are keyed by it, so a change would orphan every record and a restore would bring erased people back. Do not set it to the TOKEN_ENC_KEY value either.
+
 How it stays safe: **writes** always use `TOKEN_ENC_KEY`; **reads** try `TOKEN_ENC_KEY`, then `TOKEN_ENC_KEY_PREVIOUS` when it is set. So there is never a moment when a credential
 cannot be opened. A read that needed the previous key re-encrypts that row under the new one on the spot; the operator route finishes the rest.
 

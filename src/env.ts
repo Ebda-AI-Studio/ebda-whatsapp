@@ -85,6 +85,8 @@ export type Env = {
   EMBEDDED_SIGNUP_CONFIG_ID?: string;
   /** Base64 of 32 random bytes: encrypts business tokens and registration PINs (AES-GCM). Required while the switch is on. */
   TOKEN_ENC_KEY?: string;
+  /** ERASURE-KEY-1: HMAC key (secret, at least 32 characters) for the erasure subject hash, the offboarding pseudonym, the audit target ids and the view-as record hashes. NEVER rotated (a rotation would orphan every erasure record); independent of TOKEN_ENC_KEY. */
+  ERASURE_HMAC_KEY?: string;
   /** M-174: HMAC key (secret, at least 32 characters) that signs backup manifests; PREVIOUS only verifies older backups during a key change. */
   BACKUP_HMAC_KEY?: string;
   BACKUP_HMAC_KEY_PREVIOUS?: string;

@@ -126,3 +126,20 @@ describe('the erasure record', () => {
   });
 
 });
+
+describe('ERASURE-KEY-1: the hash does not follow TOKEN_ENC_KEY', () => {
+  it('rotating TOKEN_ENC_KEY changes nothing: the old record still matches, so a restore still drops the person', async () => {
+    const ws = W(3010);
+    await seed(ws);
+    await workspace(ws).exportSnapshot('2026-10-27');
+    expect((await (await apiFor(ws)).call('DELETE', `/contacts/${A}`)).status).toBe(200);
+    const [rec] = await d1<{ subject_hash: string }>('SELECT subject_hash FROM erasure_records WHERE workspace_id = ?', ws);
+    const rotated = { ...env, TOKEN_ENC_KEY: btoa(String.fromCharCode(...Uint8Array.from({ length: 32 }, (_, i) => 200 - i))), TOKEN_ENC_KEY_PREVIOUS: env.TOKEN_ENC_KEY } as typeof env;
+    expect(await subjectHash(rotated, ws, A)).toBe(rec!.subject_hash);
+  });
+
+  it('without ERASURE_HMAC_KEY there is no hash (fail closed), and a different key gives a different one', async () => {
+    expect(await subjectHash({ ...env, ERASURE_HMAC_KEY: undefined } as typeof env, W(3011), A)).toBeNull();
+    expect(await subjectHash({ ...env, ERASURE_HMAC_KEY: 'another-erasure-key-0123456789abcdef!!' } as typeof env, W(3011), A)).not.toBe(await subjectHash(env, W(3011), A));
+  });
+});

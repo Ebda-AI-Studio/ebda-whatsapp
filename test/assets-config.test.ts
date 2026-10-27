@@ -91,5 +91,5 @@ it('a brand with its own OIDC provider lists that issuer origin, exactly, in con
 });
 
 it('production lists the secrets /health must find well-formed (the first deploy\'s section B keys)', () => {
-  expect(String(cfg.vars?.REQUIRED_SECRETS ?? '').split(',').sort()).toEqual(['AGENT_SECRETS_KEY', 'PROOF_URL_SECRET', 'SUITE_BUYER_KEY_SECRET', 'TOKEN_ENC_KEY']);
+  expect(String(cfg.vars?.REQUIRED_SECRETS ?? '').split(',').sort()).toEqual(['AGENT_SECRETS_KEY', 'BACKUP_HMAC_KEY', 'ERASURE_HMAC_KEY', 'PROOF_URL_SECRET', 'SUITE_BUYER_KEY_SECRET', 'TOKEN_ENC_KEY']);
 });

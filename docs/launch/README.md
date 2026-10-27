@@ -61,6 +61,7 @@ Generate random keys locally: `node -e "console.log(crypto.randomBytes(32).toStr
 | `META_VERIFY_TOKEN` | any random string, also typed into Meta's webhook setup | webhook handshake (required) |
 | `META_SYSTEM_TOKEN` | Meta Business → System user token | platform calls, shared number (required) |
 | `TOKEN_ENC_KEY` | random 32 bytes, base64 | own numbers (encrypts each business token) |
+| `ERASURE_HMAC_KEY` | random, at least 32 characters; **seed it ONCE at the first deploy and never rotate it** | erasure records, offboarding pseudonyms, audit target ids (ERASURE-KEY-1) |
 | `AGENT_SECRETS_KEY` | random 32 bytes, base64 | AI agent (encrypts merchants' own model keys) |
 | `SUITE_BUYER_KEY_SECRET` | **the same value as Ebda Store's** (set on both Workers in the same session) | store link (buyer keys) |
 | `PROOF_URL_SECRET` | random 32 bytes, base64 | store link (signed proof links) |
