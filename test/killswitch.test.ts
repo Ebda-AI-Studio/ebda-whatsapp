@@ -295,7 +295,7 @@ describe('item 1: the suspension / red gate runs AFTER the duplicate checks', ()
 });
 
 describe('suspend is idempotent and reports a partial state', () => {
-  it('when the workspace copy cannot be reached: 503 unavailable with the D1 half in force and ONE audit row; the same call again finishes it without a second row', async () => {
+  it('when the workspace copy cannot be reached: 503 unavailable with the D1 half applied and ONE audit row; the same call again finishes it without a second row', async () => {
     const ws = W(1123);
     await setupBilling(ws);
     const spy = vi.spyOn(env.WORKSPACE_DO, 'get').mockImplementation((() => ({ setSuspended: async () => { throw new Error('do down'); } })) as never);
