@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../data/api';
-import type { Adjustment, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView } from '../data/billing';
+import type { Adjustment, AuditFilter, AuditLogItem, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -17,7 +17,7 @@ type PanelProps = { t: Strings; lang: Lang; api: OperatorApi; now: () => number;
 const HOUR = 3_600_000;
 const SETTINGS_LEAD_H = 1;
 const RATE_LEAD_H = 24;
-const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared', 'killswitch'] as const;
+const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared', 'killswitch', 'audit'] as const;
 type Tab = (typeof TABS)[number];
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -73,6 +73,7 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
         {tab === 'queues' && <QueuesPanel {...panel} />}
         {tab === 'log' && <LogPanel {...panel} />}
         {tab === 'killswitch' && <KillSwitchPanel {...panel} />}
+        {tab === 'audit' && <AuditPanel {...panel} />}
         {tab === 'shared' && source.sharedTemplates && <SharedTemplatesPanel t={t} lang={lang} api={source.sharedTemplates} run={run} fail={fail} />}
       </div>
     </main>
@@ -487,6 +488,43 @@ function LogPanel({ t, lang, api }: PanelProps) {
           </li>
         ))}
       </ul>
+    </Card>
+  );
+}
+
+// ---- Action log (T8): who did what to which ids ---------------------------------------------------------------------------------
+
+function AuditPanel({ t, lang, api }: PanelProps) {
+  const [form, setForm] = useState({ workspaceId: '', actor: '', action: '' });
+  const [filter, setFilter] = useState<AuditFilter>({});
+  const [items, setItems] = useState<AuditLogItem[] | null>(null);
+  const [error, setError] = useState(false);
+  const load = useCallback((f: AuditFilter, append: boolean) => {
+    api.auditLog(f).then((x) => { setItems((cur) => (append && cur ? [...cur, ...x] : x)); setError(false); }, () => setError(true));
+  }, [api]);
+  useEffect(() => { load(filter, false); }, [filter, load]);
+  const apply = (e: FormEvent) => { e.preventDefault(); setFilter({ ...(form.workspaceId.trim() ? { workspaceId: form.workspaceId.trim() } : {}), ...(form.actor.trim() ? { actor: form.actor.trim() } : {}), ...(form.action.trim() ? { action: form.action.trim() } : {}) }); };
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  return (
+    <Card id="op-audit" title={t.opAuditTitle}>
+      <p className="muted">{t.opAuditIntro}</p>
+      <form className="wallet-form op-inline" onSubmit={apply}>
+        <label className="field"><span>{t.opAuditWorkspace}</span><input dir="ltr" value={form.workspaceId} onChange={set('workspaceId')} /></label>
+        <label className="field"><span>{t.opAuditActor}</span><input dir="ltr" value={form.actor} onChange={set('actor')} /></label>
+        <label className="field"><span>{t.opAuditAction}</span><input dir="ltr" value={form.action} onChange={set('action')} /></label>
+        <button type="submit" className="btn">{t.opAuditApply}</button>
+      </form>
+      {error && <p className="error-text">{t.opLoadError}</p>}
+      {items?.length === 0 && <p className="muted">{t.opAuditEmpty}</p>}
+      <ul className="wallet-rows op-rows">
+        {items?.map((l) => (
+          <li key={l.id}>
+            <span className="wallet-row-main"><span className="muted">{dateTime(l.at, lang)}</span> • <b><bdi dir="ltr">{l.actor}</bdi></b> <span className="muted">({l.actorRole})</span> • <bdi dir="ltr">{l.action}</bdi>{l.status === 403 && <span className="error-text"> • {t.opAuditDenied}</span>}</span>
+            <span className="muted">{l.workspaceId && <bdi dir="ltr">{l.workspaceId}</bdi>}{l.targetType && <> • <bdi dir="ltr">{l.targetType}={l.targetId}</bdi></>}</span>
+          </li>
+        ))}
+      </ul>
+      {items && items.length >= 100 && <button type="button" className="btn" onClick={() => load({ ...filter, before: items[items.length - 1]!.id }, true)}>{t.opAuditMore}</button>}
     </Card>
   );
 }

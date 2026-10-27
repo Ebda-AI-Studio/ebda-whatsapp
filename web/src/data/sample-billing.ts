@@ -222,6 +222,14 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       return { ...a };
     },
     changeLog: async () => structuredClone(log),
+    async auditLog(f) {
+      const all = [
+        { id: 3, at: BASE - D, workspaceId: 'ws-sample', actor: 'u-staff', actorRole: 'staff' as const, action: 'POST /stores/:storeId/conversations/:conversationId/assign', targetType: 'conversationId', targetId: '41', status: 200 },
+        { id: 2, at: BASE - 2 * D, workspaceId: 'ws-sample', actor: 'u-root', actorRole: 'operator' as const, action: 'POST /operator/workspaces/:workspaceId/suspend', targetType: null, targetId: null, status: 200 },
+        { id: 1, at: BASE - 3 * D, workspaceId: 'ws-sample', actor: 'u-owner', actorRole: 'owner' as const, action: 'DELETE /stores/:storeId/contacts/:waId', targetType: 'waId', targetId: '3f9a1c0e5b7d4a2c8e6f1b0d9c3a7e52', status: 200 },
+      ];
+      return all.filter((r) => (!f.workspaceId || r.workspaceId === f.workspaceId) && (!f.actor || r.actor === f.actor) && (!f.action || r.action === f.action) && (!f.before || r.id < f.before));
+    },
     async yearlyRefundQuote(orderId) {
       if (!/^yearly-/.test(orderId)) throw new ApiError('not_found', 404);
       return { orderId, packageId: 'growth-yearly', periodMonths: 12, monthlyMinor: 111750, unusedMonths: 11, grossMinor: 1229250, debtMinor: 100000, debtSettledMinor: 100000, refundMinor: 1129250 };

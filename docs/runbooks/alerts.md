@@ -34,6 +34,9 @@ A send job exhausted its retries. The message is now `failed` with `error_reason
 ### unhandled_error
 A route threw. Find the event in Sentry (search the route and the time); `route` and `method` are in the message.
 
+### audit_write_failed / erasure_record_failed (P1)
+`audit_write_failed`: an action went through but its `audit_log` row did not (D1 trouble). The Worker log has the line `{audit:"action"}` for it; check D1, then note the gap. `erasure_record_failed`: a contact was erased but its erasure record was not written, so a restore could bring the person back. Re-run `DELETE /api/v1/stores/:id/contacts/:waId` for the same contact (idempotent, rewrites the record) and confirm a row in `erasure_records`. Design: `docs/erasure-and-audit.md`.
+
 ### number_quality_flagged / number_error_spike (P1) and number_restricted (P0)
 Meta flagged a number (FLAGGED counts as red), rated it red, restricted it, or 25 frequency-cap / undeliverable errors hit it in an hour (yellow). The workspace's campaigns on it are already paused (`quality_flagged`) and, for red / restricted, new templates are refused. Look at `phone_numbers.health_*` and the workspace's `number_health_log`; contact the merchant. Recovery never resumes campaigns: the merchant does. See `docs/number-health.md`.
 

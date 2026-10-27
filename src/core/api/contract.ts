@@ -323,6 +323,15 @@ export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused',
 export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable', 'quality_flagged', 'operator_paused']);
 /** W2-OPS: every kill-switch action carries a reason (kept in the append-only audit). */
 export const operatorKillSwitch = z.object({ reason: z.string().trim().min(5).max(300) });
+/** GET /operator/audit-log (T8): filters and a cursor (`before` = the smallest id already seen). */
+export const auditLogQuery = z.object({
+  workspaceId: z.string().min(1).max(100).optional(), actor: z.string().min(1).max(100).optional(), action: z.string().min(1).max(200).optional(),
+  before: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+export const auditLogItemDto = z.object({
+  id: z.number().int(), at: z.number().int(), workspaceId: z.string().nullable(), actor: z.string(), actorRole: z.enum(['owner', 'staff', 'operator', 'integration', 'system']),
+  action: z.string(), targetType: z.string().nullable(), targetId: z.string().nullable(), status: z.number().int(),
+});
 export const healthState = z.enum(['green', 'yellow', 'red', 'restricted']);
 const opsNumberHealth = z.object({ phoneNumberId: z.string(), health: healthState, healthReason: z.string().nullable(), healthAt: z.number().int().nullable() });
 /** GET /operator/workspaces/:id/ops: what the kill-switch card shows for one workspace and for the platform number. */

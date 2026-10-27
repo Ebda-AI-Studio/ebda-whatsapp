@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { OpsStatusDto, StatementDto, WalletDto } from '../../../src/core/api/contract';
-import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
+import { auditLogItemDto, changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
 
 export type { OpsStatusDto, StatementDto, WalletDto };
 export type CostEstimateDto = z.infer<typeof costEstimateDto>;
@@ -14,6 +14,8 @@ export type InstapayCreated = z.infer<typeof instapayCreatedDto>;
 export type OperatorInstapay = z.infer<typeof operatorInstapayDto>;
 export type PricingSettings = z.infer<typeof pricingSettingsDto>;
 export type ChangeLogItem = z.infer<typeof changeLogItemDto>;
+export type AuditLogItem = z.infer<typeof auditLogItemDto>;
+export type AuditFilter = { workspaceId?: string; actor?: string; action?: string; before?: number };
 
 // The operator lists below have no shared DTO in contract.ts (the server builds them inline), so the web client pins their shape here
 // and validates every response against it, exactly like it does for the shared DTOs.
@@ -90,6 +92,8 @@ export interface OperatorApi {
   createAdjustment(workspaceId: string, amountMinor: number, reason: string): Promise<Adjustment>;
   decideAdjustment(id: string, decision: 'approve' | 'reject'): Promise<Adjustment>;
   changeLog(): Promise<ChangeLogItem[]>;
+  /** T8: who did what to which ids (append-only). Newest first; pass `before` (the smallest id seen) for the next page. */
+  auditLog(filter: AuditFilter): Promise<AuditLogItem[]>;
   /** A yearly package order: what can be refunded now (unused whole months x price/12, current month kept, wallet debt settled first). */
   yearlyRefundQuote(orderId: string): Promise<YearlyRefundQuoteView>;
   /** Cancels the yearly plan at the end of the current month and settles the wallet debt first. Idempotent: a replay returns the same figures. */

@@ -10,6 +10,7 @@ import type { MessageDto, SendMessageRequest } from './api/contract';
 import { MESSAGE_COLUMNS, WINDOW_MS, messageDto, type MessageRow } from './dto';
 import { activeNumberFor } from './routing';
 import { eraseSharedFor } from './shared/shared-number';
+import { dropErased } from './erasure';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
@@ -2169,7 +2170,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     const dumps = this.ctx.storage.transactionSync(() =>
       BACKUP_TABLES.map((t) => ({ t, rows: this.sql.exec(`SELECT * FROM ${t} ORDER BY ${BACKUP_ORDER[t]}`).toArray() as Record<string, unknown>[] })),
     );
-    const manifest: BackupManifest = { workspaceId, date, schemaVersion: DO_MIGRATIONS.length, tables: {} as BackupManifest['tables'] };
+    const manifest: BackupManifest = { workspaceId, date, schemaVersion: DO_MIGRATIONS.length, takenAt: Date.now(), tables: {} as BackupManifest['tables'] };
     const prefix = backupPrefix(workspaceId, date);
     for (const { t, rows } of dumps) {
       const body = toNdjson(rows);
@@ -2181,20 +2182,20 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** Restores a snapshot into THIS workspace, which must be empty. Verifies counts and hashes before writing anything. */
-  async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest } | { ok: false; reason: string }> {
+  async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest; erasedSkipped?: number } | { ok: false; reason: string }> {
     try {
-      const manifest = await this.importSnapshotOrThrow(prefix);
+      const { manifest, erasedSkipped } = await this.importSnapshotOrThrow(prefix);
       // A restored campaign that was running has no workflow in this account's engine: the sweep starts one.
       if (this.sql.exec("SELECT 1 FROM campaigns WHERE status IN ('scheduled', 'running') LIMIT 1").toArray().length) addTask(this.sql, 'campaign_step', Date.now() + 60_000);
       await this.ensureBackupAlarm();
       await this.arm();
-      return { ok: true, manifest };
+      return { ok: true, manifest, ...(erasedSkipped ? { erasedSkipped } : {}) };
     } catch (e) {
       return { ok: false, reason: (e as Error).message };
     }
   }
 
-  private async importSnapshotOrThrow(prefix: string): Promise<BackupManifest> {
+  private async importSnapshotOrThrow(prefix: string): Promise<{ manifest: BackupManifest; erasedSkipped: number }> {
     const manifestObj = await this.env.BACKUPS.get(`${prefix}manifest.json`);
     if (!manifestObj) throw new Error('backup manifest not found');
     const parsed = backupManifestSchema.safeParse(await manifestObj.json().catch(() => null));
@@ -2214,6 +2215,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (rows.length !== entry.rows) throw new Error(`backup row count mismatch: ${t}`);
       files.push({ t, rows });
     }
+    // Everyone erased after this backup was taken is dropped before a single row is written (B3): an erased contact never comes back.
+    const erasedSkipped = await dropErased(this.env, manifest.workspaceId, manifest.takenAt ?? Date.parse(`${manifest.date}T00:00:00Z`), files);
     this.ctx.storage.transactionSync(() => {
       for (const t of BACKUP_TABLES) {
         if (this.sql.exec(`SELECT 1 FROM ${t} LIMIT 1`).toArray().length) throw new Error('restore target workspace is not empty');
@@ -2228,7 +2231,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
     });
     this.rebuildFts();
-    return manifest;
+    return { manifest, erasedSkipped };
   }
 
   /**
