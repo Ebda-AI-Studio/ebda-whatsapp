@@ -19,6 +19,8 @@ async function hmacHex(secret: string, message: string): Promise<string> {
  * public value is never the buyer key of anyone, real or made up, and cannot be matched against a customer list.
  * The other suite Worker (the Store) must emit exactly this: `hmac_sha256_hex(SUITE_BUYER_KEY_SECRET, "suite-buyer-key-probe:v1").slice(0, 16)`.
  */
+/** The probe is published only when the secret has at least this many characters (the real one is 64 hex): on a short secret it would be an offline-guessing oracle. Mirrors the Store. */
+export const MIN_PROBE_SECRET_LENGTH = 64;
 export const BUYER_KEY_PROBE_INPUT = 'suite-buyer-key-probe:v1';
 export async function buyerKeyProbe(secret: string): Promise<string> {
   return (await hmacHex(secret, BUYER_KEY_PROBE_INPUT)).slice(0, 16);

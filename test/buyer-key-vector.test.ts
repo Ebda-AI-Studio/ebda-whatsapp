@@ -1,7 +1,7 @@
 import { createExecutionContext, env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import worker from '../src/index';
-import { BUYER_KEY_PROBE_INPUT, buyerKeyProbe } from '../src/core/buyer-key';
+import { BUYER_KEY_PROBE_INPUT, MIN_PROBE_SECRET_LENGTH, buyerKeyProbe } from '../src/core/buyer-key';
 import { isE164, normaliseE164 } from '../src/core/phone';
 // @ts-expect-error plain .mjs script, no types
 import { runChecks } from '../scripts/verify-prod.mjs';
@@ -9,7 +9,7 @@ import { runChecks } from '../scripts/verify-prod.mjs';
 // D4: SUITE_BUYER_KEY_SECRET must be the same value on this Worker and on Ebda Store. A secret that differs silently splits every customer into
 // two identities. Each Worker publishes a DERIVED test vector (the buyer key of one fixed probe number) on /health; verify-prod compares the two.
 // The secret itself never leaves a Worker and is never an input of the check.
-const SECRET = 's'.repeat(32);
+const SECRET = 's'.repeat(MIN_PROBE_SECRET_LENGTH);
 const health = async (over: Record<string, unknown>) => {
   const res = await (worker as unknown as ExportedHandler<typeof env>).fetch!(new Request('https://x/health'), { ...env, ...over } as typeof env, createExecutionContext());
   return { status: res.status, text: await res.text() };
@@ -41,6 +41,17 @@ it('two Workers with the same secret agree and different secrets differ', async 
   expect(await buyerKeyProbe(SECRET)).not.toBe(await buyerKeyProbe('t'.repeat(32)));
   expect(JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: SECRET })).text).buyerKeyVector).toBe(JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: SECRET })).text).buyerKeyVector);
 });
+
+it('the vector is published only for a long secret (an offline-guessing oracle on a short one): 63 characters publish nothing, 64 publish 16 hex, unset publishes nothing', async () => {
+  expect(MIN_PROBE_SECRET_LENGTH).toBe(64);
+  expect('buyerKeyVector' in JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: 's'.repeat(63) })).text)).toBe(false);
+  expect(JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: 's'.repeat(64) })).text).buyerKeyVector).toMatch(/^[0-9a-f]{16}$/);
+  expect('buyerKeyVector' in JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: undefined })).text)).toBe(false);
+});
+
+// TODO(vendor): the Store publishes tests/vectors/ebda-wa/buyer-key-probe.json {secret, message, vector} (SHA256SUMS-listed). Once the controller confirms it is on the
+// Store's main, vendor it byte for byte as vendor/vectors/buyer-key-probe.json, pin its sha256 here, and replace this skip with the pinned-vector test.
+it.skip('the vendored Store probe vector (pending: the Store file is not on its main yet)', () => undefined);
 
 it('without the secret there is no vector (and no empty string that two unset Workers would "agree" on)', async () => {
   const r = await health({ SUITE_BUYER_KEY_SECRET: undefined });
