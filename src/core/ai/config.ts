@@ -8,7 +8,7 @@ import { OpenAiCompatibleProvider, WorkersAiProvider, type LlmProvider } from '.
 
 /** Words of the agent, supplied by the product addon. */
 export type AgentCopy = {
-  /** The system prompt: persona, language rule, how to use the tools, the knowledge base chunks. The core adds nothing to it. */
+  /** The system prompt: persona, language rule, how to use the tools, the knowledge base chunks. The core appends only the instruction boundary (`BOUNDARY` in agent.ts). */
   systemPrompt: (a: { persona: string; language: 'ar' | 'en' | 'auto'; storeName: string | null; knowledge: string[]; tools: string[] }) => string;
   /** Used when the merchant wrote no persona. */
   defaultPersona: Localised;
@@ -48,6 +48,8 @@ export type AgentConfig = {
   slowMs: number;
   /** Workers AI model used for the platform-funded agent. */
   defaultModel: (env: Env) => string;
+  /** F1: AI turns one customer may use per rolling 24 h; the next message is handed to a person without calling the model. */
+  turnsPerDay: number;
 };
 
 export const DEFAULT_WORKERS_AI_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
@@ -86,6 +88,7 @@ let current: AgentConfig = {
   allowedHosts: (env) => (env.AGENT_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim()).filter(Boolean),
   slowMs: 2000,
   defaultModel: (env) => env.AGENT_MODEL || DEFAULT_WORKERS_AI_MODEL,
+  turnsPerDay: 30,
 };
 
 export function configureAgent(next: Partial<AgentConfig>): AgentConfig {

@@ -5,6 +5,7 @@ import { errClass, alert } from '../observability';
 import { isE164 } from '../phone';
 import { storeLink } from '../store-link';
 import type { ToolDef } from '../ai/provider';
+import { maskForModel } from '../ai/mask';
 import { connectorSecret, listConnectors, TOOL_SEP, type ConnectorRow } from './store';
 import { odooConnector, pingOdoo } from './odoo';
 import { pingWebhook, webhookConnector } from './webhook';
@@ -50,7 +51,8 @@ export function loadConnectors(host: Host): ConnectorSet | null {
 
 /** What the model reads back: bounded JSON, never a stack or a raw body. */
 export function toolContent(res: ToolResult): string {
-  const text = JSON.stringify(res.ok ? { ok: true, result: res.result } : { ok: false, error: res.error, ...(res.message ? { message: res.message } : {}) });
+  // M-177: the client's error text is free text from their system (it can echo a phone, a card, an e-mail): masked before the model reads it.
+  const text = JSON.stringify(res.ok ? { ok: true, result: res.result } : { ok: false, error: res.error, ...(res.message ? { message: maskForModel(res.message) } : {}) });
   if (text.length <= CONTENT_MAX) return text;
   return JSON.stringify({ ok: res.ok, truncated: true, result: text.slice(0, CONTENT_MAX - 100) });
 }

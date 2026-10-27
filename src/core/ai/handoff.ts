@@ -8,7 +8,7 @@ import { readAgentSettings } from './settings';
 
 export const NEEDS_HUMAN_TAG = 'needs_human';
 /** Why a conversation was handed over; stored as a code, never as free text from the customer or the model. */
-export type HandoffReason = 'asked' | 'model' | 'no_credits' | 'misconfigured' | 'provider_error' | 'bad_output' | 'no_answer' | 'staff';
+export type HandoffReason = 'asked' | 'model' | 'no_credits' | 'misconfigured' | 'provider_error' | 'bad_output' | 'no_answer' | 'staff' | 'turn_cap' | 'guarded';
 
 /** True while the bot must stay silent for this customer. An elapsed window is cleared on the way (row and tag). */
 export function handoffActive(host: LinkHost, waId: string, now: number): boolean {

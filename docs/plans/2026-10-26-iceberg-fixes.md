@@ -114,3 +114,8 @@ Every M-id below maps to a ledger row (or a new row). Gates as in the master fil
 | M-177 | PW9 | **NEW: connector error text masked before it reaches the model** | 2 / W2-ABUSE |
 | M-178 | PW9 | **NEW: dailyBilling LIMIT 100 → drain until empty (bounded per pass with continuation)** | 2 / W2-MONEY |
 Ledger rows with no M-id (kept, still to fix): A3, A5, A7, B7, B9, D4, E3, E4, E5, T20, T33-T35.
+
+## Wave-2 status (Track B)
+- **F6 verified closed 2026-10-27**: `/t/:code` verifies the signed code before any bucket or Durable Object (`src/core/request-guards.ts`, `test/signed-link-codes.test.ts`), and `/meta/webhook` and `/kashier/webhook` are size-capped before the body is read (`test/request-guards.test.ts`).
+- **W2-ABUSE done (branch feat/w2-abuse)**: F1, F4, F5, B6, F2, M-068/069/090/091/092/179, M-134, M-177. See docs/ai-agent.md, docs/campaigns.md, docs/connectors.md, docs/contracts/identity-v1.3-integrator-tokens.md.
+

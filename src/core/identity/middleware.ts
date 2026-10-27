@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono';
 import type { Env } from '../../env';
+import { takeApiToken } from '../api-rate';
 import { integrationState } from './integration';
 import { writeSessionState } from './session';
 import { gateFor } from './scopes';
@@ -37,6 +38,11 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     const storeId = c.req.param('storeId');
     const membership = principal.stores.find((s) => s.id === storeId);
     if (!membership && !principal.superAdmin) return c.json({ error: 'forbidden' }, 403);
+    // F4: per-workspace and per-integrator-client rate limit, as soon as the caller is a valid member (a platform operator is not limited by a store's bucket).
+    if (storeId && !principal.superAdmin) {
+      const wait = takeApiToken(storeId, principal.integration?.clientId ?? null);
+      if (wait) return c.json({ error: 'rate_limited' }, 429, { 'retry-after': String(wait) });
+    }
     const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
     // M-135: a person token is revocation-checked on EVERY write, not only on money actions (fail closed: an unreachable accounts service refuses it).
     if (write && !principal.integration) {

@@ -126,3 +126,6 @@ Subscribe the Meta app to `phone_number_quality_update` and `account_update` (al
 
 ## 14. Go live checklist for the first merchant
 Business verified · a package on record (Store plan with WhatsApp, a purchase or an operator-assigned paid package; no package = no sending) · number connected and registered (or coexistence synced within 24 h) · templates approved · store linked (if Ebda Store) · AI agent configured (optional) · wallet funded (shared number only) · help guides published at help.ebda.app.
+
+## Media type is checked from the bytes (M-134)
+`POST /stores/:storeId/media` compares the first bytes of the file (JPEG, PNG, PDF, MP4 `ftyp`, Ogg `OpusHead`) with the declared type; a mismatch is `415 unsupported_media` and nothing reaches Meta.

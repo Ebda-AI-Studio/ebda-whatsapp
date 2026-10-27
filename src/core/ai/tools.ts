@@ -16,6 +16,8 @@ import type { ToolCall, ToolDef } from './provider';
 
 export const MAX_TOOL_ROUNDS = 3;
 export const MAX_CALLS_PER_ROUND = 3;
+/** F2: tool calls (built-in and connector) one turn may EXECUTE; a call past the budget is answered with `tool_budget` and does nothing. */
+export const MAX_TOOL_CALLS_PER_TURN = 6;
 const SEARCH_PAGES = 5;
 const SEARCH_PAGE_SIZE = 100;
 const SEARCH_RESULTS = 5;

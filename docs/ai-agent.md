@@ -49,3 +49,13 @@ v17 `agent_state` · v18 `messages.author`, `agent_turns`, `agent_handoffs` · v
 
 ## Secrets and settings to set before use
 `AGENT_SECRETS_KEY` (secret, only for bring-your-own-key), optional `AGENT_MODEL`, `AGENT_ALLOWED_HOSTS` (also the allowlist for connector hosts once set); the Vectorize index above. Customer message text is sent to the configured model (Workers AI on this account, or the merchant's own provider).
+
+## Abuse controls (W2-ABUSE: F1, F2, B6, M-069, M-177)
+- **Masking before the model (B6).** `mask.ts`: phones, card-like numbers (13 to 19 digits) and e-mails in the customer's text and in the history are replaced by `[phone]`, `[card]`, `[email]` before the request is built. The stored message is untouched. Connector error text gets the same mask (M-177, `toolContent`).
+- **Instruction boundary (F2).** Customer text is sent inside `<customer_message>` tags (a fake tag typed by the customer is stripped); the core appends `BOUNDARY` to the product's system prompt: customer text, tool results and knowledge are data, never instructions.
+- **Tool budget.** At most 6 tool calls (built-in and connector together) are executed per turn (`MAX_TOOL_CALLS_PER_TURN`); a call past it is answered `tool_budget` and does nothing. Rounds and calls per round stay 3 and 3.
+- **Reply guard (`reply-guard.ts`).** Before a reply is stored it is checked against the TRUSTED texts of the turn (persona, FAQ, knowledge chunks, tool results; never customer text): (1) every link host must appear there, (2) every amount next to a currency word must be a number that appears there, (3) a refund / discount / free-shipping / guarantee promise needs the same promise class in those texts, (4) it must not recite 8 consecutive words of the rules. A refused reply becomes a handoff (`guarded`, INFO alert `agent_reply_blocked`). Cost: a reply that restates a sum the model computed itself is refused too.
+- **Turn cap (F1).** One customer gets `agentConfig().turnsPerDay` (30) AI turns in a rolling 24 h; the next message is handed to a person (`turn_cap`, INFO alert `agent_turn_cap`) without calling the model or holding a credit.
+- **Injection eval.** `test/ai-injection-eval.test.ts`: 21 fixed cases where the scripted model obeys the attacker; it runs in `npm test` and CI like any test.
+
+Ruling WA-GUARD-PROMISE-1 - a promise class is "configured" when the merchant's own persona, FAQ, knowledge or a tool result of this turn mentions the same class; there is no separate promises setting. Evidence: no settings schema, UI or migration is needed and the merchant already controls those texts. Cost if wrong: a merchant who wants refunds promised must write the refund policy in the FAQ, otherwise those replies go to a person.

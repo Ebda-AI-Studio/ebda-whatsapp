@@ -34,7 +34,7 @@ describe('the agent answers', () => {
     const req = m.calls[0]!;
     expect(req.system).toContain('انت مساعد متجر الورد');
     expect(req.system).toContain('search_catalog');
-    expect(req.messages).toEqual([{ role: 'user', content: 'مساء الخير' }]);
+    expect(req.messages).toEqual([{ role: 'user', content: '<customer_message>مساء الخير</customer_message>' }]);
     expect(req.tools.map((t) => t.name)).toEqual(['search_catalog', 'order_status', 'start_order', 'handoff_to_human']);
     expect(req.maxTokens).toBeGreaterThan(0);
   });
@@ -55,7 +55,7 @@ describe('the agent answers', () => {
     const g = stubGraph();
     await say(ws, pn, text('عندكم ورد؟'), g);
     await say(ws, pn, text('بكام؟'), g);
-    expect(m.calls[1]!.messages).toEqual([{ role: 'user', content: 'عندكم ورد؟' }, { role: 'assistant', content: 'عندنا ورد بلدي' }, { role: 'user', content: 'بكام؟' }]);
+    expect(m.calls[1]!.messages).toEqual([{ role: 'user', content: '<customer_message>عندكم ورد؟</customer_message>' }, { role: 'assistant', content: 'عندنا ورد بلدي' }, { role: 'user', content: '<customer_message>بكام؟</customer_message>' }]);
   });
 });
 
