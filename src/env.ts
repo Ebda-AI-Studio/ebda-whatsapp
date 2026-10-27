@@ -29,6 +29,9 @@ export type Env = {
   AGENT_ALLOWED_HOSTS?: string;
   /** Overrides the default Workers AI model of the agent. */
   AGENT_MODEL?: string;
+  /** The platform model's price in USD per million tokens (input / output), for the cost-per-credit log and alert (M-084). Unset = cost unknown, no alert. */
+  AI_PRICE_INPUT_USD_PER_M?: string;
+  AI_PRICE_OUTPUT_USD_PER_M?: string;
   /** Phase 6: contact-import workflow (one instance per uploaded file). */
   IMPORT_WORKFLOW: Workflow<{ workspaceId: string; importId: string }>;
   /** Phase 6: campaign broadcasts (one instance per campaign generation, id `<campaignId>-<attempt>`). */

@@ -48,13 +48,15 @@ GROUP BY stage ORDER BY p95_ms_since_receipt
 One workspace: add `AND blob2 = '<workspace id>'`. The product budget is p95 < 500 ms inbound-to-reply; a stage whose p95 jumps shows where.
 
 ## 3. Cost per reply and per workspace
-**One AI credit = one AI turn** (`docs/billing.md`). What a turn COSTS the platform is measured from the tokens each turn writes (`src/core/timing.ts`, `markAiTurn`): `blob1 = 'ai_turn'`, `blob2 = workspace id`, `blob3 = outcome` (`reply`, `order`, `handoff:<reason>`, `error`), `double1 = input tokens`, `double2 = output tokens`, `double3 = model rounds`, `double4 = milliseconds`, `double5 = credits charged` (0 for a workspace with its own model key).
+**One AI credit = one AI turn** (`docs/billing.md`). What a turn COSTS the platform is measured from the tokens each turn writes (`src/core/timing.ts`, `markAiTurn`): `blob1 = 'ai_turn'`, `blob2 = workspace id`, `blob3 = outcome` (`reply`, `order`, `handoff:<reason>`, `error`), `double1 = input tokens`, `double2 = output tokens`, `double3 = model rounds`, `double4 = milliseconds`, `double5 = credits charged` (0 for a workspace with its own model key), `double6 = the platform's cost of the turn in EGP micros` (tokens x the configured model prices x the workspace's FX; 0 = unknown or own model key). The alert on it is `ai_cost_over_threshold` (docs/billing.md).
 ```sql
 SELECT blob2 AS workspace,
        sum(_sample_interval) AS turns,
        sum(double1 * _sample_interval) AS input_tokens,
        sum(double2 * _sample_interval) AS output_tokens,
        sum(double5 * _sample_interval) AS credits_charged,
+       sum(double6 * _sample_interval) / 1000000 AS platform_cost_egp,
+       sum(double6 * _sample_interval) / nullIf(sum(double5 * _sample_interval), 0) / 1000000 AS egp_per_credit,
        quantileWeighted(0.95)(double4, _sample_interval) AS p95_turn_ms
 FROM ebda_wa_usage
 WHERE blob1 = 'ai_turn' AND timestamp > NOW() - INTERVAL '30' DAY
