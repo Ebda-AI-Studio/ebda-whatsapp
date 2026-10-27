@@ -1,7 +1,7 @@
 import { env, introspectWorkflow } from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
 import { importDto, listContactsResponse } from '../src/core/api/contract';
-import { DEFAULT_IMPORT_WORDING } from '../src/core/consent-proof';
+import { DEFAULT_IMPORT_WORDING, STORE_CHECKOUT_WORDING } from '../src/core/consent-proof';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import { BUYER_KEY_1, WA_1, deliver, iso, storeEvent, storeWorkspace, useStoreLink } from './helpers/store-link';
 import { exec, openChat, rows, workspace } from './helpers/workspace';
@@ -80,6 +80,30 @@ it('a Store checkout opt-in records a link proof attested by the store', async (
   const at = Date.now() - 60_000;
   await deliver([storeEvent(ws, 'cart.abandoned', { cartId: 'c1', buyerKey: BUYER_KEY_1, phoneE164: '+201001234567', locale: 'ar', recoveryUrl: 'https://shop.example/cart/x' }, { occurredAt: iso(at) })]);
   expect(await proofs(ws)).toMatchObject([{ source: 'link', attested_by: 'store', at }]);
+});
+
+it('contract v1.5: a consent_changed that carries the checkout wording records those exact words and the locale shown (WA-CONSENT-PROOF-1 gap closed)', async () => {
+  const ws = W(9016);
+  await storeWorkspace(ws);
+  const t0 = Date.now() - 120_000;
+  await deliver([storeEvent(ws, 'cart.abandoned', { cartId: 'c1', buyerKey: BUYER_KEY_1, phoneE164: '+201001234567', locale: 'ar', recoveryUrl: 'https://shop.example/cart/x' }, { occurredAt: iso(t0) })]);
+  await deliver([storeEvent(ws, 'customer.consent_changed', { buyerKey: BUYER_KEY_1, marketingOptIn: false, at: iso(t0 + 1_000) })]);
+  const words = 'أوافق على استلام عروض المتجر على واتساب';
+  await deliver([storeEvent(ws, 'customer.consent_changed', { buyerKey: BUYER_KEY_1, marketingOptIn: true, at: iso(t0 + 2_000), wording: { text: words, locale: 'ar' } })]);
+  const last = (await proofs(ws)).at(-1)!;
+  expect(last).toMatchObject({ source: 'link', attested_by: 'store', wording: words, ref: 'locale:ar', at: t0 + 2_000 });
+});
+
+it('contract v1.5: a consent_changed without wording still records the marker text (older Store builds)', async () => {
+  const ws = W(9017);
+  await storeWorkspace(ws);
+  const t0 = Date.now() - 120_000;
+  await deliver([storeEvent(ws, 'cart.abandoned', { cartId: 'c1', buyerKey: BUYER_KEY_1, phoneE164: '+201001234567', locale: 'en', recoveryUrl: 'https://shop.example/cart/x' }, { occurredAt: iso(t0) })]);
+  await deliver([storeEvent(ws, 'customer.consent_changed', { buyerKey: BUYER_KEY_1, marketingOptIn: false, at: iso(t0 + 1_000) })]);
+  await deliver([storeEvent(ws, 'customer.consent_changed', { buyerKey: BUYER_KEY_1, marketingOptIn: true, at: iso(t0 + 2_000) })]);
+  const last = (await proofs(ws)).at(-1)!;
+  expect(last.wording).toBe(STORE_CHECKOUT_WORDING);
+  expect(last.ref).toBeNull();
 });
 
 it('a backup carries the proofs and restore brings them back', async () => {

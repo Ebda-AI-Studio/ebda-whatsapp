@@ -7,6 +7,9 @@
  */
 import { z } from 'zod';
 
+/** The minor version of this contract (envelope `v` stays 1: every change so far is additive). v1.5 = `customer.consent_changed.wording`. */
+export const CONTRACT_VERSION = '1.5';
+
 const iso = z.string().datetime({ offset: true });
 const phone = z.string().regex(/^\+[1-9]\d{7,14}$/);
 const key = z.string().regex(/^[0-9a-f]{64}$/);
@@ -19,7 +22,9 @@ const ev = <T extends string, D extends z.ZodType>(type: T, data: D) => z.object
 
 export const storeEventSchema = z.discriminatedUnion('type', [
   // `status` and `periodEnd` are optional for compatibility; with them a dunning suspension or a cancellation reaches the package gate.
-  ev('store.plan_changed', z.object({ planCode: z.string(), includesWhatsApp: z.boolean(), ownerUserId: z.string(), effectiveAt: iso, status: planStatus.optional(), periodEnd: iso.optional() })),
+  // v1.4 (additive, WA-GRACE-1): `pastDueSince` = when the subscription first went past_due (set only while status is past_due). WhatsApp ends its
+  // grace at min(periodEnd, pastDueSince + 7 days).
+  ev('store.plan_changed', z.object({ planCode: z.string(), includesWhatsApp: z.boolean(), ownerUserId: z.string(), effectiveAt: iso, status: planStatus.optional(), periodEnd: iso.optional(), pastDueSince: iso.optional() })),
   ev('store.linked', z.object({ ownerUserId: z.string() })),
   ev('store.unlinked', z.object({ ownerUserId: z.string() })),
   ev('catalog.product_upserted', z.object({ productId: z.string().min(1), variantIds: z.array(z.string().min(1)), updatedAt: iso })),
@@ -43,7 +48,9 @@ export const storeEventSchema = z.discriminatedUnion('type', [
   ev('customer.erased', z.object({ buyerKey: key })),
   // v1.1 (additive): the buyer changed their marketing choice at the Store (account settings or a new checkout tick). Marketing to
   // them follows it; a STOP sent on WhatsApp still wins over a later opt-in here.
-  ev('customer.consent_changed', z.object({ buyerKey: key, marketingOptIn: z.boolean(), at: iso })),
+  // v1.5 (additive): `wording` = the exact words shown beside the checkout opt-in tick, in the locale shown (proof of what the buyer agreed to). Present
+  // only when marketingOptIn is true and the Store recorded the locale.
+  ev('customer.consent_changed', z.object({ buyerKey: key, marketingOptIn: z.boolean(), at: iso, wording: z.object({ text: z.string().min(1).max(600), locale: z.enum(['ar', 'en']) }).optional() })),
 ]);
 export type StoreEvent = z.infer<typeof storeEventSchema>;
 export type StoreEventType = StoreEvent['type'];

@@ -5,6 +5,7 @@ import { BUYER_KEY_PROBE_INPUT, MIN_PROBE_SECRET_LENGTH, buyerKeyProbe } from '.
 import { isE164, normaliseE164 } from '../src/core/phone';
 // @ts-expect-error plain .mjs script, no types
 import { runChecks } from '../scripts/verify-prod.mjs';
+import probe from '../vectors/buyer-key-probe.json';
 
 // D4: SUITE_BUYER_KEY_SECRET must be the same value on this Worker and on Ebda Store. A secret that differs silently splits every customer into
 // two identities. Each Worker publishes a DERIVED test vector (the buyer key of one fixed probe number) on /health; verify-prod compares the two.
@@ -49,9 +50,13 @@ it('the vector is published only for a long secret (an offline-guessing oracle o
   expect('buyerKeyVector' in JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: undefined })).text)).toBe(false);
 });
 
-// TODO(vendor): the Store publishes tests/vectors/ebda-wa/buyer-key-probe.json {secret, message, vector} (SHA256SUMS-listed). Once the controller confirms it is on the
-// Store's main, vendor it byte for byte as vendor/vectors/buyer-key-probe.json, pin its sha256 here, and replace this skip with the pinned-vector test.
-it.skip('the vendored Store probe vector (pending: the Store file is not on its main yet)', () => undefined);
+// The Store's probe vector, vendored byte for byte (vectors/buyer-key-probe.json; sha pinned in test/vendored-artifacts.test.ts): same secret,
+// same message, so both Workers prove the same derivation, not just "both use HMAC".
+it("the Store's published probe vector: same secret, same message, same 16 hex", async () => {
+  expect(probe.secret.length).toBeGreaterThanOrEqual(64);
+  expect(BUYER_KEY_PROBE_INPUT).toBe(probe.message);
+  expect(await buyerKeyProbe(probe.secret)).toBe(probe.vector);
+});
 
 it('without the secret there is no vector (and no empty string that two unset Workers would "agree" on)', async () => {
   const r = await health({ SUITE_BUYER_KEY_SECRET: undefined });

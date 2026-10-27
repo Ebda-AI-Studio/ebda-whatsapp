@@ -146,7 +146,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       if (!event.data.marketingOptIn) recordWithdrawal(host, event.data.buyerKey, at(event.data.at)); // before the unknown-buyer return
       if (event.data.marketingOptIn && !isLinked(host)) return { status: 'skipped', detail: 'unlinked' };
       if (!pre.consentWaId) return { status: 'skipped', detail: 'unknown_buyer' }; // the attestation comes with a later event
-      return applyConsentChanged(host, pre.consentWaId, event.data.buyerKey, event.data.marketingOptIn, at(event.data.at));
+      return applyConsentChanged(host, pre.consentWaId, event.data.buyerKey, event.data.marketingOptIn, at(event.data.at), event.data.wording);
     }
     default:
   }

@@ -29,10 +29,9 @@ export async function applyStorePlan(env: Env, event: PlanEvent, now = Date.now(
   }
   const status = event.data.status ?? 'cancelled';
   const periodEnd = event.data.periodEnd ? Date.parse(event.data.periodEnd) : eff;
-  // TODO(Store #218, contract v1.4): `pastDueSince` (ISO, only while past_due) is not in the vendored event schema yet, so it is read defensively; once
-  // store-events.ts is re-vendored this becomes `event.data.pastDueSince` and the cast goes. Without it the first past_due we see is "now" (setSubscription).
-  const rawSince = (event.data as { pastDueSince?: unknown }).pastDueSince;
-  const since = status === 'past_due' && typeof rawSince === 'string' ? Date.parse(rawSince) : NaN;
+  // Contract v1.4: `pastDueSince` (ISO, only while past_due). Without it the first past_due we see is "now" (setSubscription).
+  const rawSince = event.data.pastDueSince;
+  const since = status === 'past_due' && rawSince ? Date.parse(rawSince) : NaN;
   const pastDueSince = Number.isFinite(since) && since > 0 && since <= now ? since : undefined;
   const claim = env.DB.prepare(
     `INSERT INTO store_plan_applied (workspace_id, effective_at, event_id, includes_whatsapp, status, period_end, claimed) VALUES (?, ?, ?, ?, ?, ?, 1)
