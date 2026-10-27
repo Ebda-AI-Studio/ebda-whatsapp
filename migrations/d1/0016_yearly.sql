@@ -18,6 +18,10 @@ ALTER TABLE package_orders ADD COLUMN period_months INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE package_orders ADD COLUMN kind TEXT NOT NULL DEFAULT 'purchase' CHECK (kind IN ('purchase', 'upgrade', 'queued_switch'));
 ALTER TABLE package_orders ADD COLUMN from_package TEXT;
 ALTER TABLE package_orders ADD COLUMN period_owner TEXT;
+-- The period an upgrade / queued switch was PRICED against. The grant applies only while the subscription is still in exactly that period (a stale quote paid after
+-- the period rolled is never granted at the old pro-rata price; it stays paid-but-ungranted and alerts a person).
+ALTER TABLE package_orders ADD COLUMN quoted_period_start INTEGER;
+ALTER TABLE package_orders ADD COLUMN quoted_period_end INTEGER;
 
 -- One executed yearly refund per period owner (the operator's cancel + refund, debt first): the stored figures make a replay return the same answer and
 -- redo only the idempotent steps. cash_minor = what still has to be sent back through the provider's dashboard (0 = no money goes out).

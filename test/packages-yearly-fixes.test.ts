@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addMonthsUtc, yearlyRefundQuote } from '../src/core/billing/yearly';
 import { createInstapayRequest } from '../src/core/billing/instapay';
 import { KashierProvider, configurePayments, type PaymentProvider } from '../src/core/billing/payments';
-import { packageRefundQuote, startPackageCheckout } from '../src/core/billing/package-orders';
+import { executeYearlyRefund, packageRefundQuote, repairPackageOrders, startPackageCheckout } from '../src/core/billing/package-orders';
 import { rollRenewals } from '../src/core/billing/subscriptions';
 import { handleProviderWebhook } from '../src/core/billing/topups';
 import { configureSessionCheck } from '../src/core/identity/session';
@@ -387,5 +387,83 @@ describe('a webhook retry after the store-plan fallback is safe', () => {
     await hook(o.orderId, 'TX-FULL', '6210.00', { label: 'refund' });
     expect(await ledger(ws)).toEqual(once);
     expect((await workspace(ws).aiCredits()).balance).toBe(balance);
+  });
+});
+
+describe('security review: a stale quote, a cross-period refund and the refund of an upgrade', () => {
+  const T0 = Date.now();
+  const monthK = (k: number) => addMonths(T0, k - 1) + 3_600_000;
+  const payOrder = async (orderId: string, amountMinor: number, tx: string, at: number) => {
+    const { body, sig } = await signed({ merchantOrderId: orderId, transactionId: tx, amount: (amountMinor / 100).toFixed(2) });
+    await handleProviderWebhook(env, body, sig, kashier, at);
+  };
+
+  it('HIGH: an upgrade quoted against one period is NOT granted if it is paid after the period rolled (left paid-but-ungranted, alerted), and a pending one expires', async () => {
+    const ws = W(80);
+    await buyAt(ws, 'starter-yearly', T0);
+    const before = (await sub(ws))!;
+    const up = await startPackageCheckout(env, { workspaceId: ws, userId: 'u1', sessionId: 's1', packageId: 'growth-yearly' }, monthK(2));
+    if (!up.ok) throw new Error(up.reason);
+    expect(await env.DB.prepare('SELECT quoted_period_start AS s, quoted_period_end AS e FROM package_orders WHERE order_id = ?').bind(up.orderId).first()).toEqual({ s: before.period_start, e: before.period_end });
+    await env.DB.prepare('UPDATE workspace_subscriptions SET period_start = period_end, period_end = ?, version = version + 1 WHERE workspace_id = ?').bind(addMonths(before.period_end, 12), ws).run();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await payOrder(up.orderId, up.amountMinor, 'TX-STALE', monthK(2));
+    expect(await sub(ws)).toMatchObject({ package_id: 'starter-yearly', period_start: before.period_end });
+    expect(await env.DB.prepare('SELECT status, granted_at FROM package_orders WHERE order_id = ?').bind(up.orderId).first()).toEqual({ status: 'paid', granted_at: null });
+    expect(log.mock.calls.flat().join(' ')).toContain('"alert":"switch_order_stale"');
+    // an unpaid quote for a period that has ended expires
+    const ws2 = W(81);
+    await buyAt(ws2, 'starter-yearly', T0);
+    const open = await startPackageCheckout(env, { workspaceId: ws2, userId: 'u1', sessionId: 's1', packageId: 'growth-yearly' }, monthK(2));
+    if (!open.ok) throw new Error(open.reason);
+    const end = (await sub(ws2))!.period_end;
+    await repairPackageOrders(env, end + 1000, null);
+    expect(await env.DB.prepare('SELECT status FROM package_orders WHERE order_id = ?').bind(open.orderId).first()).toEqual({ status: 'expired' });
+  });
+  it('HIGH: a queued downgrade quoted against one period is not granted after the period rolled either', async () => {
+    const ws = W(82);
+    await buyAt(ws, 'growth-yearly', T0);
+    const before = (await sub(ws))!;
+    const low = await startPackageCheckout(env, { workspaceId: ws, userId: 'u1', sessionId: 's1', packageId: 'starter-yearly' }, monthK(2));
+    if (!low.ok) throw new Error(low.reason);
+    await env.DB.prepare('UPDATE workspace_subscriptions SET period_start = period_end, period_end = ?, version = version + 1 WHERE workspace_id = ?').bind(addMonths(before.period_end, 12), ws).run();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await payOrder(low.orderId, low.amountMinor, 'TX-STALE-Q', monthK(2));
+    expect(await sub(ws)).toMatchObject({ queued_periods: 0, package_id: 'growth-yearly' });
+    expect(await env.DB.prepare('SELECT status, granted_at, queued_seq FROM package_orders WHERE order_id = ?').bind(low.orderId).first()).toEqual({ status: 'paid', granted_at: null, queued_seq: null });
+  });
+
+  it('MEDIUM: an order of an EARLIER period (an upgrade whose owner no longer owns the running period) cannot refund, shorten or cancel the current one', async () => {
+    const ws = W(83);
+    const a = await buyAt(ws, 'starter-yearly', T0);
+    const u = await buyAt(ws, 'growth-yearly', monthK(1)); // upgrade of A's period
+    await buyAt(ws, 'growth-yearly', T0 + 2000); // a queued renewal of the new package
+    const ended = Math.floor((Date.now() - 1000) / 1000) * 1000;
+    await env.DB.prepare('UPDATE workspace_subscriptions SET period_end = ? WHERE workspace_id = ?').bind(ended, ws).run();
+    expect(await rollRenewals(env, ws, Date.now())).toBe(1); // the renewal now owns the running period; A (and its upgrade U) belong to the past
+    const cur = (await sub(ws))!;
+    await hook(u.orderId, 'TX-OLD-1', '2235.00', { label: 'partial_refund' });
+    expect((await sub(ws))!.period_end).toBe(cur.period_end); // not shortened
+    expect(await executeYearlyRefund(env, u.orderId, { actor: 'op', reason: 'wrong order' })).toEqual({ ok: false, reason: 'not_running' });
+    expect(await executeYearlyRefund(env, a.orderId, { actor: 'op', reason: 'wrong order' })).toEqual({ ok: false, reason: 'not_running' });
+    expect(await packageRefundQuote(env, u.orderId, Date.now())).toMatchObject({ unusedMonths: 0, refundMinor: 0 });
+    expect((await sub(ws))!.status).toBe('active');
+  });
+
+  it('MEDIUM: a FULL refund of an upgrade puts the subscription back on the package it was bought from, for the rest of the period; it does not cancel or roll anything', async () => {
+    const ws = W(84);
+    const a = await buyAt(ws, 'starter-yearly', T0);
+    const u = await buyAt(ws, 'growth-yearly', monthK(1));
+    const mid = (await sub(ws))!;
+    expect(mid.package_id).toBe('growth-yearly');
+    await hook(u.orderId, 'TX-UP-FULL', '7200.00', { label: 'refund' });
+    const after = (await sub(ws))!;
+    expect(after).toMatchObject({ package_id: 'starter-yearly', status: 'active', period_start: mid.period_start, period_end: mid.period_end, queued_periods: 0 });
+    expect(after.version).toBeGreaterThan(mid.version);
+    expect(await orderFull(u.orderId)).toMatchObject({ status: 'refunded', refunded_minor: 720000 });
+    expect(await orderFull(a.orderId)).toMatchObject({ status: 'paid', owns_running: 1 });
+    expect((await workspace(ws).getEntitlement())!.packageId).toBe('starter-yearly');
+    await hook(u.orderId, 'TX-UP-FULL', '7200.00', { label: 'refund' }); // the webhook is retried
+    expect((await sub(ws))!.version).toBe(after.version);
   });
 });
