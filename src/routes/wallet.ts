@@ -23,7 +23,7 @@ walletRoutes.get('/stores/:storeId/wallet', async (c) => {
   const dto: WalletDto = {
     balanceMinor: v.balanceMinor, heldMinor: v.heldMinor, availableMinor: v.availableMinor, debtMinor: v.debtMinor, creditLimitMinor: v.creditLimitMinor, currency: 'EGP',
     funding: results.map((r) => ({ phoneNumberId: r.phone_number_id, displayPhone: r.display_phone, funding: r.funding ?? 'unknown' })),
-    topupsEnabled: topupsEnabled(c.env), lowBalance: v.lowBalance, aiCredits: v.aiCredits, plan: v.plan as WalletDto['plan'],
+    topupsEnabled: topupsEnabled(c.env), lowBalance: v.lowBalance, lowBalanceThresholdMinor: v.lowBalanceThresholdMinor, aiCredits: v.aiCredits, plan: v.plan as WalletDto['plan'],
     ...(owner(c) ? { instapayNotice: await rejectionNotice(c.env, c.req.param('storeId')!) } : {}),
   };
   return c.json(dto);

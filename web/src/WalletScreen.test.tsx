@@ -496,3 +496,15 @@ describe('wallet: pay with InstaPay', () => {
     expect(screen.queryByRole('region', { name: t.wIpTitle })).toBeNull();
   });
 });
+
+describe('AI credits: what one is and when it is low (M-084)', () => {
+  it('says what a credit pays for and shows no warning while credits are healthy', async () => {
+    await openWallet();
+    expect(screen.getByText(t.wAiCreditDefinition)).toBeTruthy();
+    expect(screen.queryByText(/باقي .* رصيد ذكاء اصطناعي بس/)).toBeNull();
+  });
+  it('warns, with the threshold, when the credits are low', async () => {
+    await openWallet(withWallet({ aiCredits: { balance: 8, available: 8, low: true, lowThreshold: 30, allowance: 300 } }));
+    expect(screen.getByText(t.wAiCreditsLow('8', '30'))).toBeTruthy();
+  });
+});

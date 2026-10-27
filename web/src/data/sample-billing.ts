@@ -65,7 +65,7 @@ export function createSampleWallet(): WalletApi {
   const wallet: WalletDto = {
     balanceMinor: 18500, heldMinor: 2500, availableMinor: 16000, debtMinor: 0, creditLimitMinor: 5000, currency: 'EGP',
     funding: [{ phoneNumberId: 'pn-sample-1', displayPhone: '+20 100 555 0101', funding: 'merchant_card' }, { phoneNumberId: 'pn-sample-shared', displayPhone: '+20 100 555 0900', funding: 'platform_line' }],
-    topupsEnabled: true, lowBalance: false, aiCredits: { balance: 500, available: 480 },
+    topupsEnabled: true, lowBalance: false, lowBalanceThresholdMinor: 2000, aiCredits: { balance: 500, available: 480, low: false, lowThreshold: 30, allowance: 300 },
     plan: { packageId: 'growth', status: 'active', periodEnd: BASE + 18 * D, cancelledAt: null },
   };
   return {

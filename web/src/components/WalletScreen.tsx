@@ -119,6 +119,8 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
             <div><dt>{t.wHeld}</dt><dd>{money(wallet.heldMinor)}</dd></div>
             <div><dt>{t.wAiCredits}</dt><dd>{num(wallet.aiCredits.available, lang)}</dd></div>
           </dl>
+          {wallet.aiCredits.low && <p className="wallet-debt" role="status">{t.wAiCreditsLow(num(wallet.aiCredits.available, lang), num(wallet.aiCredits.lowThreshold, lang))}</p>}
+          <p className="muted">{t.wAiCreditDefinition}</p>
           {wallet.debtMinor > 0 && <p className="wallet-debt">{t.wDebtLine(money(wallet.debtMinor))}</p>}
           {paused && <p className="wallet-debt">{t.wMarketingPaused}</p>}
           <p className="muted">{t.wOverdraft(money(wallet.creditLimitMinor))}</p>
