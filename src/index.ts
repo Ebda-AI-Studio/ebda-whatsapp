@@ -241,8 +241,8 @@ app.post('/meta/webhook', async (c) => {
     if (number && tier !== undefined) await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(number.workspaceId)).setNumberLimits(number.phoneNumberId, { tier });
     if (number) await c.env.DB.prepare('UPDATE phone_numbers SET messaging_limit_tier = ? WHERE phone_number_id = ?').bind(u.currentLimit, number.phoneNumberId).run();
   }
-  for (const q of extractQualityEvents(payload)) await applyHealthEvent(c.env, q.wabaId, q.displayPhone, { kind: 'quality', event: q.event });
-  for (const a of extractAccountEvents(payload)) await applyAccountEvent(c.env, a.wabaId, a.restricted ? { kind: 'restricted' } : { kind: 'restriction_lifted' });
+  for (const q of extractQualityEvents(payload)) await applyHealthEvent(c.env, q.wabaId, q.displayPhone, { kind: 'quality', event: q.event }, q.at, (f) => c.executionCtx.waitUntil(f()));
+  for (const a of extractAccountEvents(payload)) await applyAccountEvent(c.env, a.wabaId, a.restricted ? { kind: 'restricted' } : { kind: 'restriction_lifted' }, a.at, (f) => c.executionCtx.waitUntil(f()));
   for (const u of extractNameUpdates(payload)) {
     const number = await numberForDisplayPhone(c.env.DB, u.wabaId, u.displayPhone);
     if (!number) continue;

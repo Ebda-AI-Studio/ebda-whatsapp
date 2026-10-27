@@ -42,13 +42,13 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     if (write && !principal.integration) {
       const s = await writeSessionState(c.env, principal.sessionId);
       if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
-      if (s === 'unavailable') return c.json({ error: 'rate_limited', message: 'session_check_unavailable' }, 503);
+      if (s === 'unavailable') return c.json({ error: 'unavailable', message: 'session_check_unavailable' }, 503);
     }
-    // The operator kill switch (W2-OPS), read from D1 on every request that needs it (a NEVER-stale gate, no cache): every integrator token issued
-    // at or before `integrations_revoked_at` is refused, and a suspended workspace takes no writes except paying, and erasing a contact.
+    // The operator kill switch (W2-OPS), read from D1 on every request that needs it (a NEVER-stale gate, no cache): every integrator token is refused
+    // while `integrations_revoked_at` is set, and a suspended workspace takes no writes except paying, and erasing a contact.
     if (storeId && (write || principal.integration)) {
       const flags = await c.env.DB.prepare('SELECT suspended_at, integrations_revoked_at FROM workspaces WHERE id = ?').bind(storeId).first<{ suspended_at: number | null; integrations_revoked_at: number | null }>();
-      if (principal.integration && flags?.integrations_revoked_at != null && principal.integration.issuedAt * 1000 <= flags.integrations_revoked_at) return c.json({ error: 'unauthorized' }, 401);
+      if (principal.integration && flags?.integrations_revoked_at != null) return c.json({ error: 'unauthorized' }, 401); // the operator revoked this store's integrations: EVERY server token is refused (a client re-mints every few minutes, so an issue-time cut-off would not hold) until the operator restores them
       if (write && flags?.suspended_at != null && !principal.superAdmin && !allowedWhileSuspended(c.req.method, new URL(c.req.url).pathname)) return c.json({ error: 'forbidden', message: 'workspace_suspended' }, 403);
     }
     if (principal.integration) {

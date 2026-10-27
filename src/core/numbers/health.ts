@@ -2,10 +2,11 @@
  * Number health (W2-META). One small state machine per phone number, fed by Meta's `phone_number_quality_update` and `account_update`
  * webhooks, a rating refresh and the spike guard:
  *
- *   green  --FLAGGED / YELLOW / DOWNGRADE / spike-->  yellow  --RED-->  red        (RESTRICTED beats all three)
- *   any    --restriction / ban / violation-->         restricted
- *   restricted --restriction lifted-->                yellow   (never straight to green: the next UNFLAGGED / UPGRADE / GREEN does that)
- *   yellow|red --UNFLAGGED / UPGRADE / GREEN-->       green    (yellow --YELLOW--> yellow, red --YELLOW--> yellow)
+ *   any    --FLAGGED / rating RED-->                 red        (a quality event never LOWERS red or restricted)
+ *   green  --DOWNGRADE / rating YELLOW / spike-->    yellow
+ *   any    --restriction / ban / violation-->        restricted (beats everything)
+ *   restricted --restriction lifted-->               yellow     (never straight to green)
+ *   yellow|red --UNFLAGGED / GREEN rating-->         green      (UPGRADE only lifts yellow)
  *
  * What each state does (applied in the workspace Durable Object, src/core/workspace-do.ts):
  *   yellow     running and scheduled campaigns on the number are paused (`quality_flagged`); P1 `number_quality_flagged`
@@ -23,34 +24,35 @@ export type HealthSignal =
   | { kind: 'restriction_lifted' }
   | { kind: 'spike' };
 
-type Level = 'green' | 'yellow' | 'red';
+const rank = (s: HealthState): number => HEALTH_STATES.indexOf(s);
+const worse = (a: HealthState, b: HealthState): HealthState => (rank(b) > rank(a) ? b : a);
 
-/** Meta's `event` of a quality update. ONBOARDING and anything unknown change nothing. */
-function levelOfEvent(event: string): Level | null {
-  switch (event.toUpperCase()) {
-    case 'FLAGGED': case 'DOWNGRADE': return 'yellow';
-    case 'UNFLAGGED': case 'UPGRADE': return 'green';
-    default: return null;
-  }
-}
-function levelOfRating(rating: string): Level | null {
-  switch (rating.toUpperCase()) {
-    case 'GREEN': return 'green';
-    case 'YELLOW': return 'yellow';
-    case 'RED': return 'red';
-    default: return null;
-  }
-}
-
+/**
+ * FAIL CLOSED: a quality event only ever holds or raises the state. The only ways down are the explicit recovery signals: UNFLAGGED, a GREEN rating read,
+ * UPGRADE out of yellow, and (restricted only) Meta lifting the restriction, which lands on yellow. FLAGGED is treated as RED: Meta says the number's quality
+ * is poor enough to be flagged, so campaigns pause AND new templates stop until Meta says it recovered. INFERRED from Meta's documentation, not seen live.
+ */
 export function nextHealth(current: HealthState, signal: HealthSignal): HealthState {
   switch (signal.kind) {
     case 'restricted': return 'restricted';
     case 'restriction_lifted': return current === 'restricted' ? 'yellow' : current;
-    case 'spike': return current === 'green' ? 'yellow' : current;
-    case 'quality': case 'rating': {
-      const level = signal.kind === 'quality' ? levelOfEvent(signal.event) : levelOfRating(signal.rating);
-      if (level === null || current === 'restricted') return current; // a restriction is only lifted by Meta saying so
-      return level;
+    case 'spike': return worse(current, 'yellow');
+    case 'quality': {
+      switch (signal.event.toUpperCase()) {
+        case 'FLAGGED': return worse(current, 'red');
+        case 'DOWNGRADE': return worse(current, 'yellow');
+        case 'UNFLAGGED': return current === 'restricted' ? current : 'green';
+        case 'UPGRADE': return current === 'yellow' ? 'green' : current;
+        default: return current; // ONBOARDING and anything unknown
+      }
+    }
+    case 'rating': {
+      switch (signal.rating.toUpperCase()) {
+        case 'RED': return worse(current, 'red');
+        case 'YELLOW': return worse(current, 'yellow');
+        case 'GREEN': return current === 'restricted' ? current : 'green';
+        default: return current;
+      }
     }
   }
 }
@@ -69,6 +71,14 @@ export function currentHealth(sql: SqlStorage, phoneNumberId: string): HealthSta
 }
 export function logHealth(sql: SqlStorage, phoneNumberId: string, from: HealthState, to: HealthState, source: string, detail: string | null, now: number): void {
   sql.exec('INSERT INTO number_health_log (phone_number_id, at, from_state, to_state, source, detail) VALUES (?, ?, ?, ?, ?, ?)', phoneNumberId, now, from, to, source, detail);
+}
+
+/** When (Meta's time, ms) the newest signal applied to this number happened; 0 = none yet. */
+export function lastSignalAt(sql: SqlStorage, phoneNumberId: string): number {
+  return sql.exec<{ signal_at: number }>('SELECT signal_at FROM number_health_signal WHERE phone_number_id = ?', phoneNumberId).toArray()[0]?.signal_at ?? 0;
+}
+export function recordSignalAt(sql: SqlStorage, phoneNumberId: string, at: number): void {
+  sql.exec('INSERT INTO number_health_signal (phone_number_id, signal_at) VALUES (?, ?) ON CONFLICT(phone_number_id) DO UPDATE SET signal_at = max(signal_at, excluded.signal_at)', phoneNumberId, at);
 }
 
 /** Meta errors that signal a sender-quality problem: 131049 (marketing frequency cap) and 131026 (undeliverable: blocked / not on WhatsApp). */
@@ -102,8 +112,8 @@ export function setSuspendedFlag(sql: SqlStorage, suspended: boolean, reason: st
 // ---- D1 (what the Worker, the Numbers screen and the shared-number join read) -----------------------------------------------
 
 /** Writes the state next to the number. Awaited by the writer: if D1 fails the webhook answers 5xx and Meta redelivers (the transition is idempotent). */
-export async function mirrorHealth(db: D1Database, table: 'phone_numbers' | 'shared_numbers', phoneNumberId: string, state: HealthState, reason: string, now: number): Promise<void> {
-  await db.prepare(`UPDATE ${table} SET health_state = ?, health_reason = ?, health_at = ? WHERE phone_number_id = ? AND (health_state <> ? OR health_reason IS NOT ?)`).bind(state, reason, now, phoneNumberId, state, reason).run();
+export async function mirrorHealth(db: D1Database, table: 'phone_numbers' | 'shared_numbers', phoneNumberId: string, state: HealthState, reason: string, now: number, signalAt = 0): Promise<void> {
+  await db.prepare(`UPDATE ${table} SET health_state = ?, health_reason = ?, health_at = ?, health_signal_at = max(health_signal_at, ?) WHERE phone_number_id = ? AND (health_state <> ? OR health_reason IS NOT ? OR health_signal_at < ?)`).bind(state, reason, now, signalAt, phoneNumberId, state, reason, signalAt).run();
 }
 
 export async function sharedNumberByDisplay(db: D1Database, wabaId: string, displayPhone: string): Promise<{ phoneNumberId: string; state: HealthState } | null> {

@@ -168,6 +168,7 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       else if (action === 'shared-number/evict') ops.evicted = true;
       else if (action === 'shared-number/readmit') ops.evicted = false;
       else if (action === 'integrations/revoke') ops.revokedAt = Date.now();
+      else if (action === 'integrations/restore') ops.revokedAt = null;
     },
     pricingSettings: async () => structuredClone(settings),
     async publishPricingSettings(input) {

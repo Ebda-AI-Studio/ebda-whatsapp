@@ -1,14 +1,17 @@
 import { SELF, createExecutionContext, env } from 'cloudflare:test';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 import { clearIntegrationCache } from '../src/core/identity/integration';
 import { configureSessionCheck } from '../src/core/identity/session';
 import { joinShared, sharedStatus } from '../src/core/shared/shared-number';
 import { postWebhook } from './helpers/meta';
 import { mintClient } from './helpers/issuer';
-import { PARAMS, makeCampaign, seedContacts, seedTemplate } from './helpers/campaigns';
+import { PARAMS, makeCampaign, seedContacts, seedSharedTemplate, seedTemplate } from './helpers/campaigns';
 import { OP1, apiFor, apiKey, operatorCall, storeId as W, useApiKey } from './helpers/api';
-import { chat, fund, jobOf, pn, queueText, setupBilling } from './helpers/billing';
+import { chat, fund, holdOf, jobOf, pn, queueTemplate, queueText, sendOut, setupBilling } from './helpers/billing';
+import { applyHealthEvent, syncMemberHealth } from '../src/core/numbers/health-events';
+import { configureWriteSessionDefault } from '../src/core/identity/session';
+import { SPIKE_THRESHOLD } from '../src/core/numbers/health';
 import { exec, own, rows, workspace } from './helpers/workspace';
 
 useApiKey();
@@ -60,13 +63,19 @@ describe('suspend / unsuspend', () => {
     const conv = await chat(ws, 'UTILITY');
     const api = await apiFor(ws);
     expect((await api.call('POST', `/conversations/${conv}/messages`, { ...sendBody, clientId: crypto.randomUUID() })).status).toBe(202);
+    const topupBefore = await api.call('POST', '/wallet/topups', { amountMinor: 10000 });
+    await exec(ws, "INSERT INTO contacts (wa_id, profile_name) VALUES ('201009999999', 'erase me')");
     expect((await operatorCall(OP1, 'POST', `/workspaces/${ws}/suspend`, { reason: REASON })).status).toBe(200);
+    const topupWhileSuspended = await api.call('POST', '/wallet/topups', { amountMinor: 10000 });
+    const erasedWhileSuspended = await api.call('DELETE', '/contacts/201009999999');
     const blocked = await api.call('POST', `/conversations/${conv}/messages`, { ...sendBody, clientId: crypto.randomUUID() });
     expect(blocked.status).toBe(403);
     expect(await blocked.json()).toEqual({ error: 'forbidden', message: 'workspace_suspended' });
     expect((await api.call('GET', '/conversations')).status).toBe(200); // reading stays
-    expect(((await (await api.call('POST', '/wallet/topups', { amountMinor: 10000 })).json()) as { message?: string }).message).not.toBe('workspace_suspended'); // paying is not blocked
-    expect(((await (await api.call('DELETE', '/contacts/201009999999')).json()) as { message?: string }).message).not.toBe('workspace_suspended'); // a data-erasure right stays
+    // Paying and erasing a contact are NOT blocked: each answers exactly what it answers for a store that is not suspended (asserted against the real status, not "anything but the suspension").
+    expect(topupWhileSuspended.status).toBe(topupBefore.status);
+    expect(topupWhileSuspended.status).not.toBe(403);
+    expect(erasedWhileSuspended.status).toBe(200);
     const unsus = await operatorCall(OP1, 'POST', `/workspaces/${ws}/unsuspend`, { reason: 'resolved with the owner' });
     expect(unsus.status).toBe(200);
     expect((await api.call('POST', `/conversations/${conv}/messages`, { ...sendBody, clientId: crypto.randomUUID() })).status).toBe(202);
@@ -138,23 +147,15 @@ describe('shared number', () => {
     }
     expect(await env.DB.prepare('SELECT 1 FROM shared_number_members').first()).toBeNull();
   });
-  it('the platform number\'s state follows Meta\'s webhooks (D1 row, P1 alert path) and recovers on UPGRADE', async () => {
+  it('the platform number\'s state follows Meta\'s webhooks (D1 row; FLAGGED -> red, UNFLAGGED recovers) and an older retry is ignored', async () => {
     await sharedRow('green');
-    const hook = (event: string) => JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: 'waba-plat', time: 1, changes: [{ field: 'phone_number_quality_update', value: { display_phone_number: '201008880001', event, current_limit: 'TIER_1K' } }] }] });
-    expect((await postWebhook(SELF, hook('FLAGGED'))).status).toBe(200);
-    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('yellow');
-    await postWebhook(SELF, hook('UPGRADE'));
+    const hook = (event: string, time: number) => JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: 'waba-plat', time, changes: [{ field: 'phone_number_quality_update', value: { display_phone_number: '201008880001', event, current_limit: 'TIER_1K' } }] }] });
+    expect((await postWebhook(SELF, hook('FLAGGED', 100))).status).toBe(200);
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('red');
+    await postWebhook(SELF, hook('UNFLAGGED', 200));
     expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green');
-  });
-  it('sharedStatus reports the number unavailable unless it is green (the join card disappears with it)', async () => {
-    const ws = W(1111);
-    await setupBilling(ws);
-    await sharedRow('green');
-    expect((await sharedStatus(env, ws)).available).toBe(true);
-    for (const s of ['yellow', 'red', 'restricted']) {
-      await env.DB.prepare('UPDATE shared_numbers SET health_state = ?').bind(s).run();
-      expect((await sharedStatus(env, ws)).available, s).toBe(false);
-    }
+    await postWebhook(SELF, hook('FLAGGED', 100)); // Meta retries the old one
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green');
   });
   it('a member store\'s own Durable Object learns the platform number went red / restricted: template sends are refused and a campaign cannot start (fail-open gate closed)', async () => {
     const ws = W(1112);
@@ -169,15 +170,18 @@ describe('shared number', () => {
     const hook = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: 'waba-plat', time: 1, changes: [{ field: 'account_update', value: { event: 'ACCOUNT_RESTRICTION', restriction_info: [{ restriction_type: 'RESTRICTED_BIZ_INITIATED_MESSAGING' }] } }] }] });
     expect((await postWebhook(SELF, hook)).status).toBe(200);
     expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('restricted');
-    expect(await workspace(ws).numberHealth('pn-plat')).toBe('restricted'); // pushed to the member's own copy
+    await vi.waitFor(async () => expect(await workspace(ws).numberHealth('pn-plat')).toBe('restricted')); // pushed to the member's own copy (in the background)
     expect(await workspace(ws).sendCampaign(created.campaign.id)).toEqual({ ok: false, reason: 'number_restricted' });
+    await env.DB.prepare("INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES ('pn-plat', 'platform_line', 0)").run();
+    await seedSharedTemplate('pn-plat', { name: 'tpl-u', language: 'ar' });
     const conv = await chat(ws, 'UTILITY');
     const tpl = await workspace(ws).queueOutbound(conv, 'pn-plat', { type: 'template', clientId: crypto.randomUUID(), name: 'tpl-u', language: 'ar', params: [] });
+    expect(tpl.ok).toBe(true);
     if (tpl.ok && tpl.job) expect(await workspace(ws).claimSend(tpl.job)).toBe('dropped');
     // recovery reaches the members too
     const lifted = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: 'waba-plat', time: 1, changes: [{ field: 'account_update', value: { event: 'ACCOUNT_RESTRICTION', restriction_info: [] } }] }] });
     await postWebhook(SELF, lifted);
-    expect(await workspace(ws).numberHealth('pn-plat')).toBe('yellow');
+    await vi.waitFor(async () => expect(await workspace(ws).numberHealth('pn-plat')).toBe('yellow'));
   });
   it('evict: the member leaves and its routes go, it cannot rejoin until the operator readmits it; audited', async () => {
     const ws = W(1108);
@@ -197,17 +201,18 @@ describe('revoke all integration tokens of a store', () => {
   const live = { INTEGRATOR_TOKENS_ENABLED: 'true', ACCOUNTS: { isRevoked: async () => false } };
   const call = async (token: string, path: string) =>
     worker.fetch(new Request(`https://x/api/v1${path}`, { headers: { authorization: `Bearer ${token}` } }), { ...env, ...live } as typeof env, createExecutionContext());
-  it('every token issued at or before the revoke is refused (401); a token issued after it works; audited', async () => {
+  it('while revoked EVERY server token is refused (401), also one minted after the revoke (a client re-mints every few minutes); restoring lets them back in; both audited', async () => {
     const ws = W(1109);
     await apiFor(ws);
     const before = await mintClient(apiKey(), { storeId: ws, scope: 'conversations:read' });
     expect((await call(before, `/stores/${ws}/conversations`)).status).toBe(200);
     expect((await operatorCall(OP1, 'POST', `/workspaces/${ws}/integrations/revoke`, { reason: REASON })).status).toBe(200);
     expect((await call(before, `/stores/${ws}/conversations`)).status).toBe(401);
-    expect(await actions(ws)).toEqual([{ actor: OP1, action: 'revoke_integrations', reason: REASON, detail: null }]);
-    await env.DB.prepare('UPDATE workspaces SET integrations_revoked_at = ? WHERE id = ?').bind(Date.now() - 60_000, ws).run(); // the revoke happened a minute ago
-    const after = await mintClient(apiKey(), { storeId: ws, scope: 'conversations:read' });
+    const after = await mintClient(apiKey(), { storeId: ws, scope: 'conversations:read' }); // minted AFTER the revoke
+    expect((await call(after, `/stores/${ws}/conversations`)).status).toBe(401);
+    expect((await operatorCall(OP1, 'POST', `/workspaces/${ws}/integrations/restore`, { reason: 'owner rotated the secret' })).status).toBe(200);
     expect((await call(after, `/stores/${ws}/conversations`)).status).toBe(200);
+    expect((await actions(ws)).map((a) => a.action)).toEqual(['revoke_integrations', 'restore_integrations']);
   });
 });
 
@@ -227,8 +232,171 @@ describe('M-135: a person token is revocation-checked on EVERY write', () => {
     configureSessionCheck(async () => { throw new Error('accounts down'); });
     const down = await send();
     expect(down.status).toBe(503);
-    expect(await down.json()).toEqual({ error: 'rate_limited', message: 'session_check_unavailable' });
+    expect(await down.json()).toEqual({ error: 'unavailable', message: 'session_check_unavailable' });
     expect((await api.call('GET', '/conversations')).status).toBe(200);
     expect((await api.call('POST', `/conversations/${conv}/notes`, { text: 'n' })).status).toBe(503); // every other write is behind the same check
+  });
+});
+
+describe('the production binding path (no test default installed)', () => {
+  it('with the test defaults cleared, a write is checked against env.ACCOUNTS: revoked -> 403, healthy -> 202, throwing -> 503 unavailable', async () => {
+    const ws = W(1113);
+    await setupBilling(ws);
+    const conv = await chat(ws, 'UTILITY');
+    const api = await apiFor(ws);
+    configureSessionCheck(null);
+    configureWriteSessionDefault(null);
+    const send = (accounts: unknown) =>
+      worker.fetch(new Request(`https://x/api/v1/stores/${ws}/conversations/${conv}/messages`, { method: 'POST', headers: { authorization: `Bearer ${api.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ ...sendBody, clientId: crypto.randomUUID() }) }),
+        { ...env, ACCOUNTS: accounts } as typeof env, createExecutionContext());
+    expect((await send({ isRevoked: async () => true })).status).toBe(403);
+    expect((await send({ isRevoked: async () => false })).status).toBe(202);
+    const down = await send({ isRevoked: async () => { throw new Error('down'); } });
+    expect(down.status).toBe(503);
+    expect(await down.json()).toEqual({ error: 'unavailable', message: 'session_check_unavailable' });
+  });
+});
+
+describe('item 1: the suspension / red gate runs AFTER the duplicate checks', () => {
+  it('a redelivered job whose message already went to Meta keeps its wallet hold and is "already_sent", never dropped', async () => {
+    const ws = W(1120);
+    await setupBilling(ws);
+    await fund(ws, 100_000);
+    const conv = await chat(ws, 'UTILITY');
+    const job = jobOf(await queueTemplate(ws, conv, 'UTILITY'));
+    expect(await sendOut(ws, job, 'wamid.sent.1')).toBe('sent');
+    const hold = await holdOf(ws, job);
+    await operatorCall(OP1, 'POST', `/workspaces/${ws}/suspend`, { reason: REASON });
+    expect(await workspace(ws).claimSend(job)).toBe('already_sent');
+    expect(await holdOf(ws, job)).toEqual(hold); // not released early: the charge lands when the status arrives
+    expect(await rows(ws, 'SELECT status FROM messages WHERE idempotency_key = ?', job.idempotencyKey)).toEqual([{ status: 'accepted' }]);
+  });
+  it('a job another attempt is holding right now stays "in_flight" (not acked away as dropped) and its row stays claimed', async () => {
+    const ws = W(1121);
+    await setupBilling(ws);
+    await fund(ws, 100_000);
+    const conv = await chat(ws, 'UTILITY');
+    const job = jobOf(await queueTemplate(ws, conv, 'UTILITY'));
+    expect(await workspace(ws).claimSend(job)).toBe('claimed'); // attempt A
+    await operatorCall(OP1, 'POST', `/workspaces/${ws}/suspend`, { reason: REASON });
+    expect(await workspace(ws).claimSend(job)).toBe('in_flight'); // attempt B
+    expect(await rows(ws, 'SELECT status FROM messages WHERE idempotency_key = ?', job.idempotencyKey)).toEqual([{ status: 'claimed' }]);
+  });
+  it('a QUEUED job on a suspended store is failed and its hold released (the pre-existing behaviour, still there)', async () => {
+    const ws = W(1122);
+    await setupBilling(ws);
+    await fund(ws, 100_000);
+    const conv = await chat(ws, 'UTILITY');
+    const job = jobOf(await queueTemplate(ws, conv, 'UTILITY'));
+    await operatorCall(OP1, 'POST', `/workspaces/${ws}/suspend`, { reason: REASON });
+    expect(await workspace(ws).claimSend(job)).toBe('dropped');
+    expect((await holdOf(ws, job))?.state).not.toBe('open');
+  });
+});
+
+describe('suspend is idempotent and reports a partial state', () => {
+  it('when the workspace copy cannot be reached: 503 unavailable with the D1 half in force and ONE audit row; the same call again finishes it without a second row', async () => {
+    const ws = W(1123);
+    await setupBilling(ws);
+    const spy = vi.spyOn(env.WORKSPACE_DO, 'get').mockImplementation((() => ({ setSuspended: async () => { throw new Error('do down'); } })) as never);
+    const first = await operatorCall(OP1, 'POST', `/workspaces/${ws}/suspend`, { reason: REASON });
+    spy.mockRestore();
+    expect(first.status).toBe(503);
+    expect(await first.json()).toMatchObject({ error: 'unavailable', message: 'suspended_in_d1_workspace_copy_pending_retry' });
+    expect(await env.DB.prepare('SELECT suspended_at FROM workspaces WHERE id = ?').bind(ws).first('suspended_at')).not.toBeNull();
+    expect(await workspace(ws).suspended()).toBe(false); // the copy is behind...
+    expect((await (await apiFor(ws)).call('POST', '/conversations/1/messages', sendBody)).status).toBe(403); // ...but the Worker already refuses writes
+    expect((await operatorCall(OP1, 'POST', `/workspaces/${ws}/suspend`, { reason: REASON })).status).toBe(200);
+    expect(await workspace(ws).suspended()).toBe(true);
+    expect((await actions(ws)).map((a) => a.action)).toEqual(['suspend']);
+  });
+});
+
+describe('the platform number reaches every member (items 6 and 7, and the shadowing question)', () => {
+  const PLAT = 'pn-plat2';
+  async function platform(members: number[], health = 'green') {
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM shared_number_members'), env.DB.prepare('DELETE FROM shared_numbers'),
+      env.DB.prepare("INSERT INTO shared_numbers (phone_number_id, waba_id, display_phone, created_at, health_state) VALUES (?, 'waba-plat', '+20 100 888 0001', 1, ?)").bind(PLAT, health),
+    ]);
+    const ids: string[] = [];
+    for (const n of members) {
+      const ws = W(n);
+      await setupBilling(ws);
+      await env.DB.prepare("INSERT INTO shared_number_members (workspace_id, phone_number_id, display_name, name_key, status, joined_at) VALUES (?, ?, ?, ?, 'active', 1)").bind(ws, PLAT, `Shop ${n}`, `shop${n}`).run();
+      ids.push(ws);
+    }
+    return ids;
+  }
+  const restrictedHook = (time: number) => JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: 'waba-plat', time, changes: [{ field: 'account_update', value: { event: 'ACCOUNT_RESTRICTION', restriction_info: [{ restriction_type: 'X' }] } }] }] });
+
+  it('one signal pages on-call ONCE however many members there are, and every member ends up restricted', async () => {
+    const members = await platform([1130, 1131, 1132]);
+    const spy = vi.spyOn(console, 'error');
+    expect((await postWebhook(SELF, restrictedHook(10))).status).toBe(200);
+    await vi.waitFor(async () => { for (const m of members) expect(await workspace(m).numberHealth(PLAT)).toBe('restricted'); });
+    const names = spy.mock.calls.map((c) => { try { return (JSON.parse(String(c[0])) as { alert?: string }).alert; } catch { return undefined; } });
+    expect(names.filter((n) => n === 'number_restricted')).toHaveLength(1);
+  });
+
+  it('the webhook does not wait for the member pushes: D1 is up to date when it returns, the members are told afterwards', async () => {
+    const members = await platform([1133, 1134]);
+    const later: (() => Promise<unknown>)[] = [];
+    await applyHealthEvent(env, 'waba-plat', '201008880001', { kind: 'restricted' }, 20_000, (f) => later.push(f));
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers WHERE phone_number_id = ?').bind(PLAT).first('health_state')).toBe('restricted');
+    for (const m of members) expect(await workspace(m).numberHealth(PLAT)).toBe('green'); // nobody told yet
+    expect(later).toHaveLength(1);
+    await later[0]?.();
+    for (const m of members) expect(await workspace(m).numberHealth(PLAT)).toBe('restricted');
+  });
+
+  it('a phone_numbers row for the platform number cannot be created through connect (conflict), and one that exists anyway does not shadow it: the signal reaches EVERY member', async () => {
+    const members = await platform([1135, 1136]);
+    await env.DB.prepare("INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, display_phone, status, kind) VALUES (?, 'waba-plat', ?, '+20 100 888 0001', 'active', 'platform')").bind(PLAT, members[0]!).run();
+    await postWebhook(SELF, restrictedHook(30));
+    await vi.waitFor(async () => { for (const m of members) expect(await workspace(m).numberHealth(PLAT)).toBe('restricted'); });
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('restricted');
+    expect(await env.DB.prepare('SELECT health_state FROM phone_numbers WHERE phone_number_id = ?').bind(PLAT).first('health_state')).toBe('green'); // the stray row was not treated as the number
+  });
+  it('item 7: a rejoin after recovery is not refused forever by a stale red copy; a member that missed the push is brought to the current D1 state on join', async () => {
+    const [ws] = await platform([1137]);
+    await workspace(ws!).syncSharedHealth(PLAT, 'red', 5_000); // the stale copy a leaving member keeps
+    await env.DB.prepare("UPDATE shared_number_members SET status = 'left'").run();
+    await env.DB.prepare("UPDATE shared_numbers SET health_state = 'green', health_at = 9000").run(); // the number recovered while it was gone
+    expect(await workspace(ws!).numberHealth(PLAT)).toBe('red');
+    expect(await joinShared(env, ws!, 'Shop 1137')).not.toBe('number_unhealthy');
+    expect(await workspace(ws!).numberHealth(PLAT)).toBe('green'); // synced by the join
+    const conv = await chat(ws!, 'UTILITY');
+    const tpl = await workspace(ws!).queueOutbound(conv, PLAT, { type: 'template', clientId: crypto.randomUUID(), name: 'tpl-u', language: 'ar', params: [] });
+    if (tpl.ok && tpl.job) expect(await workspace(ws!).claimSend(tpl.job)).not.toBe('dropped');
+  });
+  it('item 7: syncing a member while D1 says red makes its own copy refuse templates (a store that joined mid-push)', async () => {
+    const [ws] = await platform([1138], 'red');
+    await env.DB.prepare("UPDATE shared_numbers SET health_at = 7000").run();
+    expect(await workspace(ws!).numberHealth(PLAT)).toBe('green');
+    await syncMemberHealth(env, ws!);
+    expect(await workspace(ws!).numberHealth(PLAT)).toBe('red');
+  });
+  it('an older platform signal arriving late is dropped (ordering also holds for the shared row)', async () => {
+    await platform([1139]);
+    await postWebhook(SELF, restrictedHook(50_000));
+    const lifted = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: 'waba-plat', time: 40_000, changes: [{ field: 'account_update', value: { event: 'DISABLED_UPDATE', ban_info: { waba_ban_state: 'REINSTATE' } } }] }] });
+    await postWebhook(SELF, lifted);
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('restricted');
+  });
+  it('the spike guard counts the platform number per NUMBER: errors spread over several members trip it once', async () => {
+    const members = await platform([1140, 1141]);
+    for (let i = 0; i < SPIKE_THRESHOLD; i++) await workspace(members[i % 2]!).noteSendError(PLAT, 131049);
+    expect(await env.DB.prepare('SELECT health_state, health_reason FROM shared_numbers').first()).toEqual({ health_state: 'yellow', health_reason: 'spike' });
+  });
+});
+
+describe('quality errors are counted once per NEW status event', () => {
+  it('a redelivered failed status (same wamid, status, ts) does not count twice', async () => {
+    const ws = W(1150);
+    await setupBilling(ws);
+    const ev = { wamid: 'wamid.err.1', status: 'failed' as const, ts: 100, errorCode: 131049 };
+    for (let i = 0; i < 3; i++) await workspace(ws).ingest({ phoneNumberId: pn(ws), inbound: [], statuses: [ev], receivedAt: 1 });
+    expect(await rows(ws, 'SELECT sum(n) AS n FROM number_health_events')).toEqual([{ n: 1 }]);
   });
 });

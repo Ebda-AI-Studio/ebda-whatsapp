@@ -1,3 +1,4 @@
+import { isSuspended } from '../numbers/health';
 /**
  * Ordering in chat: browse the Store's catalog, build a cart (or take one sent from Meta's catalog), pick COD, a payment
  * link or InstaPay, give an address, and place the order through the Store bridge. The Store owns orders, stock, prices
@@ -151,7 +152,7 @@ function serialised<T>(key: string, run: () => Promise<T>): Promise<T> {
 
 /** The bot answers only while the Store link is on: a Store bound, copy registered, store linked and the switch on. */
 export function orderingActive(host: Pick<LinkHost, 'sql' | 'env'>): boolean {
-  return bridgeFor(host.env) !== null && storeLink().copy !== null && isLinked(host) && readSettings(host).orderingBot && featureAllowed(host.sql, 'order_in_chat');
+  return !isSuspended(host.sql) && bridgeFor(host.env) !== null && storeLink().copy !== null && isLinked(host) && readSettings(host).orderingBot && featureAllowed(host.sql, 'order_in_chat');
 }
 
 function loadSession(host: LinkHost, waId: string): Session {

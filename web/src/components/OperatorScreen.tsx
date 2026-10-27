@@ -559,6 +559,7 @@ function KillSwitchPanel({ t, lang, api, run, fail }: PanelProps) {
           <button type="button" className="btn danger" onClick={() => ask('shared-number/evict', k.evict)}>{k.evict}</button>
           <button type="button" className="btn" onClick={() => ask('shared-number/readmit', k.readmit)}>{k.readmit}</button>
           <button type="button" className="btn danger" onClick={() => ask('integrations/revoke', k.revoke)}>{k.revoke}</button>
+          <button type="button" className="btn" onClick={() => ask('integrations/restore', k.restore)}>{k.restore}</button>
         </div>
         {asking && (
           <div className="confirm-inline" role="group" aria-label={k.confirm(asking.label)}>

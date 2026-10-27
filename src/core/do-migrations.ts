@@ -1,5 +1,6 @@
 /** WorkspaceDO SQLite schema, applied in order and recorded in _migrations. Never edit a shipped entry; append. */
 export const DO_MIGRATIONS: readonly string[] = [
+  // v1 (Phase 1, inbox core): contacts, conversations, messages and their status events.
   `CREATE TABLE contacts (
      id INTEGER PRIMARY KEY,
      wa_id TEXT UNIQUE NOT NULL,
@@ -37,6 +38,7 @@ export const DO_MIGRATIONS: readonly string[] = [
      error_code INTEGER
    );
    CREATE INDEX status_events_wamid ON message_status_events (wamid);`,
+  // v2: how many times a send job was claimed (a stuck claim is retried at most once).
   `ALTER TABLE messages ADD COLUMN claim_attempts INTEGER NOT NULL DEFAULT 0;`,
   // v3: full text for bodies up to 1 KB (larger ones live in R2); one row per distinct status event.
   `ALTER TABLE messages ADD COLUMN body TEXT;
@@ -126,7 +128,7 @@ export const DO_MIGRATIONS: readonly string[] = [
    );`,
   // v10 (Phase 2, erasure follow-up): idempotency keys of erased messages, so a send job still in the queue is dropped instead of re-creating the contact.
   `CREATE TABLE erased_keys (key TEXT PRIMARY KEY);`,
-  // Lease: a task being run is claimed until lease_until, so overlapping runners (alarm + direct calls) never run it twice.
+  // v11 (lease): a task being run is claimed until lease_until, so overlapping runners (alarm + direct calls) never run it twice.
   `ALTER TABLE scheduled_tasks ADD COLUMN lease_until INTEGER;`,
   // v12 (final review): why a message failed when Meta never saw it (error_code is Meta's numbers only), e.g. 'opted_out'.
   `ALTER TABLE messages ADD COLUMN error_reason TEXT;`,
@@ -441,6 +443,7 @@ export const DO_MIGRATIONS: readonly string[] = [
   // v33 (WA-GRACE-1): when the control plane saw the subscription first fail to renew. NULL = never past_due (or unknown: serviceAllowed then bounds the grace from updated_at).
   `ALTER TABLE entitlements ADD COLUMN past_due_since INTEGER;`,
   // v34 (W2-META number health): the state of each number is its latest log row (no row = green); the log is the audit of every change.
+  // number_health_signal keeps when (Meta's own time, ms) the newest signal applied to a number happened, so an older one retried later is dropped.
   // number_health_events counts the Meta errors that signal a sender-quality problem (131049 frequency cap, 131026 undeliverable) per number in
   // 10-minute buckets, for the spike guard. No phone number, no message content.
   `CREATE TABLE number_health_log (
@@ -453,6 +456,10 @@ export const DO_MIGRATIONS: readonly string[] = [
      detail TEXT
    );
    CREATE INDEX number_health_log_number ON number_health_log (phone_number_id, id);
+   CREATE TABLE number_health_signal (
+     phone_number_id TEXT PRIMARY KEY,
+     signal_at INTEGER NOT NULL
+   );
    CREATE TABLE number_health_events (
      phone_number_id TEXT NOT NULL,
      bucket INTEGER NOT NULL,

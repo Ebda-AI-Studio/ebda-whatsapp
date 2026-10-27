@@ -13,19 +13,26 @@ const alertNames = (s: ReturnType<typeof alerts>) => s.mock.calls.map((c) => { t
 
 describe('the state machine', () => {
   const table: [HealthState, Parameters<typeof nextHealth>[1], HealthState][] = [
-    ['green', { kind: 'quality', event: 'FLAGGED' }, 'yellow'],
+    ['green', { kind: 'quality', event: 'FLAGGED' }, 'red'], // FLAGGED fails closed: campaigns pause AND new templates stop
+    ['yellow', { kind: 'quality', event: 'FLAGGED' }, 'red'],
     ['green', { kind: 'quality', event: 'DOWNGRADE' }, 'yellow'],
+    ['red', { kind: 'quality', event: 'DOWNGRADE' }, 'red'], // a quality event NEVER lowers red
+    ['restricted', { kind: 'quality', event: 'DOWNGRADE' }, 'restricted'],
     ['green', { kind: 'quality', event: 'ONBOARDING' }, 'green'],
+    ['red', { kind: 'quality', event: 'ONBOARDING' }, 'red'],
+    ['red', { kind: 'quality', event: 'UNFLAGGED' }, 'green'], // explicit recovery
     ['yellow', { kind: 'quality', event: 'UNFLAGGED' }, 'green'],
     ['yellow', { kind: 'quality', event: 'UPGRADE' }, 'green'],
+    ['red', { kind: 'quality', event: 'UPGRADE' }, 'red'], // a tier upgrade is not a recovery from red
     ['green', { kind: 'rating', rating: 'RED' }, 'red'],
     ['green', { kind: 'rating', rating: 'yellow' }, 'yellow'],
-    ['red', { kind: 'rating', rating: 'YELLOW' }, 'yellow'],
+    ['red', { kind: 'rating', rating: 'YELLOW' }, 'red'], // not lowered by anything but GREEN
     ['red', { kind: 'rating', rating: 'GREEN' }, 'green'],
     ['red', { kind: 'rating', rating: 'UNKNOWN' }, 'red'],
     ['green', { kind: 'restricted' }, 'restricted'],
     ['red', { kind: 'restricted' }, 'restricted'],
-    ['restricted', { kind: 'quality', event: 'UPGRADE' }, 'restricted'], // only Meta lifting the restriction clears it
+    ['restricted', { kind: 'quality', event: 'UNFLAGGED' }, 'restricted'], // only Meta lifting the restriction clears it
+    ['restricted', { kind: 'quality', event: 'UPGRADE' }, 'restricted'],
     ['restricted', { kind: 'rating', rating: 'GREEN' }, 'restricted'],
     ['restricted', { kind: 'restriction_lifted' }, 'yellow'], // never straight to green
     ['green', { kind: 'restriction_lifted' }, 'green'],
@@ -39,10 +46,10 @@ describe('the state machine', () => {
   });
 });
 
-const qualityHook = (waba: string, display: string, event: string) =>
-  JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: waba, time: 1, changes: [{ field: 'phone_number_quality_update', value: { display_phone_number: display, event, current_limit: 'TIER_1K' } }] }] });
-const accountHook = (waba: string, value: Record<string, unknown>) =>
-  JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: waba, time: 1, changes: [{ field: 'account_update', value }] }] });
+const qualityHook = (waba: string, display: string, event: string, time = 1) =>
+  JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: waba, time, changes: [{ field: 'phone_number_quality_update', value: { display_phone_number: display, event, current_limit: 'TIER_1K' } }] }] });
+const accountHook = (waba: string, value: Record<string, unknown>, time = 1) =>
+  JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: waba, time, changes: [{ field: 'account_update', value }] }] });
 const d1Health = (id: string) => env.DB.prepare('SELECT health_state, health_reason FROM phone_numbers WHERE phone_number_id = ?').bind(id).first<{ health_state: string; health_reason: string | null }>();
 async function runningCampaign(ws: string) {
   await own(ws);
@@ -56,15 +63,15 @@ async function runningCampaign(ws: string) {
 const campaignRow = async (ws: string, id: string) => (await rows<{ status: string; pause_reason: string | null }>(ws, 'SELECT status, pause_reason FROM campaigns WHERE id = ?', id))[0]!;
 
 describe('Meta webhooks drive the state', () => {
-  it('FLAGGED: running campaigns pause with quality_flagged, D1 and the workspace agree, P1 number_quality_flagged; the webhook is acknowledged', async () => {
+  it('FLAGGED: running campaigns pause with quality_flagged, the number goes red (templates stop), D1 and the workspace agree, P0 number_restricted; the webhook is acknowledged', async () => {
     const ws = W(980);
     const c = await runningCampaign(ws);
     const spy = alerts();
     expect((await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'FLAGGED'))).status).toBe(200);
     expect(await campaignRow(ws, c.id)).toEqual({ status: 'paused', pause_reason: 'quality_flagged' });
-    expect(await d1Health('pn-x')).toEqual({ health_state: 'yellow', health_reason: 'quality:FLAGGED' });
-    expect(await workspace(ws).numberHealth('pn-x')).toBe('yellow');
-    expect(alertNames(spy)).toContain('number_quality_flagged');
+    expect(await d1Health('pn-x')).toEqual({ health_state: 'red', health_reason: 'quality:FLAGGED' });
+    expect(await workspace(ws).numberHealth('pn-x')).toBe('red');
+    expect(alertNames(spy)).toContain('number_restricted');
   });
 
   it('a redelivered FLAGGED changes nothing a second time (idempotent: one log row, one alert)', async () => {
@@ -74,14 +81,14 @@ describe('Meta webhooks drive the state', () => {
     await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'FLAGGED'));
     await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'FLAGGED'));
     expect(await rows(ws, 'SELECT 1 FROM number_health_log')).toHaveLength(1);
-    expect(alertNames(spy).filter((n) => n === 'number_quality_flagged')).toHaveLength(1);
+    expect(alertNames(spy).filter((n) => n === 'number_restricted')).toHaveLength(1);
   });
 
-  it('recovery (UPGRADE) turns the number green but NEVER resumes a campaign', async () => {
+  it('recovery (UNFLAGGED) turns the number green but NEVER resumes a campaign', async () => {
     const ws = W(982);
     const c = await runningCampaign(ws);
     await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'FLAGGED'));
-    await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'UPGRADE'));
+    await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'UNFLAGGED', 2));
     expect(await d1Health('pn-x')).toMatchObject({ health_state: 'green' });
     expect(await campaignRow(ws, c.id)).toEqual({ status: 'paused', pause_reason: 'quality_flagged' });
   });
@@ -118,6 +125,36 @@ describe('Meta webhooks drive the state', () => {
   });
 });
 
+describe('fail closed and ordered', () => {
+  it('RED then DOWNGRADE (or a YELLOW rating) is still red: only UNFLAGGED / a GREEN rating lowers it', async () => {
+    const ws = W(991);
+    await runningCampaign(ws);
+    await workspace(ws).applyNumberHealth('pn-x', { kind: 'rating', rating: 'RED' }, Date.now(), 1000);
+    await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'DOWNGRADE', 5)); // newer than the RED, and still not allowed to lower it
+    expect((await d1Health('pn-x'))!.health_state).toBe('red');
+    expect(await workspace(ws).numberHealth('pn-x')).toBe('red');
+    await workspace(ws).applyNumberHealth('pn-x', { kind: 'rating', rating: 'YELLOW' }, Date.now(), 6000);
+    expect(await workspace(ws).numberHealth('pn-x')).toBe('red');
+    await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'UNFLAGGED', 10));
+    expect(await workspace(ws).numberHealth('pn-x')).toBe('green');
+  });
+
+  it('a retried OLDER signal never undoes a newer one: REINSTATE(t1), DISABLE(t2), REINSTATE(t1) again -> still restricted', async () => {
+    const ws = W(992);
+    await runningCampaign(ws);
+    const disable = { event: 'DISABLED_UPDATE', ban_info: { waba_ban_state: 'DISABLE' } };
+    const reinstate = { event: 'DISABLED_UPDATE', ban_info: { waba_ban_state: 'REINSTATE' } };
+    await postWebhook(SELF, accountHook('waba-own', reinstate, 1000));
+    await postWebhook(SELF, accountHook('waba-own', disable, 2000));
+    expect((await d1Health('pn-x'))!.health_state).toBe('restricted');
+    await postWebhook(SELF, accountHook('waba-own', reinstate, 1000)); // Meta retries the old one after a 5xx
+    expect((await d1Health('pn-x'))!.health_state).toBe('restricted');
+    expect(await workspace(ws).numberHealth('pn-x')).toBe('restricted');
+    await postWebhook(SELF, accountHook('waba-own', reinstate, 3000)); // a genuinely newer REINSTATE does lift it
+    expect((await d1Health('pn-x'))!.health_state).toBe('yellow');
+  });
+});
+
 describe('what a number state stops', () => {
   it('RED / restricted: a template send is refused at claim (number_restricted) but a service reply inside the window still goes; yellow stops nothing but campaigns', async () => {
     const ws = W(986);
@@ -125,7 +162,7 @@ describe('what a number state stops', () => {
     await fund(ws, 100_000);
     const conv = await chat(ws, 'UTILITY');
     const number = pn(ws);
-    await workspace(ws).applyNumberHealth(number, { kind: 'quality', event: 'FLAGGED' });
+    await workspace(ws).applyNumberHealth(number, { kind: 'rating', rating: 'YELLOW' });
     const tplYellow = jobOf(await queueTemplate(ws, conv, 'UTILITY'));
     expect(await workspace(ws).claimSend(tplYellow)).toBe('claimed'); // yellow: still allowed
     await workspace(ws).applyNumberHealth(number, { kind: 'rating', rating: 'RED' });
@@ -174,7 +211,7 @@ describe('the Numbers screen reads the state', () => {
   it('GET /numbers carries health for the owner', async () => {
     const ws = W(990);
     await runningCampaign(ws);
-    await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'FLAGGED'));
+    await postWebhook(SELF, qualityHook('waba-own', '201007770001', 'DOWNGRADE'));
     const api = await apiFor(ws);
     const res = await api.call('GET', '/numbers');
     expect(res.status).toBe(200);

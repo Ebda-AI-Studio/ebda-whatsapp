@@ -1,3 +1,4 @@
+import { isSuspended } from './numbers/health';
 /**
  * The front desk: what answers a customer before the ordering bot and the AI agent do. The merchant's service menu (a list of
  * FAQ rows, "Order", "Our location", "Talk to a person"), the store location, and the business-hours gate live here. Every
@@ -30,7 +31,7 @@ export function menuActive(host: Pick<LinkHost, 'sql'>): boolean {
 
 /** Any front-desk feature is on: the inbound message needs a turn even when neither the ordering bot nor the agent is. */
 export function frontDeskActive(host: Pick<LinkHost, 'sql'>): boolean {
-  if (storeLink().copy === null) return false;
+  if (storeLink().copy === null || isSuspended(host.sql)) return false;
   const s = readSettings(host);
   return menuActive(host) || s.hours.enabled || s.location !== null;
 }

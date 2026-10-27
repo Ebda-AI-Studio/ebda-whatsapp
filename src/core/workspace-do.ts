@@ -13,7 +13,8 @@ import { eraseSharedFor } from './shared/shared-number';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptIn, detectOptOutMessage } from './consent';
-import { QUALITY_ERROR_CODES, blocksTemplates, currentHealth, isSuspended, logHealth, mirrorHealth, nextHealth, noteQualityError, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { QUALITY_ERROR_CODES, blocksTemplates, currentHealth, isSuspended, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { applySharedHealth, noteSharedError } from './numbers/health-events';
 import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText, phoneDigits } from './text-normalise';
@@ -281,7 +282,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.armPending = false;
       await this.arm();
     }
-    for (const st of batch.statuses) if (st.status === 'failed' && st.errorCode !== undefined) await this.noteSendError(batch.phoneNumberId, st.errorCode);
+    for (const code of this.freshQualityErrors.splice(0)) await this.noteSendError(batch.phoneNumberId, code);
     return result;
   }
 
@@ -364,10 +365,6 @@ export class WorkspaceDO extends DurableObject<Env> {
     await this.repullIfUnknown(job.phoneNumberId, now);
     let deferred = false;
     const result = this.ctx.storage.transactionSync((): ClaimResult => {
-      // Operator suspension and a red / restricted number are NEVER-stale gates read from this workspace's own copy on every claim, so the
-      // alarms, retries and queued jobs that never pass the Worker are stopped too (defense in depth next to the Worker's check).
-      const refused = this.sendRefusal(job);
-      if (refused) return this.refuseClaim(job, refused, now);
       const claim = this.claimRow(job, now);
       if (claim !== 'claimed') return claim;
       // The wallet decides before Meta's limits do: an unpayable send must not take a tier slot or a throughput token.
@@ -439,12 +436,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     return null;
   }
 
-  private refuseClaim(job: SendJob, reason: 'workspace_suspended' | 'number_restricted', now: number): ClaimResult {
-    const row = this.sql.exec<{ id: number }>("UPDATE messages SET status = 'failed', error_reason = ?, updated_at = ? WHERE idempotency_key = ? AND status IN ('queued', 'retry') RETURNING id", reason, now, job.idempotencyKey).toArray()[0];
-    if (row) this.emitMessageStatus(row.id);
-    this.billing.settleHold(job.idempotencyKey, 'failed', now);
-    return 'dropped';
-  }
+  private freshQualityErrors: number[] = [];
 
   private claimRow(job: SendJob, now: number): ClaimResult {
     {
@@ -473,6 +465,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (!existing) {
         // Only auto-reply jobs (no row yet) may create their row; a job created by the API always has one, so a missing row means it was erased.
         if (jobKind(job) !== 'text' || job.idempotencyKey.startsWith('ui:') || !job.text) return 'dropped';
+        if (this.sendRefusal(job)) return 'dropped'; // an auto reply that has no row yet: nothing to settle
         if (this.sql.exec('SELECT 1 FROM erased_keys WHERE key = ?', job.idempotencyKey).toArray().length) {
           this.billing.settleHold(job.idempotencyKey, 'erased', now);
           return 'dropped';
@@ -507,6 +500,22 @@ export class WorkspaceDO extends DurableObject<Env> {
           this.addReleaseOnce(job, now + PARK_MS, 'campaign_paused');
           return 'deferred';
         }
+      }
+      // Operator suspension and a red / restricted number: NEVER-stale gates read from this workspace's own copy on every claim, so the alarms, retries and queued
+      // jobs that never pass the Worker are stopped too (defense in depth next to the Worker's check). Only AFTER the duplicate checks above: a redelivered job
+      // whose message already went to Meta keeps its hold (the charge lands later), and a job another attempt holds is still `in_flight`, never acked away.
+      const refused = this.sendRefusal(job);
+      if (refused && (existing.status === 'queued' || existing.status === 'retry')) {
+        this.sql.exec("UPDATE messages SET status = 'failed', error_reason = ?, updated_at = ? WHERE id = ?", refused, now, existing.id);
+        this.emitMessageStatus(existing.id);
+        this.billing.settleHold(job.idempotencyKey, 'failed', now);
+        return 'dropped';
+      }
+      if (refused && existing.status === 'claimed' && now - existing.updated_at > STALE_CLAIM_MS && existing.claim_attempts < 2) {
+        // A claim nobody finished: it may have reached Meta before the crash, so its hold is NOT released here (a late status settles it); the row just stops being retried.
+        this.sql.exec("UPDATE messages SET status = 'failed', error_reason = ?, updated_at = ? WHERE id = ?", refused, now, existing.id);
+        this.emitMessageStatus(existing.id);
+        return 'dropped';
       }
       if (existing.status === 'queued' || existing.status === 'retry') {
         // A marketing template that waited (tier, throughput or Meta's frequency cap) must honour an opt-out given meanwhile.
@@ -634,12 +643,17 @@ export class WorkspaceDO extends DurableObject<Env> {
    * redelivers, and the mirror only writes when D1 differs, so a redelivery repairs it), and every worsening (and every spike) pauses the number's
    * running / scheduled campaigns and tells a human. Recovery changes the state and nothing else: a paused campaign is resumed by the merchant.
    */
-  async applyNumberHealth(phoneNumberId: string, signal: HealthSignal, now = Date.now()): Promise<{ from: HealthState; to: HealthState; changed: boolean; paused: number }> {
+  async applyNumberHealth(phoneNumberId: string, signal: HealthSignal, now = Date.now(), signalAt = now): Promise<{ from: HealthState; to: HealthState; changed: boolean; paused: number; dropped?: true }> {
     const from = currentHealth(this.sql, phoneNumberId);
+    // Meta retries a webhook for days: a signal older than the newest one already applied (by Meta's own time) is dropped, never undoing a newer one.
+    if (signalAt < lastSignalAt(this.sql, phoneNumberId)) return { from, to: from, changed: false, paused: 0, dropped: true };
     const to = nextHealth(from, signal);
     const source = signalSource(signal);
-    if (to !== from) logHealth(this.sql, phoneNumberId, from, to, source, null, now);
-    await mirrorHealth(this.env.DB, 'phone_numbers', phoneNumberId, to, source, now);
+    this.ctx.storage.transactionSync(() => {
+      recordSignalAt(this.sql, phoneNumberId, signalAt);
+      if (to !== from) logHealth(this.sql, phoneNumberId, from, to, source, null, now);
+    });
+    await mirrorHealth(this.env.DB, 'phone_numbers', phoneNumberId, to, source, now, signalAt);
     let paused = 0;
     if (worsened(from, to) || signal.kind === 'spike') paused = await this.pauseCampaignsOn(phoneNumberId, 'quality_flagged', now);
     const fields = { workspace: this.workspaceId, phoneNumberId, from, to, source, pausedCampaigns: paused };
@@ -651,9 +665,30 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { from, to, changed: to !== from, paused };
   }
 
+  /**
+   * The platform (shared) number's state, SET on this member's copy by the Worker (never replayed as a signal, never alerting: the one alert is raised at the platform
+   * level). Ordered by Meta's time like every signal. A worsening pauses this store's campaigns on that number.
+   */
+  async syncSharedHealth(phoneNumberId: string, state: HealthState, version: number, now = Date.now()): Promise<void> {
+    const signalAt = version;
+    if (signalAt < lastSignalAt(this.sql, phoneNumberId)) return; // for the platform number this column holds the push version (processing time), not Meta's
+    const from = currentHealth(this.sql, phoneNumberId);
+    this.ctx.storage.transactionSync(() => {
+      recordSignalAt(this.sql, phoneNumberId, signalAt);
+      if (state !== from) logHealth(this.sql, phoneNumberId, from, state, 'shared', null, now);
+    });
+    if (worsened(from, state)) await this.pauseCampaignsOn(phoneNumberId, 'quality_flagged', now);
+  }
+
   /** Counts a Meta quality error (131049 / 131026) for the number; enough of them inside the window is a spike. */
   async noteSendError(phoneNumberId: string, code: number, now = Date.now()): Promise<void> {
     if (!QUALITY_ERROR_CODES.has(code)) return;
+    // The platform number is counted per NUMBER (every member together, in D1) and tripped once at the platform level; an own number is counted here.
+    const shared = await this.env.DB.prepare('SELECT 1 FROM shared_numbers WHERE phone_number_id = ?').bind(phoneNumberId).first();
+    if (shared) {
+      if (await noteSharedError(this.env, phoneNumberId, now)) await applySharedHealth(this.env, phoneNumberId, { kind: 'spike' }, now, (f) => this.ctx.waitUntil(f()), now);
+      return;
+    }
     if (noteQualityError(this.sql, phoneNumberId, now)) await this.applyNumberHealth(phoneNumberId, { kind: 'spike' }, now);
   }
 
@@ -960,6 +995,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   async applyStatus(e: StatusEvent): Promise<{ applied: boolean }> {
     await this.ensurePricing();
     const r = this.ctx.storage.transactionSync(() => ({ applied: this.applyStatusSync(e) }));
+    this.freshQualityErrors.length = 0; // no phone number id on this path: only the ingest path counts them
     await this.flushArm();
     return r;
   }
@@ -971,6 +1007,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       e.wamid, e.status, e.ts, e.errorCode ?? null, e.pricing ? JSON.stringify(e.pricing) : null,
     ).rowsWritten > 0;
     if (!isNew) return false;
+    if (e.status === 'failed' && e.errorCode !== undefined && QUALITY_ERROR_CODES.has(e.errorCode)) this.freshQualityErrors.push(e.errorCode); // counted once per NEW event, never for a redelivery
     const applied = this.applyToMessage(e);
     if (applied) this.sql.exec('UPDATE message_status_events SET applied = 1 WHERE wamid = ? AND status = ? AND ts = ?', e.wamid, e.status, e.ts);
     // The money side runs for every NEW event, applied to a message row or not: a late billable status still charges.

@@ -133,12 +133,14 @@ export async function pullStatus(env: Env, workspaceId: string, phoneNumberId: s
 
 /** Another workspace already has this number or WABA (or is in the middle of connecting it). Never silently moved. */
 async function conflicts(env: Env, workspaceId: string, wabaId: string, phoneNumberId: string): Promise<boolean> {
-  const [num, cred, waba] = await env.DB.batch([
+  const [num, cred, waba, platform] = await env.DB.batch([
     env.DB.prepare("SELECT 1 FROM phone_numbers WHERE phone_number_id = ? AND workspace_id != ? AND (status = 'active' OR registration IN ('pending', 'failed', 'locked'))").bind(phoneNumberId, workspaceId),
     env.DB.prepare('SELECT 1 FROM waba_credentials WHERE waba_id = ? AND workspace_id != ?').bind(wabaId, workspaceId),
     env.DB.prepare("SELECT 1 FROM phone_numbers WHERE waba_id = ? AND workspace_id != ? AND (status = 'active' OR registration IN ('pending', 'failed', 'locked'))").bind(wabaId, workspaceId),
+    // The platform number is nobody's own number: a store row carrying its id would shadow it in every lookup keyed by that id.
+    env.DB.prepare('SELECT 1 FROM shared_numbers WHERE phone_number_id = ?').bind(phoneNumberId),
   ]);
-  return [num, cred, waba].some((r) => (r!.results as unknown[]).length > 0);
+  return [num, cred, waba, platform].some((r) => (r!.results as unknown[]).length > 0);
 }
 
 /** The business id when Meta confirms it owns the WABA, else null (logged as `business_id_unverified`, no phone numbers, never throws). */

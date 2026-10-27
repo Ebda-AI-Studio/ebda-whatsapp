@@ -32,7 +32,7 @@ describe('verifier: integrator tokens', () => {
   it('accepts a client token with a scope (fixed vector), as an integration principal with no person powers', async () => {
     const p = await verifierFor().verify(await mintClient(k1, { storeId: STORE, scope: 'messages:send conversations:read' }), ON);
     expect(p).toMatchObject({ userId: 'cli_01HZX3K9Q8T2M5N7P4R6V0W1YA', sessionId: 'cli_01HZX3K9Q8T2M5N7P4R6V0W1YA', superAdmin: false, stores: [{ id: STORE, role: 'staff' }] });
-    expect(p.integration).toEqual({ clientId: 'cli_01HZX3K9Q8T2M5N7P4R6V0W1YA', jti: expect.any(String), scopes: ['messages:send', 'conversations:read'], issuedAt: expect.any(Number) });
+    expect(p.integration).toEqual({ clientId: 'cli_01HZX3K9Q8T2M5N7P4R6V0W1YA', jti: expect.any(String), scopes: ['messages:send', 'conversations:read'] });
   });
   it('accepts the accounts side\'s pinned example token shape (ebda-store docs/contracts/identity-client-token-v1.3.example.json, matching r2)', async () => {
     // The pinned payload, re-signed with the test key and given a live time window; every other claim is copied as published.
@@ -41,7 +41,7 @@ describe('verifier: integrator tokens', () => {
     const token = await new SignJWT(vector).setProtectedHeader({ alg: 'ES256', kid: k1.kid, typ: 'at+jwt' }).sign(k1.privateKey);
     const p = await verifierFor().verify(token, ON);
     expect(p).toMatchObject({ userId: vector.sub, sessionId: vector.sid, superAdmin: false, stores: [{ id: vector.stores[0]!.id, role: 'staff' }] });
-    expect(p.integration).toEqual({ clientId: vector.sub, jti: vector.jti, scopes: ['messages:send', 'contacts:read'], issuedAt: vector.iat });
+    expect(p.integration).toEqual({ clientId: vector.sub, jti: vector.jti, scopes: ['messages:send', 'contacts:read'] });
   });
   it('is refused while the switch is off (default), whatever else is valid', async () => {
     expect(await status(verifierFor().verify(await mintClient(k1, { storeId: STORE })))).toBe(401);

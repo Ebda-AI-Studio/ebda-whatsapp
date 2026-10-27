@@ -19,6 +19,7 @@ import type { InboundMessage, StatusEvent, WebhookEvents } from '../meta/webhook
 import type { SendJob } from '../send-queue';
 import type { WorkspaceConfig } from '../workspace-do';
 import { alert } from '../observability';
+import { reconcileSharedHealth, syncMemberHealth } from '../numbers/health-events';
 
 export const sharedEnabled = (env: Pick<Env, 'SHARED_NUMBER_ENABLED'>): boolean => env.SHARED_NUMBER_ENABLED === '1' || env.SHARED_NUMBER_ENABLED?.toLowerCase() === 'true';
 
@@ -152,6 +153,9 @@ export async function joinShared(env: Env, workspaceId: string, displayName?: st
   }
   // The store's copy of the funding map is refreshed at once, so the number is usable now rather than after the next pull.
   await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId)).refreshPricing();
+  // A rejoin reactivates the old member row, whose Durable Object may hold a stale (even red) copy; a store that joins while a push is in flight is never told, and Meta does
+  // not redeliver a webhook that got a 200. So the member's copy is set to the platform number's CURRENT D1 state before the join answers.
+  await syncMemberHealth(env, workspaceId);
   return sharedStatus(env, workspaceId);
 }
 
@@ -455,6 +459,7 @@ export async function sweepShared(env: Env, now = Date.now()): Promise<{ r2: num
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor && ++pages < 20);
   }
+  await reconcileSharedHealth(env); // any member push that never arrived is repaired here, once a day
   const res = await env.DB.prepare('DELETE FROM shared_sent WHERE at < ?').bind(now - SENT_RETENTION_MS).run();
   return { r2, sent: res.meta.changes ?? 0 };
 }
