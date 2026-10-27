@@ -298,7 +298,7 @@ export function createSampleSource(): InboxSource {
           .filter((c) => q.optedOut === undefined || c.optedOut === q.optedOut);
         return { items: items.map((c) => ({ ...c })), nextCursor: null };
       },
-      async importCsv(file, consented) {
+      async importCsv(file, consented, _wording) {
         const id = `i-${nextId++}`;
         const imp: ImportDto = { id, filename: file.name, status: 'running', consented, total: 0, created: 0, updated: 0, rejected: 0, error: null, createdAt: Date.now(), finishedAt: null };
         imports.unshift(imp);

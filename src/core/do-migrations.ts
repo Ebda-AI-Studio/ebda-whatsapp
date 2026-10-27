@@ -469,6 +469,19 @@ export const DO_MIGRATIONS: readonly string[] = [
   // v35 (P2 yearly): the billing period length (1 or 12 months) of the workspace's package, carried by the entitlement event. A period longer than a month
   // gets its AI credits one month at a time (credit_month tasks), never 12x at once.
   `ALTER TABLE entitlements ADD COLUMN period_months INTEGER NOT NULL DEFAULT 1;`,
+  // v36 (W2-CONSENT, A4): the evidence behind a consent: who attested, the exact wording shown, when and through which door (import / opt_in / link).
+  // Append-only, erased with the contact. imports.consent_wording keeps the wording the owner's screen showed when the import started.
+  `CREATE TABLE consent_proofs (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     contact_id INTEGER NOT NULL,
+     source TEXT NOT NULL CHECK (source IN ('import', 'opt_in', 'link')),
+     attested_by TEXT NOT NULL,
+     wording TEXT NOT NULL,
+     at INTEGER NOT NULL,
+     ref TEXT
+   );
+   CREATE INDEX consent_proofs_contact ON consent_proofs (contact_id, id);
+   ALTER TABLE imports ADD COLUMN consent_wording TEXT;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

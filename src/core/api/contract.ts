@@ -15,7 +15,12 @@ export const contactDto = z.object({
   /** Phase 6 (additive: the inbox's embedded contact omits them). Tags from the contact and from its conversation. */
   tags: z.array(z.string()).optional(),
   /** Where and when the contact agreed to receive marketing (`import:<file>`, `keyword_start`, ...); null = no consent on record, so no marketing. */
-  consent: z.object({ source: z.string(), at: z.number().int() }).nullable().optional(),
+  consent: z.object({
+    source: z.string(),
+    at: z.number().int(),
+    /** A4: the evidence of the newest grant (absent for consents recorded before proofs were kept). */
+    proof: z.object({ source: z.enum(['import', 'opt_in', 'link']), attestedBy: z.string(), wording: z.string(), at: z.number().int(), ref: z.string().nullable() }).optional(),
+  }).nullable().optional(),
   lastInboundAt: z.number().int().nullable().optional(),
 });
 
@@ -261,7 +266,7 @@ export const listContactsResponse = z.object({ items: z.array(contactDto), nextC
 export const setContactTagsRequest = z.object({ tags: z.array(tagName).max(10) });
 export const importMapping = z.object({ phone: z.string().min(1).max(100).optional(), name: z.string().min(1).max(100).optional(), tags: z.string().min(1).max(100).optional() });
 /** The multipart text fields next to the `file` part. `consented` must be the literal string "true" to grant marketing consent. */
-export const createImportFields = z.object({ consented: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'), mapping: z.string().max(1000).optional() });
+export const createImportFields = z.object({ consented: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'), wording: z.string().trim().min(1).max(500).optional(), mapping: z.string().max(1000).optional() });
 export const importDto = z.object({
   id: z.string(),
   filename: z.string(),

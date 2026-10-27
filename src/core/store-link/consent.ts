@@ -8,6 +8,7 @@ import { acceptVersion, rememberBuyerKey } from './order-store';
 import { uuidFromKey } from './orders';
 import { getState, putState } from './settings';
 import { alert } from '../observability';
+import { recordConsentProof, STORE_CHECKOUT_WORDING } from '../consent-proof';
 
 // Per-buyer state kept here (both removed by forgetBuyer on erasure): the newest Store consent change applied
 // (entity_versions `consent:<buyerKey>`) and the last opt-out version we sent (store_state `optver:<buyerKey>`).
@@ -20,10 +21,15 @@ function grantStoreConsent(host: LinkHost, waId: string, key: string, atMs: numb
   // A withdrawal wins ties: a grant must be STRICTLY newer than the last one recorded for this buyer (kept even when the buyer was unknown).
   const revoked = Number(getState(host, revokedKey(key)) ?? -1);
   if (atMs <= revoked) return false;
-  return host.sql.exec(
+  const granted = host.sql.exec(
     "UPDATE contacts SET consent_source = 'store_checkout', consent_at = ? WHERE wa_id = ? AND opted_out_at IS NULL AND (consent_at IS NULL OR consent_at <= ?)",
     atMs, waId, atMs,
   ).rowsWritten > 0;
+  if (granted) {
+    const id = host.sql.exec<{ id: number }>('SELECT id FROM contacts WHERE wa_id = ?', waId).one().id;
+    recordConsentProof(host.sql, { contactId: id, source: 'link', attestedBy: 'store', wording: STORE_CHECKOUT_WORDING, at: atMs });
+  }
+  return granted;
 }
 
 /** A `cart.abandoned` attests the checkout opt-in (WA-CONSENT-1). Also remembers the buyer key so a later STOP can be reported. Call inside a transaction. */

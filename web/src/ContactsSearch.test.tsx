@@ -107,3 +107,15 @@ describe('contacts search as you type', () => {
     expect(statusOf().textContent).toBe('مفيش نتايج لـ «ااا»');
   });
 });
+
+describe('proof of consent (A4)', () => {
+  it('shows who attested, when, and the exact wording under the contact', async () => {
+    const proofed = { ...c('201001110009', 'سارة'), consent: { source: 'import:customers.csv', at: 1, proof: { source: 'import', attestedBy: 'u-1', wording: 'العملاء دول وافقوا يستقبلوا عروض مني.', at: Date.UTC(2026, 9, 20), ref: 'imp-1' } } } as unknown as ContactDto;
+    const api: ContactsApi = { ...createSampleSource().contacts!, list: () => Promise.resolve({ items: [proofed], nextCursor: null }) };
+    renderScreen(api);
+    await screen.findByText('سارة');
+    expect(screen.getByText(STRINGS.ar.consentProof)).toBeTruthy();
+    expect(screen.getByText('العملاء دول وافقوا يستقبلوا عروض مني.')).toBeTruthy();
+    expect(screen.getByText(/استيراد ملف/)).toBeTruthy();
+  });
+});

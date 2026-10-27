@@ -45,6 +45,7 @@ import { OTP_RATE_WINDOW_MS } from './otp-policy';
 import { OTP_MASK } from './templates';
 import type { OtpResult } from './otp';
 import { queueTemplate } from './store-link/outbound';
+import { recordConsentProof } from './consent-proof';
 import { forgetBuyer, noteOptOutChange, pushOptOut } from './store-link/consent';
 import { storeLink } from './store-link';
 import { eraseFunnelMarkers, funnelRollup, readFunnel } from './bot-funnel';
@@ -265,6 +266,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           if (!wasOptedOut && noteOptOutChange(this.host(), m.from, true, m.ts * 1000, now)) linkWork = true;
         } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
           const cleared = this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId).rowsWritten > 0;
+          if (cleared) recordConsentProof(this.sql, { contactId, source: 'opt_in', attestedBy: 'customer', wording: m.text, at: now });
           if (cleared && noteOptOutChange(this.host(), m.from, false, now, now)) linkWork = true;
         }
         const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
@@ -1251,7 +1253,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   // ---- Campaigns (Phase 6): contacts + imports -------------------------------------------------------------------
 
-  async createImport(a: { id: string; filename: string; r2Key: string; size: number; consented: boolean; mapping: ImportState['mapping']; actor: string }): Promise<{ ok: true } | { ok: false; reason: 'import_in_progress' }> {
+  async createImport(a: { id: string; filename: string; r2Key: string; size: number; consented: boolean; wording?: string | null; mapping: ImportState['mapping']; actor: string }): Promise<{ ok: true } | { ok: false; reason: 'import_in_progress' }> {
     return createImport(this.host(), { ...a, now: Date.now() });
   }
 
@@ -2269,6 +2271,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       this.sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM contact_tags WHERE contact_id = ?', contact.id);
+      this.sql.exec('DELETE FROM consent_proofs WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM campaign_recipients WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM campaign_links WHERE contact_id = ?', contact.id);
       this.sql.exec('DELETE FROM store_orders WHERE wa_id = ?', waId);
