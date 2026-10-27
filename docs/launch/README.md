@@ -101,6 +101,8 @@ META_VERIFY_TOKEN=… META_APP_SECRET=… CLOUDFLARE_API_TOKEN=… CLOUDFLARE_AC
 
 **Ruling WA-YEARLY-SWITCH-2 (Ahmad, supersedes WA-YEARLY-SWITCH-1).** While a yearly package is running: moving to a higher yearly package is an UPGRADE (pay `(new price/12 - old price/12) x the remaining months`, the current month included, rounded down to a whole EGP; the new plan starts at once with the same end date and the credits switch from the current month); moving to a lower yearly or to any monthly package is a DOWNGRADE (paid in full, queued for the next renewal, no refund); a queued period cannot be switched (409, contact support, the operator cancels and refunds it from the console). Evidence: `planPurchase` + `test/packages-yearly-fixes.test.ts` (exact prices for months 1, 6 and 12). Cost if wrong: a wrong proration either gives a month of the higher plan away or overcharges; mitigated by integer minor-unit arithmetic floored in the merchant's favour and by tests at the boundaries.
 
+**Ruling WA-YEARLY-SWITCH-3 (second review of P2).** An upgrade or queued-switch order that was EXPIRED, quoted in an earlier month than it is paid in, or priced against a period that has moved on is recorded as paid (so a refund can match it) and never granted; a person is alerted once (`switch_order_stale`) and refunds it. A refund's months are counted at the rate in effect when each refund was made. Cost if wrong: a merchant who paid a few minutes after the month turned waits for a manual refund and re-buy instead of getting the plan at once.
+
 ## 13. Verify production (Claude) — after EVERY deploy
 ```
 META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://wa.ebda.app --expect "$(git rev-parse --short origin/main)" --brand ebda

@@ -43,11 +43,12 @@ export function upgradePriceMinor(a: { oldPriceMinor: number; newPriceMinor: num
 }
 
 /** Whole months a partial refund takes off a yearly period, cumulative over everything refunded so far, never into the current month, never lengthening. */
-export function partialRefundCut(a: { monthlyMinor: number; periodMonths: number; periodStart: number; periodEnd: number; now: number; refundedMinor: number; refundMinor: number }): { months: number; newEnd: number } {
+export function partialRefundCut(a: { monthlyMinor: number; periodMonths: number; periodStart: number; periodEnd: number; now: number; refundedMinor: number; refundMinor: number; consumedMinor?: number }): { months: number; newEnd: number } {
   const n = periodLengthMonths(a.periodStart, a.periodEnd, a.periodMonths);
-  const cutSoFar = a.periodMonths - n;
+  // Money the months already cut consumed: what those refunds were worth at the rate in effect when each was made (default: today's rate, for a period that never changed rate).
+  const consumed = a.consumedMinor ?? (a.periodMonths - n) * a.monthlyMinor;
   const unused = Math.max(0, n - monthsStarted(a.periodStart, n, a.now));
-  const months = Math.max(0, Math.min(Math.floor((a.refundedMinor + a.refundMinor) / a.monthlyMinor) - cutSoFar, unused));
+  const months = Math.max(0, Math.min(Math.floor((a.refundedMinor + a.refundMinor - consumed) / a.monthlyMinor), unused));
   return { months, newEnd: months > 0 ? addMonthsUtc(a.periodEnd, -months) : a.periodEnd };
 }
 
@@ -70,14 +71,14 @@ export type YearlyRefundQuote = {
  * beyond the months already cut is deducted, and the result never exceeds `paidMinor` (all paid for the period, default the price) minus what was refunded.
  * A period that has not begun yet (a queued early renewal) has all its months unused; one that has ended has none. A monthly package is always 0.
  */
-export function yearlyRefundQuote(a: { priceMinor: number; periodMonths: number; periodStart: number; periodEnd?: number; now: number; debtMinor: number; refundedMinor?: number; paidMinor?: number }): YearlyRefundQuote {
+export function yearlyRefundQuote(a: { priceMinor: number; periodMonths: number; periodStart: number; periodEnd?: number; now: number; debtMinor: number; refundedMinor?: number; paidMinor?: number; consumedMinor?: number }): YearlyRefundQuote {
   const monthlyMinor = Math.floor(a.priceMinor / a.periodMonths);
   const periodEnd = a.periodEnd ?? addMonthsUtc(a.periodStart, a.periodMonths);
   const n = periodLengthMonths(a.periodStart, periodEnd, a.periodMonths) || a.periodMonths;
   const started = monthsStarted(a.periodStart, n, a.now);
   const unusedMonths = Math.max(0, n - started);
   const refunded = a.refundedMinor ?? 0;
-  const leftover = Math.max(0, refunded - (a.periodMonths - n) * monthlyMinor); // money refunded beyond the months already cut
+  const leftover = Math.max(0, refunded - (a.consumedMinor ?? (a.periodMonths - n) * monthlyMinor)); // money refunded beyond the months already cut
   const cap = Math.max(0, (a.paidMinor ?? a.priceMinor) - refunded);
   const grossMinor = Math.max(0, Math.min(unusedMonths * monthlyMinor - leftover, cap));
   const debtSettledMinor = Math.min(grossMinor, Math.max(0, a.debtMinor));

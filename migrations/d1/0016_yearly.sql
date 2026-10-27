@@ -36,5 +36,11 @@ CREATE TABLE package_refund_plans (
   actor TEXT NOT NULL,
   reason TEXT NOT NULL,
   at INTEGER NOT NULL,
-  applied INTEGER NOT NULL DEFAULT 0
+  applied INTEGER NOT NULL DEFAULT 0,
+  -- 1 once the debt part has been credited to the workspace wallet (a fixed, idempotent ref). The daily pass posts the ones still 0, so an applied plan whose wallet call failed heals.
+  debt_posted INTEGER NOT NULL DEFAULT 0
 );
+
+-- What a partial refund of a YEARLY order cut, in money: months cut x the monthly value in effect WHEN IT WAS MADE. Later refunds (after an upgrade changed the rate) are
+-- measured against what the earlier cuts really consumed, never against today's rate.
+ALTER TABLE package_refunds ADD COLUMN cut_value_minor INTEGER NOT NULL DEFAULT 0;

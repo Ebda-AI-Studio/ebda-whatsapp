@@ -135,6 +135,17 @@ export function expireGrant(sql: Sql, a: { periodStart: number; now: number; ref
   return r.ok ? unused : 0;
 }
 
+/**
+ * A refunded upgrade gives back what it added: the credits this month's grant holds ABOVE `keep` (the allowance of the package the workspace goes back to) expire,
+ * but never more than the grant's unused part (credits already spent stay spent). One ledger row under `ref`, so a retry is a no-op.
+ */
+export function revokeGrantExcess(sql: Sql, a: { periodStart: number; keep: number; now: number; ref: string }): number {
+  const amount = Math.min(unusedGrant(sql, a.periodStart, a.now), Math.max(0, grantedInPeriod(sql, a.periodStart) - a.keep));
+  if (amount <= 0) return 0;
+  const r = postCredit(sql, { kind: 'expire', amount: -amount, ref: a.ref, parentRef: `period:${a.periodStart}`, now: a.now });
+  return r.ok ? amount : 0;
+}
+
 /** A partial refund: `num/den` of the period's UNUSED granted credits expire (a ledger row under `ref`, so a retry is a no-op; used credits stay used). */
 export function expireGrantFraction(sql: Sql, a: { periodStart: number; num: number; den: number; now: number; ref: string }): number {
   if (!(a.num > 0 && a.den > 0)) return 0;

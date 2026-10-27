@@ -130,9 +130,14 @@ export async function setSubscription(env: Env, a: SetSubscription, now = Date.n
     WHERE ${o.guard?.sql ?? '1'}
     RETURNING version`;
   const binds = [a.workspaceId, a.packageId, a.status, a.periodStart, a.periodEnd, a.status, now, now, a.source, a.status, a.pastDueSince ?? null, now, ...(o.only?.binds ?? []), now, now, now, a.pastDueSince ?? null, now, ...(o.guard?.binds ?? [])];
+  // A period written by anyone but a purchase (an operator, the Store plan) is no order's: the order that owned the previous period stops owning anything, in the
+  // same batch and only if the write happened (the audit row, which runs right after the write, is what `changes()` sees). Otherwise an old order could later be
+  // refunded as if it had paid for this period.
+  const releaseOwner = env.DB.prepare('UPDATE package_orders SET owns_running = 0 WHERE workspace_id = ? AND owns_running = 1 AND changes() > 0').bind(a.workspaceId);
+  const opts: WriteOpts = a.source === 'purchase' ? o : { ...o, after: [releaseOwner, ...(o.after ?? [])] };
   return runWrite(env, env.DB.prepare(sql).bind(...binds),
     auditStmt(env, { actor: a.source, workspaceId: a.workspaceId, ref: a.ref, after: { packageId: a.packageId, status: a.status, periodStart: a.periodStart, periodEnd: a.periodEnd, ...(a.reason ? { reason: a.reason } : {}) } }, now),
-    o, a.workspaceId, now);
+    opts, a.workspaceId, now);
 }
 
 /** Cancels the existing subscription (never creates one). `periodEndNow` ends the period at `now` (a refund); otherwise the period is kept. */

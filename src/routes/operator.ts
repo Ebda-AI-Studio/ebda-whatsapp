@@ -204,6 +204,7 @@ operatorRoutes.get('/package-orders/:orderId/refund-quote', async (c) => {
   const q = await packageRefundQuote(c.env, c.req.param('orderId'));
   if (q === 'not_found') return c.json({ error: 'not_found' }, 404);
   if (q === 'not_paid') return c.json({ error: 'invalid_request', message: 'order_not_paid' }, 409);
+  if (typeof q === 'string') return c.json({ error: 'invalid_request', message: q }, 409); // queued_periods | order_queued: the same refusals the refund action makes
   return c.json(q);
 });
 
