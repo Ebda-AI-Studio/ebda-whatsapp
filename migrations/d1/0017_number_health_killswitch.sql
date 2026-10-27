@@ -20,7 +20,7 @@ CREATE TABLE operator_actions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   at INTEGER NOT NULL,
   actor TEXT NOT NULL,
-  action TEXT NOT NULL CHECK (action IN ('suspend', 'unsuspend', 'pause_campaigns', 'evict_shared', 'revoke_integrations')),
+  action TEXT NOT NULL CHECK (action IN ('suspend', 'unsuspend', 'pause_campaigns', 'evict_shared', 'readmit_shared', 'revoke_integrations')),
   workspace_id TEXT NOT NULL,
   reason TEXT NOT NULL CHECK (length(reason) >= 5),
   detail TEXT

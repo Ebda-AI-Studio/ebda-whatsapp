@@ -1,12 +1,20 @@
 import type { MiddlewareHandler } from 'hono';
 import type { Env } from '../../env';
 import { integrationState } from './integration';
+import { writeSessionState } from './session';
 import { gateFor } from './scopes';
 import { IdentityError, type IdentityVerifier, type Principal } from './verifier';
 
 export const integratorTokensEnabled = (env: Partial<Pick<Env, 'INTEGRATOR_TOKENS_ENABLED'>> | undefined): boolean => env?.INTEGRATOR_TOKENS_ENABLED === '1' || env?.INTEGRATOR_TOKENS_ENABLED?.toLowerCase() === 'true';
 
 export type AuthVars = { principal: Principal; storeRole: 'owner' | 'staff' | 'super_admin' };
+
+/** What a suspended workspace may still do: pay (wallet, packages) and erase a contact (a data-protection right never waits on a suspension). */
+const SUSPENDED_OK = [/^\/api\/v1\/stores\/[^/]+\/wallet(\/|$)/, /^\/api\/v1\/stores\/[^/]+\/packages(\/|$)/];
+export function allowedWhileSuspended(method: string, path: string): boolean {
+  if (SUSPENDED_OK.some((re) => re.test(path))) return true;
+  return method === 'DELETE' && /^\/api\/v1\/stores\/[^/]+\/contacts\/[^/]+$/.test(path);
+}
 
 /** Requires a valid bearer token whose principal may act on the `:storeId` route param. */
 export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier): MiddlewareHandler<{ Bindings: Env; Variables: AuthVars }> {
@@ -29,6 +37,20 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     const storeId = c.req.param('storeId');
     const membership = principal.stores.find((s) => s.id === storeId);
     if (!membership && !principal.superAdmin) return c.json({ error: 'forbidden' }, 403);
+    const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
+    // M-135: a person token is revocation-checked on EVERY write, not only on money actions (fail closed: an unreachable accounts service refuses it).
+    if (write && !principal.integration) {
+      const s = await writeSessionState(c.env, principal.sessionId);
+      if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
+      if (s === 'unavailable') return c.json({ error: 'rate_limited', message: 'session_check_unavailable' }, 503);
+    }
+    // The operator kill switch (W2-OPS), read from D1 on every request that needs it (a NEVER-stale gate, no cache): every integrator token issued
+    // at or before `integrations_revoked_at` is refused, and a suspended workspace takes no writes except paying, and erasing a contact.
+    if (storeId && (write || principal.integration)) {
+      const flags = await c.env.DB.prepare('SELECT suspended_at, integrations_revoked_at FROM workspaces WHERE id = ?').bind(storeId).first<{ suspended_at: number | null; integrations_revoked_at: number | null }>();
+      if (principal.integration && flags?.integrations_revoked_at != null && principal.integration.issuedAt * 1000 <= flags.integrations_revoked_at) return c.json({ error: 'unauthorized' }, 401);
+      if (write && flags?.suspended_at != null && !principal.superAdmin && !allowedWhileSuspended(c.req.method, new URL(c.req.url).pathname)) return c.json({ error: 'forbidden', message: 'workspace_suspended' }, 403);
+    }
     if (principal.integration) {
       // A merchant's server: still valid right now (fail closed), then the route map decides (default deny). Revoked first, so a revoked
       // client learns nothing about which routes exist.

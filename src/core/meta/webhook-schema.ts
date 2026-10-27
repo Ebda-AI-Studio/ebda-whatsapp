@@ -211,7 +211,7 @@ export function extractQualityEvents(payload: unknown): QualityEvent[] {
   return out;
 }
 
-/** `account_update`: WABA-wide. restricted = a restriction, ban or violation is in force; lifted = Meta cleared it; anything else is not about sending. */
+/** `account_update`: WABA-wide. restricted = a restriction, ban or violation is active; lifted = Meta cleared it; anything else is not about sending. */
 export type AccountEvent = { wabaId: string; restricted: boolean };
 const accountChangeSchema = z.object({
   field: z.literal('account_update'),

@@ -31,5 +31,14 @@ async function applySharedHealth(env: Env, phoneNumberId: string, signal: Health
   if (!row) return;
   const to = nextHealth(row.health_state, signal);
   await mirrorHealth(env.DB, 'shared_numbers', phoneNumberId, to, signalSource(signal), now);
-  if (worsened(row.health_state, to)) alert(to === 'yellow' ? 'number_quality_flagged' : 'number_restricted', { phoneNumberId, shared: true, from: row.health_state, to, source: signalSource(signal) });
+  // Push the same signal to EVERY active member's own copy, so the send gate (claimSend), campaign start and resume see it with no D1 read and no cache.
+  // Always forwarded, also on a redelivery (idempotent), so a member that missed an earlier push is repaired by Meta's retry. A member only ever joins
+  // while the number is green, so every member's machine starts where the number's did and the same signals keep them equal.
+  const members = await env.DB.prepare("SELECT workspace_id FROM shared_number_members WHERE phone_number_id = ? AND status = 'active'").bind(phoneNumberId).all<{ workspace_id: string }>();
+  for (const m of members.results) await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(m.workspace_id)).applyNumberHealth(phoneNumberId, signal, now);
+  const fields = { phoneNumberId, shared: true, from: row.health_state, to, source: signalSource(signal) };
+  if (worsened(row.health_state, to)) {
+    if (to === 'yellow') alert('number_quality_flagged', fields);
+    else alert('number_restricted', fields);
+  }
 }

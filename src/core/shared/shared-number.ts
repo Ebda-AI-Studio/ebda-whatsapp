@@ -88,7 +88,9 @@ export async function sharedStatus(env: Env, workspaceId: string): Promise<Share
   const num = await currentSharedNumber(env);
   if (!num) return { available: false, member: false, displayName: null, displayPhone: null, packageRequired: false };
   const m = await env.DB.prepare("SELECT display_name FROM shared_number_members WHERE workspace_id = ? AND phone_number_id = ? AND status = 'active'").bind(workspaceId, num.phone_number_id).first<{ display_name: string }>();
-  return { available: true, member: !!m, displayName: m?.display_name ?? null, displayPhone: num.display_phone, packageRequired: !m && !(await sharedPackageAllowed(env, workspaceId)) };
+  // Unavailable unless Meta says the platform number is fine (green): the join card goes away with it. NEVER-stale, read from D1 on every call.
+  const health = await env.DB.prepare('SELECT health_state FROM shared_numbers WHERE phone_number_id = ?').bind(num.phone_number_id).first<{ health_state: string }>();
+  return { available: health?.health_state === 'green', member: !!m, displayName: m?.display_name ?? null, displayPhone: num.display_phone, packageRequired: !m && !(await sharedPackageAllowed(env, workspaceId)) };
 }
 
 // Every entry maps straight to its final letter (i → l, so і/ї/ι → l too): one pass is the whole skeleton.
@@ -127,9 +129,13 @@ export async function sharedPackageAllowed(env: Env, workspaceId: string, now = 
   return p?.shared_number === 1;
 }
 
-export async function joinShared(env: Env, workspaceId: string, displayName?: string, now = Date.now()): Promise<SharedStatus | null | 'name_taken' | 'package_required'> {
+export async function joinShared(env: Env, workspaceId: string, displayName?: string, now = Date.now()): Promise<SharedStatus | null | 'name_taken' | 'package_required' | 'number_unhealthy' | 'evicted'> {
   const num = await currentSharedNumber(env);
   if (!num) return null;
+  // A7: nobody new joins a platform number Meta has flagged (NEVER-stale: read from D1 on every join), and an evicted store stays out until the operator readmits it.
+  const health = await env.DB.prepare('SELECT health_state FROM shared_numbers WHERE phone_number_id = ?').bind(num.phone_number_id).first<{ health_state: string }>();
+  if (health && health.health_state !== 'green') return 'number_unhealthy';
+  if (await isEvicted(env, workspaceId)) return 'evicted';
   const raw = displayName ?? (await env.DB.prepare('SELECT name FROM workspaces WHERE id = ?').bind(workspaceId).first<{ name: string }>())?.name;
   const name = raw === undefined ? undefined : canonicalDisplayName(raw);
   if (!name) return null;
@@ -147,6 +153,12 @@ export async function joinShared(env: Env, workspaceId: string, displayName?: st
   // The store's copy of the funding map is refreshed at once, so the number is usable now rather than after the next pull.
   await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId)).refreshPricing();
   return sharedStatus(env, workspaceId);
+}
+
+/** An evicted store stays out until the operator readmits it: the newest of (evict, readmit) for the workspace decides. */
+export async function isEvicted(env: Env, workspaceId: string): Promise<boolean> {
+  const last = await env.DB.prepare("SELECT action FROM operator_actions WHERE workspace_id = ? AND action IN ('evict_shared', 'readmit_shared') ORDER BY id DESC LIMIT 1").bind(workspaceId).first<{ action: string }>();
+  return last?.action === 'evict_shared';
 }
 
 export async function leaveShared(env: Env, workspaceId: string): Promise<SharedStatus> {

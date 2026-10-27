@@ -52,6 +52,9 @@ Cache staleness class: **BOUNDED-stale, 60 s per isolate**, cleared synchronousl
 ## Disconnect
 Marks the number `disconnected` first (sending stops), then best effort: `POST /<PN>/deregister` for Cloud API numbers (not for Business app numbers), and, when no other active own number uses the WABA, `DELETE /<WABA>/subscribed_apps` and deletion of the credential. Failures come back as warnings.
 
+## Health
+Each number carries a health state (green / yellow / red / restricted) from Meta's quality and account webhooks; see `docs/number-health.md`. `GET /numbers` returns it as `health`; the Numbers screen shows a badge and one sentence when it is not green.
+
 ## Not verified against real Meta
 Every Graph call is covered with stubs of the documented shapes. Nothing here has talked to Meta yet.
 

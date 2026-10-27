@@ -20,6 +20,16 @@ type NumberStateKey = 'active' | 'pending' | 'failed' | 'locked' | 'disconnected
 
 
 const ar = {
+  ks: {
+    title: 'إيقاف طارئ', help: 'بتوقف حساب عميل أو جزء منه فورًا. كل خطوة بتتسجّل باسمك وسببها ومينفعش تتمسح. القراءة بتفضل شغّالة، والعميل يقدر يدفع ويمسح بيانات عميل.',
+    workspace: 'معرّف حساب العميل', load: 'اعرض الحالة', reason: 'السبب (5 حروف على الأقل)', reasonShort: 'اكتب السبب (5 حروف على الأقل).',
+    stateOn: 'الحساب موقوف', stateOff: 'الحساب شغّال', integrationsRevoked: (d: string) => `توكنات الربط اتلغت في ${d}`, evicted: 'العميل متشال من الرقم المشترك', notEvicted: 'العميل مش متشال من الرقم المشترك',
+    numbers: 'أرقام العميل', platform: 'الرقم المشترك', none: 'مفيش أرقام متصلة.', history: 'آخر الإجراءات',
+    suspend: 'وقّف الحساب', unsuspend: 'شغّل الحساب', pauseCampaigns: 'وقّف كل الحملات', evict: 'شيل من الرقم المشترك', readmit: 'اسمح بالرجوع للرقم المشترك', revoke: 'الغي كل توكنات الربط',
+    confirm: (what: string) => `هتنفّذ: ${what}. تأكّد؟`, yes: 'أيوه، نفّذ', no: 'لأ', done: 'اتنفّذ وانسجّل.', failed: 'ماتنفّذش. جرّب تاني.',
+  },
+  numberHealth: { green: 'سليم', yellow: 'جودة الرقم قلّت', red: 'جودة الرقم وحشة', restricted: 'واتساب قيّد الرقم' } as Record<string, string>,
+  numberHealthHelp: { yellow: 'واتساب نبّهنا إن جودة الرقم قلّت. وقفنا حملاتك علشان نحمي الرقم. راجع رسايلك وكمّل الحملة بنفسك لما تطمّن.', red: 'جودة الرقم وحشة. مش هنبعت قوالب جديدة من الرقم ده لحد ما واتساب يحسّن التقييم. تقدر ترد على عملائك جوه نافذة الـ24 ساعة، والحملات واقفة.', restricted: 'واتساب قيّد الرقم ده. مش هنبعت قوالب جديدة منه، وتقدر ترد على عملائك جوه نافذة الـ24 ساعة. لما واتساب يرفع التقييد كمّل حملاتك بنفسك.' } as Record<string, string>,
   searchLoading: 'بندوّر…', searchFailed: 'البحث مشتغلش دلوقتي، جرّب تاني.', searchNone: (q: string) => `مفيش نتايج لـ «${q}»`,
   searchCount: (n: number, s: string) => (n === 1 ? 'لقينا نتيجة واحدة' : n === 2 ? 'لقينا نتيجتين' : n <= 10 ? `لقينا ${s} نتايج` : `لقينا ${s} نتيجة`),
   nav: 'التنقل الرئيسي', inbox: 'المحادثات', templates: 'القوالب', campaigns: 'الحملات', settings: 'الإعدادات',
@@ -80,7 +90,7 @@ const ar = {
   contacts: 'العملاء', campaignsTitle: 'الحملات', newCampaign: 'حملة جديدة', backToCampaigns: 'رجوع للحملات',
   campaignsEmpty: 'لسه مفيش حملات. ابدأ أول حملة وابعت قالب معتمد لعملائك اللي وافقوا يستقبلوا عروض.',
   campaignStatus: copy<CampaignStatus>({ draft: 'مسودة', scheduled: 'متجدولة', running: 'شغالة', paused: 'متوقفة', completed: 'خلصت', cancelled: 'اتلغت' }),
-  pauseReasons: copy<PauseReason>({ manual: 'وقّفتها يدوي', wallet_empty: 'المحفظة فاضية. اشحن رصيد وكمّل الحملة.', template_unavailable: 'القالب مبقاش معتمد من واتساب.', internal_error: 'حصلت مشكلة عندنا، وفريقنا بيتابعها.', plan_blocked: 'اشتراكك مش بيسمح بالحملات دلوقتي. جدّد الاشتراك وكمّل الحملة.', funding_unknown: 'لسه ما اتحددش مين بيدفع لواتساب على رقمك، فالحملة واقفة لحد ما يتحدد.', rate_unavailable: 'سعر الرسالة لسه مش جاهز، فالحملة واقفة لحد ما يتحدد.', quality_flagged: 'واتساب نبّهنا إن جودة رقمك قلّت، فوقفنا حملاتك علشان نحمي الرقم. اتأكد من الرسايل وكمّل الحملة بنفسك لما تطمّن.', operator_paused: 'فريق Ebda وقّف الحملة. لو محتاج تعرف السبب، كلّم الدعم.' }), pauseUnknown: 'الحملة واقفة لسبب مش معروف. لو فضلت واقفة، كلّم الدعم.',
+  pauseReasons: copy<PauseReason>({ manual: 'وقّفتها يدوي', wallet_empty: 'المحفظة فاضية. اشحن رصيد وكمّل الحملة.', template_unavailable: 'القالب مبقاش معتمد من واتساب.', internal_error: 'حصلت مشكلة عندنا، وفريقنا بيتابعها.', plan_blocked: 'اشتراكك مش بيسمح بالحملات دلوقتي. جدّد الاشتراك وكمّل الحملة.', funding_unknown: 'لسه ما اتحددش مين بيدفع لواتساب على رقمك، فالحملة واقفة لحد ما يتحدد.', rate_unavailable: 'سعر الرسالة لسه مش جاهز، فالحملة واقفة لحد ما يتحدد.', quality_flagged: 'واتساب نبّهنا إن جودة رقمك قلّت، فوقفنا حملاتك علشان نحمي الرقم. اتأكد من الرسايل وكمّل الحملة بنفسك لما تطمّن.', operator_paused: 'فريقنا وقّف الحملة. لو محتاج تعرف السبب، كلّم الدعم.' }), pauseUnknown: 'الحملة واقفة لسبب مش معروف. لو فضلت واقفة، كلّم الدعم.',
   stopSent: 'اتبعت', stopDelivered: 'وصل', stopRead: 'اتقرا', stopQueued: 'في الطابور',
   ofRecipients: (a: string, b: string) => `${a} من ${b}`, clicksLine: (u: string, t: string) => `${u} فتحوا اللينك · ${t} فتحة`,
   failedLine: (f: string, s: string) => `${f} ما وصلتش · ${s} اتشالوا`, scheduledFor: (d: string) => `هتبدأ ${d}`, startedAt: (d: string) => `بدأت ${d}`, finishedAt: (d: string) => `خلصت ${d}`,
@@ -174,7 +184,7 @@ const ar = {
   wBannerLow: 'رصيد المحفظة قليل. اشحن علشان الخدمات اللي بتتخصم منها تفضل شغالة.', wBannerDebt: (a: string) => `عليك مديونية ${a} في المحفظة.`, wBannerLink: 'افتح المحفظة',
   costCard: 'واتساب بيحاسب كارتك مباشرة على الرسايل دي، ومفيش حاجة هتتخصم من المحفظة.',
   opNav: 'لوحة التشغيل', opTitle: 'لوحة التشغيل', opIntro: 'أسعار المحافظ والمراجعات. كل تغيير بيتسجّل باسمك وبسببه.',
-  opTabs: { pricing: 'التسعير', rates: 'أسعار ميتا والصرف', account: 'حساب عميل', queues: 'الاسترداد والتسويات', log: 'سجل التغييرات', shared: 'قوالب الرقم المشترك' } as Record<string, string>,
+  opTabs: { pricing: 'التسعير', rates: 'أسعار ميتا والصرف', account: 'حساب عميل', queues: 'الاسترداد والتسويات', log: 'سجل التغييرات', shared: 'قوالب الرقم المشترك', killswitch: 'إيقاف طارئ' } as Record<string, string>,
   opSharedTitle: 'قوالب الرقم المشترك', opSharedHelp: 'دي قوالب حساب واتساب بتاع المنصة. المتاجر مبتشوفهاش ومبتعدّلهاش، وبتستخدم منها بس القوالب المعتمدة من نوع خدمي أو تحقق.', opSharedSync: 'تحديث من ميتا',
   opSharedSynced: (up: string, gone: string) => `اتحدّث: ${up} قالب، واتشال ${gone}.`, opSharedEmpty: 'مفيش قوالب لسه. اضغط تحديث من ميتا أو ابعت قالب جديد.',
   opSharedName: 'اسم القالب', opSharedLang: 'اللغة', opSharedCategory: 'النوع', opSharedStatus: 'الحالة', opSharedStores: 'للمتاجر',
@@ -221,6 +231,16 @@ const ar = {
 };
 
 const en: typeof ar = {
+  ks: {
+    title: 'Kill switch', help: 'Stops a customer account, or part of it, at once. Every step is recorded with your id and the reason, and cannot be edited or removed. Reading stays on, and the customer can still pay and erase a contact.',
+    workspace: 'Customer account id', load: 'Show status', reason: 'Reason (at least 5 characters)', reasonShort: 'Write the reason (at least 5 characters).',
+    stateOn: 'Account suspended', stateOff: 'Account running', integrationsRevoked: (d: string) => `Integration tokens revoked on ${d}`, evicted: 'Removed from the shared number', notEvicted: 'Not removed from the shared number',
+    numbers: 'Customer numbers', platform: 'Shared number', none: 'No connected numbers.', history: 'Recent actions',
+    suspend: 'Suspend account', unsuspend: 'Unsuspend account', pauseCampaigns: 'Pause all campaigns', evict: 'Remove from shared number', readmit: 'Allow back on shared number', revoke: 'Revoke all integration tokens',
+    confirm: (what: string) => `You are about to: ${what}. Sure?`, yes: 'Yes, do it', no: 'No', done: 'Done and recorded.', failed: 'It did not go through. Try again.',
+  },
+  numberHealth: { green: 'Healthy', yellow: 'Quality dropped', red: 'Quality is poor', restricted: 'Restricted by WhatsApp' } as Record<string, string>,
+  numberHealthHelp: { yellow: 'WhatsApp warned that this number\'s quality dropped. We paused your campaigns to protect the number. Check your messages and resume the campaign yourself once you are comfortable.', red: 'The number\'s quality is poor. We will not send new templates from it until WhatsApp improves the rating. You can still reply to customers inside the 24-hour window; campaigns are paused.', restricted: 'WhatsApp restricted this number. We will not send new templates from it, and you can still reply inside the 24-hour window. When WhatsApp lifts the restriction, resume your campaigns yourself.' } as Record<string, string>,
   searchLoading: 'Searching…', searchFailed: 'Search is not working right now, try again.', searchNone: (q: string) => `No results for “${q}”`,
   searchCount: (n: number, s: string) => (n === 1 ? '1 result' : `${s} results`),
   nav: 'Main navigation', inbox: 'Inbox', templates: 'Templates', campaigns: 'Campaigns', settings: 'Settings',
@@ -281,7 +301,7 @@ const en: typeof ar = {
   contacts: 'Contacts', campaignsTitle: 'Campaigns', newCampaign: 'New campaign', backToCampaigns: 'Back to campaigns',
   campaignsEmpty: 'No campaigns yet. Start one and send an approved template to customers who agreed to receive offers.',
   campaignStatus: copy<CampaignStatus>({ draft: 'Draft', scheduled: 'Scheduled', running: 'Running', paused: 'Paused', completed: 'Completed', cancelled: 'Cancelled' }),
-  pauseReasons: copy<PauseReason>({ manual: 'Paused by you', wallet_empty: 'The wallet is empty. Top up to continue.', template_unavailable: 'The template is no longer approved by WhatsApp.', internal_error: 'Something went wrong on our side; our team is on it.', plan_blocked: 'Your plan does not allow campaigns right now. Renew it and resume the campaign.', funding_unknown: 'Who pays WhatsApp for your number is not set yet, so the campaign is stopped until it is.', rate_unavailable: 'The message price is not ready yet, so the campaign is stopped until it is.', quality_flagged: 'WhatsApp warned that your number\'s quality dropped, so we paused your campaigns to protect it. Check your messages and resume the campaign yourself once you are comfortable.', operator_paused: 'The Ebda team paused this campaign. Contact support if you need the reason.' }), pauseUnknown: 'The campaign is stopped for a reason we do not know. If it stays stopped, contact support.',
+  pauseReasons: copy<PauseReason>({ manual: 'Paused by you', wallet_empty: 'The wallet is empty. Top up to continue.', template_unavailable: 'The template is no longer approved by WhatsApp.', internal_error: 'Something went wrong on our side; our team is on it.', plan_blocked: 'Your plan does not allow campaigns right now. Renew it and resume the campaign.', funding_unknown: 'Who pays WhatsApp for your number is not set yet, so the campaign is stopped until it is.', rate_unavailable: 'The message price is not ready yet, so the campaign is stopped until it is.', quality_flagged: 'WhatsApp warned that your number\'s quality dropped, so we paused your campaigns to protect it. Check your messages and resume the campaign yourself once you are comfortable.', operator_paused: 'Our team paused this campaign. Contact support if you need the reason.' }), pauseUnknown: 'The campaign is stopped for a reason we do not know. If it stays stopped, contact support.',
   stopSent: 'Sent', stopDelivered: 'Delivered', stopRead: 'Read', stopQueued: 'Queued',
   ofRecipients: (a: string, b: string) => `${a} of ${b}`, clicksLine: (u: string, t: string) => `${u} opened the link · ${t} opens`,
   failedLine: (f: string, s: string) => `${f} failed · ${s} skipped`, scheduledFor: (d: string) => `Starts ${d}`, startedAt: (d: string) => `Started ${d}`, finishedAt: (d: string) => `Finished ${d}`,
@@ -375,7 +395,7 @@ const en: typeof ar = {
   wBannerLow: 'The wallet balance is low. Top up so the services paid from it keep running.', wBannerDebt: (a) => `You owe ${a} in the wallet.`, wBannerLink: 'Open the wallet',
   costCard: 'WhatsApp bills your card directly for these messages; nothing is taken from the wallet.',
   opNav: 'Operations', opTitle: 'Operations', opIntro: 'Wallet pricing and reviews. Every change is recorded under your name with its reason.',
-  opTabs: { pricing: 'Pricing', rates: 'Meta rates and FX', account: 'One account', queues: 'Refunds and adjustments', log: 'Change log', shared: 'Shared number templates' } as Record<string, string>,
+  opTabs: { pricing: 'Pricing', rates: 'Meta rates and FX', account: 'One account', queues: 'Refunds and adjustments', log: 'Change log', shared: 'Shared number templates', killswitch: 'Kill switch' } as Record<string, string>,
   opSharedTitle: 'Shared number templates', opSharedHelp: 'These are the platform WhatsApp account\'s templates. Stores cannot see or change them, and may use only approved utility or authentication ones.', opSharedSync: 'Sync from Meta',
   opSharedSynced: (up: string, gone: string) => `Synced: ${up} templates, ${gone} removed.`, opSharedEmpty: 'No templates yet. Sync from Meta or submit a new one.',
   opSharedName: 'Template name', opSharedLang: 'Language', opSharedCategory: 'Category', opSharedStatus: 'Status', opSharedStores: 'For stores',

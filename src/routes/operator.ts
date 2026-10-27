@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import {
-  fxPublish, instapayReject, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
+  fxPublish, instapayReject, operatorKillSwitch, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -15,6 +15,7 @@ import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type Sh
 import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
+import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, revokeIntegrations, suspendWorkspace, unsuspendWorkspace } from '../core/ops/kill-switch';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -219,3 +220,22 @@ operatorRoutes.post('/instapay/:id/reject', async (c) => {
   if (!b.success) return bad(c, 'reason_required');
   return decided(c, await rejectInstapay(c.env, { id: c.req.param('id'), actor: actor(c), reason: b.data.reason }));
 });
+
+// ---- W2-OPS: the kill switch. Every action needs a reason (5+ characters), is audited append-only with the actor, and fails closed on a revoked session (the guard above).
+const killSwitch = (run: (env: Env, a: { actor: string; workspaceId: string; reason: string }) => Promise<{ ok: true; value: unknown } | { ok: false; reason: 'not_found' }>) =>
+  async (c: import('hono').Context<E>) => {
+    const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
+    if (!b.success) return bad(c, 'reason_required');
+    const r = await run(c.env, { actor: actor(c), workspaceId: c.req.param('workspaceId')!, reason: b.data.reason });
+    return r.ok ? c.json(r.value) : c.json({ error: 'not_found' }, 404);
+  };
+operatorRoutes.get('/workspaces/:workspaceId/ops', async (c) => {
+  const st = await opsStatus(c.env, c.req.param('workspaceId'));
+  return st ? c.json(st) : c.json({ error: 'not_found' }, 404);
+});
+operatorRoutes.post('/workspaces/:workspaceId/suspend', killSwitch(suspendWorkspace));
+operatorRoutes.post('/workspaces/:workspaceId/unsuspend', killSwitch(unsuspendWorkspace));
+operatorRoutes.post('/workspaces/:workspaceId/campaigns/pause', killSwitch(pauseAllCampaigns));
+operatorRoutes.post('/workspaces/:workspaceId/shared-number/evict', killSwitch(evictFromSharedNumber));
+operatorRoutes.post('/workspaces/:workspaceId/shared-number/readmit', killSwitch(readmitToSharedNumber));
+operatorRoutes.post('/workspaces/:workspaceId/integrations/revoke', killSwitch(revokeIntegrations));

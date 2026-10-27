@@ -428,3 +428,9 @@ textarea { caret-color: var(--gold-ink); }
   .wallet-card, .wallet-balance { padding: 14px 14px; }
   .op-inline { grid-template-columns: 1fr; }
 }
+
+/* W2-META: a number whose health is not green says so (badge + one calm sentence) */
+.number-health { display: grid; gap: 4px; }
+.number-health[data-health='yellow'] .flag { background: var(--sand-2); color: var(--gold-ink); }
+.btn.danger { border-color: var(--bad); color: var(--bad); }
+.op-ks-actions { flex-wrap: wrap; margin-top: 12px; }

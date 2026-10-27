@@ -7,7 +7,7 @@ export type Principal = {
   /** When the access token expires (epoch seconds). Long-lived connections must not outlive it. */
   expiresAt: number;
   /** Set only for an integrator server token (identity contract v1.3 r2): a merchant's own server, never a person. */
-  integration?: { clientId: string; jti: string; scopes: string[] };
+  integration?: { clientId: string; jti: string; scopes: string[]; /** When the token was issued (epoch seconds): a revoke-all refuses every token issued at or before it. */ issuedAt: number };
 };
 
 export class IdentityError extends Error {

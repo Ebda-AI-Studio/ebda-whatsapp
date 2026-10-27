@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../data/api';
-import type { Adjustment, ChangeLogItem, FxRate, MarginOverride, OperatorApi, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest } from '../data/billing';
+import type { Adjustment, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -17,7 +17,7 @@ type PanelProps = { t: Strings; lang: Lang; api: OperatorApi; now: () => number;
 const HOUR = 3_600_000;
 const SETTINGS_LEAD_H = 1;
 const RATE_LEAD_H = 24;
-const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared'] as const;
+const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared', 'killswitch'] as const;
 type Tab = (typeof TABS)[number];
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -72,6 +72,7 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
         {tab === 'account' && <AccountPanel {...panel} />}
         {tab === 'queues' && <QueuesPanel {...panel} />}
         {tab === 'log' && <LogPanel {...panel} />}
+        {tab === 'killswitch' && <KillSwitchPanel {...panel} />}
         {tab === 'shared' && source.sharedTemplates && <SharedTemplatesPanel t={t} lang={lang} api={source.sharedTemplates} run={run} fail={fail} />}
       </div>
     </main>
@@ -496,5 +497,77 @@ function InstapayReview({ t, lang, api, source, run }: PanelProps) {
         })}
       </ul>
     </Card>
+  );
+}
+
+// ---- Kill switch (W2-OPS) ----------------------------------------------------------------------------------------------------
+
+function KillSwitchPanel({ t, lang, api, run, fail }: PanelProps) {
+  const k = t.ks;
+  const [ws, setWs] = useState('');
+  const [reason, setReason] = useState('');
+  const [st, setSt] = useState<{ id: string; status: OpsStatusDto } | null>(null);
+  const [asking, setAsking] = useState<{ action: KillSwitchAction; label: string } | null>(null);
+
+  const load = async (id = ws.trim()) => {
+    if (!id) return fail(t.opWorkspace);
+    try { setSt({ id, status: await api.opsStatus(id) }); } catch { fail(t.opLoadError); }
+  };
+  const ask = (action: KillSwitchAction, label: string) => {
+    if (!ws.trim()) return fail(t.opWorkspace);
+    if (reason.trim().length < 5) return fail(k.reasonShort);
+    setAsking({ action, label });
+  };
+  const doIt = async () => {
+    if (!asking) return;
+    const { action } = asking;
+    setAsking(null);
+    if (await run(async () => { await api.killSwitch(ws.trim(), action, reason.trim()); return k.done; })) { setReason(''); await load(); }
+  };
+  const health = (h: string) => t.numberHealth[h] ?? h;
+
+  return (
+    <>
+      <Card id="op-ks" title={k.title}>
+        <p className="muted">{k.help}</p>
+        <form className="wallet-form op-grid" onSubmit={(e) => { e.preventDefault(); void load(); }}>
+          <label className="field"><span>{k.workspace}</span><input dir="ltr" value={ws} onChange={(e) => setWs(e.target.value)} /></label>
+          <label className="field op-wide"><span>{k.reason}</span><input dir="auto" maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+          <div className="settings-actions op-wide"><button type="submit" className="btn">{k.load}</button></div>
+        </form>
+        {st && (
+          <div className="op-ks-status" aria-live="polite">
+            <p><span className={st.status.suspended ? 'flag bad' : 'flag'} data-ok={!st.status.suspended}>{st.status.suspended ? k.stateOn : k.stateOff}</span> <span className="muted">{st.status.evicted ? k.evicted : k.notEvicted}</span></p>
+            {st.status.integrationsRevokedAt !== null && <p className="muted small">{k.integrationsRevoked(dateTime(st.status.integrationsRevokedAt, lang))}</p>}
+            <h3 className="pane-sub">{k.numbers}</h3>
+            {st.status.numbers.length === 0 ? <p className="muted">{k.none}</p> : (
+              <ul className="wallet-rows">{st.status.numbers.map((n) => <li key={n.phoneNumberId}><span className="wallet-row-main"><bdi dir="ltr">{n.phoneNumberId}</bdi> <span className="flag" data-ok={n.health === 'green'}>{health(n.health)}</span></span></li>)}</ul>
+            )}
+            {st.status.sharedNumber && <p><b>{k.platform}:</b> <bdi dir="ltr">{st.status.sharedNumber.phoneNumberId}</bdi> <span className="flag" data-ok={st.status.sharedNumber.health === 'green'}>{health(st.status.sharedNumber.health)}</span></p>}
+            {st.status.recentActions.length > 0 && (
+              <>
+                <h3 className="pane-sub">{k.history}</h3>
+                <ul className="wallet-rows">{st.status.recentActions.map((a) => <li key={`${a.at}-${a.action}`}><span className="wallet-row-main"><b>{a.action}</b> <span className="muted">• {dateTime(a.at, lang)} • {t.opBy(a.actor)}</span><span className="muted op-line" dir="auto">{a.reason}</span></span></li>)}</ul>
+              </>
+            )}
+          </div>
+        )}
+        <div className="settings-actions op-ks-actions">
+          <button type="button" className="btn danger" onClick={() => ask('suspend', k.suspend)}>{k.suspend}</button>
+          <button type="button" className="btn" onClick={() => ask('unsuspend', k.unsuspend)}>{k.unsuspend}</button>
+          <button type="button" className="btn danger" onClick={() => ask('campaigns/pause', k.pauseCampaigns)}>{k.pauseCampaigns}</button>
+          <button type="button" className="btn danger" onClick={() => ask('shared-number/evict', k.evict)}>{k.evict}</button>
+          <button type="button" className="btn" onClick={() => ask('shared-number/readmit', k.readmit)}>{k.readmit}</button>
+          <button type="button" className="btn danger" onClick={() => ask('integrations/revoke', k.revoke)}>{k.revoke}</button>
+        </div>
+        {asking && (
+          <div className="confirm-inline" role="group" aria-label={k.confirm(asking.label)}>
+            <span>{k.confirm(asking.label)}</span>
+            <button type="button" className="btn danger" onClick={() => void doIt()}>{k.yes}</button>
+            <button type="button" className="btn ghost" onClick={() => setAsking(null)}>{k.no}</button>
+          </div>
+        )}
+      </Card>
+    </>
   );
 }

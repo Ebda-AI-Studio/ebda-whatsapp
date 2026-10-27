@@ -64,7 +64,7 @@ export function createEbdaAccountsVerifier(opts: { jwksUrl: string; issuer: stri
         const scopes = k.data.scope.split(' ').filter((x): x is (typeof WHATSAPP_SCOPES)[number] => (WHATSAPP_SCOPES as readonly string[]).includes(x));
         if (scopes.length === 0) throw new IdentityError(401, 'no usable scope');
         // Mapped to the store's staff level for the handlers behind the gate; the route map (scopes.ts) is what limits it, never this role.
-        return { userId: k.data.sub, sessionId: k.data.sid, stores: [{ id: k.data.stores[0]!.id, role: 'staff' }], superAdmin: false, expiresAt: Number(payload.exp), integration: { clientId: k.data.sub, jti: k.data.jti, scopes } };
+        return { userId: k.data.sub, sessionId: k.data.sid, stores: [{ id: k.data.stores[0]!.id, role: 'staff' }], superAdmin: false, expiresAt: Number(payload.exp), integration: { clientId: k.data.sub, jti: k.data.jti, scopes, issuedAt: Number(payload.iat) } };
       }
       const c = claimsSchema.safeParse(payload);
       if (!c.success) throw new IdentityError(401, 'invalid claims');

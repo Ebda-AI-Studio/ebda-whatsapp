@@ -163,7 +163,7 @@ describe('routes', () => {
     const ws = W(8422);
     const owner = await apiFor(ws, 'owner');
     configureSessionCheck(async () => true);
-    expect((await owner.call('POST', '/packages/gold/checkout', {})).status).toBe(401);
+    expect((await owner.call('POST', '/packages/gold/checkout', {})).status).toBe(403); // M-135: refused by the middleware on every write (403 session_revoked), before the route's own check
     expect((await env.DB.prepare('SELECT count(*) AS n FROM package_orders WHERE workspace_id = ?').bind(ws).first<{ n: number }>())!.n).toBe(0);
     const { tokenFor } = await import('./helpers/api');
     const { SELF } = await import('cloudflare:test');

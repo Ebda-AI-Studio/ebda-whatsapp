@@ -1,4 +1,4 @@
-import type { InstapayRequest, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, WalletDto } from './billing';
+import type { OpsStatusDto, InstapayRequest, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, WalletDto } from './billing';
 import { ApiError } from './api';
 
 // Sample billing data for preview only (the app labels the whole source as sample). Amounts are invented; nothing here is real money.
@@ -119,6 +119,12 @@ export function createSampleWallet(): WalletApi {
 
 export function createSampleOperator(currentUserId: string): OperatorApi {
   let n = 100;
+  const ops = { suspended: false, evicted: false, revokedAt: null as number | null };
+  const opsView = (): OpsStatusDto => ({
+    suspended: ops.suspended, suspendedReason: ops.suspended ? 'sample' : null, integrationsRevokedAt: ops.revokedAt, evicted: ops.evicted,
+    numbers: [{ phoneNumberId: 'pn-sample-1', health: 'green', healthReason: null, healthAt: null }],
+    sharedNumber: { phoneNumberId: 'pn-platform', health: 'green', healthReason: null, healthAt: null }, recentActions: [],
+  });
   const settings: PricingSettings[] = [
     { ver: 3, effectiveFrom: BASE + 3 * D, marginBps: 1800, creditLimitMinor: 5000, fxBufferBps: 200, vatBps: 0, actor: 'u-root', reason: 'رفع الهامش بعد زيادة أسعار ميتا' },
     { ver: 2, effectiveFrom: BASE - 10 * D, marginBps: 1500, creditLimitMinor: 5000, fxBufferBps: 200, vatBps: 0, actor: 'u-root', reason: 'تحديث هامش الربع الأخير' },
@@ -155,6 +161,14 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
     return x;
   };
   return {
+    opsStatus: async () => opsView(),
+    killSwitch: async (_ws, action) => {
+      if (action === 'suspend') ops.suspended = true;
+      else if (action === 'unsuspend') ops.suspended = false;
+      else if (action === 'shared-number/evict') ops.evicted = true;
+      else if (action === 'shared-number/readmit') ops.evicted = false;
+      else if (action === 'integrations/revoke') ops.revokedAt = Date.now();
+    },
     pricingSettings: async () => structuredClone(settings),
     async publishPricingSettings(input) {
       const row: PricingSettings = { ver: settings.length + 1, ...input, actor: currentUserId };

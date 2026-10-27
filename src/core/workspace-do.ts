@@ -625,7 +625,10 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (worsened(from, to) || signal.kind === 'spike') paused = await this.pauseCampaignsOn(phoneNumberId, 'quality_flagged', now);
     const fields = { workspace: this.workspaceId, phoneNumberId, from, to, source, pausedCampaigns: paused };
     if (signal.kind === 'spike') alert('number_error_spike', fields);
-    else if (worsened(from, to)) alert(to === 'yellow' ? 'number_quality_flagged' : 'number_restricted', fields);
+    else if (worsened(from, to)) {
+      if (to === 'yellow') alert('number_quality_flagged', fields);
+      else alert('number_restricted', fields);
+    }
     return { from, to, changed: to !== from, paused };
   }
 

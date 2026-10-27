@@ -7,7 +7,7 @@
  *   restricted --restriction lifted-->                yellow   (never straight to green: the next UNFLAGGED / UPGRADE / GREEN does that)
  *   yellow|red --UNFLAGGED / UPGRADE / GREEN-->       green    (yellow --YELLOW--> yellow, red --YELLOW--> yellow)
  *
- * What each state does (enforced in the workspace Durable Object, src/core/workspace-do.ts):
+ * What each state does (applied in the workspace Durable Object, src/core/workspace-do.ts):
  *   yellow     running and scheduled campaigns on the number are paused (`quality_flagged`); P1 `number_quality_flagged`
  *   red / restricted   the same, and no new business-initiated TEMPLATE send leaves the number (service replies inside the 24 h window still go); P0 `number_restricted`
  *   recovery   NEVER resumes a campaign: the merchant does
