@@ -19,10 +19,28 @@ export const normaliseForLinks = (text: string): string =>
 
 type Scanned = { host: string | null; scheme: string | null; ip: boolean; raw: string };
 
+/**
+ * The UNION of the links of the raw text and of its normalised form: a client (WhatsApp, a browser) may render either, so every host of
+ * either form is returned and the caller checks each. A host that exists in only one form is `obscured` (the guards refuse it).
+ */
 export function findUrls(text: string): FoundUrl[] {
   const norm = normaliseForLinks(text);
-  const rawHosts = new Set(scan(text).map((u) => u.host));
-  return scan(norm).map((u) => ({ ...u, obscured: u.host === null ? norm !== text : !rawHosts.has(u.host) }) as FoundUrl);
+  const raw = scan(text);
+  const normed = scan(norm);
+  const rawHosts = new Set(raw.map((u) => u.host));
+  const normHosts = new Set(normed.map((u) => u.host));
+  const seen = new Set<string>();
+  const out: FoundUrl[] = [];
+  for (const [list, other] of [[raw, normHosts], [normed, rawHosts]] as const) {
+    for (const u of list) {
+      const key = `${u.host}|${u.scheme}`;
+      const differs = u.host === null ? norm !== text : !other.has(u.host);
+      if (seen.has(key) && !differs) continue;
+      seen.add(key);
+      out.push({ ...u, obscured: differs } as FoundUrl);
+    }
+  }
+  return out;
 }
 
 function scan(text: string): Scanned[] {

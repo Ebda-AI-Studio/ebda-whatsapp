@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EBDA_AGENT_COPY } from '../src/addons/ebda/agent-copy';
 import { configureCampaignLinks, type LinkConfig } from '../src/core/campaigns/links';
 import { contentProblem } from '../src/core/campaigns/content-guard';
+import { findUrls } from '../src/core/url-extract';
 import { guardReply } from '../src/core/ai/reply-guard';
 import { ScriptedProvider, useAgent } from './helpers/agent';
 import { agentWorkspace, say, text } from './helpers/agent-chat';
@@ -78,6 +79,15 @@ describe('6. invisible and compatibility characters cannot hide or split a link'
   const trusted = ['موقعنا https://shop.example.com/p'];
   const hidden = ['evil\u200B.com', 'evil\u200D.com/x', 'evil%2Ecom', 'evil%2ecom/x', '\uff45\uff56\uff49\uff4c\uff0e\uff43\uff4f\uff4d', 'evil\u00AD.com', 'ev\u2060il.com', 'evil.\uFEFFcom', 'evil.c\u00ADom', 'shop.example.com\u200B@evil.com'];
   for (const link of hidden) it(`refuses ${JSON.stringify(link)}`, () => expect(guardReply(`افتح ${link} دلوقتي`, trusted)).toEqual({ ok: false, reason: 'url' }));
+  it('a host present only in the RAW text is checked too: the normalised form alone would have been allow-listed', () => {
+    // normalised: evil.com.shop.example.com (a subdomain of the allowed host); raw: the zero-width space ends "evil.com" as a link of its own
+    expect(guardReply('افتح evil.com\u200B.shop.example.com دلوقتي', trusted)).toEqual({ ok: false, reason: 'url' });
+    expect(guardReply('افتح https://shop.example.com\u2024evil.com/x', trusted)).toEqual({ ok: false, reason: 'url' });
+  });
+  it('a plain allow-listed link has no format characters and is accepted (not obscured)', () => {
+    expect(findUrls('تفاصيل https://shop.example.com/p/1').map((u) => u.obscured)).toEqual([false]);
+    expect(guardReply('تفاصيل https://shop.example.com/p/1', trusted)).toEqual({ ok: true });
+  });
   it('plain Arabic text with no link is accepted', () => {
     expect(guardReply('أهلاً بيك! أقدر أساعدك إزاي؟ الشحن بياخد ٣ أيام', [])).toEqual({ ok: true });
   });
