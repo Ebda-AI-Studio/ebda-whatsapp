@@ -144,6 +144,8 @@ it('DIGITS-1: no ٠-٩ / ۰-۹ in code, copy, templates, brands, help, legal or 
     }
   }
   expect(hits).toEqual([]);
+});
+
 // ---- WA-NOFREE-1: there is no free plan ----
 it('across the D1 migrations, a package with price_minor = 0 is only ever store-included', async () => {
   const { readdirSync, readFileSync } = await import('node:fs');
