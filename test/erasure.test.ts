@@ -22,7 +22,7 @@ async function seed(ws: string) {
 it('removes the contact, conversation, messages and status events, and deletes R2 bodies', async () => {
   await seed('ws-e1');
   const r = await workspace('ws-e1').eraseContact(A);
-  expect(r).toEqual({ found: true, messages: 2, statusEvents: 1, r2Objects: 1, r2Pending: 0 });
+  expect(r).toEqual({ found: true, messages: 2, statusEvents: 1, r2Objects: 1, r2Pending: 0, completedAt: expect.any(Number) });
   expect(await rows('ws-e1', 'SELECT wa_id FROM contacts')).toEqual([{ wa_id: B }]);
   expect(await rows('ws-e1', 'SELECT count(*) AS n FROM conversations')).toEqual([{ n: 1 }]);
   expect(await rows('ws-e1', 'SELECT wamid FROM messages')).toEqual([{ wamid: 'ws-e1.b1' }]);
@@ -33,7 +33,7 @@ it('removes the contact, conversation, messages and status events, and deletes R
 it('is idempotent', async () => {
   await seed('ws-e2');
   await workspace('ws-e2').eraseContact(A);
-  expect(await workspace('ws-e2').eraseContact(A)).toEqual({ found: false, messages: 0, statusEvents: 0, r2Objects: 0, r2Pending: 0 });
+  expect(await workspace('ws-e2').eraseContact(A)).toEqual({ found: false, messages: 0, statusEvents: 0, r2Objects: 0, r2Pending: 0, completedAt: expect.any(Number) });
 });
 
 it('also erases outbound replies to that contact', async () => {
