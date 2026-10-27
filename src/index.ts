@@ -17,7 +17,7 @@ import { operatorRoutes } from './routes/operator';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { TIER_LIMITS } from './core/throttle';
-import { buyerKey } from './core/buyer-key';
+import { BUYER_KEY_PROBE_E164, buyerKey } from './core/buyer-key';
 import { messagesRoutes } from './routes/messages';
 import { conversationsRoutes } from './routes/conversations';
 import { mediaRoutes } from './routes/media';
@@ -192,7 +192,7 @@ app.post('/kashier/webhook', async (c) => {
   return c.text(out.body, out.status);
 });
 
-app.get('/health', (c) => {
+app.get('/health', async (c) => {
   const commit = c.env.COMMIT_SHA || 'dev';
   // A malformed or missing secret fails health (so verify-prod catches it at deploy); the key names go to the alert line only.
   const problems = secretProblems(c.env as unknown as Record<string, unknown>);
@@ -200,7 +200,10 @@ app.get('/health', (c) => {
     alert('secret_misconfigured', { severity: 'P1', keys: problems });
     return c.json({ ok: false, status: 'misconfigured', service: PACK.service, commit }, 503);
   }
-  return c.json({ ok: true, status: 'ok', service: PACK.service, commit });
+  // D4: a value DERIVED from SUITE_BUYER_KEY_SECRET (the buyer key of a fixed probe number), so scripts/verify-prod.mjs can prove it equals Ebda Store's
+  // without the secret leaving either Worker. Absent when the secret is unset.
+  const secret = c.env.SUITE_BUYER_KEY_SECRET;
+  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(secret ? { buyerKeyVector: await buyerKey(secret, BUYER_KEY_PROBE_E164) } : {}) });
 });
 
 app.get('/meta/webhook', (c) => {

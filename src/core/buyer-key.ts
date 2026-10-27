@@ -7,3 +7,9 @@ export async function buyerKey(secret: string, e164: string): Promise<string> {
   const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(e164)));
   return [...mac].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+/**
+ * The fixed number whose buyer key every Worker of the suite publishes on /health (`buyerKeyVector`). Comparing the two published values proves
+ * SUITE_BUYER_KEY_SECRET is the same on both Workers without either secret ever leaving its Worker (D4). Not a real customer.
+ */
+export const BUYER_KEY_PROBE_E164 = '+201001234567';
