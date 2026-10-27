@@ -694,8 +694,8 @@ export class WorkspaceDO extends DurableObject<Env> {
     const shared = await this.env.DB.prepare('SELECT 1 FROM shared_numbers WHERE phone_number_id = ?').bind(phoneNumberId).first();
     if (shared) {
       const verdict = await noteSharedError(this.env, phoneNumberId, this.workspaceId, now);
-      if (verdict.kind === 'platform') await applySharedHealth(this.env, phoneNumberId, { kind: 'spike' }, undefined, (f) => this.ctx.waitUntil(f()), now);
-      else if (verdict.kind === 'member') {
+      if (verdict.kind === 'platform' || (verdict.kind === 'member' && verdict.platform)) await applySharedHealth(this.env, phoneNumberId, { kind: 'spike' }, undefined, (f) => this.ctx.waitUntil(f()), now);
+      if (verdict.kind === 'member') {
         // One store produced (nearly) all of it: stop THAT store's templates on the number, not everyone's.
         if (verdict.workspaceId === this.workspaceId) blockMember(this.sql, phoneNumberId, now + MEMBER_BLOCK_MS);
         else await this.env.WORKSPACE_DO.get(this.env.WORKSPACE_DO.idFromName(verdict.workspaceId)).blockSharedSends(phoneNumberId, now + MEMBER_BLOCK_MS);

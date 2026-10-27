@@ -1,7 +1,7 @@
 import type { Env } from '../../env';
 import { alert } from '../observability';
 import { numberForDisplayPhone } from '../routing';
-import { HEALTH_STATES, MEMBER_BLOCK_MS, SHARED_DOMINANCE, SHARED_SPIKE_MIN_MEMBERS, SPIKE_THRESHOLD, SPIKE_WINDOW_MS, mirrorHealth, nextHealth, sharedNumberByDisplay, signalSource, worsened, type HealthSignal, type HealthState } from './health';
+import { HEALTH_STATES, MEMBER_BLOCK_MS, SHARED_DOMINANCE, SHARED_REPEAT_SHARE, SHARED_REPEAT_WINDOWS, SHARED_REPEAT_WINDOW_MS, SHARED_SPIKE_MIN_MEMBERS, SPIKE_THRESHOLD, SPIKE_WINDOW_MS, mirrorHealth, nextHealth, sharedNumberByDisplay, signalSource, worsened, type HealthSignal, type HealthState } from './health';
 
 /** Hands background work to the request's waitUntil (the webhook answers Meta once D1 is up to date, not after every member was told). */
 export type Schedule = (work: () => Promise<unknown>) => void;
@@ -83,14 +83,22 @@ export async function reconcileSharedHealth(env: Env): Promise<void> {
   for (const n of results) await pushToMembers(env, n.phone_number_id, n.health_state, n.health_at);
 }
 
-export type SharedSpike = { kind: 'none' } | { kind: 'platform' } | { kind: 'member'; workspaceId: string } | { kind: 'ambiguous' };
+export type SharedSpike =
+  | { kind: 'none' }
+  | { kind: 'platform' }
+  /** One store is to blame: its sends stop. `platform` is also true when the OTHER members' errors on their own meet the platform rule. */
+  | { kind: 'member'; workspaceId: string; platform: boolean }
+  | { kind: 'ambiguous' };
 
 /**
- * The platform number's spike guard, attributed per MEMBER (D1 `shared_number_errors`). Once the window holds SPIKE_THRESHOLD errors:
- *  - from at least SHARED_SPIKE_MIN_MEMBERS distinct members -> the number itself is in trouble: `platform` (the state trips for everyone);
- *  - else one member with at least SHARED_DOMINANCE of them -> `member`: only that store's template sends on the number stop;
- *  - else (two members, no clear culprit) -> `ambiguous`: alert only, nobody is stopped.
- * The counters are cleared on any verdict but `none`, so the next spike needs fresh errors.
+ * The platform number's spike guard, attributed per MEMBER (D1 `shared_number_errors`). Once the window holds SPIKE_THRESHOLD errors, in this ORDER:
+ *  1. DOMINANCE first: a member with at least SHARED_DOMINANCE of the window's errors is blocked. The platform still trips only if the REMAINING members' errors meet
+ *     the platform rule on their own (at least SPIKE_THRESHOLD errors from at least SHARED_SPIKE_MIN_MEMBERS members): an abuser with two tiny accomplices is blocked
+ *     and does not take the number down for everyone;
+ *  2. else errors from at least SHARED_SPIKE_MIN_MEMBERS distinct members -> the number itself: `platform`;
+ *  3. else `ambiguous` (two members, no culprit): alert only, BUT a member holding at least SHARED_REPEAT_SHARE of the window earns a strike, and SHARED_REPEAT_WINDOWS
+ *     strikes inside SHARED_REPEAT_WINDOW_MS block it like a dominant one (a rolling tally; the window counters are cleared, the strikes are not).
+ * The window counters are cleared on any verdict but `none`.
  */
 export async function noteSharedError(env: Env, phoneNumberId: string, workspaceId: string, now = Date.now()): Promise<SharedSpike> {
   const bucket = Math.floor(now / 600_000);
@@ -103,9 +111,26 @@ export async function noteSharedError(env: Env, phoneNumberId: string, workspace
   const total = results.reduce((a, r) => a + r.n, 0);
   if (total < SPIKE_THRESHOLD) return { kind: 'none' };
   await env.DB.prepare('DELETE FROM shared_number_errors WHERE phone_number_id = ?').bind(phoneNumberId).run();
-  if (results.length >= SHARED_SPIKE_MIN_MEMBERS) return { kind: 'platform' };
   const top = results[0]!;
-  return top.n / total >= SHARED_DOMINANCE ? { kind: 'member', workspaceId: top.workspace_id } : { kind: 'ambiguous' };
+  if (top.n / total >= SHARED_DOMINANCE) { // 1. dominance FIRST
+    const rest = results.slice(1);
+    const restTotal = total - top.n;
+    return { kind: 'member', workspaceId: top.workspace_id, platform: rest.length >= SHARED_SPIKE_MIN_MEMBERS && restTotal >= SPIKE_THRESHOLD };
+  }
+  if (results.length >= SHARED_SPIKE_MIN_MEMBERS) return { kind: 'platform' }; // 2.
+  // 3. ambiguous: remember who carried it, so a repeat offender is caught across windows
+  const since = now - SHARED_REPEAT_WINDOW_MS;
+  await env.DB.prepare('DELETE FROM shared_number_strikes WHERE at < ?').bind(since).run();
+  for (const r of results) {
+    if (r.n / total < SHARED_REPEAT_SHARE) continue;
+    await env.DB.prepare('INSERT INTO shared_number_strikes (phone_number_id, workspace_id, at) VALUES (?, ?, ?)').bind(phoneNumberId, r.workspace_id, now).run();
+    const strikes = (await env.DB.prepare('SELECT count(*) AS n FROM shared_number_strikes WHERE phone_number_id = ? AND workspace_id = ? AND at >= ?').bind(phoneNumberId, r.workspace_id, since).first<{ n: number }>())?.n ?? 0;
+    if (strikes >= SHARED_REPEAT_WINDOWS) {
+      await env.DB.prepare('DELETE FROM shared_number_strikes WHERE phone_number_id = ? AND workspace_id = ?').bind(phoneNumberId, r.workspace_id).run();
+      return { kind: 'member', workspaceId: r.workspace_id, platform: false };
+    }
+  }
+  return { kind: 'ambiguous' };
 }
 
 export { MEMBER_BLOCK_MS };

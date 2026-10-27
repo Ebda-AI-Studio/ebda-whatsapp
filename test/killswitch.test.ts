@@ -405,6 +405,41 @@ describe('the platform number reaches every member (items 6 and 7, and the shado
     expect(await workspace(good!).claimSend(goodJob!)).not.toBe('dropped'); // the innocent one: still sends
     expect(spy.mock.calls.some((c) => String(c[0]).includes('number_member_abuse'))).toBe(true);
   });
+  /** A template job from `ws` on the platform number; true when its claim is refused as number_restricted. */
+  async function templateRefused(ws: string): Promise<boolean> {
+    await env.DB.prepare("INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, 'platform_line', 0)").bind(PLAT).run();
+    await seedSharedTemplate(PLAT, { name: 'tpl-u', language: 'ar' });
+    await fund(ws, 100_000);
+    const c = await chat(ws, 'UTILITY');
+    const r = await workspace(ws).queueOutbound(c, PLAT, { type: 'template', clientId: crypto.randomUUID(), name: 'tpl-u', language: 'ar', params: [] });
+    expect(r.ok).toBe(true);
+    if (!r.ok || !r.job) return false;
+    return (await workspace(ws).claimSend(r.job)) === 'dropped';
+  }
+  it('dominance is checked FIRST: an abuser with ~85% plus two tiny accomplices is blocked and does NOT take the number down for everyone', async () => {
+    const [abuser, a, b] = await platform([1147, 1148, 1149]);
+    const send = async (ws: string, n: number) => { for (let i = 0; i < n; i++) await workspace(ws).noteSendError(PLAT, 131049); };
+    await send(a!, 2); await send(b!, 2); await send(abuser!, SPIKE_THRESHOLD - 4); // the 25th error: abuser 21 (84%), accomplices 2 + 2
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green'); // the platform did not trip
+    expect(await templateRefused(abuser!)).toBe(true); // the abuser is blocked
+    expect(await templateRefused(a!)).toBe(false);
+    expect(await templateRefused(b!)).toBe(false);
+  });
+  it('a member holding 60% in three consecutive AMBIGUOUS windows is blocked on the third (rolling tally), and the other member never is', async () => {
+    const [x, y] = await platform([1150, 1151]);
+    const oneWindow = async () => { // 10 from y first, then 15 from x: the 25th error leaves x at 60%
+      for (let i = 0; i < 10; i++) await workspace(y!).noteSendError(PLAT, 131049);
+      for (let i = 0; i < 15; i++) await workspace(x!).noteSendError(PLAT, 131049);
+    };
+    await oneWindow();
+    expect(await templateRefused(x!)).toBe(false);
+    await oneWindow();
+    expect(await templateRefused(x!)).toBe(false);
+    await oneWindow(); // the third window: x is the repeat top contributor
+    expect(await templateRefused(x!)).toBe(true);
+    expect(await templateRefused(y!)).toBe(false);
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green');
+  });
   it('errors spread over 3 or more members trip the platform number for everyone (yellow)', async () => {
     const members = await platform([1142, 1143, 1144]);
     for (let i = 0; i < SPIKE_THRESHOLD; i++) await workspace(members[i % 3]!).noteSendError(PLAT, 131049);

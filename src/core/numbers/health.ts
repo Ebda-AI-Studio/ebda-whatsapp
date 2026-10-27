@@ -90,6 +90,11 @@ export const SPIKE_WINDOW_MS = 60 * 60_000;
 export const SHARED_SPIKE_MIN_MEMBERS = 3;
 /** Below that, one member that produced at least this share of the window's errors is the problem: only ITS template sends on the number stop. */
 export const SHARED_DOMINANCE = 0.8;
+/** A member that contributed at least this share of an AMBIGUOUS window (no one dominant, fewer than 3 members) gets a strike... */
+export const SHARED_REPEAT_SHARE = 0.5;
+/** ...and this many strikes inside SHARED_REPEAT_WINDOW_MS block it like a dominant member (a rolling tally: the per-window counters are cleared, the strikes are not). */
+export const SHARED_REPEAT_WINDOWS = 3;
+export const SHARED_REPEAT_WINDOW_MS = 24 * 60 * 60_000;
 /** How long a dominant member's template sends on the platform number stay stopped (it can be shortened by the operator evicting it). */
 export const MEMBER_BLOCK_MS = 24 * 60 * 60_000;
 const BUCKET_MS = 10 * 60_000;

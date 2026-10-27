@@ -13,6 +13,14 @@ ALTER TABLE shared_numbers ADD COLUMN health_reason TEXT;
 ALTER TABLE shared_numbers ADD COLUMN health_at INTEGER;
 ALTER TABLE shared_numbers ADD COLUMN health_signal_at INTEGER NOT NULL DEFAULT 0;
 
+-- A member that was the main contributor of an ambiguous spike gets a strike; repeated strikes inside a day block it (see SHARED_REPEAT_* in health.ts).
+CREATE TABLE shared_number_strikes (
+  phone_number_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX shared_number_strikes_member ON shared_number_strikes (phone_number_id, workspace_id, at);
+
 -- The spike guard for the platform number: errors per number AND per member (10-minute buckets), so one abusive member is told apart from a number-wide problem.
 CREATE TABLE shared_number_errors (
   phone_number_id TEXT NOT NULL,
