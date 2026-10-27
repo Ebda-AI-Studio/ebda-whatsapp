@@ -37,7 +37,7 @@ import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, p
 import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
 import type { AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
-import { creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
+import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
@@ -1513,7 +1513,11 @@ export class WorkspaceDO extends DurableObject<Env> {
     return {
       ...this.billing.view(now),
       funding: Object.fromEntries(this.sql.exec<{ phone_number_id: string; funding: string }>('SELECT phone_number_id, funding FROM number_funding').toArray().map((f) => [f.phone_number_id, f.funding])),
-      aiCredits: { balance: creditBalance(this.sql), available: creditsAvailable(this.sql, now) },
+      aiCredits: (() => {
+        const available = creditsAvailable(this.sql, now);
+        const allowance = monthlyAllowance(this.sql);
+        return { balance: creditBalance(this.sql), available, low: available < lowCreditsThreshold(allowance), lowThreshold: lowCreditsThreshold(allowance), allowance };
+      })(),
       plan: ent ? { packageId: ent.packageId, status: ent.status, periodEnd: ent.periodEnd, cancelledAt: ent.cancelledAt } : null,
     };
   }

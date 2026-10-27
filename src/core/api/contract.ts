@@ -412,7 +412,10 @@ export const walletDto = z.object({
   funding: z.array(z.object({ phoneNumberId: z.string(), displayPhone: z.string().nullable(), funding: walletFundingKind })),
   topupsEnabled: z.boolean(),
   lowBalance: z.boolean(),
-  aiCredits: z.object({ balance: z.number().int(), available: z.number().int() }),
+  /** The wallet is low under this many minor units: max(20 EGP, 3 days of the last week's average Meta spend). */
+  lowBalanceThresholdMinor: z.number().int().nonnegative(),
+  /** One credit = one AI turn. `low` = available under a tenth of the monthly `allowance` (never under 5 credits, `lowThreshold`). */
+  aiCredits: z.object({ balance: z.number().int(), available: z.number().int(), low: z.boolean(), lowThreshold: z.number().int().nonnegative(), allowance: z.number().int().nonnegative() }),
   plan: z.object({ packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable() }).nullable(),
 });
 export type WalletDto = z.infer<typeof walletDto>;

@@ -30,6 +30,8 @@ export const AUTH_HOLD_TTL_MS = 2 * DAY;
 export const PENDING_RATE_MAX_MS = 7 * DAY;
 export const PARENT_HOLD_TTL_MS = 60 * DAY;
 export const LOW_BALANCE_MINOR = 2000;
+/** The wallet is "low" when it covers fewer than this many days of the last week's average Meta spend (never less than LOW_BALANCE_MINOR, the floor for a quiet wallet). */
+export const LOW_RUNWAY_DAYS = 3;
 const DRAIN_DELAY_MS = 1000;
 
 export type WalletKind = 'topup' | 'meta_charge' | 'meta_adjust' | 'ai_charge' | 'refund' | 'chargeback' | 'adjustment' | 'grant' | 'expire';
@@ -120,8 +122,14 @@ export class Billing {
   }
 
   /** Once per day while the available balance is under the threshold: a log alert the alert bridge turns into a notice. */
+  /** M-084: max(floor, LOW_RUNWAY_DAYS days of the average daily Meta spend over the last 7 days). A flat 20 EGP covers about six marketing messages. */
+  lowBalanceThreshold(now: number): number {
+    const spent = this.sql.exec<{ s: number }>("SELECT coalesce(-sum(amount_minor), 0) AS s FROM wallet_ledger WHERE kind = 'meta_charge' AND amount_minor < 0 AND at > ?", now - 7 * DAY).one().s;
+    return Math.max(LOW_BALANCE_MINOR, Math.ceil((LOW_RUNWAY_DAYS * spent) / 7));
+  }
+
   private lowBalanceAlert(now: number, balance: number): void {
-    if (balance - this.held() >= LOW_BALANCE_MINOR) return;
+    if (balance - this.held() >= this.lowBalanceThreshold(now)) return;
     const last = Number(this.sql.exec<{ value: string }>("SELECT value FROM store_state WHERE key = 'wallet.low_alert_at'").toArray()[0]?.value ?? 0);
     if (now - last < DAY) return;
     this.sql.exec("INSERT INTO store_state (key, value) VALUES ('wallet.low_alert_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(now));
@@ -485,7 +493,7 @@ export class Billing {
     const st = settingsAt(this.sql, now);
     return {
       balanceMinor: balance, heldMinor: held, availableMinor: balance - held, debtMinor: balance < 0 ? -balance : 0,
-      creditLimitMinor: st.creditLimitMinor ?? DEFAULT_SETTINGS.creditLimitMinor, lowBalance: balance - held < LOW_BALANCE_MINOR,
+      creditLimitMinor: st.creditLimitMinor ?? DEFAULT_SETTINGS.creditLimitMinor, lowBalance: balance - held < this.lowBalanceThreshold(now), lowBalanceThresholdMinor: this.lowBalanceThreshold(now),
     };
   }
 }

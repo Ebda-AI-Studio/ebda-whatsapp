@@ -105,7 +105,7 @@ const P1_ALERTS = new Set([
 ]);
 /** Known and deliberately log-only. A NEW alert name must be added to exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS (test/guards.test.ts fails otherwise). */
 export const INFO_ALERTS = new Set([
-  'agent_no_credits', 'agent_tool_failed', 'ai_overdraw_refused', 'catalog_not_linked', 'catalog_provision_failed', 'catalog_vector_search_failed', 'cod_outcome_refused',
+  'agent_no_credits', 'agent_tool_failed', 'ai_credits_low', 'ai_overdraw_refused', 'catalog_not_linked', 'catalog_provision_failed', 'catalog_vector_search_failed', 'cod_outcome_refused',
   'cod_request_details_missing', 'connector_call_crashed', 'connector_call_failed', 'kb_index_unavailable', 'kb_retrieve_failed', 'r2_delete_failed', 'rate_missing_pending',
   'send_tier_exhausted', 'shared_pick_id_refused', 'shared_trueup_no_rebate', 'topup_inquiry_unsupported', 'wallet_low_balance', 'webhook_unconfirmed',
 ]);
