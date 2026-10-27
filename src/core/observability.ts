@@ -104,6 +104,7 @@ const P1_ALERTS = new Set([
   'switch_order_stale', 'upgrade_refund_not_reverted', 'upgrade_stranded_by_owner_refund', 'yearly_refund_debt_not_posted',
   'offboarding_failed', 'offboarding_held',
   'audit_write_failed', 'erasure_record_failed',
+  'instapay_duplicate_proof', 'billing_pass_backlog', 'billing_pass_row_failed', 'instapay_proof_purge_failed',
 ]);
 /** Known and deliberately log-only. A NEW alert name must be added to exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS (test/guards.test.ts fails otherwise). */
 export const INFO_ALERTS = new Set([

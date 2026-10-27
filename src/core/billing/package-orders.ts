@@ -18,6 +18,7 @@ import { addMonthsUtc, monthsStarted, partialRefundCut, periodLengthMonths, upgr
 import { sessionState } from '../identity/session';
 import { packagesEnabled, paymentProvider, type ParsedWebhook, type PaymentProvider } from './payments';
 import { MONTHS_SQL, announceSubscription, auditStmt, fallbackToStorePlan, runWrite, setSubscription } from './subscriptions';
+import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
 import { alert } from '../observability';
 
 const SWITCH_KINDS: readonly PurchaseKind[] = ['upgrade', 'queued_switch'];
@@ -381,16 +382,22 @@ async function postPlanDebt(env: Env, p: Pick<PlanRow, 'order_id' | 'workspace_i
 }
 
 /** Daily: an applied plan whose debt credit never reached the wallet (the call failed after the D1 batch) is posted now. Same fixed ref, so it can only ever land once. */
-async function repairRefundPlans(env: Env, now: number): Promise<void> {
-  const { results } = await env.DB.prepare('SELECT order_id, workspace_id, debt_settled_minor, actor FROM package_refund_plans WHERE applied = 1 AND debt_settled_minor > 0 AND debt_posted = 0 LIMIT 100')
-    .all<Pick<PlanRow, 'order_id' | 'workspace_id' | 'debt_settled_minor' | 'actor'>>();
-  for (const p of results) {
-    try {
-      await postPlanDebt(env, p, now);
-    } catch (err) {
-      alert('yearly_refund_debt_not_posted', { severity: 'P1', workspace: p.workspace_id, orderId: p.order_id, error: errName(err) });
-    }
-  }
+async function repairRefundPlans(env: Env, now: number, opts: PassOpts = {}): Promise<void> {
+  type P = Pick<PlanRow, 'order_id' | 'workspace_id' | 'debt_settled_minor' | 'actor'>;
+  const size = opts.page ?? DRAIN_PAGE;
+  await drainKeyset<P, string>({
+    name: 'repair_refund_plans', pageSize: size, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(`SELECT order_id, workspace_id, debt_settled_minor, actor FROM package_refund_plans WHERE applied = 1 AND debt_settled_minor > 0 AND debt_posted = 0 ${after ? 'AND order_id > ?' : ''} ORDER BY order_id LIMIT ${size}`)
+      .bind(...(after ? [after] : [])).all<P>()).results,
+    cursorOf: (p) => p.order_id,
+    handle: async (p) => {
+      try {
+        await postPlanDebt(env, p, now);
+      } catch (err) {
+        alert('yearly_refund_debt_not_posted', { severity: 'P1', workspace: p.workspace_id, orderId: p.order_id, error: errName(err) });
+      }
+    },
+  });
 }
 
 /**
@@ -632,35 +639,46 @@ export const INQUIRE_UNTIL_MS = 7 * 86_400_000;
  * nothing and the order is asked again tomorrow. (2) A `paid` order that was never granted (no batch ran) is granted now and reported.
  * (3) Pending orders older than 24 h expire (a payment that still arrives is granted, see `grantOrder`).
  */
-export async function repairPackageOrders(env: Env, now = Date.now(), provider: PaymentProvider | null = paymentProvider(env)): Promise<{ granted: number; expired: number; confirmed: number }> {
+export async function repairPackageOrders(env: Env, now = Date.now(), provider: PaymentProvider | null = paymentProvider(env), opts: PassOpts = {}): Promise<{ granted: number; expired: number; confirmed: number }> {
+  const size = opts.page ?? 200;
+  const more = opts.maxBatches ? { maxBatches: opts.maxBatches } : {};
   let granted = 0;
   let confirmed = 0;
   if (packagesEnabled(env) && provider) {
-    const { results: stuck } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE provider = 'kashier' AND status IN ('pending', 'expired') AND created_at < ? AND created_at > ? ORDER BY created_at LIMIT 200`)
-      .bind(now - REPAIR_AFTER_MS, now - INQUIRE_UNTIL_MS).all<PackageOrderRow>();
-    for (const row of stuck) {
+    await drainKeyset<PackageOrderRow, [number, string]>({
+      name: 'repair_package_orders_inquire', pageSize: size, ...more,
+      page: async (after) => (await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE provider = 'kashier' AND status IN ('pending', 'expired') AND created_at < ?1 AND created_at > ?2 ${after ? 'AND (created_at > ?3 OR (created_at = ?3 AND order_id > ?4))' : ''} ORDER BY created_at, order_id LIMIT ${size}`)
+        .bind(now - REPAIR_AFTER_MS, now - INQUIRE_UNTIL_MS, ...(after ?? [])).all<PackageOrderRow>()).results,
+      cursorOf: (r) => [r.created_at, r.order_id],
+      handle: async (row) => {
+        try {
+          const q = await provider.inquire(row.order_id);
+          if (q === 'unsupported' || q === 'unavailable' || q.status === 'PENDING') return;
+          if (q.status === 'SUCCESS' && !q.transactionId) return;
+          const ev: ParsedWebhook = { event: 'pay', status: q.status, orderId: row.order_id, transactionId: q.transactionId ?? `none:${row.order_id}`, amountMinor: q.amountMinor ?? -1, currency: q.currency ?? '', eventKey: `kashier:${q.transactionId ?? row.order_id}:${q.status}` };
+          if ((await applyPackageWebhook(env, row, ev, now)) === 'granted') confirmed++;
+        } catch (err) {
+          alert('package_repair_failed', { orderId: row.order_id, error: errName(err) });
+        }
+      },
+    });
+  }
+  await drainKeyset<PackageOrderRow, [number, string]>({
+    name: 'repair_package_orders_grant', pageSize: size, ...more,
+    page: async (after) => (await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE status = 'paid' AND granted_at IS NULL AND provider_ref IS NOT NULL ${after ? 'AND (created_at > ?1 OR (created_at = ?1 AND order_id > ?2))' : ''} ORDER BY created_at, order_id LIMIT ${size}`)
+      .bind(...(after ?? [])).all<PackageOrderRow>()).results,
+    cursorOf: (r) => [r.created_at, r.order_id],
+    handle: async (row) => {
+      // (A stale or expired switch order is reported once by `staleOrReplay`, not again every day.)
+      if (!SWITCH_KINDS.includes(row.kind)) alert('package_paid_not_granted', { workspace: row.workspace_id, orderId: row.order_id });
       try {
-        const q = await provider.inquire(row.order_id);
-        if (q === 'unsupported' || q === 'unavailable' || q.status === 'PENDING') continue;
-        if (q.status === 'SUCCESS' && !q.transactionId) continue;
-        const ev: ParsedWebhook = { event: 'pay', status: q.status, orderId: row.order_id, transactionId: q.transactionId ?? `none:${row.order_id}`, amountMinor: q.amountMinor ?? -1, currency: q.currency ?? '', eventKey: `kashier:${q.transactionId ?? row.order_id}:${q.status}` };
-        if ((await applyPackageWebhook(env, row, ev, now)) === 'granted') confirmed++;
+        if ((await grantOrder(env, row, row.provider_ref!, now, { claim: false })) === 'granted') granted++;
       } catch (err) {
         alert('package_repair_failed', { orderId: row.order_id, error: errName(err) });
       }
-    }
-  }
-  const { results } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM package_orders WHERE status = 'paid' AND granted_at IS NULL AND provider_ref IS NOT NULL ORDER BY created_at LIMIT 200`).all<PackageOrderRow>();
-  for (const row of results) {
-    // (A stale or expired switch order is reported once by `staleOrReplay`, not again every day.)
-    if (!SWITCH_KINDS.includes(row.kind)) alert('package_paid_not_granted', { workspace: row.workspace_id, orderId: row.order_id });
-    try {
-      if ((await grantOrder(env, row, row.provider_ref!, now, { claim: false })) === 'granted') granted++;
-    } catch (err) {
-      alert('package_repair_failed', { orderId: row.order_id, error: errName(err) });
-    }
-  }
-  await repairRefundPlans(env, now);
+    },
+  });
+  await repairRefundPlans(env, now, opts);
   // A switch quote whose period has ended can never be granted at its price: expire it now rather than after a day.
   await env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE provider = 'kashier' AND status = 'pending' AND kind IN ('upgrade', 'queued_switch') AND quoted_period_end <= ?").bind(now).run();
   const exp = await env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE provider = 'kashier' AND status = 'pending' AND created_at < ?").bind(now - PENDING_EXPIRES_AFTER_MS).run();
