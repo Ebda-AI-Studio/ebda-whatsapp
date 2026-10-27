@@ -17,6 +17,13 @@ export const MONTHS_SQL = (col: string, months: string) => `CAST(strftime('%s', 
 export const MONTH_SQL = (col: string) => MONTHS_SQL(col, '1');
 /** The billing period (1 or 12 months) of the package a `workspace_subscriptions` row is on. */
 export const PERIOD_MONTHS_SQL = 'coalesce((SELECT period_months FROM packages WHERE id = workspace_subscriptions.package_id), 1)';
+/**
+ * Used while a queued period is rolled in: the order that now OWNS the running period decides the package and how many months that period is, because a queued
+ * order keeps what it was bought as (a 12-month period rolls as 12 months, and a queued downgrade rolls as the package it was bought for), whatever the
+ * package row says later. Evaluated after the owner flag moved, so exactly one order matches; with no order (a legacy row) the subscription keeps its own.
+ */
+export const OWNER_MONTHS_SQL = 'coalesce((SELECT period_months FROM package_orders WHERE workspace_id = workspace_subscriptions.workspace_id AND owns_running = 1), 1)';
+export const OWNER_PACKAGE_SQL = 'coalesce((SELECT package_id FROM package_orders WHERE workspace_id = workspace_subscriptions.workspace_id AND owns_running = 1), package_id)';
 
 type SubRow = { workspace_id: string; package_id: string; status: EntitlementEvent['status']; period_start: number; period_end: number; cancelled_at: number | null; version: number; ai_credits: number | null; max_members: number | null; feat_campaigns: number | null; feat_order_in_chat: number | null; feat_api: number | null; priority_support: number | null; past_due_since: number | null; period_months: number | null };
 
@@ -91,11 +98,11 @@ export type SetSubscription = {
 };
 export type WriteResult = { version: number; written: boolean; applied: boolean; eventQueued: boolean; pre: number[] };
 
-const auditStmt = (env: Env, a: { actor: string; workspaceId: string; after: unknown; ref: string }, now: number) =>
+export const auditStmt = (env: Env, a: { actor: string; workspaceId: string; after: unknown; ref: string }, now: number) =>
   env.DB.prepare("INSERT INTO billing_audit (at, actor, action, workspace_id, before_json, after_json, reason) SELECT ?, ?, 'subscription_set', ?, NULL, ?, ? WHERE changes() > 0")
     .bind(now, a.actor, a.workspaceId, JSON.stringify(a.after), a.ref);
 
-async function runWrite(env: Env, write: D1PreparedStatement, audit: D1PreparedStatement, o: WriteOpts, workspaceId: string, now: number): Promise<WriteResult> {
+export async function runWrite(env: Env, write: D1PreparedStatement, audit: D1PreparedStatement, o: WriteOpts, workspaceId: string, now: number): Promise<WriteResult> {
   const before = o.before ?? [];
   const res = await env.DB.batch([...before, write, audit, ...(o.after ?? [])]);
   const version = (res[before.length]!.results[0] as { version: number } | undefined)?.version;
@@ -151,7 +158,7 @@ export async function rollRenewals(env: Env, workspaceId: string, now: number): 
       env.DB.prepare(`UPDATE package_orders SET owns_running = 0 WHERE workspace_id = ? AND owns_running = 1 AND ${due.sql}`).bind(workspaceId, ...due.binds),
       env.DB.prepare(`UPDATE package_orders SET owns_running = 1, queued_seq = NULL WHERE order_id = (SELECT order_id FROM package_orders WHERE workspace_id = ? AND queued_seq IS NOT NULL ORDER BY queued_seq LIMIT 1) AND ${due.sql}`).bind(workspaceId, ...due.binds),
       env.DB.prepare(`UPDATE package_orders SET queued_seq = queued_seq - 1 WHERE workspace_id = ? AND queued_seq IS NOT NULL AND ${due.sql}`).bind(workspaceId, ...due.binds),
-      env.DB.prepare(`UPDATE workspace_subscriptions SET period_start = period_end, period_end = ${MONTHS_SQL('period_end', PERIOD_MONTHS_SQL)}, queued_periods = queued_periods - 1,
+      env.DB.prepare(`UPDATE workspace_subscriptions SET period_start = period_end, package_id = ${OWNER_PACKAGE_SQL}, period_end = ${MONTHS_SQL('period_end', OWNER_MONTHS_SQL)}, queued_periods = queued_periods - 1,
           version = version + 1, updated_at = ? WHERE workspace_id = ? AND queued_periods > 0 AND period_end <= ? AND status IN ('active', 'trialing') RETURNING version`).bind(now, workspaceId, now),
       auditStmt(env, { actor: 'purchase', workspaceId, ref: 'queued_period_started', after: { rolledAt: now } }, now),
     ]);

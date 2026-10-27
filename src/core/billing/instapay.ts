@@ -19,7 +19,7 @@ import { sessionState } from '../identity/session';
 import { addBusinessMs, businessMsBetween } from './business-hours';
 import type { InstapayPayee } from './instapay-payee';
 import { adjustmentThreshold } from './operator';
-import { ORDER_COLS, grantOrder, type PackageOrderRow } from './package-orders';
+import { ORDER_COLS, grantOrder, planPurchase, type PackageOrderRow, type PurchasePlan } from './package-orders';
 import { MAX_TOPUP_MINOR, MIN_TOPUP_MINOR, TOPUP_COLS, credit, type TopupRow } from './topups';
 
 export type { InstapayPayee };
@@ -63,7 +63,7 @@ function newReference(): string {
 }
 
 export type CreateInput = { kind: 'package'; packageId: string } | { kind: 'topup'; amountMinor: number };
-export type CreateResult = { ok: true; request: InstapayRequestDto } | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'invalid_amount' | 'unknown_package' | 'too_many_open' };
+export type CreateResult = { ok: true; request: InstapayRequestDto } | { ok: false; reason: 'disabled' | 'unavailable' | 'session_revoked' | 'invalid_amount' | 'unknown_package' | 'too_many_open' | 'yearly_queued' };
 
 export async function createInstapayRequest(env: Env, a: { workspaceId: string; userId: string; sessionId: string; input: CreateInput; payee: InstapayPayee | null }, now = Date.now()): Promise<CreateResult> {
   if (!instapayEnabled(env)) return { ok: false, reason: 'disabled' };
@@ -73,10 +73,12 @@ export async function createInstapayRequest(env: Env, a: { workspaceId: string; 
   if (session === 'unavailable') return { ok: false, reason: 'unavailable' };
   let amount: number;
   let packageId: string | null = null;
+  let plan: Extract<PurchasePlan, { ok: true }> | null = null;
   if (a.input.kind === 'package') {
-    const pkg = await env.DB.prepare('SELECT price_minor FROM packages WHERE id = ? AND active = 1 AND price_minor > 0').bind(a.input.packageId).first<{ price_minor: number }>();
-    if (!pkg) return { ok: false, reason: 'unknown_package' };
-    amount = pkg.price_minor;
+    const p = await planPurchase(env, a.workspaceId, a.input.packageId, now); // the server's amount, kind and period length (WA-YEARLY-SWITCH-2)
+    if (!p.ok) return p;
+    plan = p;
+    amount = p.amountMinor;
     packageId = a.input.packageId;
   } else {
     amount = a.input.amountMinor;
@@ -93,7 +95,7 @@ export async function createInstapayRequest(env: Env, a: { workspaceId: string; 
         WHERE (SELECT count(*) FROM instapay_requests WHERE workspace_id = ?3 AND state IN ('awaiting_proof', 'under_review')) < ${MAX_OPEN_PER_WORKSPACE}`,
     ).bind(id, reference, a.workspaceId, a.input.kind, packageId, amount, a.userId, now, now + INSTAPAY_TTL_MS);
     const order = a.input.kind === 'package'
-      ? env.DB.prepare("INSERT INTO package_orders (order_id, workspace_id, package_id, amount_minor, currency, status, created_by, created_at, provider) SELECT ?, ?, ?, ?, 'EGP', 'pending', ?, ?, 'instapay' WHERE EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?)").bind(id, a.workspaceId, packageId, amount, a.userId, now, id)
+      ? env.DB.prepare("INSERT INTO package_orders (order_id, workspace_id, package_id, amount_minor, currency, status, created_by, created_at, provider, kind, from_package, period_months) SELECT ?, ?, ?, ?, 'EGP', 'pending', ?, ?, 'instapay', ?, ?, ? WHERE EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?)").bind(id, a.workspaceId, packageId, amount, a.userId, now, plan?.kind ?? 'purchase', plan?.fromPackage ?? null, plan?.periodMonths ?? 1, id)
       : env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, fee_minor, total_minor, currency, state, created_by, created_at, provider) SELECT ?, ?, ?, 0, ?, 'EGP', 'pending', ?, ?, 'instapay' WHERE EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?)").bind(id, a.workspaceId, amount, amount, a.userId, now, id);
     try {
       const res = await env.DB.batch([req, order]); // both rows or neither

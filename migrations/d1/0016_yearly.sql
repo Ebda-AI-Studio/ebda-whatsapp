@@ -6,3 +6,31 @@ INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, creat
   ('starter-yearly', 'Starter (yearly)', 621000, 300, 1, 0, 2, 0, 0, 0, 0, 12),
   ('growth-yearly', 'Growth (yearly)', 1341000, 1500, 1, 0, 5, 1, 1, 0, 0, 12),
   ('pro-yearly', 'Pro (yearly)', 3141000, 5000, 1, 0, 15, 1, 1, 1, 1, 12);
+
+-- What a package order is, decided when it is created (server-side) and never by the client:
+--  period_months  the length of the period THIS order bought (so a queued 12-month period rolls as 12 months whatever the package row says later);
+--  kind           'purchase' (a new period, or a renewal of the same package queued behind the running one), 'upgrade' (WA-YEARLY-SWITCH-2: the prorated
+--                 difference to a higher yearly package, applied at once to the running period, same end) or 'queued_switch' (a downgrade: paid in full,
+--                 queued to start at the next renewal, no refund of the running package);
+--  from_package   the package an upgrade / queued switch was bought from;
+--  period_owner   for an upgrade: the order that owns the period it belongs to (refunds are measured over all the orders of a period).
+ALTER TABLE package_orders ADD COLUMN period_months INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE package_orders ADD COLUMN kind TEXT NOT NULL DEFAULT 'purchase' CHECK (kind IN ('purchase', 'upgrade', 'queued_switch'));
+ALTER TABLE package_orders ADD COLUMN from_package TEXT;
+ALTER TABLE package_orders ADD COLUMN period_owner TEXT;
+
+-- One executed yearly refund per period owner (the operator's cancel + refund, debt first): the stored figures make a replay return the same answer and
+-- redo only the idempotent steps. cash_minor = what still has to be sent back through the provider's dashboard (0 = no money goes out).
+CREATE TABLE package_refund_plans (
+  order_id TEXT PRIMARY KEY REFERENCES package_orders(order_id),
+  workspace_id TEXT NOT NULL,
+  shortened_months INTEGER NOT NULL,
+  debt_settled_minor INTEGER NOT NULL,
+  cash_minor INTEGER NOT NULL,
+  period_start INTEGER NOT NULL,
+  new_period_end INTEGER NOT NULL,
+  actor TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  applied INTEGER NOT NULL DEFAULT 0
+);

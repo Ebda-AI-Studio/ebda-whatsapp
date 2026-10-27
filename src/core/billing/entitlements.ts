@@ -116,35 +116,51 @@ function scheduleExpiry(sql: Sql, periodEnd: number): void {
   addTask(sql, 'subscription_expire', periodEnd);
 }
 
-/**
- * A period longer than a month (yearly) gets its AI credits ONE MONTH AT A TIME: the first month's allowance lands with the event, and a single `credit_month`
- * task sits at the next monthly anniversary. Re-applying an event (a refund shortened the period, an upgrade) re-points that one task; a plan that no longer
- * grants (past_due, cancelled, expired) or a one-month period has none.
- */
-function scheduleCreditMonth(sql: Sql, ev: { periodStart: number; periodEnd: number; periodMonths: number; status: EntitlementStatus; aiCredits: number }, now: number): void {
-  sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'credit_month' AND lease_until IS NULL");
-  if (ev.periodMonths <= 1 || !GRANTING.has(ev.status) || ev.aiCredits <= 0) return;
-  const k = Math.max(1, monthsStarted(ev.periodStart, ev.periodMonths, now));
-  const due = addMonthsUtc(ev.periodStart, k);
-  if (k < ev.periodMonths && due < ev.periodEnd) addTask(sql, 'credit_month', due, { periodStart: ev.periodStart, k });
+/** Statuses whose yearly period still earns its monthly AI credits: a plan cancelled while in effect keeps them until period_end (WA-CANCEL-1). */
+function earnsMonthlyCredits(e: { status: EntitlementStatus; period_end?: number; periodEnd?: number; aiCredits?: number; ai_credits?: number }, now: number): boolean {
+  const end = e.periodEnd ?? e.period_end ?? 0;
+  const credits = e.aiCredits ?? e.ai_credits ?? 0;
+  return credits > 0 && (e.status === 'active' || e.status === 'trialing' || (e.status === 'cancelled' && end > now));
 }
 
 /**
- * The `credit_month` task at the anniversary of month `k` (1-based from 0): the previous month's unused grant expires (purchased credits roll over) and this
- * month's allowance lands, each under its own ledger ref, so a retry or a replay is a no-op. It does nothing if the period was replaced (a renewal brings its own
- * first month), the plan no longer grants, or a refund shortened the period past this month.
+ * The next month of a period longer than a month (yearly) that has not been granted yet, derived from the LAST month actually granted (never from the clock, so a
+ * missed run or a replayed event cannot skip a month), and when it is due. Null = nothing more to grant in this period.
  */
-export function runCreditMonth(sql: Sql, payload: { periodStart?: number; k?: number } | null, now: number): void {
+function nextCreditMonth(sql: Sql, e: { periodStart: number; periodEnd: number; periodMonths: number }): { k: number; due: number } | null {
+  if (e.periodMonths <= 1) return null;
+  const k = monthsStarted(e.periodStart, e.periodMonths, lastGrantStart(sql, e.periodStart));
+  const due = addMonthsUtc(e.periodStart, k);
+  return k >= 1 && k < e.periodMonths && due < e.periodEnd ? { k, due } : null;
+}
+
+/**
+ * A period longer than a month (yearly) gets its AI credits ONE MONTH AT A TIME: the first month's allowance lands with the event, and ONE `credit_month` task
+ * (a singleton row) sits at the next monthly anniversary. An event re-points that row; a RUNNING (leased) row is left alone, because it recomputes its own next
+ * month when it finishes. A plan that no longer earns them, or a one-month period, has none.
+ */
+function scheduleCreditMonth(sql: Sql, ev: { periodStart: number; periodEnd: number; periodMonths: number; status: EntitlementStatus; aiCredits: number }, now: number): void {
+  sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'credit_month' AND lease_until IS NULL");
+  if (!earnsMonthlyCredits(ev, now)) return;
+  const next = nextCreditMonth(sql, ev);
+  if (next) addTask(sql, 'credit_month', next.due, { periodStart: ev.periodStart });
+}
+
+/**
+ * The `credit_month` task. Everything is derived from the ledger and the entitlement, never from the payload: it grants the next UNGRANTED month if its
+ * anniversary has come (the previous month's unused grant expires first; purchased credits roll over), under refs keyed by the month so a replay is a no-op, and
+ * returns the due time of the month after (or the not-yet-due month), or undefined when the period has nothing more to grant. A duplicate row, a stale payload, a
+ * replacement period or a refund-shortened period therefore cannot grant or expire anything twice.
+ */
+export function runCreditMonth(sql: Sql, now: number): number | undefined {
   const e = readEntitlement(sql);
-  const k = payload?.k;
-  if (!e || typeof k !== 'number' || payload?.periodStart !== e.periodStart) return;
-  if (!GRANTING.has(e.status) || e.aiCredits <= 0 || k < 1 || k >= e.periodMonths) return;
-  const monthStart = addMonthsUtc(e.periodStart, k);
-  if (monthStart >= e.periodEnd) return;
+  if (!e || !earnsMonthlyCredits(e, now)) return undefined;
+  const next = nextCreditMonth(sql, e);
+  if (!next) return undefined;
+  if (next.due > now) return next.due; // not yet: keep the row at its true time
   expireGrant(sql, { periodStart: lastGrantStart(sql, e.periodStart), now });
-  grantCredits(sql, { periodStart: monthStart, packageId: e.packageId, credits: e.aiCredits, now });
-  const next = addMonthsUtc(e.periodStart, k + 1);
-  if (k + 1 < e.periodMonths && next < e.periodEnd) addTask(sql, 'credit_month', next, { periodStart: e.periodStart, k: k + 1 });
+  grantCredits(sql, { periodStart: next.due, packageId: e.packageId, credits: e.aiCredits, now });
+  return nextCreditMonth(sql, e)?.due;
 }
 
 /** Applies one event inside the caller's transaction. */

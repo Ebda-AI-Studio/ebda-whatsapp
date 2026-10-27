@@ -207,5 +207,14 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       return { ...a };
     },
     changeLog: async () => structuredClone(log),
+    async yearlyRefundQuote(orderId) {
+      if (!/^yearly-/.test(orderId)) throw new ApiError('not_found', 404);
+      return { orderId, packageId: 'growth-yearly', periodMonths: 12, monthlyMinor: 111750, unusedMonths: 11, grossMinor: 1229250, debtMinor: 100000, debtSettledMinor: 100000, refundMinor: 1129250 };
+    },
+    async yearlyRefundExecute(orderId, reason) {
+      if (!/^yearly-/.test(orderId)) throw new ApiError('not_found', 404);
+      record('yearly_refund', null, null, { orderId, shortenedMonths: 11 }, reason);
+      return { orderId, shortenedMonths: 11, debtSettledMinor: 100000, cashRefundMinor: 1129250, noMoneyOut: false, periodEnd: Date.now() + 20 * 86_400_000 };
+    },
   };
 }

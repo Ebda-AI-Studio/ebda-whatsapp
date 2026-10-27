@@ -239,6 +239,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
   const [pending, setPending] = useState<PendingPackage | null>(() => readPendingPackage(now()));
   const [note, setNote] = useState<'waiting' | 'activated' | 'failed' | null>(() => (readPendingPackage(now()) ? 'waiting' : null));
   const [error, setError] = useState(false);
+  const [queued, setQueued] = useState(false); // WA-YEARLY-SWITCH-2: a queued period cannot be switched
   const [busy, setBusy] = useState<string | null>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
@@ -274,6 +275,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
   const buy = async (id: string) => {
     setBusy(id);
     setError(false);
+    setQueued(false);
     try {
       const o = await api.buyPackage(id);
       // Only an https checkout page is ever opened; anything else from the server is refused, never followed.
@@ -285,13 +287,16 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
       setPending(p);
       setNote('waiting');
       go(o.checkoutUrl);
-    } catch { setError(true); } finally { setBusy(null); }
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'yearly_queued') setQueued(true); else setError(true);
+    } finally { setBusy(null); }
   };
 
   return (
     <section className="wallet-card" aria-labelledby="w-packages-title">
       <h2 id="w-packages-title">{t.wPackagesTitle}</h2>
       <p className="muted">{t.wPackagesIntro}</p>
+      <p className="muted">{t.wYearlyUpgradeNote}</p>
       {list === 'loading' ? <p className="muted">…</p>
         : list === 'error' ? <p role="alert" className="error-text">{t.wPackagesError} <button type="button" className="btn ghost" onClick={load}>{t.retry}</button></p>
         : list.length === 0 ? <p className="muted">{t.wPackagesEmpty}</p> : (
@@ -308,6 +313,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
             ))}
           </ul>
         )}
+      {queued && <p role="alert" className="error-text">{t.wYearlyQueued}</p>}
       {error && <p role="alert" className="error-text">{t.wPackageError}</p>}
       {note === 'waiting' && pending && <p role="status" className="muted">{t.wPackageWaiting}</p>}
       {note === 'activated' && <p role="status" className="wallet-ok">{t.wPackageActivated}</p>}
@@ -496,7 +502,7 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
       input = { kind: 'topup', amountMinor: minor };
     }
     setBusy(true);
-    try { setCreated(await api.createInstapay(input)); load(); } catch { setMsg({ kind: 'alert', text: t.wIpError }); } finally { setBusy(false); }
+    try { setCreated(await api.createInstapay(input)); load(); } catch (err) { setMsg({ kind: 'alert', text: err instanceof ApiError && err.code === 'yearly_queued' ? t.wYearlyQueued : t.wIpError }); } finally { setBusy(false); }
   };
 
   const upload = async (id: string, file: File | undefined) => {

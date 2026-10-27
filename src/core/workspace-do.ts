@@ -1971,8 +1971,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       case 'funnel_rollup':
         return funnelRollup(this.sql, now);
       case 'credit_month':
-        this.ctx.storage.transactionSync(() => runCreditMonth(this.sql, JSON.parse(payload ?? 'null') as { periodStart?: number; k?: number } | null, now));
-        return undefined;
+        return this.ctx.storage.transactionSync(() => runCreditMonth(this.sql, now));
       case 'subscription_expire': {
         // A paid early renewal queued behind this period starts now instead of the plan expiring (the control plane owns the queue).
         try {

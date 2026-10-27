@@ -135,15 +135,15 @@ describe('AI credits are granted monthly inside a yearly period, never 12x upfro
     const tasks = await rows<{ due_at: number; payload: string }>(ws, "SELECT due_at, payload FROM scheduled_tasks WHERE kind = 'credit_month'");
     expect(tasks).toHaveLength(1);
     expect(tasks[0]!.due_at).toBe(addMonths(e.periodStart, 1));
-    expect(JSON.parse(tasks[0]!.payload)).toMatchObject({ periodStart: e.periodStart, k: 1 });
+    expect(JSON.parse(tasks[0]!.payload)).toMatchObject({ periodStart: e.periodStart });
     expect(await rows(ws, 'SELECT period_months FROM entitlements')).toEqual([{ period_months: 12 }]);
   });
   it('12 monthly grants in a year: each anniversary grants one month and expires the previous month\'s unused grant; the balance never exceeds one month', async () => {
     const ws = W(21);
-    await workspace(ws).applyEntitlement(ev());
+    const e = ev();
+    await workspace(ws).applyEntitlement(e);
     for (let k = 1; k <= 11; k++) {
-      await exec(ws, "UPDATE scheduled_tasks SET due_at = 1 WHERE kind = 'credit_month'");
-      await workspace(ws).runDueTasks();
+      await workspace(ws).runDueTasks(addMonths(e.periodStart, k) + 1000); // time travel to the anniversary
       expect((await workspace(ws).aiCredits()).balance, `month ${k + 1}`).toBe(300);
     }
     const g = await grants(ws);
@@ -154,11 +154,11 @@ describe('AI credits are granted monthly inside a yearly period, never 12x upfro
   });
   it('credits used in a month are not expired twice and purchased credits roll over', async () => {
     const ws = W(22);
-    await workspace(ws).applyEntitlement(ev());
+    const e = ev();
+    await workspace(ws).applyEntitlement(e);
     await workspace(ws).postAiCredits({ kind: 'purchase', amount: 40, ref: 'buy-1' });
     expect((await workspace(ws).aiCredits()).balance).toBe(340);
-    await exec(ws, "UPDATE scheduled_tasks SET due_at = 1 WHERE kind = 'credit_month'");
-    await workspace(ws).runDueTasks();
+    await workspace(ws).runDueTasks(addMonths(e.periodStart, 1) + 1000);
     expect((await workspace(ws).aiCredits()).balance).toBe(340); // the unused 300 expired, the new 300 landed, the 40 stayed
   });
   it('a renewal (a new period) expires the last month\'s unused grant and grants the first month of the next year; a shortened period stops the monthly grants', async () => {
@@ -167,11 +167,9 @@ describe('AI credits are granted monthly inside a yearly period, never 12x upfro
     await workspace(ws).applyEntitlement(first);
     // a refund shortened the period to 2 months: month 3's grant must not happen
     await workspace(ws).applyEntitlement({ ...first, version: 2, periodEnd: addMonths(first.periodStart, 2) });
-    await exec(ws, "UPDATE scheduled_tasks SET due_at = 1 WHERE kind = 'credit_month'");
-    await workspace(ws).runDueTasks(); // month 2 (k=1) is inside the shortened period
+    await workspace(ws).runDueTasks(addMonths(first.periodStart, 1) + 1000); // month 2 (k=1) is inside the shortened period
     expect((await grants(ws)).filter((r) => r.kind === 'grant')).toHaveLength(2);
-    await exec(ws, "UPDATE scheduled_tasks SET due_at = 1 WHERE kind = 'credit_month'");
-    await workspace(ws).runDueTasks(); // k=2 starts at the new end: nothing
+    await workspace(ws).runDueTasks(addMonths(first.periodStart, 2) + 1000); // k=2 starts at the new end: nothing
     expect((await grants(ws)).filter((r) => r.kind === 'grant')).toHaveLength(2);
     // the next year
     await workspace(ws).applyEntitlement({ ...first, version: 3, periodStart: addMonths(first.periodStart, 2), periodEnd: addMonths(first.periodStart, 14) });

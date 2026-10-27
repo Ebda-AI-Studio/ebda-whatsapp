@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../data/api';
-import type { Adjustment, ChangeLogItem, FxRate, MarginOverride, OperatorApi, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest } from '../data/billing';
+import type { Adjustment, ChangeLogItem, FxRate, MarginOverride, OperatorApi, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -311,6 +311,7 @@ function AccountPanel({ t, lang, api, now, run, fail }: PanelProps) {
           <div className="settings-actions op-wide"><button type="submit" className="btn primary">{t.opAdjCreate}</button></div>
         </form>
       </Card>
+      <YearlyPlanCard t={t} lang={lang} api={api} run={run} fail={fail} />
     </>
   );
 }
@@ -424,6 +425,46 @@ function QueuesPanel({ t, lang, api, source, run, now, fail }: PanelProps) {
         </ul>
       </Card>
     </>
+  );
+}
+
+/** Cancel a yearly plan: look at the refund (unused whole months x price/12, debt first), then cancel at the end of the current month. */
+function YearlyPlanCard({ t, lang, api, run, fail }: Pick<PanelProps, 't' | 'lang' | 'api' | 'run' | 'fail'>) {
+  const [orderId, setOrderId] = useState('');
+  const [reason, setReason] = useState('');
+  const [quote, setQuote] = useState<YearlyRefundQuoteView | null>(null);
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const show = async (e: FormEvent) => {
+    e.preventDefault();
+    const id = orderId.trim();
+    if (!id) return fail(t.opYrOrder);
+    setQuote(null);
+    await run(async () => { setQuote(await api.yearlyRefundQuote(id)); return ''; });
+  };
+  const execute = async () => {
+    if (!quote) return;
+    if (reason.trim().length < 5) return fail(t.opReasonShort);
+    await run(async () => {
+      const done = await api.yearlyRefundExecute(quote.orderId, reason.trim());
+      setQuote(null);
+      return done.noMoneyOut ? `${t.opYrDone(num(done.shortenedMonths, lang), money(done.debtSettledMinor), money(0))} ${t.opYrNoMoney}` : t.opYrDone(num(done.shortenedMonths, lang), money(done.debtSettledMinor), money(done.cashRefundMinor));
+    });
+  };
+  return (
+    <Card id="op-yearly" title={t.opYrTitle}>
+      <p className="muted">{t.opYrHelp}</p>
+      <form className="wallet-form op-inline" onSubmit={(e) => void show(e)}>
+        <label className="field"><span>{t.opYrOrder}</span><input dir="ltr" value={orderId} onChange={(e) => setOrderId(e.target.value)} /></label>
+        <button type="submit" className="btn">{t.opYrShow}</button>
+      </form>
+      {quote && (
+        <>
+          <p role="status">{t.opYrQuote(num(quote.unusedMonths, lang), money(quote.grossMinor), money(quote.debtSettledMinor), money(quote.refundMinor))}</p>
+          <label className="field"><span>{t.opReason}</span><input dir="auto" maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+          <div className="settings-actions"><button type="button" className="btn primary" onClick={() => void execute()}>{t.opYrExecute}</button></div>
+        </>
+      )}
+    </Card>
   );
 }
 

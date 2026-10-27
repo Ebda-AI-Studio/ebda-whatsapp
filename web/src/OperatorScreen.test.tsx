@@ -290,3 +290,22 @@ describe('operator: InstaPay transfers', () => {
     expect(confirm).toHaveBeenCalledWith('ip-op-1');
   });
 });
+
+describe('operator: cancel a yearly plan and refund (debt first)', () => {
+  it('shows the quote, then executes it with a reason; an unknown order says so', async () => {
+    const source = await openOperator(createSampleSource(), 'account');
+    const execute = vi.spyOn(source.operator!, 'yearlyRefundExecute');
+    field(t.opYrOrder, 'yearly-1');
+    await submit(t.opYrShow);
+    expect(await screen.findByText(t.opYrQuote('١١', egp(1229250), egp(100000), egp(1129250)))).toBeTruthy();
+    await submit(t.opYrExecute); // a reason is required first
+    expect(execute).not.toHaveBeenCalled();
+    fireEvent.change(within(screen.getByRole('region', { name: t.opYrTitle })).getByLabelText(t.opReason), { target: { value: 'merchant asked to leave' } });
+    await submit(t.opYrExecute);
+    expect(execute).toHaveBeenCalledWith('yearly-1', 'merchant asked to leave');
+    expect(await screen.findByText(t.opYrDone('١١', egp(100000), egp(1129250)))).toBeTruthy();
+    field(t.opYrOrder, 'nope');
+    await submit(t.opYrShow);
+    expect(await screen.findByText(t.opFailed)).toBeTruthy();
+  });
+});

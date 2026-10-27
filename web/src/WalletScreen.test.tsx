@@ -339,6 +339,18 @@ describe('wallet: packages (owner)', () => {
     expect(within(monthly).queryByText(t.wPackageYearly(num(12, 'ar')))).toBeNull();
   });
 
+  it('a refused switch while a period is queued says so and opens no checkout', async () => {
+    const source = createSampleSource();
+    const go = vi.fn();
+    vi.spyOn(source.wallet!, 'buyPackage').mockRejectedValue(new ApiError('yearly_queued', 409));
+    render(<WalletScreen {...props(source, go)} />);
+    const card = await screen.findByRole('region', { name: t.wPackagesTitle });
+    const gold = (await within(card).findByText('Gold')).closest('li')!;
+    await act(async () => fireEvent.click(within(gold).getByRole('button', { name: t.wPackageBuy })));
+    expect(await screen.findByText(t.wYearlyQueued)).toBeTruthy();
+    expect(go).not.toHaveBeenCalled();
+  });
+
   it('lists the packages with price and AI credits and sends only the package id; redirects only to https', async () => {
     const source = createSampleSource();
     const go = vi.fn();

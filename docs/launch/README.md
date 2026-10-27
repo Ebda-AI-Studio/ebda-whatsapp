@@ -88,6 +88,8 @@ Each merge: full suite green twice locally, CI green, then deploy.
 ## 12. Deploy (Claude)
 `npx wrangler deploy --var COMMIT_SHA:$(git rev-parse --short HEAD)` from a clean checkout of `main` (so `/health` reports the commit).
 
+**Ruling WA-YEARLY-SWITCH-2 (Ahmad, supersedes WA-YEARLY-SWITCH-1).** While a yearly package is running: moving to a higher yearly package is an UPGRADE (pay `(new price/12 - old price/12) x the remaining months`, the current month included, rounded down to a whole EGP; the new plan starts at once with the same end date and the credits switch from the current month); moving to a lower yearly or to any monthly package is a DOWNGRADE (paid in full, queued for the next renewal, no refund); a queued period cannot be switched (409, contact support, the operator cancels and refunds it from the console). Evidence: `planPurchase` + `test/packages-yearly-fixes.test.ts` (exact prices for months 1, 6 and 12). Cost if wrong: a wrong proration either gives a month of the higher plan away or overcharges; mitigated by integer minor-unit arithmetic floored in the merchant's favour and by tests at the boundaries.
+
 ## 13. Verify production (Claude) — after EVERY deploy
 ```
 META_VERIFY_TOKEN=… META_APP_SECRET=… node scripts/verify-prod.mjs --base https://wa.ebda.app --expect "$(git rev-parse --short origin/main)" --brand ebda

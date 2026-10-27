@@ -20,6 +20,7 @@ packageRoutes.post('/stores/:storeId/packages/:packageId/checkout', async (c) =>
   if (r.ok) return c.json(packageOrderDto.parse({ orderId: r.orderId, state: 'pending', packageId: c.req.param('packageId'), amountMinor: r.amountMinor, checkoutUrl: r.checkoutUrl }), 201);
   if (r.reason === 'unknown_package') return apiError(c, 404, 'not_found');
   if (r.reason === 'session_revoked') return apiError(c, 401, 'unauthorized');
+  if (r.reason === 'yearly_queued') return c.json({ error: 'yearly_queued' }, 409); // a queued period cannot be switched: support / the operator cancels and refunds it
   if (r.reason === 'disabled') return apiError(c, 404, 'not_found');
   return apiError(c, 503, 'unavailable');
 });
