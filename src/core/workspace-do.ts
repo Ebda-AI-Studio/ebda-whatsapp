@@ -2211,6 +2211,9 @@ export class WorkspaceDO extends DurableObject<Env> {
     } else if (manifest.signature) {
       throw new Error('backup manifest is signed but BACKUP_HMAC_KEY is not set');
     }
+    // The signature proves the manifest is ours, not that it belongs HERE: a genuine signed manifest of another workspace or date, dropped into this folder
+    // next to copies of that workspace's files, would pass every hash and the signature. It must name exactly the folder it is read from.
+    if (backupPrefix(manifest.workspaceId, manifest.date) !== prefix) throw new Error('backup manifest is for another workspace or date');
     if (manifest.schemaVersion > DO_MIGRATIONS.length) throw new Error('backup is newer than this schema');
     const files: { t: (typeof BACKUP_TABLES)[number]; rows: Record<string, unknown>[] }[] = [];
     for (const t of BACKUP_TABLES) {

@@ -78,6 +78,20 @@ describe('export and restore', () => {
     expect(await workspace('ws-sg5-restore2').importSnapshot(PREFIX('ws-sg5'))).toEqual({ ok: false, reason: 'backup manifest signature invalid' });
   });
 
+  it('one workspace\'s valid signed manifest cannot stand in for another\'s or another date\'s (the signature is bound to the folder it is read from)', async () => {
+    await seed('ws-sg7a'); await withKey('ws-sg7a', KEY);
+    await workspace('ws-sg7a').exportSnapshot('2026-10-24');
+    // the substitution: B's folder holds A's table files AND A's signed manifest, so the hashes and the signature are all genuine
+    for (const f of (await env.BACKUPS.list({ prefix: PREFIX('ws-sg7a') })).objects) {
+      await env.BACKUPS.put(f.key.replace('ws-sg7a', 'ws-sg7b'), await (await env.BACKUPS.get(f.key))!.arrayBuffer());
+      await env.BACKUPS.put(f.key.replace('ws-sg7a/2026-10-24', 'ws-sg7a/2026-10-20'), await (await env.BACKUPS.get(f.key))!.arrayBuffer());
+    }
+    await withKey('ws-sg7-restore', KEY);
+    expect(await workspace('ws-sg7-restore').importSnapshot(PREFIX('ws-sg7b'))).toEqual({ ok: false, reason: 'backup manifest is for another workspace or date' });
+    expect(await workspace('ws-sg7-restore').importSnapshot('backups/ws-sg7a/2026-10-20/')).toEqual({ ok: false, reason: 'backup manifest is for another workspace or date' });
+    expect((await workspace('ws-sg7-restore').importSnapshot(PREFIX('ws-sg7a'))).ok).toBe(true); // the right folder still restores (into another workspace id, as the runbook says)
+  });
+
   it('with no key anywhere, unsigned backups behave as before (existing restores keep working)', async () => {
     await seed('ws-sg6');
     await workspace('ws-sg6').exportSnapshot('2026-10-24');
