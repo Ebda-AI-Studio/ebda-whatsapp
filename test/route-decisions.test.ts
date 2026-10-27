@@ -68,7 +68,7 @@ describe('decisions are made on the ROUTED pattern, never on the raw URL', () =>
 describe('every store read has a session decision', () => {
   const real = (apiRoutes.routes as { method: string; path: string }[]).filter((r) => r.method === 'GET' && r.path.startsWith('/stores/:storeId/')).map((r) => `GET ${r.path}`);
 
-  it('is either checked like a write or explicitly listed as unchecked, with a reason: a new read forces a decision', () => {
+  it('is either checked like a write or explicitly listed as unchecked, with a reason: a new read needs a decision', () => {
     const decided = new Set([...SESSION_CHECKED_READS, ...Object.keys(SESSION_UNCHECKED_READS)]);
     expect(real.filter((r) => !decided.has(r)), 'store reads with no session decision (src/core/identity/scopes.ts)').toEqual([]);
     expect([...decided].filter((r) => !real.includes(r)), 'decisions for routes that do not exist').toEqual([]);
