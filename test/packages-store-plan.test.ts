@@ -1,6 +1,6 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { marketingBlocked } from '../src/core/billing/entitlements';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setSubscription } from '../src/core/billing/subscriptions';
 import { deliver, iso, storeEvent, storeWorkspace, useStoreLink } from './helpers/store-link';
 import { exec, rows, workspace } from './helpers/workspace';
@@ -9,13 +9,53 @@ const W = (n: number) => `00000000-0000-4000-8000-0000000082${String(n).padStart
 const DAY = 86_400_000;
 const link = useStoreLink();
 const plan = (ws: string, includesWhatsApp: boolean, t: number, extra: Record<string, unknown> = {}, id?: string) =>
-  storeEvent(ws, 'store.plan_changed', { planCode: 'business', includesWhatsApp, ownerUserId: 'u', effectiveAt: iso(t), ...extra }, { occurredAt: iso(t), ...(id ? { id } : {}) });
+  storeEvent(ws, 'store.plan_changed', { planCode: 'business', includesWhatsApp, ownerUserId: 'u', effectiveAt: iso(t), status: 'active', periodEnd: iso(t + 31 * DAY), ...extra }, { occurredAt: iso(t), ...(id ? { id } : {}) });
 const blocked = (ws: string) => runInDurableObject(workspace(ws), (_i, state) => marketingBlocked(state.storage.sql));
 const sub = (ws: string) => env.DB.prepare('SELECT package_id, status, version, source, period_end FROM workspace_subscriptions WHERE workspace_id = ?').bind(ws).first<{ package_id: string; status: string; version: number; source: string; period_end: number }>();
 const writes = async (ws: string) => (await env.DB.prepare("SELECT count(*) AS n FROM billing_audit WHERE workspace_id = ? AND action = 'subscription_set'").bind(ws).first<{ n: number }>())!.n;
 
+describe('D3: an incomplete store.plan_changed never grants access', () => {
+  const noise = () => { const e: string[] = []; vi.spyOn(console, 'error').mockImplementation((m: unknown) => { e.push(String(m)); }); return e; };
+  afterEach(() => vi.restoreAllMocks());
+  it('includesWhatsApp=true without a status creates no package, keeps marketing blocked and tells a human', async () => {
+    const ws = W(30);
+    await storeWorkspace(ws);
+    const errors = noise();
+    await deliver([plan(ws, true, Date.now(), { status: undefined })]);
+    expect(await sub(ws)).toBeNull();
+    expect(await workspace(ws).getEntitlement()).toMatchObject({ version: 0, packageId: 'test-plan' }); // still the fixture's own package, nothing from the Store
+    expect(errors.join('\n')).toContain('store_plan_incomplete');
+  });
+  it('includesWhatsApp=true with a status but no periodEnd grants nothing either (no invented 31 days)', async () => {
+    const ws = W(31);
+    await storeWorkspace(ws);
+    const errors = noise();
+    await deliver([plan(ws, true, Date.now(), { periodEnd: undefined })]);
+    expect(await sub(ws)).toBeNull();
+    expect(errors.join('\n')).toContain('store_plan_incomplete');
+  });
+  it('an incomplete event after a complete one changes nothing (no extension, no status reset)', async () => {
+    const ws = W(32);
+    await storeWorkspace(ws);
+    const t = Date.now();
+    await deliver([plan(ws, true, t, { status: 'past_due' })]);
+    const before = await sub(ws);
+    noise();
+    await deliver([plan(ws, true, t + 1000, { status: undefined, periodEnd: undefined })]);
+    expect(await sub(ws)).toEqual(before);
+  });
+  it('a cancellation (includesWhatsApp=false) needs no status: removing access is always safe', async () => {
+    const ws = W(33);
+    await storeWorkspace(ws);
+    const t = Date.now();
+    await deliver([plan(ws, true, t)]);
+    await deliver([plan(ws, false, t + 1000, { status: undefined, periodEnd: undefined })]);
+    expect(await sub(ws)).toMatchObject({ package_id: 'store-included', status: 'cancelled' });
+  });
+});
+
 describe('store.plan_changed -> store-included package', () => {
-  it('includesWhatsApp=true makes the package active (periodEnd defaults to effectiveAt + 31 days) and marketing is allowed', async () => {
+  it('includesWhatsApp=true with status and periodEnd makes the package active until periodEnd, and marketing is allowed', async () => {
     const ws = W(1);
     await storeWorkspace(ws);
     const t = Date.now();

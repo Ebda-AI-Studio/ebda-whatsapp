@@ -142,3 +142,6 @@ Each workspace's `shared_number_trueup` task reports its service charges per pla
 - **Campaign review**: a zero per-message cost reads "WhatsApp bills your card directly" only when every active number is `merchant_card`; otherwise it stays "price not ready".
 - **Operator** ("لوحة التشغيل", rail item only for `super_admin`; the server still checks every call): pricing settings (current / scheduled / earlier; publish with percent and EGP parsed as exact integers, effective-from >= 1 h, reason >= 5 chars, "never retroactive"), rate cards (textarea `country,category,usd`, parsed client-side with line-numbered errors, >= 24 h) and FX, per-account margin override / who-pays-Meta / adjustment request, refund queue (approve explains the wallet is debited first and asks to confirm), adjustments (your own pending request has no approve/reject and says another super admin must decide), change log. A `503` on any write shows "session protection is not switched on yet, changes are locked"; reads keep working.
 - Preview: `npx vite web` then `?role=super_admin` (or `staff`) switches the sample role. Everything under it is invented sample data.
+
+## store.plan_changed must be complete to grant (D3)
+`applyStorePlan` no longer defaults `status` to active or `periodEnd` to effectiveAt + 31 days. See docs/launch/README.md (Ruling D3-1).
