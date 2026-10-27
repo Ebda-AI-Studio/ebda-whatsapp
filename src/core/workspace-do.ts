@@ -282,7 +282,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.armPending = false;
       await this.arm();
     }
-    for (const code of this.freshQualityErrors.splice(0)) await this.noteSendError(batch.phoneNumberId, code);
+    for (const f of this.freshQualityErrors.splice(0)) await this.noteSendError(batch.phoneNumberId, f.code, Date.now(), f.template);
     return result;
   }
 
@@ -390,7 +390,12 @@ export class WorkspaceDO extends DurableObject<Env> {
       await this.arm();
     }
     // A send on the platform number is counted per member (the denominator of its error rate): ids and a count, nothing else. Not awaited: counting never delays a send.
-    if (result === 'claimed' && this.sql.exec('SELECT 1 FROM store_state WHERE key = ?', `shared.number:${job.phoneNumberId}`).toArray().length) this.ctx.waitUntil(noteSharedSend(this.env, job.phoneNumberId, this.workspaceId, now).catch(() => undefined));
+    // Only what can produce the counted errors (a business-initiated TEMPLATE) and only the FIRST claim of a job (`claim_attempts` is 1 on a first claim; a deferral gives it back,
+    // a retry or a stale re-claim makes it 2+): a redelivery, a retry or a reply never dilutes the rate.
+    if (result === 'claimed' && jobKind(job) === 'template' && this.sql.exec('SELECT 1 FROM store_state WHERE key = ?', `shared.number:${job.phoneNumberId}`).toArray().length
+      && this.sql.exec<{ claim_attempts: number }>('SELECT claim_attempts FROM messages WHERE idempotency_key = ?', job.idempotencyKey).toArray()[0]?.claim_attempts === 1) {
+      this.ctx.waitUntil(noteSharedSend(this.env, job.phoneNumberId, this.workspaceId, now).catch(() => undefined));
+    }
     return result;
   }
 
@@ -438,7 +443,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     return null;
   }
 
-  private freshQualityErrors: number[] = [];
+  private freshQualityErrors: { code: number; template: boolean }[] = [];
 
   private claimRow(job: SendJob, now: number): ClaimResult {
     {
@@ -691,11 +696,12 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** Counts a Meta quality error (131049 / 131026) for the number; enough of them inside the window is a spike. */
-  async noteSendError(phoneNumberId: string, code: number, now = Date.now()): Promise<void> {
+  async noteSendError(phoneNumberId: string, code: number, now = Date.now(), template = true): Promise<void> {
     if (!QUALITY_ERROR_CODES.has(code)) return;
     // The platform number is counted per NUMBER (every member together, in D1) and tripped once at the platform level; an own number is counted here.
     const shared = await this.env.DB.prepare('SELECT 1 FROM shared_numbers WHERE phone_number_id = ?').bind(phoneNumberId).first();
     if (shared) {
+      if (!template) return; // sends are counted for templates only, so only a template's failure may count against the rate
       const verdict = await noteSharedError(this.env, phoneNumberId, this.workspaceId, now);
       if (verdict.kind === 'platform' || (verdict.kind === 'member' && verdict.platform)) await applySharedHealth(this.env, phoneNumberId, { kind: 'spike' }, undefined, (f) => this.ctx.waitUntil(f()), now);
       if (verdict.kind === 'member') {
@@ -1024,7 +1030,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       e.wamid, e.status, e.ts, e.errorCode ?? null, e.pricing ? JSON.stringify(e.pricing) : null,
     ).rowsWritten > 0;
     if (!isNew) return false;
-    if (e.status === 'failed' && e.errorCode !== undefined && QUALITY_ERROR_CODES.has(e.errorCode)) this.freshQualityErrors.push(e.errorCode); // counted once per NEW event, never for a redelivery
+    if (e.status === 'failed' && e.errorCode !== undefined && QUALITY_ERROR_CODES.has(e.errorCode)) this.freshQualityErrors.push({ code: e.errorCode, template: this.sql.exec('SELECT 1 FROM messages WHERE wamid = ? AND template_name IS NOT NULL', e.wamid).toArray().length > 0 }); // counted once per NEW event, never for a redelivery
     const applied = this.applyToMessage(e);
     if (applied) this.sql.exec('UPDATE message_status_events SET applied = 1 WHERE wamid = ? AND status = ? AND ts = ?', e.wamid, e.status, e.ts);
     // The money side runs for every NEW event, applied to a message row or not: a late billable status still charges.

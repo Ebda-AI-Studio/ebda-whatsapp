@@ -99,12 +99,13 @@ export async function noteSharedSend(env: Env, phoneNumberId: string, workspaceI
 /**
  * The platform number's spike guard, attributed per MEMBER by its OWN error RATE (D1 `shared_number_errors` / `shared_number_sends`). Once the window holds SPIKE_THRESHOLD errors,
  * in this ORDER ("over the bar" = at least SHARED_MEMBER_MIN_SENDS sends and an error rate of at least SHARED_MEMBER_ERROR_RATE; no send data = not over the bar):
- *  1. DOMINANCE first: a member with at least SHARED_DOMINANCE of the window's errors AND over the rate bar is blocked. The platform still trips if the OTHERS reach
- *     SHARED_REST_THRESHOLD errors from at least SHARED_SPIKE_MIN_MEMBERS members (a dominance-scaled bar: an abuser with two tiny accomplices does not take the number down);
+ *  1. DOMINANCE first: a member with at least SHARED_DOMINANCE of the window's errors AND over the rate bar is blocked; one under the bar earns a strike instead. Either way
+ *     the platform verdict uses the REST ONLY: it trips if the OTHERS reach SHARED_REST_THRESHOLD errors from at least SHARED_SPIKE_MIN_MEMBERS members (a dominance-scaled
+ *     bar: an abuser, or a big honest store, with two tiny accomplices does not take the number down);
  *  2. else errors from at least SHARED_SPIKE_MIN_MEMBERS distinct members -> the number itself: `platform`;
  *  3. else `ambiguous`: alert only, BUT every member over the rate bar (whatever its share) earns a strike, and SHARED_REPEAT_WINDOWS strikes inside SHARED_REPEAT_WINDOW_MS block
  *     it (a rolling tally; the window counters are cleared, the strikes are not).
- * A high-volume, low-rate store is never blamed. The window counters are cleared on any verdict but `none`.
+ * A high-volume, low-rate store is never blocked on one window (a dominant one earns a strike). Errors and sends are cleared together on any verdict but `none`.
  */
 export async function noteSharedError(env: Env, phoneNumberId: string, workspaceId: string, now = Date.now()): Promise<SharedSpike> {
   const bucket = Math.floor(now / 600_000);
@@ -118,26 +119,34 @@ export async function noteSharedError(env: Env, phoneNumberId: string, workspace
   const total = results.reduce((a, r) => a + r.n, 0);
   if (total < SPIKE_THRESHOLD) return { kind: 'none' };
   const sends = new Map((await env.DB.prepare('SELECT workspace_id, sum(n) AS n FROM shared_number_sends WHERE phone_number_id = ? AND bucket > ? GROUP BY workspace_id').bind(phoneNumberId, oldest).all<{ workspace_id: string; n: number }>()).results.map((r) => [r.workspace_id, r.n]));
-  await env.DB.prepare('DELETE FROM shared_number_errors WHERE phone_number_id = ?').bind(phoneNumberId).run();
+  // Both windows are cleared together on any verdict: errors and the sends they are measured against always cover the same stretch of time.
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM shared_number_errors WHERE phone_number_id = ?').bind(phoneNumberId),
+    env.DB.prepare('DELETE FROM shared_number_sends WHERE phone_number_id = ?').bind(phoneNumberId),
+  ]);
   const overBar = (r: { workspace_id: string; n: number }): boolean => { const s = sends.get(r.workspace_id) ?? 0; return s >= SHARED_MEMBER_MIN_SENDS && r.n / s >= SHARED_MEMBER_ERROR_RATE; };
+  const since = now - SHARED_REPEAT_WINDOW_MS;
+  await env.DB.prepare('DELETE FROM shared_number_strikes WHERE at < ?').bind(since).run();
+  /** A strike for `ws`; true once it has SHARED_REPEAT_WINDOWS of them inside the rolling window (then they are spent). */
+  const strike = async (ws: string): Promise<boolean> => {
+    await env.DB.prepare('INSERT INTO shared_number_strikes (phone_number_id, workspace_id, at) VALUES (?, ?, ?)').bind(phoneNumberId, ws, now).run();
+    const n = (await env.DB.prepare('SELECT count(*) AS n FROM shared_number_strikes WHERE phone_number_id = ? AND workspace_id = ? AND at >= ?').bind(phoneNumberId, ws, since).first<{ n: number }>())?.n ?? 0;
+    if (n < SHARED_REPEAT_WINDOWS) return false;
+    await env.DB.prepare('DELETE FROM shared_number_strikes WHERE phone_number_id = ? AND workspace_id = ?').bind(phoneNumberId, ws).run();
+    return true;
+  };
   const top = results[0]!;
-  if (top.n / total >= SHARED_DOMINANCE && overBar(top)) { // 1. dominance FIRST (and only for a member whose own rate is bad)
-    const rest = results.slice(1);
-    return { kind: 'member', workspaceId: top.workspace_id, platform: rest.length >= SHARED_SPIKE_MIN_MEMBERS && total - top.n >= SHARED_REST_THRESHOLD };
+  if (top.n / total >= SHARED_DOMINANCE) {
+    // 1. DOMINANCE first. The platform verdict then uses the REST ONLY: the dominant member's own errors never count toward tripping the number for everyone,
+    //    whether or not it is blocked.
+    const platform = results.length - 1 >= SHARED_SPIKE_MIN_MEMBERS && total - top.n >= SHARED_REST_THRESHOLD;
+    // Over the rate bar: blocked at once. Under it (a big honest store): never blocked on one window, but it earns a strike, so repeated dominance still escalates.
+    if (overBar(top) || (await strike(top.workspace_id))) return { kind: 'member', workspaceId: top.workspace_id, platform };
+    return platform ? { kind: 'platform' } : { kind: 'ambiguous' };
   }
   if (results.length >= SHARED_SPIKE_MIN_MEMBERS) return { kind: 'platform' }; // 2.
   // 3. ambiguous: a member whose own rate is over the bar earns a strike, whatever its share
-  const since = now - SHARED_REPEAT_WINDOW_MS;
-  await env.DB.prepare('DELETE FROM shared_number_strikes WHERE at < ?').bind(since).run();
-  for (const r of results) {
-    if (!overBar(r)) continue;
-    await env.DB.prepare('INSERT INTO shared_number_strikes (phone_number_id, workspace_id, at) VALUES (?, ?, ?)').bind(phoneNumberId, r.workspace_id, now).run();
-    const strikes = (await env.DB.prepare('SELECT count(*) AS n FROM shared_number_strikes WHERE phone_number_id = ? AND workspace_id = ? AND at >= ?').bind(phoneNumberId, r.workspace_id, since).first<{ n: number }>())?.n ?? 0;
-    if (strikes >= SHARED_REPEAT_WINDOWS) {
-      await env.DB.prepare('DELETE FROM shared_number_strikes WHERE phone_number_id = ? AND workspace_id = ?').bind(phoneNumberId, r.workspace_id).run();
-      return { kind: 'member', workspaceId: r.workspace_id, platform: false };
-    }
-  }
+  for (const r of results) if (overBar(r) && (await strike(r.workspace_id))) return { kind: 'member', workspaceId: r.workspace_id, platform: false };
   return { kind: 'ambiguous' };
 }
 

@@ -432,8 +432,8 @@ describe('the platform number reaches every member (items 6 and 7, and the shado
   });
   it('a member holding 60% in three consecutive AMBIGUOUS windows is blocked on the third (rolling tally), and the other member never is', async () => {
     const [x, y] = await platform([1150, 1151]);
-    await seedSends(x!, 40); await seedSends(y!, 500); // x: 15 errors on 40 sends = 37%; y: 10 on 500 = 2%
     const oneWindow = async () => { // 10 from y first, then 15 from x: the 25th error leaves x at 60%
+      await seedSends(x!, 40); await seedSends(y!, 500); // each window has its own sends (a verdict clears errors and sends together): x 15 on 40 = 37%; y 10 on 500 = 2%
       for (let i = 0; i < 10; i++) await workspace(y!).noteSendError(PLAT, 131049);
       for (let i = 0; i < 15; i++) await workspace(x!).noteSendError(PLAT, 131049);
     };
@@ -455,16 +455,53 @@ describe('the platform number reaches every member (items 6 and 7, and the shado
     expect(await templateRefused(abuser!)).toBe(true);
     expect(await templateRefused(a!)).toBe(false);
   });
+  it('a dominant member UNDER the rate bar (80%+ of the errors at a 4% rate) plus two tiny members does NOT trip the platform (its own errors never count), and it earns a strike', async () => {
+    const [dom, a, b] = await platform([1160, 1161, 1162]);
+    await seedSends(dom!, 500); await seedSends(a!, 30); await seedSends(b!, 30);
+    await errors(a!, 2); await errors(b!, 2); await errors(dom!, SPIKE_THRESHOLD - 4); // dominant 21 of 25 (84%) on 500 sends = 4.2%
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green'); // rest = 4 errors from 2 members: no platform trip
+    expect(await rows(dom!, 'SELECT 1')).toBeTruthy();
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM shared_number_strikes WHERE workspace_id = ?').bind(dom).first('n')).toBe(1); // a strike, not a block
+    expect(await templateRefused(dom!)).toBe(false);
+  });
+  it('repeated dominance under the bar escalates: the third strike blocks the dominant member', async () => {
+    const [dom, a, b] = await platform([1163, 1164, 1165]);
+    for (let w = 0; w < 3; w++) { await seedSends(dom!, 500); await seedSends(a!, 30); await seedSends(b!, 30); await errors(a!, 2); await errors(b!, 2); await errors(dom!, SPIKE_THRESHOLD - 4); }
+    expect(await templateRefused(dom!)).toBe(true);
+    expect(await env.DB.prepare('SELECT health_state FROM shared_numbers').first('health_state')).toBe('green');
+  });
+  it('sends are counted once per JOB (the first claim): a retry that is claimed again adds nothing; only templates are counted', async () => {
+    const [ws] = await platform([1166]);
+    await syncMemberHealth(env, ws!);
+    await env.DB.prepare("INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, 'platform_line', 0)").bind(PLAT).run();
+    await seedSharedTemplate(PLAT, { name: 'tpl-u', language: 'ar' });
+    await fund(ws!, 100_000);
+    const c = await chat(ws!, 'UTILITY');
+    const sum = async () => (await env.DB.prepare('SELECT coalesce(sum(n), 0) AS n FROM shared_number_sends WHERE workspace_id = ?').bind(ws).first<{ n: number }>())!.n;
+    const q = await workspace(ws!).queueOutbound(c, PLAT, { type: 'template', clientId: crypto.randomUUID(), name: 'tpl-u', language: 'ar', params: [] });
+    expect(q.ok).toBe(true);
+    const job = q.ok ? q.job : undefined;
+    expect(await workspace(ws!).claimSend(job!)).toBe('claimed'); // first claim: counted
+    await vi.waitFor(async () => expect(await sum()).toBe(1));
+    for (let i = 0; i < 2; i++) {
+      await workspace(ws!).recordOutbound(job!.idempotencyKey, { ok: false, code: 500, retryable: true, message: 'x' }); // a retryable failure puts it back for another attempt
+      expect(await workspace(ws!).claimSend(job!)).toBe('claimed'); // claimed again (redelivery / retry)
+    }
+    await new Promise((r) => setTimeout(r, 100));
+    expect(await sum()).toBe(1); // still one
+    const t = await workspace(ws!).queueOutbound(c, PLAT, { type: 'text', clientId: crypto.randomUUID(), text: 'a reply' });
+    if (t.ok && t.job) await workspace(ws!).claimSend(t.job);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(await sum()).toBe(1); // a non-template send is not counted
+  });
   it('a BIG honest store (1000 sends, 3% errors) is never struck or blocked, even holding 60% of the errors in three windows; a SMALL store at 25% is struck and blocked on the third', async () => {
     const [big, other, small] = await platform([1156, 1157, 1158]);
-    await seedSends(big!, 1000); await seedSends(other!, 500);
-    for (let w = 0; w < 3; w++) { await errors(other!, 10); await errors(big!, 15); } // big: 45 errors on 1000 sends = 4.5%, 60% of every window
+    for (let w = 0; w < 3; w++) { await seedSends(big!, 1000); await seedSends(other!, 500); await errors(other!, 10); await errors(big!, 15); } // big: 15 on 1000 = 1.5% per window, 60% of every window
     expect(await templateRefused(big!)).toBe(false);
     expect(await templateRefused(other!)).toBe(false);
-    expect(await env.DB.prepare('SELECT count(*) AS n FROM shared_number_strikes').first('n')).toBe(0);
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM shared_number_strikes WHERE workspace_id IN (?, ?)').bind(big, other).first('n')).toBe(0);
     // now a small store with a really bad rate takes the other seat
-    await seedSends(small!, 40);
-    for (let w = 0; w < 3; w++) { await errors(small!, 10); await errors(big!, 15); } // small: 10 errors per window on 40 sends = 25% (strike each window)
+    for (let w = 0; w < 3; w++) { await seedSends(small!, 40); await seedSends(big!, 1000); await errors(small!, 10); await errors(big!, 15); } // small: 10 errors per window on 40 sends = 25% (strike each window)
     expect(await templateRefused(small!)).toBe(true);
     expect(await templateRefused(big!)).toBe(false);
   });
