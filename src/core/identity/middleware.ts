@@ -92,7 +92,7 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
       if (!allowed) return refuse('plan_feature', 403, { feature: 'api' });
     }
     c.set('principal', principal);
-    c.set('storeRole', membership ? membership.role : 'super_admin');
+    c.set('storeRole', principal.superAdmin ? 'super_admin' : membership!.role);
     await next();
   };
 }

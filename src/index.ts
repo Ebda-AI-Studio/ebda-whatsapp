@@ -147,8 +147,9 @@ api.get('/stores/:storeId/me', (c) => {
   return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env) } });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
-  // The member's own right to erase (STORE-ROUTES-OWNER-1): a super admin uses the operator route, which needs a stated reason.
-  if (c.get('storeRole') !== 'owner') return c.json({ error: 'forbidden' }, 403);
+  // The member's own right to erase (STORE-ROUTES-OWNER-1): the owner, or a super admin who is a MEMBER of the store (requireStoreAccess already refused a non-member's write; that operator uses the operator route, which needs a stated reason).
+  const role = c.get('storeRole');
+  if (role !== 'owner' && role !== 'super_admin') return c.json({ error: 'forbidden' }, 403);
   // Hono has already percent-decoded the param; decoding again would turn a literal % into a 500.
   const r = await eraseContactFlow(c.env, { storeId: c.req.param('storeId'), waIdParam: c.req.param('waId'), actor: c.get('principal').userId });
   return c.json(r.body, r.status);
