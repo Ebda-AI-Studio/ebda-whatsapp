@@ -98,3 +98,21 @@ it('the workers project keeps console lines off the worker -> runner RPC (a line
   const config = readFileSync(join(__dirname, '..', 'vitest.config.mts'), 'utf8');
   expect(config).toMatch(/name: 'workers', disableConsoleIntercept: true/);
 });
+
+it('a stall line printed by a test is turned into a GitHub warning annotation, and the verdict still comes from vitest', () => {
+  const line = JSON.stringify({ stall: 'billing-charging a slow test', pending: [{ label: 'fetch graph.facebook.com/v25.0/[n]/messages', ageMs: 58123 }] });
+  const r = run(`console.log(${JSON.stringify(line)}); ${SUMMARY_OK} process.exit(0);`);
+  expect(r.status).toBe(0);
+  expect(r.stdout).toContain('::warning title=test stall::');
+  expect(r.stdout).toContain('billing-charging a slow test');
+  expect(r.stdout).toContain('graph.facebook.com');
+  expect(r.stdout.match(/::warning title=test stall::/g)).toHaveLength(1);
+});
+
+it('a stall annotation never carries a newline or percent that could inject another workflow command', () => {
+  const line = JSON.stringify({ stall: 'x\n::error::injected%0A', pending: [] });
+  const r = run(`console.log(${JSON.stringify(line)}); ${SUMMARY_OK} process.exit(0);`);
+  const ann = r.stdout.split('\n').filter((l) => l.startsWith('::warning title=test stall::'));
+  expect(ann).toHaveLength(1);
+  expect(r.stdout.split('\n').some((l) => l.startsWith('::error::'))).toBe(false);
+});

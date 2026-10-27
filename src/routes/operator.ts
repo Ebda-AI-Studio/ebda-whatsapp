@@ -18,6 +18,7 @@ import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
+import { rotateTokenKey, rotationStatus } from '../core/enc-rotation';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -270,3 +271,17 @@ operatorRoutes.post('/workspaces/:workspaceId/shared-number/evict', killSwitch(e
 operatorRoutes.post('/workspaces/:workspaceId/shared-number/readmit', killSwitch(readmitToSharedNumber));
 operatorRoutes.post('/workspaces/:workspaceId/integrations/revoke', killSwitch(revokeIntegrations));
 operatorRoutes.post('/workspaces/:workspaceId/integrations/restore', killSwitch(restoreIntegrations));
+
+// M-173: finishing a TOKEN_ENC_KEY rotation (docs/runbooks/token-enc-key-rotation.md). Counts only, never a value.
+operatorRoutes.get('/token-key/status', async (c) => {
+  const q = z.object({ cursor: z.string().max(200).optional(), budget: z.coerce.number().int().min(1).max(50_000).optional() }).safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
+  if (!q.success) return c.json({ error: 'invalid_request' }, 400);
+  return c.json(await rotationStatus(c.env, { ...(q.data.cursor ? { cursor: q.data.cursor } : {}), ...(q.data.budget ? { budget: q.data.budget } : {}) }));
+});
+operatorRoutes.post('/token-key/rotate', async (c) => {
+  const body = z.object({ batch: z.number().int().min(1).max(500).optional(), cursor: z.string().max(200).optional() }).safeParse(await c.req.json().catch(() => ({})));
+  if (!body.success) return c.json({ error: 'invalid_request' }, 400);
+  const r = await rotateTokenKey(c.env, body.data.batch ?? 100, body.data.cursor ? { cursor: body.data.cursor } : {});
+  console.log(JSON.stringify({ audit: 'token_key_rotate', by: c.get('principal').userId, ...(r.ok ? { rotated: r.rotated, remaining: r.remaining, unreadable: r.unreadable, complete: r.complete } : { refused: r.reason }) }));
+  return r.ok ? c.json(r) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+});

@@ -17,6 +17,8 @@ export const backupManifestSchema = z.object({
   workspaceId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   schemaVersion: z.number().int().positive(),
+  /** `hmac-sha256:<hex>` over the canonical manifest (M-174). Optional so backups made before it still read; a restore with a key configured requires it. */
+  signature: z.string().regex(/^hmac-sha256:[0-9a-f]{64}$/).optional(),
   tables: z.object({
     contacts: tableEntry, conversations: tableEntry, messages: tableEntry, message_status_events: tableEntry,
     notes: tableEntry.optional(), conversation_tags: tableEntry.optional(), templates: tableEntry.optional(), uploads: tableEntry.optional(),
@@ -27,6 +29,34 @@ export const backupManifestSchema = z.object({
   }),
 });
 export type BackupManifest = z.infer<typeof backupManifestSchema>;
+
+// ---- M-174: the manifest is signed (HMAC-SHA256, key from env), not only hashed ------------------------------------------------------------
+// The per-table sha256 proves integrity (corruption, truncation); anyone who can write to the bucket can rewrite a table file and its hash together.
+// The signature covers the canonical manifest, so a forged manifest needs the key, which never lives in the bucket.
+const SIGNATURE = /^hmac-sha256:[0-9a-f]{64}$/;
+/** Stable JSON of the manifest WITHOUT its signature: keys sorted at every level, so the signature does not depend on key order. */
+export function canonicalManifest(m: Omit<BackupManifest, 'signature'> & { signature?: string }): string {
+  const sort = (v: unknown): unknown => (Array.isArray(v) ? v.map(sort) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, sort(x)])) : v);
+  const { signature: _signature, ...rest } = m;
+  return JSON.stringify(sort(rest));
+}
+async function hmacHex(key: string, text: string): Promise<string> {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return [...new Uint8Array(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+export async function signManifest(m: Omit<BackupManifest, 'signature'> & { signature?: string }, key: string): Promise<string> {
+  return `hmac-sha256:${await hmacHex(key, canonicalManifest(m))}`;
+}
+/** True when the manifest's signature matches under ANY of `keys` (the current key, and the previous one during a key change). */
+export async function verifyManifestSignature(m: BackupManifest & { signature?: string }, keys: string[]): Promise<boolean> {
+  if (!m.signature || !SIGNATURE.test(m.signature)) return false;
+  const want = new TextEncoder().encode(m.signature);
+  for (const key of keys) {
+    const got = new TextEncoder().encode(await signManifest(m, key));
+    if (got.byteLength === want.byteLength && crypto.subtle.timingSafeEqual(got, want)) return true;
+  }
+  return false;
+}
 
 export const BACKUP_HOUR_LOCAL = 2;
 export const BACKUP_TIME_ZONE = 'Africa/Cairo';
