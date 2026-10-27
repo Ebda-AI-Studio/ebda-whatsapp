@@ -3,6 +3,7 @@ import { SignJWT } from 'jose';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker, { apiRoutes } from '../src/index';
 import { createEbdaAccountsVerifier } from '../src/addons/ebda/identity';
+import { DEFAULT_API_LIMITS, configureApiLimits } from '../src/core/api-rate';
 import { clearIntegrationCache, configureIntegrationClock } from '../src/core/identity/integration';
 import { createOidcVerifier, parseOidcConfig } from '../src/core/identity/oidc';
 import { ROUTE_SCOPES, WHATSAPP_SCOPES } from '../src/core/identity/scopes';
@@ -90,6 +91,10 @@ describe('verifier: integrator tokens', () => {
 });
 
 describe('API: what an integrator token may do', () => {
+  // These tests make dozens of calls with one client id; the rate limit (test/api-rate-limit.test.ts) is not what they are about.
+  let prevLimits = DEFAULT_API_LIMITS;
+  beforeEach(() => { prevLimits = configureApiLimits({ workspace: { ratePerSec: 1e6, burst: 1e6 }, integration: { ratePerSec: 1e6, burst: 1e6 } }); });
+  afterEach(() => { configureApiLimits(prevLimits); });
   const live = { INTEGRATOR_TOKENS_ENABLED: 'true', ACCOUNTS: { isRevoked: async () => false } };
   const call = async (token: string, method: string, path: string, over: Record<string, unknown> = {}, body?: unknown) =>
     worker.fetch(new Request(`https://x/api/v1${path}`, { method, headers: { authorization: `Bearer ${token}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }),

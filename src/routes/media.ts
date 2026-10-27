@@ -57,13 +57,13 @@ mediaRoutes.post('/stores/:storeId/media', async (c) => {
   if (!allowed) return apiError(c, 415, 'unsupported_media');
   if (file.size === 0) return apiError(c, 400, 'invalid_request');
   if (file.size > allowed.maxBytes) return apiError(c, 413, 'invalid_request', 'file_too_large');
-  // M-134: the bytes must be what the declared type says.
-  if (sniffMime(new Uint8Array(await file.slice(0, 64).arrayBuffer())) !== normaliseMime(file.type)) return apiError(c, 415, 'unsupported_media');
   const ws = await workspaceStub(c);
   const number = await senderNumber(c);
   if (!ws || !number) return apiError(c, 404, 'not_found');
   const noPlan = await planRequired(c, ws);
   if (noPlan) return noPlan;
+  // M-134: the bytes must be what the declared type says.
+  if (sniffMime(new Uint8Array(await file.slice(0, 64).arrayBuffer())) !== normaliseMime(file.type)) return apiError(c, 415, 'unsupported_media');
   const token = await bizToken(c, { phoneNumberId: number.phoneNumberId });
   if (!token) return apiError(c, 503, 'rate_limited', 'token_unavailable');
   const mime = canonicalMime(file.type);
