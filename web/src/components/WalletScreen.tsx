@@ -3,7 +3,7 @@ import { BRAND } from '@brand';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { StatementDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
-import type { InstapayCreated, InstapayRequest, InstapayView, PackageDto, RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/billing';
+import type { OffboardingView, InstapayCreated, InstapayRequest, InstapayView, PackageDto, RefundRequest, TopupDto, WalletApi, WalletDto } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -160,6 +160,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
         {owner && <InstapayCard t={t} lang={lang} api={api} />}
         {canSeeStatement && <StatementCard t={t} lang={lang} api={api} now={now} />}
         {owner && <RefundCard t={t} lang={lang} api={api} />}
+        {owner && typeof wallet === 'object' && wallet !== null && <OffboardingCard t={t} lang={lang} api={api} balanceMinor={Math.max(0, wallet.balanceMinor)} />}
       </div>
     </main>
   );
@@ -569,6 +570,73 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+// ---- Delete the workspace (OFFBOARD-1): 14-day cooling-off, the balance given up explicitly, cancel while it is ours to cancel -----------
+
+function OffboardingCard({ t, lang, api, balanceMinor }: { t: Strings; lang: Lang; api: WalletApi; balanceMinor: number }) {
+  const [view, setView] = useState<OffboardingView>({ state: 'none' });
+  const [asking, setAsking] = useState(false);
+  const [accept, setAccept] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+  useEffect(() => { api.offboarding().then(setView, () => undefined); }, [api]);
+
+  const request = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      setView(await api.requestOffboarding(balanceMinor > 0 ? { acceptWriteOff: true } : {}));
+      setAsking(false); setAccept(false);
+    } catch (err) {
+      setMsg(err instanceof ApiError && err.detail === 'wallet_balance_remains' ? t.offBalanceChanged : t.offError);
+    } finally { setBusy(false); }
+  };
+  const cancel = async () => {
+    setBusy(true); setMsg(null);
+    try { await api.cancelOffboarding(); setView({ state: 'cancelled' }); } catch { setMsg(t.offError); void api.offboarding().then(setView, () => undefined); } finally { setBusy(false); }
+  };
+
+  const waiting = view.state === 'pending';
+  const ours = waiting && view.requestedRole === 'operator';
+  return (
+    <section className="wallet-card" aria-labelledby="off-title">
+      <h2 id="off-title">{t.offTitle}</h2>
+      {waiting && !ours && (
+        <>
+          <p>{t.offPending(dateTime(view.executeAfter ?? 0, lang))}</p>
+          {(view.writeOffMinor ?? 0) > 0 && <p className="muted">{t.offWriteOff(money(view.writeOffMinor!))}</p>}
+          <div className="settings-actions"><button type="button" className="btn" disabled={busy} onClick={() => void cancel()}>{t.offCancel}</button></div>
+        </>
+      )}
+      {ours && (
+        <>
+          <p>{t.offPending(dateTime(view.executeAfter ?? 0, lang))}</p>
+          <p role="note">{t.offOperator(BRAND.supportEmail ?? t.wSupport)}</p>
+        </>
+      )}
+      {view.state === 'running' && <p>{t.offRunning}</p>}
+      {(view.state === 'none' || view.state === 'cancelled') && !asking && (
+        <div className="settings-actions"><button type="button" className="btn" onClick={() => setAsking(true)}>{t.offAsk}</button></div>
+      )}
+      {(view.state === 'none' || view.state === 'cancelled') && asking && (
+        <>
+          <p>{t.offWhat}</p>
+          {balanceMinor > 0 && (
+            <>
+              <p><b>{t.offBalance(money(balanceMinor))}</b></p>
+              <label className="field check"><input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} /> <span>{t.offGiveUp(money(balanceMinor))}</span></label>
+            </>
+          )}
+          <div className="settings-actions">
+            <button type="button" className="btn primary" disabled={busy || (balanceMinor > 0 && !accept)} onClick={() => void request()}>{t.offConfirm}</button>
+            <button type="button" className="btn" disabled={busy} onClick={() => { setAsking(false); setAccept(false); setMsg(null); }}>{t.offBack}</button>
+          </div>
+        </>
+      )}
+      {msg && <p role="alert" className="error-text">{msg}</p>}
     </section>
   );
 }

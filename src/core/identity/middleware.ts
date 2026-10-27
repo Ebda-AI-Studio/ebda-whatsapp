@@ -13,6 +13,8 @@ export type AuthVars = { principal: Principal; storeRole: 'owner' | 'staff' | 's
 const SUSPENDED_OK = [/^\/api\/v1\/stores\/[^/]+\/wallet(\/|$)/, /^\/api\/v1\/stores\/[^/]+\/packages(\/|$)/];
 export function allowedWhileSuspended(method: string, path: string): boolean {
   if (SUSPENDED_OK.some((re) => re.test(path))) return true;
+  // Asking to delete the workspace is a right a suspension never blocks; cancelling is not (a suspended store may be suspended for abuse).
+  if ((method === 'POST' || method === 'GET') && /^\/api\/v1\/stores\/[^/]+\/offboarding$/.test(path)) return true;
   return method === 'DELETE' && /^\/api\/v1\/stores\/[^/]+\/contacts\/[^/]+$/.test(path);
 }
 

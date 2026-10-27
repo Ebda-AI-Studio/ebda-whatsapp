@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
-  fxPublish, instapayReject, operatorKillSwitch, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
+  fxPublish, instapayReject, operatorKillSwitch, operatorOffboardingRequest, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -18,6 +18,7 @@ import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { confirmInstapay, listForOperator, rejectInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
+import { cancelOffboarding, getOffboardingWithLog, listOffboardings, requestOffboarding, runDueOffboardings } from '../core/ops/offboarding';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -172,7 +173,7 @@ operatorRoutes.post('/trueups', async (c) => {
   const b = trueupPublish.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c);
   const r = await publishTrueup(c.env, { actor: actor(c), ...b.data });
-  return r.ok ? c.json(r.trueup, 201) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+  return r.ok ? c.json(r.trueup, 201) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
 });
 
 operatorRoutes.get('/workspaces/:workspaceId/wallet', async (c) => {
@@ -214,7 +215,7 @@ operatorRoutes.post('/package-orders/:orderId/yearly-refund', async (c) => {
   const body = z.object({ reason: z.string().trim().min(5).max(500) }).safeParse(await c.req.json().catch(() => null));
   if (!body.success) return bad(c, 'reason_required');
   const r = await executeYearlyRefund(c.env, c.req.param('orderId'), { actor: actor(c), reason: body.data.reason });
-  if (!r.ok) return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+  if (!r.ok) return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
   console.log(JSON.stringify({ audit: 'operator_yearly_refund', orderId: r.orderId, shortenedMonths: r.shortenedMonths, debtSettledMinor: r.debtSettledMinor, cashRefundMinor: r.cashRefundMinor, actor: actor(c) }));
   const { ok: _ok, ...out } = r;
   return c.json(out);
@@ -259,6 +260,28 @@ const killSwitch = (run: (env: Env, a: { actor: string; workspaceId: string; rea
     if (r.reason === 'partial') return c.json({ error: 'unavailable', message: 'suspended_in_d1_workspace_copy_pending_retry' }, 503);
     return c.json({ error: 'not_found' }, 404);
   };
+// ---- W2-OFFBOARD: workspace deletion. A reason is required and audited; `immediate` skips the 14-day cooling-off.
+operatorRoutes.get('/offboardings', async (c) => c.json({ items: await listOffboardings(c.env, c.req.query('state') || undefined) }));
+operatorRoutes.get('/workspaces/:workspaceId/offboarding', async (c) => {
+  const st = await getOffboardingWithLog(c.env, c.req.param('workspaceId'));
+  return st ? c.json(st) : c.json({ error: 'not_found' }, 404);
+});
+operatorRoutes.post('/workspaces/:workspaceId/offboarding', async (c) => {
+  const b = operatorOffboardingRequest.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  const r = await requestOffboarding(c.env, { workspaceId: c.req.param('workspaceId')!, actor: actor(c), role: 'operator', ...b.data });
+  if (r.ok) return c.json(r.value, 202);
+  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
+});
+operatorRoutes.delete('/workspaces/:workspaceId/offboarding', async (c) => {
+  const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  const r = await cancelOffboarding(c.env, { workspaceId: c.req.param('workspaceId')!, actor: actor(c), role: 'operator', reason: b.data.reason });
+  if (r.ok) return c.json({ ok: true });
+  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
+});
+operatorRoutes.post('/offboardings/run', async (c) => c.json(await runDueOffboardings(c.env))); // finish an interrupted run now instead of waiting for the daily pass
+
 operatorRoutes.get('/workspaces/:workspaceId/ops', async (c) => {
   const st = await opsStatus(c.env, c.req.param('workspaceId'));
   return st ? c.json(st) : c.json({ error: 'not_found' }, 404);

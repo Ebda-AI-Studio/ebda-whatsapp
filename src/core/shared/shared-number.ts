@@ -317,7 +317,7 @@ const parkedMessage = z.object({
   order: z.unknown().optional(),
 }).loose();
 
-const parkedPrefix = (pn: string, key: string) => `shared-parked/${pn}/${key}/`;
+export const parkedPrefix = (pn: string, key: string) => `shared-parked/${pn}/${key}/`;
 const listMarkerKey = (pn: string, key: string) => `shared-list/${pn}/${key}`;
 const noRouteKey = (pn: string, key: string) => `shared-noroute/${pn}/${key}`;
 

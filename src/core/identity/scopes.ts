@@ -73,6 +73,10 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/shared-number/join`]: 'person_only',
   [`POST ${S}/shared-number/leave`]: 'person_only',
 
+  [`GET ${S}/offboarding`]: 'person_only', // workspace deletion
+  [`POST ${S}/offboarding`]: 'person_only',
+  [`DELETE ${S}/offboarding`]: 'person_only',
+
   [`GET ${S}/wallet`]: 'person_only',
   [`GET ${S}/wallet/estimate`]: 'person_only',
   [`GET ${S}/wallet/statement`]: 'person_only',

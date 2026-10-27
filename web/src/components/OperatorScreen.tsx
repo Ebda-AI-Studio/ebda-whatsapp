@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../data/api';
-import type { Adjustment, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView } from '../data/billing';
+import type { OperatorOffboarding, Adjustment, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -17,7 +17,7 @@ type PanelProps = { t: Strings; lang: Lang; api: OperatorApi; now: () => number;
 const HOUR = 3_600_000;
 const SETTINGS_LEAD_H = 1;
 const RATE_LEAD_H = 24;
-const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared', 'killswitch'] as const;
+const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared', 'killswitch', 'offboarding'] as const;
 type Tab = (typeof TABS)[number];
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -73,6 +73,7 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
         {tab === 'queues' && <QueuesPanel {...panel} />}
         {tab === 'log' && <LogPanel {...panel} />}
         {tab === 'killswitch' && <KillSwitchPanel {...panel} />}
+        {tab === 'offboarding' && <OffboardingOpPanel {...panel} />}
         {tab === 'shared' && source.sharedTemplates && <SharedTemplatesPanel t={t} lang={lang} api={source.sharedTemplates} run={run} fail={fail} />}
       </div>
     </main>
@@ -488,6 +489,75 @@ function LogPanel({ t, lang, api }: PanelProps) {
         ))}
       </ul>
     </Card>
+  );
+}
+
+// ---- Workspace deletion (OFFBOARD-1): request, delete now, take over, cancel; the status and the request's log -----------------------
+
+function OffboardingOpPanel({ t, lang, api }: PanelProps) {
+  const [ws, setWs] = useState('');
+  const [reason, setReason] = useState('');
+  const [accept, setAccept] = useState(false);
+  const [needed, setNeeded] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [st, setSt] = useState<OperatorOffboarding | null>(null);
+  const list = useList<OperatorOffboarding>(api.offboardings);
+  const money = (m: number) => formatMoney(m, 'EGP', lang);
+  const ready = ws.trim() !== '' && reason.trim().length >= 5;
+
+  const show = async () => { try { setSt(await api.offboarding(ws.trim())); } catch { setSt(null); } };
+  const request = (immediate: boolean) => async () => {
+    setMsg(null);
+    try {
+      await api.requestOffboarding(ws.trim(), { reason: reason.trim(), ...(immediate ? { immediate: true as const } : {}), ...(accept ? { acceptWriteOff: true as const } : {}) });
+      setNeeded(false); setAccept(false);
+      await show(); list.reload();
+    } catch (e) {
+      if (e instanceof ApiError && e.detail === 'write_off_required') { setNeeded(true); setMsg(t.offOpWriteOffNeeded(money(e.amountMinor ?? 0))); } else setMsg(t.offOpFailed);
+    }
+  };
+  const cancel = async () => {
+    setMsg(null);
+    try { await api.cancelOffboarding(ws.trim(), reason.trim()); await show(); list.reload(); } catch { setMsg(t.offOpFailed); }
+  };
+
+  return (
+    <>
+      <Card id="op-off" title={t.offOpTitle}>
+        <form className="wallet-form op-grid" onSubmit={(e) => { e.preventDefault(); void show(); }}>
+          <label className="field"><span>{t.offOpWorkspace}</span><input dir="ltr" value={ws} onChange={(e) => setWs(e.target.value)} /></label>
+          <label className="field op-wide"><span>{t.offOpReason}</span><input dir="auto" maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+          <div className="settings-actions op-wide"><button type="submit" className="btn" disabled={!ws.trim()}>{t.offOpLoad}</button></div>
+        </form>
+        {needed && <label className="field check"><input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} /> <span>{t.offOpAccept}</span></label>}
+        <div className="settings-actions">
+          <button type="button" className="btn danger" disabled={!ready} onClick={() => void request(false)()}>{t.offOpRequest}</button>
+          <button type="button" className="btn danger" disabled={!ready} onClick={() => void request(true)()}>{t.offOpNow}</button>
+          {st?.state === 'pending' && <button type="button" className="btn" disabled={!ready} onClick={() => void cancel()}>{t.offCancel}</button>}
+        </div>
+        {msg && <p role="alert" className="error-text">{msg}</p>}
+        {st && (
+          <div aria-live="polite">
+            <p><span className="flag" data-ok={st.state !== 'running'}>{t.offOpState[st.state] ?? st.state}</span> <span className="muted">{st.requestedRole === 'operator' ? t.opBy(st.requestedBy) : st.requestedBy}</span></p>
+            {st.state === 'pending' && <p>{t.offPending(dateTime(st.executeAfter, lang))}</p>}
+            {st.writeOffMinor > 0 && <p className="muted">{t.offWriteOff(money(st.writeOffMinor))}</p>}
+            {st.stepsDone.length > 0 && <p className="muted"><b>{t.offOpSteps}:</b> <bdi dir="ltr">{st.stepsDone.join(', ')}</bdi></p>}
+            {st.lastError && <p className="error-text"><bdi dir="ltr">{st.lastError}</bdi></p>}
+            <h3 className="pane-sub">{t.offOpLog}</h3>
+            <ul className="wallet-rows">
+              {(st.log ?? []).map((l, i) => <li key={i}><span className="wallet-row-main"><b>{l.action}</b> <span className="muted">• {dateTime(l.at, lang)} • <bdi dir="ltr">{l.actor}</bdi></span></span>{l.reason && <p className="muted" dir="auto">{l.reason}</p>}</li>)}
+            </ul>
+          </div>
+        )}
+      </Card>
+      <Card id="op-off-list" title={t.offOpListTitle}>
+        {list.error && <p className="error-text">{t.opLoadError}</p>}
+        {list.items?.length === 0 && <p className="muted">{t.offOpNone}</p>}
+        <ul className="wallet-rows">
+          {list.items?.map((o) => <li key={o.workspaceId}><span className="wallet-row-main"><bdi dir="ltr">{o.workspaceId}</bdi> <span className="muted">• {t.offOpState[o.state] ?? o.state} • {dateTime(o.executeAfter, lang)}</span></span></li>)}
+        </ul>
+      </Card>
+    </>
   );
 }
 

@@ -117,6 +117,9 @@ It checks the running commit, the live cron schedule (with `--cron`/`--worker` a
 ### Number health and the kill switch (before `SHARED_NUMBER_ENABLED` is ever on)
 Subscribe the Meta app to `phone_number_quality_update` and `account_update` (already in the webhook field list in section 2). After the first real event of each kind, check `phone_numbers.health_state` moved and that the P1 / P0 alert reached Telegram. The operator console has a "Kill switch" tab (suspend, pause campaigns, evict, revoke tokens), every action is in `operator_actions`. Details and limits: `docs/number-health.md`.
 
+### Workspace deletion (OFFBOARD-1)
+Owner and operator deletion with a 14-day cooling-off, run by the daily pass (`runDueOffboardings`); design, API, what is kept and the rulings OFFBOARD-AUDIT-1 / OFFBOARD-PROOF-1 / OFFBOARD-HOLD-1 / OFFBOARD-KEY-1 are in `docs/offboarding.md`. Apply D1 migration `0018_offboarding.sql` before the deploy. Alerts `offboarding_failed` and `offboarding_held` are P1.
+
 ### Request guards (security, `src/core/request-guards.ts`, one middleware before every route)
 - Body size is checked before the body is read (`Content-Length`) and counted while it is read (chunked, no length): `/meta/webhook` and `/kashier/webhook` 256 KB, JSON API 1 MB, uploads keep their own limits (media 50 MB, imports 10 MB, InstaPay proof 5 MB, plus the multipart envelope). Over: `413 {"error":"payload_too_large"}`.
 - Content-type allow-list when a body is present: webhooks and API writes `application/json`; media and imports `multipart/form-data`; the InstaPay proof jpeg/png/webp/pdf. Anything else: `415 {"error":"unsupported_media"}`.
