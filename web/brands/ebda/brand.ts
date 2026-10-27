@@ -10,4 +10,6 @@ export const BRAND: WebBrand = {
   // The suite help site's WhatsApp section: Arabic at the root, English under /en, trailing slash (help.ebda.app routing).
   helpUrl: (lang, slug) => `https://help.ebda.app${lang === 'en' ? '/en' : ''}/whatsapp/${slug}/`,
   storeName: 'Ebda Store',
+  // WA-SUPPORT-1 (Ahmad): the Store's public contact address; pinned to the Store's brand constant in vendor/brand/store-support-email.json.
+  supportEmail: 'ahlan@ebda.app',
 };

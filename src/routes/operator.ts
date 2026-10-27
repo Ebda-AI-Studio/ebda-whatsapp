@@ -209,7 +209,7 @@ operatorRoutes.get('/package-orders/:orderId/refund-quote', async (c) => {
   return c.json(q);
 });
 
-// The operator's cancel + refund of a yearly period, debt first (the console action behind "your yearly plan runs until <date>; contact support"). Idempotent.
+// The operator's cancel + refund of a yearly period, debt first (the console action behind "your yearly plan runs until <date>; write to us at <support email>"). Idempotent.
 operatorRoutes.post('/package-orders/:orderId/yearly-refund', async (c) => {
   const body = z.object({ reason: z.string().trim().min(5).max(500) }).safeParse(await c.req.json().catch(() => null));
   if (!body.success) return bad(c, 'reason_required');

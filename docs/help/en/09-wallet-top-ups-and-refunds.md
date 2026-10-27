@@ -30,7 +30,7 @@ While card payment is not switched on for your account, you pay by InstaPay tran
 3. Pay on the Kashier page. The package turns on when Kashier confirms the payment, not when you return to the page. Until then you see "waiting for confirmation".
 4. A package runs for **one month** (a yearly one for **twelve**) and does **not renew by itself**. A week before it ends, the inbox shows a reminder with a link to the wallet; buy again to renew. If you renew early, the new month starts the day the current one ends (you do not lose days), and the AI credits of a month are valid for that month only; the new month brings a fresh amount.
 
-**Changing a yearly package.** With a yearly package running you can move **up** to a higher yearly package: you pay only the difference (new yearly price / 12 minus your current one / 12) for the months that are left, **this month included**, rounded down to a whole pound; the new package starts at once and ends on the same date, and this month's AI credits are topped up to the new amount (what you already used stays used). Moving to a **lower** yearly package, or to any **monthly** package, starts when your current package ends, with no refund. If a renewal is already queued behind your package, you cannot switch: contact support.
+**Changing a yearly package.** With a yearly package running you can move **up** to a higher yearly package: you pay only the difference (new yearly price / 12 minus your current one / 12) for the months that are left, **this month included**, rounded down to a whole pound; the new package starts at once and ends on the same date, and this month's AI credits are topped up to the new amount (what you already used stays used). Moving to a **lower** yearly package, or to any **monthly** package, starts when your current package ends, with no refund. If a renewal is already queued behind your package, you cannot switch: write to us at ahlan@ebda.app.
 
 **Yearly packages** (Starter, Growth and Pro "yearly") cost 9 times the monthly price and run for **12 months**. They have the same features and the same AI credits per month as the monthly package; the credits are added **every month**, not all at once, and a month's unused credits end when the next month's arrive.
 
@@ -56,10 +56,10 @@ From **Wallet > Statement** choose a month to see every entry (top-up, message, 
 - **Not refundable:** card fees already paid, AI credits that came with the package, the current package period (it keeps working until the period ends), and purchased AI credits that were used or are older than 14 days.
 - Financial records are kept even after you cancel or ask for data deletion, as the law requires.
 
-To request one, contact the Ebda AI Studio team through support, or use the refund request in your account if available.
+To request one, write to the Ebda AI Studio team at ahlan@ebda.app, or use the refund request in your account if available. For a yearly package, the whole months left after the current one are refundable at the package's monthly price (the yearly price ÷ 12), up to what you paid for that year; the current month is not refunded.
 
 ## Troubleshooting
-- **I paid but the balance did not grow:** wait a few minutes. If it persists, send the transaction number to support.
+- **I paid but the balance did not grow:** wait a few minutes. If it persists, email the transaction number to ahlan@ebda.app.
 - **A campaign stopped with "insufficient balance":** top up and resume the campaign.
 - **I was charged for a message that did not arrive:** we only charge messages Meta counts as billable.
 
