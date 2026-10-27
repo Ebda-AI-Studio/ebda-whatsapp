@@ -1,3 +1,5 @@
+import { auditWrites } from './core/audit';
+import { recordErasure } from './core/erasure';
 import * as Sentry from '@sentry/cloudflare';
 import { env as workerEnv } from 'cloudflare:workers';
 import { Hono } from 'hono';
@@ -133,6 +135,7 @@ const getVerifier = (env: Env): IdentityVerifier => (verifier ??= selectVerifier
 const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
 api.use('/operator/*', requireSuperAdmin(getVerifier));
+api.use('*', auditWrites()); // every state-changing call: who, what, which ids (src/core/audit.ts)
 api.use('*', apiContentTypes()); // after auth: 401/403 first, then 415 for a body type the route class does not take
 api.route('/operator', operatorRoutes);
 api.get('/stores/:storeId/me', (c) => {
@@ -149,6 +152,8 @@ api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   // For Ebda Store stores the workspace id is the store id (Phase 1 ruling). Never touch a DO for an unregistered workspace.
   const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(storeId).first();
   if (!known) return c.json({ error: 'workspace not found' }, 404);
+  // The record first (D1, durable, a keyed hash): a restore from an older backup then drops this person. A failure alerts and the erasure still goes ahead.
+  await recordErasure(c.env, { workspaceId: storeId, waId: e164.slice(1), actor: c.get('principal').userId });
   const result = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId)).eraseContact(e164.slice(1));
   if (!result.found && result.r2Pending === 0) return c.json({ error: 'contact not found' }, 404);
   const who = c.env.SUITE_BUYER_KEY_SECRET ? await buyerKey(c.env.SUITE_BUYER_KEY_SECRET, e164) : `…${e164.slice(-4)}`;

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
+  opsStatusDto, auditLogItemDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -209,6 +209,11 @@ export function createApiSource(o: Opts): LiveSource {
       createAdjustment: (workspaceId, amountMinor, reason) => op(`/workspaces/${encodeURIComponent(workspaceId)}/adjustments`, adjustmentDto, post({ amountMinor, reason })),
       decideAdjustment: (id, decision) => op(`/adjustments/${encodeURIComponent(id)}/decision`, adjustmentDto, post({ decision })),
       changeLog: async () => (await op('/change-log?limit=100', items(changeLogItemDto))).items,
+      auditLog: async (f) => {
+        const q = new URLSearchParams({ limit: '100' });
+        for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== '') q.set(k, String(v));
+        return (await op(`/audit-log?${q}`, items(auditLogItemDto))).items;
+      },
       yearlyRefundQuote: (orderId) => op(`/package-orders/${encodeURIComponent(orderId)}/refund-quote`, z.object({
         orderId: z.string(), packageId: z.string(), periodMonths: z.number(), monthlyMinor: z.number(), unusedMonths: z.number(), grossMinor: z.number(), debtMinor: z.number(), debtSettledMinor: z.number(), refundMinor: z.number(),
       }).loose()),

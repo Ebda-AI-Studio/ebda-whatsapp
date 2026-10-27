@@ -272,6 +272,22 @@ describe('operator: change log', () => {
   });
 });
 
+describe('operator: action log (T8)', () => {
+  it('lists who did what to which id, newest first, and filters by actor', async () => {
+    const source = createSampleSource();
+    const spy = vi.spyOn(source.operator!, 'auditLog');
+    await openOperator(source, 'audit');
+    const card = await screen.findByRole('region', { name: t.opAuditTitle });
+    expect(await within(card).findByText('POST /stores/:storeId/conversations/:conversationId/assign')).toBeTruthy();
+    expect(within(card).getByText('waId=3f9a1c0e5b7d4a2c8e6f1b0d9c3a7e52')).toBeTruthy(); // a hash, never a phone number
+    fireEvent.change(within(card).getByLabelText(t.opAuditActor), { target: { value: 'u-root' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.opAuditApply })));
+    expect(spy).toHaveBeenLastCalledWith({ actor: 'u-root' });
+    expect(within(card).queryByText('POST /stores/:storeId/conversations/:conversationId/assign')).toBeNull();
+    expect(within(card).getByText('POST /operator/workspaces/:workspaceId/suspend')).toBeTruthy();
+  });
+});
+
 describe('operator: InstaPay transfers', () => {
   it('shows the review SLA, lists the proofs under review, and confirms or rejects (a reason is needed to reject)', async () => {
     const source = createSampleSource();
