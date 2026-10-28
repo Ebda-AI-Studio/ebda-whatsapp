@@ -14,7 +14,19 @@ import { alert } from '../observability';
 
 type Sql = DurableObjectStorage['sql'];
 
+/**
+ * WHAT AN AI CREDIT IS (M-084): one credit pays for one AI TURN, i.e. one customer message the agent took on (it called the model, up to 3 rounds with tools, and
+ * answered or handed over). Not per token, not per reply length, not per tool call. Free: a message handed to a person before the model (a "talk to a human"
+ * request, no credits left, misconfigured), the "I only read text" note, a replayed task (charged once), and every turn of a workspace with its own model key.
+ * The platform's own cost per turn is measured, not assumed: each turn writes its token use to Analytics Engine (docs/analytics.md).
+ */
 export const AI_TURN_CREDITS = 1;
+/** "Low" is a tenth of the package's monthly allowance, never fewer than this many credits (a package with 100 credits warns at 10; one with 20 at 5). */
+export const LOW_CREDITS_FRACTION = 0.1;
+export const LOW_CREDITS_FLOOR = 5;
+export const lowCreditsThreshold = (monthlyAllowance: number): number => Math.max(LOW_CREDITS_FLOOR, Math.ceil(monthlyAllowance * LOW_CREDITS_FRACTION));
+/** The package's monthly allowance in credits as the workspace knows it (0 without an entitlement). */
+export const monthlyAllowance = (sql: Sql): number => sql.exec<{ c: number }>('SELECT coalesce((SELECT ai_credits FROM entitlements WHERE id = 1), 0) AS c').one().c;
 /** A hold whose turn crashed frees itself after this long. */
 export const HOLD_TTL_MS = 10 * 60_000;
 
@@ -67,7 +79,7 @@ export function heartbeatHold(sql: Sql, ref: string, now: number): void {
  * another call: it is charged only if a credit is still available; otherwise nothing is posted ('refused', alerted) so the
  * balance can never go negative.
  */
-export function settleHold(sql: Sql, ref: string, now: number): 'charged' | 'refused' | 'noop' {
+export function settleHold(sql: Sql, ref: string, now: number, workspaceId?: string): 'charged' | 'refused' | 'noop' {
   const h = sql.exec<{ amount: number; state: string; expires_at: number }>('SELECT amount, state, expires_at FROM credit_holds WHERE ref = ?', ref).toArray()[0];
   if (!h || h.state === 'charged' || h.state === 'released') return 'noop';
   const lapsed = h.state === 'expired' || h.expires_at <= now;
@@ -78,7 +90,19 @@ export function settleHold(sql: Sql, ref: string, now: number): 'charged' | 'ref
   }
   postCredit(sql, { kind: 'ai_charge', amount: -h.amount, ref, parentRef: ref, now });
   sql.exec("UPDATE credit_holds SET state = 'charged', settled_at = ? WHERE ref = ?", now, ref);
+  lowCreditsAlert(sql, now, workspaceId);
   return 'charged';
+}
+
+/** Once a day while the available credits are under the package's threshold: INFO alert `ai_credits_low` (the merchant sees the same flag in the wallet view). */
+function lowCreditsAlert(sql: Sql, now: number, workspaceId?: string): void {
+  const available = creditsAvailable(sql, now);
+  const threshold = lowCreditsThreshold(monthlyAllowance(sql));
+  if (available >= threshold) return;
+  const last = Number(sql.exec<{ value: string }>("SELECT value FROM store_state WHERE key = 'ai.low_alert_at'").toArray()[0]?.value ?? 0);
+  if (now - last < 86_400_000) return;
+  sql.exec("INSERT INTO store_state (key, value) VALUES ('ai.low_alert_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(now));
+  alert('ai_credits_low', { ...(workspaceId ? { workspace: workspaceId } : {}), available, threshold });
 }
 
 /** Gives a hold back unused (the model never answered). Idempotent. Call inside a transaction. */

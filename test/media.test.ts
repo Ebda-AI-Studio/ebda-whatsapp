@@ -9,6 +9,12 @@ import { exec, openChat, rows, seedNumber, workspace } from './helpers/workspace
 
 useApiKey();
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5]);
+const bytesOf = (head: number[] | string, pad = 24) => new Uint8Array([...(typeof head === 'string' ? [...head].map((c) => c.charCodeAt(0)) : head), ...new Array(pad).fill(1)]);
+const PNG = bytesOf([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PDF = bytesOf('%PDF-1.7\n');
+const OGG_OPUS = bytesOf('OggS\0\x02\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\x13OpusHead');
+const MP4 = bytesOf([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+const HTML = bytesOf('<html><script>alert(1)</script>');
 const mediaReplies = (id: string, mime = 'image/jpeg') => (c: { url: string }) =>
   c.url.endsWith(`/${id}`)
     ? { status: 200, json: { url: `https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=${id}`, mime_type: mime, file_size: JPEG.byteLength } }
@@ -139,7 +145,7 @@ it('refuses types outside the allow-list with unsupported_media and files over t
   // the ogg/opus parameter is accepted in either spelling
   g.restore();
   graphStub(() => ({ status: 200, json: { id: 'meta-ogg' } }));
-  expect((await api.call('POST', '/media', upload('v.ogg', 'audio/ogg;codecs=opus', JPEG))).status).toBe(201);
+  expect((await api.call('POST', '/media', upload('v.ogg', 'audio/ogg;codecs=opus', OGG_OPUS))).status).toBe(201);
 });
 
 it('a Meta upload failure is reported and stores nothing', async () => {
@@ -186,4 +192,31 @@ it('overlapping task runs never execute the same task twice (lease)', async () =
   // the winner may be the DO's own alarm, still finishing its attempt: wait for the attempt to be recorded
   await vi.waitFor(async () => expect(await rows(store, "SELECT attempts FROM scheduled_tasks WHERE kind = 'media_fetch'")).toEqual([{ attempts: 1 }]));
   expect(g.calls.length).toBe(1);
+});
+
+it('an mp4 is recognised by its ftyp brand: mov, m4a and heic are not mp4', async () => {
+  const { sniffMime } = await import('../src/core/media');
+  const brand = (b: string) => bytesOf([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, ...[...b].map((c) => c.charCodeAt(0))]);
+  for (const ok of ['isom', 'mp42', 'avc1']) expect(sniffMime(brand(ok)), ok).toBe('video/mp4');
+  for (const no of ['qt  ', 'M4A ', 'heic']) expect(sniffMime(brand(no)), no).toBeNull();
+});
+
+// M-134: the bytes decide, not the declared type.
+it('sniffs the real type from the bytes: a file whose bytes do not match its declared type is unsupported_media and never reaches Meta', async () => {
+  const store = W(407);
+  const api = await apiFor(store, 'owner', 'pn-m8');
+  const g = graphStub(() => ({ status: 200, json: { id: 'meta-ok' } }));
+  const bad: [string, string, Uint8Array][] = [
+    ['x.jpg', 'image/jpeg', HTML], ['x.png', 'image/png', JPEG], ['x.jpg', 'image/jpeg', PDF], ['x.pdf', 'application/pdf', PNG],
+    ['x.mp4', 'video/mp4', JPEG], ['x.ogg', 'audio/ogg;codecs=opus', MP4], ['x.jpg', 'image/jpeg', new Uint8Array([0xff])],
+  ];
+  for (const [name, type, bytes] of bad) {
+    const res = await api.call('POST', '/media', upload(name, type, bytes));
+    expect(res.status, `${type} / ${name}`).toBe(415);
+    expect(await res.json()).toMatchObject({ error: 'unsupported_media' });
+  }
+  expect(g.calls).toHaveLength(0);
+  for (const [name, type, bytes] of [['a.jpg', 'image/jpeg', JPEG], ['a.png', 'image/png', PNG], ['a.pdf', 'application/pdf', PDF], ['a.ogg', 'audio/ogg; codecs=opus', OGG_OPUS], ['a.mp4', 'video/mp4', MP4]] as const) {
+    expect((await api.call('POST', '/media', upload(name, type, bytes))).status, type).toBe(201);
+  }
 });

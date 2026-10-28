@@ -16,6 +16,7 @@ export const ERASURE_TARGETS: readonly ErasureTarget[] = [
   { table: 'events', by: 'event_payload', purge: true }, // realtime log: message events carry the message text; keyed by message id inside the JSON
   { table: 'tier_slots', by: 'contact_id' },
   { table: 'contact_tags', by: 'contact_id' },
+  { table: 'consent_proofs', by: 'contact_id' }, // W2-CONSENT: the proof of a consent is the customer's data and goes with them
   { table: 'campaign_recipients', by: 'contact_id' },
   { table: 'campaign_links', by: 'contact_id' },
   { table: 'store_orders', by: 'wa_id' },

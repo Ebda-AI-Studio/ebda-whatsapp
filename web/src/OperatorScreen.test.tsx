@@ -330,3 +330,12 @@ describe('operator: cancel a yearly plan and refund (debt first)', () => {
     expect(await screen.findByText(t.opFailed)).toBeTruthy();
   });
 });
+
+describe('Meta data-deletion requests in the console (B9)', () => {
+  it('the Queues tab lists them with their state, so a request that needs a person is visible', async () => {
+    await openOperator(createSampleSource(), 'queues');
+    expect(await screen.findByRole('heading', { name: t.opDeletionsTitle })).toBeTruthy();
+    expect(await screen.findByText(t.opDeletionState.nothing_found)).toBeTruthy();
+    expect(screen.getByText(t.opDeletionState.done)).toBeTruthy();
+  });
+});

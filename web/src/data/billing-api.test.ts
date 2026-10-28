@@ -5,7 +5,7 @@ const STORE = '11111111-1111-4111-8111-111111111111';
 const wallet = {
   balanceMinor: 18500, heldMinor: 2500, availableMinor: 16000, debtMinor: 0, creditLimitMinor: 5000, currency: 'EGP',
   funding: [{ phoneNumberId: 'pn1', displayPhone: '+20 100 555 0101', funding: 'merchant_card' }], topupsEnabled: true, lowBalance: false,
-  aiCredits: { balance: 10, available: 8 }, plan: { packageId: 'growth', status: 'active', periodEnd: 1, cancelledAt: null },
+  lowBalanceThresholdMinor: 2000, aiCredits: { balance: 10, available: 8, low: true, lowThreshold: 5, allowance: 20 }, plan: { packageId: 'growth', status: 'active', periodEnd: 1, cancelledAt: null },
 };
 
 function stub(routes: Record<string, (init?: RequestInit) => { status: number; body: unknown; raw?: string }>) {

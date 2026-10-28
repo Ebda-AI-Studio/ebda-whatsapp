@@ -5,6 +5,7 @@ import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { LoadError } from './LoadError';
 
+const PROMISE_FLAGS = [['allowRefund', 'promiseRefund'], ['allowDiscount', 'promiseDiscount'], ['allowFreeDelivery', 'promiseFreeDelivery'], ['allowExchange', 'promiseExchange'], ['allowGuarantee', 'promiseGuarantee']] as const;
 type Draft = Omit<AgentSettingsDto, 'hasApiKey' | 'credits' | 'knowledgeReady'> & { apiKey: string };
 
 export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; source: InboxSource }) {
@@ -74,6 +75,16 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
           <textarea id="agent-faq" dir="auto" rows={6} maxLength={20000} value={draft.faqText} onChange={(e) => set('faqText', e.target.value)} aria-describedby="faq-hint" />
           <small id="faq-hint" className="muted">{t.agentFaqHint} · {settings.knowledgeReady ? t.agentKbReady : t.agentKbPending}</small>
         </div>
+        <fieldset className="field">
+          <legend>{t.agentPromises}</legend>
+          <small className="muted">{t.agentPromisesHint}</small>
+          {PROMISE_FLAGS.map(([key, label]) => (
+            <div className="setting-row" key={key}>
+              <span id={`agent-${key}-label`}>{t[label]}</span>
+              <button type="button" role="switch" aria-checked={draft[key]} aria-labelledby={`agent-${key}-label`} className="switch" onClick={() => set(key, !draft[key])}><span /></button>
+            </div>
+          ))}
+        </fieldset>
         <fieldset className="field">
           <legend>{t.agentProvider}</legend>
           <label className="radio"><input type="radio" name="provider" checked={!own} onChange={() => set('provider', 'workers-ai')} />{t.providerBuiltIn}</label>

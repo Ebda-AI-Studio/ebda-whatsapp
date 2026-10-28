@@ -134,6 +134,22 @@ describe('item 2: any open money row holds, however old; a credit that reaches a
   });
 });
 
+describe('ERASURE-KEY-1: the pseudonym is stored once', () => {
+  it('a retry after a key change reuses the stored pseudonym: the money records are never split across two ids', async () => {
+    const ws = W(21);
+    await open(ws);
+    await env.DB.prepare("INSERT INTO topups (order_id, workspace_id, amount_minor, total_minor, state, created_by, created_at) VALUES ('tp-key', ?, 9000, 9000, 'expired', 'u', 1)").bind(ws).run();
+    await op(ws, OP1, 'POST', '', { reason: REASON, immediate: true });
+    const stored = 'del_' + 'ab'.repeat(16);
+    await env.DB.prepare('UPDATE offboarding SET pseudonym = ? WHERE workspace_id = ?').bind(stored, ws).run(); // an earlier attempt stored it under the OLD key
+    const changed = { ...env, ERASURE_HMAC_KEY: 'a-different-erasure-key-0123456789abcdef' } as typeof env;
+    expect(await pseudonymFor(changed, ws)).not.toBe(stored);
+    expect(await runOffboarding(changed, ws, Date.now() + 1000)).toBe('done');
+    expect((await d1<{ workspace_id: string }>('SELECT workspace_id FROM topups WHERE order_id = ?', 'tp-key'))[0]!.workspace_id).toBe(stored);
+    expect((await d1<{ pseudonym: string }>('SELECT pseudonym FROM offboarding WHERE workspace_id = ?', ws))[0]!.pseudonym).toBe(stored);
+  });
+});
+
 describe('item 3: held rows never starve a due one', () => {
   it('21 held deletions and one due: the due one runs', async () => {
     const t0 = Date.now();

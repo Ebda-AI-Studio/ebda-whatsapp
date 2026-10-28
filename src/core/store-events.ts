@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { parseStoreEvent } from './api/store-events';
+import { recordWorkspaceOwner } from './campaigns/new-cap';
 import { applyStorePlan } from './billing/store-plan';
 import { errClass, alert } from './observability';
 import { senderNumberFor } from './shared/shared-number';
@@ -31,6 +32,7 @@ export async function consumeStoreEvents(batch: MessageBatch<unknown>, env: Env)
         continue;
       }
       // The package lives in D1: a plan change is applied here, before the workspace records the event, so a failure is retried with it.
+      if (event.type === 'store.plan_changed' || event.type === 'store.linked') await recordWorkspaceOwner(env, event.storeId, event.data.ownerUserId, Date.now()); // who owns the store: the new-workspace campaign cap is per owner
       if (event.type === 'store.plan_changed') await applyStorePlan(env, event);
       // Own number, else the shared platform number for a member (transactional events carry their order ref there).
       const number = await senderNumberFor(env, event.storeId);

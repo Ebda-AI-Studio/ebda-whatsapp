@@ -1,5 +1,6 @@
 import type { Env } from '../../env';
-import { decryptSecret } from '../ai/secrets';
+import { encryptSecret } from '../ai/secrets';
+import { decryptAny, tokenKeys } from '../enc-keys';
 
 /** The business token of a number's WABA is unusable (missing key, missing or unreadable credential). Never falls back to the platform token. */
 export class TokenUnavailable extends Error {
@@ -46,8 +47,15 @@ async function ownTokenOfWaba(env: Env, wabaId: string): Promise<string | null> 
   let value: string | null = null;
   if (row) {
     if (!env.TOKEN_ENC_KEY) throw new TokenUnavailable('no_key');
-    value = await decryptSecret(row.token_enc, env.TOKEN_ENC_KEY, row.workspace_id);
-    if (value === null) throw new TokenUnavailable('unreadable'); // not cached: a fixed key or credential heals on the next call
+    const got = await decryptAny(row.token_enc, tokenKeys(env), row.workspace_id);
+    if (got === null) throw new TokenUnavailable('unreadable'); // not cached: a fixed key or credential heals on the next call
+    value = got.value;
+    // M-173: opened by the previous key: re-encrypt under the current one (compare-and-set; best effort, the operator route finishes the rest).
+    if (got.keyIndex > 0) {
+      try {
+        await env.DB.prepare('UPDATE waba_credentials SET token_enc = ? WHERE waba_id = ? AND token_enc = ?').bind(await encryptSecret(value, env.TOKEN_ENC_KEY, row.workspace_id), wabaId, row.token_enc).run();
+      } catch { /* the next read tries again */ }
+    }
   }
   tokenByWaba.set(wabaId, { value, until: Date.now() + TTL_MS });
   return value;

@@ -1,4 +1,4 @@
-import type { OffboardingView, OperatorOffboarding, OpsStatusDto, InstapayRequest, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, WalletDto } from './billing';
+import type { OpsStatusDto, InstapayRequest, ChangeLogItem, FxRate, MarginOverride, OperatorApi, PricingSettings, RateCardVersion, RefundRequest, StatementDto, WalletApi, Adjustment, DigestDto, WalletDto, OffboardingView, OperatorOffboarding } from './billing';
 import { ApiError } from './api';
 
 // Sample billing data for preview only (the app labels the whole source as sample). Amounts are invented; nothing here is real money.
@@ -62,15 +62,23 @@ export function createSampleWallet(): WalletApi {
   const instapayItems: InstapayRequest[] = [
     { id: 'ip-0', reference: 'WA-K7M2Q9XD', kind: 'package', packageId: 'gold', amountMinor: 50000, currency: 'EGP', state: 'rejected', createdAt: BASE - 5 * D, expiresAt: BASE - 3 * D, hasProof: true, rejectReason: 'المبلغ في الإيصال أقل من المطلوب', decidedAt: BASE - 4 * D },
   ];
+  const digestState = { on: true };
+  const sampleDigest: DigestDto = {
+    enabled: true, from: BASE - 7 * D, to: BASE, customersWrote: 41, messagesIn: 96, messagesOut: 133, delivered: 118, failed: 4, aiReplies: 52, aiCreditsUsed: 52, handoffs: 6,
+    campaignRecipients: 200, optOuts: 2, spendMinor: 7450, topupsMinor: 10000, balanceMinor: 18500, availableMinor: 16000, lowBalance: false,
+    aiCredits: { available: 480, low: false, lowThreshold: 30, allowance: 300 },
+  };
   let off: OffboardingView = { state: 'none' };
   const wallet: WalletDto = {
     balanceMinor: 18500, heldMinor: 2500, availableMinor: 16000, debtMinor: 0, creditLimitMinor: 5000, currency: 'EGP',
     funding: [{ phoneNumberId: 'pn-sample-1', displayPhone: '+20 100 555 0101', funding: 'merchant_card' }, { phoneNumberId: 'pn-sample-shared', displayPhone: '+20 100 555 0900', funding: 'platform_line' }],
-    topupsEnabled: true, lowBalance: false, aiCredits: { balance: 500, available: 480 },
+    topupsEnabled: true, lowBalance: false, lowBalanceThresholdMinor: 2000, aiCredits: { balance: 500, available: 480, low: false, lowThreshold: 30, allowance: 300 },
     plan: { packageId: 'growth', status: 'active', periodEnd: BASE + 18 * D, cancelledAt: null },
   };
   return {
     wallet: async () => structuredClone(wallet),
+    digest: async () => structuredClone(digestState.on ? sampleDigest : ({ enabled: false } as const)),
+    async setDigest(enabled) { digestState.on = enabled; },
     statement: async (month) => sampleStatement(month),
     async statementCsv(month) {
       const s = sampleStatement(month);
@@ -234,6 +242,7 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       record(`adjustment_${decision}d`, a.workspaceId, { state: 'pending' }, { state: a.state }, a.reason);
       return { ...a };
     },
+    metaDeletions: async () => [{ code: 'a'.repeat(32), state: 'nothing_found' as const, receivedAt: BASE - D, removedConnections: 0, finishedAt: BASE - D + 1000 }, { code: 'b'.repeat(32), state: 'done' as const, receivedAt: BASE - 3 * D, removedConnections: 1, finishedAt: BASE - 3 * D + 2000 }],
     async offboardings() { return [...offs.values()].map((o) => structuredClone(o)); },
     async offboarding(ws) {
       const o = offs.get(ws);

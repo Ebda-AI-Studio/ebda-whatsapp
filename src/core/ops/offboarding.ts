@@ -32,6 +32,7 @@ export const OFFBOARD_TABLES = {
     phone_numbers: 'workspace_id', waba_credentials: 'workspace_id', shared_number_members: 'workspace_id', shared_routes: 'workspace_id', shared_sent: 'workspace_id',
     shared_number_sends: 'workspace_id', shared_number_strikes: 'workspace_id', shared_number_errors: 'workspace_id', workspace_subscriptions: 'workspace_id',
     store_plan_applied: 'workspace_id',
+    waba_signup_users: 'workspace_id', workspace_notices: 'workspace_id', workspace_owners: 'workspace_id', new_cap_usage: 'workspace_id', // final review: Meta-user links, owner notices, the Store owner and the campaign-cap usage go with the workspace
     audit_reasons: 'workspace_id', // operators' free-text reasons (AUDIT-RETENTION-1): deletable on purpose
     erasure_records: 'workspace_id', // the workspace's backups are erased with it, so nothing is left for a restore to bring back
   } as Record<string, string>,
@@ -46,7 +47,7 @@ export const OFFBOARD_TABLES = {
     shared_number_usage: { people: [], clear: [] },
   } as Record<string, { people: string[]; clear: string[] }>,
   // Immutable by trigger (a row can be neither updated nor deleted): they keep the opaque workspace id, which names no one once everything above is erased.
-  audit: ['operator_actions', 'offboarding', 'offboarding_log', 'ledger_mirror', 'billing_audit', 'workspace_pricing_overrides', 'audit_log'],
+  audit: ['operator_actions', 'offboarding', 'offboarding_log', 'ledger_mirror', 'billing_audit', 'workspace_pricing_overrides', 'audit_log', 'operator_view_log'], // operator_view_log: who looked at a workspace, when and which route (no text, the reason is in audit_reasons and goes with the workspace)
 };
 
 export type OffboardingStatus = {
@@ -154,9 +155,9 @@ export async function isOffboarding(env: Env, ws: string): Promise<boolean> {
   return !!(await env.DB.prepare("SELECT 1 FROM offboarding WHERE workspace_id = ? AND state IN ('running', 'done')").bind(ws).first());
 }
 
-/** The id the money records of a deleted workspace move to: HMAC-SHA-256 under a key derived (HKDF) from TOKEN_ENC_KEY, truncated to 128 bits. Null = no key (fail closed). */
+/** The id the money records of a deleted workspace move to: HMAC-SHA-256 under a key derived (HKDF) from ERASURE_HMAC_KEY (ERASURE-KEY-1: never rotated, unlike TOKEN_ENC_KEY), truncated to 128 bits. Null = no key (fail closed). */
 export async function pseudonymFor(env: Env, ws: string): Promise<string | null> {
-  const secret = env.TOKEN_ENC_KEY;
+  const secret = env.ERASURE_HMAC_KEY;
   if (!secret) return null;
   const enc = new TextEncoder();
   const base = await crypto.subtle.importKey('raw', enc.encode(secret), 'HKDF', false, ['deriveBits']);
@@ -384,14 +385,15 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now(), hoo
     const grew = await balanceHold(env, row, now);
     if (grew) return hold(grew);
   }
-  const pseudo = await pseudonymFor(env, ws);
+  // ERASURE-KEY-1: the pseudonym is computed ONCE and stored; a retry (even after a key change) reuses the stored one, so money records never end up under two ids.
+  const pseudo = row.pseudonym ?? await pseudonymFor(env, ws);
   if (!pseudo) {
     alert('offboarding_failed', { workspace: ws, error: 'no_key' });
     return 'failed';
   }
   // The claim is ONE conditional write: a request cancelled (or not yet due) since we read it is not claimed, and nothing irreversible runs.
   const claim = await env.DB.prepare(
-    "UPDATE offboarding SET state = 'running', attempts = attempts + 1, pseudonym = ?, started_at = coalesce(started_at, ?) WHERE workspace_id = ? AND state IN ('pending', 'running') AND execute_after <= ?",
+    "UPDATE offboarding SET state = 'running', attempts = attempts + 1, pseudonym = coalesce(pseudonym, ?), started_at = coalesce(started_at, ?) WHERE workspace_id = ? AND state IN ('pending', 'running') AND execute_after <= ?",
   ).bind(pseudo, now, ws, now).run();
   if (!claim.meta.changes) return 'skipped';
   if (row.state === 'pending') await env.DB.batch(logRows(env, ws, 'system', 'started', now));

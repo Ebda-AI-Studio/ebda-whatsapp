@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, offboardingDto, operatorOffboardingDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse, auditLogItemDto, retentionDto, contactSummaryDto,
+  agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -17,6 +17,8 @@ export class ApiError extends Error {
 type Opts = {
   baseUrl: string; storeId: string; getToken: () => Promise<string>;
   fetchImpl?: typeof fetch; userNames: Record<string, string>; currentUserId: string;
+  /** T35: look at this workspace as an operator, read-only; `reason` is sent with every request and written to the audit log. */
+  viewAs?: { reason: string };
 };
 
 /** The live inbox source: every response is validated against the shared contract. */
@@ -31,6 +33,7 @@ export function createApiSource(o: Opts): LiveSource {
   async function call<S extends z.ZodTypeAny>(path: string, schema: S, init: RequestInit = {}, base: string = root): Promise<z.infer<S>> {
     const headers = new Headers(init.headers);
     headers.set('authorization', `Bearer ${await o.getToken()}`);
+    if (o.viewAs) { headers.set('x-view-as-merchant', '1'); headers.set('x-view-as-reason', o.viewAs.reason); }
     if (init.body && !(init.body instanceof FormData)) headers.set('content-type', 'application/json');
     const res = await f(`${base}${path}`, { ...init, headers });
     const json = await res.json().catch(() => null);
@@ -53,6 +56,7 @@ export function createApiSource(o: Opts): LiveSource {
 
   const source: LiveSource = {
     kind: 'live',
+    ...(o.viewAs ? { viewAs: true } : {}),
     // Off until the server says the store link is bound (GET /me → capabilities): never offer an action that would 404.
     capabilities: { codOutcome: false },
     // Least privilege until GET /me answers: spending actions stay hidden.
@@ -129,6 +133,8 @@ export function createApiSource(o: Opts): LiveSource {
     },
     numbers: {
       list: async () => (await call('/numbers', listNumbersResponse)).items,
+      notices: async () => (await call('/numbers', listNumbersResponse)).notices,
+      dismissNotice: async (id) => { await call(`/numbers/notices/${id}/dismiss`, z.object({ ok: z.boolean() }).loose(), { method: 'POST' }); },
       async signupConfig() {
         try { return await call('/numbers/signup-config', signupConfigDto); } catch (e) { if (e instanceof ApiError && (e.status === 503 || e.status === 404 || e.status === 403)) return null; throw e; }
       },
@@ -151,10 +157,11 @@ export function createApiSource(o: Opts): LiveSource {
         if (q.cursor) p.set('cursor', q.cursor);
         return call(`/contacts?${p}`, listContactsResponse, signal ? { signal } : {});
       },
-      async importCsv(file, consented) {
+      async importCsv(file, consented, wording) {
         const form = new FormData();
         form.set('file', file);
         form.set('consented', consented ? 'true' : 'false');
+        if (consented && wording) form.set('wording', wording); // the exact sentence the owner ticked (A4)
         return (await call('/imports', z.object({ id: z.string() }).loose(), { method: 'POST', body: form })).id;
       },
       imports: async () => (await call('/imports', listImportsResponse)).items,
@@ -176,6 +183,8 @@ export function createApiSource(o: Opts): LiveSource {
     },
     wallet: {
       wallet: () => call('/wallet', walletDto),
+      digest: () => call('/digest', digestDto),
+      async setDigest(enabled) { await call('/digest', z.object({ enabled: z.boolean() }), { method: 'PUT', body: JSON.stringify({ enabled }) }); },
       statement: (month) => call(`/wallet/statement?month=${encodeURIComponent(month)}`, statementDto),
       async statementCsv(month) {
         const res = await f(`${root}/wallet/statement?month=${encodeURIComponent(month)}&format=csv`, { headers: { authorization: `Bearer ${await o.getToken()}` } });
@@ -226,6 +235,7 @@ export function createApiSource(o: Opts): LiveSource {
       adjustments: async () => (await op('/adjustments', items(adjustmentDto))).items,
       createAdjustment: (workspaceId, amountMinor, reason) => op(`/workspaces/${encodeURIComponent(workspaceId)}/adjustments`, adjustmentDto, post({ amountMinor, reason })),
       decideAdjustment: (id, decision) => op(`/adjustments/${encodeURIComponent(id)}/decision`, adjustmentDto, post({ decision })),
+      metaDeletions: async () => (await op('/meta-deletions', items(z.object({ code: z.string(), state: z.enum(['queued', 'done', 'nothing_found', 'failed']), receivedAt: z.number().int(), removedConnections: z.number().int(), finishedAt: z.number().int().nullable() })))).items,
       offboardings: async () => (await op('/offboardings', items(operatorOffboardingDto))).items,
       offboarding: (ws) => op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, operatorOffboardingDto),
       requestOffboarding: (ws, body) => op(`/workspaces/${encodeURIComponent(ws)}/offboarding`, operatorOffboardingDto, post(body)),

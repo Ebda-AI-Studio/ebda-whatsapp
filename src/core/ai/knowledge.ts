@@ -12,6 +12,7 @@ import type { CatalogRow } from '../store-bridge';
 import { bridgeFor } from '../store-link';
 import type { LinkHost } from '../store-link/host';
 import { agentConfig } from './config';
+import { maskForModel } from './mask';
 import { getAgentState, putAgentState, readAgentSettings } from './settings';
 
 export const KB_TOP = 4;
@@ -129,7 +130,7 @@ export async function retrieveKnowledge(host: LinkHost, query: string): Promise<
     const store = cfg.vectors(host.env);
     const embed = cfg.embedder(host.env);
     if (!store || !embed) return [];
-    const [vector] = await embed([query.slice(0, 400)]);
+    const [vector] = await embed([maskForModel(query).slice(0, 400)]); // the same masker as before any model: a phone or e-mail in the question never reaches the embedder
     if (!vector) return [];
     const hits = await store.query(vector, { namespace: nsKb(host.workspaceId), topK: 8 });
     const good = hits.filter((h) => h.score >= KB_MIN_SCORE);
@@ -208,7 +209,7 @@ export async function catalogCandidates(host: LinkHost, query: string): Promise<
     const store = cfg.vectors(host.env);
     const embed = cfg.embedder(host.env);
     if (!store || !embed) return null;
-    const [vector] = await embed([query.slice(0, 200)]);
+    const [vector] = await embed([maskForModel(query).slice(0, 200)]);
     if (!vector) return null;
     const hits = await store.query(vector, { namespace: nsCatalog(host.workspaceId), topK: 8 });
     const ids = [...new Set(hits.filter((h) => h.score >= KB_MIN_SCORE).map((h) => h.metadata?.productId).filter((x): x is string => !!x))];

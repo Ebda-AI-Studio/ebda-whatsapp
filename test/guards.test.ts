@@ -19,7 +19,7 @@ it('pins the Store event contract file: change it only together with the Store r
   const { readFileSync } = await import('node:fs');
   const { createHash } = await import('node:crypto');
   const file = readFileSync(new URL('../src/core/api/store-events.ts', import.meta.url));
-  expect(createHash('sha256').update(file).digest('hex')).toBe('d0ae7d8757b3807e325bdf5523680e7a098d121272dd0854e7d2a97ff60bdf23');
+  expect(createHash('sha256').update(file).digest('hex')).toBe('3c24ed64267e9d051bce1b1959a7d0c2dd2f28cec1bab03d8a47147b375fc4af'); // contract v1.5 = Store apps/api/src/contracts/wa-v1.ts (Store #285)
 });
 
 it('shared web code names no brand: names, marks, hosts and colours come from web/brands/<brand>', () => {
@@ -78,7 +78,7 @@ it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / IN
   const sets = { P0: setOf('P0_ALERTS'), P1: setOf('P1_ALERTS'), INFO: setOf('INFO_ALERTS') };
   expect(sets.P0.size).toBeGreaterThan(5);
   expect(sets.P1.size).toBeGreaterThan(40);
-  expect(sets.INFO.size).toBe(21); // 20 + instapay_no_reference (DUP-REF-REQUIRED-1, W2 final review)
+  expect(sets.INFO.size).toBe(25); // 20 + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
   const used = new Set<string>();
   for (const hit of findMatches(/\balert\(/, 'src')) {
     const [file, line] = hit.split(':') as [string, string];
@@ -215,6 +215,11 @@ it('every DO migration has a `// vNN` label directly above it that matches its p
   expect(entries).toBe(DO_MIGRATIONS.length);
   expect(labels.filter((l) => l.label !== l.entry)).toEqual([]); // a mislabelled entry, or a slot inserted mid-array
   expect(DO_MIGRATIONS.map((_, i) => i + 1).filter((n) => !labelled.has(n))).toEqual([]); // an UNLABELLED entry
+});
+
+// D4 follow-up: a value published on a public route must never be derived from something shaped like a real person's phone number.
+it('no string literal in src (outside tests and vectors) is an Egyptian E.164 mobile number', () => {
+  expect(findMatches(/['"`]\+20\d{9,10}['"`]/, 'src')).toEqual([]);
 });
 
 // AUDIT-RETENTION-1 (review item 6): the audit log is append-only, so free text (which can hold a phone number) never goes into `detail`; an operator's reason goes to audit_reasons.

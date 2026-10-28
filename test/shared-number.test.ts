@@ -78,9 +78,10 @@ const texts = () => graph!.calls.filter((c) => c.body?.type === 'text');
 
 beforeEach(async () => {
   graph = graphStub();
+  // EVERY shared_* table, found in the schema (naming five of them left strikes, errors, sends, usage and trueups behind: WA-CI-STALL-1).
+  const shared = (await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'shared\\_%' ESCAPE '\\'").all<{ name: string }>()).results.map((r) => r.name);
   await env.DB.batch([
-    env.DB.prepare('DELETE FROM shared_templates'), env.DB.prepare('DELETE FROM shared_routes'), env.DB.prepare('DELETE FROM shared_sent'),
-    env.DB.prepare('DELETE FROM shared_number_members'), env.DB.prepare('DELETE FROM shared_numbers'),
+    ...shared.sort((a, b) => Number(a === 'shared_numbers') - Number(b === 'shared_numbers')).map((n) => env.DB.prepare(`DELETE FROM ${n}`)), // children first: shared_numbers is the parent
     env.DB.prepare('DELETE FROM number_funding WHERE phone_number_id = ?').bind(PLAT),
   ]);
   for (const o of (await env.MEDIA.list({ prefix: 'shared-' })).objects) await env.MEDIA.delete(o.key);
@@ -498,5 +499,19 @@ describe('security review fixes (2026-10-25)', () => {
     // Same first 23 characters: the 24-character list row shows both as "Nile Fashion House Down…".
     expect((await c.call('POST', '/shared-number/join', { displayName: 'Nile Fashion House Downstairs' })).status).toBe(409);
     expect((await c.call('POST', '/shared-number/join', { displayName: 'Nile Fashion Uptown' })).status).toBe(200);
+  });
+});
+
+// WA-CI-STALL-1 isolation: the reset above listed five tables by name; five other shared_* tables (strikes, errors, sends, usage, trueups) were never cleared, so a
+// number-health strike left by one test (or by a test that hung and kept running) made the next join answer 409 number_unhealthy. The reset now clears EVERY shared_* table.
+describe('state left behind by one test never reaches the next', () => {
+  it('leaves strikes, errors, sends, usage and trueups behind', async () => {
+    const t = (await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'shared\\_%' ESCAPE '\\'").all<{ name: string }>()).results.map((r) => r.name);
+    expect(t.length).toBeGreaterThanOrEqual(10);
+    await env.DB.prepare('INSERT INTO shared_number_strikes (phone_number_id, workspace_id, at) VALUES (?, ?, ?)').bind(PLAT, 'ws-leak', Date.now()).run();
+  });
+  it('and the next test finds every shared_* table empty', async () => {
+    const t = (await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'shared\\_%' ESCAPE '\\'").all<{ name: string }>()).results.map((r) => r.name);
+    for (const name of t) expect(await env.DB.prepare(`SELECT count(*) AS n FROM ${name}`).first('n'), name).toBe(0);
   });
 });

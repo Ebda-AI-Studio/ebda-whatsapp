@@ -8,9 +8,12 @@ import { alert } from './observability';
  */
 const HEX = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 
-/** 128-bit HMAC-SHA-256 under a key derived (HKDF) from TOKEN_ENC_KEY with its own label. Null = no key: the caller fails closed or alerts. */
-export async function subjectHash(env: Pick<Env, 'TOKEN_ENC_KEY'>, workspaceId: string, waId: string): Promise<string | null> {
-  const secret = env.TOKEN_ENC_KEY;
+/**
+ * 128-bit HMAC-SHA-256 under a key derived (HKDF) from ERASURE_HMAC_KEY with its own label. Null = no key: the caller fails closed or alerts.
+ * ERASURE-KEY-1: NOT TOKEN_ENC_KEY. That key is rotated (M-173); a hash that followed it would match no old erasure record after a rotation and a restore would resurrect erased people.
+ */
+export async function subjectHash(env: Pick<Env, 'ERASURE_HMAC_KEY'>, workspaceId: string, waId: string): Promise<string | null> {
+  const secret = env.ERASURE_HMAC_KEY;
   if (!secret) return null;
   const enc = new TextEncoder();
   const base = await crypto.subtle.importKey('raw', enc.encode(secret), 'HKDF', false, ['deriveBits']);

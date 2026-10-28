@@ -25,6 +25,9 @@ A name's level is decided in `P0_ALERTS` / `P1_ALERTS` (observability.ts); a cal
 ## Verify the channel (after setting the secrets and deploying)
 Drill with the dead-letter queue, which touches no workspace: Cloudflare dashboard → Queues → `ebda-wa-send-dlq` → *Send message* → body `{}`. The consumer finds an invalid job and raises `send_dlq` (P1, `reason=invalid_job`). Expect within a minute: one Telegram message `🟠 Ebda WhatsApp: send_dlq [P1 PLATFORM]` and one Sentry event named `send_dlq [P1]`. Record the date of the drill here: ______
 
+## One runbook per P0 and P1 alert
+Every P0 and P1 alert has its own file, `docs/runbooks/alerts/<name>.md`, and the Telegram message links to exactly that file (`runbook=<RUNBOOK_BASE_URL>/<name>.md`; the var is set in `wrangler.jsonc`, unset = the repo-relative path). `test/alert-runbooks.test.ts` fails CI when a P0 or P1 name has no runbook, when a runbook lacks its sections, or when it cites a route that does not exist. A new alert name therefore needs its runbook in the same change.
+
 ## Alerts worth a section
 Search the code for the name in the Telegram text (`grep -rn "'<name>'" src`) to find where it fires. The ones you are most likely to meet:
 

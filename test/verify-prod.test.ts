@@ -8,11 +8,12 @@ const TOKEN = 'verify-token-test';
 const COMMIT = 'abc1234';
 
 /** A fake deployment that behaves like the real Worker: health, webhook handshake, signature check, security headers. */
-function fakeDeploy(over: { kashierServedByAssets?: boolean; commit?: string; noHsts?: boolean; acceptUnsigned?: boolean; brand?: string | null; csp?: string } = {}) {
+function fakeDeploy(over: { deletionServedByAssets?: boolean; kashierServedByAssets?: boolean; commit?: string; noHsts?: boolean; acceptUnsigned?: boolean; brand?: string | null; csp?: string } = {}) {
   const sec: Record<string, string> = over.noHsts ? {} : { 'strict-transport-security': 'max-age=63072000', 'x-content-type-options': 'nosniff' };
   return async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
-    if (u.pathname === '/health') return new Response(JSON.stringify({ ok: true, service: 'ebda-wa', commit: over.commit ?? COMMIT }), { headers: sec });
+    if (u.host === 'peer.test') return new Response(JSON.stringify({ buyerKeyVector: 'v'.repeat(16) }));
+    if (u.pathname === '/health') return new Response(JSON.stringify({ ok: true, service: 'ebda-wa', commit: over.commit ?? COMMIT, buyerKeyVector: 'v'.repeat(16) }), { headers: sec });
     if (u.pathname === '/') return new Response('<html></html>', { headers: { ...sec, 'content-security-policy': over.csp ?? "default-src 'self'; frame-ancestors 'none'" } });
     if (u.pathname === '/brand.json') return over.brand === null ? new Response('<html></html>') : new Response(JSON.stringify({ brand: over.brand ?? 'ebda' }));
     if (u.pathname === '/meta/webhook' && (init.method ?? 'GET') === 'GET') {
@@ -24,6 +25,7 @@ function fakeDeploy(over: { kashierServedByAssets?: boolean; commit?: string; no
       const good = sig === `sha256=${createHmac('sha256', SECRET).update(body).digest('hex')}`;
       return good || over.acceptUnsigned ? new Response('ok') : new Response('unauthorized', { status: 401 });
     }
+    if (u.pathname === '/meta/data-deletion') return init.method === 'POST' ? new Response(JSON.stringify({ error: 'invalid_request' }), { status: over.deletionServedByAssets ? 200 : 400, headers: { 'content-type': over.deletionServedByAssets ? 'text/html' : 'application/json' } }) : new Response('nf', { status: 404 });
     if (u.pathname === '/kashier/webhook') {
       if (over.kashierServedByAssets) return new Response('<html>spa</html>', { status: 200, headers: { 'content-type': 'text/html' } });
       return new Response(JSON.stringify({ error: 'invalid_signature' }), { status: 401, headers: { 'content-type': 'application/json' } });
@@ -36,7 +38,7 @@ describe('verify-prod', () => {
   it('passes every check against a healthy deployment', async () => {
     const deploy = fakeDeploy();
     const fetchImpl = async (url: string, init?: RequestInit) => (url.startsWith('https://api.cloudflare.com/') ? new Response(JSON.stringify({ success: true, result: { schedules: [{ cron: '17 1 * * *' }] } })) : deploy(url, init));
-    const r = await runChecks({ base: 'https://wa.test', expectCommit: COMMIT, expectBrand: 'ebda', verifyToken: TOKEN, appSecret: SECRET, expectCron: '17 1 * * *', worker: 'ebda-wa', cfToken: 't', cfAccount: 'a', fetchImpl });
+    const r = await runChecks({ base: 'https://wa.test', expectCommit: COMMIT, expectBrand: 'ebda', peerHealth: 'https://peer.test/health', verifyToken: TOKEN, appSecret: SECRET, expectCron: '17 1 * * *', worker: 'ebda-wa', cfToken: 't', cfAccount: 'a', fetchImpl });
     expect(r.filter((c: { ok: boolean | null }) => c.ok !== true)).toEqual([]);
   });
 
@@ -45,6 +47,13 @@ describe('verify-prod', () => {
     expect(ok.find((c: { name: string }) => c.name === 'kashier webhook is served by the Worker')).toMatchObject({ ok: true });
     const spa = await runChecks({ base: 'https://wa.test', fetchImpl: fakeDeploy({ kashierServedByAssets: true }) });
     expect(spa.find((c: { name: string }) => c.name === 'kashier webhook is served by the Worker')).toMatchObject({ ok: false });
+  });
+
+  it('Meta\'s data-deletion callback must be served by the Worker (an unsigned post gets its 400 JSON, not the SPA)', async () => {
+    const ok = await runChecks({ base: 'https://wa.test', fetchImpl: fakeDeploy() });
+    expect(ok.find((c: { name: string }) => c.name.startsWith('data-deletion callback'))).toMatchObject({ ok: true });
+    const spa = await runChecks({ base: 'https://wa.test', fetchImpl: fakeDeploy({ deletionServedByAssets: true }) });
+    expect(spa.find((c: { name: string }) => c.name.startsWith('data-deletion callback'))).toMatchObject({ ok: false });
   });
 
   describe('the live cron schedule (Ruling #17: a registered schedule is proven from the API, not assumed from wrangler.jsonc)', () => {

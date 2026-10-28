@@ -15,7 +15,12 @@ export const contactDto = z.object({
   /** Phase 6 (additive: the inbox's embedded contact omits them). Tags from the contact and from its conversation. */
   tags: z.array(z.string()).optional(),
   /** Where and when the contact agreed to receive marketing (`import:<file>`, `keyword_start`, ...); null = no consent on record, so no marketing. */
-  consent: z.object({ source: z.string(), at: z.number().int() }).nullable().optional(),
+  consent: z.object({
+    source: z.string(),
+    at: z.number().int(),
+    /** A4: the evidence of the newest grant (absent for consents recorded before proofs were kept). */
+    proof: z.object({ source: z.enum(['import', 'opt_in', 'link']), attestedBy: z.string(), wording: z.string(), at: z.number().int(), ref: z.string().nullable() }).optional(),
+  }).nullable().optional(),
   lastInboundAt: z.number().int().nullable().optional(),
 });
 
@@ -183,6 +188,12 @@ export const agentSettingsFields = z.object({
   /** Only for `openai-compatible`; the platform chooses the Workers AI model. */
   model: z.string().min(1).max(100).regex(/^[\w./:@+-]+$/).nullable(),
   baseUrl: z.string().max(300).nullable(),
+  /** The promises the agent may make (reply guard, Ruling WA-GUARD-PROMISE-1). All default off: the FAQ text never switches one on. */
+  allowRefund: z.boolean(),
+  allowDiscount: z.boolean(),
+  allowFreeDelivery: z.boolean(),
+  allowExchange: z.boolean(),
+  allowGuarantee: z.boolean(),
 });
 export const agentSettingsDto = agentSettingsFields.extend({
   hasApiKey: z.boolean(),
@@ -274,7 +285,7 @@ export const retentionDto = z.object({ days: z.number().int().nullable(), effect
 export const contactSummaryDto = z.object({ waId: z.string(), name: z.string().nullable(), optedOut: z.boolean() });
 export const importMapping = z.object({ phone: z.string().min(1).max(100).optional(), name: z.string().min(1).max(100).optional(), tags: z.string().min(1).max(100).optional() });
 /** The multipart text fields next to the `file` part. `consented` must be the literal string "true" to grant marketing consent. */
-export const createImportFields = z.object({ consented: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'), mapping: z.string().max(1000).optional() });
+export const createImportFields = z.object({ consented: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'), wording: z.string().trim().min(1).max(500).optional(), mapping: z.string().max(1000).optional() });
 export const importDto = z.object({
   id: z.string(),
   filename: z.string(),
@@ -449,10 +460,27 @@ export const walletDto = z.object({
   funding: z.array(z.object({ phoneNumberId: z.string(), displayPhone: z.string().nullable(), funding: walletFundingKind })),
   topupsEnabled: z.boolean(),
   lowBalance: z.boolean(),
-  aiCredits: z.object({ balance: z.number().int(), available: z.number().int() }),
+  /** The wallet is low under this many minor units: max(20 EGP, 3 days of the last week's average Meta spend). */
+  lowBalanceThresholdMinor: z.number().int().nonnegative(),
+  /** One credit = one AI turn. `low` = available under a tenth of the monthly `allowance` (never under 5 credits, `lowThreshold`). */
+  aiCredits: z.object({ balance: z.number().int(), available: z.number().int(), low: z.boolean(), lowThreshold: z.number().int().nonnegative(), allowance: z.number().int().nonnegative() }),
   plan: z.object({ packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable() }).nullable(),
 });
 export type WalletDto = z.infer<typeof walletDto>;
+
+/** T13: the weekly usage digest. Counts and amounts only. `{ enabled: false }` when the owner switched it off. */
+export const digestDto = z.union([
+  z.object({ enabled: z.literal(false) }),
+  z.object({
+    enabled: z.literal(true), from: z.number().int(), to: z.number().int(),
+    customersWrote: z.number().int(), messagesIn: z.number().int(), messagesOut: z.number().int(), delivered: z.number().int(), failed: z.number().int(),
+    aiReplies: z.number().int(), aiCreditsUsed: z.number().int(), handoffs: z.number().int(), campaignRecipients: z.number().int(), optOuts: z.number().int(),
+    spendMinor: z.number().int(), topupsMinor: z.number().int(), balanceMinor: z.number().int(), availableMinor: z.number().int(), lowBalance: z.boolean(),
+    aiCredits: z.object({ available: z.number().int(), low: z.boolean(), lowThreshold: z.number().int(), allowance: z.number().int() }),
+  }),
+]);
+export type DigestDto = z.infer<typeof digestDto>;
+export const digestSettings = z.object({ enabled: z.boolean() });
 
 export const walletMoney = z.object({ count: z.number().int(), netMinor: z.number().int(), vatMinor: z.number().int(), amountMinor: z.number().int() });
 export const statementRowDto = z.object({
@@ -657,7 +685,10 @@ export const numberDto = z.object({
   /** W2-META: green = fine; yellow = flagged (campaigns paused); red / restricted = no new template sends. Meta's own rating is `qualityRating`. */
   health: z.enum(['green', 'yellow', 'red', 'restricted']).optional(),
 });
-export const listNumbersResponse = z.object({ items: z.array(numberDto) });
+/** Owner-visible notices about a connection (final review I5): a person who connected the number removed the app from Meta. Nothing was disconnected. */
+export const numberNoticeDto = z.object({ id: z.number().int(), kind: z.string(), wabaId: z.string(), at: z.number().int() });
+export const listNumbersResponse = z.object({ items: z.array(numberDto), notices: z.array(numberNoticeDto).default([]) });
+export type NumberNoticeDto = z.infer<typeof numberNoticeDto>;
 /** GET /numbers/signup-config: public Meta ids for launching Embedded Signup in the page. */
 export const signupConfigDto = z.object({ appId: z.string(), configId: z.string(), graphVersion: z.string() });
 export type NumberDto = z.infer<typeof numberDto>;

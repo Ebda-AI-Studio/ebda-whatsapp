@@ -72,7 +72,7 @@ export function safeMessage(err: unknown, max = 200): string {
 
 export type AlertSeverity = 'P0' | 'P1' | 'info';
 export type AlertFields = { severity?: AlertSeverity; workspace?: string } & Record<string, unknown>;
-export type AlertEnv = { TELEGRAM_BOT_TOKEN?: string; TELEGRAM_ALERT_CHAT_ID?: string; ENVIRONMENT?: string; ALERT_PRODUCT?: string; [k: string]: unknown };
+export type AlertEnv = { TELEGRAM_BOT_TOKEN?: string; TELEGRAM_ALERT_CHAT_ID?: string; RUNBOOK_BASE_URL?: string; ENVIRONMENT?: string; ALERT_PRODUCT?: string; [k: string]: unknown };
 type SentryLevel = 'error' | 'warning';
 type AlertDeps = {
   env: AlertEnv;
@@ -101,15 +101,11 @@ const P1_ALERTS = new Set([
   // Added in review: each of these was silently `info` and a human must see it.
   'instapay_sla_not_scheduled', 'proof_url_not_configured', 'catalog_mass_delete_refused', 'catalog_business_mismatch', 'rate_missing_estimate_charged', 'bot_buyer_key_unavailable',
   'package_refunded', 'package_partial_refund', 'number_quality_flagged', 'number_error_spike', 'number_member_abuse', 'shared_health_push_failed',
-  'switch_order_stale', 'upgrade_refund_not_reverted', 'upgrade_stranded_by_owner_refund', 'yearly_refund_debt_not_posted',
-  'offboarding_failed', 'offboarding_held', 'offboarding_backlog', 'credit_after_offboard',
-  'audit_write_failed', 'erasure_record_failed',
-  'instapay_duplicate_proof', 'billing_pass_backlog', 'billing_pass_row_failed', 'instapay_proof_purge_failed',
-  'refund_exceeds_charge',
+  'switch_order_stale', 'store_plan_incomplete', 'upgrade_refund_not_reverted', 'upgrade_stranded_by_owner_refund', 'yearly_refund_debt_not_posted', 'backup_export_mismatch', 'ai_cost_over_threshold', 'meta_deletion_needs_review', 'meta_user_removed_app', 'offboarding_failed', 'offboarding_held', 'offboarding_backlog', 'credit_after_offboard', 'audit_write_failed', 'erasure_record_failed', 'instapay_duplicate_proof', 'billing_pass_backlog', 'billing_pass_row_failed', 'instapay_proof_purge_failed', 'refund_exceeds_charge',
 ]);
 /** Known and deliberately log-only. A NEW alert name must be added to exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS (test/guards.test.ts fails otherwise). */
 export const INFO_ALERTS = new Set([
-  'agent_no_credits', 'agent_tool_failed', 'ai_overdraw_refused', 'catalog_not_linked', 'catalog_provision_failed', 'catalog_vector_search_failed', 'cod_outcome_refused',
+  'agent_no_credits', 'agent_tool_failed', 'agent_turn_cap', 'agent_reply_blocked', 'campaign_content_blocked', 'ai_overdraw_refused', 'catalog_not_linked', 'catalog_provision_failed', 'catalog_vector_search_failed', 'cod_outcome_refused', 'ai_credits_low',
   'cod_request_details_missing', 'connector_call_crashed', 'connector_call_failed', 'kb_index_unavailable', 'kb_retrieve_failed', 'r2_delete_failed', 'rate_missing_pending',
   'send_tier_exhausted', 'shared_pick_id_refused', 'shared_trueup_no_rebate', 'topup_inquiry_unsupported', 'wallet_low_balance', 'webhook_unconfirmed',
   'instapay_no_reference', // DUP-REF-REQUIRED-1: an operator confirmed an InstaPay transfer with the audited "no reference" box ticked; review the weekly count
@@ -154,12 +150,16 @@ const PHONE_ANYWHERE = /[0-9\u0660-\u0669\u06f0-\u06f9]{8,}/g;
 
 const shortWorkspace = (ws: string): string => (ws.length > 8 ? `${ws.slice(0, 8)}…` : ws);
 
+/** T25: the incident runbook of ONE alert, as a URL a phone can open (docs/runbooks/alerts/<name>.md; test/alert-runbooks.test.ts proves every P0/P1 name has one). The base URL is the var RUNBOOK_BASE_URL (wrangler.jsonc); unset = the repo-relative path. */
+const runbookUrl = (name: string, env: AlertEnv): string =>
+  `${typeof env.RUNBOOK_BASE_URL === 'string' && /^https:\/\//.test(env.RUNBOOK_BASE_URL) ? env.RUNBOOK_BASE_URL.replace(/\/$/, '') : 'docs/runbooks/alerts'}/${name}.md`;
+
 function telegramText(name: string, sev: AlertSeverity, workspace: string | undefined, fields: string[], suppressed: number, env: AlertEnv): string {
   const lines = [
     `${sev === 'P0' ? '🔴' : '🟠'} ${env.ALERT_PRODUCT ?? 'WhatsApp'}: ${name}`,
     `[${sev} ${workspace ? 'WORKSPACE' : 'PLATFORM'}]`,
     ...(workspace ? [`workspace=${shortWorkspace(workspace)}`] : []),
-    `env=${env.ENVIRONMENT ?? 'production'} · runbook=docs/runbooks/alerts.md#${name}`,
+    `env=${env.ENVIRONMENT ?? 'production'} · runbook=${runbookUrl(name, env)}`,
     ...fields,
     ...(suppressed > 0 ? [`(suppressed ${suppressed} more since the last alert)`] : []),
   ];

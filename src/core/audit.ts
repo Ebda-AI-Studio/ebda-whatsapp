@@ -28,7 +28,8 @@ const PHONE_LIKE = /^\+?\d{8,}$/;
 
 export async function recordAudit(env: Env, e: AuditEntry, now = Date.now()): Promise<void> {
   try {
-    const targetId = e.targetId == null ? null : (maskPhones(e.targetId) ?? null)?.slice(0, 128) ?? null;
+    // A keyed subject hash (32 hex) is not a phone: masking it would corrupt about 1 in 50 of them (an 8-digit run inside the hex).
+    const targetId = e.targetId == null ? null : /^[0-9a-f]{32}$/.test(e.targetId) ? e.targetId : (maskPhones(e.targetId) ?? null)?.slice(0, 128) ?? null;
     const detail = e.detail ? Object.fromEntries(Object.entries(e.detail).filter(([k]) => !FREE_TEXT_KEY.test(k))) : null;
     const stmts = [
       env.DB.prepare('INSERT INTO audit_log (at, workspace_id, actor, actor_role, action, target_type, target_id, detail, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')

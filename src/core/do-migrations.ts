@@ -476,6 +476,19 @@ export const DO_MIGRATIONS: readonly string[] = [
   // v37 (W2 review): "is this R2 key still referenced by a message?" (retention purge, erasure of one contact) probes these two partial indexes instead of scanning every message per key.
   `CREATE INDEX messages_body_r2 ON messages (body_r2_key) WHERE body_r2_key IS NOT NULL;
    CREATE INDEX messages_media_r2 ON messages (media_r2_key) WHERE media_r2_key IS NOT NULL;`,
+  // v38 (W2-CONSENT, A4): the evidence behind a consent: who attested, the exact wording shown, when and through which door (import / opt_in / link).
+  // Append-only, erased with the contact. imports.consent_wording keeps the wording the owner's screen showed when the import started.
+  `CREATE TABLE consent_proofs (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     contact_id INTEGER NOT NULL,
+     source TEXT NOT NULL CHECK (source IN ('import', 'opt_in', 'link')),
+     attested_by TEXT NOT NULL,
+     wording TEXT NOT NULL,
+     at INTEGER NOT NULL,
+     ref TEXT
+   );
+   CREATE INDEX consent_proofs_contact ON consent_proofs (contact_id, id);
+   ALTER TABLE imports ADD COLUMN consent_wording TEXT;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
+import { BUDGET_RATIO, baselineMs, overBudget } from './helpers/bench';
 import { seedConversations } from './helpers/seed';
 
 useApiKey();
@@ -25,6 +26,7 @@ it.runIf(env.BENCH === '1')('bench: conversation list, open chat and send-enqueu
     return performance.now() - t;
   };
   for (let i = 0; i < 5; i++) await timed('GET', '/conversations?limit=50'); // warm the isolate and the verifier's key cache
+  const unit = Number((await baselineMs(() => timed('GET', '/me'))).toFixed(3)); // the same-run baseline every budget is a fixed multiple of (M-176)
   const list: number[] = [];
   const unread: number[] = [];
   const chat: number[] = [];
@@ -37,7 +39,8 @@ it.runIf(env.BENCH === '1')('bench: conversation list, open chat and send-enqueu
     if (i % 4 === 0) search.push(await timed('GET', `/search?q=${encodeURIComponent('رسالة')}`));
     enqueue.push(await timed('POST', `/conversations/${chatId}/messages`, { type: 'text', clientId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, text: `رد ${i}` }, 202));
   }
-  const out = { conversations: 5000, list50: stats(list), list50Unread: stats(unread), openChat50: stats(chat), search: stats(search), sendEnqueue: stats(enqueue) };
+  const out = { unitMs: unit, conversations: 5000, list50: stats(list), list50Unread: stats(unread), openChat50: stats(chat), search: stats(search), sendEnqueue: stats(enqueue) };
   console.log(`BENCH ${JSON.stringify(out)}`);
-  for (const k of ['list50', 'list50Unread', 'openChat50', 'search', 'sendEnqueue'] as const) expect(out[k].p95, k).toBeLessThan(Number(env.BENCH_BUDGET_MS));
+  const over = (['list50', 'list50Unread', 'openChat50', 'search', 'sendEnqueue'] as const).map((k) => overBudget(k, out[k].p95, unit, k === 'sendEnqueue' ? BUDGET_RATIO.send : BUDGET_RATIO.read, env.BENCH_ABSOLUTE_MS)).filter(Boolean);
+  expect(over).toEqual([]);
 });

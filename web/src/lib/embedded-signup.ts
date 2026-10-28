@@ -12,7 +12,7 @@ export class SignupStopped extends Error {
 
 type Fb = {
   init(o: Record<string, unknown>): void;
-  login(cb: (r: { authResponse?: { code?: string } | null }) => void, o: Record<string, unknown>): void;
+  login(cb: (r: { authResponse?: { code?: string; userID?: string } | null }) => void, o: Record<string, unknown>): void;
 };
 declare global {
   interface Window { FB?: Fb; fbAsyncInit?: () => void }

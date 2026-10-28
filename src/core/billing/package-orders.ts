@@ -20,6 +20,7 @@ import { packagesEnabled, paymentProvider, type ParsedWebhook, type PaymentProvi
 import { MONTHS_SQL, announceSubscription, auditStmt, fallbackToStorePlan, runWrite, setSubscription } from './subscriptions';
 import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
 import { alert } from '../observability';
+import { funnel } from '../funnel';
 import { frozenForOffboarding, refuseIfOffboarded } from '../ops/offboarded';
 import { reasonStmt } from '../audit-reason';
 import { noteRefundExcess } from './refund-excess';
@@ -165,7 +166,10 @@ export async function grantOrder(env: Env, row: PackageOrderRow, ref: string, no
   const r = await setSubscription(env, { workspaceId: row.workspace_id, packageId: row.package_id, status: 'active', periodStart: now, periodEnd: addMonthsUtc(now, months), source: 'purchase', ref: row.order_id }, now, {
     before: opts.claim ? [claim, flag, handOver] : [flag, handOver], only: orderPaidUngranted(row.order_id, ref), after: [stamp], renewal: true,
   });
-  if (r.written) return 'granted';
+  if (r.written) {
+    funnel(env, 'package_purchased', row.workspace_id, row.package_id);
+    return 'granted';
+  }
   const now2 = await findPackageOrder(env, row.order_id);
   if (now2 && now2.status === 'paid' && now2.granted_at !== null && now2.provider_ref === ref) await announceSubscription(env, row.workspace_id, now);
   return 'replay';

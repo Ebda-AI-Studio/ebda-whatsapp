@@ -8,6 +8,7 @@ import { acceptVersion, rememberBuyerKey } from './order-store';
 import { uuidFromKey } from './orders';
 import { getState, putState } from './settings';
 import { alert } from '../observability';
+import { recordConsentProof, STORE_CHECKOUT_WORDING } from '../consent-proof';
 
 // Per-buyer state kept here (both removed by forgetBuyer on erasure): the newest Store consent change applied
 // (entity_versions `consent:<buyerKey>`) and the last opt-out version we sent (store_state `optver:<buyerKey>`).
@@ -16,14 +17,23 @@ const revokedKey = (key: string) => `revoked:${key}`;
 const optVersionKey = (key: string) => `optver:${key}`;
 
 /** Records marketing consent given at the Store, unless the contact opted out here (STOP always wins). Returns whether it was recorded. Call inside a transaction. */
-function grantStoreConsent(host: LinkHost, waId: string, key: string, atMs: number): boolean {
+/** The words shown beside the checkout opt-in tick, when the Store sent them (contract v1.5). */
+export type CheckoutWording = { text: string; locale: 'ar' | 'en' };
+
+function grantStoreConsent(host: LinkHost, waId: string, key: string, atMs: number, wording?: CheckoutWording): boolean {
   // A withdrawal wins ties: a grant must be STRICTLY newer than the last one recorded for this buyer (kept even when the buyer was unknown).
   const revoked = Number(getState(host, revokedKey(key)) ?? -1);
   if (atMs <= revoked) return false;
-  return host.sql.exec(
+  const granted = host.sql.exec(
     "UPDATE contacts SET consent_source = 'store_checkout', consent_at = ? WHERE wa_id = ? AND opted_out_at IS NULL AND (consent_at IS NULL OR consent_at <= ?)",
     atMs, waId, atMs,
   ).rowsWritten > 0;
+  if (granted) {
+    const id = host.sql.exec<{ id: number }>('SELECT id FROM contacts WHERE wa_id = ?', waId).one().id;
+    // v1.5: the exact words the buyer saw, with the locale they were shown in (kept in `ref`); older Store builds send none, so the marker stays.
+    recordConsentProof(host.sql, { contactId: id, source: 'link', attestedBy: 'store', wording: wording?.text ?? STORE_CHECKOUT_WORDING, at: atMs, ref: wording ? `locale:${wording.locale}` : null });
+  }
+  return granted;
 }
 
 /** A `cart.abandoned` attests the checkout opt-in (WA-CONSENT-1). Also remembers the buyer key so a later STOP can be reported. Call inside a transaction. */
@@ -40,9 +50,9 @@ export function recordWithdrawal(host: LinkHost, key: string, atMs: number): voi
 }
 
 /** `customer.consent_changed` for a contact we know. Newest wins per buyer; a WhatsApp STOP is never overridden. Call inside a transaction. */
-export function applyConsentChanged(host: LinkHost, waId: string, key: string, optIn: boolean, atMs: number): StoreEventOutcome {
+export function applyConsentChanged(host: LinkHost, waId: string, key: string, optIn: boolean, atMs: number, wording?: CheckoutWording): StoreEventOutcome {
   if (!acceptVersion(host, consentEntity(key), atMs)) return { status: 'stale' };
-  if (optIn) return grantStoreConsent(host, waId, key, atMs) ? { status: 'applied' } : { status: 'skipped', detail: 'opted_out' };
+  if (optIn) return grantStoreConsent(host, waId, key, atMs, wording) ? { status: 'applied' } : { status: 'skipped', detail: 'opted_out' };
   host.sql.exec("UPDATE contacts SET consent_source = 'store_revoked', consent_at = NULL WHERE wa_id = ?", waId);
   return { status: 'applied' };
 }

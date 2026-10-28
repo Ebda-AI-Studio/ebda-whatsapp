@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
   RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
 } from '../../../src/core/api/contract';
 
@@ -27,6 +27,10 @@ export interface CampaignsApi {
 /** A merchant's own WhatsApp numbers (Phase 8.1); absent when Embedded Signup is switched off. */
 export interface NumbersApi {
   list(): Promise<NumberDto[]>;
+  /** Owner-visible notices about connections (a person who connected a number removed the app); absent in sample data. */
+  notices?(): Promise<NumberNoticeDto[]>;
+  /** The owner keeps the numbers connected and closes the notice. */
+  dismissNotice?(id: number): Promise<void>;
   /** Public Meta ids for the signup popup; null when signup is not configured on the server. */
   signupConfig(): Promise<{ appId: string; configId: string; graphVersion: string } | null>;
   connect(req: ConnectNumberRequest): Promise<NumberDto>;
@@ -46,7 +50,7 @@ export type ContactsQuery = { q?: string; tag?: string; optedOut?: boolean; curs
 export interface ContactsApi {
   list(query: ContactsQuery, signal?: AbortSignal): Promise<{ items: ContactDto[]; nextCursor: string | null }>;
   /** Uploads a CSV for import. `consented` must reflect the owner's explicit tick: it is the marketing consent on record. */
-  importCsv(file: File, consented: boolean): Promise<string>;
+  importCsv(file: File, consented: boolean, wording?: string): Promise<string>;
   imports(): Promise<ImportDto[]>;
   rejects(importId: string): Promise<{ line: number; reason: string }[]>;
   /** A name the merchant gives a contact (null = follow WhatsApp's name again). */
@@ -63,6 +67,8 @@ export interface ContactsApi {
 /** Where the inbox reads from: the live API (contract.ts) or labelled sample data. */
 export interface InboxSource {
   kind: 'live' | 'sample';
+  /** T35: an operator looking at a merchant's workspace, read-only (every request carries the view-as headers; the server refuses writes). */
+  viewAs?: boolean;
   currentUserId: string;
   /** The signed-in user's role in this store (GET /me); `staff` hides spending actions. */
   role: Role;

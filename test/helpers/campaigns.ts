@@ -21,8 +21,14 @@ export async function seedContacts(ws: string, n: number, o: { consent?: boolean
 
 export const PARAMS = [{ kind: 'name', fallback: 'عميلنا' }, { kind: 'text', value: '50%' }] as const;
 
+/** A workspace with no owner row sends no campaigns (NEW-CAP-ATOMIC-1, fail closed): the Store's link event records one. Never overrides a test's own owner. */
+export async function seedOwner(ws: string) {
+  await env.DB.prepare('INSERT OR IGNORE INTO workspace_owners (workspace_id, owner_user_id, updated_at) VALUES (?, ?, 1)').bind(ws, `owner-of-${ws}`).run();
+}
+
 export async function makeCampaign(ws: string, o: { criteria?: unknown; dailySendLimit?: number; params?: unknown } = {}) {
   await seedPlan(ws); // marketing needs a plan on record
+  await seedOwner(ws);
   const r = await workspace(ws).createCampaign({
     name: 'Eid sale', template: { name: 'promo', language: 'ar' }, params: (o.params ?? PARAMS) as never,
     audience: { criteria: (o.criteria ?? { everyone: true }) as never }, phoneNumberId: PN, actor: 'u1', ...(o.dailySendLimit ? { dailySendLimit: o.dailySendLimit } : {}),

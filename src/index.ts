@@ -2,6 +2,7 @@ import { runDueOffboardings } from './core/ops/offboarding';
 import { offboardingRoutes } from './routes/offboarding';
 import { auditWrites } from './core/audit';
 import { eraseContactFlow } from './core/contact-erase';
+import { purgeNewCapUsage } from './core/campaigns/new-cap';
 import { reconcileRefundBounds } from './core/billing/refund-excess';
 import * as Sentry from '@sentry/cloudflare';
 import { env as workerEnv } from 'cloudflare:workers';
@@ -12,6 +13,7 @@ import { selectVerifier } from './identity-select';
 import { configureAgent } from './core/ai/config';
 import { signupEnabled } from './core/numbers/numbers';
 import { verifyMetaSignature } from './core/meta/signature';
+import { parseSignedRequest, processRequest, recordRequest, requestStatus, statusPage, sweepDeletionRequests } from './core/meta/data-deletion';
 import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
@@ -22,7 +24,7 @@ import { operatorRoutes } from './routes/operator';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { TIER_LIMITS } from './core/throttle';
-import { buyerKey } from './core/buyer-key';
+import { MIN_PROBE_SECRET_LENGTH, buyerKey, buyerKeyProbe } from './core/buyer-key';
 import { messagesRoutes } from './routes/messages';
 import { conversationsRoutes } from './routes/conversations';
 import { mediaRoutes } from './routes/media';
@@ -193,7 +195,7 @@ app.post('/kashier/webhook', async (c) => {
   return c.text(out.body, out.status);
 });
 
-app.get('/health', (c) => {
+app.get('/health', async (c) => {
   const commit = c.env.COMMIT_SHA || 'dev';
   // A malformed or missing secret fails health (so verify-prod catches it at deploy); the key names go to the alert line only.
   const problems = secretProblems(c.env as unknown as Record<string, unknown>);
@@ -201,7 +203,35 @@ app.get('/health', (c) => {
     alert('secret_misconfigured', { severity: 'P1', keys: problems });
     return c.json({ ok: false, status: 'misconfigured', service: PACK.service, commit }, 503);
   }
-  return c.json({ ok: true, status: 'ok', service: PACK.service, commit });
+  // D4: a value DERIVED from SUITE_BUYER_KEY_SECRET (16 hex of an HMAC over a fixed non-phone string, see buyer-key.ts), so scripts/verify-prod.mjs can prove it equals Ebda Store's
+  // without the secret leaving either Worker. Absent when the secret is unset or shorter than MIN_PROBE_SECRET_LENGTH.
+  const secret = c.env.SUITE_BUYER_KEY_SECRET;
+  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(secret && secret.length >= MIN_PROBE_SECRET_LENGTH ? { buyerKeyVector: await buyerKeyProbe(secret) } : {}) });
+});
+
+// B9: Meta's data-deletion callback and its status page (public; the signed request is the authentication).
+app.post('/meta/data-deletion', async (c) => {
+  const form = await c.req.formData().catch(() => null);
+  const sr = form?.get('signed_request');
+  const parsed = typeof sr === 'string' ? await parseSignedRequest(sr, c.env.META_APP_SECRET) : null;
+  if (!parsed) return c.json({ error: 'invalid_request' }, 400);
+  const recorded = await recordRequest(c.env, parsed, Date.now());
+  if (!recorded) return c.json({ error: 'unavailable' }, 503); // no ERASURE_HMAC_KEY: nothing can be matched or kept; Meta retries
+  const { code, created } = recorded;
+  if (created) {
+    // Fast path only: the row is already the durable task, and the daily sweep retries it if this never finishes (waitUntil is not a queue).
+    const work = processRequest(c.env, code);
+    try { c.executionCtx.waitUntil(work); } catch { await work; }
+  }
+  return c.json({ url: `${new URL(c.req.url).origin}/meta/data-deletion/status?code=${code}`, confirmation_code: code });
+});
+const wantsHtml = (c: { req: { header(n: string): string | undefined } }) => (c.req.header('accept') ?? '').includes('text/html');
+app.get('/meta/data-deletion', (c) => c.html(statusPage(c.env.SUPPORT_EMAIL ?? '', null), 200, { 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; frame-ancestors 'none'" }));
+app.get('/meta/data-deletion/status', async (c) => {
+  const s = await requestStatus(c.env, c.req.query('code') ?? '');
+  if (!s) return c.json({ error: 'not_found' }, 404);
+  const headers = { 'cache-control': 'no-store' };
+  return wantsHtml(c) ? c.html(statusPage(c.env.SUPPORT_EMAIL ?? '', s), 200, { ...headers, 'content-security-policy': "default-src 'none'; frame-ancestors 'none'" }) : c.json(s, 200, headers);
 });
 
 app.get('/meta/webhook', (c) => {
@@ -316,6 +346,8 @@ export async function dailyBilling(env: Env): Promise<void> {
   await runDueOffboardings(env).catch((err) => alert('offboarding_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileRefundBounds(env).catch((err) => alert('refund_exceeds_charge', { error: err instanceof Error ? err.name : 'error', reconcileFailed: true }));
   await sweepShared(env).catch((err) => alert('shared_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await sweepDeletionRequests(env).catch((err) => alert('meta_deletion_needs_review', { reason: 'sweep_failed', error: err instanceof Error ? err.name : 'error' }));
+  await purgeNewCapUsage(env).catch((err) => alert('shared_sweep_failed', { error: err instanceof Error ? err.name : 'error', what: 'new_cap_usage' }));
 }
 
 let warnedNoDsn = false;

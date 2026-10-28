@@ -1,6 +1,6 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
-import { PARAMS, seedContacts, seedTemplate } from './helpers/campaigns';
+import { PARAMS, seedContacts, seedTemplate, seedOwner } from './helpers/campaigns';
 import { chat, fund, holdOf, jobOf, ledger, nowS, pn, pricing, queueTemplate, queueText, sendOut, setupBilling, status, wamidOf } from './helpers/billing';
 import { recordNumberFunding } from '../src/core/billing/funding';
 import { exec, openChat, rows, seedPlan, workspace } from './helpers/workspace';
@@ -40,6 +40,7 @@ describe('funding must be KNOWN: a missing row is never "free"', () => {
     await fund(ws, 5000);
     await seedTemplate(ws);
     await seedContacts(ws, 2);
+    await seedOwner(ws);
     const c = await workspace(ws).createCampaign({ name: 'x', template: { name: 'promo', language: 'ar' }, params: [...PARAMS] as never, audience: { criteria: { everyone: true } }, phoneNumberId: pn(ws), actor: 'u' });
     if (!c.ok) throw new Error('x');
     await exec(ws, "UPDATE campaigns SET status = 'running', started_at = 1, attempt = 1 WHERE id = ?", c.campaign.id);

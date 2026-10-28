@@ -1,12 +1,16 @@
 import type { Env } from '../../env';
 import type { ConnectNumberRequest, NumberDto } from '../api/contract';
-import { decryptSecret, encryptSecret } from '../ai/secrets';
+import { encryptSecret } from '../ai/secrets';
+import { recordSignupUser } from '../meta/signup-users';
+import { resolveNoticesForWaba } from '../meta/notices';
+import { decryptAny, tokenKeys } from '../enc-keys';
 import { recordNumberFunding } from '../billing/funding';
 import { listOwnedWabas } from '../meta/catalog-api';
 import { TIER_LIMITS } from '../throttle';
-import { HISTORY_DECLINED_CODE, REGISTRATION_LOCKED_CODE, deregisterNumber, exchangeCode, fetchPhone, fetchWabaNumbers, registerNumber, requestSync, subscribeApp, unsubscribeApp, type GraphFail, type PhoneStatus } from './graph';
+import { HISTORY_DECLINED_CODE, REGISTRATION_LOCKED_CODE, deregisterNumber, exchangeCode, fetchPhone, tokenOwner, fetchWabaNumbers, registerNumber, requestSync, subscribeApp, unsubscribeApp, type GraphFail, type PhoneStatus } from './graph';
 import { graphTokenFor, invalidateNumber, invalidateWaba, TokenUnavailable } from './token';
 import { alert } from '../observability';
+import { funnel } from '../funnel';
 
 /** Meta fixes the throughput of a number that stays on the WhatsApp Business app at 20 messages per second. */
 export const BUSINESS_APP_MPS = 20;
@@ -98,6 +102,7 @@ export function generatePin(): string {
  * at once so the number is usable now rather than after the next 30-minute pull. Idempotent: a resumed connect calls it again.
  */
 export async function onNumberConnected(env: Env, n: { workspaceId: string; phoneNumberId: string; wabaId: string; kind: 'own' }): Promise<void> {
+  funnel(env, 'number_connected', n.workspaceId);
   await recordNumberFunding(env, n.phoneNumberId, 'merchant_card');
   await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(n.workspaceId)).refreshPricing();
 }
@@ -166,6 +171,7 @@ export async function connectNumber(env: Env, workspaceId: string, req: ConnectN
   const ex = await exchangeCode(env, cfg.appId, req.code);
   if (!ex.ok) return ex.retryable ? fail(503, 'signup_unavailable', 'code_exchange_unavailable') : fail(400, 'signup_failed', 'code_rejected');
   const token = ex.value.access_token;
+  const owner = await tokenOwner(env, cfg.appId, token);
 
   const listed = await fetchWabaNumbers(env, token, wabaId);
   if (!listed.ok) return listed.retryable ? fail(503, 'signup_unavailable', 'waba_unreachable') : fail(400, 'signup_failed', 'waba_not_accessible');
@@ -190,6 +196,8 @@ export async function connectNumber(env: Env, workspaceId: string, req: ConnectN
      WHERE waba_credentials.workspace_id = excluded.workspace_id`,
   ).bind(wabaId, workspaceId, tokenEnc, now, now, businessId).run();
   if (!cred.meta.changes) return fail(409, 'number_conflict', 'number_belongs_to_another_workspace');
+  // Who connected it: asked of Meta about the token we just exchanged (never the browser's claim), kept as a keyed hash so Meta's deletion callback can find the person's mapping.
+  await recordSignupUser(env, workspaceId, wabaId, owner, now);
   // Reconnecting keeps what was already learned; a number released by another workspace starts clean. The WHERE is the race guard.
   const up = await env.DB.prepare(
     `INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status, kind, onboarding, pin_enc, registration, display_phone, connected_at, subscribed_at)
@@ -239,7 +247,7 @@ async function completeSetup(env: Env, workspaceId: string, phoneNumberId: strin
   }
 
   if (row.onboarding === 'cloud_api' && row.registration !== 'registered') {
-    const pin = row.pin_enc ? await decryptSecret(row.pin_enc, cfg.encKey, workspaceId) : null;
+    const pin = row.pin_enc ? ((await decryptAny(row.pin_enc, tokenKeys(env), workspaceId))?.value ?? null) : null;
     if (!pin) return fail(400, 'signup_failed', 'pin_unreadable', await reload());
     const reg = await registerNumber(env, token, phoneNumberId, pin);
     if (!reg.ok || !reg.value.success) {
@@ -323,6 +331,7 @@ export async function disconnectNumber(env: Env, workspaceId: string, phoneNumbe
     await env.DB.prepare('DELETE FROM waba_credentials WHERE waba_id = ? AND workspace_id = ?').bind(row.waba_id, workspaceId).run();
   }
   invalidateWaba(row.waba_id);
+  await resolveNoticesForWaba(env, workspaceId, row.waba_id, 'disconnect').catch(() => undefined); // the owner's decision is made: the Meta-user notice about this WABA is settled
   console.log(JSON.stringify({ audit: 'number_disconnected', workspace: workspaceId, phoneNumberId, warnings }));
   return { ok: true, number: numberDto((await numberRow(env, workspaceId, phoneNumberId))!), warnings };
 }

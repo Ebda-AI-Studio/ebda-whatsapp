@@ -10,22 +10,28 @@
  */
 import type { Env } from '../../env';
 import type { StoreEvent } from '../api/store-events';
+import { alert } from '../observability';
 import { STORE_INCLUDED, cancelSubscription, setSubscription, type WriteOpts } from './subscriptions';
 
 export { STORE_INCLUDED };
-const DEFAULT_PERIOD_MS = 31 * 86_400_000;
 type PlanEvent = Extract<StoreEvent, { type: 'store.plan_changed' }>;
 
 export async function applyStorePlan(env: Env, event: PlanEvent, now = Date.now()): Promise<'applied' | 'ignored' | 'kept'> {
   const ws = event.storeId;
   const eff = Date.parse(event.data.effectiveAt);
-  const status = event.data.status ?? 'active';
-  const periodEnd = event.data.periodEnd ? Date.parse(event.data.periodEnd) : eff + DEFAULT_PERIOD_MS;
   const includes = event.data.includesWhatsApp;
-  // TODO(Store #218, contract v1.4): `pastDueSince` (ISO, only while past_due) is not in the vendored event schema yet, so it is read defensively; once
-  // store-events.ts is re-vendored this becomes `event.data.pastDueSince` and the cast goes. Without it the first past_due we see is "now" (setSubscription).
-  const rawSince = (event.data as { pastDueSince?: unknown }).pastDueSince;
-  const since = status === 'past_due' && typeof rawSince === 'string' ? Date.parse(rawSince) : NaN;
+  // D3: access is never GRANTED on a guess. The contract keeps `status` and `periodEnd` optional so an old Store event still parses, but an event
+  // that says "includes WhatsApp" without saying for how long and in what state grants nothing (no default to active, no invented period) and pages
+  // a human: the Store must send both. A cancellation needs neither (removing access is always safe).
+  if (includes && (event.data.status === undefined || event.data.periodEnd === undefined)) {
+    alert('store_plan_incomplete', { workspace: ws, missing: [event.data.status === undefined ? 'status' : null, event.data.periodEnd === undefined ? 'periodEnd' : null].filter(Boolean) });
+    return 'ignored';
+  }
+  const status = event.data.status ?? 'cancelled';
+  const periodEnd = event.data.periodEnd ? Date.parse(event.data.periodEnd) : eff;
+  // Contract v1.4: `pastDueSince` (ISO, only while past_due). Without it the first past_due we see is "now" (setSubscription).
+  const rawSince = event.data.pastDueSince;
+  const since = status === 'past_due' && rawSince ? Date.parse(rawSince) : NaN;
   const pastDueSince = Number.isFinite(since) && since > 0 && since <= now ? since : undefined;
   const claim = env.DB.prepare(
     `INSERT INTO store_plan_applied (workspace_id, effective_at, event_id, includes_whatsapp, status, period_end, claimed) VALUES (?, ?, ?, ?, ?, ?, 1)

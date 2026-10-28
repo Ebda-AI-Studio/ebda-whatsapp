@@ -1,3 +1,4 @@
+import { DEFAULT_IMPORT_WORDING, latestProofs, recordConsentProof, type ConsentProof } from '../consent-proof';
 import type { LinkHost } from '../store-link/host';
 import type { ColumnMap, ImportRejectReason } from './csv';
 import { MAX_TAGS_PER_CONTACT } from './csv';
@@ -30,12 +31,12 @@ export function importConsentSource(filename: string): string {
   return `import:${clean || 'file'}`;
 }
 
-export function createImport(host: LinkHost, a: { id: string; filename: string; r2Key: string; size: number; consented: boolean; mapping: ImportState['mapping']; actor: string; now: number }): { ok: true } | { ok: false; reason: 'import_in_progress' } {
+export function createImport(host: LinkHost, a: { id: string; filename: string; r2Key: string; size: number; consented: boolean; mapping: ImportState['mapping']; actor: string; wording?: string | null; now: number }): { ok: true } | { ok: false; reason: 'import_in_progress' } {
   return host.storage.transactionSync(() => {
     if (host.sql.exec("SELECT 1 FROM imports WHERE status IN ('pending', 'running')").toArray().length) return { ok: false, reason: 'import_in_progress' } as const;
     host.sql.exec(
-      "INSERT INTO imports (id, filename, r2_key, size, consented, mapping, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
-      a.id, a.filename.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120), a.r2Key, a.size, a.consented ? 1 : 0, a.mapping ? JSON.stringify(a.mapping) : null, a.actor, a.now,
+      "INSERT INTO imports (id, filename, r2_key, size, consented, consent_wording, mapping, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+      a.id, a.filename.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120), a.r2Key, a.size, a.consented ? 1 : 0, a.consented ? (a.wording ?? DEFAULT_IMPORT_WORDING) : null, a.mapping ? JSON.stringify(a.mapping) : null, a.actor, a.now,
     );
     return { ok: true } as const;
   });
@@ -78,8 +79,8 @@ export type ApplyResult = { ok: true; done: boolean; keys: string[] } | { ok: fa
  */
 export function applyImportChunk(host: LinkHost, a: ApplyArgs): ApplyResult {
   return host.storage.transactionSync((): ApplyResult => {
-    const imp = host.sql.exec<{ status: ImportStatus; next_offset: number; consented: number; filename: string; r2_key: string; size: number; total: number; rejected_count: number }>(
-      'SELECT status, next_offset, consented, filename, r2_key, size, total, rejected_count FROM imports WHERE id = ?', a.importId,
+    const imp = host.sql.exec<{ status: ImportStatus; next_offset: number; consented: number; consent_wording: string | null; created_by: string | null; filename: string; r2_key: string; size: number; total: number; rejected_count: number }>(
+      'SELECT status, next_offset, consented, consent_wording, created_by, filename, r2_key, size, total, rejected_count FROM imports WHERE id = ?', a.importId,
     ).toArray()[0];
     if (!imp) return { ok: false, reason: 'unknown_import' };
     if (imp.next_offset > a.fromOffset) return { ok: true, done: imp.status === 'done' || imp.status === 'failed', keys: [] };
@@ -106,18 +107,23 @@ export function applyImportChunk(host: LinkHost, a: ApplyArgs): ApplyResult {
       if (have?.last_import_id === a.importId) { reject(row.line, 'duplicate_in_file'); continue; }
       let contactId: number;
       const grant = imp.consented === 1;
+      const recordProof = (id: number) => recordConsentProof(host.sql, { contactId: id, source: 'import', attestedBy: imp.created_by ?? 'unknown', wording: imp.consent_wording ?? DEFAULT_IMPORT_WORDING, at: a.now, ref: a.importId });
       if (!have) {
         contactId = host.sql.exec<{ id: number }>(
           'INSERT INTO contacts (wa_id, profile_name, last_import_id, consent_source, consent_at) VALUES (?, ?, ?, ?, ?) RETURNING id',
           row.waId, row.name, a.importId, grant ? source : null, grant ? a.now : null,
         ).one().id;
+        if (grant) recordProof(contactId);
         indexContactName(host.sql, contactId);
         created++;
       } else {
         contactId = have.id;
         host.sql.exec('UPDATE contacts SET profile_name = coalesce(profile_name, ?), last_import_id = ? WHERE id = ?', row.name, a.importId, contactId);
         indexContactName(host.sql, contactId);
-        if (grant && have.consent_at === null && have.opted_out_at === null) host.sql.exec('UPDATE contacts SET consent_source = ?, consent_at = ? WHERE id = ?', source, a.now, contactId);
+        if (grant && have.consent_at === null && have.opted_out_at === null) {
+          host.sql.exec('UPDATE contacts SET consent_source = ?, consent_at = ? WHERE id = ?', source, a.now, contactId);
+          recordProof(contactId);
+        }
         updated++;
       }
       addContactTags(host, contactId, row.tags);
@@ -160,7 +166,7 @@ export function addContactTags(host: LinkHost, contactId: number, tags: string[]
 }
 
 export type ContactItem = {
-  waId: string; name: string | null; optedOut: boolean; tags: string[]; consent: { source: string; at: number } | null; lastInboundAt: number | null;
+  waId: string; name: string | null; optedOut: boolean; tags: string[]; consent: { source: string; at: number; proof?: ConsentProof } | null; lastInboundAt: number | null;
 };
 
 /** Every tag a contact carries: its own and those the inbox put on its conversation. */
@@ -206,10 +212,11 @@ export function listContacts(host: LinkHost, q: ContactQuery): { items: ContactI
   ).toArray();
   const page = rows.slice(0, q.limit);
   const tags = tagsFor(host, page.map((r) => r.id));
+  const proofs = latestProofs(host.sql, page.map((r) => r.id));
   return {
     items: page.map((r) => ({
       waId: r.wa_id, name: r.profile_name, optedOut: r.opted_out_at !== null, tags: tags.get(r.id) ?? [],
-      consent: r.consent_at !== null && r.consent_source ? { source: r.consent_source, at: r.consent_at } : null,
+      consent: r.consent_at !== null && r.consent_source ? { source: r.consent_source, at: r.consent_at, ...(proofs.has(r.id) ? { proof: proofs.get(r.id)! } : {}) } : null,
       lastInboundAt: r.last_inbound_at === null ? null : r.last_inbound_at * 1000,
     })),
     nextCursor: rows.length > q.limit ? String(page[page.length - 1]!.id) : null,

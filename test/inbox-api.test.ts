@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { conversationDto, getMessagesResponse, listConversationsResponse, noteDto, searchResponse, type ConversationDto } from '../src/core/api/contract';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
+import { BUDGET_RATIO, baselineMs, overBudget } from './helpers/bench';
 import { seedConversations } from './helpers/seed';
 import { openChat, rows, workspace } from './helpers/workspace';
 
@@ -160,8 +161,8 @@ it('long bodies are served from /messages/:id/body', async () => {
   expect((await api.call('GET', '/messages/99999/body')).status).toBe(404);
 });
 
-// Opt-in like test/perf.test.ts (BENCH=1, scripts/bench-local.mjs): a wall-clock budget only means something on a quiet, known machine;
-// on the shared CI runner (7-12x slower) it measures the runner, not the code.
+// Opt-in like test/perf.test.ts (BENCH=1, scripts/bench-local.mjs). The budget is a FIXED multiple of a same-run baseline (test/helpers/bench.ts), so it holds on
+// any runner; the 150 ms absolute figure is asserted only where BENCH_ABSOLUTE_MS is set (the local script).
 it.runIf(env.BENCH === '1')('speed: listing 50 of 5,000 conversations and opening a chat stay under the 150 ms p95 budget', async () => {
   const ws = W(210);
   const api = await apiFor(ws);
@@ -185,7 +186,6 @@ it.runIf(env.BENCH === '1')('speed: listing 50 of 5,000 conversations and openin
   const chats: number[] = [];
   for (let i = 0; i < 20; i++) chats.push(await time('?limit=50', `/conversations/${bigConv.id}/messages`));
   console.log('PERF inbox', JSON.stringify({ listP95: p95(lists), filteredP95: p95(filtered), chatP95: p95(chats) }));
-  expect(p95(lists)).toBeLessThan(Number(env.BENCH_BUDGET_MS));
-  expect(p95(filtered)).toBeLessThan(Number(env.BENCH_BUDGET_MS));
-  expect(p95(chats)).toBeLessThan(Number(env.BENCH_BUDGET_MS));
+  const unit = await baselineMs(() => time('', '/me'));
+  expect([['list', lists, BUDGET_RATIO.read], ['filtered', filtered, BUDGET_RATIO.filtered], ['chat', chats, BUDGET_RATIO.read]].map(([n, xs, r]) => overBudget(n as string, p95(xs as number[]), unit, r as number, env.BENCH_ABSOLUTE_MS)).filter(Boolean)).toEqual([]);
 });

@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
-import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, toNdjson, type BackupManifest } from './backup';
+import { DEFAULT_CHUNK_ROWS, exportTable, highWaterMarks } from './backup-export';
+import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, signManifest, toNdjson, verifyManifestSignature, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
 import type { SendResult } from './meta/client';
 import type { CoexMessage, InboundMessage, StatusEvent, StatusPricing, SyncedContact } from './meta/webhook-schema';
@@ -16,10 +17,10 @@ import { exportContact, mergeContacts, renameContact } from './contact-data';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
-import { detectOptIn, detectOptOutMessage } from './consent';
+import { detectOptOutMessage, matchOptIn } from './consent';
 import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
-import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
+import { DAILY_KINDS, addTask, dailyHour, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText, phoneDigits } from './text-normalise';
 import { conversationDto, type ConversationRow } from './dto';
@@ -40,8 +41,10 @@ import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, canc
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
 import type { SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
-import type { AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
-import { creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
+import type { DigestDto, AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
+import { funnelOnce } from './funnel';
+import { digestCounts, digestEnabled, setDigestEnabled } from './digest';
+import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
@@ -49,6 +52,7 @@ import { OTP_RATE_WINDOW_MS } from './otp-policy';
 import { OTP_MASK } from './templates';
 import type { OtpResult } from './otp';
 import { queueTemplate } from './store-link/outbound';
+import { recordConsentProof } from './consent-proof';
 import { forgetBuyer, noteOptOutChange, pushOptOut } from './store-link/consent';
 import { storeLink } from './store-link';
 import { eraseFunnelMarkers, funnelRollup, readFunnel } from './bot-funnel';
@@ -260,6 +264,7 @@ export class WorkspaceDO extends DurableObject<Env> {
           if (!claimed && !optOut && m.type === 'text' && config.autoReplyText) result.replies.push(this.replyJob(workspaceId, batch, m, config.autoReplyText));
           continue;
         }
+        funnelOnce(this.host(), 'first_inbound');
         result.stored++;
         this.indexMessage(inserted.id, cols.preview);
         if (m.media) {
@@ -273,8 +278,9 @@ export class WorkspaceDO extends DurableObject<Env> {
           const wasOptedOut = this.sql.exec<{ o: number | null }>('SELECT opted_out_at AS o FROM contacts WHERE id = ?', contactId).one().o != null;
           this.sql.exec("UPDATE contacts SET opted_out_at = max(coalesce(opted_out_at, 0), ?), consent_source = 'keyword_stop', consent_at = ? WHERE id = ?", m.ts * 1000, now, contactId);
           if (!wasOptedOut && noteOptOutChange(this.host(), m.from, true, m.ts * 1000, now)) linkWork = true;
-        } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
+        } else if (m.type === 'text' && m.text && matchOptIn(m.text, config.optInKeywords)) {
           const cleared = this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId).rowsWritten > 0;
+          if (cleared) recordConsentProof(this.sql, { contactId, source: 'opt_in', attestedBy: 'customer', wording: matchOptIn(m.text, config.optInKeywords) ?? '', at: now }); // the keyword only, not the customer's message
           if (cleared && noteOptOutChange(this.host(), m.from, false, now, now)) linkWork = true;
         }
         const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
@@ -1261,7 +1267,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   // ---- Campaigns (Phase 6): contacts + imports -------------------------------------------------------------------
 
-  async createImport(a: { id: string; filename: string; r2Key: string; size: number; consented: boolean; mapping: ImportState['mapping']; actor: string }): Promise<{ ok: true } | { ok: false; reason: 'import_in_progress' }> {
+  async createImport(a: { id: string; filename: string; r2Key: string; size: number; consented: boolean; wording?: string | null; mapping: ImportState['mapping']; actor: string }): Promise<{ ok: true } | { ok: false; reason: 'import_in_progress' }> {
     return createImport(this.host(), { ...a, now: Date.now() });
   }
 
@@ -1517,13 +1523,32 @@ export class WorkspaceDO extends DurableObject<Env> {
   // ---- Wallet (Phase 7) --------------------------------------------------------------------------------------------------
   // All answers are result objects. The only writers of money are Billing.post (one synchronous transaction per row) and the AI credit ledger.
 
+  /** T13: the weekly digest (counts only), or `{ enabled: false }` when the owner switched it off. */
+  async weeklyDigest(now = Date.now()): Promise<DigestDto> {
+    if (!digestEnabled(this.sql)) return { enabled: false };
+    const view = this.billing.view(now);
+    const available = creditsAvailable(this.sql, now);
+    const allowance = monthlyAllowance(this.sql);
+    return {
+      enabled: true, ...digestCounts(this.sql, now), balanceMinor: view.balanceMinor, availableMinor: view.availableMinor, lowBalance: view.lowBalance,
+      aiCredits: { available, low: available < lowCreditsThreshold(allowance), lowThreshold: lowCreditsThreshold(allowance), allowance },
+    };
+  }
+  async setDigestEnabled(enabled: boolean): Promise<void> {
+    setDigestEnabled(this.sql, enabled);
+  }
+
   async walletView(now = Date.now()) {
     await this.ensurePricing(now);
     const ent = readEntitlement(this.sql);
     return {
       ...this.billing.view(now),
       funding: Object.fromEntries(this.sql.exec<{ phone_number_id: string; funding: string }>('SELECT phone_number_id, funding FROM number_funding').toArray().map((f) => [f.phone_number_id, f.funding])),
-      aiCredits: { balance: creditBalance(this.sql), available: creditsAvailable(this.sql, now) },
+      aiCredits: (() => {
+        const available = creditsAvailable(this.sql, now);
+        const allowance = monthlyAllowance(this.sql);
+        return { balance: creditBalance(this.sql), available, low: available < lowCreditsThreshold(allowance), lowThreshold: lowCreditsThreshold(allowance), allowance };
+      })(),
       plan: ent ? { packageId: ent.packageId, status: ent.status, periodEnd: ent.periodEnd, cancelledAt: ent.cancelledAt } : null,
     };
   }
@@ -1969,7 +1994,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     let added = false;
     for (const kind of DAILY_KINDS) {
       if (have.has(kind)) continue;
-      addTask(this.sql, kind, nextLocalHour(now, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE));
+      addTask(this.sql, kind, nextLocalHour(now, dailyHour(kind), BACKUP_TIME_ZONE));
       added = true;
     }
     return added;
@@ -2057,7 +2082,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       case 'retention_purge': {
         const r = await this.retentionPurge(now);
-        return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
+        return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, dailyHour('retention_purge'), BACKUP_TIME_ZONE);
       }
       case 'r2_drain': {
         const stillOwed = await this.drainR2Deletes();
@@ -2176,8 +2201,8 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /**
    * Writes every table as NDJSON plus a manifest (row count + sha256 per table) to R2.
-   * All tables are read inside ONE transaction, so the snapshot is consistent; the whole workspace is held in memory
-   * (fine for the spike's metadata-only rows; streaming export is a Phase 3 follow-up).
+   * Chunked and streamed (src/core/backup-export.ts, T17): NO single transaction over the workspace. Rowid tables stop at a high-water mark taken at the start, so a child never refers
+   * to a parent the snapshot lacks; a row DELETED below the mark while the export runs (the retention purge, which runs at another hour) is tolerated, a row that is missing is not.
    */
   async exportSnapshot(date: string): Promise<BackupManifest> {
     if (this.offboarding || this.offboarded) throw new Error('workspace is being deleted');
@@ -2192,19 +2217,23 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   private async writeSnapshot(date: string): Promise<BackupManifest> {
     const workspaceId = this.workspaceId;
-    const dumps = this.ctx.storage.transactionSync(() =>
-      BACKUP_TABLES.map((t) => ({ t, rows: this.sql.exec(`SELECT * FROM ${t} ORDER BY ${BACKUP_ORDER[t]}`).toArray() as Record<string, unknown>[] })),
-    );
     const manifest: BackupManifest = { workspaceId, date, schemaVersion: DO_MIGRATIONS.length, tables: {} as BackupManifest['tables'] };
     const prefix = backupPrefix(workspaceId, date);
-    for (const { t, rows } of dumps) {
-      const body = toNdjson(rows);
-      manifest.tables[t] = { rows: rows.length, sha256: await sha256Hex(body) };
-      await this.env.BACKUPS.put(`${prefix}${t}.ndjson`, body);
+    // T17: chunked and streamed (src/core/backup-export.ts); the only transaction is the tiny read of the high-water marks.
+    const marks = highWaterMarks(this.sql, this.ctx.storage, BACKUP_TABLES);
+    for (const t of BACKUP_TABLES) {
+      manifest.tables[t] = await exportTable({ sql: this.sql, bucket: this.env.BACKUPS, key: `${prefix}${t}.ndjson`, table: t, highWater: marks[t], chunkRows: this.backupChunkRows, ...(this.backupHooks.afterChunk ? { afterChunk: this.backupHooks.afterChunk } : {}) });
     }
+    // M-174: signed when BACKUP_HMAC_KEY is set. The signature is part of the stored manifest and of the returned one.
+    if (this.env.BACKUP_HMAC_KEY) manifest.signature = await signManifest(manifest, this.env.BACKUP_HMAC_KEY);
     await this.env.BACKUPS.put(`${prefix}manifest.json`, JSON.stringify(manifest));
     return manifest;
   }
+
+  /** Rows per read of the chunked export (a field so a test can shrink it). */
+  backupChunkRows = DEFAULT_CHUNK_ROWS;
+  /** Test seam: runs after every chunk of every table, between reads. */
+  backupHooks: { afterChunk?: (table: string, chunk: number) => Promise<void> } = {};
 
   /** Restores a snapshot into THIS workspace, which must be empty. Verifies counts and hashes before writing anything. */
   async importSnapshot(prefix: string): Promise<{ ok: true; manifest: BackupManifest; erasedSkipped?: number } | { ok: false; reason: string }> {
@@ -2227,6 +2256,18 @@ export class WorkspaceDO extends DurableObject<Env> {
     const parsed = backupManifestSchema.safeParse(await manifestObj.json().catch(() => null));
     if (!parsed.success) throw new Error('backup manifest is invalid');
     const manifest = parsed.data;
+    // M-174: with a key the manifest MUST carry a valid signature (an unsigned one is a stripped signature, not a legacy backup); a signed manifest is never
+    // restored where nothing can check it. With no key and no signature the old integrity-only behaviour stands.
+    const hmacKeys = [this.env.BACKUP_HMAC_KEY, this.env.BACKUP_HMAC_KEY_PREVIOUS].filter((k): k is string => !!k);
+    if (hmacKeys.length) {
+      if (!manifest.signature) throw new Error('backup manifest is not signed');
+      if (!(await verifyManifestSignature(manifest, hmacKeys))) throw new Error('backup manifest signature invalid');
+    } else if (manifest.signature) {
+      throw new Error('backup manifest is signed but BACKUP_HMAC_KEY is not set');
+    }
+    // The signature proves the manifest is ours, not that it belongs HERE: a genuine signed manifest of another workspace or date, dropped into this folder
+    // next to copies of that workspace's files, would pass every hash and the signature. It must name exactly the folder it is read from.
+    if (backupPrefix(manifest.workspaceId, manifest.date) !== prefix) throw new Error('backup manifest is for another workspace or date');
     if (manifest.schemaVersion > DO_MIGRATIONS.length) throw new Error('backup is newer than this schema');
     const files: { t: (typeof BACKUP_TABLES)[number]; rows: Record<string, unknown>[] }[] = [];
     for (const t of BACKUP_TABLES) {

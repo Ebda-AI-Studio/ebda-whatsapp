@@ -21,6 +21,7 @@ import type { InstapayPayee } from './instapay-payee';
 import { adjustmentThreshold } from './operator';
 import { ORDER_COLS, grantOrder, planPurchase, type PackageOrderRow, type PurchasePlan } from './package-orders';
 import { MAX_TOPUP_MINOR, MIN_TOPUP_MINOR, TOPUP_COLS, credit, type TopupRow } from './topups';
+import { tokenKeys } from '../enc-keys';
 import { alert } from '../observability';
 import { LAST_REASON_ID, REASON_PLACEHOLDER, billingAudit, reasonStmt } from '../audit-reason';
 import { frozenForOffboarding } from '../ops/offboarded';
@@ -228,14 +229,22 @@ export async function signProofLink(env: Env, id: string, now = Date.now()): Pro
   return { url: `/api/v1/instapay-proof/${id}.${exp}.${await hmac(env.TOKEN_ENC_KEY, `${id}.${exp}`)}`, expiresAt: exp };
 }
 /** The proof for a valid, unexpired link; null for anything else (the caller answers 404, never saying why). */
-export async function readProof(env: Env, token: string, now = Date.now()): Promise<{ body: ReadableStream; mime: string } | null> {
+/** The signature and time window of a proof link token, under the current TOKEN_ENC_KEY or (during a rotation, M-173) the previous one. */
+export async function verifyProofLinkSignature(env: Env, token: string, now = Date.now()): Promise<boolean> {
   const m = /^([0-9a-f-]{36})\.(\d{10,15})\.([0-9a-f]{64})$/.exec(token);
-  if (!m || !env.TOKEN_ENC_KEY) return null;
+  if (!m) return false;
   const exp = Number(m[2]);
-  if (exp < now || exp > now + PROOF_LINK_TTL_MS + 60_000) return null;
-  const want = enc.encode(await hmac(env.TOKEN_ENC_KEY, `${m[1]}.${exp}`));
+  if (exp < now || exp > now + PROOF_LINK_TTL_MS + 60_000) return false;
   const got = enc.encode(m[3]!);
-  if (want.byteLength !== got.byteLength || !crypto.subtle.timingSafeEqual(want, got)) return null;
+  for (const key of tokenKeys(env)) {
+    const want = enc.encode(await hmac(key, `${m[1]}.${exp}`));
+    if (want.byteLength === got.byteLength && crypto.subtle.timingSafeEqual(want, got)) return true;
+  }
+  return false;
+}
+export async function readProof(env: Env, token: string, now = Date.now()): Promise<{ body: ReadableStream; mime: string } | null> {
+  if (!(await verifyProofLinkSignature(env, token, now))) return null;
+  const m = /^([0-9a-f-]{36})\./.exec(token)!;
   const r = await get(env, m[1]!);
   if (!r?.proof_key || !r.proof_mime) return null;
   const obj = await env.MEDIA.get(r.proof_key);

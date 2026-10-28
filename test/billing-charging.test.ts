@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import { PIASTERS, DAY, chat, fund, holdOf, holds, jobOf, ledger, nowS, pn, pricing, queueTemplate, queueText, sendOut, setupBilling, status, wamidOf } from './helpers/billing';
-import { PARAMS, seedContacts, seedTemplate, setPageSize } from './helpers/campaigns';
+import { PARAMS, seedContacts, seedTemplate, setPageSize, seedOwner } from './helpers/campaigns';
 import { exec, openChat, rows, workspace } from './helpers/workspace';
 
 const W = (n: number) => `00000000-0000-4000-8000-0000000073${String(n).padStart(2, '0')}`;
@@ -319,6 +319,7 @@ describe('pre-send rules by category (WA-OVERDRAFT-1)', () => {
     await fund(ws, 600); // 4 contacts x 250 = 1000
     await seedTemplate(ws);
     await seedContacts(ws, 4);
+    await seedOwner(ws);
     const c = await workspace(ws).createCampaign({ name: 'Eid', template: { name: 'promo', language: 'ar' }, params: [...PARAMS] as never, audience: { criteria: { everyone: true } }, phoneNumberId: pn(ws), actor: 'u1' });
     if (!c.ok) throw new Error('not created');
     expect(c.campaign.estimate).toEqual({ audience: 4, perMessageMinor: 250, totalMinor: 1000 });
@@ -335,6 +336,7 @@ describe('campaign pages reserve once; their messages draw from the reservation'
     await fund(ws, funds);
     await seedTemplate(ws);
     await seedContacts(ws, contacts);
+    await seedOwner(ws);
     const c = await workspace(ws).createCampaign({ name: 'Eid', template: { name: 'promo', language: 'ar' }, params: [...PARAMS] as never, audience: { criteria: { everyone: true } }, phoneNumberId: pn(ws), actor: 'u1' });
     if (!c.ok) throw new Error('not created');
     await exec(ws, "UPDATE campaigns SET status = 'running', started_at = 1, attempt = 1 WHERE id = ?", c.campaign.id);
@@ -434,6 +436,7 @@ describe('(a) every terminal message path settles its hold', () => {
     await fund(ws, 5000);
     await seedTemplate(ws);
     await seedContacts(ws, 1);
+    await seedOwner(ws);
     const c = await workspace(ws).createCampaign({ name: 'x', template: { name: 'promo', language: 'ar' }, params: [...PARAMS] as never, audience: { criteria: { everyone: true } }, phoneNumberId: pn(ws), actor: 'u' });
     if (!c.ok) throw new Error('x');
     await exec(ws, "UPDATE campaigns SET status = 'running', attempt = 1, started_at = 1 WHERE id = ?", c.campaign.id);

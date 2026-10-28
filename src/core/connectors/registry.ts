@@ -5,6 +5,7 @@ import { errClass, alert } from '../observability';
 import { isE164 } from '../phone';
 import { storeLink } from '../store-link';
 import type { ToolDef } from '../ai/provider';
+import { maskForModel } from '../ai/mask';
 import { connectorSecret, listConnectors, TOOL_SEP, type ConnectorRow } from './store';
 import { odooConnector, pingOdoo } from './odoo';
 import { pingWebhook, webhookConnector } from './webhook';
@@ -48,9 +49,18 @@ export function loadConnectors(host: Host): ConnectorSet | null {
   };
 }
 
-/** What the model reads back: bounded JSON, never a stack or a raw body. */
+/** Every string in a connector's result, masked the way a customer's text is (phones, cards, e-mails) before any model reads it (M-177): success results too, not only error text. */
+function maskDeep(v: unknown, depth = 0): unknown {
+  if (typeof v === 'string') return maskForModel(v);
+  if (depth > 8 || v === null || typeof v !== 'object') return v;
+  if (Array.isArray(v)) return v.map((x) => maskDeep(x, depth + 1));
+  return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, maskDeep(x, depth + 1)]));
+}
+
+/** What the model reads back: bounded JSON, never a stack or a raw body, every string masked. */
 export function toolContent(res: ToolResult): string {
-  const text = JSON.stringify(res.ok ? { ok: true, result: res.result } : { ok: false, error: res.error, ...(res.message ? { message: res.message } : {}) });
+  // M-177: the client's text is free text from their system (it can echo a phone, a card, an e-mail): masked before the model reads it, in errors AND in results.
+  const text = JSON.stringify(res.ok ? { ok: true, result: maskDeep(res.result) } : { ok: false, error: maskForModel(String(res.error)), ...(res.message ? { message: maskForModel(res.message) } : {}) });
   if (text.length <= CONTENT_MAX) return text;
   return JSON.stringify({ ok: res.ok, truncated: true, result: text.slice(0, CONTENT_MAX - 100) });
 }

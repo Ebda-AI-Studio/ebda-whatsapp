@@ -106,9 +106,12 @@ describe('GET /api/v1/stores/:storeId/me', () => {
     expect(r.status).toBe(200);
     expect(await r.json()).toMatchObject({ storeId: STORE, role: 'staff' });
   });
-  it('is 200 for a super admin on any store', async () => {
+  it('for a super admin on a store they are not a member of: 403 view_as_required without the header, 200 with the view-as header and a reason (final review I3)', async () => {
     stubJwks([k1]);
-    expect((await get(await mint(k1, { pa: 'super_admin' }))).status).toBe(200);
+    const admin = await mint(k1, { pa: 'super_admin' });
+    expect((await get(admin)).status).toBe(403);
+    const viaViewAs = await SELF.fetch(`https://x/api/v1/stores/${STORE}/me`, { headers: { authorization: `Bearer ${admin}`, 'x-view-as-merchant': '1', 'x-view-as-reason': 'checking the identity contract (ticket 1)' } });
+    expect(viaViewAs.status).toBe(200);
   });
 });
 

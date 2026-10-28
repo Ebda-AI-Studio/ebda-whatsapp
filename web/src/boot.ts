@@ -12,6 +12,13 @@ export function accountsUrlFor(envUrl: string | undefined, brandUrl: string | nu
 }
 
 /** ?store= wins only when the token actually lists that store (the server checks it again). */
+/** T35: `?viewAs=1&store=<workspace id>` opens that workspace read-only for an operator. Only a plain id is accepted (no path characters). */
+export function viewAsStore(search: string): string | null {
+  const q = new URLSearchParams(search);
+  const store = q.get('store');
+  return q.get('viewAs') === '1' && store && /^[A-Za-z0-9_-]{1,64}$/.test(store) ? store : null;
+}
+
 export function pickStore(stores: { id: string; role: 'owner' | 'staff' }[], search: string): string | null {
   const wanted = new URLSearchParams(search).get('store');
   if (wanted && stores.some((s) => s.id === wanted)) return wanted;

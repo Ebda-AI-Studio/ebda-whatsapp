@@ -33,7 +33,12 @@ export function detectOptOutMessage(m: { type: string; text?: string; reply?: { 
   return false;
 }
 
-export function detectOptIn(text: string, extraKeywords: readonly string[] = []): boolean {
+/** The opt-in keyword (as normalised) the WHOLE message is, or null. The proof of a consent stores this, never the customer's message. */
+export function matchOptIn(text: string, extraKeywords: readonly string[] = []): string | null {
   const t = normaliseText(text);
-  return t !== '' && [...CORE_OPT_IN_KEYWORDS, ...extraKeywords].some((k) => normaliseText(k) === t);
+  return t !== '' && [...CORE_OPT_IN_KEYWORDS, ...extraKeywords].some((k) => normaliseText(k) === t) ? t : null;
+}
+
+export function detectOptIn(text: string, extraKeywords: readonly string[] = []): boolean {
+  return matchOptIn(text, extraKeywords) !== null;
 }

@@ -47,6 +47,19 @@ export function exchangeCode(env: Env, appId: string, code: string) {
   return call(env, 'GET', 'oauth/access_token', z.object({ access_token: z.string().min(1) }).loose(), { query: { client_id: appId, client_secret: env.META_APP_SECRET, code } });
 }
 
+/**
+ * Who the exchanged token belongs to, asked of Meta (debug_token, authorised by the app's own id|secret). Only a token that is valid for THIS app and names a numeric
+ * user id counts; anything else is null (the connect still works, the person is just not recorded). The browser's own claim is never used (final review I5).
+ * NOT VERIFIED against Meta's live responses for the Embedded Signup business token (docs/launch/README.md s4).
+ */
+export async function tokenOwner(env: Env, appId: string, token: string): Promise<string | null> {
+  if (!env.META_APP_SECRET) return null;
+  const res = await call(env, 'GET', 'debug_token', z.object({ data: z.object({ is_valid: z.boolean().optional(), app_id: z.string().optional(), user_id: z.string().optional() }).loose() }).loose(), { token: `${appId}|${env.META_APP_SECRET}`, query: { input_token: token } });
+  if (!res.ok) return null;
+  const d = res.value.data;
+  return d.is_valid === true && d.app_id === appId && d.user_id && /^[0-9]{1,40}$/.test(d.user_id) ? d.user_id : null;
+}
+
 export const subscribeApp = (env: Env, token: string, wabaId: string) => call(env, 'POST', `${wabaId}/subscribed_apps`, success, { token });
 export const unsubscribeApp = (env: Env, token: string, wabaId: string) => call(env, 'DELETE', `${wabaId}/subscribed_apps`, success, { token });
 export const registerNumber = (env: Env, token: string, phoneNumberId: string, pin: string) =>

@@ -22,6 +22,22 @@ export function outboundMediaFor(mime: string) {
 /** The spelling Meta documents for the allowed types (it wants "audio/ogg; codecs=opus" with the space). */
 export const canonicalMime = (mime: string): string => (normaliseMime(mime) === 'audio/ogg;codecs=opus' ? 'audio/ogg; codecs=opus' : normaliseMime(mime));
 
+const MP4_BRANDS: ReadonlySet<string> = new Set(['isom', 'iso2', 'iso4', 'iso5', 'iso6', 'mp41', 'mp42', 'avc1', 'dash', 'mmp4']);
+
+/**
+ * M-134: the type a file REALLY is, from its first bytes, as one of the allowed spellings (`normaliseMime`), or null. A declared type is a
+ * claim by the uploader; Meta and the merchant's customers see the bytes. Needs the first 64 bytes.
+ */
+export function sniffMime(head: Uint8Array): string | null {
+  const at = (s: string, off = 0) => head.length >= off + s.length && [...s].every((c, i) => head[off + i] === c.charCodeAt(0));
+  if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
+  if (head.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((b, i) => head[i] === b)) return 'image/png';
+  if (at('%PDF-')) return 'application/pdf';
+  if (at('ftyp', 4) && MP4_BRANDS.has(String.fromCharCode(...head.slice(8, 12)))) return 'video/mp4'; // the brand decides: a QuickTime .mov, an m4a or a HEIC image is not an mp4 Meta accepts
+  if (at('OggS') && [...Array(Math.max(0, head.length - 7)).keys()].some((i) => at('OpusHead', i))) return 'audio/ogg;codecs=opus';
+  return null;
+}
+
 /** Strips path separators and control characters from a client-supplied file name. */
 export const safeFilename = (name: string): string => name.replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 120) || 'file';
 

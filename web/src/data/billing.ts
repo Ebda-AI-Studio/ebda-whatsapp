@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import type { OpsStatusDto, StatementDto, WalletDto } from '../../../src/core/api/contract';
-import { auditLogItemDto, changeLogItemDto, offboardingDto, operatorOffboardingDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto } from '../../../src/core/api/contract';
+import type { DigestDto, OpsStatusDto, StatementDto, WalletDto } from '../../../src/core/api/contract';
+import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto, auditLogItemDto, offboardingDto, operatorOffboardingDto } from '../../../src/core/api/contract';
 
-export type { OpsStatusDto, StatementDto, WalletDto };
+export type { DigestDto, OpsStatusDto, StatementDto, WalletDto };
 export type CostEstimateDto = z.infer<typeof costEstimateDto>;
 export type TopupDto = z.infer<typeof topupDto>;
 export type PackageDto = z.infer<typeof packageDto>;
@@ -38,6 +38,10 @@ export type OffboardingView = z.infer<typeof offboardingDto>;
 export type OperatorOffboarding = z.infer<typeof operatorOffboardingDto>;
 export interface WalletApi {
   wallet(): Promise<WalletDto>;
+  /** The weekly usage digest (counts only). `{ enabled: false }` after the owner switched it off. */
+  digest(): Promise<DigestDto>;
+  /** Owner only. */
+  setDigest(enabled: boolean): Promise<void>;
   /** `month` = YYYY-MM. Owner and operator only (the server answers 403 to staff). */
   statement(month: string): Promise<StatementDto>;
   /** A URL the browser can download the month's CSV from: fetched with the token (like media), never a bare link. */
@@ -70,7 +74,10 @@ export type PricingSettingsInput = { effectiveFrom: number; marginBps: number; c
 
 /** The super-admin console (/api/v1/operator/*). Every write may answer 503 until the accounts binding exists. */
 export type KillSwitchAction = 'suspend' | 'unsuspend' | 'campaigns/pause' | 'shared-number/evict' | 'shared-number/readmit' | 'integrations/revoke' | 'integrations/restore';
+export type MetaDeletion = { code: string; state: 'queued' | 'done' | 'nothing_found' | 'failed'; receivedAt: number; removedConnections: number; finishedAt: number | null };
 export interface OperatorApi {
+  /** B9: Meta data-deletion requests, newest first (state and counts only). */
+  metaDeletions(): Promise<MetaDeletion[]>;
   /** W2-OPS: the kill-switch card. Every action needs a reason of 5+ characters and is audited with the operator's id. */
   opsStatus(workspaceId: string): Promise<OpsStatusDto>;
   killSwitch(workspaceId: string, action: KillSwitchAction, reason: string): Promise<void>;

@@ -3,6 +3,7 @@
 // signature check. A check it cannot run is reported as SKIPPED with the reason, never as passed.
 //
 // Usage: node scripts/verify-prod.mjs --base https://wa.ebda.app --expect "$(git rev-parse --short origin/main)" --brand ebda
+// --peer-health <url> is the other suite Worker's /health (Ebda Store): proves SUITE_BUYER_KEY_SECRET is equal on both by comparing a derived vector.
 // --brand is the brand the deployment must serve: the page's /brand.json must say so and, for any brand but ebda, its CSP must name no ebda.app host.
 // Optional secrets come from the environment only (never argv, which lands in shell history):
 //   META_VERIFY_TOKEN  → runs the webhook handshake check
@@ -11,7 +12,7 @@
 import { createHmac, randomUUID } from 'node:crypto';
 
 /** @returns {Promise<{ name: string; ok: boolean | null; detail: string }[]>} ok: true = passed, false = failed, null = skipped */
-export async function runChecks({ base, expectCommit, expectBrand, verifyToken, appSecret, expectCron, worker, cfToken, cfAccount, fetchImpl = fetch }) {
+export async function runChecks({ base, expectCommit, expectBrand, peerHealth, verifyToken, appSecret, expectCron, worker, cfToken, cfAccount, fetchImpl = fetch }) {
   const out = [];
   const add = (name, ok, detail) => out.push({ name, ok, detail });
   const get = (path, init) => fetchImpl(`${base}${path}`, { redirect: 'manual', ...init });
@@ -32,6 +33,21 @@ export async function runChecks({ base, expectCommit, expectBrand, verifyToken, 
   // An empty running commit would satisfy startsWith('') for ANY expected commit: it proves nothing, so it fails.
   else if (health) add('health commit', !!health.commit && (String(health.commit).startsWith(expectCommit) || expectCommit.startsWith(String(health.commit))), `running ${health.commit || '(empty)'}, expected ${expectCommit}`);
   else add('health commit', false, 'no health answer');
+
+  // D4: SUITE_BUYER_KEY_SECRET must be identical on this Worker and on Ebda Store. Each publishes a value DERIVED from it on /health (16 hex of an HMAC over a
+  // fixed non-phone string); the two are compared here. The secret is never an input of this script and never printed, and neither is the vector.
+  {
+    const name = 'suite buyer key equal on both Workers';
+    if (!peerHealth) add(name, null, 'skipped: pass --peer-health <url of the other Worker\'s /health> (Ebda Store)');
+    else {
+      const own = health?.buyerKeyVector;
+      let peer = null;
+      try { peer = (await (await fetchImpl(peerHealth, { redirect: 'manual' })).json().catch(() => null))?.buyerKeyVector ?? null; } catch { /* reported below */ }
+      if (typeof own !== 'string' || !own) add(name, false, 'this Worker publishes no buyerKeyVector: SUITE_BUYER_KEY_SECRET is not set (or /health is down)');
+      else if (typeof peer !== 'string' || !peer) add(name, null, 'skipped: the other Worker is unreachable or does not publish buyerKeyVector yet (it must add the same field, see docs/launch/README.md)');
+      else add(name, own === peer, own === peer ? 'both Workers derive the same buyer key' : 'the two Workers derive DIFFERENT buyer keys: set SUITE_BUYER_KEY_SECRET to the same value on both, or every customer is two people');
+    }
+  }
 
   try {
     const res = await get('/');
@@ -78,6 +94,15 @@ export async function runChecks({ base, expectCommit, expectBrand, verifyToken, 
   } catch (e) {
     add('kashier webhook is served by the Worker', false, `unreachable: ${e.message}`);
   }
+  // Meta's data-deletion callback (B9) must reach the Worker too: an unsigned form post gets the Worker's 400 JSON, never the SPA's HTML.
+  try {
+    const d = await get('/meta/data-deletion', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'signed_request=invalid' });
+    const dBody = (await d.text()).trimStart();
+    const dHtml = /text\/html/i.test(d.headers.get('content-type') ?? '') || dBody.startsWith('<');
+    add('data-deletion callback is served by the Worker and refuses an unsigned post', d.status === 400 && !dHtml, dHtml ? `status ${d.status}, an HTML page: /meta/* is not reaching the Worker` : `status ${d.status}`);
+  } catch (e) {
+    add('data-deletion callback is served by the Worker and refuses an unsigned post', false, `unreachable: ${e.message}`);
+  }
   if (!appSecret) add('webhook accepts signed', null, 'skipped: set META_APP_SECRET');
   else {
     const sig = `sha256=${createHmac('sha256', appSecret).update(empty).digest('hex')}`;
@@ -111,7 +136,7 @@ if (isMain) {
     console.error('usage: node scripts/verify-prod.mjs --base https://<host> [--expect <commit>] [--brand <brand>]');
     process.exit(2);
   }
-  const results = await runChecks({ base: base.replace(/\/$/, ''), expectCommit: arg('--expect'), expectBrand: arg('--brand'), verifyToken: process.env.META_VERIFY_TOKEN, appSecret: process.env.META_APP_SECRET, expectCron: arg('--cron'), worker: arg('--worker'), cfToken: process.env.CLOUDFLARE_API_TOKEN, cfAccount: process.env.CLOUDFLARE_ACCOUNT_ID });
+  const results = await runChecks({ base: base.replace(/\/$/, ''), expectCommit: arg('--expect'), expectBrand: arg('--brand'), peerHealth: arg('--peer-health'), verifyToken: process.env.META_VERIFY_TOKEN, appSecret: process.env.META_APP_SECRET, expectCron: arg('--cron'), worker: arg('--worker'), cfToken: process.env.CLOUDFLARE_API_TOKEN, cfAccount: process.env.CLOUDFLARE_ACCOUNT_ID });
   for (const r of results) console.log(`${r.ok === true ? 'PASS' : r.ok === false ? 'FAIL' : 'SKIP'}  ${r.name}: ${r.detail}`);
   const failed = results.filter((r) => r.ok === false).length;
   const skipped = results.filter((r) => r.ok === null).length;

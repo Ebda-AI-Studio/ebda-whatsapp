@@ -317,7 +317,7 @@ describe('route walk: every non-GET store route is decided (sends and number set
     'POST /stores/:storeId/conversations/:conversationId/messages', 'POST /stores/:storeId/media', 'POST /stores/:storeId/numbers/connect',
     'POST /stores/:storeId/numbers/:phoneNumberId/register', 'POST /stores/:storeId/shared-number/join',
   ]);
-  // Decided: cannot send a WhatsApp message or set a number up, or are gated by the campaigns feature (plan_feature, see package-limits-review).
+  // Decided: cannot send a WhatsApp message or set a number up, or are gated by the campaigns feature (plan_feature, see package-feature-gates-campaigns-ordering).
   const NOT_SENDING = new Set([
     'PUT /stores/:storeId/agent', 'DELETE /stores/:storeId/contacts/:waId', 'DELETE /stores/:storeId/campaigns/:campaignId',
     'POST /stores/:storeId/campaigns', 'POST /stores/:storeId/campaigns/:campaignId/send', 'POST /stores/:storeId/campaigns/:campaignId/resume',
@@ -325,11 +325,11 @@ describe('route walk: every non-GET store route is decided (sends and number set
     'DELETE /stores/:storeId/connectors/:connectorId', 'POST /stores/:storeId/connectors/:connectorId/test', 'PUT /stores/:storeId/connectors/:connectorId',
     'PUT /stores/:storeId/contacts/:waId/tags', 'POST /stores/:storeId/conversations/:conversationId/assign', 'POST /stores/:storeId/conversations/:conversationId/notes',
     'POST /stores/:storeId/conversations/:conversationId/read', 'PUT /stores/:storeId/conversations/:conversationId/tags', 'POST /stores/:storeId/imports',
-    'POST /stores/:storeId/wallet/instapay', 'PUT /stores/:storeId/wallet/instapay/:requestId/proof', 'POST /stores/:storeId/numbers/:phoneNumberId/disconnect',
+    'POST /stores/:storeId/wallet/instapay', 'PUT /stores/:storeId/wallet/instapay/:requestId/proof', 'POST /stores/:storeId/numbers/:phoneNumberId/disconnect', 'POST /stores/:storeId/numbers/notices/:noticeId/dismiss',
     'POST /stores/:storeId/numbers/:phoneNumberId/refresh', 'PATCH /stores/:storeId/store-link/settings', 'POST /stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outcome',
     'POST /stores/:storeId/store-link/catalog/provision', 'POST /stores/:storeId/packages/:packageId/checkout', 'DELETE /stores/:storeId/segments/:segmentId',
     'POST /stores/:storeId/segments', 'POST /stores/:storeId/segments/preview', 'PUT /stores/:storeId/segments/:segmentId', 'POST /stores/:storeId/shared-number/leave',
-    'POST /stores/:storeId/wallet/refund-requests', 'POST /stores/:storeId/wallet/topups',
+    'POST /stores/:storeId/wallet/refund-requests', 'POST /stores/:storeId/wallet/topups', 'PUT /stores/:storeId/digest',
     'POST /stores/:storeId/offboarding', 'DELETE /stores/:storeId/offboarding', // deleting the workspace needs no plan (a lapsed merchant can still leave)
     'PUT /stores/:storeId/retention', 'PATCH /stores/:storeId/contacts/:waId', 'POST /stores/:storeId/contacts/merge', // data rights and housekeeping: no message leaves
     // Template management talks to Meta's template catalog, not to a customer: no message leaves.

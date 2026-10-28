@@ -1,7 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { accountsUrlFor, chooseMode, pickStore, signInMode } from './boot';
+import { accountsUrlFor, chooseMode, pickStore, signInMode, viewAsStore } from './boot';
+import { STRINGS } from './i18n';
 import { SignInError } from './components/SignInError';
 import { makeSignOut } from './signout';
 import { SignedOutLocally } from './components/SignedOutLocally';
@@ -50,13 +51,21 @@ async function boot(): Promise<void> {
       tokens = createTokenProvider({ accountsUrl: ACCOUNTS_URL! });
     }
     const token = await tokens.getToken(); // redirects to sign-in when signed out
-    const storeId = pickStore(decodeStores(token), location.search);
+    // T35: an operator opening a merchant's workspace read-only (?viewAs=1&store=<id>); the server writes an audit row for every request.
+    const viewAsId = viewAsStore(location.search);
+    const reason = viewAsId ? (window.prompt(STRINGS.ar.viewAsPrompt) ?? '').trim() : '';
+    if (viewAsId && reason.length < 10) {
+      document.body.textContent = STRINGS.ar.viewAsNeedsReason;
+      return;
+    }
+    const storeId = viewAsId ?? pickStore(decodeStores(token), location.search);
     if (!storeId) {
       document.body.textContent = 'حسابك مش مربوط بأي متجر لسه. / Your account is not linked to a store yet.';
       return;
     }
-    const api = createApiSource({ baseUrl: location.origin, storeId, getToken: tokens.getToken, userNames: {}, currentUserId: decodeSub(token) ?? '' });
-    const stopRealtime = connectRealtime({
+    const api = createApiSource({ baseUrl: location.origin, storeId, getToken: tokens.getToken, userNames: {}, currentUserId: decodeSub(token) ?? '', ...(viewAsId ? { viewAs: { reason } } : {}) });
+    // A live socket would outlive the audit of one request, so a view-as session has none (the server refuses it).
+    const stopRealtime = viewAsId ? () => undefined : connectRealtime({
       url: `${location.origin.replace(/^http/, 'ws')}/api/v1/stores/${storeId}/ws`,
       getToken: tokens.getToken,
       onEvent: api.emit,

@@ -36,6 +36,8 @@ const STORE = /^\/api\/v1\/stores\/[^/]+/;
 export function classify(method: string, path: string): RouteClass | null {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
   if (path === '/meta/webhook') return { name: 'webhook', maxBytes: WEBHOOK_MAX_BYTES, types: JSON_TYPES };
+  // Meta's data-deletion callback is a small form post (signed_request=...): no login, so type and size are judged here, before anything is read.
+  if (path === '/meta/data-deletion') return { name: 'data-deletion', maxBytes: 16 * KB, types: ['application/x-www-form-urlencoded'] };
   // Kashier's Content-Type is not documented anywhere we can check, and its HMAC over the raw body is the authentication: a wrong guess here
   // would silently drop paid top-ups, so this webhook gets the size cap only.
   if (path === '/kashier/webhook') return { name: 'webhook-kashier', maxBytes: WEBHOOK_MAX_BYTES, types: null };
@@ -181,7 +183,7 @@ export function requestGuards(limits: GuardLimits = DEFAULT_LIMITS): MiddlewareH
       if (Number(declared) > cls.maxBytes) return tooLarge(); // refused before a body byte is read
     }
     // The type allow-list of the API classes runs after authentication (apiContentTypes); webhooks have no login, so theirs runs here.
-    if (cls.name === 'webhook' && declared !== '0' && !cls.types!.includes(mimeOf(req.headers.get('content-type')))) return json(415, 'unsupported_media');
+    if ((cls.name === 'webhook' || cls.name === 'data-deletion') && declared !== '0' && !cls.types!.includes(mimeOf(req.headers.get('content-type')))) return json(415, 'unsupported_media');
 
     if (path === '/meta/webhook') {
       // Small and signed: read it all (counting bytes), check the signature, then count it against its phone numbers.

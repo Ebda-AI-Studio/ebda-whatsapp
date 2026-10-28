@@ -29,6 +29,11 @@ export type Env = {
   AGENT_ALLOWED_HOSTS?: string;
   /** Overrides the default Workers AI model of the agent. */
   AGENT_MODEL?: string;
+  /** The platform model's price in USD per million tokens (input / output), for the cost-per-credit log and alert (M-084). Unset = cost unknown, no alert. */
+  AI_PRICE_INPUT_USD_PER_M?: string;
+  AI_PRICE_OUTPUT_USD_PER_M?: string;
+  /** The public support address shown on the data-deletion page; the brand's supportEmail (pinned to vendor/brand/store-support-email.json). */
+  SUPPORT_EMAIL?: string;
   /** Phase 6: contact-import workflow (one instance per uploaded file). */
   IMPORT_WORKFLOW: Workflow<{ workspaceId: string; importId: string }>;
   /** Phase 6: campaign broadcasts (one instance per campaign generation, id `<campaignId>-<attempt>`). */
@@ -80,6 +85,13 @@ export type Env = {
   EMBEDDED_SIGNUP_CONFIG_ID?: string;
   /** Base64 of 32 random bytes: encrypts business tokens and registration PINs (AES-GCM). Required while the switch is on. */
   TOKEN_ENC_KEY?: string;
+  /** ERASURE-KEY-1: HMAC key (secret, at least 32 characters) for the erasure subject hash, the offboarding pseudonym, the audit target ids and the view-as record hashes. NEVER rotated (a rotation would orphan every erasure record); independent of TOKEN_ENC_KEY. */
+  ERASURE_HMAC_KEY?: string;
+  /** M-174: HMAC key (secret, at least 32 characters) that signs backup manifests; PREVIOUS only verifies older backups during a key change. */
+  BACKUP_HMAC_KEY?: string;
+  BACKUP_HMAC_KEY_PREVIOUS?: string;
+  /** M-173: during a TOKEN_ENC_KEY rotation, the key being retired. Reads try it after TOKEN_ENC_KEY; writes never use it. Remove it once the rotation status shows 0 rows on it. */
+  TOKEN_ENC_KEY_PREVIOUS?: string;
   COMMIT_SHA?: string;
   IDENTITY_ISSUER: string;
   IDENTITY_JWKS_URL: string;
@@ -101,4 +113,6 @@ export type Env = {
   ENVIRONMENT?: string;
   /** Var: the product name shown first in an alert (the brand's, so core code names no brand). */
   ALERT_PRODUCT?: string;
+  /** T25: where docs/runbooks/alerts/<name>.md is served from (an https URL); unset = the repo-relative path in the alert text. */
+  RUNBOOK_BASE_URL?: string;
 };

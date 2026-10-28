@@ -120,7 +120,7 @@ export function createSampleSource(): InboxSource {
     tags: s.tags,
     windowOpenUntil: s.windowH === null ? null : BASE + s.windowH * H,
   }));
-  let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', provider: 'workers-ai', model: null, baseUrl: null, hasApiKey: false, credits: 500, knowledgeReady: false };
+  let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, hasApiKey: false, credits: 500, knowledgeReady: false };
   let bot: BotSettingsDto = {
     menu: { enabled: false, items: [] },
     hours: { enabled: false, timezone: 'Africa/Cairo', week: { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }, awayMessage: { ar: 'احنا مقفولين دلوقتي، هنرد عليك أول ما نفتح.', en: 'We are closed right now; we will reply as soon as we open.' }, ordersWhileClosed: true },
@@ -300,7 +300,7 @@ export function createSampleSource(): InboxSource {
           .filter((c) => q.optedOut === undefined || c.optedOut === q.optedOut);
         return { items: items.map((c) => ({ ...c })), nextCursor: null };
       },
-      async importCsv(file, consented) {
+      async importCsv(file, consented, _wording) {
         const id = `i-${nextId++}`;
         const imp: ImportDto = { id, filename: file.name, status: 'running', consented, total: 0, created: 0, updated: 0, rejected: 0, error: null, createdAt: Date.now(), finishedAt: null };
         imports.unshift(imp);
