@@ -97,15 +97,16 @@ it('rows whose old cursor column is NULL are exported across chunk boundaries (a
   expect(await rows('ws-ck6-restore', 'SELECT count(*) AS n FROM agent_state')).toEqual([{ n: total }]);
 });
 
-it('a row removed while its table was being exported makes the export FAIL (positive count match required), alerts, and writes no manifest', async () => {
+it('a row removed while a table WITHOUT a high-water mark was being exported makes the export FAIL (positive count match required), alerts, and writes no manifest (a rowid table tolerates a deleted row: see review-minors-2.test.ts)', async () => {
   const ws = 'ws-ck7';
   await seed(ws, 6);
+  for (let i = 0; i < 6; i++) await exec(ws, 'INSERT INTO contact_tags (contact_id, tag) VALUES (1, ?)', `t${i}`);
   const lines: string[] = [];
   await knobs(ws, (k) => {
     k.backupChunkRows = 2;
     const sql = (k as unknown as { sql: SqlStorage }).sql;
     let done = false;
-    k.backupHooks = { afterChunk: async (t) => { if (t === 'messages' && !done) { done = true; sql.exec('DELETE FROM messages WHERE id = (SELECT min(id) FROM messages)'); } } };
+    k.backupHooks = { afterChunk: async (t) => { if (t === 'contact_tags' && !done) { done = true; sql.exec("DELETE FROM contact_tags WHERE tag = 't0'"); } } };
   });
   const { vi } = await import('vitest');
   const spy = vi.spyOn(console, 'error').mockImplementation((m: unknown) => { lines.push(String(m)); });

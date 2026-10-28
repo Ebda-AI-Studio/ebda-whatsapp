@@ -133,6 +133,8 @@ export function createApiSource(o: Opts): LiveSource {
     },
     numbers: {
       list: async () => (await call('/numbers', listNumbersResponse)).items,
+      notices: async () => (await call('/numbers', listNumbersResponse)).notices,
+      dismissNotice: async (id) => { await call(`/numbers/notices/${id}/dismiss`, z.object({ ok: z.boolean() }).loose(), { method: 'POST' }); },
       async signupConfig() {
         try { return await call('/numbers/signup-config', signupConfigDto); } catch (e) { if (e instanceof ApiError && (e.status === 503 || e.status === 404 || e.status === 403)) return null; throw e; }
       },

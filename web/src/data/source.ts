@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
   RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
 } from '../../../src/core/api/contract';
 
@@ -27,6 +27,10 @@ export interface CampaignsApi {
 /** A merchant's own WhatsApp numbers (Phase 8.1); absent when Embedded Signup is switched off. */
 export interface NumbersApi {
   list(): Promise<NumberDto[]>;
+  /** Owner-visible notices about connections (a person who connected a number removed the app); absent in sample data. */
+  notices?(): Promise<NumberNoticeDto[]>;
+  /** The owner keeps the numbers connected and closes the notice. */
+  dismissNotice?(id: number): Promise<void>;
   /** Public Meta ids for the signup popup; null when signup is not configured on the server. */
   signupConfig(): Promise<{ appId: string; configId: string; graphVersion: string } | null>;
   connect(req: ConnectNumberRequest): Promise<NumberDto>;
@@ -38,7 +42,7 @@ export interface NumbersApi {
   /** Loads what the popup needs ahead of the click (sample data and tests replace it); absent = Meta's SDK. */
   prepare?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<void>;
   /** Replaces Meta's popup (sample data and tests only); absent = the real Embedded Signup. */
-  launch?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<{ code: string; event: ConnectNumberRequest['event']; wabaId: string; phoneNumberId: string; businessId?: string; fbUserId?: string }>;
+  launch?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<{ code: string; event: ConnectNumberRequest['event']; wabaId: string; phoneNumberId: string; businessId?: string }>;
 }
 
 export type ContactsQuery = { q?: string; tag?: string; optedOut?: boolean; cursor?: string | null };

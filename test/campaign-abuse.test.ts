@@ -1,4 +1,5 @@
-import { afterEach, expect, it } from 'vitest';
+import { env } from 'cloudflare:test';
+import { afterEach, beforeEach, expect, it } from 'vitest';
 import { NEW_WORKSPACE_CAP, configureNewWorkspaceCap } from '../src/core/campaigns/campaigns';
 import { PN, makeCampaign, resetWallet, seedContacts, seedTemplate, setTier } from './helpers/campaigns';
 import { storeId as W, useApiKey } from './helpers/api';
@@ -7,6 +8,8 @@ import { exec, own, rows, seedPlan, workspace } from './helpers/workspace';
 // F5: a new workspace has a daily campaign cap, and every campaign passes a simple content guard.
 useApiKey();
 afterEach(() => resetWallet());
+// The owner / number allowance lives in D1 (new_cap_usage), which a test does not roll back: every test starts with it empty.
+beforeEach(async () => { await env.DB.prepare('DELETE FROM new_cap_usage').run(); });
 const DAY = 86_400_000;
 const running = (ws: string, id: string) => exec(ws, "UPDATE campaigns SET status = 'running', started_at = 1, attempt = 1 WHERE id = ?", id);
 const page = (ws: string, id: string, n: number) => workspace(ws).campaignPage(id, 1, n);
@@ -26,6 +29,7 @@ it('a new workspace queues at most the daily cap in any rolling 24 h, however bi
     const first = (await rows<{ at: number }>(ws, 'SELECT min(at) AS at FROM campaign_recipients'))[0]!.at;
     expect(wait).toEqual({ state: 'wait', until: first + DAY + 1000 });
     await exec(ws, 'UPDATE campaign_recipients SET at = at - ?', DAY + 5000);
+    await env.DB.prepare('UPDATE new_cap_usage SET at = at - ?').bind(DAY + 5000).run(); // the owner / number allowance (D1) ages with it
     expect(await page(ws, c.id, 1)).toMatchObject({ count: 3 }); // the next allowance
   } finally { configureNewWorkspaceCap(prev); }
 });

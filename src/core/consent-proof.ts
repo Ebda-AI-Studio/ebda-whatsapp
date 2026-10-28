@@ -11,7 +11,8 @@ export type ConsentProof = { source: ConsentProofSource; attestedBy: string; wor
 export const DEFAULT_IMPORT_WORDING = 'The sender confirms that these customers agreed to receive marketing messages from them on WhatsApp, and that they can prove it.';
 /** The Store sends the fact of a checkout opt-in, not the wording shown at checkout (contract gap, see docs/campaigns.md). */
 export const STORE_CHECKOUT_WORDING = 'Marketing opt-in at the Store checkout (wording not provided by the Store).';
-export const MAX_WORDING_CHARS = 500;
+/** The Store's own maximum for the checkout wording (contract v1.5: `wording.text` max 600), so what it sends is stored whole. */
+export const MAX_WORDING_CHARS = 600;
 
 export function recordConsentProof(sql: Sql, p: { contactId: number; source: ConsentProofSource; attestedBy: string; wording: string; at: number; ref?: string | null }): void {
   sql.exec(

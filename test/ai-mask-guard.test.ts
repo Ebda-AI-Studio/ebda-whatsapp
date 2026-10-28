@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { maskForModel } from '../src/core/ai/mask';
-import { guardReply } from '../src/core/ai/reply-guard';
+import { guardReply, Trusted } from '../src/core/ai/reply-guard';
 
 describe('maskForModel (B6): buyer text is masked before it reaches the model', () => {
   it('masks phones in every written form, card-like numbers and e-mails', () => {
@@ -18,7 +18,9 @@ describe('maskForModel (B6): buyer text is masked before it reaches the model', 
 });
 
 describe('guardReply: a reply the merchant did not stand behind is refused', () => {
-  const trusted = ['{"results":[{"id":"v1","name":"Rose","price":110,"currency":"EGP","link":"https://shop.example.com/p/rose"}]}', 'We ship in 2 days. Visit https://shop.example.com'];
+  // the Store's JSON is a tool RESULT (structured price and link fields); the sentence is the merchant's own text
+  const trusted = Object.assign(new Trusted(), { text: ['We ship in 2 days. Visit https://shop.example.com'] });
+  trusted.addStoreResult('{"results":[{"id":"v1","name":"Rose","price":110,"currency":"EGP","link":"https://shop.example.com/p/rose"}]}');
   it('lets an honest reply through', () => {
     expect(guardReply('الوردة سعرها 110 جنيه: https://shop.example.com/p/rose', trusted)).toEqual({ ok: true });
     expect(guardReply('Rose is 110 EGP, shipping takes 2 days', trusted)).toEqual({ ok: true });
@@ -41,8 +43,10 @@ describe('guardReply: a reply the merchant did not stand behind is refused', () 
     expect(guardReply('خصم 50% ليك انت', trusted)).toEqual({ ok: false, reason: 'promise' });
     expect(guardReply('free shipping on this order', trusted)).toEqual({ ok: false, reason: 'promise' });
   });
-  it('allows a promise class the merchant wrote down themselves', () => {
-    const t = [...trusted, 'Returns: full refund within 14 days of delivery.'];
+  it('allows a promise class only when the merchant switched its policy flag on (their text alone never does)', () => {
+    const t = Object.assign(new Trusted(), { text: ['Returns: full refund within 14 days of delivery.'] });
+    expect(guardReply('You can get a full refund within 14 days', t)).toEqual({ ok: false, reason: 'promise' });
+    t.setPolicy({ refund: true, discount: false, freeDelivery: false, exchange: false, guarantee: false });
     expect(guardReply('You can get a full refund within 14 days', t)).toEqual({ ok: true });
     expect(guardReply('هديلك خصم', t)).toEqual({ ok: false, reason: 'promise' }); // a different class
   });

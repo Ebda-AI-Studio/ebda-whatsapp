@@ -188,6 +188,12 @@ export const agentSettingsFields = z.object({
   /** Only for `openai-compatible`; the platform chooses the Workers AI model. */
   model: z.string().min(1).max(100).regex(/^[\w./:@+-]+$/).nullable(),
   baseUrl: z.string().max(300).nullable(),
+  /** The promises the agent may make (reply guard, Ruling WA-GUARD-PROMISE-1). All default off: the FAQ text never switches one on. */
+  allowRefund: z.boolean(),
+  allowDiscount: z.boolean(),
+  allowFreeDelivery: z.boolean(),
+  allowExchange: z.boolean(),
+  allowGuarantee: z.boolean(),
 });
 export const agentSettingsDto = agentSettingsFields.extend({
   hasApiKey: z.boolean(),
@@ -650,8 +656,6 @@ export const connectNumberRequest = z.object({
   wabaId: metaId,
   phoneNumberId: metaId,
   businessId: metaId.optional(),
-  /** The app-scoped Facebook user id the browser reports (digits): remembered so Meta's data-deletion callback can find this connection (B9). */
-  fbUserId: z.string().regex(/^[0-9]{1,40}$/).optional(),
 });
 export type ConnectNumberRequest = z.infer<typeof connectNumberRequest>;
 
@@ -681,7 +685,10 @@ export const numberDto = z.object({
   /** W2-META: green = fine; yellow = flagged (campaigns paused); red / restricted = no new template sends. Meta's own rating is `qualityRating`. */
   health: z.enum(['green', 'yellow', 'red', 'restricted']).optional(),
 });
-export const listNumbersResponse = z.object({ items: z.array(numberDto) });
+/** Owner-visible notices about a connection (final review I5): a person who connected the number removed the app from Meta. Nothing was disconnected. */
+export const numberNoticeDto = z.object({ id: z.number().int(), kind: z.string(), wabaId: z.string(), at: z.number().int() });
+export const listNumbersResponse = z.object({ items: z.array(numberDto), notices: z.array(numberNoticeDto).default([]) });
+export type NumberNoticeDto = z.infer<typeof numberNoticeDto>;
 /** GET /numbers/signup-config: public Meta ids for launching Embedded Signup in the page. */
 export const signupConfigDto = z.object({ appId: z.string(), configId: z.string(), graphVersion: z.string() });
 export type NumberDto = z.infer<typeof numberDto>;

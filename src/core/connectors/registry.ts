@@ -24,8 +24,7 @@ function build(host: Host, row: ConnectorRow): Connector {
     : odooConnector({ env: host.env, workspaceId: host.workspaceId, id: row.id, config: row.config, updatedAt: row.updatedAt, secret });
 }
 
-/** `hosts`: the domains of the enabled connectors' configured URLs (the only links a connector may be the source of). */
-export type ConnectorSet = { tools: ToolDef[]; hosts: string[]; owns(name: string): boolean; call(name: string, args: unknown, ctx: ConnectorCtx): Promise<ToolResult> };
+export type ConnectorSet = { tools: ToolDef[]; owns(name: string): boolean; call(name: string, args: unknown, ctx: ConnectorCtx): Promise<ToolResult> };
 
 /** Null when no connector is enabled. The caller has already established that the agent is on. */
 export function loadConnectors(host: Host): ConnectorSet | null {
@@ -35,10 +34,8 @@ export function loadConnectors(host: Host): ConnectorSet | null {
   const tools: ToolDef[] = [];
   for (const [id, c] of byId) for (const t of c.tools) tools.push({ ...t, name: `${id}${TOOL_SEP}${t.name}` });
   const names = new Set(tools.map((t) => t.name));
-  const hosts = rows.flatMap((r) => { try { return [new URL(r.config.url).hostname.toLowerCase()]; } catch { return []; } });
   return {
     tools,
-    hosts,
     owns: (name) => names.has(name),
     async call(name, args, ctx) {
       const at = name.indexOf(TOOL_SEP);
@@ -52,10 +49,18 @@ export function loadConnectors(host: Host): ConnectorSet | null {
   };
 }
 
-/** What the model reads back: bounded JSON, never a stack or a raw body. */
+/** Every string in a connector's result, masked the way a customer's text is (phones, cards, e-mails) before any model reads it (M-177): success results too, not only error text. */
+function maskDeep(v: unknown, depth = 0): unknown {
+  if (typeof v === 'string') return maskForModel(v);
+  if (depth > 8 || v === null || typeof v !== 'object') return v;
+  if (Array.isArray(v)) return v.map((x) => maskDeep(x, depth + 1));
+  return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, maskDeep(x, depth + 1)]));
+}
+
+/** What the model reads back: bounded JSON, never a stack or a raw body, every string masked. */
 export function toolContent(res: ToolResult): string {
-  // M-177: the client's error text is free text from their system (it can echo a phone, a card, an e-mail): masked before the model reads it.
-  const text = JSON.stringify(res.ok ? { ok: true, result: res.result } : { ok: false, error: res.error, ...(res.message ? { message: maskForModel(res.message) } : {}) });
+  // M-177: the client's text is free text from their system (it can echo a phone, a card, an e-mail): masked before the model reads it, in errors AND in results.
+  const text = JSON.stringify(res.ok ? { ok: true, result: maskDeep(res.result) } : { ok: false, error: maskForModel(String(res.error)), ...(res.message ? { message: maskForModel(res.message) } : {}) });
   if (text.length <= CONTENT_MAX) return text;
   return JSON.stringify({ ok: res.ok, truncated: true, result: text.slice(0, CONTENT_MAX - 100) });
 }

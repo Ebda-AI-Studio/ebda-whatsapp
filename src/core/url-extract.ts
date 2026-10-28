@@ -70,3 +70,18 @@ function scan(text: string): Scanned[] {
 
 /** True when `host` is `allowed` or a subdomain of it. */
 export const hostUnder = (host: string, allowed: string): boolean => host === allowed || host.endsWith(`.${allowed}`);
+
+/**
+ * The parts a trust decision needs: scheme (null when the text had none), host and the path WITHOUT a trailing slash ('' = the site root). Query and fragment
+ * are dropped (they never choose the destination page); the path keeps its case (an Apps Script or Drive id is case-sensitive). Null for an unparsable token.
+ */
+export function linkParts(u: FoundUrl): { scheme: string | null; host: string; path: string } | null {
+  if (u.host === null) return null;
+  try {
+    const raw = u.raw.replace(DOTS, '.').replace(/\\/g, '/').replace(/[.,;:!?؟،]+$/u, '');
+    const parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return { scheme: u.scheme, host: parsed.hostname.toLowerCase(), path: parsed.pathname.replace(/\/+$/, '') };
+  } catch {
+    return null;
+  }
+}

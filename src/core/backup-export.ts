@@ -11,8 +11,8 @@ import { alert } from './observability';
  *    is one chunk plus one part, not the table;
  *  - every rowid table stops at the high-water mark (`max(rowid)`) taken at the start of the whole export, so a child row written during the export never refers to a parent
  *    row the snapshot lacks (messages -> conversations -> contacts). WITHOUT ROWID tables (tags, recipients) are read as of their chunk.
- *  - SUCCESS IS A POSITIVE COUNT MATCH: after a table is read, the rows written are compared with `count(*)` under the same condition. A mismatch (a row deleted or added
- *    while the table was read) raises `backup_export_mismatch`, throws, and writes neither the table file nor the manifest: a partial backup never reads as complete.
+ *  - SUCCESS IS A POSITIVE COUNT MATCH: after a table is read, the rows written are compared with `count(*)` under the same condition. A mismatch (a row ADDED or skipped
+ *    while the table was read; for a rowid table a row DELETED below the high-water mark is tolerated) raises `backup_export_mismatch`, throws, and writes neither the table file nor the manifest: a partial backup never reads as complete.
  * The files and hashes are byte-identical to the one-shot export. Consistency model: per row, not per workspace (Ruling WA-BACKUP-CHUNK-1 in docs/runbooks/backup-restore.md).
  */
 export const DEFAULT_CHUNK_ROWS = 500;
@@ -116,7 +116,9 @@ export async function exportTable(d: ExportDeps): Promise<{ rows: number; sha256
     }
     // Positive count match BEFORE anything is finalised: the table file does not exist, and no manifest follows, unless the rows written equal the rows the table holds.
     const counted = d.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${d.table} ${capped ? 'WHERE rowid <= ?' : ''}`, ...(capped ? [d.highWater!] : [])).one().n;
-    if (counted !== rows) {
+    // A rowid table stops at the high-water mark, so a row can only have been DELETED since it was read (the retention purge, an erasure): fewer rows now than were written is fine.
+    // MORE rows than were written is a row the keyset skipped: a real mismatch. A table with no mark (WITHOUT ROWID) can also grow, so it stays an exact match.
+    if (capped ? counted > rows : counted !== rows) {
       alert('backup_export_mismatch', { table: d.table, exported: rows, counted });
       throw new Error(`backup export mismatch: ${d.table} exported ${rows} rows, the table holds ${counted}`);
     }

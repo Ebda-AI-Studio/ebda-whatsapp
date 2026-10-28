@@ -22,7 +22,7 @@ import { funnelOnce } from '../funnel';
 import { markAiTurn } from '../timing';
 import { recordTurnCost } from './cost';
 import { LlmError, type ChatTurn, type LlmProvider, type LlmResponse } from './provider';
-import { getAgentState, providerFor, putAgentState, readAgentSettings, type AgentSettings } from './settings';
+import { getAgentState, promisePolicyOf, providerFor, putAgentState, readAgentSettings, type AgentSettings } from './settings';
 import { MAX_CALLS_PER_ROUND, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_ROUNDS, runTool, toolDefs, type ToolContext } from './tools';
 import { maskForModel } from './mask';
 import { guardReply, Trusted } from './reply-guard';
@@ -193,7 +193,7 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   let executed = 0;
   const persona = settings.persona.trim() || copy.defaultPersona[locale];
   trusted.addText(persona, settings.faqText, ...knowledge);
-  trusted.addHosts(connectors?.hosts ?? []);
+  trusted.setPolicy(promisePolicyOf(settings));
   const prompt = (p: string, k: string[]) => `${copy.systemPrompt({ persona: p, language: settings.language, storeName: null, knowledge: k, tools: tools.map((t) => t.name) })}\n\n${BOUNDARY}`;
   const system = prompt(persona, knowledge);
   // What a reply must never recite: the rules, without the merchant's own persona and knowledge (those may be quoted).
@@ -232,7 +232,7 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
         if (turnGone(host, input)) throw new Aborted();
         const content = await runConnectorTool(host, connectors, input.from, call.name, call.arguments, `conn:${input.messageId}:${connectorCalls++}`);
         if (turnGone(host, input)) throw new Aborted();
-        // a connector's output vouches for nothing (it can echo the customer); only its configured domain does, added once below
+        // a connector's output vouches for nothing (it can echo the customer), and neither does its endpoint host (Ruling WA-GUARD-LINK-1)
         messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content });
         continue;
       }

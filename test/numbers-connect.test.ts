@@ -40,7 +40,9 @@ function meta(waba: string, pn: string, over: Record<string, GraphReply | ((c: G
     }
   };
 }
-const paths = () => graph!.calls.map((c) => `${c.method} ${new URL(c.url).pathname.replace(/^\/v[\d.]+\//, '')}`);
+// Final review I5: the server also asks Meta (debug_token) who the exchanged token belongs to; that call is checked in meta-deletion-review.test.ts and left out of the signup call lists here.
+const signupCalls = () => graph!.calls.filter((c) => !new URL(c.url).pathname.endsWith('/debug_token'));
+const paths = () => signupCalls().map((c) => `${c.method} ${new URL(c.url).pathname.replace(/^\/v[\d.]+\//, '')}`);
 const row = async (pn: string) => (await env.DB.prepare('SELECT * FROM phone_numbers WHERE phone_number_id = ?').bind(pn).first<Record<string, any>>())!;
 
 const connect = (api: Awaited<ReturnType<typeof apiFor>>, waba: string, pn: string, event = 'FINISH', code = 'code-1') =>
@@ -72,12 +74,12 @@ it('FINISH: exchanges the code first, verifies, subscribes, registers with a sto
   expect(dto).toMatchObject({ phoneNumberId: '8101', wabaId: '9101', kind: 'own', onboarding: 'cloud_api', status: 'active', registration: 'registered', verifiedName: 'Demo Shop', qualityRating: 'GREEN', messagingLimitTier: 'TIER_250', throughputLevel: 'STANDARD', syncDeadlineAt: null });
   expect(paths()[0]).toBe('GET oauth/access_token');
   expect(paths()).toEqual(['GET oauth/access_token', 'GET 9101/phone_numbers', 'POST 9101/subscribed_apps', 'POST 8101/register', 'GET 8101']);
-  const q = new URL(graph.calls[0]!.url).searchParams;
+  const q = new URL(signupCalls()[0]!.url).searchParams;
   expect([q.get('client_id'), q.get('client_secret'), q.get('code')]).toEqual(['app-1', 'test-secret', 'code-1']);
-  expect(graph.calls[2]!.headers.authorization).toBe('Bearer biz-token-new');
-  const sentPin = graph.calls[3]!.body.pin as string;
+  expect(signupCalls()[2]!.headers.authorization).toBe('Bearer biz-token-new');
+  const sentPin = signupCalls()[3]!.body.pin as string;
   expect(sentPin).toMatch(/^\d{6}$/);
-  expect(graph.calls[3]!.body).toEqual({ messaging_product: 'whatsapp', pin: sentPin });
+  expect(signupCalls()[3]!.body).toEqual({ messaging_product: 'whatsapp', pin: sentPin });
   // Stored encrypted, bound to the workspace, never in the response.
   const r = await row('8101');
   expect(await decryptSecret(r.pin_enc, env.TOKEN_ENC_KEY!, W(501))).toBe(sentPin);

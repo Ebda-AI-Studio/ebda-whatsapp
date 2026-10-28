@@ -1,3 +1,4 @@
+import { newCapUsage, reserveNewCap } from './new-cap';
 import { segmentCriteria, type CampaignDto, type CampaignParam, type SegmentCriteria } from '../api/contract';
 import { errClass, alert } from '../observability';
 import { addTask } from '../scheduler';
@@ -287,7 +288,13 @@ export type Capacity = { room: number; until: number };
  * minus slots in use, minus sends waiting for a slot, minus this workspace's campaign messages still on their way to Meta. A campaign's
  * `daily_send_limit` narrows it further. `until` is when to look again when `room` is 0.
  */
-export function capacity(host: LinkHost, c: Pick<Row, 'id' | 'phone_number_id' | 'daily_send_limit'>, now: number): Capacity {
+/** True while the workspace is inside the first days of the cap (its Durable Object first ran less than `NEW_WORKSPACE_CAP.days` ago). */
+export function isNewWorkspace(host: Pick<LinkHost, 'sql'>, now: number): boolean {
+  const born = host.sql.exec<{ at: number }>('SELECT applied_at AS at FROM _migrations WHERE version = 1').toArray()[0]?.at ?? 0;
+  return now - born < NEW_WORKSPACE_CAP.days * 86_400_000;
+}
+
+export function capacity(host: LinkHost, c: Pick<Row, 'id' | 'phone_number_id' | 'daily_send_limit'>, now: number, shared: { used: number; first: number | null } | null = null): Capacity {
   const since = now - TIER_WINDOW_MS;
   const tier = host.sql.exec<{ tier: number }>('SELECT tier FROM number_limits WHERE phone_number_id = ?', c.phone_number_id).toArray()[0]?.tier ?? DEFAULT_TIER;
   const slots = host.sql.exec<{ n: number; first: number | null }>('SELECT count(*) AS n, min(started_at) AS first FROM tier_slots WHERE phone_number_id = ? AND started_at > ?', c.phone_number_id, since).one();
@@ -305,13 +312,20 @@ export function capacity(host: LinkHost, c: Pick<Row, 'id' | 'phone_number_id' |
       if (left <= 0 && today.first !== null) until = today.first + TIER_WINDOW_MS + 1000;
     }
   }
-  const born = host.sql.exec<{ at: number }>('SELECT applied_at AS at FROM _migrations WHERE version = 1').toArray()[0]?.at ?? 0;
-  if (now - born < NEW_WORKSPACE_CAP.days * 86_400_000) {
+  if (isNewWorkspace(host, now)) {
     const day = host.sql.exec<{ n: number; first: number | null }>('SELECT count(*) AS n, min(at) AS first FROM campaign_recipients WHERE at > ?', since).one();
     const left = NEW_WORKSPACE_CAP.perDay - day.n;
     if (left < room) {
       room = left;
       if (left <= 0 && day.first !== null) until = day.first + TIER_WINDOW_MS + 1000;
+    }
+    // The same allowance, counted across this owner's workspaces and across everyone on this number (new-cap.ts).
+    if (shared) {
+      const sharedLeft = NEW_WORKSPACE_CAP.perDay - shared.used;
+      if (sharedLeft < room) {
+        room = sharedLeft;
+        if (sharedLeft <= 0 && shared.first !== null) until = shared.first + TIER_WINDOW_MS + 1000;
+      }
     }
   }
   return { room: Math.max(0, room), until: Math.max(until, now + 1000) };
@@ -386,7 +400,8 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
   // No signing secret = no tracked links (fail closed): a link the edge cannot verify would be refused there anyway.
   const baseUrl = c.link_url && linkSecret ? campaignLinks().baseUrl(host.env) : null;
   if (c.link_url && !baseUrl) return { state: 'retry', reason: 'tracking_unavailable' };
-  const cap = capacity(host, c, now);
+  const shared = isNewWorkspace(host, now) ? await newCapUsage(host.env, host.workspaceId, c.phone_number_id, now - TIER_WINDOW_MS) : null;
+  const cap = capacity(host, c, now, shared);
   if (cap.room <= 0) return { state: 'wait', until: cap.until };
   const limit = Math.min(pageSize, cap.room);
   const criteria = segmentCriteria.parse(JSON.parse(c.criteria));
@@ -420,6 +435,8 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
       return stop(after && after.attempt === attempt ? after.status : 'superseded');
     }
   }
+  // Reserved against the owner's and the number's allowance BEFORE anything is queued (idempotent per page; a failure retries the step).
+  if (rows.length && shared) await reserveNewCap(host.env, { workspaceId: host.workspaceId, phoneNumberId: c.phone_number_id, ref, n: rows.length, now });
   const specs = JSON.parse(c.params) as CampaignParam[];
   const exhausted = rows.length < limit;
   // Codes are signed with Web Crypto (async): mint this page's before the synchronous transaction, use them inside.

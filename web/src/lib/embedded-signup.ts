@@ -3,7 +3,7 @@
 // Docs: developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/implementation/ (checked 2026-10-25).
 
 export type SignupEvent = 'FINISH' | 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING';
-export type SignupResult = { code: string; event: SignupEvent; wabaId: string; phoneNumberId: string; businessId?: string; fbUserId?: string };
+export type SignupResult = { code: string; event: SignupEvent; wabaId: string; phoneNumberId: string; businessId?: string };
 export class SignupStopped extends Error {
   constructor(public readonly reason: 'cancelled' | 'error' | 'no_number' | 'sdk_unavailable', public readonly step?: string) {
     super(reason);
@@ -66,12 +66,11 @@ export function launchEmbeddedSignup(cfg: { appId: string; configId: string; gra
 function start(fb: Fb, cfg: { configId: string }): Promise<SignupResult> {
   return new Promise<SignupResult>((resolve, reject) => {
     let code: string | null = null;
-    let fbUserId: string | undefined;
     let session: { event: SignupEvent; wabaId: string; phoneNumberId: string; businessId?: string } | null = null;
     let done = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = (fn: () => void) => { if (done) return; done = true; clearTimeout(timer); window.removeEventListener('message', onMessage); fn(); };
-    const settle = () => { if (code && session) { const s = session; const c = code; finish(() => resolve({ code: c, ...s, ...(fbUserId ? { fbUserId } : {}) })); } };
+    const settle = () => { if (code && session) { const s = session; const c = code; finish(() => resolve({ code: c, ...s })); } };
 
     function onMessage(e: MessageEvent) {
       if (!isMetaOrigin(e.origin)) return;
@@ -93,7 +92,6 @@ function start(fb: Fb, cfg: { configId: string }): Promise<SignupResult> {
     fb.login((r) => {
       if (r.authResponse?.code) {
         code = r.authResponse.code;
-        if (r.authResponse.userID && /^[0-9]{1,40}$/.test(r.authResponse.userID)) fbUserId = r.authResponse.userID; // lets Meta's data-deletion callback find this connection
         settle();
         // The session message normally follows within a moment; if it never does the code is about to expire, so say so instead of hanging.
         if (!done) timer = setTimeout(() => finish(() => reject(new SignupStopped('error'))), SESSION_AFTER_CODE_MS);

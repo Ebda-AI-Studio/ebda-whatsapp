@@ -2,6 +2,7 @@ import { runDueOffboardings } from './core/ops/offboarding';
 import { offboardingRoutes } from './routes/offboarding';
 import { auditWrites } from './core/audit';
 import { eraseContactFlow } from './core/contact-erase';
+import { purgeNewCapUsage } from './core/campaigns/new-cap';
 import { reconcileRefundBounds } from './core/billing/refund-excess';
 import * as Sentry from '@sentry/cloudflare';
 import { env as workerEnv } from 'cloudflare:workers';
@@ -12,7 +13,7 @@ import { selectVerifier } from './identity-select';
 import { configureAgent } from './core/ai/config';
 import { signupEnabled } from './core/numbers/numbers';
 import { verifyMetaSignature } from './core/meta/signature';
-import { parseSignedRequest, processRequest, recordRequest, requestStatus, statusPage } from './core/meta/data-deletion';
+import { parseSignedRequest, processRequest, recordRequest, requestStatus, statusPage, sweepDeletionRequests } from './core/meta/data-deletion';
 import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
@@ -214,9 +215,12 @@ app.post('/meta/data-deletion', async (c) => {
   const sr = form?.get('signed_request');
   const parsed = typeof sr === 'string' ? await parseSignedRequest(sr, c.env.META_APP_SECRET) : null;
   if (!parsed) return c.json({ error: 'invalid_request' }, 400);
-  const { code, created } = await recordRequest(c.env, parsed, Date.now());
+  const recorded = await recordRequest(c.env, parsed, Date.now());
+  if (!recorded) return c.json({ error: 'unavailable' }, 503); // no ERASURE_HMAC_KEY: nothing can be matched or kept; Meta retries
+  const { code, created } = recorded;
   if (created) {
-    const work = processRequest(c.env, code, parsed.userId);
+    // Fast path only: the row is already the durable task, and the daily sweep retries it if this never finishes (waitUntil is not a queue).
+    const work = processRequest(c.env, code);
     try { c.executionCtx.waitUntil(work); } catch { await work; }
   }
   return c.json({ url: `${new URL(c.req.url).origin}/meta/data-deletion/status?code=${code}`, confirmation_code: code });
@@ -342,6 +346,8 @@ export async function dailyBilling(env: Env): Promise<void> {
   await runDueOffboardings(env).catch((err) => alert('offboarding_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileRefundBounds(env).catch((err) => alert('refund_exceeds_charge', { error: err instanceof Error ? err.name : 'error', reconcileFailed: true }));
   await sweepShared(env).catch((err) => alert('shared_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await sweepDeletionRequests(env).catch((err) => alert('meta_deletion_needs_review', { reason: 'sweep_failed', error: err instanceof Error ? err.name : 'error' }));
+  await purgeNewCapUsage(env).catch((err) => alert('shared_sweep_failed', { error: err instanceof Error ? err.name : 'error', what: 'new_cap_usage' }));
 }
 
 let warnedNoDsn = false;

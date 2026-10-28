@@ -70,8 +70,8 @@ describe('2. a connector cannot launder the customer\'s own words into the allow
     for (let i = 0; i < 12; i++) await say(ws, pn, text(`filler ${i}`), g);
     expect((await say(ws, pn, text('where do I pay'), g)).map((s) => s.text)).toEqual([ACK]);
   });
-  it('a link on the connector\'s own configured domain is vouched for (negative control)', async () => {
-    expect(await run('where is my booking', { ok: 1 }, 'التفاصيل هنا https://hooks.acme-client.com/b/1')).toEqual(['التفاصيل هنا https://hooks.acme-client.com/b/1']);
+  it('a link on the connector\'s own endpoint host is NOT vouched for either (Ruling WA-GUARD-LINK-1: an Apps Script or form URL is shared with the world)', async () => {
+    expect(await run('where is my booking', { ok: 1 }, 'التفاصيل هنا https://hooks.acme-client.com/b/1')).toEqual([ACK]);
   });
 });
 
@@ -104,9 +104,9 @@ describe('3. every link form is judged by its WHATWG hostname', () => {
   ];
   for (const link of refused) it(`refuses ${JSON.stringify(link)}`, () => expect(guardReply(`افتح ${link} دلوقتي`, trusted)).toEqual({ ok: false, reason: 'url' }));
   it('accepts an allow-listed host, its subdomains, and ordinary dotted text', () => {
-    expect(guardReply('صورة: cdn.shop.example.com/a.png', trusted)).toEqual({ ok: true });
-    expect(guardReply('https://SHOP.example.com:443/x?y=1', trusted)).toEqual({ ok: true });
-    expect(guardReply('السعر 110 ج.م والتقييم 3.5 من 5، الساعة 5 p.m.', ['110'])).toEqual({ ok: true });
+    expect(guardReply('صورة: cdn.shop.example.com/a.png', trusted)).toEqual({ ok: false, reason: 'url' }); // trust is the exact host the merchant wrote, not its subdomains (final review I1)
+    expect(guardReply('https://SHOP.example.com:443/p/x?y=1', trusted)).toEqual({ ok: true });
+    expect(guardReply('السعر 110 ج.م والتقييم 3.5 من 5، الساعة 5 p.m.', ['السعر 110 ج.م'])).toEqual({ ok: true });
   });
 });
 

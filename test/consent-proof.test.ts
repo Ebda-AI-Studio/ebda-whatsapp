@@ -66,12 +66,12 @@ it('the proof is shown in the contact view', async () => {
   expect(list.items[0]!.consent).toMatchObject({ source: 'import:customers.csv', proof: { source: 'import', wording: 'W1', attestedBy: expect.any(String), ref: expect.any(String) } });
 });
 
-it('START on WhatsApp records an opt_in proof: attested by the customer, with the words they typed', async () => {
+it('START on WhatsApp records an opt_in proof: attested by the customer, with the START keyword that matched, not their whole message', async () => {
   const ws = W(9005);
   await storeWorkspace(ws);
   await openChat(ws, WA_1, { text: 'stop', ts: Math.floor(Date.now() / 1000), wamid: 'wamid.p5.1' });
-  await openChat(ws, WA_1, { text: 'START', ts: Math.floor(Date.now() / 1000) + 1, wamid: 'wamid.p5.2' });
-  expect(await proofs(ws)).toMatchObject([{ source: 'opt_in', attested_by: 'customer', wording: 'START' }]);
+  await openChat(ws, WA_1, { text: ' START!! ', ts: Math.floor(Date.now() / 1000) + 1, wamid: 'wamid.p5.2' });
+  expect(await proofs(ws)).toMatchObject([{ source: 'opt_in', attested_by: 'customer', wording: 'start' }]);
 });
 
 it('a Store checkout opt-in records a link proof attested by the store', async () => {

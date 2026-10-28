@@ -22,7 +22,7 @@ function fakeRclone() {
   const bin = tmp();
   const log = join(bin, 'calls.log');
   // `copy r2:ebda-wa-backups/... <dir>` materialises $FAKE_R2_BACKUPS there (what rclone would download); `copy <local> <dir>` copies the folder; `sync` and anything else only logs.
-  writeFileSync(join(bin, 'rclone'), `#!/bin/sh\necho "$@" >> "${log}"\nif [ "$1" = copy ]; then mkdir -p "$3"; case "$2" in r2:ebda-wa-backups*) [ -n "$FAKE_R2_BACKUPS" ] && cp -R "$FAKE_R2_BACKUPS/." "$3";; *) cp -R "$2/." "$3";; esac; fi\n`);
+  writeFileSync(join(bin, 'rclone'), `#!/bin/sh\necho "$@" >> "${log}"\nif [ "$1" = copy ]; then case "$3" in *:*) exit 0;; esac; mkdir -p "$3"; case "$2" in r2:ebda-wa-backups*) [ -n "$FAKE_R2_BACKUPS" ] && cp -R "$FAKE_R2_BACKUPS/." "$3";; *) cp -R "$2/." "$3";; esac; fi\n`);
   chmodSync(join(bin, 'rclone'), 0o755);
   return { bin, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []) };
 }
@@ -70,8 +70,8 @@ describe('scripts/backup-offsite.sh', () => {
     expect(r.status, r.stderr).toBe(0);
     const calls = f.calls();
     const stage = env.OFFSITE_STAGE;
-    expect(calls).toContain(`copy r2:ebda-wa-backups/backups ${stage}/snapshots --checksum --fast-list`);
-    expect(calls).toContain(`copy ${stage}/snapshots ${dest}/snapshots/2026-10-27 --checksum`);
+    expect(calls).toContain(`copy r2:ebda-wa-backups/backups ${stage}/snapshots --checksum --fast-list --include */2026-10-27/**`); // only TONIGHT's folders, never the whole bucket
+    expect(calls).toContain(`copy ${stage}/verified ${dest}/snapshots/2026-10-27 --checksum`);
     expect(calls).toContain(`sync r2:ebda-wa-media/bodies ${dest}/bodies --checksum --fast-list --backup-dir ${dest}/bodies-removed/2026-10-27`);
     expect(calls.join('\n')).not.toContain(SECRET_ENV);
     expect(calls.join('\n')).not.toContain(KEY);
@@ -124,6 +124,73 @@ describe('scripts/backup-offsite.sh', () => {
     expect(existsSync(join(dest, 'snapshots/2026-01-01'))).toBe(false);
     expect(existsSync(join(dest, 'snapshots/2026-10-20'))).toBe(true);
     expect(existsSync(join(dest, 'snapshots/keep-me'))).toBe(true); // not a dated folder of ours: never touched
+  });
+});
+
+describe('scripts/backup-offsite.sh (final review I6)', () => {
+  it('one bad snapshot does not block the rest: the good one is copied, the run exits non-zero with a summary', async () => {
+    const f = fakeRclone();
+    const dest = tmp();
+    const fixture = await r2Fixture({ ws: 'ws-good' }, { ws: 'ws-bad' });
+    writeFileSync(join(fixture, 'ws-bad/2026-10-27/messages.ndjson'), '{"id":1}\n{"id":3}\n');
+    const r = run('scripts/backup-offsite.sh', ['2026-10-27'], base(fixture, dest), f.bin);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('NOT VERIFIED');
+    expect(r.stderr).toContain('1 of 2');
+    expect(existsSync(join(dest, 'snapshots/2026-10-27/ws-good/2026-10-27/manifest.json'))).toBe(true);
+    expect(existsSync(join(dest, 'snapshots/2026-10-27/ws-bad'))).toBe(false);
+    expect(f.calls().some((c) => c.startsWith('sync'))).toBe(true); // the bodies mirror still ran
+  });
+
+  it('BACKUP_HMAC_KEY is required: without it nothing is asked of rclone', async () => {
+    const f = fakeRclone();
+    const env = base(await r2Fixture({ ws: 'ws-k' }), tmp());
+    delete (env as Record<string, string | undefined>).BACKUP_HMAC_KEY;
+    const r = run('scripts/backup-offsite.sh', ['2026-10-27'], env, f.bin);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('BACKUP_HMAC_KEY');
+    expect(f.calls()).toEqual([]);
+  });
+
+  it('an unsigned manifest fails, unless the snapshot is older than BACKUP_KEY_SINCE: then it is reported as legacy, skipped (not copied) and does not fail the job', async () => {
+    const f = fakeRclone();
+    const dest = tmp();
+    const fixture = await r2Fixture({ ws: 'ws-old', key: null }, { ws: 'ws-new' });
+    const noSince = run('scripts/backup-offsite.sh', ['2026-10-27'], base(fixture, dest), f.bin);
+    expect(noSince.status).toBe(1);
+    expect(noSince.stderr).toContain('not signed');
+    const legacy = run('scripts/backup-offsite.sh', ['2026-10-27'], base(fixture, dest, { BACKUP_KEY_SINCE: '2026-11-01' }), f.bin);
+    expect(legacy.status, legacy.stderr).toBe(0);
+    expect(legacy.stdout).toContain('LEGACY-UNSIGNED');
+    expect(legacy.stdout).toContain('1 legacy');
+    expect(existsSync(join(dest, 'snapshots/2026-10-27/ws-new/2026-10-27/manifest.json'))).toBe(true);
+    expect(existsSync(join(dest, 'snapshots/2026-10-27/ws-old'))).toBe(false);
+    const afterSince = run('scripts/backup-offsite.sh', ['2026-10-27'], base(fixture, dest, { BACKUP_KEY_SINCE: '2026-10-01' }), f.bin);
+    expect(afterSince.status).toBe(1); // signing was already required on that date
+  });
+
+  it('prunes an rclone REMOTE too: delete --min-age and rmdirs on snapshots and bodies-removed', async () => {
+    const f = fakeRclone();
+    const r = run('scripts/backup-offsite.sh', ['2026-10-27'], base(await r2Fixture({ ws: 'ws-r' }), 'b2:ebda-offsite', { OFFSITE_KEEP_DAYS: '30' }), f.bin);
+    expect(r.status, r.stderr).toBe(0);
+    const calls = f.calls();
+    for (const dir of ['snapshots', 'bodies-removed']) {
+      expect(calls).toContain(`delete b2:ebda-offsite/${dir} --min-age 30d`);
+      expect(calls).toContain(`rmdirs b2:ebda-offsite/${dir} --leave-root`);
+    }
+  });
+
+  it('the CLI: unsigned + before the key date is LEGACY-UNSIGNED (exit 0); no key at all is NOT VERIFIED', async () => {
+    const d = join(tmp(), 'ws-l', '2026-10-27');
+    await snapshot(d);
+    const node = (env: Record<string, string>) => spawnSync('node', [CLI, d], { encoding: 'utf8', env: { PATH: process.env.PATH ?? '', ...env } });
+    const legacy = node({ BACKUP_HMAC_KEY: KEY, BACKUP_KEY_SINCE: '2026-11-01' });
+    expect(legacy.status).toBe(0);
+    expect(legacy.stdout).toMatch(/^LEGACY-UNSIGNED ws-l 2026-10-27/m);
+    expect(node({ BACKUP_HMAC_KEY: KEY }).status).toBe(1);
+    const none = node({});
+    expect(none.status).toBe(1);
+    expect(none.stdout).toContain('BACKUP_HMAC_KEY is required');
   });
 });
 

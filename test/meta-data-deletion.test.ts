@@ -1,11 +1,8 @@
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureSessionCheck } from '../src/core/identity/session';
-import { connectNumberRequest } from '../src/core/api/contract';
 import { OP1, operatorCall, useApiKey } from './helpers/api';
 import { TEST_APP_SECRET } from './helpers/meta';
-import { stubGraph } from './helpers/graph';
-import { seedOwnNumber } from './helpers/own-number';
 
 // B9: Meta's "Data Deletion Request URL" is OUR route. Meta POSTs a signed_request when a person removes the app; we verify it (HMAC-SHA256 over the payload with
 // the app secret), queue the erasure, and answer { url, confirmation_code } as Meta's spec says. NOT VERIFIED against Meta's live callback (docs/launch/README.md s4).
@@ -96,20 +93,8 @@ describe('the callback', () => {
   });
 });
 
+// The erasure itself (what is erased, who is flagged, that nothing is disconnected) is in meta-deletion-review.test.ts (final review I5).
 describe('the erasure', () => {
-  it('removes every connection the person made: numbers disconnected, tokens and PINs gone, the id forgotten, state done', async () => {
-    await seedOwnNumber('pn-del-1', 'ws-del-1', 'waba-del-1', 'tok-del-1');
-    await seedOwnNumber('pn-del-2', 'ws-del-2', 'waba-del-2', 'tok-del-2');
-    await env.DB.prepare("UPDATE waba_credentials SET fb_user_id = '424242' WHERE waba_id IN ('waba-del-1', 'waba-del-2')").run();
-    const g = stubGraph();
-    const { confirmation_code } = (await (await post(await signedRequest(PAYLOAD('424242')))).json()) as { confirmation_code: string };
-    const done = await vi.waitFor(async () => { const r = await request(confirmation_code); if (r?.state !== 'done') throw new Error(r?.state); return r; }, { timeout: 5000 });
-    expect(done).toEqual({ state: 'done', removed_connections: 2 });
-    expect(await env.DB.prepare("SELECT status FROM phone_numbers WHERE phone_number_id IN ('pn-del-1', 'pn-del-2') ORDER BY phone_number_id").all()).toMatchObject({ results: [{ status: 'disconnected' }, { status: 'disconnected' }] });
-    expect(await env.DB.prepare("SELECT count(*) AS n FROM waba_credentials WHERE fb_user_id = '424242' OR waba_id IN ('waba-del-1', 'waba-del-2')").first('n')).toBe(0);
-    g.restore();
-  });
-
   it('a person we cannot match is not "done": the request waits for a human (state nothing_found) and a P1 alert asks for one', async () => {
     const logs: string[] = [];
     vi.spyOn(console, 'error').mockImplementation((m: unknown) => { logs.push(String(m)); });
@@ -146,16 +131,6 @@ describe('the status page', () => {
     const res = await SELF.fetch('https://x/meta/data-deletion', { headers: { accept: 'text/html' } });
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('ahlan@ebda.app');
-  });
-});
-
-describe('Embedded Signup remembers who connected, so a deletion request can find the connection', () => {
-  it('the connect request may carry the app-scoped user id (digits only)', () => {
-    const base = { code: 'c', event: 'FINISH' as const, wabaId: '1', phoneNumberId: '2' };
-    expect(connectNumberRequest.parse({ ...base, fbUserId: '123456' }).fbUserId).toBe('123456');
-    expect(connectNumberRequest.safeParse({ ...base, fbUserId: '12 34' }).success).toBe(false);
-    expect(connectNumberRequest.safeParse({ ...base, fbUserId: '1'.repeat(41) }).success).toBe(false);
-    expect(connectNumberRequest.parse(base).fbUserId).toBeUndefined();
   });
 });
 

@@ -17,10 +17,10 @@ import { exportContact, mergeContacts, renameContact } from './contact-data';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
-import { detectOptIn, detectOptOutMessage } from './consent';
+import { detectOptOutMessage, matchOptIn } from './consent';
 import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
-import { DAILY_KINDS, addTask, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
+import { DAILY_KINDS, addTask, dailyHour, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText, phoneDigits } from './text-normalise';
 import { conversationDto, type ConversationRow } from './dto';
@@ -278,9 +278,9 @@ export class WorkspaceDO extends DurableObject<Env> {
           const wasOptedOut = this.sql.exec<{ o: number | null }>('SELECT opted_out_at AS o FROM contacts WHERE id = ?', contactId).one().o != null;
           this.sql.exec("UPDATE contacts SET opted_out_at = max(coalesce(opted_out_at, 0), ?), consent_source = 'keyword_stop', consent_at = ? WHERE id = ?", m.ts * 1000, now, contactId);
           if (!wasOptedOut && noteOptOutChange(this.host(), m.from, true, m.ts * 1000, now)) linkWork = true;
-        } else if (m.type === 'text' && m.text && detectOptIn(m.text, config.optInKeywords)) {
+        } else if (m.type === 'text' && m.text && matchOptIn(m.text, config.optInKeywords)) {
           const cleared = this.sql.exec("UPDATE contacts SET opted_out_at = NULL, consent_source = 'keyword_start', consent_at = ? WHERE id = ? AND opted_out_at IS NOT NULL", now, contactId).rowsWritten > 0;
-          if (cleared) recordConsentProof(this.sql, { contactId, source: 'opt_in', attestedBy: 'customer', wording: m.text, at: now });
+          if (cleared) recordConsentProof(this.sql, { contactId, source: 'opt_in', attestedBy: 'customer', wording: matchOptIn(m.text, config.optInKeywords) ?? '', at: now }); // the keyword only, not the customer's message
           if (cleared && noteOptOutChange(this.host(), m.from, false, now, now)) linkWork = true;
         }
         const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
@@ -1994,7 +1994,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     let added = false;
     for (const kind of DAILY_KINDS) {
       if (have.has(kind)) continue;
-      addTask(this.sql, kind, nextLocalHour(now, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE));
+      addTask(this.sql, kind, nextLocalHour(now, dailyHour(kind), BACKUP_TIME_ZONE));
       added = true;
     }
     return added;
@@ -2082,7 +2082,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       case 'retention_purge': {
         const r = await this.retentionPurge(now);
-        return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, BACKUP_HOUR_LOCAL, BACKUP_TIME_ZONE);
+        return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, dailyHour('retention_purge'), BACKUP_TIME_ZONE);
       }
       case 'r2_drain': {
         const stillOwed = await this.drainR2Deletes();
@@ -2201,8 +2201,8 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /**
    * Writes every table as NDJSON plus a manifest (row count + sha256 per table) to R2.
-   * All tables are read inside ONE transaction, so the snapshot is consistent; the whole workspace is held in memory
-   * (fine for the spike's metadata-only rows; streaming export is a Phase 3 follow-up).
+   * Chunked and streamed (src/core/backup-export.ts, T17): NO single transaction over the workspace. Rowid tables stop at a high-water mark taken at the start, so a child never refers
+   * to a parent the snapshot lacks; a row DELETED below the mark while the export runs (the retention purge, which runs at another hour) is tolerated, a row that is missing is not.
    */
   async exportSnapshot(date: string): Promise<BackupManifest> {
     if (this.offboarding || this.offboarded) throw new Error('workspace is being deleted');

@@ -6,6 +6,8 @@ import { recordAudit, type AuditRole } from '../audit';
 import { integrationState } from './integration';
 import { writeSessionState } from './session';
 import { routePath } from 'hono/route';
+import { subjectHash } from '../erasure';
+import { phoneDigits } from '../text-normalise';
 import { SESSION_CHECKED_READS, gateForRoute } from './scopes';
 import { IdentityError, type IdentityVerifier, type Principal } from './verifier';
 
@@ -56,23 +58,38 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
       return c.json({ error, ...extra }, status);
     };
     if (!membership && !principal.superAdmin) return refuse('forbidden', 403);
-    // F4: per-workspace and per-integrator-client rate limit, as soon as the caller is a valid member (a platform operator is not limited by a store's bucket).
-    if (storeId && !principal.superAdmin) {
-      const wait = takeApiToken(storeId, principal.integration?.clientId ?? null);
-      if (wait) return c.json({ error: 'rate_limited' }, 429, { 'retry-after': String(wait) });
-    }
+    // I3: a platform super admin who is NOT a member reads a store only AS an operator looking at a merchant's workspace: the view-as header and a reason (audited below), on EVERY store
+    // route. Without them the read is refused and nothing is served or logged. (A write keeps its own refusal further down: operator_route_required.) Members are unaffected.
+    const viewAs = c.req.header('x-view-as-merchant') === '1';
+    if (storeId && !membership && principal.superAdmin && !principal.integration && !viewAs && !write) return c.json({ error: 'forbidden', message: 'view_as_required' }, 403);
     // T35: an operator looking at a merchant's workspace to help them. Read-only, a reason on every request, audited BEFORE it is served (no audit, no view).
-    if (c.req.header('x-view-as-merchant') === '1') {
+    if (viewAs) {
       if (!principal.superAdmin) return c.json({ error: 'forbidden', message: 'view_as_operators_only' }, 403);
       const reason = (c.req.header('x-view-as-reason') ?? '').trim();
       if (reason.length < 10 || reason.length > 200) return c.json({ error: 'invalid_request', message: 'view_as_reason_required' }, 400);
-      const route = new URL(c.req.url).pathname.replace(/^\/api\/v1/, '').replace(/\/\d{6,}(?=\/|$)/g, '/:id'); // the CONCRETE path (the audit must say WHICH record was viewed); a long digit run (a phone) is masked
+      // I4: the ROUTED pattern (as every other check uses) and the concrete route params as keyed hashes, never the raw path or a param value. A waId is reduced to its digits first
+      // (`%2B20...`, Arabic-Indic digits and `20-100-...` are the same person) and hashed as the erasure subject; every other param is hashed under its name.
+      const hashes: Record<string, string> = {};
+      // The params of the handler that WILL answer: this middleware runs before it, so they are read off the routed pattern against the path, segment by segment (decoded).
+      const patternParts = routed.split('/');
+      const pathParts = new URL(c.req.url).pathname.replace(/^\/api\/v1/, '').split('/');
+      for (let i = 0; i < patternParts.length; i++) {
+        const m = /^:([A-Za-z0-9_]+)/.exec(patternParts[i]!);
+        if (!m || pathParts[i] === undefined) continue;
+        let value = pathParts[i]!;
+        try { value = decodeURIComponent(value); } catch { /* keep the raw segment: it is only hashed */ }
+        const name = m[1]!;
+        const h = await subjectHash(c.env, storeId ?? '', name === 'waId' ? phoneDigits(value) : `${name}:${value}`);
+        if (h === null) return c.json({ error: 'unavailable', message: 'view_as_audit_unavailable' }, 503); // no key, no audit, no view
+        hashes[name] = h;
+      }
+      const route = routed;
       try {
         const at = Date.now();
         // AUDIT-REASONS-1: the typed reason goes to the deletable audit_reasons (removed with the workspace); the immutable row keeps only reason_id. One batch: no audit, no view.
         await c.env.DB.batch([
           reasonStmt(c.env, { at, workspaceId: storeId ?? null, actor: principal.userId, action: 'operator.view_as', reason }),
-          c.env.DB.prepare(`INSERT INTO operator_view_log (at, actor, workspace_id, method, route, reason, reason_id) VALUES (?, ?, ?, ?, ?, ?, ${LAST_REASON_ID})`).bind(at, principal.userId, storeId ?? '', c.req.method, route.slice(0, 300), REASON_PLACEHOLDER),
+          c.env.DB.prepare(`INSERT INTO operator_view_log (at, actor, workspace_id, method, route, reason, reason_id, params) VALUES (?, ?, ?, ?, ?, ?, ${LAST_REASON_ID}, ?)`).bind(at, principal.userId, storeId ?? '', c.req.method, route.slice(0, 300), REASON_PLACEHOLDER, JSON.stringify(hashes)),
         ]);
       } catch {
         return c.json({ error: 'unavailable', message: 'view_as_audit_unavailable' }, 503);
@@ -108,6 +125,12 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
         // No message content, no phone numbers: who, where, and under which scope.
         console.log(JSON.stringify({ audit: 'integration_write', clientId: principal.integration.clientId, jti: principal.integration.jti, storeId, scope: gate }));
       }
+    }
+    // F4: per-workspace and per-integrator-client rate limit, taken only AFTER the revocation checks (session, kill switch, integration state): a refused request (a revoked
+    // token, a suspended store) never spends the workspace's allowance, so a flood of dead tokens cannot lock the owner out. A platform operator is not limited by a store's bucket.
+    if (storeId && !principal.superAdmin) {
+      const wait = takeApiToken(storeId, principal.integration?.clientId ?? null);
+      if (wait) return c.json({ error: 'rate_limited' }, 429, { 'retry-after': String(wait) });
     }
     // A merchant's server needs the `api` feature in the plan (deny by default: no entitlement = no API). Checked on EVERY route, GET /me included,
     // from the workspace's own copy; an unregistered workspace has no copy, so it is refused without creating a Durable Object.

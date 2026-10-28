@@ -1,3 +1,4 @@
+import { disconnectNumber } from '../core/numbers/numbers';
 import { Hono } from 'hono';
 import { routePath } from 'hono/route';
 import { z } from 'zod';
@@ -362,6 +363,17 @@ operatorRoutes.delete('/workspaces/:workspaceId/contacts/:waId', async (c) => {
   return c.json(r.body, r.status);
 });
 
+// Final review I5: a person who connected a number removed the app (a P1 `meta_user_removed_app` and an owner notice); the OWNER or, here, an operator with a reason confirms any disconnect.
+operatorRoutes.post('/workspaces/:workspaceId/numbers/:phoneNumberId/disconnect', async (c) => {
+  const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
+  const pn = c.req.param('phoneNumberId')!;
+  if (!b.success || !/^[0-9]{1,30}$/.test(pn)) return bad(c, 'reason_required');
+  const workspaceId = c.req.param('workspaceId')!;
+  const r = await disconnectNumber(c.env, workspaceId, pn);
+  await recordAudit(c.env, { workspaceId, actor: actor(c), role: 'operator', action: 'number.disconnect', targetType: 'phoneNumberId', targetId: pn, reason: b.data.reason, status: r.ok ? 200 : r.status });
+  return r.ok ? c.json({ number: r.number, warnings: r.warnings }) : c.json({ error: r.error, message: r.message }, r.status);
+});
+
 operatorRoutes.get('/audit-log', async (c) => {
   const q = auditLogQuery.safeParse(c.req.query());
   if (!q.success) return bad(c, q.error.issues[0]?.message);
@@ -398,7 +410,7 @@ operatorRoutes.post('/token-key/rotate', async (c) => {
 operatorRoutes.get('/view-log', async (c) => {
   const q = z.object({ workspaceId: z.string().min(1).max(64), limit: z.coerce.number().int().min(1).max(200).default(50) }).safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
   if (!q.success) return bad(c);
-  const { results } = await c.env.DB.prepare(`SELECT v.at, v.actor, v.method, v.route, ${reasonSql('v', 'r')} AS reason FROM operator_view_log v LEFT JOIN audit_reasons r ON r.id = v.reason_id WHERE v.workspace_id = ? ORDER BY v.id DESC LIMIT ?`).bind(q.data.workspaceId, q.data.limit).all();
+  const { results } = await c.env.DB.prepare(`SELECT v.at, v.actor, v.method, v.route, v.params, ${reasonSql('v', 'r')} AS reason FROM operator_view_log v LEFT JOIN audit_reasons r ON r.id = v.reason_id WHERE v.workspace_id = ? ORDER BY v.id DESC LIMIT ?`).bind(q.data.workspaceId, q.data.limit).all();
   return c.json({ items: results });
 });
 // B9: Meta data-deletion requests, newest first. State and counts only: the Meta user id is never stored, only a hash that is not shown here.

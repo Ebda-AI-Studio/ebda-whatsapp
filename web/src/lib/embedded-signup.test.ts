@@ -26,11 +26,9 @@ describe('Embedded Signup launcher', () => {
     expect(r).toEqual({ code: 'code-xyz', event: 'FINISH', wabaId: '9001', phoneNumberId: '8001', businessId: '7001' });
   });
 
-  it('passes the app-scoped user id on (digits only), so Meta\'s data-deletion callback can find the connection', async () => {
+  it('never reports a user id: who connected is asked of Meta by the server (final review I5)', async () => {
     fakeFb((cb) => { post({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH', data: { phone_number_id: '8001', waba_id: '9001' } }); cb({ authResponse: { code: 'c', userID: '1234567890' } }); });
-    expect((await launchEmbeddedSignup(CFG)).fbUserId).toBe('1234567890');
-    fakeFb((cb) => { post({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH', data: { phone_number_id: '8001', waba_id: '9001' } }); cb({ authResponse: { code: 'c', userID: '12 34; drop' } }); });
-    expect((await launchEmbeddedSignup(CFG)).fbUserId).toBeUndefined();
+    expect(await launchEmbeddedSignup(CFG)).toEqual({ code: 'c', event: 'FINISH', wabaId: '9001', phoneNumberId: '8001' });
   });
 
   it('works when the code arrives before the session message (either order)', async () => {

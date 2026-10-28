@@ -17,6 +17,8 @@ export type ContactExport = {
   messages: Row[]; nextAfter: number | null;
   conversation?: { id: number; assigneeUserId: string | null; unread: number; lastMessageAt: number | null } | null;
   notes?: Row[]; tags?: string[]; orders?: Row[]; campaigns?: Row[];
+  /** The evidence behind the consent on record (who attested, the exact wording shown, when, through which door). First page only. */
+  consentProofs?: Row[];
 };
 
 /** `after` = the last message id of the previous page (0 for the first); the other sections come with the first page only. Long bodies are read back from R2 in full. */
@@ -57,6 +59,8 @@ export async function exportContact(sql: SqlStorage, media: R2Bucket, waId: stri
   ).toArray().map((o) => ({ orderId: o.order_id, orderNumber: o.order_number, paymentMethod: o.payment_method, status: o.status, totalMinor: o.total_minor, currency: o.currency, codState: o.cod_state, outcome: o.outcome, at: o.updated_at }));
   out.campaigns = sql.exec<{ campaign_id: string; state: string; skip_reason: string | null; at: number }>('SELECT campaign_id, state, skip_reason, at FROM campaign_recipients WHERE contact_id = ? ORDER BY at', c.id).toArray()
     .map((r) => ({ campaignId: r.campaign_id, state: r.state, skipReason: r.skip_reason, at: r.at }));
+  out.consentProofs = sql.exec<{ source: string; attested_by: string; wording: string; at: number; ref: string | null }>('SELECT source, attested_by, wording, at, ref FROM consent_proofs WHERE contact_id = ? ORDER BY id', c.id).toArray()
+    .map((p) => ({ source: p.source, attestedBy: p.attested_by, wording: p.wording, at: p.at, ref: p.ref }));
   return out;
 }
 
@@ -72,6 +76,24 @@ export function renameContact(sql: SqlStorage, waId: string, name: string | null
   const now = contactRow(sql, waId)!;
   return { waId, name: now.profile_name, optedOut: now.opted_out_at !== null };
 }
+
+/**
+ * Every DO table that carries a `contact_id` or `wa_id` column and what a merge does with it. `test/contact-merge-proofs.test.ts` walks the schema and fails when a table is missing, so a
+ * new per-person table cannot ship without a decision (same idea as ERASURE_TARGETS / ERASURE_EXEMPT for an erasure). `contacts.id` has no AUTOINCREMENT: a row left under the deleted id
+ * would be INHERITED by the next contact that reuses it, which is why nothing may stay under `from`.
+ */
+export const MERGE_TABLES: Readonly<Record<string, string>> = {
+  contacts: 'the source row is folded into the target (consent, opt-out, name, last inbound) and deleted',
+  conversations: 'the source conversation is merged into the target one (messages, notes, tags move), or re-pointed when the target has none',
+  contact_tags: 're-pointed: tags are added to the target, the source rows deleted',
+  consent_proofs: 're-pointed to the target: the evidence of a consent follows the person, and no proof may stay under an id that gets reused',
+  campaign_recipients: 're-pointed (a campaign both were in keeps the target row), leftovers deleted',
+  campaign_links: 're-pointed (one link per campaign and contact), leftovers deleted',
+  tier_slots: 'deleted: a 24 h slot of a number the person no longer is',
+  store_orders: 're-pointed by wa_id to the target',
+  bot_sessions: 'deleted: a half-finished bot conversation of the old number',
+  agent_handoffs: 'deleted: the handoff window of the old number',
+};
 
 /**
  * Folds `from` into `into` (the same person on a new number): messages, notes, tags, orders and campaign rows move; unread adds up; the older of two opt-outs wins (a STOP is
@@ -110,6 +132,7 @@ export function mergeContacts(sql: SqlStorage, fromWaId: string, intoWaId: strin
   // (campaign_id, contact_id) is unique: a campaign both numbers were in keeps ONE row (the target's); the source's leftover is removed.
   sql.exec('UPDATE OR IGNORE campaign_links SET contact_id = ? WHERE contact_id = ?', t.id, f.id);
   sql.exec('DELETE FROM campaign_links WHERE contact_id = ?', f.id);
+  sql.exec('UPDATE consent_proofs SET contact_id = ? WHERE contact_id = ?', t.id, f.id); // the proof of a consent follows the person
   sql.exec('DELETE FROM tier_slots WHERE contact_id = ?', f.id);
   sql.exec('UPDATE store_orders SET wa_id = ? WHERE wa_id = ?', intoWaId, fromWaId);
   sql.exec('DELETE FROM bot_sessions WHERE wa_id = ?', fromWaId);

@@ -69,6 +69,7 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`GET ${S}/numbers`]: 'person_only',
   [`GET ${S}/numbers/signup-config`]: 'person_only',
   [`POST ${S}/numbers/connect`]: 'person_only',
+  [`POST ${S}/numbers/notices/:noticeId/dismiss`]: 'person_only',
   [`POST ${S}/numbers/:phoneNumberId/disconnect`]: 'person_only',
   [`POST ${S}/numbers/:phoneNumberId/refresh`]: 'person_only',
   [`POST ${S}/numbers/:phoneNumberId/register`]: 'person_only',

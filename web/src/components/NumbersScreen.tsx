@@ -1,7 +1,7 @@
 import { Check, Circle, Phone, Plus } from 'lucide-react';
 import { BRAND } from '@brand';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import type { NumberDto, SharedNumberDto } from '../../../src/core/api/contract';
+import type { NumberDto, NumberNoticeDto, SharedNumberDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
 import type { InboxSource, NumbersApi } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
@@ -26,6 +26,7 @@ function stateOf(n: NumberDto): 'active' | 'pending' | 'failed' | 'locked' | 'di
 export function NumbersScreen({ t, lang, source, api }: Props) {
   const list = useCallback(() => api.list(), [api]);
   const { data: items, setData: setItems, error: loadFailed, reload: load } = useLoad<NumberDto[]>(list);
+  const [notices, setNotices] = useState<NumberNoticeDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note>(null);
   const [addedId, setAddedId] = useState<string | null>(null);
@@ -44,6 +45,9 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
     }, () => undefined);
     return () => { live = false; };
   }, [api]);
+  useEffect(() => {
+    if (owner) void api.notices?.().then(setNotices, () => undefined);
+  }, [api, owner, items]);
   useEffect(() => {
     void source.templates().then((ts) => setChecks((c) => ({ ...c, templates: ts.some((x) => x.status === 'APPROVED') })), () => undefined);
     void source.agentSettings?.().then((a) => setChecks((c) => ({ ...c, agent: !!a?.enabled })), () => undefined);
@@ -73,7 +77,7 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
       if (!cfg || !popup) { setNote({ kind: 'alert', text: t.signupUnavailable }); return; }
       const r = await popup;
       // The code expires 30 seconds after Meta issues it: send it before anything else.
-      const added = await api.connect({ code: r.code, event: r.event, wabaId: r.wabaId, phoneNumberId: r.phoneNumberId, ...(r.businessId ? { businessId: r.businessId } : {}), ...(r.fbUserId ? { fbUserId: r.fbUserId } : {}) });
+      const added = await api.connect({ code: r.code, event: r.event, wabaId: r.wabaId, phoneNumberId: r.phoneNumberId, ...(r.businessId ? { businessId: r.businessId } : {}) });
       setItems((xs) => [...(xs ?? []).filter((x) => x.phoneNumberId !== added.phoneNumberId), added]);
       setAddedId(added.phoneNumberId); // focus moves to the new number
     } catch (e) {
@@ -107,6 +111,12 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
       <div className="settings wide numbers-layout">
         <section className="numbers-main">
           <p className="muted intro">{t.numbersIntro}</p>
+          {notices.map((n) => (
+            <div key={n.id} className="number-health" role="status">
+              <p className="flag bad">{t.metaUserRemovedApp}</p>
+              <button type="button" className="btn quiet" onClick={() => void api.dismissNotice?.(n.id).then(() => setNotices((l) => l.filter((x) => x.id !== n.id)), (e) => setNote(explain(e)))}>{t.metaUserRemovedAppKeep}</button>
+            </div>
+          ))}
           {busy && <p className="muted" role="status">{t.connecting}</p>}
           {note && <p ref={noteRef} tabIndex={-1} role={note.kind} className={note.kind === 'alert' ? 'error-text' : 'muted'}>{note.text}</p>}
           {loadFailed ? <LoadError t={t} onRetry={load} />

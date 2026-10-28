@@ -6,6 +6,9 @@ export type TaskKind = 'backup' | 'r2_drain' | 'send_release' | 'campaign_step' 
 /** One pending row at most: scheduling again keeps the earlier due time. */
 const SINGLETONS: ReadonlySet<TaskKind> = new Set(['backup', 'r2_drain', 'catalog_sync', 'catalog_reconcile', 'kb_index', 'catalog_embed', 'campaign_step', 'wallet_sweep', 'ledger_drain', 'funnel_rollup', 'credit_month', 'retention_purge']);
 export const DAILY_KINDS = ['backup', 'r2_drain', 'retention_purge'] as const;
+/** Cairo hour each daily task runs. The retention purge deletes history, so it must not run while the nightly backup (02:00) is reading it. */
+export const RETENTION_HOUR_LOCAL = 5;
+export const dailyHour = (kind: (typeof DAILY_KINDS)[number]): number => (kind === 'retention_purge' ? RETENTION_HOUR_LOCAL : 2);
 
 export type DueTask = { id: number; kind: TaskKind; due_at: number; payload: string | null; attempts: number };
 

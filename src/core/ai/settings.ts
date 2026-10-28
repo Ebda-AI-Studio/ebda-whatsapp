@@ -4,11 +4,15 @@ import type { Env } from '../../env';
 import { agentConfig } from './config';
 import { validBaseUrl, type LlmProvider } from './provider';
 import { decryptSecret, encryptSecret } from './secrets';
+import type { PromisePolicy } from './reply-guard';
 
 /** Workspace settings of the AI agent (stored as key/value text in `agent_state`). The shape is the API contract's. */
 export const agentSettingsSchema = agentSettingsFields;
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;
-export const DEFAULT_AGENT_SETTINGS: AgentSettings = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', provider: 'workers-ai', model: null, baseUrl: null };
+export const DEFAULT_AGENT_SETTINGS: AgentSettings = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false };
+/** The promise policy the reply guard applies (Ruling WA-GUARD-PROMISE-1): off unless the merchant switched it on. */
+export const promisePolicyOf = (s: AgentSettings): PromisePolicy => ({ refund: s.allowRefund, discount: s.allowDiscount, freeDelivery: s.allowFreeDelivery, exchange: s.allowExchange, guarantee: s.allowGuarantee });
+const BOOLEAN_KEYS: ReadonlySet<keyof AgentSettings> = new Set(['enabled', 'allowRefund', 'allowDiscount', 'allowFreeDelivery', 'allowExchange', 'allowGuarantee']);
 
 /** What a PUT may carry. `apiKey` is write-only: a string sets it, null removes it, absent keeps it. */
 export type AgentSettingsUpdate = Partial<AgentSettings> & { apiKey?: string | null };
@@ -27,12 +31,12 @@ export function readAgentSettings(sql: Sql): AgentSettings {
   for (const k of KEYS) {
     const v = stored.get(k);
     if (v === undefined) continue;
-    if (k === 'enabled') out.enabled = v === '1';
+    if (BOOLEAN_KEYS.has(k)) (out as Record<string, unknown>)[k] = v === '1';
     else if (k === 'handoffMinutes') out.handoffMinutes = Number(v) || DEFAULT_AGENT_SETTINGS.handoffMinutes;
     else if (k === 'model' || k === 'baseUrl') out[k] = v === '' ? null : v;
     else if (k === 'language') out.language = v === 'en' || v === 'auto' ? v : 'ar';
     else if (k === 'provider') out.provider = v === 'openai-compatible' ? 'openai-compatible' : 'workers-ai';
-    else out[k] = v;
+    else (out as Record<string, unknown>)[k] = v; // persona, faqText
   }
   return out;
 }
@@ -75,7 +79,7 @@ export async function planAgentUpdate(env: Env, workspaceId: string, sql: Sql, p
 }
 
 export function writeAgentSettings(sql: Sql, s: AgentSettings, secret: { set: string } | { clear: true } | null): void {
-  for (const k of KEYS) putAgentState(sql, `setting.${k}`, k === 'enabled' ? (s.enabled ? '1' : '0') : s[k] === null ? '' : String(s[k]));
+  for (const k of KEYS) putAgentState(sql, `setting.${k}`, BOOLEAN_KEYS.has(k) ? (s[k] ? '1' : '0') : s[k] === null ? '' : String(s[k]));
   if (secret && 'set' in secret) putAgentState(sql, 'secret.apiKey', secret.set);
   else if (secret) sql.exec("DELETE FROM agent_state WHERE key = 'secret.apiKey'");
 }

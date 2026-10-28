@@ -3,6 +3,7 @@ import { connectNumberRequest, listNumbersResponse, signupConfigDto } from '../c
 import { SignupConfigError, connectNumber, disconnectNumber, listNumbers, refreshNumber, resumeSetup, signupEnabled, type NumberResult } from '../core/numbers/numbers';
 import { apiError, planRequired, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 import { alert } from '../core/observability';
+import { openNotices, resolveNotice } from '../core/meta/notices';
 
 const owner = managesStore;
 const PN = /^[0-9]{1,30}$/;
@@ -41,8 +42,17 @@ async function guarded(c: ApiContext, run: (workspaceId: string) => Promise<Numb
 
 numbersRoutes.get('/stores/:storeId/numbers', async (c) => {
   if (!(await workspaceStub(c))) return apiError(c, 404, 'not_found');
-  const body: typeof listNumbersResponse._output = { items: await listNumbers(c.env, c.req.param('storeId')!) };
+  const body: typeof listNumbersResponse._output = { items: await listNumbers(c.env, c.req.param('storeId')!), notices: owner(c) ? await openNotices(c.env, c.req.param('storeId')!) : [] };
   return c.json(body);
+});
+
+/** The owner has read a notice and keeps the numbers connected. (Disconnecting a number settles its notices by itself.) */
+numbersRoutes.post('/stores/:storeId/numbers/notices/:noticeId/dismiss', async (c) => {
+  if (!owner(c)) return apiError(c, 403, 'forbidden');
+  const id = Number(c.req.param('noticeId'));
+  if (!Number.isInteger(id) || id < 1) return apiError(c, 400, 'invalid_request');
+  const ok = await resolveNotice(c.env, c.req.param('storeId')!, id, c.get('principal').userId);
+  return ok ? c.json({ ok: true }) : apiError(c, 404, 'not_found');
 });
 
 /** The public Meta ids the page needs to open Embedded Signup (v4+: the configuration decides the flow). Not secrets, but owner-only like connect. */

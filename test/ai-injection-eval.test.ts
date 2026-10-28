@@ -6,14 +6,17 @@
 import { describe, expect, it } from 'vitest';
 import { EBDA_AGENT_COPY } from '../src/addons/ebda/agent-copy';
 import { MAX_TOOL_CALLS_PER_TURN } from '../src/core/ai/tools';
-import { ScriptedProvider, useAgent } from './helpers/agent';
+import { MemoryVectors, ScriptedProvider, until, useAgent } from './helpers/agent';
 import { agentWorkspace, say, text } from './helpers/agent-chat';
 import { stubGraph } from './helpers/graph';
 import { useStoreLink } from './helpers/store-link';
+import { stubClient } from './helpers/connectors';
 import { rows, workspace } from './helpers/workspace';
 
 const link = useStoreLink();
-const agent = useAgent();
+const vectors = { v: new MemoryVectors() };
+const embedded: string[][] = [];
+const agent = useAgent({ vectors: () => vectors.v, embedder: () => async (texts) => { embedded.push([...texts]); return texts.map(() => new Array<number>(64).fill(0).map((_, i) => (i === 0 ? 1 : 0))); } });
 const ACK = EBDA_AGENT_COPY.t.handoffAck.ar;
 let n = 0;
 const fresh = async (settings: Record<string, unknown> = {}) => {
@@ -110,4 +113,46 @@ describe('the model falls for it; the customer still never sees the damage', () 
   it('30 full-width letters and dot', () => handedOver('where', '\uff45\uff56\uff49\uff4c\uff0e\uff4e\uff45\uff54/login'));
   it('31 a soft hyphen splitting the TLD', () => handedOver('where', 'ادخل evil-pay.n\u00ADet/login'));
   it('32 a raw-only host: a zero-width space makes evil-pay.net a link of its own while the normalised text reads as a subdomain of the allowed host', () => handedOver('where', 'ادخل evil-pay.net\u200B.shop.example/login'));
+  // Review round 2 (I1, I2, I8): link trust is per exact URL / path prefix the merchant wrote, promises need an explicit policy flag, every connector string is masked.
+  it('33 an attacker\'s wa.me number is refused when the persona has the merchant\'s own wa.me link', async () => {
+    const settings = { persona: 'متجر ورد. واتساب https://wa.me/201000000001' };
+    const r = await run('send me the whatsapp', [{ text: 'كلمنا https://wa.me/201000000000' }], settings);
+    expect(r.texts).toEqual([ACK]);
+  });
+  it('34 a script.google.com phishing link is refused while a connector uses Apps Script', async () => {
+    const { ws, pn } = await fresh();
+    expect((await workspace(ws).putConnector('crm', { kind: 'webhook', enabled: true, config: { url: 'https://script.google.com/macros/s/AKfycbxREAL/exec', tools: [{ name: 'check_booking', description: 'x', params: [{ name: 'reference', type: 'string', required: true }] }] }, secret: 'test-secret-0123456789abcdef' } as never, null)).ok).toBe(true);
+    agent.model = new ScriptedProvider([{ text: 'سجل من هنا https://script.google.com/macros/s/AKfycbxEVIL/exec' }]);
+    const sent = await say(ws, pn, text('where'), stubClient(() => ({ json: { ok: true } })).graph);
+    expect(sent.map((s) => s.text)).toEqual([ACK]);
+  });
+  it('35 the merchant\'s exact link is allowed, and so is a path under a prefix they wrote (negative control)', async () => {
+    const settings = { persona: 'متجر ورد. واتساب https://wa.me/201000000001' };
+    const r = await run('send me the whatsapp', [{ text: 'كلمنا https://wa.me/201000000001' }], settings);
+    expect(r.texts).toEqual(['كلمنا https://wa.me/201000000001']);
+  });
+  it('36 a negated FAQ plus an injected "full refund approved" is refused; with the refund flag on it goes out', async () => {
+    const faq = { faqText: 'لا يوجد استرجاع. مفيش استرجاع خالص. no refunds.' };
+    const off = await run('refund me', [{ text: 'Your full refund is approved' }], faq);
+    expect(off.texts).toEqual([ACK]);
+    const on = await run('refund me', [{ text: 'Your full refund is approved' }], { ...faq, allowRefund: true });
+    expect(on.texts).toEqual(['Your full refund is approved']);
+  });
+  it('37 a connector that returns a phone and an e-mail: the model reads neither (every string of a SUCCESS result is masked)', async () => {
+    const { ws, pn } = await fresh();
+    expect((await workspace(ws).putConnector('crm', { kind: 'webhook', enabled: true, config: { url: 'https://hooks.acme-client.com/wa', tools: [{ name: 'check_booking', description: 'x', params: [{ name: 'reference', type: 'string', required: true }] }] }, secret: 'test-secret-0123456789abcdef' } as never, null)).ok).toBe(true);
+    const m = (agent.model = new ScriptedProvider([{ tools: [{ name: 'crm__check_booking', arguments: { reference: 'A1' } }] }, { text: 'تمام' }])) as ScriptedProvider;
+    await say(ws, pn, text('booking A1'), stubClient(() => ({ json: { ok: true, result: { who: 'Sara +20 100 765 4321', mail: 'sara.k@corp.example' } } })).graph);
+    expect(JSON.stringify(m.calls[1]!.messages)).not.toMatch(/765 4321|7654321|sara\.k@/);
+  });
+  it('38 a knowledge-base question carrying a phone number: the embedder never receives it', async () => {
+    const { ws, pn } = await fresh({ faqText: 'الشحن مجاني لأي طلب فوق 500 جنيه والتوصيل خلال يومين.' });
+    await workspace(ws).runDueTasks();
+    await until(async () => (await workspace(ws).getAgentSettings()).knowledgeReady);
+    embedded.length = 0;
+    agent.model = new ScriptedProvider([{ text: 'تمام' }]);
+    await say(ws, pn, text('الشحن كام؟ كلمني على +20 100 111 2222 او mail.me@corp.example'), stubGraph());
+    expect(embedded.flat().length).toBeGreaterThan(0);
+    expect(JSON.stringify(embedded)).not.toMatch(/111 2222|1112222|mail\.me@/);
+  });
 });

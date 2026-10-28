@@ -30,7 +30,7 @@ describe('reading as the merchant', () => {
     expect(((await res.json()) as { items: unknown[] }).items.length).toBeGreaterThan(0);
     const rows = await log(ws);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ actor: OP1, workspace_id: ws, method: 'GET', route: `/stores/${ws}/conversations`, reason: REASON });
+    expect(rows[0]).toMatchObject({ actor: OP1, workspace_id: ws, method: 'GET', route: '/stores/:storeId/conversations', reason: REASON });
     expect(rows[0]!.at).toBeGreaterThanOrEqual(before);
   });
 
@@ -49,7 +49,7 @@ describe('reading as the merchant', () => {
     const rows = await log(ws);
     expect(rows).toHaveLength(1);
     expect(JSON.stringify(rows)).not.toMatch(/201001234567|SECRET|x=1/);
-    expect(rows[0]!.route).toBe(`/stores/${ws}/contacts/:id/orders`);
+    expect(rows[0]!.route).toBe('/stores/:storeId/contacts/:waId/orders');
   });
 
   it('a reason is required: missing or too short is 400 and nothing is read or logged', async () => {
@@ -101,12 +101,14 @@ describe('it is read-only', () => {
     expect(res.status).toBe(403);
   });
 
-  it('without the header an operator behaves exactly as before (the merchant app and the operator console are unchanged)', async () => {
+  it('without the header a NON-MEMBER operator is refused on every store route (final review I3: view_as_required); a member is unchanged', async () => {
     const ws = W(9906);
-    await apiFor(ws);
+    const owner = await apiFor(ws);
     const res = await SELF.fetch(`https://x/api/v1/stores/${ws}/conversations`, { headers: { authorization: `Bearer ${await adminToken(OP1)}` } });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ message: 'view_as_required' });
     expect(await log(ws)).toEqual([]);
+    expect((await owner.call('GET', '/conversations')).status).toBe(200);
   });
 
   it('only an operator may use it: a merchant owner sending the header is refused and nothing is logged', async () => {
@@ -127,7 +129,7 @@ describe('reading the audit', () => {
     const r = await operatorCall(OP1, 'GET', `/view-log?workspaceId=${ws}`);
     expect(r.status).toBe(200);
     const items = ((await r.json()) as { items: { route: string; actor: string }[] }).items;
-    expect(items.map((i) => i.route)).toEqual([`/stores/${ws}/wallet`, `/stores/${ws}/conversations`]);
+    expect(items.map((i) => i.route)).toEqual(['/stores/:storeId/wallet', '/stores/:storeId/conversations']);
     await expect(env.DB.prepare('UPDATE operator_view_log SET reason = ?').bind('x').run()).rejects.toThrow(/append-only/);
     await expect(env.DB.prepare('DELETE FROM operator_view_log').run()).rejects.toThrow(/append-only/);
   });
