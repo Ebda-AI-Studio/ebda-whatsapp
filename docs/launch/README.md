@@ -40,14 +40,14 @@ The `WhatsAppBridge` RPC entrypoint, the `ebda-wa-events` / `ebda-store-events` 
 
 ## 6. Cloudflare resources (Claude, on the personal account `69188202efc4df480140dd76545aa3ab` only)
 Check `npx wrangler whoami` first; never deploy to any other account.
-`bash scripts/cf-resources.sh` lists what exists and prints what is missing (dry run, creates nothing); `--apply` creates the missing ones after the launch go. Applied 2026-10-25 on the coordinator's go: `ebda-wa-backups` (+ `expire-30d` lifecycle), queues `ebda-wa-events` (+dlq) and `ebda-store-events`, Vectorize `ebda-wa-kb` created; the re-run reports 0 missing. Their bindings (Vectorize, Store-link queues) stay commented in `wrangler.jsonc` until the deploy that uses them.
+`bash scripts/cf-resources.sh` lists what exists and prints what is missing (dry run, creates nothing); `--apply` creates the missing ones after the launch go. Applied 2026-10-25 on the coordinator's go: `ebda-wa-backups` (+ `expire-30d` lifecycle), queues `ebda-wa-events` (+dlq) and `ebda-store-events`, Vectorize `ebda-wa-kb` created; the re-run reports 0 missing. The Store-link queue bindings went live with WA-LINK-ON-1; Vectorize stays commented in `wrangler.jsonc` until the deploy that uses them.
 | Resource | Command / place | Binding |
 |---|---|---|
 | R2 backups + 30-day lifecycle | `npx wrangler r2 bucket create ebda-wa-backups` · `npx wrangler r2 bucket lifecycle add ebda-wa-backups expire-30d --expire-days 30` | `BACKUPS` |
 | R2 logs + Logpush (Ahmad clicks) | `docs/runbooks/cloudflare-account.md` § Logs | n/a |
 | Vectorize index (AI knowledge base) | `npx wrangler vectorize create ebda-wa-kb --dimensions=<model dims> --metric=cosine`, then uncomment the binding | `VECTORIZE` |
 | Store events queues | `npx wrangler queues create ebda-wa-events` (+ `-dlq`), `ebda-store-events`; uncomment bindings | `STORE_EVENTS`, consumer |
-| Store service binding | uncomment once the Store Worker exists | `STORE_BRIDGE` |
+| Store service binding | live (WA-LINK-ON-1); deploy `ebda-api` first | `STORE_BRIDGE` |
 | Accounts revocation binding | uncomment the `services` line in `wrangler.jsonc` once `ebda-accounts` (entrypoint `Accounts`, RPC `isRevoked(sid)`) is deployed; top-ups and operator writes answer 503 until then | `ACCOUNTS` |
 | Billing alerts (Ahmad clicks) | `docs/runbooks/cloudflare-account.md` § Billing alerts | n/a |
 

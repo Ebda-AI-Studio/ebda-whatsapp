@@ -47,11 +47,17 @@
     { "binding": "BACKUPS", "bucket_name": "ebda-wa-backups" }
   ],
   "queues": {
-    "producers": [{ "binding": "SEND_QUEUE", "queue": "ebda-wa-send" }],
+    "producers": [
+      { "binding": "SEND_QUEUE", "queue": "ebda-wa-send" },
+      // Store link: outcomes and opt-outs to the Store (consumed by ebda-api).
+      { "binding": "STORE_EVENTS", "queue": "ebda-store-events" }
+    ],
     "consumers": [
       { "queue": "ebda-wa-send", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-send-dlq" },
       // The dead letters: marked failed + a P1 `send_dlq` alert (src/core/send-queue.ts consumeSendDlq). Nothing else may consume this queue.
-      { "queue": "ebda-wa-send-dlq", "max_batch_size": 10, "max_retries": 2 }
+      { "queue": "ebda-wa-send-dlq", "max_batch_size": 10, "max_retries": 2 },
+      // Store link: events from the Store (ebda-api produces). One consumer per queue; checked empty 2026-10-28.
+      { "queue": "ebda-wa-events", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-events-dlq" }
     ]
   },
   // Workers AI: the AI agent's default model and the knowledge-base embeddings (@cf/baai/bge-m3). Billed to this account.
@@ -67,7 +73,11 @@
     { "name": "ebda-wa-campaign", "binding": "CAMPAIGN_WORKFLOW", "class_name": "CampaignWorkflow" }
   ],
   // Session revocation for top-ups, package checkout and operator writes (fail closed when the call fails).
-  "services": [{ "binding": "ACCOUNTS", "service": "ebda-accounts", "entrypoint": "Accounts" }]
+  "services": [
+    { "binding": "ACCOUNTS", "service": "ebda-accounts", "entrypoint": "Accounts" },
+    // Store link (Phase 4, Ruling WA-LINK-ON-1): the Store API Worker's RPC entrypoint. The Worker must be deployed or the whole deploy fails.
+    { "binding": "STORE_BRIDGE", "service": "ebda-api", "entrypoint": "WhatsAppBridge" }
+  ]
   // ---- Billing (Phase 7). Switches and secrets (see docs/billing.md). TOPUPS_ENABLED stays off until Kashier is configured:
   //   vars: TOPUPS_ENABLED ("true"), PACKAGE_CHECKOUT_ENABLED ("true", self-serve packages, default off), KASHIER_MERCHANT_ID, KASHIER_FEE_BPS, KASHIER_FEE_FIXED_MINOR, ADJUSTMENT_APPROVAL_MINOR, ADJUSTMENT_DAILY_CAP
   //   secret: KASHIER_API_KEY and KASHIER_SECRET_KEY (`wrangler secret put`; the Secret key confirms webhooks, vars KASHIER_API_URL optional); service binding ACCOUNTS is required for top-ups and operator writes (fail closed
@@ -82,12 +92,6 @@
   // Secrets: AGENT_SECRETS_KEY (base64, 32 random bytes; encrypts merchants' own model keys). Var AGENT_MODEL overrides the default Workers AI model.
   // ---- Own number (Phase 8.1, docs/numbers.md). Var EMBEDDED_SIGNUP_ENABLED="1" turns the /numbers routes on; secrets TOKEN_ENC_KEY (base64, 32 random bytes) and
   // META_APP_ID are then required (a request answers 503 naming the missing key). META_APP_SECRET and META_SYSTEM_TOKEN are already secrets.
-  // ---- Store link (Phase 4). Left OFF until the Store side exists: a binding to a service or queue that is not
-  // deployed fails the whole deploy. When the Store Worker, `ebda-wa-events` and `ebda-store-events` exist, add:
-  //   "services": [{ "binding": "STORE_BRIDGE", "service": "<store api worker name>", "entrypoint": "WhatsAppBridge" }],
-  //   queues.producers += { "binding": "STORE_EVENTS", "queue": "ebda-store-events" },
-  //   queues.consumers += { "queue": "ebda-wa-events", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "ebda-wa-events-dlq" },
-  // and set the PROOF_URL_SECRET secret (wrangler secret put) and the PUBLIC_BASE_URL var (this Worker's public origin).
-  // The accounts service reaches the one-time-code RPC with a service binding whose entrypoint is "WhatsAppOtp". Until then the link is inert: the consumer is never
-  // called, /me reports codOutcome:false and the ordering bot stays silent.
+  // ---- Store link (Phase 4): ON (Ruling WA-LINK-ON-1). Bindings are in services / queues above; PROOF_URL_SECRET (secret) and PUBLIC_BASE_URL (var) are set.
+  // The one-time-code RPC is the `WhatsAppOtp` entrypoint of this Worker; no Worker binds it yet (docs/store-link.md, OTP-1).
 }

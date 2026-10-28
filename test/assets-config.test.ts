@@ -94,3 +94,12 @@ it('a brand with its own OIDC provider lists that issuer origin, exactly, in con
 it('production lists the secrets /health must find well-formed (the first deploy\'s section B keys)', () => {
   expect(String(cfg.vars?.REQUIRED_SECRETS ?? '').split(',').sort()).toEqual(['AGENT_SECRETS_KEY', 'BACKUP_HMAC_KEY', 'ERASURE_HMAC_KEY', 'PROOF_URL_SECRET', 'SUITE_BUYER_KEY_SECRET', 'TOKEN_ENC_KEY']);
 });
+
+it('has the Store link on (WA-LINK-ON-1): bridge to ebda-api, one events consumer with its DLQ, the store-events producer', () => {
+  expect(cfg.services).toContainEqual({ binding: 'STORE_BRIDGE', service: 'ebda-api', entrypoint: 'WhatsAppBridge' });
+  expect(cfg.queues.producers).toContainEqual({ binding: 'STORE_EVENTS', queue: 'ebda-store-events' });
+  const events = cfg.queues.consumers.filter((c: { queue: string }) => c.queue === 'ebda-wa-events');
+  expect(events).toEqual([{ queue: 'ebda-wa-events', max_batch_size: 10, max_retries: 5, dead_letter_queue: 'ebda-wa-events-dlq' }]);
+  // The DLQ of the events queue is not consumed here (no handler would ack it); the send DLQ is.
+  expect(cfg.queues.consumers.some((c: { queue: string }) => c.queue === 'ebda-wa-events-dlq')).toBe(false);
+});
