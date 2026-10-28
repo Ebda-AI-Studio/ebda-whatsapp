@@ -5,6 +5,11 @@ import { configureWriteSessionDefault } from '../src/core/identity/session';
 
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
+// WA-LINK-ON-1: production binds the Store (STORE_BRIDGE, STORE_EVENTS). The default test world is the link-OFF one every older test was
+// written against; a test that needs the link registers its own bridge (test/helpers/fake-store.ts) or passes its own env.
+delete (env as Partial<typeof env>).STORE_BRIDGE;
+delete (env as Partial<typeof env>).STORE_EVENTS;
+
 const realFetch = globalThis.fetch;
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const leaked: string[] = [];

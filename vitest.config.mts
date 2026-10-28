@@ -21,6 +21,11 @@ export default defineConfig({
               workers: [{
                 name: 'ebda-accounts', modules: true, compatibilityDate: '2026-10-24',
                 script: "import { WorkerEntrypoint } from 'cloudflare:workers'; export class Accounts extends WorkerEntrypoint { async isRevoked() { throw new Error('accounts service is not available in tests'); } } export default { fetch() { return new Response(null, { status: 404 }); } };",
+              }, {
+                // WA-LINK-ON-1: wrangler.jsonc binds STORE_BRIDGE to ebda-api, and workerd refuses to start with a binding to a missing service.
+                // test/setup.ts then removes STORE_BRIDGE / STORE_EVENTS from env so the default test world stays link-off.
+                name: 'ebda-api', modules: true, compatibilityDate: '2026-10-24',
+                script: "import { WorkerEntrypoint } from 'cloudflare:workers'; export class WhatsAppBridge extends WorkerEntrypoint {} export default { fetch() { return new Response(null, { status: 404 }); } };",
               }],
               bindings: { REQUIRED_SECRETS: '', TOPUPS_ENABLED: 'true', PACKAGE_CHECKOUT_ENABLED: 'true', KASHIER_REFUNDS_ENABLED: 'true', INSTAPAY_BILLING_ENABLED: 'true', SUPPORT_EMAIL: 'ahlan@ebda.app', AI_PRICE_INPUT_USD_PER_M: '0.293', AI_PRICE_OUTPUT_USD_PER_M: '2.253', EBDA_INSTAPAY_HANDLE: 'ebda@instapay', EBDA_INSTAPAY_PAYEE_NAME: 'Ebda AI Studio', EBDA_INSTAPAY_QR_URL: 'https://media.ebda.app/platform/instapay-qr.jpg', META_APP_SECRET: 'test-secret', META_VERIFY_TOKEN: 'VT', META_SYSTEM_TOKEN: 'test-token', EMBEDDED_SIGNUP_ENABLED: '1', META_APP_ID: 'app-1', EMBEDDED_SIGNUP_CONFIG_ID: 'cfg-1', TOKEN_ENC_KEY: testKey(), ERASURE_HMAC_KEY: 'test-erasure-hmac-key-0123456789abcdef', TEST_MIGRATIONS: migrations, BENCH: process.env.BENCH ?? '0', VITEST_TEST_TIMEOUT: process.env.VITEST_TEST_TIMEOUT ?? '20000', BENCH_ABSOLUTE_MS: process.env.BENCH_ABSOLUTE_MS ?? '' },
             },
