@@ -61,8 +61,9 @@ it('the toast is placed with logical properties, so it is centred and padded rig
   expect(rules).toMatch(/inset-inline/);
 });
 
-it('the production Worker answers on wa.ebda.app as a custom domain, and its public origin is that host', () => {
-  expect(cfg.routes).toEqual([{ pattern: 'wa.ebda.app', custom_domain: true }]);
+it('the production Worker answers on wa.ebda.app as a custom domain plus an explicit zone route (WA-ROUTE-1), and its public origin is that host', () => {
+  // The zone route keeps the Store's `*.ebda.app/*` and `*/*` wildcard routes from shadowing the custom domain.
+  expect(cfg.routes).toEqual([{ pattern: 'wa.ebda.app', custom_domain: true }, { pattern: 'wa.ebda.app/*', zone_name: 'ebda.app' }]);
   expect(cfg.vars.PUBLIC_BASE_URL).toBe('https://wa.ebda.app');
 });
 
