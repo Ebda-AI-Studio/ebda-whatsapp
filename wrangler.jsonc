@@ -7,7 +7,12 @@
   "compatibility_flags": ["nodejs_compat"],
   // Production host (LAUNCH-SUITE-1). workers.dev stays on until wa.ebda.app is verified live, then goes off (one surface).
   "workers_dev": true,
-  "routes": [{ "pattern": "wa.ebda.app", "custom_domain": true }],
+  // The custom domain alone is NOT enough: the Store's ebda-web Worker holds the zone routes `*.ebda.app/*` and `*/*`, and a zone route
+  // beats a custom domain, so wa.ebda.app served the Store's 404 until this explicit, more specific route existed (Ruling WA-ROUTE-1).
+  "routes": [
+    { "pattern": "wa.ebda.app", "custom_domain": true },
+    { "pattern": "wa.ebda.app/*", "zone_name": "ebda.app" }
+  ],
   "assets": {
     "directory": "web/dist",
     "binding": "ASSETS",
