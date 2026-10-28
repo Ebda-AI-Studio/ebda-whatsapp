@@ -5,7 +5,7 @@ import { buyerKey } from '../src/core/buyer-key';
 import { configureCampaignLinks, isAutomatedFetch, newSignedCode, parseCode, validateTrackedUrl, withUtm, type LinkConfig } from '../src/core/campaigns/links';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import { BUYER_SECRET } from './helpers/store-link';
-import { holdAlarm, registerWorkspace, seedContacts, seedTemplate } from './helpers/campaigns';
+import { holdAlarm, registerWorkspace, seedContacts, seedTemplate, seedOwner } from './helpers/campaigns';
 import { exec, rows, workspace } from './helpers/workspace';
 
 useApiKey();
@@ -80,6 +80,7 @@ it('each recipient gets their own link in the body or in a URL button; skipped r
   await seedTemplate(ws, { name: 'btn', components: BUTTON_LINK });
   await seedContacts(ws, 3);
   await exec(ws, "UPDATE contacts SET opted_out_at = 5 WHERE wa_id = '201010000001'");
+  await seedOwner(ws);
   const created = await workspace(ws).createCampaign({ name: 'Eid', template: { name: 'promo', language: 'ar' }, params: [{ kind: 'name', fallback: 'x' }, { kind: 'link' }], audience: { criteria: { everyone: true } }, linkUrl: DEST, phoneNumberId: 'pn-x', actor: 'u' });
   if (!created.ok) throw new Error(created.reason);
   await exec(ws, "UPDATE campaigns SET status = 'running', attempt = 1 WHERE id = ?", created.campaign.id);
@@ -90,6 +91,7 @@ it('each recipient gets their own link in the body or in a URL button; skipped r
   const jobs = (await rows<{ payload: string }>(ws, "SELECT payload FROM scheduled_tasks WHERE kind = 'send_release' ORDER BY id")).map((t) => JSON.parse(t.payload).job);
   expect(jobs.map((j) => j.template.components[0].parameters[1].text)).toEqual(links.map((l) => `${BASE}/t/${l.code}`));
   // URL button flavour
+  await seedOwner(ws);
   const b = await workspace(ws).createCampaign({ name: 'Btn', template: { name: 'btn', language: 'ar' }, params: [{ kind: 'name', fallback: 'x' }, { kind: 'link_code' }], audience: { criteria: { everyone: true } }, linkUrl: DEST, phoneNumberId: 'pn-x', actor: 'u' });
   if (!b.ok) throw new Error(b.reason);
   await exec(ws, "UPDATE campaigns SET status = 'running', attempt = 1 WHERE id = ?", b.campaign.id);
@@ -104,6 +106,7 @@ async function sentCampaign(ws: string, n = 3) {
   await holdAlarm(ws);
   await seedTemplate(ws, { components: BODY_LINK });
   await seedContacts(ws, n);
+  await seedOwner(ws);
   const created = await workspace(ws).createCampaign({ name: 'Eid Sale', template: { name: 'promo', language: 'ar' }, params: [{ kind: 'name', fallback: 'x' }, { kind: 'link' }], audience: { criteria: { everyone: true } }, linkUrl: DEST, phoneNumberId: 'pn-x', actor: 'u' });
   if (!created.ok) throw new Error(created.reason);
   await exec(ws, "UPDATE campaigns SET status = 'running', attempt = 1 WHERE id = ?", created.campaign.id);

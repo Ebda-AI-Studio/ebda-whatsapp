@@ -135,6 +135,7 @@ describe('the new-workspace campaign cap is per owner and per shared number', ()
     try {
       const [a, b] = [W(14), W(15)];
       for (const ws of [a, b]) await env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, 1)').bind(ws, ws).run();
+      await env.DB.prepare("INSERT INTO workspace_owners (workspace_id, owner_user_id, updated_at) VALUES (?, 'owner-s1', 1), (?, 'owner-s2', 1)").bind(a, b).run();
       const ca = await setup(a, 'pn-shared');
       expect(await page(a, ca.id, 0)).toEqual({ state: 'next', count: 3 });
       const cb = await setup(b, 'pn-shared'); // the fixture hands the number to the second workspace; the allowance is the number's, so it is already used

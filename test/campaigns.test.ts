@@ -5,7 +5,7 @@ import { PAGE_SIZE, resolveParams } from '../src/core/campaigns/campaigns';
 import { runCampaign } from '../src/core/campaigns/workflows';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import {
-  PN, campaignMessages, fakeStep, holdAlarm, installWallet, makeCampaign, resetWallet, seedContacts, seedTemplate, setPageSize, setTier, stepsOf,
+  PN, campaignMessages, fakeStep, holdAlarm, installWallet, makeCampaign, resetWallet, seedContacts, seedOwner, seedTemplate, setPageSize, setTier, stepsOf,
 } from './helpers/campaigns';
 import { exec, openChat, rows, workspace, own } from './helpers/workspace';
 
@@ -295,6 +295,7 @@ it('a scheduled campaign sleeps until its time, then activates once; paused befo
 it('the real workflow runs a campaign end to end (start, page, done) and a second generation retires the first', async () => {
   const ws = W(644);
   const api = await apiFor(ws);
+  await seedOwner(ws);
   await seedTemplate(ws);
   await seedContacts(ws, 3);
   const created = campaignDto.parse(await (await api.call('POST', '/campaigns', { name: 'Eid', template: { name: 'promo', language: 'ar' }, params: [{ kind: 'name', fallback: 'x' }, { kind: 'text', value: '50%' }], audience: { criteria: { everyone: true } } })).json());

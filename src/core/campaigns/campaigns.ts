@@ -409,6 +409,12 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
   const ref = pageRef(id, page);
   const wallet = campaignWallet();
   let reservedMinor = 0;
+  // Owner's + number's allowance reserved in ONE conditional statement BEFORE the wallet or any queueing (NEW-CAP-ATOMIC-1): nothing is sent unless it was reserved.
+  // Idempotent per page ref; a wallet failure afterwards overcounts for 24 h (safe direction). No owner row = fail closed.
+  if (rows.length && shared) {
+    const got = await reserveNewCap(host.env, { workspaceId: host.workspaceId, phoneNumberId: c.phone_number_id, ref, n: rows.length, now, cap: NEW_WORKSPACE_CAP.perDay, since: now - TIER_WINDOW_MS });
+    if (!got.ok) return got.reason === 'no_owner' ? { state: 'retry', reason: 'owner_unknown' } : { state: 'wait', until: now + 30_000 };
+  }
   if (rows.length) {
     await host.ensurePricing();
     if (!pricingReady(host.sql)) return { state: 'retry', reason: 'pricing_unavailable' }; // an empty copy decides nothing
@@ -435,8 +441,6 @@ export async function campaignPage(host: LinkHost, id: string, attempt: number, 
       return stop(after && after.attempt === attempt ? after.status : 'superseded');
     }
   }
-  // Reserved against the owner's and the number's allowance BEFORE anything is queued (idempotent per page; a failure retries the step).
-  if (rows.length && shared) await reserveNewCap(host.env, { workspaceId: host.workspaceId, phoneNumberId: c.phone_number_id, ref, n: rows.length, now });
   const specs = JSON.parse(c.params) as CampaignParam[];
   const exhausted = rows.length < limit;
   // Codes are signed with Web Crypto (async): mint this page's before the synchronous transaction, use them inside.
