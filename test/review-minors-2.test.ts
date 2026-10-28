@@ -130,16 +130,23 @@ describe('the new-workspace campaign cap is per owner and per shared number', ()
       expect(await page(other, co.id, 0)).toEqual({ state: 'next', count: 3 }); // another owner is unaffected
     } finally { configureNewWorkspaceCap(prev); }
   });
-  it('two new workspaces on ONE shared number share the allowance, whoever owns them', async () => {
+  it('two new workspaces on ONE own number share the allowance; on the shared platform number they do not pool', async () => {
     const prev = configureNewWorkspaceCap({ days: 14, perDay: 3 });
     try {
-      const [a, b] = [W(14), W(15)];
-      for (const ws of [a, b]) await env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, 1)').bind(ws, ws).run();
-      await env.DB.prepare("INSERT INTO workspace_owners (workspace_id, owner_user_id, updated_at) VALUES (?, 'owner-s1', 1), (?, 'owner-s2', 1)").bind(a, b).run();
+      const [a, b, c, d] = [W(14), W(15), W(17), W(18)];
+      for (const ws of [a, b, c, d]) await env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, 1)').bind(ws, ws).run();
+      await env.DB.prepare("INSERT INTO workspace_owners (workspace_id, owner_user_id, updated_at) VALUES (?, 'owner-s1', 1), (?, 'owner-s2', 1), (?, 'owner-s3', 1), (?, 'owner-s4', 1)").bind(a, b, c, d).run();
       const ca = await setup(a, 'pn-shared');
       expect(await page(a, ca.id, 0)).toEqual({ state: 'next', count: 3 });
-      const cb = await setup(b, 'pn-shared'); // the fixture hands the number to the second workspace; the allowance is the number's, so it is already used
+      const cb = await setup(b, 'pn-shared'); // the fixture hands the own number to the second workspace; the allowance is the number's, so it is already used
       expect((await page(b, cb.id, 0)).state).toBe('wait');
+      // platform number: tenant C exhausts its own allowance, tenant D (another owner) still sends
+      const cc = await setup(c, 'pn-platform');
+      await env.DB.prepare("UPDATE phone_numbers SET kind = 'platform' WHERE phone_number_id = 'pn-platform'").run();
+      expect(await page(c, cc.id, 0)).toEqual({ state: 'next', count: 3 });
+      const cd = await setup(d, 'pn-platform');
+      await env.DB.prepare("UPDATE phone_numbers SET kind = 'platform' WHERE phone_number_id = 'pn-platform'").run();
+      expect(await page(d, cd.id, 0)).toEqual({ state: 'next', count: 3 });
       void CPN; void _CAP;
     } finally { configureNewWorkspaceCap(prev); }
   });

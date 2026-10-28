@@ -5,7 +5,7 @@
  * exchange / guarantee promise the merchant did not switch on, or (4) a recital of the rules.
  *
  * What is TRUSTED, structurally: (1) links: the EXACT URL, or the URL prefix (scheme + host + path prefix), the merchant wrote in their persona, FAQ or
- * knowledge, and the link / url string fields of the platform's own Store tools (their host). Trust is never per host for a shared host (wa.me, instagram.com,
+ * knowledge, and the link / url string fields of the platform's own Store tools (as full links, same rule). Trust is never per host for a shared host (wa.me, instagram.com,
  * docs.google.com, script.google.com ...): a bare mention of such a host vouches only for its root. A connector's endpoint host is NEVER trusted for a
  * customer-facing link (Ruling WA-GUARD-LINK-1). (2) prices: the `price` / `total` / `amount` ... fields of the Store's JSON (not stock counts or ids) and
  * amounts the merchant wrote next to a currency. (3) promises: ONLY the policy flags in the agent settings, default off; the FAQ's wording decides nothing,
@@ -66,8 +66,8 @@ export class Trusted {
   readonly text: string[] = [];
   /** Amounts of the Store's own structured price fields (catalogue items, order totals). */
   readonly prices = new Set<number>();
-  /** Hosts of the Store's own link / url fields (exact host, any path). */
-  readonly storeHosts = new Set<string>();
+  /** The Store's own link / url fields as full links (scheme, host, path), matched with `covers()` like the merchant's own links (WA-GUARD-LINK-1). */
+  readonly storeLinks: Link[] = [];
   policy: PromisePolicy = { ...NO_PROMISES };
   /** Free text the merchant wrote (persona, FAQ, knowledge): the links and the currency-attached amounts in it are vouched for. Promises are NOT (see `policy`). */
   addText(...t: string[]): void { this.text.push(...t); }
@@ -82,7 +82,7 @@ export class Trusted {
     const walk = (v: unknown, key: string, depth: number): void => {
       if (depth > 6 || v === null) return;
       if (typeof v === 'number' && Number.isFinite(v)) { if (PRICE_KEY.test(key)) this.prices.add(v); return; }
-      if (typeof v === 'string') { if (/^(?:link|url|href)$/i.test(key)) for (const l of linksOf(v)) this.storeHosts.add(l.host); return; }
+      if (typeof v === 'string') { if (/^(?:link|url|href)$/i.test(key)) this.storeLinks.push(...linksOf(v)); return; }
       if (Array.isArray(v)) { for (const x of v.slice(0, 50)) walk(x, key, depth + 1); return; }
       if (typeof v === 'object') for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 50)) walk(x, k, depth + 1);
     };
@@ -113,10 +113,10 @@ export function guardReply(reply: string, trustedIn: Trusted | string[], protect
   if (protectedText && leaks(reply, protectedText)) return { ok: false, reason: 'leak' };
   const trustedText = trusted.text.join('\n');
   // 1. links: every link-looking token, parsed as a browser would; an IP address or an unparsable token is never allowed
-  const written = linksOf(trustedText);
+  const written = [...linksOf(trustedText), ...trusted.storeLinks];
   for (const u of findUrls(asciiDigits(reply))) {
     const parts = u.host === null || u.ip || u.obscured ? null : linkParts(u);
-    if (!parts || !(written.some((t) => covers(t, parts)) || trusted.storeHosts.has(parts.host))) return { ok: false, reason: 'url' };
+    if (!parts || !written.some((t) => covers(t, parts))) return { ok: false, reason: 'url' };
   }
   // 2. prices (digits and words)
   const known = new Set([...pricesIn(trustedText), ...trusted.prices]);

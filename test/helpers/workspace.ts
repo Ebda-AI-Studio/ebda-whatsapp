@@ -60,7 +60,7 @@ export async function own(workspaceId: string, phoneNumberId = 'pn-x', funding: 
   await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(workspaceId, workspaceId, Date.now()),
     env.DB.prepare('DELETE FROM phone_numbers WHERE phone_number_id = ?').bind(phoneNumberId),
-    env.DB.prepare("INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status) VALUES (?, 'waba-own', ?, 'active')").bind(phoneNumberId, workspaceId),
+    env.DB.prepare("INSERT INTO phone_numbers (phone_number_id, waba_id, workspace_id, status, kind) VALUES (?, 'waba-own', ?, 'active', 'own')").bind(phoneNumberId, workspaceId),
     env.DB.prepare('INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, ?, 0)').bind(phoneNumberId, funding),
   ]);
   await seedPlan(workspaceId);

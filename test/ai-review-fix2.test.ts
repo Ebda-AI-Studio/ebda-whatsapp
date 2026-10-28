@@ -41,6 +41,14 @@ describe('I1 link trust is per exact URL or path prefix, never per host', () => 
     expect(guardReply('https://store.example/p/3', tr).ok).toBe(true);
     expect(guardReply('https://evil.example/p/3', tr).ok).toBe(false);
   });
+  it('WA-GUARD-LINK-1: a Store link on a shared host vouches for that path only; scheme downgrade is refused', () => {
+    const tr = new Trusted();
+    tr.addStoreResult(JSON.stringify({ items: [{ link: 'https://instagram.com/shopA' }, { url: 'https://store.example/shop' }] }));
+    expect(guardReply('https://instagram.com/shopA', tr).ok).toBe(true);
+    expect(guardReply('https://instagram.com/attacker', tr).ok).toBe(false);
+    expect(guardReply('https://store.example/shop/p/3', tr).ok).toBe(true);
+    expect(guardReply('http://store.example/shop', tr).ok).toBe(false);
+  });
 });
 
 describe('I2 promises are allowed only by explicit policy flags', () => {
