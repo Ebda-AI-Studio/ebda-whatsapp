@@ -1,12 +1,12 @@
 {
   "tag": "v0.1.0",
-  "commit": "b43eb8143e4a18785f2b5f161619b4ef7eecd2fe",
+  "commit": "8d8061daed67096bac1301296ff12de8de8554fe",
   "dir": "foundation",
   "parity": "test/foundation-parity.test.ts",
   "files": {
     "foundation/brand.ts": "4fa27f50ce0dccca947a1d9bf0c381171c60e78c61a9fd63f0fab542c242acce",
-    "foundation/buyer.ts": "d0eae7eaffb9c63dc11dc4cdd5f7b7b0786a673fa09c65a3dc0d8d91eb450c66",
-    "foundation/package.json": "cd78e0541a2d0e213331cf95b01075db818fef61895a3da7f3322055df817257",
+    "foundation/buyer.ts": "2d5434657f733827423796f5a3782ca1d6794d0e9e802332cf0f9a6778e455e8",
+    "foundation/package.json": "66fbc2c015bc16610c220925510f19279991d3fbb0c62e9554e3c660ee69f94d",
     "foundation/phone.ts": "564883fd657afd578902ee88b26257f1caafde15cb0072c49633d2d6753ecc54",
     "foundation/slugs.ts": "abc59b0cda8e990823e10371f53e8763fc15f769f93e17a9be95dbde5e3efb2d",
     "foundation/text.ts": "4c7f5a933b0054129b1bb5a23127ab4a635dab6ee2fbac66c5c2312ff16c29fb",
