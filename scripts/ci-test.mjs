@@ -55,8 +55,7 @@ function watch(chunk, out) {
     summary = { files: filesLine[1].trim(), tests: testsLine[1].trim() };
     if (timer) clearTimeout(timer);
     timer = setTimeout(onHang, GRACE_MS);
-    return;
-  }
+  } // no return: a stall line in the same chunk as the summary still gets its annotation below
   const lines = ((partial.get(out) ?? '') + text).split('\n');
   partial.set(out, lines.pop() ?? '');
   for (const l of lines) {

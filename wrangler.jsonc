@@ -37,6 +37,12 @@
     // This Worker's public origin: tracked campaign links and Store proof links are built on it.
     "PUBLIC_BASE_URL": "https://wa.ebda.app",
     // /health fails (503, alert secret_misconfigured) unless these secrets are set and well-formed; see src/core/secrets-check.ts.
+    // Launch billing (Ruling WA-INSTAPAY-LAUNCH-1): merchants pay for packages and wallet top-ups by InstaPay (receipt + operator confirm). The two card switches are ON only so the
+    // package list and the Wallet screen open; with no Kashier merchant id / api key every CARD route answers 503 and the Wallet offers InstaPay alone. Kashier stays unconfigured (third-party approval).
+    "TOPUPS_ENABLED": "true",
+    "PACKAGE_CHECKOUT_ENABLED": "true",
+    "INSTAPAY_BILLING_ENABLED": "true",
+    "EBDA_INSTAPAY_QR_URL": "https://media.ebda.app/platform/instapay-qr.jpg",
     "REQUIRED_SECRETS": "TOKEN_ENC_KEY,AGENT_SECRETS_KEY,PROOF_URL_SECRET,SUITE_BUYER_KEY_SECRET,ERASURE_HMAC_KEY,BACKUP_HMAC_KEY"
   },
   "durable_objects": { "bindings": [{ "name": "WORKSPACE_DO", "class_name": "WorkspaceDO" }] },
@@ -79,7 +85,7 @@
     // Store link (Phase 4, Ruling WA-LINK-ON-1): the Store API Worker's RPC entrypoint. The Worker must be deployed or the whole deploy fails.
     { "binding": "STORE_BRIDGE", "service": "ebda-api", "entrypoint": "WhatsAppBridge" }
   ]
-  // ---- Billing (Phase 7). Switches and secrets (see docs/billing.md). TOPUPS_ENABLED stays off until Kashier is configured:
+  // ---- Billing (Phase 7). Switches and secrets (see docs/billing.md). Kashier-only settings below stay unset until Kashier is approved (the switches themselves are ON in vars, see WA-INSTAPAY-LAUNCH-1):
   //   vars: TOPUPS_ENABLED ("true"), PACKAGE_CHECKOUT_ENABLED ("true", self-serve packages, default off), KASHIER_MERCHANT_ID, KASHIER_FEE_BPS, KASHIER_FEE_FIXED_MINOR, ADJUSTMENT_APPROVAL_MINOR, ADJUSTMENT_DAILY_CAP
   //   secret: KASHIER_API_KEY and KASHIER_SECRET_KEY (`wrangler secret put`; the Secret key confirms webhooks, vars KASHIER_API_URL optional); service binding ACCOUNTS is required for top-ups and operator writes (fail closed
   //   otherwise). RPC: isRevoked(sid) → true for an unknown sid. The ebda-accounts Worker is live (2026-10-25).
@@ -93,5 +99,5 @@
   // ---- Own number (Phase 8.1, docs/numbers.md). Var EMBEDDED_SIGNUP_ENABLED="1" turns the /numbers routes on; secrets TOKEN_ENC_KEY (base64, 32 random bytes) and
   // META_APP_ID are then required (a request answers 503 naming the missing key). META_APP_SECRET and META_SYSTEM_TOKEN are already secrets.
   // ---- Store link (Phase 4): ON (Ruling WA-LINK-ON-1). Bindings are in services / queues above; PROOF_URL_SECRET (secret) and PUBLIC_BASE_URL (var) are set.
-  // The one-time-code RPC is the `WhatsAppOtp` entrypoint of this Worker; it is for a store's customers only; platform account codes use the PlatformOtp entrypoint (Ruling WA-OTP-SENDER-1).
+  // `WhatsAppOtp` (a store's customers, from the store's number) is bound by no Worker. Platform account codes use the `PlatformOtp` entrypoint (accounts binds it), which stays `disabled` until the platform number exists: then set vars PLATFORM_OTP_PHONE_NUMBER_ID and PLATFORM_OTP_TEMPLATE (Ruling WA-OTP-SENDER-1).
 }

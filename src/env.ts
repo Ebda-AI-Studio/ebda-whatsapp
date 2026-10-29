@@ -21,6 +21,9 @@ export type Env = {
   PUBLIC_BASE_URL?: string;
   /** Workers AI: the agent's default model and the knowledge-base embeddings. Absent = the agent cannot answer (it hands off). */
   AI?: Ai;
+  /** The platform number's Meta phone-number id, and the approved AUTHENTICATION template on its WABA: sender of platform account codes (WA-OTP-SENDER-1). Either unset = `PlatformOtp` answers `disabled`. */
+  PLATFORM_OTP_PHONE_NUMBER_ID?: string;
+  PLATFORM_OTP_TEMPLATE?: string;
   /** Vectorize index `ebda-wa-kb` (knowledge base + catalog search). Unbound = the agent answers without a knowledge base. */
   VECTORIZE?: Vectorize;
   /** Base64 of 32 random bytes: encrypts merchants' own model keys (AES-GCM). Unset = bring-your-own-key is unavailable. */

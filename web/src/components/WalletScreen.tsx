@@ -158,7 +158,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
           <TopupCard t={t} lang={lang} api={api} wallet={wallet} pending={pending} note={topupNote} go={go} now={now}
             onStarted={(p) => { writePending(p); setPending(p); setTopupNote('waiting'); }} cardOnly={cardOnly} />
         )}
-        {owner && <PackagesCard t={t} lang={lang} api={api} go={go} now={now} onActivated={() => void api.wallet().then(setWallet, () => undefined)} />}
+        {owner && wallet.cardCheckout !== false && <PackagesCard t={t} lang={lang} api={api} go={go} now={now} onActivated={() => void api.wallet().then(setWallet, () => undefined)} />}
         {owner && <InstapayCard t={t} lang={lang} api={api} />}
         <DigestCard t={t} lang={lang} api={api} owner={owner} />
         {canSeeStatement && <StatementCard t={t} lang={lang} api={api} now={now} />}
@@ -182,6 +182,10 @@ function TopupCard({ t, lang, api, wallet, pending, note, go, now, onStarted, ca
 
   if (!wallet.topupsEnabled) {
     return <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2><p className="muted">{t.wTopupOff}</p></section>;
+  }
+  // No card provider (Kashier not configured): the card form would only answer 503. InstaPay is the way to top up (Ruling WA-INSTAPAY-LAUNCH-1).
+  if (wallet.cardCheckout === false) {
+    return <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2><p className="muted">{t.wTopupViaInstapay}</p></section>;
   }
 
   const start = async (e: FormEvent) => {
