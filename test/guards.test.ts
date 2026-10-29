@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
+import { BARE_AR, BARE_EN } from '../foundation/brand';
 import { findMatches } from './helpers/grep';
 
 it('repo carries no legacy brand strings', () => {
@@ -31,10 +32,7 @@ it('the Worker reaches brand code only through the brand registry (src/brand.ts)
 });
 
 // Brand rule (suite-wide, same pattern as the Store repo's brand-name-never-bare guard): the company is "Ebda AI Studio" and every
-// product is "Ebda <Product>"; a bare "Ebda" never reaches a user. Header/identifier names (X-Ebda-…, Ebda-Webhooks) are not copy.
-const BARE_EN = /(?<!X-)\bEbda\b(?!-Webhooks)(?! (?:Store|AI Studio|WhatsApp|CRM|ERP)\b)/;
-// The Arabic brand spellings with hamza under alef; the plain ابدأ is the everyday verb "start" and stays allowed in copy.
-const BARE_AR = /(?:إبدأ|إبدا)(?!\s*(?:ستور|استوديو|واتساب|WhatsApp|CRM|ERP|Store)(?![ء-يٱ-ۓ]))/;
+// product is "Ebda <Product>"; a bare "Ebda" never reaches a user. The two regexes live in the foundation (`brand`), shared with the Store.
 it('user-facing copy never says a bare "Ebda": always Ebda AI Studio or Ebda <Product>', () => {
   const scopes = ['src', 'web', 'docs/help', 'docs/legal', 'docs/site'];
   const hits = scopes.flatMap((s) => [...findMatches(BARE_EN, s), ...findMatches(BARE_AR, s)]).filter((m) => !/\.test\.tsx?:/.test(m));
