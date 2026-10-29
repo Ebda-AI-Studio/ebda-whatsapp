@@ -1,10 +1,9 @@
 {
   "name": "@ebda/foundation",
   "version": "0.1.0",
-  "foundationCommit": "8d8061daed67096bac1301296ff12de8de8554fe",
+  "foundationCommit": "adccac5d1149e97a8be05a9955ce25577178f4a0",
   "private": true,
   "license": "UNLICENSED",
-  "type": "module",
   "exports": {
     "./brand": "./brand.ts",
     "./buyer": "./buyer.ts",
