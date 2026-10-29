@@ -58,7 +58,7 @@ import { walletRoutes } from './routes/wallet';
 import { instapayProofRoutes, instapayRoutes } from './routes/instapay';
 import { sharedNumberRoutes } from './routes/shared-number';
 import { handleSharedEvent, sharedEnabled, sharedNumberById, sweepShared } from './core/shared/shared-number';
-import { secretProblems } from './core/secrets-check';
+import { bindingProblems, secretProblems } from './core/secrets-check';
 import { apiContentTypes, requestGuards } from './core/request-guards';
 import { applySharedTemplateEvent } from './core/shared/shared-templates';
 import { applyAccountEvent, applyHealthEvent } from './core/numbers/health-events';
@@ -212,6 +212,11 @@ app.get('/health', async (c) => {
   const problems = secretProblems(c.env as unknown as Record<string, unknown>);
   if (problems.length) {
     alert('secret_misconfigured', { severity: 'P1', keys: problems });
+    return c.json({ ok: false, status: 'misconfigured', service: PACK.service, commit }, 503);
+  }
+  const missing = bindingProblems(c.env as unknown as Record<string, unknown>);
+  if (missing.length) {
+    alert('binding_missing', { severity: 'P1', bindings: missing });
     return c.json({ ok: false, status: 'misconfigured', service: PACK.service, commit }, 503);
   }
   // D4: a value DERIVED from SUITE_BUYER_KEY_SECRET (16 hex of an HMAC over a fixed non-phone string, see buyer-key.ts), so scripts/verify-prod.mjs can prove it equals Ebda Store's
