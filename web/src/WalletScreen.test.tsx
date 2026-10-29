@@ -212,6 +212,23 @@ describe('wallet: top-up', () => {
   });
 });
 
+describe('wallet: no card provider (Ruling WA-INSTAPAY-LAUNCH-1)', () => {
+  it('cardCheckout false: no card top-up form, no card package list; the message points to InstaPay, whose card stays', async () => {
+    await openWallet(withWallet({ cardCheckout: false }));
+    const topup = screen.getByRole('region', { name: t.wTopupTitle });
+    expect(within(topup).getByText(t.wTopupViaInstapay)).toBeTruthy();
+    expect(within(topup).queryByRole('button', { name: t.wTopupContinue })).toBeNull();
+    expect(screen.queryByRole('region', { name: t.wPackagesTitle })).toBeNull();
+    expect(screen.queryByRole('button', { name: t.wPackageBuy })).toBeNull();
+    expect(await screen.findByRole('region', { name: t.wIpTitle })).toBeTruthy();
+  });
+  it('cardCheckout true or absent: the card top-up and the card package list are shown as before', async () => {
+    await openWallet(withWallet({ cardCheckout: true }));
+    expect(within(screen.getByRole('region', { name: t.wTopupTitle })).getByRole('button', { name: t.wTopupContinue })).toBeTruthy();
+    expect(await screen.findByRole('region', { name: t.wPackagesTitle })).toBeTruthy();
+  });
+});
+
 describe('wallet: statement', () => {
   it('shows opening and closing, the totals and every row of the month', async () => {
     await openWallet();

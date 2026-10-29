@@ -56,6 +56,8 @@ let factory: (env: Env) => PaymentProvider | null = (env) => (env.KASHIER_MERCHA
 export const configurePayments = (f: (env: Env) => PaymentProvider | null): void => { factory = f; };
 export const paymentProvider = (env: Env): PaymentProvider | null => factory(env);
 export const topupsEnabled = (env: Env): boolean => env.TOPUPS_ENABLED === 'true';
+/** A card provider is configured AND can confirm its webhooks: the only state in which a card checkout may be opened (startTopup / startPackageCheckout refuse otherwise). */
+export const cardCheckoutReady = (env: Env): boolean => paymentProvider(env)?.confirmationReady() === true;
 export const packagesEnabled = (env: Env): boolean => env.PACKAGE_CHECKOUT_ENABLED === 'true';
 /** Card refunds through the provider's API. Default off: every refund is then a manual payout, exactly as before. */
 export const refundsEnabled = (env: Env): boolean => env.KASHIER_REFUNDS_ENABLED === 'true';
