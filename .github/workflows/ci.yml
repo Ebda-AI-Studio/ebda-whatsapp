@@ -24,8 +24,8 @@ jobs:
     # Umbra self-hosted runner when the repo variable EBDA_RUNS_ON is set, else GitHub-hosted.
     # EBDA_RUNS_ON must be a JSON value, e.g. ["self-hosted","umbra-ebda"], not a bare label.
     runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-latest"') }}
-    # The suite takes ~7 min on the shared VM, up to ~15 under load from other products' jobs (PR #7 run at 9eae554 was cut at 15).
-    timeout-minutes: 25
+    # The full suite takes 19-27 min on the shared VM under load from other products' jobs (main run at 0976248: 19 min; PR #43 run 40840747987 was cut at 25 while still passing files).
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
