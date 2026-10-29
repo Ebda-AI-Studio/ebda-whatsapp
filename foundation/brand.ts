@@ -17,8 +17,8 @@ export const EBDA = {
     url: 'https://ebda.app',
   },
   products: {
-    store: { id: 'store', nameEn: 'Ebda Store', nameAr: 'ابدأ ستور' },
-    whatsapp: { id: 'whatsapp', nameEn: 'Ebda WhatsApp', nameAr: 'ابدأ واتساب' },
+    store: { nameEn: 'Ebda Store', nameAr: 'ابدأ ستور' },
+    whatsapp: { nameEn: 'Ebda WhatsApp', nameAr: 'ابدأ واتساب' },
   },
   /** Brand colours. No orange anywhere in Ebda's own surfaces (merchants may choose their own). */
   colors: {
