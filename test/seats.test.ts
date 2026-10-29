@@ -1,11 +1,11 @@
 import { SELF } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { listMembersResponse } from '../src/core/api/contract';
 import { configureStoreLink } from '../src/core/store-link';
 import { apiFor, apiKey, storeId as W, useApiKey } from './helpers/api';
 import { mint } from './helpers/issuer';
 import { useStoreLink } from './helpers/store-link';
-import { exec, grantPlan, rows, workspace } from './helpers/workspace';
+import { exec, grantPlan, openChat, rows, workspace } from './helpers/workspace';
 
 // WA-SEATS-1 (plan P1b): staff work only while the owner has seated them, inside the package's member limit; membership is the Store's, read live.
 useApiKey();
@@ -256,5 +256,70 @@ describe('a downgrade raises one alert and the DO reports it', () => {
     expect((await workspace(ws).seatSummary()).seats.map((s) => s.state)).toEqual(['seated', 'seated']);
     await grantPlan(ws, 'starter');
     expect((await workspace(ws).seatSummary()).seats.map((s) => s.state)).toEqual(['seated', 'over_limit']);
+  });
+});
+
+describe('live inbox sockets follow the seat (WA-SEATS-1)', () => {
+  async function socket(ws: string, sub: string, role: 'owner' | 'staff') {
+    const token = await mint(apiKey(), { sub, stores: [{ id: ws, role }] });
+    const res = await SELF.fetch(`https://x/api/v1/stores/${ws}/ws`, { headers: { upgrade: 'websocket', 'sec-websocket-protocol': `inbox.v1, bearer.${token}` } });
+    expect(res.status).toBe(101);
+    const sock = res.webSocket!;
+    sock.accept();
+    const state = { frames: 0, closeCode: 0 };
+    sock.addEventListener('message', () => { state.frames++; });
+    sock.addEventListener('close', (e) => { state.closeCode = e.code; });
+    return state;
+  }
+  const settle = () => new Promise((r) => setTimeout(r, 150));
+
+  it('removing the seat closes that staff member\'s socket (4403) and no later event reaches it; the owner\'s socket stays', async () => {
+    const ws = await team(30);
+    const owner = await as(ws, OWNER, 'owner');
+    await owner('PUT', `/members/${S1}/seat`);
+    const staffSock = await socket(ws, S1, 'staff');
+    const ownerSock = await socket(ws, OWNER, 'owner');
+    await openChat(ws, '201001234567');
+    await vi.waitFor(() => expect(staffSock.frames).toBeGreaterThan(0), { timeout: 3000, interval: 10 });
+    await owner('DELETE', `/members/${S1}/seat`);
+    await vi.waitFor(() => expect(staffSock.closeCode).toBe(4403), { timeout: 3000, interval: 10 });
+    const before = staffSock.frames;
+    const ownerBefore = ownerSock.frames;
+    await openChat(ws, '201007654321');
+    await vi.waitFor(() => expect(ownerSock.frames).toBeGreaterThan(ownerBefore), { timeout: 3000, interval: 10 });
+    await settle();
+    expect(staffSock.frames).toBe(before);
+    expect(ownerSock.closeCode).toBe(0);
+  });
+
+  it('a leaver (removed in the Store) loses the socket when the owner next lists the team', async () => {
+    const ws = await team(31);
+    const owner = await as(ws, OWNER, 'owner');
+    await owner('PUT', `/members/${S1}/seat`);
+    const sock = await socket(ws, S1, 'staff');
+    link.fake.setMembers(ws, [{ userId: OWNER, role: 'owner' }, { userId: S2, role: 'staff' }]);
+    await owner('GET', '/members');
+    await vi.waitFor(() => expect(sock.closeCode).toBe(4403), { timeout: 3000, interval: 10 });
+  });
+
+  it('a downgrade closes the sockets over the new limit and keeps the earliest assignment\'s', async () => {
+    const ws = await team(32, 'growth', [S1, S2]);
+    await exec(ws, "INSERT INTO seats (user_id, assigned_at, assigned_by) VALUES (?, 1000, ?), (?, 2000, ?)", S1, OWNER, S2, OWNER);
+    const a = await socket(ws, S1, 'staff');
+    const b = await socket(ws, S2, 'staff');
+    await grantPlan(ws, 'starter');
+    await vi.waitFor(() => expect(b.closeCode).toBe(4403), { timeout: 3000, interval: 10 });
+    expect(a.closeCode).toBe(0);
+  });
+
+  it('backstop: a staff socket whose seat vanished by other means gets nothing and is closed at the next push', async () => {
+    const ws = await team(33);
+    await (await as(ws, OWNER, 'owner'))('PUT', `/members/${S1}/seat`);
+    const sock = await socket(ws, S1, 'staff');
+    await exec(ws, 'DELETE FROM seats'); // no removeSeat call, so no immediate close
+    await openChat(ws, '201001234567');
+    await vi.waitFor(() => expect(sock.closeCode).toBe(4403), { timeout: 3000, interval: 10 });
+    await settle();
+    expect(sock.frames).toBe(0);
   });
 });
