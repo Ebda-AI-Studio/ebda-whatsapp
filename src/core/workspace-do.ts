@@ -1610,7 +1610,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       await this.arm();
       // A downgrade never deletes anyone: staff beyond the new limit simply stop working until the owner frees a seat. The owner sees it on the Team screen; we are told once per change.
       if (seatsOverLimit(this.sql, now)) alert('seats_over_limit', { workspace: this.workspaceId });
-      this.enforceSeatSockets(this.ctx.getWebSockets());
+      this.closeUnseatedSockets(this.ctx.getWebSockets());
     }
     return r;
   }
@@ -1628,16 +1628,16 @@ export class WorkspaceDO extends DurableObject<Env> {
       pruneSeats(this.sql, activeStaffIds);
       return assignSeat(this.sql, userId, by);
     });
-    this.enforceSeatSockets(this.ctx.getWebSockets()); // the prune above may have dropped a leaver's seat
+    this.closeUnseatedSockets(this.ctx.getWebSockets()); // the prune above may have dropped a leaver's seat
     return r;
   }
   async removeSeat(userId: string): Promise<void> {
     removeSeat(this.sql, userId);
-    this.enforceSeatSockets(this.ctx.getWebSockets());
+    this.closeUnseatedSockets(this.ctx.getWebSockets());
   }
   async pruneSeats(activeStaffIds: string[]): Promise<void> {
     pruneSeats(this.sql, activeStaffIds);
-    this.enforceSeatSockets(this.ctx.getWebSockets());
+    this.closeUnseatedSockets(this.ctx.getWebSockets());
   }
 
   /** Which of these wallet refs are on the ledger (to reverse only what was really posted). */
@@ -1746,15 +1746,17 @@ export class WorkspaceDO extends DurableObject<Env> {
    * WA-SEATS-1: a staff socket stays open only while its user holds a seat. Closes (4403) every staff socket whose user is not 'seated' now (removed seat, left the
    * team, downgrade, plan lapse). Owners and operators are untouched. Without a Store link there are no seats, so nothing is closed. Returns the sockets that may keep receiving.
    */
-  private enforceSeatSockets(sockets: WebSocket[]): WebSocket[] {
+  private closeUnseatedSockets(sockets: WebSocket[]): WebSocket[] {
     if (!sockets.some((ws) => (ws.deserializeAttachment() as SocketAttachment | null)?.role === 'staff')) return sockets;
     if (!bridgeFor(this.env)) return sockets;
     const seated = new Set(listSeats(this.sql).seats.filter((x) => x.state === 'seated').map((x) => x.userId));
     return sockets.filter((ws) => {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
-      if (att?.role !== 'staff' || (att.userId && seated.has(att.userId))) return true;
-      try { ws.close(WS_CLOSE_NO_SEAT, 'no seat'); } catch { /* already closed */ }
-      return false;
+      if (att?.role === 'staff' && !(att.userId && seated.has(att.userId))) {
+        try { ws.close(WS_CLOSE_NO_SEAT, 'no seat'); } catch { /* already closed */ }
+        return false;
+      }
+      return true;
     });
   }
 
@@ -1774,7 +1776,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       return false;
     });
-    const allowed = this.enforceSeatSockets(sockets); // backstop: re-checked at every push, whatever closed (or failed to close) a socket earlier
+    const allowed = this.closeUnseatedSockets(sockets); // backstop: re-checked at every push, whatever closed (or failed to close) a socket earlier
     if (!allowed.length) return;
     for (const e of pending) {
       const frame = JSON.stringify({ ...(JSON.parse(e.payload) as object), seq: e.seq });
