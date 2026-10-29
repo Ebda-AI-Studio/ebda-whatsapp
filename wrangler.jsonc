@@ -62,6 +62,7 @@
   },
   // Workers AI: the AI agent's default model and the knowledge-base embeddings (@cf/baai/bge-m3). Billed to this account.
   "ai": { "binding": "AI" },
+  "vectorize": [{ "binding": "VECTORIZE", "index_name": "ebda-wa-kb" }],
   "analytics_engine_datasets": [
     { "binding": "USAGE", "dataset": "ebda_wa_usage" },
     { "binding": "CI_OUTCOMES", "dataset": "ebda_ci_outcomes" },
@@ -85,10 +86,9 @@
   // ---- InstaPay billing (the launch payment method until Kashier is approved): var INSTAPAY_BILLING_ENABLED ("true", default off), var EBDA_INSTAPAY_QR_URL (https only), var EBDA_INSTAPAY_PAYEE_NAME (optional),
   //   secret EBDA_INSTAPAY_HANDLE (`wrangler secret put`; the SAME value as ebda-api). Unset handle = InstaPay billing answers 503. See docs/billing.md.
   // Before a platform-paid number sends: publish a rate card + FX through /api/v1/operator and set the number's funding.
-  // ---- AI agent (Phase 5). The knowledge base and the catalog search use a Vectorize index; it does not exist yet, so the binding
-  // stays commented out (a binding to a missing index fails the deploy) and the agent answers without a knowledge base meanwhile.
-  // Create it, then uncomment: `npx wrangler vectorize create ebda-wa-kb --dimensions=1024 --metric=cosine`
-  //   "vectorize": [{ "binding": "VECTORIZE", "index_name": "ebda-wa-kb" }],
+  // ---- AI agent (Phase 5). The knowledge base and the catalog search use the Vectorize index below (1024 dimensions = @cf/baai/bge-m3, cosine; Ruling WA-VECTORIZE-1).
+  // The binding is live: the index MUST exist before the deploy (a binding to a missing index fails the deploy), and /health answers 503 if the binding is absent at runtime.
+  // Create it once, on this account, before deploying: `npx wrangler vectorize create ebda-wa-kb --dimensions=1024 --metric=cosine`
   // Secrets: AGENT_SECRETS_KEY (base64, 32 random bytes; encrypts merchants' own model keys). Var AGENT_MODEL overrides the default Workers AI model.
   // ---- Own number (Phase 8.1, docs/numbers.md). Var EMBEDDED_SIGNUP_ENABLED="1" turns the /numbers routes on; secrets TOKEN_ENC_KEY (base64, 32 random bytes) and
   // META_APP_ID are then required (a request answers 503 naming the missing key). META_APP_SECRET and META_SYSTEM_TOKEN are already secrets.
