@@ -74,6 +74,7 @@ import { parentHoldRef } from './campaigns/campaigns';
 import { indexContactName, rebuildContactIndex } from './contact-index';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
+import { assignSeat, listSeats, pruneSeats, removeSeat, seatState, seatsOverLimit, type AssignResult, type SeatRow, type SeatState } from './seats';
 import { applyEntitlement, expireSubscription, runCreditMonth, featureAllowed, marketingBlocked, memberLimit, readEntitlement, serviceAllowed, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
@@ -1601,8 +1602,33 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** One subscription event from the control plane. An older or equal version is ignored ('stale'). */
   async applyEntitlement(ev: EntitlementEvent, now = Date.now()): Promise<'applied' | 'stale' | 'invalid'> {
     const r = this.ctx.storage.transactionSync(() => applyEntitlement(this.sql, ev, now));
-    if (r === 'applied') await this.arm();
+    if (r === 'applied') {
+      await this.arm();
+      // A downgrade never deletes anyone: staff beyond the new limit simply stop working until the owner frees a seat. The owner sees it on the Team screen; we are told once per change.
+      if (seatsOverLimit(this.sql, now)) alert('seats_over_limit', { workspace: this.workspaceId });
+    }
     return r;
+  }
+
+  /** Seats (WA-SEATS-1). The owner's seat-assignment routes and the staff gate in the identity middleware are the only callers. */
+  async seatSummary(): Promise<{ limit: number; seats: SeatRow[] }> {
+    return listSeats(this.sql);
+  }
+  async seatOf(userId: string): Promise<SeatState> {
+    return seatState(this.sql, userId);
+  }
+  /** Drops rows of people who left the team, then seats `userId` if there is room: one DO call, so two requests cannot both take the last seat. */
+  async assignSeat(userId: string, by: string, activeStaffIds: string[]): Promise<AssignResult> {
+    return this.ctx.storage.transactionSync(() => {
+      pruneSeats(this.sql, activeStaffIds);
+      return assignSeat(this.sql, userId, by);
+    });
+  }
+  async removeSeat(userId: string): Promise<void> {
+    removeSeat(this.sql, userId);
+  }
+  async pruneSeats(activeStaffIds: string[]): Promise<void> {
+    pruneSeats(this.sql, activeStaffIds);
   }
 
   /** Which of these wallet refs are on the ledger (to reverse only what was really posted). */

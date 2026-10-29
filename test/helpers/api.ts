@@ -2,7 +2,7 @@ import { SELF, env } from 'cloudflare:test';
 import { beforeAll, beforeEach } from 'vitest';
 import { stubGraph, type GraphReply, type GraphCall } from './graph';
 import { mint, newKey, type TestKey } from './issuer';
-import { seedNumber } from './workspace';
+import { exec, seedNumber } from './workspace';
 
 let key: TestKey;
 /** Call once per test file: creates the signing key route tests mint tokens with. `jwks()` feeds stubGraph. */
@@ -25,6 +25,8 @@ export const apiKey = (): TestKey => key;
 /** A registered workspace with an active number, and a fetcher for its /api/v1/stores/:id routes. */
 export async function apiFor(storeId: string, role: 'owner' | 'staff' = 'owner', phoneNumberId = `pn-${storeId}`) {
   await seedNumber(phoneNumberId, storeId); // already seeded on a second call
+  // A staff fixture is a SEATED staff member (WA-SEATS-1: the owner assigned the seat); it only matters when the Store link is on. test/seats.test.ts covers the unseated case.
+  if (role === 'staff') await exec(storeId, "INSERT OR IGNORE INTO seats (user_id, assigned_at, assigned_by) VALUES ('6f1d2c1e-8a8f-4a3b-9f1e-1a2b3c4d5e6f', 0, 'fixture')");
   const token = await mint(key, { stores: [{ id: storeId, role }] });
   const call = (method: string, path: string, body?: unknown, extra: Record<string, string> = {}) =>
     SELF.fetch(`https://x/api/v1/stores/${storeId}${path}`, {

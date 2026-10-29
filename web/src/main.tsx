@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { accountsUrlFor, chooseMode, pickStore, signInMode, viewAsStore } from './boot';
 import { STRINGS } from './i18n';
+import { NoSeat } from './components/NoSeat';
 import { SignInError } from './components/SignInError';
 import { makeSignOut } from './signout';
 import { SignedOutLocally } from './components/SignedOutLocally';
@@ -73,6 +74,11 @@ async function boot(): Promise<void> {
       fetchEvents: api.fetchEvents,
     });
     await api.loadCapabilities();
+    if (api.noSeat) { // a member the owner has not seated (or whose seat the package no longer covers): say so, with a retry, instead of an inbox that cannot load
+      stopRealtime();
+      root.render(<NoSeat reason={api.noSeat} onRetry={() => location.reload()} />);
+      return;
+    }
     if (oidcSession) {
       const session = oidcSession;
       api.signOut = makeSignOut({ stopRealtime, session, onLocal: () => root.render(<SignedOutLocally onSignIn={() => { void session.startSignIn('/'); }} />) });

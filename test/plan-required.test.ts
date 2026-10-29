@@ -319,6 +319,7 @@ describe('route walk: every non-GET store route is decided (sends and number set
   ]);
   // Decided: cannot send a WhatsApp message or set a number up, or are gated by the campaigns feature (plan_feature, see package-feature-gates-campaigns-ordering).
   const NOT_SENDING = new Set([
+    'PUT /stores/:storeId/members/:userId/seat', 'DELETE /stores/:storeId/members/:userId/seat', // WA-SEATS-1: the owner's seat choices; no message, no spend
     'PUT /stores/:storeId/agent', 'DELETE /stores/:storeId/contacts/:waId', 'DELETE /stores/:storeId/campaigns/:campaignId',
     'POST /stores/:storeId/campaigns', 'POST /stores/:storeId/campaigns/:campaignId/send', 'POST /stores/:storeId/campaigns/:campaignId/resume',
     'POST /stores/:storeId/campaigns/:campaignId/pause', 'POST /stores/:storeId/campaigns/:campaignId/cancel',
