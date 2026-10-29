@@ -33,6 +33,7 @@ import { templatesRoutes } from './routes/templates';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
 import { sendOtp, type OtpResult } from './core/otp';
+import { sendPlatformOtp, type PlatformOtpResult } from './core/platform-otp';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { bridgeFor } from './core/store-link';
 import { ordersRoutes } from './routes/orders';
@@ -87,6 +88,16 @@ export { CampaignWorkflow, ImportWorkflow } from './core/campaigns/workflows';
 export class WhatsAppOtp extends WorkerEntrypoint<Env> {
   async sendOtp(storeId: string, phone: string, code: string): Promise<OtpResult> {
     return sendOtp(this.env, { storeId, phone, code });
+  }
+}
+
+/**
+ * Internal RPC for the accounts service (bind it with `entrypoint: "PlatformOtp"`): `sendCode(phone, code)`, a sign-in code for a PLATFORM account,
+ * sent from the platform number and never from a store's number (Ruling WA-OTP-SENDER-1). No store id, touches no workspace. `disabled` until the platform number is configured.
+ */
+export class PlatformOtp extends WorkerEntrypoint<Env> {
+  async sendCode(phone: string, code: string): Promise<PlatformOtpResult> {
+    return sendPlatformOtp(this.env, { phone, code });
   }
 }
 
