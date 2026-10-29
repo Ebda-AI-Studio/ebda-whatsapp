@@ -93,5 +93,5 @@
   // ---- Own number (Phase 8.1, docs/numbers.md). Var EMBEDDED_SIGNUP_ENABLED="1" turns the /numbers routes on; secrets TOKEN_ENC_KEY (base64, 32 random bytes) and
   // META_APP_ID are then required (a request answers 503 naming the missing key). META_APP_SECRET and META_SYSTEM_TOKEN are already secrets.
   // ---- Store link (Phase 4): ON (Ruling WA-LINK-ON-1). Bindings are in services / queues above; PROOF_URL_SECRET (secret) and PUBLIC_BASE_URL (var) are set.
-  // The one-time-code RPC is the `WhatsAppOtp` entrypoint of this Worker; no Worker binds it yet (docs/store-link.md, OTP-1).
+  // `WhatsAppOtp` (a store's customers, from the store's number) is bound by no Worker. Platform account codes use the `PlatformOtp` entrypoint (accounts binds it), which stays `disabled` until the platform number exists: then set vars PLATFORM_OTP_PHONE_NUMBER_ID and PLATFORM_OTP_TEMPLATE (Ruling WA-OTP-SENDER-1).
 }
