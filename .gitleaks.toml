@@ -2,6 +2,6 @@
 useDefault = true
 
 [allowlist]
-description = "Test-only values (fixtures, the pinned suite test vector, the sha256 pins of the vendored buyer-key vector files and the fake model keys of test/agent-settings.test.ts)"
-paths = ['''test/fixtures/.*''']
+description = "Test-only values (fixtures, the pinned suite test vector, the sha256 pins of the vendored buyer-key vector files and the fake model keys of test/agent-settings.test.ts and the sha256 pins in foundation.lock.json)"
+paths = ['''test/fixtures/.*''', '''foundation\.lock\.json''']
 regexes = ['''ebda-suite-buyer-key-test-v1''', '''00c47c95622dc2516d3c86d492e609fc0f8659b5645416fd076634e245c62ca1''', '''a38b2f9b58b3eb5cdbd0df21eecea0098109583a040bcbe8a90ca76826605cad''', '''e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd''', '''test-secret''', '''test-token''', '''sk-(live|or-new|test|secret)-[A-Za-z0-9-]{4,20}''']
