@@ -459,6 +459,8 @@ export const walletDto = z.object({
   /** Who pays Meta, per connected number: merchant_card = Meta bills the merchant's card (the UI shows the notice), platform_line = this wallet, unknown = not set up yet. */
   funding: z.array(z.object({ phoneNumberId: z.string(), displayPhone: z.string().nullable(), funding: walletFundingKind })),
   topupsEnabled: z.boolean(),
+  /** Additive: false while no card provider can confirm its webhooks (Kashier not configured). The screen then offers InstaPay only, never a card button that would answer 503 (Ruling WA-INSTAPAY-LAUNCH-1). Absent = an older server. */
+  cardCheckout: z.boolean().optional(),
   lowBalance: z.boolean(),
   /** The wallet is low under this many minor units: max(20 EGP, 3 days of the last week's average Meta spend). */
   lowBalanceThresholdMinor: z.number().int().nonnegative(),
