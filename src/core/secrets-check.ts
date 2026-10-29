@@ -22,3 +22,13 @@ export function secretProblems(env: Record<string, unknown>): string[] {
   for (const k of String(env.REQUIRED_SECRETS ?? '').split(',').map((s) => s.trim()).filter(Boolean)) if (value(k) === undefined) bad.add(k);
   return [...bad].sort();
 }
+
+/**
+ * Bindings the Worker cannot do its job without (Ruling WA-VECTORIZE-1). A missing one fails /health like a missing secret, so a deploy
+ * whose binding was dropped from the config is caught by verify-prod instead of silently answering without the AI knowledge base.
+ * Names only, never a value.
+ */
+export const REQUIRED_BINDINGS = ['VECTORIZE'] as const;
+export function bindingProblems(env: Record<string, unknown>): string[] {
+  return REQUIRED_BINDINGS.filter((k) => env[k] === undefined || env[k] === null);
+}

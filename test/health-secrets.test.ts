@@ -36,3 +36,14 @@ it('a key listed in REQUIRED_SECRETS but not set fails /health; well-formed keys
   expect(ok.body).toMatchObject({ ok: true, status: 'ok' });
   expect((await health({ TOKEN_ENC_KEY: B64_32.replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_') })).status).toBe(200); // base64url is accepted
 });
+
+it('Ruling WA-VECTORIZE-1: a missing VECTORIZE binding fails /health with 503 naming the binding in the alert line only; the live binding passes', async () => {
+  const bad = await health({ VECTORIZE: undefined });
+  expect(bad.status).toBe(503);
+  expect(bad.body).toMatchObject({ ok: false, status: 'misconfigured' });
+  expect(JSON.stringify(bad.body)).not.toContain('VECTORIZE');
+  expect(bad.errors).toContain('binding_missing');
+  expect(bad.errors).toContain('VECTORIZE');
+  const ok = await health({});
+  expect(ok.status).toBe(200);
+});
