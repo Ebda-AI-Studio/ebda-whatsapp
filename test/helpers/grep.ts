@@ -4,7 +4,8 @@ import { join, relative } from 'node:path';
 const ROOT = join(import.meta.dirname, '..', '..');
 const SKIP_DIRS = new Set(['node_modules', '.git', '.wrangler', 'dist', 'coverage', '.superpowers']);
 // Files that must name the banned strings in order to ban them.
-const ALLOW = [/^test\/guards\.test\.ts$/, /^CLAUDE\.md$/, /^docs\/plans\//];
+// vendor/studio is the Store's shared studio-pages renderer + brand, byte-identical and sha-pinned (test/vendored-artifacts.test.ts): its text is the Store's, not ours to edit.
+const ALLOW = [/^vendor\/studio\//, /^test\/guards\.test\.ts$/, /^CLAUDE\.md$/, /^docs\/plans\//];
 
 function walk(dir: string, out: string[]): void {
   for (const name of readdirSync(dir)) {

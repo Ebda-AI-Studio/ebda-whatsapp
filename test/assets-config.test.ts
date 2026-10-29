@@ -5,8 +5,8 @@ import { expect, it } from 'vitest';
 // wrangler.jsonc allows comments; strip line comments before parsing.
 const cfg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'wrangler.jsonc'), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
 
-it('serves the inbox SPA from web/dist with deep-link fallback', () => {
-  expect(cfg.assets).toMatchObject({ directory: 'web/dist', binding: 'ASSETS', not_found_handling: 'single-page-application' });
+it('serves the inbox SPA from web/dist; an unknown path is NOT answered with the shell (WA-404-1: the Worker 404s it)', () => {
+  expect(cfg.assets).toMatchObject({ directory: 'web/dist', binding: 'ASSETS', not_found_handling: 'none' });
 });
 
 it('keeps the API, Meta webhook, the card provider\'s webhook (/kashier/*), health and tracked links (/t/*) on the Worker', () => {
