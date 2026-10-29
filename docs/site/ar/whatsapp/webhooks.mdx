@@ -92,10 +92,11 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 function verify(rawBody /* Buffer، قبل JSON.parse */, headers, secret) {
   const ts = headers['x-timestamp'];
-  if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false; // ارفض الطلبات القديمة
+  if (!(Math.abs(Date.now() / 1000 - Number(ts)) <= 300)) return false; // ارفض الطلبات القديمة، وكمان لو الـ timestamp ناقص أو مش رقم (NaN بيفشل في الشرط ده)
   const want = 'sha256=' + createHmac('sha256', secret).update(`${ts}.${rawBody}`).digest('hex');
   const got = headers['x-signature'] ?? '';
-  return got.length === want.length && timingSafeEqual(Buffer.from(got), Buffer.from(want));
+  const g = Buffer.from(got), w = Buffer.from(want); // قارن البايتات: نص بنفس الطول ممكن يبقى أطول بالبايت، وساعتها timingSafeEqual بترمي خطأ
+  return g.length === w.length && timingSafeEqual(g, w);
 }
 ```
 
