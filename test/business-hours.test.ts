@@ -89,10 +89,13 @@ const sentOf = (g: ReturnType<typeof stubGraph>, pn: string, from = 0): Sent[] =
 });
 let seq = 0;
 async function say(ws: string, pn: string, t: string, g: ReturnType<typeof stubGraph>, now: number) {
+  // ingest stamps its bot turn with the wall clock: pin it to the scenario time so the suite passes at any hour of the day
+  vi.useFakeTimers({ toFake: ['Date'], now });
   const from = sentOf(g, pn).length;
   const msg = { id: `wamid.hours.${++seq}.${Date.now()}`, from: WA_1, type: 'text', text: { body: t }, timestamp: String(Math.floor(now / 1000)) }; // the message carries the fixed time, so the 24 h window is open at it
   expect((await postWebhook(SELF, rawMessagePayload(pn, msg))).status).toBe(200);
   await workspace(ws).runDueTasks(now);
+  vi.useRealTimers();
   return sentOf(g, pn, from);
 }
 async function setup(n: number, h: HoursSettings | null, extra: Record<string, unknown> = {}) {
