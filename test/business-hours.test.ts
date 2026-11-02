@@ -102,14 +102,8 @@ async function say(ws: string, pn: string, t: string, g: ReturnType<typeof stubG
 async function sayAt(ws: string, pn: string, t: string, g: ReturnType<typeof stubGraph>, now: number) {
   const from = sentOf(g, pn).length;
   const msg = { id: `wamid.hours.${++seq}.${Date.now()}`, from: WA_1, type: 'text', text: { body: t }, timestamp: String(Math.floor(now / 1000)) }; // the message carries the fixed time, so the 24 h window is open at it
-  // One clock (WA-FLAKE-AWAY-2): tasks are scheduled from the isolate's Date.now() but run at `now`; once the real date passed these fixed instants nothing was due. Fake only Date.
-  vi.useFakeTimers({ toFake: ['Date'], now });
-  try {
-    expect((await postWebhook(SELF, rawMessagePayload(pn, msg))).status).toBe(200);
-    await workspace(ws).runDueTasks(now);
-  } finally {
-    vi.useRealTimers();
-  }
+  expect((await postWebhook(SELF, rawMessagePayload(pn, msg))).status).toBe(200);
+  await workspace(ws).runDueTasks(now);
   return sentOf(g, pn, from);
 }
 async function setup(n: number, h: HoursSettings | null, extra: Record<string, unknown> = {}) {
