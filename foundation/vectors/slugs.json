@@ -1,0 +1,17 @@
+{
+  "format": [
+    { "in": "amelia", "error": null },
+    { "in": "a-b-c", "error": null },
+    { "in": "abc", "error": null },
+    { "in": "ab", "error": "SLUG_TOO_SHORT" },
+    { "in": "Amelia", "error": "SLUG_INVALID_CHARS" },
+    { "in": "my_shop", "error": "SLUG_INVALID_CHARS" },
+    { "in": "-abc", "error": "SLUG_INVALID_HYPHEN" },
+    { "in": "abc-", "error": "SLUG_INVALID_HYPHEN" },
+    { "in": "a--b", "error": "SLUG_INVALID_HYPHEN" },
+    { "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "error": "SLUG_TOO_LONG" },
+    { "in": "", "error": "SLUG_INVALID_CHARS" }
+  ],
+  "reserved": { "yes": ["app", "WA", " Api ", "accounts", "media"], "no": ["storedemo", "amelia", "", "demo-shop"] },
+  "demoShowroom": { "yes": ["storedemo", "storedemo-souq", "StoreDemo"], "no": ["storedemonstration", "demo-shop", "store"] }
+}

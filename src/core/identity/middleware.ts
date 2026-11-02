@@ -7,6 +7,7 @@ import { integrationState } from './integration';
 import { writeSessionState } from './session';
 import { routePath } from 'hono/route';
 import { subjectHash } from '../erasure';
+import { bridgeFor } from '../store-link';
 import { phoneDigits } from '../text-normalise';
 import { SESSION_CHECKED_READS, gateForRoute } from './scopes';
 import { IdentityError, type IdentityVerifier, type Principal } from './verifier';
@@ -126,6 +127,25 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
         console.log(JSON.stringify({ audit: 'integration_write', clientId: principal.integration.clientId, jti: principal.integration.jti, storeId, scope: gate }));
       }
     }
+    // WA-SEATS-1 (deny by default): a person who is a member by TOKEN is checked against the Store's LIVE membership on EVERY request (a permission is never-stale, so no cache; a token
+    // can be 15 minutes behind). Staff must also hold a seat the owner assigned, inside the package's limit. No Store answer = 503 (fail closed), never "allowed". This runs before the
+    // rate limit so a removed member's requests never spend the workspace's allowance. Without a Store link (a white-label deploy, no binding) there is no membership source and no seats.
+    let effectiveRole: 'owner' | 'staff' | undefined;
+    if (storeId && membership && !principal.superAdmin && !principal.integration) {
+      const bridge = c.env ? bridgeFor(c.env) : null; // a unit test mounting this middleware alone has no env; the Worker always has one
+      if (bridge) {
+        const live = await bridge.memberRole(storeId, principal.userId);
+        if (!live.ok) return c.json({ error: 'unavailable', message: 'membership_unavailable' }, 503);
+        if (live.value.role === null) return refuse('no_seat', 403, { message: 'not_a_member' });
+        // The LOWER of the token's role and the Store's: a token that is stale in either direction can never grant more than the Store says now (an owner demoted to staff is a
+        // seated-staff member from this request on; a staff member the Store now calls owner stays staff until the token refreshes).
+        effectiveRole = live.value.role === 'staff' || membership.role === 'staff' ? 'staff' : 'owner';
+        if (effectiveRole === 'staff') {
+          const seat = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId)).seatOf(principal.userId);
+          if (seat !== 'seated') return refuse('no_seat', 403, { message: seat === 'over_limit' ? 'seat_over_limit' : 'no_seat' });
+        }
+      }
+    }
     // F4: per-workspace and per-integrator-client rate limit, taken only AFTER the revocation checks (session, kill switch, integration state): a refused request (a revoked
     // token, a suspended store) never spends the workspace's allowance, so a flood of dead tokens cannot lock the owner out. A platform operator is not limited by a store's bucket.
     if (storeId && !principal.superAdmin) {
@@ -140,7 +160,7 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
       if (!allowed) return refuse('plan_feature', 403, { feature: 'api' });
     }
     c.set('principal', principal);
-    c.set('storeRole', principal.superAdmin ? 'super_admin' : membership!.role);
+    c.set('storeRole', principal.superAdmin ? 'super_admin' : (effectiveRole ?? membership!.role));
     await next();
   };
 }

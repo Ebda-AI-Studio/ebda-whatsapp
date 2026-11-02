@@ -1,5 +1,6 @@
 import { runDueOffboardings } from './core/ops/offboarding';
 import { offboardingRoutes } from './routes/offboarding';
+import { membersRoutes } from './routes/members';
 import { auditWrites } from './core/audit';
 import { eraseContactFlow } from './core/contact-erase';
 import { purgeNewCapUsage } from './core/campaigns/new-cap';
@@ -24,7 +25,7 @@ import { operatorRoutes } from './routes/operator';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { TIER_LIMITS } from './core/throttle';
-import { MIN_PROBE_SECRET_LENGTH, buyerKey, buyerKeyProbe } from './core/buyer-key';
+import { buyerKey, buyerKeyProbe } from './core/buyer-key';
 import { messagesRoutes } from './routes/messages';
 import { conversationsRoutes } from './routes/conversations';
 import { mediaRoutes } from './routes/media';
@@ -116,6 +117,10 @@ app.onError((err, c) => {
   alert('unhandled_error', { severity: 'P1', ...(storeId ? { workspace: storeId } : {}), route: c.req.routePath, method: c.req.method, error: errClass(err) });
   return c.json({ error: 'internal' }, 500);
 });
+// WA-404-1: the static assets no longer fall back to the inbox shell for every path (that answered 200 on any address). The one real
+// deep link is the sign-in return (web/src/data/oidc.ts CALLBACK_PATH): the Worker hands it the shell; everything else unknown is a real 404.
+app.get('/auth/callback', (c) => c.env.ASSETS.fetch(new Request(new URL('/', c.req.url), c.req.raw)));
+app.notFound((c) => PACK.notFound?.(c.req.raw) ?? c.json({ error: 'not_found' }, 404));
 // Everything the Worker answers itself (API, webhook, health, tracked links) is JSON, text or a redirect: nothing may load or
 // frame it. The page policy lives in web/brands/<brand>/public/_headers (served by static assets, one per brand).
 const SECURITY_HEADERS: Record<string, string> = {
@@ -188,6 +193,7 @@ api.route('/', instapayProofRoutes);
 api.route('/', packageRoutes);
 api.route('/', sharedNumberRoutes);
 api.route('/', offboardingRoutes);
+api.route('/', membersRoutes);
 app.route('/api/v1', api);
 /** The /api/v1 routes, exported so a test can walk them (every store route needs a scope decision in core/identity/scopes.ts). */
 export const apiRoutes = api;
@@ -222,7 +228,7 @@ app.get('/health', async (c) => {
   // D4: a value DERIVED from SUITE_BUYER_KEY_SECRET (16 hex of an HMAC over a fixed non-phone string, see buyer-key.ts), so scripts/verify-prod.mjs can prove it equals Ebda Store's
   // without the secret leaving either Worker. Absent when the secret is unset or shorter than MIN_PROBE_SECRET_LENGTH.
   const secret = c.env.SUITE_BUYER_KEY_SECRET;
-  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(secret && secret.length >= MIN_PROBE_SECRET_LENGTH ? { buyerKeyVector: await buyerKeyProbe(secret) } : {}) });
+  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(await buyerKeyProbe(secret ?? '').then((buyerKeyVector) => ({ buyerKeyVector }), () => ({}))) });
 });
 
 // B9: Meta's data-deletion callback and its status page (public; the signed request is the authentication).

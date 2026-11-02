@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
+import { BARE_AR, BARE_EN } from '../foundation/brand';
 import { findMatches } from './helpers/grep';
 
 it('repo carries no legacy brand strings', () => {
@@ -31,10 +32,7 @@ it('the Worker reaches brand code only through the brand registry (src/brand.ts)
 });
 
 // Brand rule (suite-wide, same pattern as the Store repo's brand-name-never-bare guard): the company is "Ebda AI Studio" and every
-// product is "Ebda <Product>"; a bare "Ebda" never reaches a user. Header/identifier names (X-Ebda-…, Ebda-Webhooks) are not copy.
-const BARE_EN = /(?<!X-)\bEbda\b(?!-Webhooks)(?! (?:Store|AI Studio|WhatsApp|CRM|ERP)\b)/;
-// The Arabic brand spellings with hamza under alef; the plain ابدأ is the everyday verb "start" and stays allowed in copy.
-const BARE_AR = /(?:إبدأ|إبدا)(?!\s*(?:ستور|استوديو|واتساب|WhatsApp|CRM|ERP|Store)(?![ء-يٱ-ۓ]))/;
+// product is "Ebda <Product>"; a bare "Ebda" never reaches a user. The two regexes live in the foundation (`brand`), shared with the Store.
 it('user-facing copy never says a bare "Ebda": always Ebda AI Studio or Ebda <Product>', () => {
   const scopes = ['src', 'web', 'docs/help', 'docs/legal', 'docs/site'];
   const hits = scopes.flatMap((s) => [...findMatches(BARE_EN, s), ...findMatches(BARE_AR, s)]).filter((m) => !/\.test\.tsx?:/.test(m));
@@ -78,7 +76,7 @@ it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / IN
   const sets = { P0: setOf('P0_ALERTS'), P1: setOf('P1_ALERTS'), INFO: setOf('INFO_ALERTS') };
   expect(sets.P0.size).toBeGreaterThan(5);
   expect(sets.P1.size).toBeGreaterThan(40);
-  expect(sets.INFO.size).toBe(25); // 20 + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
+  expect(sets.INFO.size).toBe(26); // 20 + P1b: seats_over_limit + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
   const used = new Set<string>();
   for (const hit of findMatches(/\balert\(/, 'src')) {
     const [file, line] = hit.split(':') as [string, string];

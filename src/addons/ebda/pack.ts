@@ -2,6 +2,7 @@ import type { BrandPack } from '../../brand';
 import { EBDA_AGENT_COPY } from './agent-copy';
 import { EBDA_OPT_IN_KEYWORDS } from './consent';
 import { EBDA_COPY } from './copy';
+import { ebdaNotFound } from './not-found';
 import { EBDA_OTP_POLICY } from './otp-policy';
 import { createServiceBindingBridge } from './store-bridge';
 import { EBDA_ORDERING_COPY } from './store-copy';
@@ -33,5 +34,6 @@ export const EBDA_PACK: BrandPack = {
   agentCopy: EBDA_AGENT_COPY,
   sharedNumber: { pickBody: EBDA_COPY.sharedPickBody, pickButton: EBDA_COPY.sharedPickButton, pickFooter: EBDA_COPY.sharedPickFooter, noRoute: EBDA_COPY.sharedNoRoute },
   instapayPayee: ebdaInstapayPayee,
+  notFound: ebdaNotFound,
   storeLink: { bridge: createServiceBindingBridge, events: createStoreEventSink, copy: EBDA_ORDERING_COPY, otp: EBDA_OTP_POLICY },
 };

@@ -10,3 +10,4 @@ Plan: `docs/plans/2026-10-24-ebda-whatsapp.md` (Global Constraints there are bin
 - Tenant data is reachable only through `env.WORKSPACE_DO.get(idFromName(workspaceId))`; D1 holds no message content.
 - Zod at every edge. Never log raw phone numbers or message bodies.
 - Tests: `npm test` (workerd via @cloudflare/vitest-plugin + a node project for guards); `npm run typecheck`; `npm audit` must be 0.
+- `foundation/` is vendored from `Whisky-11/ebda-foundation` (`foundation.lock.json`, test `test/foundation-parity.test.ts`). Never edit it here: change the foundation repo, tag, then `sync`. Rulings FDN-VENDOR-1, FDN-TEXT-1.
