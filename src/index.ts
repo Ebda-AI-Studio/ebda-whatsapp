@@ -116,6 +116,10 @@ app.onError((err, c) => {
   alert('unhandled_error', { severity: 'P1', ...(storeId ? { workspace: storeId } : {}), route: c.req.routePath, method: c.req.method, error: errClass(err) });
   return c.json({ error: 'internal' }, 500);
 });
+// WA-404-1: the static assets no longer fall back to the inbox shell for every path (that answered 200 on any address). The one real
+// deep link is the sign-in return (web/src/data/oidc.ts CALLBACK_PATH): the Worker hands it the shell; everything else unknown is a real 404.
+app.get('/auth/callback', (c) => c.env.ASSETS.fetch(new Request(new URL('/', c.req.url), c.req.raw)));
+app.notFound((c) => PACK.notFound?.(c.req.raw) ?? c.json({ error: 'not_found' }, 404));
 // Everything the Worker answers itself (API, webhook, health, tracked links) is JSON, text or a redirect: nothing may load or
 // frame it. The page policy lives in web/brands/<brand>/public/_headers (served by static assets, one per brand).
 const SECURITY_HEADERS: Record<string, string> = {
