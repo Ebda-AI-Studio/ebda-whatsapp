@@ -1,0 +1,9 @@
+:root {
+  --ebda-night: #0A0B0C;   /* primary background */
+  --ebda-gold:  #B08D57;   /* primary brand colour */
+  --ebda-lift:  #CBA873;   /* secondary brand colour */
+  --ebda-cream: #FAF8F3;   /* surfaces and UI */
+  --ebda-font-headline: "Playfair Display", Georgia, "Times New Roman", serif;
+  --ebda-font-ui: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ebda-app-icon-radius: 22.37%;
+}

@@ -3,6 +3,8 @@ import type { WorkspaceDO } from './core/workspace-do';
 export type Env = {
   WORKSPACE_DO: DurableObjectNamespace<WorkspaceDO>;
   DB: D1Database;
+  /** Static assets (the inbox SPA). `not_found_handling` is "none": an unknown path reaches the Worker, which answers the 404 page (WA-404-1). */
+  ASSETS: Fetcher;
   SEND_QUEUE: Queue;
   MEDIA: R2Bucket;
   BACKUPS: R2Bucket;

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Env } from '../../env';
 import {
-  addressSchema, bridgeResultSchema, catalogPageSchema, checkoutLinkSchema, codOutcomeAckSchema, customerOrdersSchema, orderCreatedSchema, orderStatusSchema, paymentLinkSchema, productsSchema,
+  addressSchema, bridgeResultSchema, memberRoleSchema, storeMembersSchema, catalogPageSchema, checkoutLinkSchema, codOutcomeAckSchema, customerOrdersSchema, orderCreatedSchema, orderStatusSchema, paymentLinkSchema, productsSchema,
   storeProfileSchema, type BridgeResult, type StoreBridge,
 } from '../../core/store-bridge';
 
@@ -36,6 +36,29 @@ export function createServiceBindingBridge(env: Pick<Env, 'STORE_BRIDGE'>): Stor
     if (!parsed.success) return unavailable(`rpc ${method}: malformed answer`);
     return parsed.data as BridgeResult<z.infer<S>>;
   }
+  /**
+   * The two membership methods answer with the bare value (and THROW FORBIDDEN / INVALID_ID), not the result envelope the commerce methods use
+   * (Store apps/api/src/lib/store-members.ts). A throw we recognise becomes `invalid`; any other failure, a timeout or a malformed answer is `unavailable`.
+   */
+  async function callBare<S extends z.ZodType>(method: string, schema: S, ...args: unknown[]): Promise<BridgeResult<z.infer<S>>> {
+    let raw: unknown;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      raw = await Promise.race([
+        binding![method]!(...args),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), RPC_TIMEOUT_MS); }),
+      ]);
+    } catch (err) {
+      const msg = (err as Error).message ?? '';
+      if (/FORBIDDEN|INVALID_ID/.test(msg)) return { ok: false, reason: 'invalid', message: /FORBIDDEN/.test(msg) ? 'FORBIDDEN' : 'INVALID_ID' };
+      return unavailable(`rpc ${method}: ${msg}`.slice(0, 200));
+    } finally {
+      clearTimeout(timer);
+    }
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) return unavailable(`rpc ${method}: malformed answer`);
+    return { ok: true, value: parsed.data };
+  }
   return {
     getStoreProfile: (s) => call('getStoreProfile', storeProfileSchema, s),
     listCatalog: (s, cursor, limit) => call('listCatalog', catalogPageSchema, s, cursor, limit),
@@ -49,5 +72,10 @@ export function createServiceBindingBridge(env: Pick<Env, 'STORE_BRIDGE'>): Stor
     saveCustomerAddress: (s, key, address) => call('saveCustomerAddress', z.object({ address: addressSchema }), s, key, address),
     getOrderStatus: (s, n, key) => call('getOrderStatus', orderStatusSchema, s, n, key),
     listCustomerOrders: (s, key, limit) => call('listCustomerOrders', customerOrdersSchema, s, key, limit),
+    listStoreMembers: (s, asUserId) => callBare('listStoreMembers', storeMembersSchema, s, asUserId),
+    memberRole: async (s, userId) => {
+      const r = await callBare('memberRole', memberRoleSchema.nullable(), s, userId);
+      return r.ok ? { ok: true, value: { role: r.value } } : r;
+    },
   };
 }

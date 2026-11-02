@@ -16,7 +16,8 @@
   "assets": {
     "directory": "web/dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
+    // WA-404-1: "none" (not the SPA fallback, which answered 200 on every path): an unknown path reaches the Worker, which answers the studio 404 page (src/addons/ebda/not-found.ts); /auth/callback is handed the shell by the Worker.
+    "not_found_handling": "none",
     "run_worker_first": ["/api/*", "/meta/*", "/kashier/*", "/health", "/t/*"]
   },
   "observability": { "enabled": true },

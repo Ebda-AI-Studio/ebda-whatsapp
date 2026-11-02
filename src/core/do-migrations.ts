@@ -489,6 +489,12 @@ export const DO_MIGRATIONS: readonly string[] = [
    );
    CREATE INDEX consent_proofs_contact ON consent_proofs (contact_id, id);
    ALTER TABLE imports ADD COLUMN consent_wording TEXT;`,
+  // v39 (P1b, WA-SEATS-1): which staff the owner seated. Membership lives in the Store; this is only the owner's choice, bounded by the package's member limit.
+  `CREATE TABLE seats (
+     user_id TEXT PRIMARY KEY,
+     assigned_at INTEGER NOT NULL,
+     assigned_by TEXT NOT NULL
+   );`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

@@ -89,6 +89,17 @@ const sentOf = (g: ReturnType<typeof stubGraph>, pn: string, from = 0): Sent[] =
 });
 let seq = 0;
 async function say(ws: string, pn: string, t: string, g: ReturnType<typeof stubGraph>, now: number) {
+  // One clock (WA-FLAKE-AWAY-2): the turn runs at `now` while the send claim reads the real Date.now(); once the wall clock passed the fixed dates the sends went stale. Pin Date to `now` for the turn.
+  const realClock = !vi.isFakeTimers();
+  if (realClock) vi.useFakeTimers({ toFake: ['Date'], now });
+  else vi.setSystemTime(now);
+  try {
+    return await sayAt(ws, pn, t, g, now);
+  } finally {
+    if (realClock) vi.useRealTimers();
+  }
+}
+async function sayAt(ws: string, pn: string, t: string, g: ReturnType<typeof stubGraph>, now: number) {
   const from = sentOf(g, pn).length;
   const msg = { id: `wamid.hours.${++seq}.${Date.now()}`, from: WA_1, type: 'text', text: { body: t }, timestamp: String(Math.floor(now / 1000)) }; // the message carries the fixed time, so the 24 h window is open at it
   expect((await postWebhook(SELF, rawMessagePayload(pn, msg))).status).toBe(200);

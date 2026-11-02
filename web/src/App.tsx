@@ -11,6 +11,7 @@ import { CampaignsScreen, dateTime } from './components/CampaignsScreen';
 import { ContactsScreen } from './components/ContactsScreen';
 import { NumbersScreen } from './components/NumbersScreen';
 import { OperatorScreen } from './components/OperatorScreen';
+import { TeamScreen } from './components/TeamScreen';
 import { WalletScreen } from './components/WalletScreen';
 import type { WalletDto } from './data/billing';
 import type { ConversationFilter, InboxSource } from './data/source';
@@ -243,12 +244,13 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   return (
     <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
       {source.viewAs && <p className="view-as-banner" role="status" aria-label={t.viewAsBanner}>{t.viewAsBanner}</p>}
-      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, operator: source.role === 'super_admin' && !!source.operator }} />
+      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
         : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} />
         : view === 'wallet' && source.wallet ? <WalletScreen t={t} lang={lang} source={source} api={source.wallet} now={now} />
         : view === 'operator' && source.operator && source.role === 'super_admin' ? <OperatorScreen t={t} lang={lang} source={source} api={source.operator} now={now} />
+        : view === 'team' && source.team ? <TeamScreen t={t} lang={lang} source={source} api={source.team} />
         : view === 'numbers' && source.numbers ? <NumbersScreen t={t} lang={lang} source={source} api={source.numbers} />
         : view === 'contacts' && source.contacts ? <ContactsScreen t={t} lang={lang} source={source} api={source.contacts} now={now} /> : (
         <>

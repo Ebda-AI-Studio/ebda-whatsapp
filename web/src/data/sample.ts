@@ -5,7 +5,7 @@ import type {
 import { normaliseText } from '../../../src/core/text-normalise';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
 import type { SharedTemplatesApi } from './shared-templates';
-import type { InboxSource } from './source';
+import type { InboxSource, TeamApi } from './source';
 
 // Sample data for preview only (labelled in the UI). Names and orders are invented; no real customers.
 const BASE = Date.UTC(2026, 9, 24, 17, 0);
@@ -286,6 +286,7 @@ export function createSampleSource(): InboxSource {
         };
       })(),
     },
+    team: createSampleTeam(),
     wallet: createSampleWallet(),
     operator: createSampleOperator('u-me'),
     sharedTemplates: createSampleSharedTemplates(),
@@ -347,5 +348,29 @@ function createSampleSharedTemplates(): SharedTemplatesApi {
     list: async () => items.map((t) => ({ ...t })),
     sync: async () => ({ upserted: items.length, removed: 0 }),
     submit: async (input) => { items.push({ name: input.name, language: input.language, category: input.category, status: 'PENDING', bodyText: input.components[0]!.text, paramCount: 0, rejectedReason: null }); return { status: 'PENDING' }; },
+  };
+}
+
+/** Sample team for the preview: the owner, three staff and a package with room for two staff seats (the owner counts as one of three). */
+function createSampleTeam(): TeamApi {
+  const people = [
+    { userId: 'u-me', displayName: 'ليلى', role: 'owner' as const, addedAt: '2026-09-01T00:00:00.000Z' },
+    { userId: 'u-1', displayName: 'مصطفى', role: 'staff' as const, addedAt: '2026-09-02T00:00:00.000Z' },
+    { userId: 'u-2', displayName: 'دينا', role: 'staff' as const, addedAt: '2026-09-03T00:00:00.000Z' },
+    { userId: 'u-3', displayName: 'كريم', role: 'staff' as const, addedAt: '2026-09-04T00:00:00.000Z' },
+  ];
+  const seated = new Set<string>(['u-1']);
+  const LIMIT = 3;
+  return {
+    async list() {
+      return { items: people.map((m) => ({ ...m, seat: m.role === 'owner' ? ('owner' as const) : seated.has(m.userId) ? ('seated' as const) : ('none' as const) })), seats: { limit: LIMIT, used: 1 + seated.size, overLimit: false } };
+    },
+    async assign(userId) {
+      if (!seated.has(userId) && seated.size >= LIMIT - 1) throw new ApiError('seat_limit', 403);
+      seated.add(userId);
+    },
+    async unassign(userId) {
+      seated.delete(userId);
+    },
   };
 }

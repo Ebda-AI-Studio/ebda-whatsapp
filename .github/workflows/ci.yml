@@ -24,10 +24,13 @@ jobs:
     # Umbra self-hosted runner when the repo variable EBDA_RUNS_ON is set, else GitHub-hosted.
     # EBDA_RUNS_ON must be a JSON value, e.g. ["self-hosted","umbra-ebda"], not a bare label.
     runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-latest"') }}
-    # The suite takes ~7 min on the shared VM, up to ~15 under load from other products' jobs (PR #7 run at 9eae554 was cut at 15).
-    timeout-minutes: 25
+    # The full suite takes 19-27 min on the shared VM under load from other products' jobs (main run at 0976248: 19 min; PR #43 run 40840747987 was cut at 25 while still passing files).
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The PR's base history, so scripts/ci-affected.sh can diff against it (WA-CI-ON-1).
+          fetch-depth: 0
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -40,18 +43,28 @@ jobs:
       # scripts/ci-test.mjs: vitest's own verdict, plus a guard for a pool that never exits after printing its summary (PR #7 run 40190537795)
       # or after every listed file reported but before the summary (main run 40217314246, PR #11 run 40222548576): per-file marks + collected
       # test counts decide; 10 min of silence fails naming unreported files. Every stop prints an alert line and a ::warning/::error annotation.
+      # PR: static guards in full + only the workers/web tests the change reaches; main and any shared-input change: everything (scripts/ci-affected.sh, Ruling WA-CI-ON-1).
       - name: Tests (suite duration reported, to see creep)
         shell: bash
         env:
           # 60 s per test on the shared VM (host memory pressure stalled it for 84 s and 343 s on 2026-10-25); local runs keep 20 s.
           VITEST_TEST_TIMEOUT: '60000'
           VITEST_ASYNC_TIMEOUT: '20000'
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
           start=$(date +%s)
           rc=0
-          npm run test:ci -- --maxWorkers=2 || rc=$?  # the step runs with bash -e: capture, report the duration, then exit with it
+          mode=$(bash scripts/ci-affected.sh)
+          echo "::notice title=Test scope::${mode}"
+          if [ "$mode" = full ]; then
+            npm run test:ci -- --maxWorkers=2 || rc=$?  # the step runs with bash -e: capture, report the duration, then exit with it
+          else
+            npm run test:ci -- --project node --maxWorkers=2 || rc=$?
+            if [ "$rc" -eq 0 ]; then npm run test:ci -- --project workers --project web --maxWorkers=2 --changed="origin/${BASE_REF}" --passWithNoTests || rc=$?; fi
+          fi
           secs=$(( $(date +%s) - start ))
           echo "::notice title=Suite duration::${secs}s"
-          echo "### Test suite: ${secs}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Test suite (${mode}): ${secs}s" >> "$GITHUB_STEP_SUMMARY"
           exit $rc
       - run: npm audit --audit-level=low

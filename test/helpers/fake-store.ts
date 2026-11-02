@@ -1,5 +1,6 @@
+import { mintedKey, mintedRoles } from './issuer';
 import type {
-  Address, BridgeFailure, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, StoreBridge, StoreProfile,
+  Address, BridgeFailure, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, StoreBridge, StoreProfile,
 } from '../../src/core/store-bridge';
 
 type Order = {
@@ -44,6 +45,28 @@ export class FakeStore implements StoreBridge {
     this.paymentMethods = opts.paymentMethods ?? ['cod', 'link', 'instapay'];
     this.catalog = opts.catalog ?? Array.from({ length: 23 }, (_, i) => row(`v${i + 1}`, `p${i + 1}`, `Item ${i + 1}`, 10_000 + i * 500));
     this.stock = opts.stock ?? Object.fromEntries(this.catalog.map((c) => [c.retailerId, 50]));
+  }
+
+  /** Store membership by store id: userId -> member. Tests set it with `setMembers`; an unknown store has no members. */
+  readonly members = new Map<string, Map<string, StoreMember>>();
+  setMembers(storeId: string, list: { userId: string; role: MemberRole; displayName?: string; addedAt?: string }[]) {
+    this.members.set(storeId, new Map(list.map((m, i) => [m.userId, { userId: m.userId, role: m.role, displayName: m.displayName ?? `Member ${i + 1}`, addedAt: m.addedAt ?? new Date(1_700_000_000_000 + i * 1000).toISOString() }])));
+  }
+
+  /** Membership answers like the Store: the bare value, a thrown FORBIDDEN for a non-owner asker; `failNext` makes the call unavailable. */
+  async listStoreMembers(storeId: string, asUserId: string): Promise<BridgeResult<{ items: StoreMember[] }>> {
+    this.calls.push({ method: 'listStoreMembers', args: [storeId, asUserId] });
+    if (this.failNext.delete('listStoreMembers')) return { ok: false, reason: 'unavailable' };
+    const all = this.members.get(storeId);
+    if (all?.get(asUserId)?.role !== 'owner') return { ok: false, reason: 'invalid', message: 'FORBIDDEN' };
+    return { ok: true, value: { items: [...all.values()] } };
+  }
+  async memberRole(storeId: string, userId: string): Promise<BridgeResult<{ role: MemberRole | null }>> {
+    this.calls.push({ method: 'memberRole', args: [storeId, userId] });
+    if (this.failNext.delete('memberRole')) return { ok: false, reason: 'unavailable' };
+    const team = this.members.get(storeId);
+    if (!team) return { ok: true, value: { role: (() => { const r = mintedRoles.get(mintedKey(storeId, userId)); return r?.has('owner') ? 'owner' as const : r?.has('staff') ? 'staff' as const : null; })() } }; // no team set for this store: the Store knows whoever the test signed in
+    return { ok: true, value: { role: team.get(userId)?.role ?? null } };
   }
 
   count(method: string): number {

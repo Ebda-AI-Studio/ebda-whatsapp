@@ -31,6 +31,8 @@ export type BrandPack = {
   sharedNumber: SharedNumberCopy;
   /** Who a merchant pays by InstaPay for packages and top-ups, read from the environment at call time. Null (or no function) = InstaPay billing is unavailable for this brand. */
   instapayPayee?: (env: Record<string, string | undefined>) => InstapayPayee | null;
+  /** The page an unknown address gets (a read only); null/absent = the plain JSON 404. The status is always 404 (WA-404-1). */
+  notFound?: (req: Request) => Response | null;
   /** Only the suite brand links to a Store; a white-label pack leaves it out (the ordering bot stays silent). */
   storeLink?: Pick<StoreLinkConfig, 'bridge' | 'events' | 'copy' | 'otp'>;
 };

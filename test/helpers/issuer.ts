@@ -11,11 +11,19 @@ export async function newKey(kid: string): Promise<TestKey> {
   return { kid, privateKey, jwk };
 }
 
+/**
+ * Every (store, user) -> role a test token asserted, so the fake Store can answer `memberRole` for a store whose team the test never set (a test that is not about
+ * seats still signs in as a member, and the Store would know them). A test about membership sets the team explicitly with `FakeStore.setMembers`, which wins.
+ */
+export const mintedRoles = new Map<string, Set<'owner' | 'staff'>>();
+export const mintedKey = (storeId: string, userId: string) => `${storeId}:${userId}`;
+
 export type Claims = { sub?: string; sid?: string; aud?: string; iss?: string; stores?: { id: string; role: 'owner' | 'staff' }[]; pa?: string };
 
 export async function mint(key: TestKey, claims: Claims = {}, opts: { expSeconds?: number; iatOffset?: number; typ?: string } = {}): Promise<string> {
   const now = Math.floor(Date.now() / 1000) + (opts.iatOffset ?? 0);
   const { aud = 'whatsapp', iss = ISSUER, ...rest } = claims;
+  for (const st of claims.stores ?? []) { const k = mintedKey(st.id, claims.sub ?? '6f1d2c1e-8a8f-4a3b-9f1e-1a2b3c4d5e6f'); mintedRoles.set(k, (mintedRoles.get(k) ?? new Set()).add(st.role)); }
   return new SignJWT({ sid: 'sess-1', stores: [], ...rest })
     .setProtectedHeader({ alg: 'ES256', kid: key.kid, typ: opts.typ ?? 'at+jwt' })
     .setSubject(claims.sub ?? '6f1d2c1e-8a8f-4a3b-9f1e-1a2b3c4d5e6f')

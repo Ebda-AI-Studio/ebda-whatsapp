@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
+  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -22,7 +22,8 @@ type Opts = {
 };
 
 /** The live inbox source: every response is validated against the shared contract. */
-export type LiveSource = InboxSource & { fetchEvents: (after: number) => Promise<z.infer<typeof eventsResponse>>; emit: (e: RealtimeEvent) => void; reload: () => void; loadCapabilities: () => Promise<void> };
+/** `noSeat` is set by loadCapabilities when the server refused this person for want of a seat (WA-SEATS-1): the app then shows the no-seat page instead of an inbox that cannot load. */
+export type LiveSource = InboxSource & { noSeat?: 'none' | 'over_limit'; fetchEvents: (after: number) => Promise<z.infer<typeof eventsResponse>>; emit: (e: RealtimeEvent) => void; reload: () => void; loadCapabilities: () => Promise<void> };
 
 export function createApiSource(o: Opts): LiveSource {
   const f = o.fetchImpl ?? fetch;
@@ -146,6 +147,14 @@ export function createApiSource(o: Opts): LiveSource {
         status: () => call('/shared-number', sharedNumberDto),
         join: (displayName) => call('/shared-number/join', sharedNumberDto, post(displayName ? { displayName } : {})),
         leave: () => call('/shared-number/leave', sharedNumberDto, post({})),
+      },
+    },
+    team: {
+      list: () => call('/members', listMembersResponse),
+      assign: async (userId) => { await call(`/members/${encodeURIComponent(userId)}/seat`, seatResponse, { method: 'PUT' }); },
+      unassign: async (userId) => {
+        const res = await f(`${root}/members/${encodeURIComponent(userId)}/seat`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
       },
     },
     contacts: {
@@ -291,8 +300,9 @@ export function createApiSource(o: Opts): LiveSource {
         const me = await call('/me', meResponse.partial().loose());
         source.capabilities = { codOutcome: me.capabilities?.codOutcome === true, numbers: me.capabilities?.numbers === true };
         if (me.role) source.role = me.role;
-      } catch {
+      } catch (e) {
         source.capabilities = { codOutcome: false };
+        if (e instanceof ApiError && e.status === 403 && e.code === 'no_seat') source.noSeat = e.detail === 'seat_over_limit' ? 'over_limit' : 'none';
       }
     },
   };

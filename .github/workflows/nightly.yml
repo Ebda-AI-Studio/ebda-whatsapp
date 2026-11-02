@@ -1,6 +1,6 @@
 name: nightly
 
-# Heavy tier, once a day (PRs run lint + typecheck + tests only): the opt-in speed benches (BENCH=1).
+# Heavy tier, once a day (PRs run typecheck + the affected tests; main runs everything): the opt-in speed benches (BENCH=1).
 # The budget is FIXED, not runner-sized (M-176): every bench measures a baseline on this same runner in this same run and
 # fails when a path is slower than a fixed multiple of it (test/helpers/bench.ts), so a slow runner cannot hide a
 # regression and a fast one cannot invent one. The 150 ms absolute product figure is certified only on a known machine:

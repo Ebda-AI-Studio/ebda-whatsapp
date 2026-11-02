@@ -84,7 +84,7 @@ export const apiError = z.object({
   error: z.enum([
     'unauthorized', 'forbidden', 'not_found', 'invalid_request',
     'window_closed', 'opted_out', 'template_not_approved', 'unsupported_media', 'wallet_empty', 'rate_limited', 'plan_blocked', 'funding_unknown', 'rate_unavailable',
-    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable', 'package_required', 'plan_feature', 'plan_required', 'vat_locked', 'yearly_queued',
+    'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable', 'package_required', 'plan_feature', 'plan_required', 'vat_locked', 'yearly_queued', 'seat_limit', 'no_seat',
   ]),
   message: z.string().optional(),
   /** plan_feature: which plan feature the package lacks (the client shows the upgrade CTA for it). */
@@ -282,6 +282,16 @@ export const exportContactQuery = z.object({ after: z.coerce.number().int().min(
 /** PUT /retention (B4): the owner's message window in days; null = the platform default. */
 export const retentionRequest = z.object({ days: z.number().int().min(30).max(3650).nullable() }).strict();
 export const retentionDto = z.object({ days: z.number().int().nullable(), effectiveDays: z.number().int(), defaultDays: z.number().int(), minDays: z.number().int(), maxDays: z.number().int() });
+/**
+ * GET /members (WA-SEATS-1): the team as the Store knows it, with each person's seat here. `seat` is 'owner' (always works, counts as one), 'seated',
+ * 'over_limit' (holds a row beyond what the package now allows: refused until a seat is freed) or 'none'. `seats.limit` counts the owner.
+ */
+export const memberSeat = z.enum(['owner', 'seated', 'over_limit', 'none']);
+export const memberDto = z.object({ userId: z.string(), displayName: z.string(), role: z.enum(['owner', 'staff']), addedAt: z.string(), seat: memberSeat });
+export const listMembersResponse = z.object({ items: z.array(memberDto), seats: z.object({ limit: z.number().int().min(1), used: z.number().int().min(1), overLimit: z.boolean() }) });
+export type MemberDto = z.infer<typeof memberDto>;
+export type ListMembersResponse = z.infer<typeof listMembersResponse>;
+export const seatResponse = z.object({ userId: z.string(), seat: z.enum(['seated']) });
 export const contactSummaryDto = z.object({ waId: z.string(), name: z.string().nullable(), optedOut: z.boolean() });
 export const importMapping = z.object({ phone: z.string().min(1).max(100).optional(), name: z.string().min(1).max(100).optional(), tags: z.string().min(1).max(100).optional() });
 /** The multipart text fields next to the `file` part. `consented` must be the literal string "true" to grant marketing consent. */

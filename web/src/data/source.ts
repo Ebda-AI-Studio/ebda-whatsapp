@@ -1,6 +1,6 @@
 import type {
   AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
-  RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
+  ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
 } from '../../../src/core/api/contract';
 
 import type { OperatorApi, WalletApi } from './billing';
@@ -22,6 +22,13 @@ export interface CampaignsApi {
   remove(id: string): Promise<void>;
   segments(): Promise<SegmentDto[]>;
   preview(criteria: SegmentCriteria): Promise<SegmentPreviewDto>;
+}
+
+/** Team seats (owner only; WA-SEATS-1). `assign` rejects with an ApiError `seat_limit` (status 403) when the package has no seat left, and 503 when the team cannot be read. */
+export interface TeamApi {
+  list(): Promise<ListMembersResponse>;
+  assign(userId: string): Promise<void>;
+  unassign(userId: string): Promise<void>;
 }
 
 /** A merchant's own WhatsApp numbers (Phase 8.1); absent when Embedded Signup is switched off. */
@@ -105,6 +112,8 @@ export interface InboxSource {
   assign?(conversationId: number, userId: string | null): Promise<void>;
   campaigns?: CampaignsApi;
   numbers?: NumbersApi;
+  /** The team and its seats; offered to the owner only. */
+  team?: TeamApi;
   contacts?: ContactsApi;
   /** Wallet, statement, top-ups and refunds (Phase 7). */
   wallet?: WalletApi;

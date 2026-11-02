@@ -74,6 +74,8 @@ import { parentHoldRef } from './campaigns/campaigns';
 import { indexContactName, rebuildContactIndex } from './contact-index';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
+import { bridgeFor } from './store-link';
+import { assignSeat, listSeats, pruneSeats, removeSeat, seatState, seatsOverLimit, type AssignResult, type SeatRow, type SeatState } from './seats';
 import { applyEntitlement, expireSubscription, runCreditMonth, featureAllowed, marketingBlocked, memberLimit, readEntitlement, serviceAllowed, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
 
@@ -85,9 +87,12 @@ export const INLINE_BODY_BYTES = 1024;
 /** Headers the Worker sets on the upgrade it forwards to the DO (never read from the client: the route overwrites them). */
 export const WS_EXP_HEADER = 'x-socket-token-exp';
 export const WS_ROLE_HEADER = 'x-socket-role';
+export const WS_USER_HEADER = 'x-socket-user';
 /** Close code for a socket whose access token has expired: the client refreshes its token and reconnects. */
 export const WS_CLOSE_TOKEN_EXPIRED = 4401;
-type SocketAttachment = { exp: number; role: string };
+/** Close code for a staff socket whose seat is gone (removed, left the team, or beyond the package's limit): it receives nothing more (WA-SEATS-1). */
+export const WS_CLOSE_NO_SEAT = 4403;
+type SocketAttachment = { exp: number; role: string; userId?: string };
 export const BOT_TURN_MAX_ATTEMPTS = 6;
 export const STALE_CLAIM_MS = 2 * 60 * 1000;
 /** failed sits between sent and delivered: it beats a late 'sent', but never undoes a delivery. */
@@ -1601,8 +1606,38 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** One subscription event from the control plane. An older or equal version is ignored ('stale'). */
   async applyEntitlement(ev: EntitlementEvent, now = Date.now()): Promise<'applied' | 'stale' | 'invalid'> {
     const r = this.ctx.storage.transactionSync(() => applyEntitlement(this.sql, ev, now));
-    if (r === 'applied') await this.arm();
+    if (r === 'applied') {
+      await this.arm();
+      // A downgrade never deletes anyone: staff beyond the new limit simply stop working until the owner frees a seat. The owner sees it on the Team screen; we are told once per change.
+      if (seatsOverLimit(this.sql, now)) alert('seats_over_limit', { workspace: this.workspaceId });
+      this.closeUnseatedSockets(this.ctx.getWebSockets());
+    }
     return r;
+  }
+
+  /** Seats (WA-SEATS-1). The owner's seat-assignment routes and the staff gate in the identity middleware are the only callers. */
+  async seatSummary(): Promise<{ limit: number; seats: SeatRow[] }> {
+    return listSeats(this.sql);
+  }
+  async seatOf(userId: string): Promise<SeatState> {
+    return seatState(this.sql, userId);
+  }
+  /** Drops rows of people who left the team, then seats `userId` if there is room: one DO call, so two requests cannot both take the last seat. */
+  async assignSeat(userId: string, by: string, activeStaffIds: string[]): Promise<AssignResult> {
+    const r = this.ctx.storage.transactionSync(() => {
+      pruneSeats(this.sql, activeStaffIds);
+      return assignSeat(this.sql, userId, by);
+    });
+    this.closeUnseatedSockets(this.ctx.getWebSockets()); // the prune above may have dropped a leaver's seat
+    return r;
+  }
+  async removeSeat(userId: string): Promise<void> {
+    removeSeat(this.sql, userId);
+    this.closeUnseatedSockets(this.ctx.getWebSockets());
+  }
+  async pruneSeats(activeStaffIds: string[]): Promise<void> {
+    pruneSeats(this.sql, activeStaffIds);
+    this.closeUnseatedSockets(this.ctx.getWebSockets());
   }
 
   /** Which of these wallet refs are on the ledger (to reverse only what was really posted). */
@@ -1678,7 +1713,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
     // Survives hibernation: the token's expiry (epoch s) and the caller's role, so a long-lived socket is re-authorised on every push.
     const exp = Number(request.headers.get(WS_EXP_HEADER));
-    server.serializeAttachment({ exp: Number.isFinite(exp) && exp > 0 ? exp : 0, role: request.headers.get(WS_ROLE_HEADER) ?? 'unknown' } satisfies SocketAttachment);
+    server.serializeAttachment({ exp: Number.isFinite(exp) && exp > 0 ? exp : 0, role: request.headers.get(WS_ROLE_HEADER) ?? 'unknown', userId: request.headers.get(WS_USER_HEADER) ?? '' } satisfies SocketAttachment);
     return new Response(null, { status: 101, webSocket: client, headers: { 'sec-websocket-protocol': 'inbox.v1' } });
   }
 
@@ -1707,6 +1742,24 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
   }
 
+  /**
+   * WA-SEATS-1: a staff socket stays open only while its user holds a seat. Closes (4403) every staff socket whose user is not 'seated' now (removed seat, left the
+   * team, downgrade, plan lapse). Owners and operators are untouched. Without a Store link there are no seats, so nothing is closed. Returns the sockets that may keep receiving.
+   */
+  private closeUnseatedSockets(sockets: WebSocket[]): WebSocket[] {
+    if (!sockets.some((ws) => (ws.deserializeAttachment() as SocketAttachment | null)?.role === 'staff')) return sockets;
+    if (!bridgeFor(this.env)) return sockets;
+    const seated = new Set(listSeats(this.sql).seats.filter((x) => x.state === 'seated').map((x) => x.userId));
+    return sockets.filter((ws) => {
+      const att = ws.deserializeAttachment() as SocketAttachment | null;
+      if (att?.role === 'staff' && !(att.userId && seated.has(att.userId))) {
+        try { ws.close(WS_CLOSE_NO_SEAT, 'no seat'); } catch { /* already closed */ }
+        return false;
+      }
+      return true;
+    });
+  }
+
   private broadcast(): void {
     const pending = this.sql.exec<{ seq: number; payload: string }>('SELECT seq, payload FROM events WHERE seq > ? ORDER BY seq', this.lastBroadcast).toArray();
     if (!pending.length) return;
@@ -1723,10 +1776,11 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       return false;
     });
-    if (!sockets.length) return;
+    const allowed = this.closeUnseatedSockets(sockets); // backstop: re-checked at every push, whatever closed (or failed to close) a socket earlier
+    if (!allowed.length) return;
     for (const e of pending) {
       const frame = JSON.stringify({ ...(JSON.parse(e.payload) as object), seq: e.seq });
-      for (const ws of sockets) {
+      for (const ws of allowed) {
         try {
           ws.send(frame);
         } catch {
