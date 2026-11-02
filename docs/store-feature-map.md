@@ -1,8 +1,8 @@
-# Store WhatsApp features → Ebda WhatsApp
+# Store WhatsApp features → Ebda Chat
 
-The WhatsApp features that Ebda Store carried through its previous integration, each mapped to where Ebda WhatsApp provides it (checked against the code on 2026-10-25). Store-side WhatsApp features go through Ebda WhatsApp only; the Store's old bridge is being removed.
+The WhatsApp features that Ebda Store carried through its previous integration, each mapped to where Ebda Chat provides it (checked against the code on 2026-10-25). Store-side WhatsApp features go through Ebda Chat only; the Store's old bridge is being removed.
 
-| Previous Store feature | Ebda WhatsApp | Where |
+| Previous Store feature | Ebda Chat | Where |
 |---|---|---|
 | Order updates: paid | **Built.** `order.status_changed` → `paid` sends the payment confirmation to the customer (InstaPay / payment-link orders, inside the 24 h window) | `src/core/store-link/events.ts`, copy in `src/addons/ebda/store-copy.ts` |
 | Order updates: shipped / delivered / failed delivery | **Built.** `shipment.updated` sends the status template (shipped, delivered, could not be delivered), with the tracking link when the Store sends one | `src/core/store-link/events.ts`, `docs/store-link.md` |

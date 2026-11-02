@@ -42,13 +42,13 @@ it('user-facing copy never says a bare "Ebda": always Ebda AI Studio or Ebda <Pr
 // The Store publishes docs/legal on ebda.app from a vendored snapshot and cannot see this repo: a change here must be sent to the
 // Store session (commit id) so it re-imports. Changing a file means updating its pin, which is the reminder.
 const LEGAL_PINS: Record<string, string> = {
-  'docs/legal/README.md': '3e2ac6be2d00104de0be887baab908784ba2468e0e97761579646c2640b8cf31',
-  'docs/legal/ar/whatsapp-dpa.md': '43dfa98c3dc681bc047ff7f04738279a326d6e71d80d9c1afbb75bb2c0975e51',
-  'docs/legal/ar/whatsapp-privacy.md': '93cc40cde3913d7f0c31bcbe5c93a1b63e5676250528b282b8ff45a9f4e59cc8',
-  'docs/legal/ar/whatsapp-terms.md': '7da7304c9d8ab799eb9a5c1665b0acb26d5c7ad1bbf2609f148b67fec5b98458',
-  'docs/legal/en/whatsapp-dpa.md': '8cfe9328d4478c1150c2c445835b0761c4a7f90849301d69dbe4e777b7f4a65a',
-  'docs/legal/en/whatsapp-privacy.md': '139b5484f759014a0245ebbbf90b3a504aebf324717f98bbd3426397ade7008a',
-  'docs/legal/en/whatsapp-terms.md': '5bc6b5876c487047acfdcd38ed62824b4a9fcc08c396791e4f44cf4668347e22',
+  'docs/legal/README.md': '2c2d17e7f10b0f7d9877f6b045b041a17ac0286d36744b4752671d53eaba0f69',
+  'docs/legal/ar/whatsapp-dpa.md': 'f14f2ae4a578ab9a2ba0ddece99562358653436d1585eb622a55580816a019a7',
+  'docs/legal/ar/whatsapp-privacy.md': '74f928d590d12b99afca3e31f1f12a7db97072943a4abab2f3d8f57c6cb54a95',
+  'docs/legal/ar/whatsapp-terms.md': '619e3006dd2a546ce1eca8dfd0c05a289a4c9b642748bb92a24ca71f8a2ffbfe',
+  'docs/legal/en/whatsapp-dpa.md': '802870620cf528c6179124df7916231f5c1aa4956f76829b7091be507c33c1c9',
+  'docs/legal/en/whatsapp-privacy.md': '490d07bd087229ad7b9edeade7aa340c3d83e445dcf6e679da34bf10b57f4d2c',
+  'docs/legal/en/whatsapp-terms.md': '1710565cf245d8e01cebc2f127ce8c8a88af2900965c5a5c1a37998190d947d7',
 };
 it('legal pages are pinned: a change needs a new pin AND a message to the Store session, which publishes them', async () => {
   const { readFileSync, readdirSync } = await import('node:fs');
@@ -261,4 +261,11 @@ it('GUARD: no INSERT into an append-only table (any table with a no-update trigg
   }
   expect(scanned).toBeGreaterThan(20);
   expect(bad, 'an append-only table must not store text: put it in audit_reasons and write reason_id (src/core/audit-reason.ts)').toEqual([]);
+});
+
+// Ruling WA-RENAME-PLAN-1 / WA-COPY-1 (Ahmad 2026-11-01): the product is "Ebda Chat" / "ابدأ شات". WhatsApp is only ever a describing phrase.
+it('the product is never called Ebda WhatsApp (banned spellings, WA-COPY-1)', () => {
+  const banned = /Ebda WhatsApp|ابدأ واتساب|Ebda for WhatsApp|WhatsApp by Ebda|\bEbda WA\b|شريك واتساب الرسمي/;
+  const hits = findMatches(banned).filter((m) => !/^(docs\/rulings|graphify-out)\//.test(m) && !/^docs\/plans\//.test(m));
+  expect(hits).toEqual([]);
 });

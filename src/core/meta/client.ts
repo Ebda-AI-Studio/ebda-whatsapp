@@ -1,4 +1,5 @@
 import { isRetryable } from './errors';
+import { fetchWithTimeout } from '../net/fetch-with-timeout';
 
 /** Meta answers within a few seconds; a hung call must not hold the claim past the queue's retry. */
 export const SEND_TIMEOUT_MS = 15_000;
@@ -18,12 +19,11 @@ const graphUrl = (graphVersion: string, path: string) => `https://graph.facebook
 async function postMessage(opts: Base, payload: Record<string, unknown>): Promise<SendResult> {
   let res: Response;
   try {
-    res = await fetch(graphUrl(opts.graphVersion, `${opts.phoneNumberId}/messages`), {
+    res = await fetchWithTimeout(graphUrl(opts.graphVersion, `${opts.phoneNumberId}/messages`), {
       method: 'POST',
       headers: { authorization: `Bearer ${opts.token}`, 'content-type': 'application/json' },
-      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: opts.to, ...payload }),
-    });
+    }, { label: 'meta.send', timeoutMs: SEND_TIMEOUT_MS });
   } catch (err) {
     // Retryable by choice: if Meta accepted before the network failed, the retry sends one duplicate (Ruling, see ledger).
     return { ok: false, code: 0, retryable: true, message: `network: ${(err as Error).message}` };

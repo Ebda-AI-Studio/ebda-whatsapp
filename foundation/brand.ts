@@ -18,7 +18,7 @@ export const EBDA = {
   },
   products: {
     store: { nameEn: 'Ebda Store', nameAr: 'ابدأ ستور' },
-    whatsapp: { nameEn: 'Ebda WhatsApp', nameAr: 'ابدأ واتساب' },
+    whatsapp: { nameEn: 'Ebda Chat', nameAr: 'ابدأ شات' },
   },
   /** Brand colours. No orange anywhere in Ebda's own surfaces (merchants may choose their own). */
   colors: {
@@ -37,7 +37,7 @@ export const EBDA = {
     status: 'status.ebda.app',
     /** Reserved for the post-launch automated WhatsApp tier. */
     whatsapp: 'whatsapp.ebda.app',
-    /** The Ebda WhatsApp app (LAUNCH-SUITE-1; its Worker's custom domain). */
+    /** The Ebda Chat app (LAUNCH-SUITE-1; its Worker's custom domain). */
     whatsappApp: 'wa.ebda.app',
     /** The shared Ebda AI Studio sign-in (ID-1). */
     accounts: 'accounts.ebda.app',
@@ -49,7 +49,7 @@ export function brandName(locale?: string | null): string {
   return locale && locale.toLowerCase().startsWith('ar') ? EBDA.nameAr : EBDA.name;
 }
 
-/** A bare English "Ebda" (not Ebda AI Studio / Store / WhatsApp / CRM / ERP). Header names (X-Ebda-…, Ebda-Webhooks) are not copy. */
-export const BARE_EN = /(?<!X-)\bEbda\b(?!-Webhooks)(?! (?:Store|AI Studio|WhatsApp|CRM|ERP)\b)/;
+/** A bare English "Ebda" (not Ebda AI Studio / Store / Chat / CRM / ERP). Header names (X-Ebda-…, Ebda-Webhooks) are not copy. */
+export const BARE_EN = /(?<!X-)\bEbda\b(?!-Webhooks)(?! (?:Store|Chat|AI Studio|CRM|ERP)\b)/;
 /** The Arabic brand spellings with hamza under alef; the plain ابدأ is the everyday verb "start" and stays allowed in copy. */
-export const BARE_AR = /(?:إبدأ|إبدا)(?!\s*(?:ستور|استوديو|واتساب|WhatsApp|CRM|ERP|Store)(?![ء-يٱ-ۓ]))/;
+export const BARE_AR = /(?:إبدأ|إبدا)(?!\s*(?:ستور|استوديو|شات|Chat|CRM|ERP|Store)(?![ء-يٱ-ۓ]))/;

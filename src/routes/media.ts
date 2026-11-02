@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { MAX_DOCUMENT_BYTES, UPLOAD_OVERHEAD_BYTES, canonicalMime, normaliseMime, outboundMediaFor, safeFilename, sniffMime } from '../core/media';
 import { senderNumber, apiError, bizToken, intParam, planRequired, workspaceStub, type ApiEnv } from './shared';
+import { fetchWithTimeout } from '../core/net/fetch-with-timeout';
 
 export const mediaRoutes = new Hono<ApiEnv>();
 
@@ -75,12 +76,11 @@ mediaRoutes.post('/stores/:storeId/media', async (c) => {
   form.set('file', file.slice(0, file.size, mime), filename); // a view on the one copy the request parser made
   let metaRes: Response;
   try {
-    metaRes = await fetch(`https://graph.facebook.com/${c.env.META_GRAPH_VERSION}/${number.phoneNumberId}/media`, {
+    metaRes = await fetchWithTimeout(`https://graph.facebook.com/${c.env.META_GRAPH_VERSION}/${number.phoneNumberId}/media`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}` },
       body: form,
-      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
-    });
+    }, { label: 'meta.media.upload', timeoutMs: UPLOAD_TIMEOUT_MS });
   } catch {
     return apiError(c, 503, 'rate_limited', 'upload_failed');
   }

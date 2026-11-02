@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mirrors last night's Ebda WhatsApp backups (R2 ebda-wa-backups) and a D1 export to this Mac. Keeps 30 days.
+# Mirrors last night's Ebda Chat backups (R2 ebda-wa-backups) and a D1 export to this Mac. Keeps 30 days.
 # Keys are deterministic (backups/<workspace>/<date>/<table>.ndjson), so no bucket listing is needed:
 # the workspace list comes from D1. Usage: scripts/backup-pull.sh [YYYY-MM-DD]   (default: today in Cairo)
 set -euo pipefail

@@ -6,7 +6,7 @@ import { expect, it } from 'vitest';
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
 // The suite's single VAT-0 clause (business/ebda/legal/VAT-0-clause.md), vendored byte for byte; the store product publishes the same text.
-const CLAUSE_SHA = 'f0af75e07c3f38ac52b86052bb56d8335ec53dbe59fda47d99af9267cf24f280';
+const CLAUSE_SHA = '9e308d934800b655673aa0491ec88f822811e79bc01793d7ca43067fd22c50a0';
 const clause = read('vendor/legal/VAT-0-clause.md');
 const section = (h: string) => clause.split(`## ${h}\n`)[1]!.split('\n## ')[0]!.trim();
 

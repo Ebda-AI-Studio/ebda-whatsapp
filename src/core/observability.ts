@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/cloudflare';
 import type { ErrorEvent } from '@sentry/cloudflare';
+import { fetchWithTimeout } from './net/fetch-with-timeout';
 
 // A run of 8+ digits (ASCII, Arabic-Indic or Persian), optionally with +, spaces, dashes, dots or parentheses between them.
 const DIGIT = '[0-9\\u0660-\\u0669\\u06f0-\\u06f9]';
@@ -198,12 +199,11 @@ export function alert(name: string, fields: AlertFields = {}): void {
     } catch { /* Sentry must never break the caller */ }
     const { TELEGRAM_BOT_TOKEN: token, TELEGRAM_ALERT_CHAT_ID: chat } = d.env;
     if (!token || !chat) return;
-    const send = fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const send = fetchWithTimeout(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chat, text: telegramText(name, sev, workspace, rendered, suppressed, d.env) }),
-      signal: AbortSignal.timeout(5000),
-    }).then(() => undefined, () => undefined);
+    }, { label: 'telegram.alert', timeoutMs: 5000 }).then(() => undefined, () => undefined);
     try {
       d.waitUntil(send);
     } catch { /* a stale execution context: the promise still runs, just unowned */ }

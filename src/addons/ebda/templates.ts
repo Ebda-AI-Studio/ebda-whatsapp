@@ -1,6 +1,6 @@
 import type { TemplateSeed } from '../../routes/templates';
 
-/** Ebda WhatsApp's starter templates (Egyptian Arabic). Submitted to Meta on request; Meta approves them, we never assume it. */
+/** Ebda Chat's starter templates (Egyptian Arabic). Submitted to Meta on request; Meta approves them, we never assume it. */
 export const EBDA_DEFAULT_TEMPLATES: readonly TemplateSeed[] = [
   {
     name: 'order_confirmation',

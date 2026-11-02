@@ -4,6 +4,7 @@
  * is an `LlmError` with a class and a retry hint, nothing else.
  */
 import { z } from 'zod';
+import { fetchWithTimeout } from '../net/fetch-with-timeout';
 
 export type ToolDef = { name: string; description: string; parameters: Record<string, unknown> };
 export type ToolCall = { id: string; name: string; arguments: unknown };
@@ -111,16 +112,15 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   readonly byoKey = true;
   constructor(private readonly cfg: { baseUrl: string; apiKey: string; model: string; fetcher?: typeof fetch; timeoutMs?: number }) {}
   async complete(req: LlmRequest): Promise<LlmResponse> {
-    const doFetch = this.cfg.fetcher ?? fetch;
+    const doFetch = this.cfg.fetcher;
     let res: Response;
     try {
-      res = await doFetch(`${this.cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      res = await fetchWithTimeout(`${this.cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${this.cfg.apiKey}` },
         body: JSON.stringify({ model: this.cfg.model, messages: toWire(req), ...(req.tools.length ? { tools: toolsWire(req.tools) } : {}), max_tokens: req.maxTokens, temperature: 0.3 }),
         redirect: 'manual', // a merchant-supplied host must not bounce us (with the key) somewhere else
-        signal: AbortSignal.timeout(this.cfg.timeoutMs ?? LLM_TIMEOUT_MS),
-      });
+      }, { label: 'ai.complete', class: 'ai', timeoutMs: this.cfg.timeoutMs ?? LLM_TIMEOUT_MS }, doFetch);
     } catch (err) {
       throw new LlmError(err instanceof Error && err.name === 'TimeoutError' ? 'timeout' : 'network', true);
     }

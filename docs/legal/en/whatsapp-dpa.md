@@ -1,5 +1,5 @@
 ---
-title: Ebda WhatsApp Data Processing Agreement
+title: Ebda Chat Data Processing Agreement
 slug: whatsapp-dpa
 lang: en
 updated: 2026-10-25
@@ -7,9 +7,9 @@ updated: 2026-10-25
 
 Arabic version prevails.
 
-# Ebda WhatsApp Data Processing Agreement
+# Ebda Chat Data Processing Agreement
 
-This agreement is between the merchant that uses Ebda WhatsApp (the "Controller") and Ebda AI Studio (the "Processor"). It forms part of the Ebda WhatsApp Terms of Service and applies to personal data that the Processor handles for the Controller in the Service, under Egypt's Personal Data Protection Law No. 151 of 2020 ("PDPL").
+This agreement is between the merchant that uses Ebda Chat (the "Controller") and Ebda AI Studio (the "Processor"). It forms part of the Ebda Chat Terms of Service and applies to personal data that the Processor handles for the Controller in the Service, under Egypt's Personal Data Protection Law No. 151 of 2020 ("PDPL").
 
 ## 1. Subject matter
 

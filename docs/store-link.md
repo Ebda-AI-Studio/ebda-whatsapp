@@ -1,6 +1,6 @@
 # Store link (Phase 4)
 
-Ebda WhatsApp talks to the Ebda Store through the integration contract (`business/ebda/plans/2026-10-24-ebda-whatsapp-store-contract.md`, with the 2026-10-25 InstaPay/OTP addendum). **The Store owns orders, stock, prices and payment state; this service never writes them, it asks.** The Store side is live and the link is ON (Ruling WA-LINK-ON-1); everything was built against the `StoreBridge` interface and a contract-faithful fake (`test/helpers/fake-store.ts`).
+Ebda Chat talks to the Ebda Store through the integration contract (`business/ebda/plans/2026-10-24-ebda-whatsapp-store-contract.md`, with the 2026-10-25 InstaPay/OTP addendum). **The Store owns orders, stock, prices and payment state; this service never writes them, it asks.** The Store side is live and the link is ON (Ruling WA-LINK-ON-1); everything was built against the `StoreBridge` interface and a contract-faithful fake (`test/helpers/fake-store.ts`).
 
 ## Switching it on
 **On since 2026-10-28** (`wrangler.jsonc`: `STORE_BRIDGE` -> `ebda-api`/`WhatsAppBridge`, `STORE_EVENTS`, consumer `ebda-wa-events`). Deploy `ebda-api` first: a binding to a missing Worker breaks the deploy. To turn it off again, remove the three entries. What each piece does:

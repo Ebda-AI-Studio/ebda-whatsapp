@@ -2,7 +2,7 @@ import type { WebBrand } from '../types';
 
 export const BRAND: WebBrand = {
   id: 'ebda',
-  productName: 'Ebda WhatsApp',
+  productName: 'Ebda Chat',
   mark: { src: '/brand/symbol-gold.svg', alt: 'Ebda AI Studio', width: 30, height: 36 },
   appleTouchIcon: '/brand/apple-touch-icon.png',
   accountsUrl: 'https://accounts.ebda.app',

@@ -1,4 +1,4 @@
-# Legal pages: publishing notes (Ebda WhatsApp)
+# Legal pages: publishing notes (Ebda Chat)
 
 **These are drafts. They have NOT been reviewed by a lawyer.** Another team publishes them; do not present them as lawyer-reviewed.
 

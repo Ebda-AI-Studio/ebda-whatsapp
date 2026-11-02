@@ -3,7 +3,7 @@
 Status: **draft r2.** It folds in the identity-side review on PR #10 (comment 6398105328, items 1–10 + the pinned tests) and awaits approval by the accounts.ebda.app owner. Additive to identity contract v1.2 (`business/ebda/plans/2026-10-24-ebda-identity-token-contract.md`); nothing in v1.2 changes. v1.2 §"what v1.x does NOT cover" lists exactly this flow as missing.
 
 ## Why
-A merchant's own server (an ERP, a custom checkout, Odoo, a script) must call the Ebda WhatsApp API without a person signing in. Today every token comes from a browser session (`GET /token?aud=`), so that is impossible.
+A merchant's own server (an ERP, a custom checkout, Odoo, a script) must call the Ebda Chat API without a person signing in. Today every token comes from a browser session (`GET /token?aud=`), so that is impossible.
 
 ## Model
 - One generic table on accounts.ebda.app: `clients(id, store_id, audience, name, scopes, created_by, created_at, revoked_at)` plus `client_secrets(client_id, slot, hmac, created_at, expires_at)`. **Audience is fixed at creation**, and v1.3 ships only `audience = whatsapp`. The Store reuses the same table later with `audience = store` (see "Not in v1.3"); there is no second key system.
@@ -65,7 +65,7 @@ A PERSON token never carries `client` or `role: "integration"`. Every product's 
 - **Retention:** issuance rows (client id, `jti`, secret slot, IP prefix, scope, time) are kept 90 days and pruned by a cron job. Created, rotated, revoked and failed-auth rows are kept for the life of the store. The owner sees last used and last IP prefix.
 - **Store deletion** deletes the store's clients, secrets and issuance rows through a store-delete RPC hook on `Accounts`, which the Store's existing delete-store flow calls within its compensating-rollback context. People are covered by v1.1 `eraseUser`.
 
-## Product side (Ebda WhatsApp)
+## Product side (Ebda Chat)
 - The verifier accepts `role: "integration"` only with `client: true` and a `scope`, and with no `pa`, `auth_time` or `email`.
 - Every route declares the scope it needs in one map. A test walks every route, so a new route without a scope decision fails CI.
 - Integration tokens get 403 on owner-only and person-only surfaces:
