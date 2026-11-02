@@ -13,6 +13,7 @@
     "test:ci": "node scripts/ci-test.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "deploy": "wrangler deploy",
+    "deploy:cf": "bash scripts/deploy-cf.sh",
     "build:web": "vite build web"
   },
   "dependencies": {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * deploy-change-label.mjs - a PR that changes how production is deployed needs the `deploy-change` label (Ruling
- * DEPLOY-PARITY-1 / WA-DEPLOY-2: Whisky-11 is a Free-plan private org, so there is no environment protection and no required-reviewer rules; this
+ * DEPLOY-PARITY-1 / WA-DEPLOY-3: Whisky-11 is a Free-plan private org, so there is no environment protection and no required-reviewer rules; this
  * check is the human checkpoint). Usage: node scripts/ci/deploy-change-label.mjs --base <sha> --labels '<json array>'
  * Exit 0 ok / not applicable, 1 = deploy files changed and the label is missing.
  */
@@ -10,9 +10,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const LABEL = 'deploy-change';
-/** Files that decide what reaches production: the deploy workflow and this check, the deploy script and its verifier, and wrangler.jsonc (bindings, vars and the required-secrets list). */
+/** Files that decide what reaches production: the deploy script Workers Builds runs and its verifier, this check and the read-only verify workflow, wrangler.jsonc (bindings, vars and the required-secrets list) and package.json (its scripts feed the build and deploy commands). */
 export const DEPLOY_FILE =
-  /^(\.github\/workflows\/(cf-deploy|deploy-change-label)\.yml|scripts\/(deploy\.sh|verify-prod\.mjs)|scripts\/ci\/deploy-change-label\.mjs|wrangler\.jsonc)$/;
+  /^(\.github\/workflows\/(deploy-change-label|prod-verify)\.yml|scripts\/(deploy-cf\.sh|verify-prod\.mjs)|scripts\/ci\/deploy-change-label\.mjs|wrangler\.jsonc|package\.json)$/;
 
 export function deployFilesChanged(files) {
   return files.filter(f => DEPLOY_FILE.test(f));

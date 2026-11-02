@@ -1,3 +1,5 @@
+**SUPERSEDED by WA-DEPLOY-3 (Ahmad, 2026-11-02): deploys go through Cloudflare Workers Builds and no Cloudflare token lives in GitHub; the residual below no longer exists.**
+
 # Ruling WA-DEPLOY-2
 
 **Decision (Ahmad, 2026-11-02; replaces WA-DEPLOY-1):** ebda-whatsapp deploys from GitHub CI the same way ebda-store does. `cf-deploy.yml` runs on every push to `main` and on `workflow_dispatch`, on `ubuntu-24.04` pinned in the YAML (never a repo variable, Ruling RUNS-ON-NEVER-1), in the `production` environment, with `CLOUDFLARE_API_TOKEN` held as an environment secret. It calls the one deploy path, `scripts/deploy.sh` (account guard, commit-is-on-main guard, D1 migrations, `wrangler deploy`, then `verify-prod`: live commit, headers, webhooks, cron), and pages Telegram when it fails. A PR that edits `cf-deploy.yml`, `deploy-change-label.yml`, `scripts/deploy.sh`, `scripts/verify-prod.mjs`, `scripts/ci/deploy-change-label.mjs` or `wrangler.jsonc` needs Ahmad's `deploy-change` label (`deploy-change-label.yml`, Ruling DEPLOY-PARITY-1). Nobody deploys from the Mac any more: no local `scripts/deploy.sh`, no local build (MAC-LIGHT-1).

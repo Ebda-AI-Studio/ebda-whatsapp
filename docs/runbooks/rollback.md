@@ -1,9 +1,9 @@
 # Deploy, rollback and the forward-only migration rule
 
-## Deploying (Ruling WA-DEPLOY-2)
-**Deploys run from GitHub CI: the `cf-deploy` workflow runs on every push to `main` (and on `workflow_dispatch` to re-deploy a commit already on main). Nobody deploys from the Mac** (see `docs/launch/README.md` section 12 and `docs/rulings/WA-DEPLOY-2.md`). The Cloudflare token is a secret of the `production` environment; a PR that edits a deploy file needs Ahmad's `deploy-change` label.
+## Deploying (Ruling WA-DEPLOY-3)
+**Deploys run from Cloudflare Workers Builds on every push to `main`. Nobody deploys from the Mac or from GitHub Actions, and no Cloudflare token lives in GitHub** (the dashboard settings are in `docs/launch/README.md` section 12; the ruling is `docs/rulings/WA-DEPLOY-3.md`). A PR that edits a deploy file needs Ahmad's `deploy-change` label.
 
-The script (`scripts/deploy.sh`, the one path) refuses any commit that is not on `origin/main`, any Cloudflare account except the personal one (`69188202efc4df480140dd76545aa3ab`) and an unclean tree, then: D1 `migrations list` → `apply --remote` (D1 first) → `wrangler deploy --var COMMIT_SHA:<sha>` → `scripts/verify-prod.mjs --expect <sha>` (fails if `/health` reports another commit; prints the live cron schedule). A failed run sends a Telegram message with the commit and run link. Secrets on the `production` environment: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALERT_CHAT_ID`, optional `META_VERIFY_TOKEN` + `META_APP_SECRET`.
+The deploy command, `scripts/deploy-cf.sh`, refuses to run outside Workers Builds or on any branch but `main`, refuses any Cloudflare account except the personal one (`69188202efc4df480140dd76545aa3ab`), then: D1 `migrations list` → `apply --remote` (D1 first) → `wrangler deploy --var COMMIT_SHA:<sha>` → `scripts/verify-prod.mjs --expect <sha>` (fails the build if `/health` reports another commit). The build log in the dashboard (Workers & Pages > ebda-wa > Deployments > Builds) is the record. To redeploy a commit already on main, retry its build in the dashboard. `prod-verify` (Actions, dispatch only) re-checks the live Worker without any secret.
 
 ## Rolling back the code
 1. `npx wrangler versions list` → pick the last good version id (the Worker keeps recent versions).

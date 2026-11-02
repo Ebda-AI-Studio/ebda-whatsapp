@@ -1,0 +1,35 @@
+name: prod-verify
+
+# Ruling WA-DEPLOY-3: production is deployed by Cloudflare Workers Builds, never from GitHub, so no Cloudflare credential exists in this repository.
+# This workflow is a read-only check of the LIVE Worker (security headers, webhook refusals, /health) for anyone who wants a second look after a deploy.
+# Run it from the Actions tab, prod-verify, Run workflow. It reads public URLs only.
+on:
+  workflow_dispatch:
+    inputs:
+      expect:
+        description: 'Expected short commit sha (optional; leave empty to skip the commit check)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Read-only check of wa.ebda.app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Verify the live Worker
+        env:
+          EXPECT: ${{ inputs.expect }}
+        run: |
+          args=(--base https://wa.ebda.app --brand ebda)
+          if [ -n "${EXPECT}" ]; then args+=(--expect "${EXPECT}"); fi
+          node scripts/verify-prod.mjs "${args[@]}"

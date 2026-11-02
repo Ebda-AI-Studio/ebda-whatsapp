@@ -9,7 +9,7 @@
 2. Confirm `wrangler.jsonc` still has `"vectorize": [{ "binding": "VECTORIZE", "index_name": "ebda-wa-kb" }]`.
 3. `npx wrangler vectorize list` (account 69188202efc4df480140dd76545aa3ab) shows `ebda-wa-kb`.
 ## Fix
-1. Missing from the config: restore the binding and redeploy (`bash scripts/deploy.sh`).
+1. Missing from the config: restore the binding and redeploy (the deploy command in Workers Builds (a push to main redeploys)).
 2. Index missing on the account: `npx wrangler vectorize create ebda-wa-kb --dimensions=1024 --metric=cosine`, then redeploy. Dimensions and metric cannot be changed later; a wrong index must be deleted and recreated (derived data: the catalog is re-embedded by the nightly pass; merchants re-save their FAQ text to rebuild its chunks).
 ## Verify it is resolved
 `/health` answers 200 `{"ok":true,"status":"ok"}` and the alert stops.
