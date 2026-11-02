@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from './net/fetch-with-timeout';
 /** Documents are held in Worker memory while they are forwarded to Meta (128 MB isolate), so the cap stays well under Meta's 100 MB. */
 export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
 /** Multipart framing and field overhead allowed on top of the largest file. */
@@ -52,10 +53,10 @@ const TIMEOUT_MS = 30_000;
  */
 export async function downloadToR2(env: { META_GRAPH_VERSION: string; MEDIA: R2Bucket }, token: string, mediaId: string, key: string, fallbackMime: string): Promise<{ mime: string; size: number }> {
   const auth = { authorization: `Bearer ${token}` };
-  const metaRes = await fetch(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(mediaId)}`, { headers: auth, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  const metaRes = await fetchWithTimeout(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(mediaId)}`, { headers: auth }, { label: 'meta.media.lookup', timeoutMs: TIMEOUT_MS });
   const meta = (await metaRes.json().catch(() => null)) as { url?: string; mime_type?: string; file_size?: number } | null;
   if (!metaRes.ok || !meta?.url) throw new Error(`media lookup failed: http ${metaRes.status}`);
-  const file = await fetch(meta.url, { headers: auth, signal: AbortSignal.timeout(TIMEOUT_MS * 2) });
+  const file = await fetchWithTimeout(meta.url, { headers: auth }, { label: 'meta.media.download', timeoutMs: TIMEOUT_MS * 2 });
   if (!file.ok || !file.body) throw new Error(`media download failed: http ${file.status}`);
   const mime = meta.mime_type ?? fallbackMime;
   const expected = meta.file_size ?? 0;

@@ -6,6 +6,7 @@ import type { Env } from '../../env';
 import { agentConfig } from '../ai/config';
 import { publicHttpsHost } from '../ai/provider';
 import { ConnectorError } from './types';
+import { fetchWithTimeout } from '../net/fetch-with-timeout';
 
 export const CONNECTOR_TIMEOUT_MS = 8_000;
 export const CONNECTOR_MAX_BYTES = 32 * 1024;
@@ -29,9 +30,8 @@ export async function connectorFetch(env: Env, url: string, init: FetchInit, o: 
   if (!target) throw new ConnectorError('blocked_host');
   const remaining = o.deadline - Date.now();
   if (remaining <= 0) throw new ConnectorError('timeout');
-  const signal = AbortSignal.timeout(Math.min(o.timeoutMs ?? CONNECTOR_TIMEOUT_MS, remaining));
   try {
-    const res = await fetch(target, { ...init, redirect: 'manual', signal });
+    const res = await fetchWithTimeout(target, { ...init, redirect: 'manual' }, { label: 'connector.post', timeoutMs: Math.min(o.timeoutMs ?? CONNECTOR_TIMEOUT_MS, remaining) });
     if (res.status >= 300 && res.status < 400) {
       void res.body?.cancel().catch(() => {});
       throw new ConnectorError('redirect');
