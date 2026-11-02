@@ -7,7 +7,8 @@ import { workspace } from './helpers/workspace';
 
 useApiKey();
 const DAY = 86_400_000;
-const NOW = Date.now();
+// Noon UTC (mid-afternoon in Cairo): whole-day offsets stay on the intended calendar day even across the clock change.
+const NOW = new Date().setUTCHours(12, 0, 0, 0);
 const day = (ms: number) => cairoDay(ms);
 
 /** Seeds funnel markers in a workspace: [step, wa id, ms]. */
