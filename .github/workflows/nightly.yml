@@ -23,6 +23,9 @@ env:
 jobs:
   bench:
     name: Speed benches
+    # Ruling CI-HOSTED-1 (2026-11-02): a scheduled run is a no-op unless a self-hosted runner is configured
+    # (EBDA_RUNS_ON set); manual dispatch still runs on hosted.
+    if: (github.event_name != 'schedule' || vars.EBDA_RUNS_ON != '')
     runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 20
     steps:
