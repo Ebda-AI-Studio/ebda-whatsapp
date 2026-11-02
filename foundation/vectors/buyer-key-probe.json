@@ -1,0 +1,5 @@
+{
+  "secret": "ebda-suite-buyer-key-probe-test-v1-secret-padded-to-at-least-64-characters",
+  "message": "suite-buyer-key-probe:v1",
+  "vector": "86d0c030d93ab7a2"
+}

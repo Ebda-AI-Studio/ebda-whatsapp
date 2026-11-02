@@ -39,7 +39,7 @@ it('pinned vector: HMAC-SHA256(secret, "suite-buyer-key-probe:v1") as hex, first
 
 it('two Workers with the same secret agree and different secrets differ', async () => {
   expect(await buyerKeyProbe(SECRET)).toBe(await buyerKeyProbe(SECRET));
-  expect(await buyerKeyProbe(SECRET)).not.toBe(await buyerKeyProbe('t'.repeat(32)));
+  expect(await buyerKeyProbe(SECRET)).not.toBe(await buyerKeyProbe('t'.repeat(MIN_PROBE_SECRET_LENGTH)));
   expect(JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: SECRET })).text).buyerKeyVector).toBe(JSON.parse((await health({ SUITE_BUYER_KEY_SECRET: SECRET })).text).buyerKeyVector);
 });
 

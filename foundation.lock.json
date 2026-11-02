@@ -1,0 +1,23 @@
+{
+  "tag": "v0.1.0",
+  "commit": "6e307bd69aff0d60b1ee8c048ab93f264694e7fe",
+  "dir": "foundation",
+  "parity": "test/foundation-parity.test.ts",
+  "files": {
+    "foundation/brand.ts": "b02305a6d1b82038b1186937bd7ca29c4ebac71fec21864ec885584dd9701613",
+    "foundation/buyer.ts": "2d5434657f733827423796f5a3782ca1d6794d0e9e802332cf0f9a6778e455e8",
+    "foundation/package.json": "998888a74872410662d37e452ee7f51daf959c23718a5cbd6bdf4924f1ffc6ca",
+    "foundation/phone.ts": "564883fd657afd578902ee88b26257f1caafde15cb0072c49633d2d6753ecc54",
+    "foundation/slugs.ts": "abc59b0cda8e990823e10371f53e8763fc15f769f93e17a9be95dbde5e3efb2d",
+    "foundation/text.ts": "4c7f5a933b0054129b1bb5a23127ab4a635dab6ee2fbac66c5c2312ff16c29fb",
+    "foundation/tokens.css": "f5e7519d2f8bd180e4e0187149e0caaa8e25ec70e9386e9dab302a44d02e323b",
+    "foundation/tokens.ts": "e29a62b04da14801af32297b77ff70f030237f707e7b5c6d35242f4a93825c89",
+    "foundation/vectors/arabic.json": "f96f8a9ff29c75cb1a06d7432298c5308d043224a2d8d801bb2103759b398fd4",
+    "foundation/vectors/buyer-key-probe.json": "a38b2f9b58b3eb5cdbd0df21eecea0098109583a040bcbe8a90ca76826605cad",
+    "foundation/vectors/buyer-key.json": "00c47c95622dc2516d3c86d492e609fc0f8659b5645416fd076634e245c62ca1",
+    "foundation/vectors/phone.json": "f1d99cadf8396fe60d04e4361edb2e46f595bfcaf7a0e0b0a72e2c10fd57009b",
+    "foundation/vectors/slugs.json": "9c34ae2167996387b7af93adf2ebc0ad714a2d4928537e5ba3a37ba6dab1a41e",
+    "test/foundation-parity.test.ts": "308c44b69b0e3337e7a51e2b425d48b351842b7d65ab5ca1652d84cdb36829e1"
+  },
+  "managed": []
+}
