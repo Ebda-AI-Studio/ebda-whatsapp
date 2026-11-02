@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ebda WhatsApp: create the account resources this Worker binds to (docs/launch/README.md §6).
+# Ebda Chat: create the account resources this Worker binds to (docs/launch/README.md §6).
 # Idempotent: lists what exists and only creates what is missing.
 # DRY RUN by default (reads only, prints the commands it would run). `--apply` creates; run it only after the launch go.
 # Refuses any Cloudflare account except the personal one in wrangler.jsonc.

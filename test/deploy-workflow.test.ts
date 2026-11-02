@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { expect, it } from 'vitest';
 
 const wf = readFileSync(new URL('../.github/workflows/cf-deploy.yml', import.meta.url), 'utf8');
@@ -8,16 +8,16 @@ const at = (needle: string): number => {
   return i;
 };
 
-it('runs only when a human dispatches it: no push, pull_request, schedule or workflow_run trigger', () => {
+it('deploys on a push to main and on dispatch only (Ruling WA-DEPLOY-2): no pull_request, schedule or workflow_run trigger', () => {
   const on = /^on:\n((?:[ \t]+.*\n|\n)+?)(?=\S)/m.exec(wf)?.[1] ?? '';
-  expect(on.trim()).toBe('workflow_dispatch:');
-  expect(wf).not.toMatch(/^\s+(push|pull_request|pull_request_target|schedule|workflow_run|repository_dispatch):/m);
+  expect(on.replace(/\s+/g, ' ').trim()).toBe('push: branches: [main] workflow_dispatch:');
+  expect(wf).not.toMatch(/^\s+(pull_request|pull_request_target|schedule|workflow_run|repository_dispatch):/m);
 });
-it('one deploy at a time and never cancelled halfway; bounded; same runner rule as ci.yml; no remote cache on self-hosted', () => {
+it('one deploy at a time and never cancelled halfway; bounded; runner pinned in YAML, never through a repo variable (RUNS-ON-NEVER-1)', () => {
   expect(wf).toMatch(/concurrency:\n\s+group: deploy\n\s+cancel-in-progress: false/);
   expect(wf).toMatch(/timeout-minutes: \d+/);
-  expect(wf).toContain("runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '\"ubuntu-latest\"') }}");
-  expect(wf).toContain("cache: ${{ vars.EBDA_RUNS_ON == '' && 'npm' || '' }}");
+  expect(wf).toMatch(/^\s+runs-on: ubuntu-24\.04$/m);
+  expect(wf).not.toContain('EBDA_RUNS_ON');
 });
 const script = readFileSync(new URL('../scripts/deploy.sh', import.meta.url), 'utf8');
 
@@ -42,7 +42,7 @@ it('the script orders D1 list, D1 apply, deploy with the commit, then verify wit
   expect(order).toEqual([...order].sort((x, y) => x - y));
   expect(script).toContain('--cron "17 1 * * *"');
 });
-it('the job runs in the `production` environment (inert until the plan supports protection) and installs without lifecycle scripts', () => {
+it('the job runs in the `production` environment (which holds the secrets) and installs without lifecycle scripts', () => {
   expect(wf).toMatch(/^\s+environment: production$/m);
   expect(wf).toContain('npm ci --ignore-scripts');
 });
@@ -67,4 +67,18 @@ it('wrangler.jsonc registers the cron the workflow verifies', () => {
   const cfg = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
   expect(cfg.triggers.crons).toEqual(['17 1 * * *']);
   expect(cfg.account_id).toBe('69188202efc4df480140dd76545aa3ab');
+});
+it('the deploy job runs only on refs/heads/main, so a dispatch from another branch is skipped (WA-DEPLOY-2)', () => {
+  expect(wf).toMatch(/^\s+if: github\.ref == 'refs\/heads\/main'$/m);
+});
+it('no workflow that references CLOUDFLARE_API_TOKEN has a pull_request or pull_request_target trigger (WA-DEPLOY-2)', () => {
+  const dir = new URL('../.github/workflows/', import.meta.url);
+  const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
+  expect(files).toContain('cf-deploy.yml');
+  for (const f of files) {
+    const text = readFileSync(new URL(f, dir), 'utf8');
+    if (text.includes('CLOUDFLARE_API_TOKEN')) expect(text, f).not.toMatch(/^\s+(pull_request|pull_request_target):?/m);
+  }
+  // negative control: the PR workflows exist and carry no such secret
+  expect(readFileSync(new URL('ci.yml', dir), 'utf8')).not.toContain('CLOUDFLARE_API_TOKEN');
 });

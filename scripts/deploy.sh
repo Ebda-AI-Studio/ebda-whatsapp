@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The ONE deploy path (Ruling WA-DEPLOY-1). Ahmad's Mac runs it with OAuth wrangler (the GO-1 path); the cf-deploy workflow calls the very same script.
-# The guards live HERE, in a file the workflow checks out from the dispatched commit but that a deploy cannot skip: a modified workflow can still call
-# something else, which is why the Cloudflare token must NOT be a GitHub secret until the repo has environment protection (docs/launch/README.md sect. 12).
+# The ONE deploy path (Ruling WA-DEPLOY-2). The cf-deploy workflow runs it on every push to main (and on dispatch), in CI; it is not run from the Mac (MAC-LIGHT-1).
+# The guards live HERE: the commit being deployed must be an ancestor of origin/main and the tree must be clean. A PR that edits this file, the workflow,
+# verify-prod or wrangler.jsonc needs Ahmad's `deploy-change` label (deploy-change-label.yml), because the Free plan has no environment protection.
 #
 # Prerequisites (the caller does them, WITHOUT any Cloudflare secret in the environment): `npm ci --ignore-scripts`, `npm run typecheck`, `npm run build:web`.
 # Optional env: CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID (CI; on the Mac wrangler uses OAuth), META_VERIFY_TOKEN, META_APP_SECRET (verify-prod checks).

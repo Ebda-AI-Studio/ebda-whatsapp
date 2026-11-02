@@ -91,7 +91,7 @@ const COPY: Record<StudioLang, Copy> = {
     mapLabel: 'Site sections',
     soon: 'Coming soon',
     soonLine: {
-      whatsapp: 'Ebda WhatsApp is coming soon.',
+      whatsapp: 'Ebda Chat is coming soon.',
       crm: 'Ebda CRM is coming soon.',
       erp: 'Ebda ERP is coming soon.',
       reserved: 'This address is held for an upcoming service from Ebda AI Studio.',
@@ -107,7 +107,7 @@ const COPY: Record<StudioLang, Copy> = {
       docs: 'Developer docs',
       status: 'Service status',
     },
-    products: { whatsapp: 'Ebda WhatsApp', crm: 'Ebda CRM', erp: 'Ebda ERP' },
+    products: { whatsapp: 'Ebda Chat', crm: 'Ebda CRM', erp: 'Ebda ERP' },
   },
   ar: {
     title404: 'الصفحة مش موجودة',
@@ -119,7 +119,7 @@ const COPY: Record<StudioLang, Copy> = {
     mapLabel: 'أقسام الموقع',
     soon: 'قريباً',
     soonLine: {
-      whatsapp: 'ابدأ واتساب جاي قريب.',
+      whatsapp: 'ابدأ شات جاي قريب.',
       crm: 'ابدأ CRM جاي قريب.',
       erp: 'ابدأ ERP جاي قريب.',
       reserved: 'العنوان ده محجوز لخدمة جاية من ابدأ استوديو للذكاء الاصطناعي.',
@@ -135,7 +135,7 @@ const COPY: Record<StudioLang, Copy> = {
       docs: 'وثائق المطوّرين',
       status: 'حالة الخدمة',
     },
-    products: { whatsapp: 'ابدأ واتساب', crm: 'ابدأ CRM', erp: 'ابدأ ERP' },
+    products: { whatsapp: 'ابدأ شات', crm: 'ابدأ CRM', erp: 'ابدأ ERP' },
   },
 };
 

@@ -1,5 +1,5 @@
 ---
-name: Ebda WhatsApp
+name: Ebda Chat
 description: Arabic-first three-pane WhatsApp inbox where the customer's order always sits beside the chat; night rail, cream ground, one brass-gold voice.
 colors:
   night: "#0a0b0c"
@@ -135,7 +135,7 @@ components:
     padding: "10px 14px"
 ---
 
-# Design System: Ebda WhatsApp
+# Design System: Ebda Chat
 
 ## Overview
 

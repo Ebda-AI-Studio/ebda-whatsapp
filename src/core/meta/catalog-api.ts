@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { fetchWithTimeout } from '../net/fetch-with-timeout';
 
 const TIMEOUT_MS = 20_000;
 const MAX_PAGES = 200;
@@ -19,12 +20,11 @@ const batchAnswer = z.object({
 export async function itemsBatch(a: Auth, requests: CatalogRequest[]): Promise<CatalogApiResult<{ handle: string | null }>> {
   let res: Response;
   try {
-    res = await fetch(`${GRAPH}${a.graphVersion}/${a.catalogId}/items_batch`, {
+    res = await fetchWithTimeout(`${GRAPH}${a.graphVersion}/${a.catalogId}/items_batch`, {
       method: 'POST',
       headers: { authorization: `Bearer ${a.token}`, 'content-type': 'application/json' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
       body: JSON.stringify({ item_type: 'PRODUCT_ITEM', allow_upsert: true, requests }),
-    });
+    }, { label: 'meta.catalog.batch', timeoutMs: TIMEOUT_MS });
   } catch (err) {
     return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
   }
@@ -43,7 +43,7 @@ export async function listRetailerIds(a: Auth): Promise<CatalogApiResult<string[
   for (let page = 0; url && page < MAX_PAGES; page++) {
     let res: Response;
     try {
-      res = await fetch(url, { headers: { authorization: `Bearer ${a.token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${a.token}` } }, { label: 'meta.catalog.get', timeoutMs: TIMEOUT_MS });
     } catch (err) {
       return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
     }
@@ -65,7 +65,7 @@ export async function listWabaCatalogs(a: { token: string; graphVersion: string;
   for (let page = 0; url && page < 20; page++) {
     let res: Response;
     try {
-      res = await fetch(url, { headers: { authorization: `Bearer ${a.token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${a.token}` } }, { label: 'meta.catalog.get', timeoutMs: TIMEOUT_MS });
     } catch (err) {
       return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
     }
@@ -85,12 +85,11 @@ const numericId = z.string().regex(/^\d{5,25}$/);
 async function graph<T>(a: Edge, path: string, schema: z.ZodType<T>, init: { method: 'GET' } | { method: 'POST'; body: unknown } = { method: 'GET' }): Promise<CatalogApiResult<T>> {
   let res: Response;
   try {
-    res = await fetch(`${GRAPH}${a.graphVersion}/${path}`, {
+    res = await fetchWithTimeout(`${GRAPH}${a.graphVersion}/${path}`, {
       method: init.method,
       headers: { authorization: `Bearer ${a.token}`, ...(init.method === 'POST' ? { 'content-type': 'application/json' } : {}) },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
       ...(init.method === 'POST' ? { body: JSON.stringify(init.body) } : {}),
-    });
+    }, { label: 'meta.catalog.graph', timeoutMs: TIMEOUT_MS });
   } catch (err) {
     return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
   }

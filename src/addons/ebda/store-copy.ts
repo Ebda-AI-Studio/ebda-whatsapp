@@ -22,7 +22,7 @@ const SHIPMENT: Record<string, Localised> = {
   failed_delivery: L('المندوب مقدرش يوصلك، هنتواصل معاك', 'could not be delivered, we will contact you'),
 };
 
-/** Ebda WhatsApp's customer-facing words: Egyptian Arabic in full sentences, English alongside. The core receives this through configureStoreLink. */
+/** Ebda Chat's customer-facing words: Egyptian Arabic in full sentences, English alongside. The core receives this through configureStoreLink. */
 export const EBDA_ORDERING_COPY: OrderingCopy = {
   templates: {
     orderConfirmation: 'order_confirmation',

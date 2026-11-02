@@ -1,5 +1,5 @@
 ---
-title: Ebda WhatsApp Privacy Policy
+title: Ebda Chat Privacy Policy
 slug: whatsapp-privacy
 lang: en
 updated: 2026-10-25
@@ -7,9 +7,9 @@ updated: 2026-10-25
 
 Arabic version prevails.
 
-# Ebda WhatsApp Privacy Policy
+# Ebda Chat Privacy Policy
 
-This policy explains how Ebda AI Studio ("we", "us") handles personal data in Ebda WhatsApp (the "Service"). It applies to merchants who use the Service and, through them, to the merchants' customers who message them on WhatsApp.
+This policy explains how Ebda AI Studio ("we", "us") handles personal data in Ebda Chat (the "Service"). It applies to merchants who use the Service and, through them, to the merchants' customers who message them on WhatsApp.
 
 ## 1. Who is responsible for what
 

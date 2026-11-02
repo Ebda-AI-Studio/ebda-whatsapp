@@ -24,7 +24,7 @@ function ebdaInstapayPayee(env: Record<string, string | undefined>) {
   return { handle, name, qrUrl };
 }
 
-/** Ebda WhatsApp under Ebda AI Studio: Egyptian Arabic first, linked to Ebda Store. */
+/** Ebda Chat under Ebda AI Studio: Egyptian Arabic first, linked to Ebda Store. */
 export const EBDA_PACK: BrandPack = {
   id: 'ebda',
   service: 'ebda-wa',

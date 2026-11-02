@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { componentsSchema } from '../templates';
+import { fetchWithTimeout } from '../net/fetch-with-timeout';
 
 const TIMEOUT_MS = 15_000;
 const MAX_PAGES = 20;
@@ -24,7 +25,7 @@ export async function fetchTemplates(a: Auth, opts: { name?: string } = {}): Pro
   for (let page = 0; url && page < MAX_PAGES; page++) {
     let res: Response;
     try {
-      res = await fetch(url, { headers: { authorization: `Bearer ${a.token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${a.token}` } }, { label: 'meta.templates.list', timeoutMs: TIMEOUT_MS });
     } catch (err) {
       return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
     }
@@ -44,12 +45,11 @@ export async function fetchTemplates(a: Auth, opts: { name?: string } = {}): Pro
 export async function submitTemplate(a: Auth, body: { name: string; language: string; category: string; components: unknown[] }): Promise<TemplatesApiResult<{ status: string; category: string; categoryConfirmed: boolean }>> {
   let res: Response;
   try {
-    res = await fetch(`https://graph.facebook.com/${a.graphVersion}/${a.wabaId}/message_templates`, {
+    res = await fetchWithTimeout(`https://graph.facebook.com/${a.graphVersion}/${a.wabaId}/message_templates`, {
       method: 'POST',
       headers: { authorization: `Bearer ${a.token}`, 'content-type': 'application/json' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
       body: JSON.stringify(body),
-    });
+    }, { label: 'meta.templates.submit', timeoutMs: TIMEOUT_MS });
   } catch (err) {
     return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
   }

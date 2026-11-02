@@ -1,8 +1,8 @@
 ---
 title: HTTP API
-section: "Ebda WhatsApp"
+section: "Ebda Chat"
 order: 3
-description: The Ebda WhatsApp HTTP API for integrators: authentication, endpoints, request and response shapes, and errors.
+description: The Ebda Chat HTTP API for integrators: authentication, endpoints, request and response shapes, and errors.
 ---
 
 # HTTP API
@@ -34,7 +34,7 @@ Authorization: Bearer <access_token>
 `role` is `owner`, `staff` or `super_admin`.
 
 ### API access for your server
-Available once enabled for your store. It is not live for every store yet: it needs the sign-in service to issue server tokens and Ebda WhatsApp to switch the feature on for your store. Until then, use the sign-in token described above.
+Available once enabled for your store. It is not live for every store yet: it needs the sign-in service to issue server tokens and Ebda Chat to switch the feature on for your store. Until then, use the sign-in token described above.
 
 **1. The store owner creates an API client.** In the Ebda AI Studio account settings, under API clients, the owner creates a client for one store and picks its scopes. Creating, rotating or revoking a client asks for a fresh second factor, and staff cannot do it. You get a `client_id` (`cli_…`) and a `client_secret` (`ebs_…`). The secret is shown once, so store it like a password. A client belongs to one store and cannot be moved.
 

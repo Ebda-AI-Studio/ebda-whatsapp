@@ -1,5 +1,5 @@
 ---
-title: Ebda WhatsApp Terms of Service
+title: Ebda Chat Terms of Service
 slug: whatsapp-terms
 lang: en
 updated: 2026-10-25
@@ -7,13 +7,13 @@ updated: 2026-10-25
 
 Arabic version prevails.
 
-# Ebda WhatsApp Terms of Service
+# Ebda Chat Terms of Service
 
-These terms are between you (the "Merchant") and Ebda AI Studio ("we", "us"). They govern your use of Ebda WhatsApp, a service for managing WhatsApp Business conversations, sending campaigns and running an optional AI agent (the "Service"). By creating an account, connecting a number or using the Service you accept these terms. If you accept them for a company, you confirm you may bind it.
+These terms are between you (the "Merchant") and Ebda AI Studio ("we", "us"). They govern your use of Ebda Chat, a service for managing WhatsApp Business conversations, sending campaigns and running an optional AI agent (the "Service"). By creating an account, connecting a number or using the Service you accept these terms. If you accept them for a company, you confirm you may bind it.
 
 ## 1. What the Service is
 
-Ebda WhatsApp lets you receive and answer your customers' WhatsApp messages in a shared inbox, send approved templates and campaigns, and switch on an AI agent that answers free-text questions. We provide software on top of the WhatsApp Business Platform, which is run by Meta Platforms. We are not Meta, and WhatsApp is not our product.
+Ebda Chat lets you receive and answer your customers' WhatsApp messages in a shared inbox, send approved templates and campaigns, and switch on an AI agent that answers free-text questions. We provide software on top of the WhatsApp Business Platform, which is run by Meta Platforms. We are not Meta, and WhatsApp is not our product.
 
 ## 2. Your account
 
@@ -83,7 +83,7 @@ You will not use the Service to: send spam or unsolicited messages; send unlawfu
 
 ## 10. Your data
 
-Your customers' messages and contact data are processed as described in the Ebda WhatsApp Privacy Policy and the Data Processing Agreement, which form part of these terms. Contact deletion is available as described at https://ebda.app/legal/data-deletion/.
+Your customers' messages and contact data are processed as described in the Ebda Chat Privacy Policy and the Data Processing Agreement, which form part of these terms. Contact deletion is available as described at https://ebda.app/legal/data-deletion/.
 
 ## 11. Suspension and termination
 
@@ -97,7 +97,7 @@ We aim for a reliable Service but do not promise that it will be uninterrupted, 
 
 To the fullest extent permitted by law, we are not liable for indirect, incidental, special or consequential loss, or for lost profits, revenue, sales, goodwill, customers or data, however caused, even if we were told it could happen.
 
-Our total liability to you for all claims arising out of or relating to the Service is limited to the fees you paid to Ebda AI Studio for Ebda WhatsApp in the 3 months before the event that gave rise to the claim.
+Our total liability to you for all claims arising out of or relating to the Service is limited to the fees you paid to Ebda AI Studio for Ebda Chat in the 3 months before the event that gave rise to the claim.
 
 Nothing in these terms excludes or limits liability that cannot be excluded or limited under mandatory Egyptian law, including liability for fraud or gross fault.
 

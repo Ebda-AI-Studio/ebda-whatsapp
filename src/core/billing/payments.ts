@@ -15,6 +15,7 @@
 import type { Env } from '../../env';
 import { KashierUnconfirmedError, TRANSACTION_ID, classifyKashierTransaction, kashierTransactionDetailsPath } from './kashier-confirm';
 import { alert } from '../observability';
+import { fetchWithTimeout } from '../net/fetch-with-timeout';
 
 export type ProviderEvent = 'pay' | 'refund' | 'other';
 export type ParsedWebhook = { event: ProviderEvent; status: 'SUCCESS' | 'FAILURE' | 'PENDING'; orderId: string; transactionId: string; amountMinor: number; currency: string; /** A chargeback (Kashier's `reversal` operation). Only ever set by `confirm`, from Kashier's own record. */ chargeback?: true; /** Kashier's own operation for the transaction (refund, partial_refund, void, reversal, pay...), set only by `confirm`. */ operation?: string; /** `kashier:<transactionId>:<status>`: built from SIGNED values only, never from the unsigned `event` label. */ eventKey?: string };
@@ -92,7 +93,7 @@ export class KashierProvider implements PaymentProvider {
   constructor(private readonly merchantId: string, private readonly apiKey: string, private readonly checkoutOrigin = 'https://checkout.kashier.io', opts: { secretKey?: string; apiBase?: string; fetch?: (url: string, init: RequestInit) => Promise<Response> } = {}) {
     this.secretKey = opts.secretKey;
     this.apiBase = (opts.apiBase ?? 'https://api.kashier.io').replace(/\/$/, '');
-    this.fetchImpl = opts.fetch ?? ((url, init) => fetch(url, init));
+    this.fetchImpl = opts.fetch ?? ((url, init) => fetchWithTimeout(url, init, { label: 'kashier', class: 'payment' }));
   }
 
   confirmationReady(): boolean {

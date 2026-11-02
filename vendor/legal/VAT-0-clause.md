@@ -2,7 +2,7 @@
 
 Meaning: no VAT is charged because the provider is not VAT-registered; prices are final amounts; if registration happens, VAT is introduced with at least 30 days of notice and is never retroactive. The Arabic text prevails. Counsel has not reviewed it yet (same status as the rest of the Ebda legal text).
 
-Published verbatim in the Ebda Store Terms of Service (section 4) and the Merchant Agreement (section 4) on ebda.app. The Ebda WhatsApp Terms must carry exactly these two paragraphs, in place of their provisional clause 6.6, and pin this file by its sha256 (`shasum -a 256 VAT-0-clause.md`).
+Published verbatim in the Ebda Store Terms of Service (section 4) and the Merchant Agreement (section 4) on ebda.app. The Ebda Chat Terms must carry exactly these two paragraphs, in place of their provisional clause 6.6, and pin this file by its sha256 (`shasum -a 256 VAT-0-clause.md`).
 
 ## English
 

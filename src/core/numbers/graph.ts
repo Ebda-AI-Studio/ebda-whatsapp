@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Env } from '../../env';
 import { isRetryable } from '../meta/errors';
+import { fetchWithTimeout } from '../net/fetch-with-timeout';
 
 /** Meta answers within seconds; a hung signup call must not outlive the request. */
 const TIMEOUT_MS = 15_000;
@@ -22,12 +23,11 @@ async function call<T>(env: Env, method: 'GET' | 'POST' | 'DELETE', path: string
   const qs = opts.query ? `?${new URLSearchParams(opts.query).toString()}` : '';
   let res: Response;
   try {
-    res = await fetch(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${path}${qs}`, {
+    res = await fetchWithTimeout(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${path}${qs}`, {
       method,
       headers: { ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}), ...(opts.body ? { 'content-type': 'application/json' } : {}) },
       ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    }, { label: 'meta.numbers', timeoutMs: TIMEOUT_MS });
   } catch {
     return { ok: false, status: 0, code: 0, retryable: true };
   }

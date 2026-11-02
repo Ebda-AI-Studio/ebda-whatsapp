@@ -1,5 +1,5 @@
 /**
- * Phone normalisation for every Ebda product. Canonical source: Ebda WhatsApp's `normaliseE164` (audit CODE-10: two normalisers that
+ * Phone normalisation for every Ebda product. Canonical source: Ebda Chat's `normaliseE164` (audit CODE-10: two normalisers that
  * differ give one customer two buyer keys). Do not "improve" it in a consumer; change it here and re-run `vectors/phone.json`.
  */
 const E164 = /^\+[1-9]\d{7,14}$/;
