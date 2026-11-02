@@ -1,21 +1,21 @@
 ---
 title: Webhooks and connectors
-section: "Ebda WhatsApp"
+section: "Ebda Chat"
 order: 4
-description: The signed webhook connector that lets the Ebda WhatsApp AI agent call your own system, and how to verify its signature.
+description: The signed webhook connector that lets the Ebda Chat AI agent call your own system, and how to verify its signature.
 ---
 
 # Webhooks and connectors
 
 ## What this is, and what it is not
 
-Ebda WhatsApp does not push a general event feed (new message, delivery status and so on) to your server. The outbound webhook that exists is the **webhook connector** of the AI agent: you describe a few tools, and when a customer's question needs one, the agent calls your URL with a signed request and uses your answer in its reply.
+Ebda Chat does not push a general event feed (new message, delivery status and so on) to your server. The outbound webhook that exists is the **webhook connector** of the AI agent: you describe a few tools, and when a customer's question needs one, the agent calls your URL with a signed request and uses your answer in its reply.
 
 If you need to follow messages and statuses from your own system, use the [HTTP API](/whatsapp/api) (`GET /events?after={seq}` and the messages list).
 
 ## The Ebda Store link is built in
 
-The link between Ebda WhatsApp and Ebda Store (order confirmations, COD confirmation, shipping updates, ordering in the chat) is built in. There is nothing to configure and no webhook to set up for it.
+The link between Ebda Chat and Ebda Store (order confirmations, COD confirmation, shipping updates, ordering in the chat) is built in. There is nothing to configure and no webhook to set up for it.
 
 ## Set up a connector
 

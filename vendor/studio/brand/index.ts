@@ -14,19 +14,19 @@ export const BRAND = {
   nameAr: 'ابدأ استوديو للذكاء الاصطناعي',
   /**
    * The PRODUCT (the store builder). `name`/`nameAr` above name the company; anything naming the product or the Service
-   * reads this (ruling PRODUCT-NAME-1). Future products: Ebda WhatsApp / CRM / ERP.
+   * reads this (ruling PRODUCT-NAME-1). Future products: Ebda Chat / CRM / ERP.
    */
   product: {
     nameEn: 'Ebda Store',
     nameAr: 'ابدأ ستور',
   },
   /**
-   * The WhatsApp PRODUCT (Ebda WhatsApp, by Ebda AI Studio): always the full name, never a bare "Ebda" (BRAND-NAME-1).
+   * The WhatsApp PRODUCT (Ebda Chat, by Ebda AI Studio): always the full name, never a bare "Ebda" (BRAND-NAME-1).
    * Lives at `domains.whatsappApp`; its marketing page is /whatsapp on the marketing site.
    */
   productWhatsapp: {
-    nameEn: 'Ebda WhatsApp',
-    nameAr: 'ابدأ واتساب',
+    nameEn: 'Ebda Chat',
+    nameAr: 'ابدأ شات',
   },
   /** The company behind Ebda (single source for every operator mention; ruling OPERATOR-1). */
   company: {
@@ -71,7 +71,7 @@ export const BRAND = {
     status: 'status.ebda.app',
     /** Reserved for the post-launch automated WhatsApp tier. */
     whatsapp: 'whatsapp.ebda.app',
-    /** The Ebda WhatsApp app (LAUNCH-SUITE-1; its Worker's custom domain). */
+    /** The Ebda Chat app (LAUNCH-SUITE-1; its Worker's custom domain). */
     whatsappApp: 'wa.ebda.app',
     /** The shared Ebda AI Studio sign-in (ID-1). */
     accounts: 'accounts.ebda.app',
@@ -203,9 +203,9 @@ export function poweredByBrand(locale?: string | null): string {
     : `Powered by ${BRAND.product.nameEn}`;
 }
 
-// ---- Ebda WhatsApp packages (Ruling WA-PRICE-1 / WA-PRICE-1a, Ahmad 2026-10-26) ----
+// ---- Ebda Chat packages (Ruling WA-PRICE-1 / WA-PRICE-1a, Ahmad 2026-10-26) ----
 /**
- * The Ebda WhatsApp packages, in ONE place: the marketing pricing section and its JSON-LD read it, and the WhatsApp app
+ * The Ebda Chat packages, in ONE place: the marketing pricing section and its JSON-LD read it, and the WhatsApp app
  * seeds the same ids, prices, seats and credits. Money is EGP in minor units (piastres) for ONE period: `periodMonths`
  * is 1 (monthly) or 12 (a `-yearly` package, priced at 9 months for 12, the Store rule). A yearly package carries the
  * same features as its monthly one (AI credits are still granted monthly). `features` uses the entitlement keys the
@@ -406,7 +406,7 @@ export function siteNavItems(lang: NavLang): SiteNavItem[] {
 }
 
 /**
- * The Products menu: only live products (BRAND-ARCH-1), Ebda Store then Ebda WhatsApp (LAUNCH-SUITE-1). The same entries,
+ * The Products menu: only live products (BRAND-ARCH-1), Ebda Store then Ebda Chat (LAUNCH-SUITE-1). The same entries,
  * labels and blurbs as the marketing header's Products panel (tests/unit/site-nav-shared.test.ts keeps them equal).
  */
 export function siteNavProducts(lang: NavLang): SiteNavProduct[] {

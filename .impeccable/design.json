@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-10-24T00:00:00Z",
-  "title": "Design System: Ebda WhatsApp",
+  "title": "Design System: Ebda Chat",
   "extensions": {
     "colorMeta": {
       "gold": { "role": "primary", "displayName": "Brass Gold", "canonical": "#b08d57", "tonalRamp": ["#2a2112", "#3f3119", "#5a4624", "#7a6030", "#b08d57", "#cba873", "#e0c9a0", "#f1e8d8"] },

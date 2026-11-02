@@ -11,7 +11,7 @@ Last checked against Meta's documentation: 2026-10-25.
 2. **Meta Business portfolio** "Ebda AI Studio" → Security Center → **Business verification** with the commercial register, tax card and a matching website/domain (ebda.app) and email on that domain.
 3. **Two-factor authentication** on every admin of the portfolio (Meta blocks sensitive actions without it).
 4. **Display name** for the platform's own number (the shared number, if used): must match the brand on the website; Meta rejects the word "WhatsApp" in names (help: `docs/help/*/01-verify-your-business-on-meta.md`).
-   - **Meta-facing names (Ruling META-NAME-2, Ahmad 2026-10-26):** the Meta app name (Embedded Signup, App Review) and the platform number's display name are **"Ebda WB"**. The product's marketing name stays **"Ebda WhatsApp"** (Ebda AI Studio). Meta-facing configuration never uses the word "WhatsApp" in a name. "Ebda WB" is not a legacy string; the legacy-strings guard (`test/guards.test.ts`) stays unchanged.
+   - **Meta-facing names (Ruling META-NAME-2, Ahmad 2026-10-26):** the Meta app name (Embedded Signup, App Review) and the platform number's display name are **"Ebda WB"**. The product's marketing name stays **"Ebda Chat"** (Ebda AI Studio). Meta-facing configuration never uses the word "WhatsApp" in a name. "Ebda WB" is not a legacy string; the legacy-strings guard (`test/guards.test.ts`) stays unchanged.
 
 ## 2. Meta app (Ahmad, with Claude preparing the texts)
 1. App "Ebda AI Studio" (type Business) owned by the verified portfolio. App ID → secret `META_APP_ID`; app secret → `META_APP_SECRET`.

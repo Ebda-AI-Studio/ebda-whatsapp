@@ -4,7 +4,7 @@ A customer can order from your catalog on WhatsApp and pay with InstaPay. The or
 
 ## What you need before you start
 - Your store on Ebda Store with the **InstaPay** payment method turned on and your InstaPay address (IPA) entered correctly.
-- The catalog synced with Ebda WhatsApp.
+- The catalog synced with Ebda Chat.
 - A connected number, and **ordering in chat** switched on in the store-link settings.
 
 ## How it works (customer side)

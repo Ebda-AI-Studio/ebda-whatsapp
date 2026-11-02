@@ -6,7 +6,7 @@ import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import { exec, openChat, own, rows, workspace } from './helpers/workspace';
 
 useApiKey();
-const SECRETS = { TELEGRAM_BOT_TOKEN: '123456:AAF-test-token', TELEGRAM_ALERT_CHAT_ID: '-1001234567', ALERT_PRODUCT: 'Ebda WhatsApp', RUNBOOK_BASE_URL: 'https://github.com/Whisky-11/ebda-whatsapp/blob/main/docs/runbooks/alerts' };
+const SECRETS = { TELEGRAM_BOT_TOKEN: '123456:AAF-test-token', TELEGRAM_ALERT_CHAT_ID: '-1001234567', ALERT_PRODUCT: 'Ebda Chat', RUNBOOK_BASE_URL: 'https://github.com/Whisky-11/ebda-whatsapp/blob/main/docs/runbooks/alerts' };
 const PHONE = '201001234567';
 
 type Harness = { telegram: { url: string; body: Record<string, string> }[]; messages: { message: string; level: string }[]; exceptions: unknown[]; waits: Promise<unknown>[]; flush(): Promise<void> };
@@ -59,7 +59,7 @@ describe('alert(): P0 / P1 reach a human, info stays in the logs', () => {
     expect(h.telegram[0]!.url).toBe(`https://api.telegram.org/bot${SECRETS.TELEGRAM_BOT_TOKEN}/sendMessage`);
     expect(h.telegram[0]!.body.chat_id).toBe(SECRETS.TELEGRAM_ALERT_CHAT_ID);
     const text = h.telegram[0]!.body.text!;
-    expect(text).toContain('Ebda WhatsApp');
+    expect(text).toContain('Ebda Chat');
     expect(text).toContain('entitlement_push_failed');
     expect(text).toContain('P1');
     expect(text).toContain('0a1b2c3d'); // the workspace, shortened

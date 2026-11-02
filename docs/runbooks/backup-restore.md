@@ -1,4 +1,4 @@
-# Backup and restore (Ebda WhatsApp)
+# Backup and restore (Ebda Chat)
 
 ## What runs
 - Every workspace Durable Object arms a daily alarm for **02:00 Africa/Cairo** on its first ingest. The alarm writes

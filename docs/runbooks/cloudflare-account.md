@@ -1,4 +1,4 @@
-# Cloudflare account setup (Ebda WhatsApp)
+# Cloudflare account setup (Ebda Chat)
 
 Account: personal/Whisky 11 (`69188202efc4df480140dd76545aa3ab`, pinned as `account_id` in `wrangler.jsonc`; `wrangler whoami` also lists another account, never deploy there).
 

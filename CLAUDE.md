@@ -1,8 +1,8 @@
-# Ebda WhatsApp: repo rules
+# Ebda Chat: repo rules
 
 Plan: `docs/plans/2026-10-24-ebda-whatsapp.md` (Global Constraints there are binding). Workspace rules: `../../CLAUDE.md` (Ebda AI Studio).
 
-- Product name is always "Ebda WhatsApp" under Ebda AI Studio; never bare "Ebda".
+- Product name is always "Ebda Chat" under Ebda AI Studio; never bare "Ebda".
 - No legacy strings anywhere: force, fwb, wbs, forcemediakw (guard: `test/guards.test.ts`).
 - `src/core/**` never names Ebda; Ebda-only code and copy live in `src/addons/ebda/**`.
 - Cloudflare only (Workers, DO SQLite per workspace, D1, R2, Queues, Workflows, Analytics Engine). Sentry is the only outside error tracker.

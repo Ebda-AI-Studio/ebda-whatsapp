@@ -4,15 +4,15 @@ The goal is fewer orders refused at the door. As soon as a COD order is created 
 
 ## How it works
 1. The customer places a cash-on-delivery order.
-2. Ebda Store asks for confirmation and Ebda WhatsApp sends a template with two buttons: **Confirm order** and **Refuse order**.
+2. Ebda Store asks for confirmation and Ebda Chat sends a template with two buttons: **Confirm order** and **Refuse order**.
 3. The conversation is marked with a dot and a **cod_pending** tag until the customer answers.
 4. If the customer taps either button, the result is recorded and sent to Ebda Store.
 5. If there is no answer within 24 hours, the result is recorded as **no reply**.
 
-The order itself (status, price, stock) belongs to Ebda Store. Ebda WhatsApp only reports the outcome.
+The order itself (status, price, stock) belongs to Ebda Store. Ebda Chat only reports the outcome.
 
 ## What you need before you start
-- Your store linked to Ebda WhatsApp.
+- Your store linked to Ebda Chat.
 - A connected number ([your own](02-connect-your-own-number.md) or [the shared number](03-use-the-shared-number.md)).
 - An approved COD confirmation template ([Templates](04-templates-and-the-24-hour-window.md)).
 - **Order confirmations** switched on in the store-link settings.

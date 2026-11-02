@@ -74,4 +74,4 @@ jobs:
           fi
           curl -sS --max-time 15 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_ALERT_CHAT_ID}" \
-            --data-urlencode "text=🔴 Ebda WhatsApp: deploy FAILED at ${SHORT_SHA:0:7}. Production may be half-migrated or unverified: ${RUN_URL}" >/dev/null || true
+            --data-urlencode "text=🔴 Ebda Chat: deploy FAILED at ${SHORT_SHA:0:7}. Production may be half-migrated or unverified: ${RUN_URL}" >/dev/null || true

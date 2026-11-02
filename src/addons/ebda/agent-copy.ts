@@ -1,7 +1,7 @@
 import type { AgentCopy } from '../../core/ai/config';
 
 /**
- * Ebda WhatsApp's AI agent: the persona and the words it says itself. Egyptian Arabic in full sentences, English alongside.
+ * Ebda Chat's AI agent: the persona and the words it says itself. Egyptian Arabic in full sentences, English alongside.
  * Handoff patterns are written for `normaliseText` output (folded alef/yaa/taa marbuta, no punctuation, lower case).
  */
 export const EBDA_AGENT_COPY: AgentCopy = {

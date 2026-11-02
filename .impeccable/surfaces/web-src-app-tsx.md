@@ -5,7 +5,7 @@ primary_target: "web/src/App.tsx"
 related_targets: []
 ---
 
-# Surface: Ebda WhatsApp inbox (web app)
+# Surface: Ebda Chat inbox (web app)
 
 Mode: Operate. Users: merchants and 1–3 staff on phones; marketing-client teams at desks (both equally). Job: answer customers fast and confirm or refuse COD orders with the order in view. Constraints: Arabic-first RTL, Egyptian Arabic, English complete; Ebda brand pack; no orange; WCAG 2.2 AA; 44 px targets; sample data labelled until the Store RPC lands.
 

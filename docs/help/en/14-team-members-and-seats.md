@@ -1,10 +1,10 @@
-# Your team and seats in Ebda WhatsApp
+# Your team and seats in Ebda Chat
 
-Your package says how many people can work in Ebda WhatsApp, **you included**: Starter and Store-included 2, Growth 5, Pro 15. You decide who gets the seats.
+Your package says how many people can work in Ebda Chat, **you included**: Starter and Store-included 2, Growth 5, Pro 15. You decide who gets the seats.
 
 ## How it works
 1. Add the person as staff on your store (in Ebda Store). Adding them there does not give them access to WhatsApp yet.
-2. Open **Team** in Ebda WhatsApp (store owner only) and press **Give a seat** next to their name.
+2. Open **Team** in Ebda Chat (store owner only) and press **Give a seat** next to their name.
 3. They can now open the inbox. Without a seat they see a page that tells them to ask you.
 
 You always have your place and never need a seat. The seat count on the Team page, "2 of 5 seats", counts you.

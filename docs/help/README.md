@@ -1,4 +1,4 @@
-# Ebda WhatsApp merchant help guides
+# Ebda Chat merchant help guides
 
 Content for help.ebda.app (plan task 8.5). One file per topic, same slug in `ar/` (Egyptian Arabic first) and `en/` (faithful version).
 
@@ -20,8 +20,8 @@ Content for help.ebda.app (plan task 8.5). One file per topic, same slug in `ar/
 | 14 | team-members-and-seats | Package seats (owner included), giving and removing a seat, what a downgrade does (WA-SEATS-1) |
 
 ## Publishing note (for the Store session's `apps/help`)
-- Files are plain Markdown with relative links between guides (`NN-slug.md`); they are published as the **Ebda WhatsApp** section of the suite help site: Arabic `https://help.ebda.app/whatsapp/<slug>/`, English `https://help.ebda.app/en/whatsapp/<slug>/` (Store repo `apps/help` imports them as `content/{ar,en}/whatsapp/<slug>.mdx`, frontmatter `section: "Ebda WhatsApp"`). Arabic is the default locale; render RTL. The inbox links to exactly this shape (`helpUrl` in `web/brands/ebda/brand.ts`), where the slug is the file name without its `NN-` prefix (a test reads this folder, so a renamed guide fails it).
+- Files are plain Markdown with relative links between guides (`NN-slug.md`); they are published as the **Ebda Chat** section of the suite help site: Arabic `https://help.ebda.app/whatsapp/<slug>/`, English `https://help.ebda.app/en/whatsapp/<slug>/` (Store repo `apps/help` imports them as `content/{ar,en}/whatsapp/<slug>.mdx`, frontmatter `section: "Ebda Chat"`). Arabic is the default locale; render RTL. The inbox links to exactly this shape (`helpUrl` in `web/brands/ebda/brand.ts`), where the slug is the file name without its `NN-` prefix (a test reads this folder, so a renamed guide fails it).
 - Each guide ends with "Last checked" (2026-10-25). Re-check every guide against Meta's current screens before launch and when Meta changes its flows; update the date.
-- Copy rules: product name "Ebda WhatsApp", company "Ebda AI Studio"; no infrastructure provider names. Undecided values (package prices, add-on price) are deliberately left to "set by the Ebda AI Studio team".
+- Copy rules: product name "Ebda Chat", company "Ebda AI Studio"; no infrastructure provider names. Undecided values (package prices, add-on price) are deliberately left to "set by the Ebda AI Studio team".
 - Guide 09 refund text is marked "subject to final terms of service": align it with the terms before launch (legal check pending). Margin is stated as 0% "for now" (WA-MARGIN-1 is operator-editable); update guides 03 and 10 if it changes.
 - No screenshots are included (none of this product's screens are final); add them in the help app once the onboarding UI is audited.
