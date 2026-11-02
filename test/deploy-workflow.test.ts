@@ -16,7 +16,7 @@ it('runs only when a human dispatches it: no push, pull_request, schedule or wor
 it('one deploy at a time and never cancelled halfway; bounded; same runner rule as ci.yml; no remote cache on self-hosted', () => {
   expect(wf).toMatch(/concurrency:\n\s+group: deploy\n\s+cancel-in-progress: false/);
   expect(wf).toMatch(/timeout-minutes: \d+/);
-  expect(wf).toContain("runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '\"ubuntu-latest\"') }}");
+  expect(wf).toContain("runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '\"ubuntu-24.04\"') }}");
   expect(wf).toContain("cache: ${{ vars.EBDA_RUNS_ON == '' && 'npm' || '' }}");
 });
 const script = readFileSync(new URL('../scripts/deploy.sh', import.meta.url), 'utf8');
