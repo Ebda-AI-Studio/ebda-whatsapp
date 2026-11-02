@@ -95,6 +95,17 @@ export type BridgeResult<T> = { ok: true; value: T } | { ok: false; reason: Brid
 
 export type CodOutcome = 'confirmed' | 'refused' | 'no_reply';
 
+/**
+ * Store membership (identity contract v1.4, Ruling ID-19): the Store owns who is on a team; we only ask. Owner and ACTIVE staff, no email, phone or credential.
+ * `memberRole` is called on every person request (a permission is never-stale); `listStoreMembers` is authorised by the CALLING user against the live membership.
+ */
+export const memberRoleSchema = z.enum(['owner', 'staff']);
+export type MemberRole = z.infer<typeof memberRoleSchema>;
+export const storeMemberSchema = z.object({ userId: z.string().min(1), displayName: z.string(), role: memberRoleSchema, addedAt: z.string() });
+export type StoreMember = z.infer<typeof storeMemberSchema>;
+export const storeMembersSchema = z.object({ items: z.array(storeMemberSchema) });
+export const memberRoleAnswerSchema = z.object({ role: memberRoleSchema.nullable() });
+
 export interface StoreBridge {
   getStoreProfile(storeId: string): Promise<BridgeResult<StoreProfile>>;
   listCatalog(storeId: string, cursor: string | null, limit: number): Promise<BridgeResult<CatalogPage>>;
@@ -108,6 +119,10 @@ export interface StoreBridge {
   saveCustomerAddress(storeId: string, buyerKey: string, address: NewAddress): Promise<BridgeResult<{ address: Address }>>;
   getOrderStatus(storeId: string, orderNumber: string, buyerKey: string): Promise<BridgeResult<OrderStatusInfo>>;
   listCustomerOrders(storeId: string, buyerKey: string, limit: number): Promise<BridgeResult<{ items: BridgeOrderSummary[] }>>;
+  /** Owner + active staff. `invalid` (message FORBIDDEN) = the asker is not the owner; `unavailable` = the Store could not answer (never read as "no members"). */
+  listStoreMembers(storeId: string, asUserId: string): Promise<BridgeResult<{ items: StoreMember[] }>>;
+  /** The live role of a user on the store; `{ role: null }` = not (or no longer) a member. `unavailable` = could not be read: callers fail closed. */
+  memberRole(storeId: string, userId: string): Promise<BridgeResult<{ role: MemberRole | null }>>;
 }
 
 /** Wraps a payload schema in the result envelope the Store answers with. */

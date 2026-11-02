@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { eventsQuery } from '../core/api/contract';
-import { WS_EXP_HEADER, WS_ROLE_HEADER } from '../core/workspace-do';
+import { WS_EXP_HEADER, WS_ROLE_HEADER, WS_USER_HEADER } from '../core/workspace-do';
 import { apiError, workspaceStub, type ApiEnv } from './shared';
 
 export const realtimeRoutes = new Hono<ApiEnv>();
@@ -14,6 +14,7 @@ realtimeRoutes.get('/stores/:storeId/ws', async (c) => {
   const req = new Request(c.req.raw);
   req.headers.set(WS_EXP_HEADER, String(c.get('principal').expiresAt));
   req.headers.set(WS_ROLE_HEADER, c.get('storeRole'));
+  req.headers.set(WS_USER_HEADER, c.get('principal').userId);
   return ws.fetch(req);
 });
 

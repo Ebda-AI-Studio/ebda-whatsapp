@@ -1,5 +1,6 @@
 import { runDueOffboardings } from './core/ops/offboarding';
 import { offboardingRoutes } from './routes/offboarding';
+import { membersRoutes } from './routes/members';
 import { auditWrites } from './core/audit';
 import { eraseContactFlow } from './core/contact-erase';
 import { purgeNewCapUsage } from './core/campaigns/new-cap';
@@ -192,6 +193,7 @@ api.route('/', instapayProofRoutes);
 api.route('/', packageRoutes);
 api.route('/', sharedNumberRoutes);
 api.route('/', offboardingRoutes);
+api.route('/', membersRoutes);
 app.route('/api/v1', api);
 /** The /api/v1 routes, exported so a test can walk them (every store route needs a scope decision in core/identity/scopes.ts). */
 export const apiRoutes = api;

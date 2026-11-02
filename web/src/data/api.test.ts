@@ -247,3 +247,37 @@ describe('connectRealtime: stop', () => {
     expect(sock.closed).toBe(true);
   });
 });
+
+describe('createApiSource team seats (WA-SEATS-1)', () => {
+  const U = 'b0000000-0000-4000-8000-000000000001';
+  const mk = (routes: Parameters<typeof fetchStub>[0]) => {
+    const { f, calls } = fetchStub(routes);
+    return { calls, src: createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' }) };
+  };
+
+  it('lists the team, assigns with PUT and removes with DELETE on the member\'s seat', async () => {
+    const team = { items: [{ userId: U, displayName: 'Mona', role: 'staff', addedAt: '2026-10-01T00:00:00.000Z', seat: 'none' }], seats: { limit: 2, used: 1, overLimit: false } };
+    const { calls, src } = mk({ '/members': (init) => (init?.method === 'DELETE' ? { status: 200, body: {} } : init?.method === 'PUT' ? { status: 201, body: { userId: U, seat: 'seated' } } : { status: 200, body: team }) });
+    expect(await src.team!.list()).toEqual(team);
+    await src.team!.assign(U);
+    await src.team!.unassign(U);
+    expect(calls.map((c) => [c.init?.method ?? 'GET', c.url.replace('https://wa.test/api/v1/stores/' + STORE, '')])).toEqual([['GET', '/members'], ['PUT', `/members/${U}/seat`], ['DELETE', `/members/${U}/seat`]]);
+  });
+
+  it('a full package rejects with the server\'s seat_limit code', async () => {
+    const { src } = mk({ '/seat': () => ({ status: 403, body: { error: 'seat_limit', limit: 2 } }) });
+    await expect(src.team!.assign(U)).rejects.toMatchObject({ code: 'seat_limit', status: 403 });
+  });
+
+  it('a refusal for want of a seat is remembered so the app shows the no-seat page, and a seat that is only over the limit says so', async () => {
+    const a = mk({ '/me': () => ({ status: 403, body: { error: 'no_seat', message: 'no_seat' } }) });
+    await a.src.loadCapabilities();
+    expect(a.src.noSeat).toBe('none');
+    const b = mk({ '/me': () => ({ status: 403, body: { error: 'no_seat', message: 'seat_over_limit' } }) });
+    await b.src.loadCapabilities();
+    expect(b.src.noSeat).toBe('over_limit');
+    const c = mk({ '/me': () => ({ status: 200, body: { role: 'staff', capabilities: {} } }) });
+    await c.src.loadCapabilities();
+    expect(c.src.noSeat).toBeUndefined();
+  });
+});

@@ -92,6 +92,42 @@ describe('Service Binding adapter', () => {
   });
 });
 
+describe('Service Binding adapter: membership (the Store answers with the bare value and throws, no envelope)', () => {
+  const U = 'b0000000-0000-4000-8000-000000000001';
+  const member = { userId: U, displayName: 'Mona', role: 'staff', addedAt: '2026-10-01T00:00:00.000Z' };
+
+  it('reads the bare role and the bare list, store id first', async () => {
+    const seen: unknown[][] = [];
+    const bridge = createServiceBindingBridge({ STORE_BRIDGE: {
+      memberRole: async (...a: unknown[]) => (seen.push(a), 'staff'),
+      listStoreMembers: async (...a: unknown[]) => (seen.push(a), { items: [member] }),
+    } as unknown as Fetcher })!;
+    expect(await bridge.memberRole(FAKE_STORE_ID, U)).toEqual({ ok: true, value: { role: 'staff' } });
+    expect(await bridge.listStoreMembers(FAKE_STORE_ID, 'owner-1')).toEqual({ ok: true, value: { items: [member] } });
+    expect(seen).toEqual([[FAKE_STORE_ID, U], [FAKE_STORE_ID, 'owner-1']]);
+  });
+
+  it('null is "not a member" (an answer), a throw or a malformed answer is "unavailable" (never read as no members)', async () => {
+    const bridge = createServiceBindingBridge({ STORE_BRIDGE: {
+      memberRole: async () => null,
+      listStoreMembers: async () => ({ items: 'nope' }),
+    } as unknown as Fetcher })!;
+    expect(await bridge.memberRole(FAKE_STORE_ID, U)).toEqual({ ok: true, value: { role: null } });
+    expect(await bridge.listStoreMembers(FAKE_STORE_ID, 'o')).toMatchObject({ ok: false, reason: 'unavailable' });
+    const down = createServiceBindingBridge({ STORE_BRIDGE: { memberRole: async () => { throw new Error('db down'); } } as unknown as Fetcher })!;
+    expect(await down.memberRole(FAKE_STORE_ID, U)).toMatchObject({ ok: false, reason: 'unavailable' });
+  });
+
+  it('the Store\'s FORBIDDEN / INVALID_ID throws are `invalid`, so a non-owner asker is not retried as an outage', async () => {
+    const bridge = createServiceBindingBridge({ STORE_BRIDGE: {
+      listStoreMembers: async () => { throw new Error('FORBIDDEN'); },
+      memberRole: async () => { throw new Error('INVALID_ID'); },
+    } as unknown as Fetcher })!;
+    expect(await bridge.listStoreMembers(FAKE_STORE_ID, 'x')).toEqual({ ok: false, reason: 'invalid', message: 'FORBIDDEN' });
+    expect(await bridge.memberRole(FAKE_STORE_ID, 'x')).toEqual({ ok: false, reason: 'invalid', message: 'INVALID_ID' });
+  });
+});
+
 describe('Store event envelope', () => {
   const base = { id: '0b6f1c7e-1d2a-4f3b-9c8d-7e6f5a4b3c2d', v: 1, storeId: FAKE_STORE_ID, occurredAt: '2026-10-25T10:00:00.000Z' };
   const key = 'b'.repeat(64);
