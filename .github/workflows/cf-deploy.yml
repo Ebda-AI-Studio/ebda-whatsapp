@@ -1,13 +1,13 @@
 name: cf-deploy
 
-# A deploy needs a human go: this workflow runs ONLY when someone dispatches it (Actions -> cf-deploy -> Run workflow).
-# All of the logic (account guard, "commit is on main" guard, D1 migrations, deploy, verify) is in scripts/deploy.sh, the same script Ahmad's Mac runs.
-#
-# SECURITY (Ruling WA-DEPLOY-1): do NOT add CLOUDFLARE_API_TOKEN to GitHub secrets until the repo has environment protection (required reviewer +
-# main-only deployment branches). Whisky-11 is on the Free plan with a private repo, where those rules do not exist, so a dispatch from a branch with an
-# edited copy of this file could read any secret it can reference. Until then deploys run from the Mac: `bash scripts/deploy.sh`. This workflow is kept
-# ready (environment `production`, step-scoped secrets, no lifecycle scripts) and is inert without the secret.
+# Ruling WA-DEPLOY-2 (replaces WA-DEPLOY-1; Ahmad 2026-11-02): ebda-whatsapp deploys from GitHub CI the same way ebda-store does. A deploy runs on every push
+# to main and on workflow_dispatch (re-deploy or recover). All of the logic (account guard, "commit is on main" guard, D1 migrations, deploy, verify incl. the
+# live commit, headers, webhooks and cron) is in scripts/deploy.sh; a failed verification fails the run and pages Telegram. CLOUDFLARE_API_TOKEN lives in the
+# `production` environment (its secrets). A PR that edits this file, scripts/deploy.sh, verify-prod or wrangler.jsonc needs Ahmad's `deploy-change` label
+# (deploy-change-label.yml, Ruling DEPLOY-PARITY-1), because the Free plan has no environment protection. No local `scripts/deploy.sh` or build from the Mac (MAC-LIGHT-1).
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 # One deploy at a time, and never cancel one halfway (a cancelled deploy is a half-migrated production).
@@ -24,10 +24,10 @@ env:
 jobs:
   deploy:
     name: Migrate, deploy, verify
-    # Inert until the plan supports environment protection (required reviewers, main-only): then configure it on `production` and add the secrets THERE.
+    # The secrets live on the `production` environment.
     environment: production
-    # Umbra self-hosted runner when the repo variable EBDA_RUNS_ON is set, else GitHub-hosted (same rule as ci.yml; a JSON value, not a bare label).
-    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-latest"') }}
+    # Pinned in YAML, never through a repo variable (Ruling RUNS-ON-NEVER-1): ubuntu-latest moved to 26.04 and broke Playwright installs.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,8 +38,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          # Remote Actions cache only on hosted runners; on Umbra ~/.npm is already local (it pulled 14 GB in 44 min once).
-          cache: ${{ vars.EBDA_RUNS_ON == '' && 'npm' || '' }}
+          cache: npm
       # No lifecycle scripts, and no secret in the environment of anything that runs repo or dependency code except wrangler itself (the Deploy step).
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
@@ -54,7 +53,7 @@ jobs:
         shell: bash
         run: |
           if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
-            echo "::error title=No Cloudflare token::CLOUDFLARE_API_TOKEN is not set. By design (WA-DEPLOY-1) it stays unset until environment protection exists; deploy from the Mac with scripts/deploy.sh."
+            echo "::error title=No Cloudflare token::CLOUDFLARE_API_TOKEN is not set. Add it to the production environment secrets (Ruling WA-DEPLOY-2)."
             exit 1
           fi
           bash scripts/deploy.sh

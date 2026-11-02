@@ -1,0 +1,32 @@
+name: Deploy change label
+# Ruling DEPLOY-PARITY-1: no environment protection exists on this plan, so a PR that edits a deploy workflow (or the deploy
+# guard / secret list) must carry the `deploy-change` label, applied by a human after reading the diff. Re-runs when the label
+# is added or removed. Needs no secrets.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-change-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-label:
+    name: Deploy workflow changes need the deploy-change label
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Require the deploy-change label when deploy files change
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/ci/deploy-change-label.mjs --base "$BASE_SHA" --labels "$LABELS"
