@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { expect, it } from 'vitest';
 
 const wf = readFileSync(new URL('../.github/workflows/cf-deploy.yml', import.meta.url), 'utf8');
@@ -67,4 +67,18 @@ it('wrangler.jsonc registers the cron the workflow verifies', () => {
   const cfg = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
   expect(cfg.triggers.crons).toEqual(['17 1 * * *']);
   expect(cfg.account_id).toBe('69188202efc4df480140dd76545aa3ab');
+});
+it('the deploy job runs only on refs/heads/main, so a dispatch from another branch is skipped (WA-DEPLOY-2)', () => {
+  expect(wf).toMatch(/^\s+if: github\.ref == 'refs\/heads\/main'$/m);
+});
+it('no workflow that references CLOUDFLARE_API_TOKEN has a pull_request or pull_request_target trigger (WA-DEPLOY-2)', () => {
+  const dir = new URL('../.github/workflows/', import.meta.url);
+  const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
+  expect(files).toContain('cf-deploy.yml');
+  for (const f of files) {
+    const text = readFileSync(new URL(f, dir), 'utf8');
+    if (text.includes('CLOUDFLARE_API_TOKEN')) expect(text, f).not.toMatch(/^\s+(pull_request|pull_request_target):?/m);
+  }
+  // negative control: the PR workflows exist and carry no such secret
+  expect(readFileSync(new URL('ci.yml', dir), 'utf8')).not.toContain('CLOUDFLARE_API_TOKEN');
 });

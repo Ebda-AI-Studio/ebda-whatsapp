@@ -24,6 +24,8 @@ env:
 jobs:
   deploy:
     name: Migrate, deploy, verify
+    # Only the main branch deploys: a workflow_dispatch from any other branch is skipped (WA-DEPLOY-2 interim hardening).
+    if: github.ref == 'refs/heads/main'
     # The secrets live on the `production` environment.
     environment: production
     # Pinned in YAML, never through a repo variable (Ruling RUNS-ON-NEVER-1): ubuntu-latest moved to 26.04 and broke Playwright installs.
