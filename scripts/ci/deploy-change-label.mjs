@@ -10,9 +10,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const LABEL = 'deploy-change';
-/** Files that decide what reaches production: the deploy script Workers Builds runs and its verifier, this check and the read-only verify workflow, wrangler.jsonc (bindings, vars and the required-secrets list) and package.json (its scripts feed the build and deploy commands). */
+/** Files that decide what reaches production: the deploy script Workers Builds runs and its verifier, this check and the read-only verify workflow, wrangler.jsonc (bindings, vars and the required-secrets list) and package.json and package-lock.json (scripts, and the dependencies whose code runs in the build), and every config file the build reads or executes (tsconfig, web/vite.config, each brand.ts the build imports, .npmrc, .nvmrc). */
 export const DEPLOY_FILE =
-  /^(\.github\/workflows\/(deploy-change-label|prod-verify)\.yml|scripts\/(deploy-cf\.sh|verify-prod\.mjs)|scripts\/ci\/deploy-change-label\.mjs|wrangler\.jsonc|package\.json)$/;
+  /^(\.github\/workflows\/(deploy-change-label|prod-verify)\.yml|scripts\/(deploy-cf\.sh|verify-prod\.mjs)|scripts\/ci\/deploy-change-label\.mjs|wrangler\.jsonc|package(-lock)?\.json|\.npmrc|\.nvmrc|\.node-version|tsconfig[^/]*\.json|web\/(vite\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|brands\/[^/]+\/brand\.ts)|(postcss|tailwind|babel|rollup|esbuild)\.config\.[cm]?[jt]s)$/;
 
 export function deployFilesChanged(files) {
   return files.filter(f => DEPLOY_FILE.test(f));
