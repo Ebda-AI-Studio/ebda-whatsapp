@@ -27,7 +27,8 @@ jobs:
     # Inert until the plan supports environment protection (required reviewers, main-only): then configure it on `production` and add the secrets THERE.
     environment: production
     # Umbra self-hosted runner when the repo variable EBDA_RUNS_ON is set, else GitHub-hosted (same rule as ci.yml; a JSON value, not a bare label).
-    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-latest"') }}
+    # ubuntu-latest became 26.04 (2026-11); Playwright 1.60 unsupported — Ruling CI-HOSTED-2
+    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
