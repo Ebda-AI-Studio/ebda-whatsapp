@@ -10,12 +10,25 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const LABEL = 'deploy-change';
-/** Files that decide what reaches production: the deploy script Workers Builds runs and its verifier, this check and the read-only verify workflow, wrangler.jsonc (bindings, vars and the required-secrets list) and package.json and package-lock.json (scripts, and the dependencies whose code runs in the build), and every config file the build reads or executes (tsconfig, web/vite.config, each brand.ts the build imports, .npmrc, .nvmrc). */
-export const DEPLOY_FILE =
-  /^(\.github\/workflows\/(deploy-change-label|prod-verify)\.yml|scripts\/(deploy-cf\.sh|verify-prod\.mjs)|scripts\/ci\/deploy-change-label\.mjs|wrangler\.jsonc|package(-lock)?\.json|\.npmrc|\.nvmrc|\.node-version|tsconfig[^/]*\.json|web\/(vite\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|brands\/[^/]+\/brand\.ts)|(postcss|tailwind|babel|rollup|esbuild)\.config\.[cm]?[jt]s)$/;
+/**
+ * Ruling GATE-INVERT-1 (deny by default, the same lesson as the auth rule NZ-D10): a changed file needs the label UNLESS it is on this short allowlist of
+ * paths that cannot change how the Worker is built, installed or deployed. Everything else (package.json, any lockfile, scripts/**, wrangler.jsonc, every
+ * build or tool config at any depth, .github/**, migrations/**, vendor/**, foundation/**, web/** outside web/src) needs the label, so a new kind of
+ * config file is covered the day it appears. Application code (src/**, web/src/**) is allowlisted because CI tests review it; docs, root markdown and
+ * tests (except this check's own test) cannot run in a build; the brand image and font folders are copied, not executed.
+ */
+const NO_LABEL = [
+  /^src\//,
+  /^web\/src\//,
+  /^docs\//,
+  /^[^/]+\.md$/,
+  /^test\/(?!deploy-change-label\.test\.ts$)/,
+  /^web\/brands\/[^/]+\/public\/.+\.(png|jpe?g|gif|svg|webp|avif|ico|woff2?)$/,
+];
+export const requiresLabel = file => !NO_LABEL.some(re => re.test(file));
 
 export function deployFilesChanged(files) {
-  return files.filter(f => DEPLOY_FILE.test(f));
+  return files.filter(requiresLabel);
 }
 
 export function check(files, labels) {

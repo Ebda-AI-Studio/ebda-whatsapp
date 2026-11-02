@@ -34,5 +34,7 @@ export default defineConfig({
   // Each brand ships its own static files: mark, favicon and _headers (its CSP names its own sign-in host).
   publicDir: join(brandDir, 'public'),
   resolve: { alias: { '@brand': join(brandDir, 'brand.ts'), '@brand-tokens': join(brandDir, 'tokens.css') } },
+  // PostCSS is pinned to an empty plugin list so vite never auto-discovers a postcss.config or .postcssrc file (Ruling GATE-INVERT-1: no config the build executes may appear unreviewed).
+  css: { postcss: {} },
   build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', sourcemap: false },
 });
