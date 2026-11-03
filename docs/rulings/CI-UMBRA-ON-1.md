@@ -1,6 +1,6 @@
 # CI-UMBRA-ON-1
 
-**Decision:** the deploy-change label check and the production deploy (`cf-deploy.yml`) run on the Umbra self-hosted runner when the repo variable `EBDA_RUNS_ON` is set, else on the pinned GitHub-hosted `ubuntu-24.04`. This supersedes RUNS-ON-NEVER-1 for these two jobs. The label check never runs a fork's PR on the self-hosted runner.
+**Decision:** the deploy-change label check runs on the Umbra self-hosted runner when `EBDA_RUNS_ON` is set (fork PRs always get GitHub-hosted, and the gate is never skipped). The production deploy (`cf-deploy.yml`) has its OWN switch, `EBDA_DEPLOY_RUNS_ON` (unset = pinned GitHub-hosted `ubuntu-24.04`), so moving PR jobs to the shared VM never silently moves the job holding production secrets. Supersedes RUNS-ON-NEVER-1 for these two jobs. Security review on the first draft flagged both points (privileged job on a shared runner; a skipped required check passing).
 
 **Evidence:** Ahmad, 2026-11-03: "No spending limit yet only umbra". The Whisky-11 org has no GitHub-hosted minutes left, so a job pinned to GitHub-hosted fails within 2 seconds without running: PR #52's label check failed that way, and the next push to main would fail its deploy the same way.
 
