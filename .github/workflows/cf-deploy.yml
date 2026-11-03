@@ -29,7 +29,7 @@ jobs:
     # The secrets live on the `production` environment.
     environment: production
     # Ruling CI-UMBRA-ON-1: the production deploy has its OWN switch, EBDA_DEPLOY_RUNS_ON, separate from the PR runners'
-    # EBDA_RUNS_ON, so pointing PR jobs at the shared self-hosted VM never also moves the job that holds production secrets.
+    # EBDA_RUNS_ON, so pointing PR jobs at the shared self-hosted VM never also moves the job that holds the production credentials.
     # Unset = the pinned GitHub-hosted ubuntu-24.04. Durable fix: Cloudflare Workers Builds (WA-DEPLOY-3).
     runs-on: ${{ fromJSON(vars.EBDA_DEPLOY_RUNS_ON || '"ubuntu-24.04"') }}
     timeout-minutes: 30
