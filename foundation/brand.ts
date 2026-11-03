@@ -7,12 +7,12 @@
 export const EBDA = {
   /** The company (master brand). Products are always "Ebda <Product>", never a bare "Ebda" (BRAND-NAME-1). */
   name: 'Ebda AI Studio',
-  nameAr: 'ابدأ استوديو للذكاء الاصطناعي',
+  nameAr: 'ابدأ ستوديو للذكاء الاصطناعي',
   /** The company behind Ebda (single source for every operator mention; ruling OPERATOR-1). */
   company: {
-    legalNameAr: 'ابدأ استوديو للذكاء الاصطناعي والبرمجيات والتسويق الرقمي',
-    legalNameEn: 'Ebda AI Studio for Artificial Intelligence, Software and Digital Marketing',
-    shortNameAr: 'ابدأ استوديو للذكاء الاصطناعي',
+    legalNameAr: 'ابدأ ستوديو للذكاء الاصطناعي والبرمجيات والتسويق الرقمي',
+    legalNameEn: 'Ebda Studio for Artificial Intelligence, Software Development, and Digital Marketing',
+    shortNameAr: 'ابدأ ستوديو للذكاء الاصطناعي',
     shortNameEn: 'Ebda AI Studio',
     url: 'https://ebda.app',
   },
@@ -52,4 +52,4 @@ export function brandName(locale?: string | null): string {
 /** A bare English "Ebda" (not Ebda AI Studio / Store / Chat / CRM / ERP). Header names (X-Ebda-…, Ebda-Webhooks) are not copy. */
 export const BARE_EN = /(?<!X-)\bEbda\b(?!-Webhooks)(?! (?:Store|Chat|AI Studio|CRM|ERP)\b)/;
 /** The Arabic brand spellings with hamza under alef; the plain ابدأ is the everyday verb "start" and stays allowed in copy. */
-export const BARE_AR = /(?:إبدأ|إبدا)(?!\s*(?:ستور|استوديو|شات|Chat|CRM|ERP|Store)(?![ء-يٱ-ۓ]))/;
+export const BARE_AR = /(?:إبدأ|إبدا)(?!\s*(?:ستور|ستوديو|استوديو|شات|Chat|CRM|ERP|Store)(?![ء-يٱ-ۓ]))/;

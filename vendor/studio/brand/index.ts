@@ -11,7 +11,7 @@
 
 export const BRAND = {
   name: 'Ebda AI Studio',
-  nameAr: 'ابدأ استوديو للذكاء الاصطناعي',
+  nameAr: 'ابدأ ستوديو للذكاء الاصطناعي',
   /**
    * The PRODUCT (the store builder). `name`/`nameAr` above name the company; anything naming the product or the Service
    * reads this (ruling PRODUCT-NAME-1). Future products: Ebda Chat / CRM / ERP.
@@ -30,9 +30,10 @@ export const BRAND = {
   },
   /** The company behind Ebda (single source for every operator mention; ruling OPERATOR-1). */
   company: {
-    legalNameAr: 'ابدأ استوديو للذكاء الاصطناعي والبرمجيات والتسويق الرقمي',
-    legalNameEn: 'Ebda AI Studio for Artificial Intelligence, Software and Digital Marketing',
-    shortNameAr: 'ابدأ استوديو للذكاء الاصطناعي',
+    legalNameAr: 'ابدأ ستوديو للذكاء الاصطناعي والبرمجيات والتسويق الرقمي',
+    legalNameEn:
+      'Ebda Studio for Artificial Intelligence, Software Development, and Digital Marketing',
+    shortNameAr: 'ابدأ ستوديو للذكاء الاصطناعي',
     shortNameEn: 'Ebda AI Studio',
     url: 'https://ebda.app',
   },
@@ -329,31 +330,38 @@ export function whatsappYearlyOf(id: WhatsAppBasePackageId): WhatsAppPackageDef 
   return id === 'store-included' ? whatsappPackage(id) : whatsappPackage(`${id}-yearly`);
 }
 
-// ---- shared header navigation of the support sites (docs, help, status) ----
+// ---- ONE navigation and footer for every Ebda AI Studio surface (marketing, help, docs, status) ----
 /**
- * The ONE header navigation of the three Ebda AI Studio support sites (docs, help, status): the wordmark lockup, the
- * Products menu, the five site links and the mobile menu. docs and help render it through packages/site-kit's page
- * shell, status through its own Worker renderer; both call these functions, so the three always show the same links,
- * in the same order, with the same labels in ar and en. Pure strings, no imports beyond the brand module (the status
- * Worker may import nothing else). It lives inside the brand module on purpose: the docs and help builders load it as bare TypeScript through Node, which
- * cannot resolve an extensionless sibling import, and the status Worker may import this module only.
+ * The ONE navigation and footer data of the five Ebda AI Studio sites (ruling NAV-PRODUCT-OF-PAGE-1, NAV-CTA-1,
+ * NAV-CHAT-SLUG-1; public sites audit 2026-11-03 section 4). Everything a header or footer shows (labels, hrefs, order,
+ * groups, ar and en) is returned by the functions below, and two renderers draw it: the marketing site's React
+ * `Header`/`Footer` and the string renderers here (`siteNavHtml`, `siteFooterHtml`) used by help, docs and status.
+ * `tests/unit/studio-nav-footer.test.ts` compares the two so they cannot drift.
+ *
+ * The studio bar is on every page: wordmark (always the studio home), Products, Resources, About, Contact, Log in,
+ * the studio CTA. A product bar (`productBar`) sits under it only on a product page. The footer is the same five
+ * columns everywhere. Pure strings, no imports beyond this module (the status Worker may import nothing else, and the
+ * docs and help builders load it as bare TypeScript through Node, which cannot resolve an extensionless sibling).
  */
 export type NavLang = 'ar' | 'en';
-/** The site a page belongs to: its link gets `aria-current="page"`. `null` = none (a page of another site). */
-export type NavSite = 'studio' | 'dashboard' | 'docs' | 'help' | 'status';
+/** The site a page belongs to: its Resources link gets `aria-current="page"`. `null` = none (a marketing page). */
+export type NavSite = 'docs' | 'help' | 'status';
+/** Which product a marketing page belongs to; `studio` shows no product bar. */
+export type NavKind = 'studio' | 'store' | 'chat';
 
-export interface SiteNavItem {
-  id: NavSite;
-  href: string;
+/** One link. `href` is absolute (support sites render it as is); `path` is the same-origin marketing path when the target is a marketing page (the marketing site routes it with next/link). */
+export interface NavLink {
+  id: string;
   label: string;
+  href: string;
+  path?: string;
 }
 export type SiteNavProductId = 'store' | 'whatsapp';
-export interface SiteNavProduct {
+export interface SiteNavProduct extends NavLink {
   id: SiteNavProductId;
-  href: string;
-  label: string;
   blurb: string;
 }
+
 /**
  * The Products menu icons (24x24, drawn once, stroked in the panel's gold on a night tile). `fill: true` paths are
  * solid. The marketing header renders the same paths in React, the support sites through `siteNavIconSvg`.
@@ -364,63 +372,64 @@ export const SITE_NAV_ICONS: Record<SiteNavProductId, readonly { d: string; fill
       d: 'M4 9.5 5.5 4h13L20 9.5M4 9.5a2.67 2.67 0 0 0 5.33 0 2.67 2.67 0 0 0 5.34 0 2.67 2.67 0 0 0 5.33 0M5.5 12.6V20h13v-7.4M10 20v-4.6h4V20',
     },
   ],
+  // Ebda Chat (Ruling MKT-HOME-APPROVED-1): two message cards, the customer's behind and the store's reply in front. A conversation, never
+  // WhatsApp's circle bubble with a handset (Meta brand rules). Same grid, 1.7 stroke and round joins as the Store icon. It mirrors in Arabic.
   whatsapp: [
-    { d: 'M12 3.5a8.5 8.5 0 0 0-7.3 12.9L3.5 20.5l4.2-1.1A8.5 8.5 0 1 0 12 3.5Z' },
     {
-      d: 'M9.2 8.6c.2-.4.5-.4.7-.4l.5.1.8 1.8c0 .2 0 .4-.2.6l-.5.6c.6 1.1 1.5 2 2.6 2.6l.6-.6c.2-.2.4-.2.6-.1l1.7.8c.1.3.1.6 0 .9-.3.8-1.3 1.2-2.2 1-2.6-.7-4.5-2.6-5.2-5.2-.1-.6.1-1.5 1-2.1Z',
-      fill: true,
+      d: 'M17 10.5V6.8a2.3 2.3 0 0 0-2.3-2.3H6.8a2.3 2.3 0 0 0-2.3 2.3v6.4a2.3 2.3 0 0 0 2.3 2.3h1.1',
     },
+    {
+      d: 'M10.8 10.5h6.4a2.3 2.3 0 0 1 2.3 2.3v3.4a2.3 2.3 0 0 1-2.3 2.3h-4.4l-2.6 2.1v-2.1a2.3 2.3 0 0 1-2.3-2.3v-3.4a2.3 2.3 0 0 1 2.3-2.3Z',
+    },
+    { d: 'M11.9 14.5h4.8' },
   ],
 };
 
 const L = (lang: NavLang, ar: string, en: string) => (lang === 'ar' ? ar : en);
-const marketing = (lang: NavLang) => `${BRAND_MARKETING_URL}${lang === 'ar' ? '/' : '/en/'}`;
+/** A marketing path for a locale: Arabic at the root, English under /en (`/` becomes `/en/`). */
+const mpath = (lang: NavLang, p: string) => `${lang === 'ar' ? '' : '/en'}${p}`;
+const marketing = (lang: NavLang) => `${BRAND_MARKETING_URL}${mpath(lang, '/')}`;
+const mlink = (lang: NavLang, id: string, label: string, p: string): NavLink => ({
+  id,
+  label,
+  path: mpath(lang, p),
+  href: `${BRAND_MARKETING_URL}${mpath(lang, p)}`,
+});
+const studioName = (lang: NavLang) =>
+  lang === 'ar' ? BRAND.company.shortNameAr : BRAND.company.shortNameEn;
 
-/** The five site links, in the one order every support site shows them. */
-export function siteNavItems(lang: NavLang): SiteNavItem[] {
-  const d = BRAND.domains;
-  return [
-    {
-      id: 'studio',
-      href: marketing(lang),
-      label: lang === 'ar' ? BRAND.company.shortNameAr : BRAND.company.shortNameEn,
-    },
-    { id: 'dashboard', href: BRAND_STORE_APP_URL, label: L(lang, 'لوحة التحكم', 'Dashboard') },
-    // docs: English at the root, Arabic under /ar/. help and status: Arabic at the root, English under /en.
-    {
-      id: 'docs',
-      href: `https://${d.docs}/${lang === 'ar' ? 'ar/' : ''}`,
-      label: L(lang, 'الوثائق', 'Docs'),
-    },
-    {
-      id: 'help',
-      href: `https://${d.help}/${lang === 'ar' ? '' : 'en/'}`,
-      label: L(lang, 'مركز المساعدة', 'Help centre'),
-    },
-    {
-      id: 'status',
-      href: `https://${d.status}/${lang === 'ar' ? '' : 'en'}`,
-      label: L(lang, 'حالة الخدمة', 'Status'),
-    },
-  ];
+/** The studio security mailbox (security.txt, the footer, the contact page). */
+export const BRAND_SECURITY_EMAIL = `security@${BRAND.domains.marketing}`;
+
+/** The studio home of a language (the wordmark target everywhere). */
+export function studioHomeLink(lang: NavLang): NavLink {
+  return mlink(lang, 'studio', studioName(lang), '/');
 }
 
 /**
- * The Products menu: only live products (BRAND-ARCH-1), Ebda Store then Ebda Chat (LAUNCH-SUITE-1). The same entries,
- * labels and blurbs as the marketing header's Products panel (tests/unit/site-nav-shared.test.ts keeps them equal).
+ * The Products menu: only live products (BRAND-ARCH-1), Ebda Store then Ebda Chat. Ebda Chat's page stays at
+ * /whatsapp (NAV-CHAT-SLUG-1); /chat is a redirect alias. Product names never carry "WhatsApp".
  */
 export function siteNavProducts(lang: NavLang): SiteNavProduct[] {
   return [
     {
+      ...mlink(
+        lang,
+        'store',
+        lang === 'ar' ? BRAND.product.nameAr : BRAND.product.nameEn,
+        '/store/'
+      ),
       id: 'store',
-      href: marketing(lang),
-      label: lang === 'ar' ? BRAND.product.nameAr : BRAND.product.nameEn,
       blurb: L(lang, 'متجرك أونلاين في دقايق', 'Your online store in minutes'),
     },
     {
+      ...mlink(
+        lang,
+        'whatsapp',
+        lang === 'ar' ? BRAND.productWhatsapp.nameAr : BRAND.productWhatsapp.nameEn,
+        '/whatsapp/'
+      ),
       id: 'whatsapp',
-      href: `${marketing(lang)}whatsapp/`,
-      label: lang === 'ar' ? BRAND.productWhatsapp.nameAr : BRAND.productWhatsapp.nameEn,
       blurb: L(
         lang,
         'كلّم عملاءك على واتساب من مكان واحد',
@@ -430,11 +439,268 @@ export function siteNavProducts(lang: NavLang): SiteNavProduct[] {
   ];
 }
 
+/** The Resources menu: Help centre, Docs, Service status, each in the page's language (docs: English at the root; help and status: Arabic at the root). */
+export function siteNavResources(lang: NavLang): (NavLink & { id: NavSite })[] {
+  const d = BRAND.domains;
+  return [
+    {
+      id: 'help',
+      href: `https://${d.help}/${lang === 'ar' ? '' : 'en/'}`,
+      label: L(lang, 'مركز المساعدة', 'Help centre'),
+    },
+    {
+      id: 'docs',
+      href: `https://${d.docs}/${lang === 'ar' ? 'ar/' : ''}`,
+      label: L(lang, 'الوثائق', 'Docs'),
+    },
+    {
+      id: 'status',
+      href: `https://${d.status}/${lang === 'ar' ? '' : 'en'}`,
+      label: L(lang, 'حالة الخدمة', 'Service status'),
+    },
+  ];
+}
+
+/** The studio's own pages: About, Contact. */
+export function siteNavStudio(lang: NavLang): NavLink[] {
+  return [
+    mlink(lang, 'about', L(lang, 'عن ابدأ ستوديو', 'About the studio'), '/about/'),
+    mlink(lang, 'contact', L(lang, 'تواصل معنا', 'Contact'), '/contact/'),
+  ];
+}
+
+/** Every destination of the studio bar as one flat list (the 404 pages' site map): studio home, products, resources, About, Contact. */
+export function siteNavMap(lang: NavLang): NavLink[] {
+  return [
+    studioHomeLink(lang),
+    ...siteNavProducts(lang),
+    ...siteNavResources(lang),
+    ...siteNavStudio(lang),
+  ];
+}
+
+/** Log in: one label, and one labelled entry per product until the shared accounts sign-in has its own page (audit P1-6). */
+export function siteNavLogin(
+  lang: NavLang,
+  kind: NavKind = 'studio'
+): { label: string; items: NavLink[] } {
+  const items: NavLink[] = [
+    {
+      id: 'store',
+      label: L(lang, 'دخول ابدأ ستور', 'Log in to Ebda Store'),
+      href: `${BRAND_STORE_APP_URL}/login`,
+    },
+    {
+      id: 'whatsapp',
+      label: L(lang, 'دخول ابدأ شات', 'Log in to Ebda Chat'),
+      href: brandUrl(BRAND.domains.whatsappApp),
+    },
+  ];
+  // a product page logs in to its own product only (MKT-WA-CHROME-1: a Chat page never sends a visitor to the Store app)
+  return {
+    label: L(lang, 'دخول', 'Log in'),
+    items:
+      kind === 'studio'
+        ? items
+        : items.filter(i => i.id === (kind === 'store' ? 'store' : 'whatsapp')),
+  };
+}
+
+/** The studio CTA (NAV-CTA-1): choose a product, anchored to the product windows of the studio home. */
+export function siteNavCta(lang: NavLang): NavLink {
+  return {
+    id: 'cta',
+    label: L(lang, 'اختار منتجك', 'Choose a product'),
+    path: `${mpath(lang, '/')}#products`,
+    href: `${marketing(lang)}#products`,
+  };
+}
+
+/** The labels of the groups, shared by both renderers. */
 export const siteNavLabels = (lang: NavLang) => ({
   nav: L(lang, 'التنقل الرئيسي', 'Main navigation'),
   products: L(lang, 'المنتجات', 'Products'),
+  resources: L(lang, 'المصادر', 'Resources'),
+  studio: L(lang, 'الستوديو', 'Studio'),
   menu: L(lang, 'القائمة', 'Menu'),
 });
+
+/**
+ * The product bar under the studio bar, only on a product page: the product chip (links to the product's page), its own
+ * sections and its own CTA. Store anchors are written `/store/#id` (one hop, audit P1-10).
+ */
+export function productBar(
+  kind: Exclude<NavKind, 'studio'>,
+  lang: NavLang
+): { chip: NavLink; links: NavLink[]; cta: NavLink } {
+  if (kind === 'store') {
+    return {
+      chip: mlink(
+        lang,
+        'store',
+        lang === 'ar' ? BRAND.product.nameAr : BRAND.product.nameEn,
+        '/store/'
+      ),
+      links: [
+        mlink(lang, 'story', L(lang, 'إزاي بيشتغل', 'How it works'), '/store/#story'),
+        mlink(lang, 'looks', L(lang, 'القوالب', 'Templates'), '/store/#looks'),
+        mlink(lang, 'features', L(lang, 'المميزات', 'Features'), '/features/'),
+        mlink(lang, 'pricing', L(lang, 'الأسعار', 'Pricing'), '/store/#pricing'),
+        mlink(lang, 'faq', L(lang, 'أسئلة', 'FAQ'), '/store/#faq'),
+      ],
+      cta: {
+        id: 'cta',
+        label: L(lang, 'افتح متجرك', 'Open your store'),
+        href: `${BRAND_STORE_APP_URL}/signup`,
+      },
+    };
+  }
+  return {
+    chip: mlink(
+      lang,
+      'whatsapp',
+      lang === 'ar' ? BRAND.productWhatsapp.nameAr : BRAND.productWhatsapp.nameEn,
+      '/whatsapp/'
+    ),
+    links: [
+      mlink(lang, 'features', L(lang, 'المميزات', 'Features'), '/whatsapp/#features'),
+      mlink(lang, 'pricing', L(lang, 'الأسعار', 'Pricing'), '/whatsapp/#pricing'),
+      mlink(lang, 'faq', L(lang, 'أسئلة', 'FAQ'), '/whatsapp/#faq'),
+    ],
+    cta: {
+      id: 'cta',
+      label: L(lang, 'ابدأ مع ابدأ شات', 'Start with Ebda Chat'),
+      href: brandUrl(BRAND.domains.whatsappApp),
+    },
+  };
+}
+
+export interface SiteFooterColumn {
+  id: 'products' | 'resources' | 'studio' | 'legal';
+  title: string;
+  links: (NavLink & { action?: 'cookies' })[];
+}
+/**
+ * The footer, identical on all five sites: the brand column (name, one-line mission, mailboxes, WhatsApp number) and
+ * four link columns (Products, Resources, Studio, Legal). No competitor compare links (Ahmad 2026-10-23). The legal
+ * entity's full name is not here: it lives on the legal pages only (AR-STUDIO-NAME-1).
+ */
+export function siteFooter(lang: NavLang): {
+  label: string;
+  brand: {
+    name: string;
+    mission: string;
+    contacts: { id: string; label: string; value: string; href: string }[];
+  };
+  columns: SiteFooterColumn[];
+  copyright: (year: number) => string;
+} {
+  const products = siteNavProducts(lang);
+  const [storeProduct, chatProduct] = products as [SiteNavProduct, SiteNavProduct];
+  const resources = siteNavResources(lang);
+  const about = siteNavStudio(lang);
+  const m = (id: string, label: string, p: string) => mlink(lang, id, label, p);
+  return {
+    label: L(lang, 'روابط الموقع', 'Site links'),
+    brand: {
+      name: studioName(lang),
+      mission: L(lang, 'بابك لبدء مشروعك.', 'Your doorway to business.'),
+      contacts: [
+        {
+          id: 'hello',
+          label: L(lang, 'أسئلة واستفسارات', 'Questions and help'),
+          value: BRAND.supportEmail,
+          href: `mailto:${BRAND.supportEmail}`,
+        },
+        {
+          id: 'security',
+          label: L(lang, 'الإبلاغ عن ثغرة أمنية', 'Report a security issue'),
+          value: BRAND_SECURITY_EMAIL,
+          href: `mailto:${BRAND_SECURITY_EMAIL}`,
+        },
+        {
+          id: 'whatsapp',
+          label: L(lang, 'واتساب', 'WhatsApp'),
+          value: whatsappDisplay(),
+          href: whatsappUrl(),
+        },
+      ],
+    },
+    columns: [
+      {
+        id: 'products',
+        title: siteNavLabels(lang).products,
+        links: [
+          storeProduct,
+          m('store-features', L(lang, 'مميزات ابدأ ستور', 'Ebda Store features'), '/features/'),
+          m('store-pricing', L(lang, 'أسعار ابدأ ستور', 'Ebda Store pricing'), '/store/#pricing'),
+          m('store-templates', L(lang, 'قوالب ابدأ ستور', 'Ebda Store templates'), '/store/#looks'),
+          chatProduct,
+          m('chat-pricing', L(lang, 'أسعار ابدأ شات', 'Ebda Chat pricing'), '/whatsapp/#pricing'),
+        ],
+      },
+      {
+        id: 'resources',
+        title: siteNavLabels(lang).resources,
+        links: [
+          ...resources,
+          m('credits', L(lang, 'حقوق الصور والموديلات', 'Credits'), '/credits/'),
+        ],
+      },
+      {
+        id: 'studio',
+        title: siteNavLabels(lang).studio,
+        links: [
+          ...about,
+          {
+            id: 'security-txt',
+            label: 'security.txt',
+            href: `${BRAND_MARKETING_URL}/.well-known/security.txt`,
+            path: '/.well-known/security.txt',
+          },
+        ],
+      },
+      {
+        id: 'legal',
+        title: L(lang, 'قانوني', 'Legal'),
+        links: [
+          m('legal', L(lang, 'الإشعار القانوني', 'Legal notice'), '/legal/'),
+          m('privacy', L(lang, 'الخصوصية', 'Privacy'), '/privacy/'),
+          m('terms', L(lang, 'الشروط', 'Terms'), '/terms/'),
+          m(
+            'merchant',
+            L(lang, 'اتفاقية التاجر لابدأ ستور', 'Ebda Store merchant agreement'),
+            '/merchant-agreement/'
+          ),
+          m('acceptable-use', L(lang, 'الاستخدام المقبول', 'Acceptable use'), '/acceptable-use/'),
+          m('refund', L(lang, 'استرداد ابدأ ستور', 'Ebda Store refunds'), '/refund/'),
+          m('data-deletion', L(lang, 'حذف البيانات', 'Data deletion'), '/legal/data-deletion/'),
+          m('chat-terms', L(lang, 'شروط ابدأ شات', 'Ebda Chat terms'), '/legal/whatsapp-terms/'),
+          m(
+            'chat-privacy',
+            L(lang, 'خصوصية ابدأ شات', 'Ebda Chat privacy'),
+            '/legal/whatsapp-privacy/'
+          ),
+          m(
+            'chat-dpa',
+            L(lang, 'اتفاقية معالجة بيانات ابدأ شات', 'Ebda Chat DPA'),
+            '/legal/whatsapp-dpa/'
+          ),
+          {
+            ...m('cookies', L(lang, 'إعدادات الكوكيز', 'Cookie settings'), '/privacy/'),
+            action: 'cookies',
+          },
+        ],
+      },
+    ],
+    copyright: year =>
+      L(
+        lang,
+        `© ${year} ${BRAND.company.shortNameAr}. جميع الحقوق محفوظة.`,
+        `© ${year} ${BRAND.company.shortNameEn}. All rights reserved.`
+      ),
+  };
+}
 
 const esc = (s: string) =>
   s.replace(
@@ -442,19 +708,18 @@ const esc = (s: string) =>
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!
   );
 
-/** The studio lockup: mark + the master brand name + the site name. `markHtml` is the caller's icon (an <img> or inline SVG). */
+/** The studio lockup: mark + the master brand name + the site name. `markHtml` is the caller's icon (an <img> or inline SVG). The href is the studio home, always. */
 export function siteWordmarkHtml(p: {
   lang: NavLang;
   href: string;
   siteLabel: string;
   markHtml: string;
 }): string {
-  const studio = p.lang === 'ar' ? BRAND.company.shortNameAr : BRAND.company.shortNameEn;
-  return `<a class="wordmark" href="${esc(p.href)}">${p.markHtml}<span>${esc(studio)}</span><span class="wm-site">${esc(p.siteLabel)}</span></a>`;
+  return `<a class="wordmark" href="${esc(p.href)}">${p.markHtml}<span>${esc(studioName(p.lang))}</span><span class="wm-site">${esc(p.siteLabel)}</span></a>`;
 }
 
 /** The icon as an inline <svg> string (decorative). */
-export function siteNavIconSvg(id: SiteNavProductId): string {
+export function siteNavIconSvg(id: SiteNavProductId, lang?: NavLang): string {
   const paths = SITE_NAV_ICONS[id]
     .map(p =>
       p.fill
@@ -462,25 +727,67 @@ export function siteNavIconSvg(id: SiteNavProductId): string {
         : `<path d="${p.d}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>`
     )
     .join('');
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">${paths}</svg>`;
+  const mirror = lang === 'ar' && id === 'whatsapp' ? ' style="transform:scaleX(-1)"' : '';
+  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"${mirror}>${paths}</svg>`;
 }
 
-/** The header nav: desktop link row with the Products disclosure, and the mobile menu (below 1180px it collapses into the menu button; wider, it is its own row under the wordmark, search and language switch). */
+/**
+ * The studio bar's navigation for the support sites: desktop link row with the Products, Resources and Log in
+ * disclosures, About, Contact and the CTA, and the mobile menu grouped Products / Resources / Studio (below 1180px
+ * it collapses into the menu button; wider, it is its own row under the wordmark, search and language switch).
+ */
 export function siteNavHtml(lang: NavLang, active: NavSite | null): string {
   const t = siteNavLabels(lang);
-  const items = siteNavItems(lang);
   const products = siteNavProducts(lang);
-  const link = (i: SiteNavItem) =>
-    `<li><a href="${esc(i.href)}"${i.id === active ? ' aria-current="page"' : ''}>${esc(i.label)}</a></li>`;
+  const resources = siteNavResources(lang);
+  const studio = siteNavStudio(lang);
+  const login = siteNavLogin(lang);
+  const cta = siteNavCta(lang);
+  const a = (i: NavLink, cls = '') =>
+    `<a href="${esc(i.href)}"${cls ? ` class="${cls}"` : ''}${i.id === active ? ' aria-current="page"' : ''}>${esc(i.label)}</a>`;
+  const li = (i: NavLink) => `<li>${a(i)}</li>`;
   // one card per product: icon tile, full name, one-sentence blurb (the marketing header renders the same pieces in React)
   const prod = (p: SiteNavProduct) =>
-    `<li><a href="${esc(p.href)}"><span class="np-ico">${siteNavIconSvg(p.id)}</span><span class="np-txt"><b>${esc(p.label)}</b><span>${esc(p.blurb)}</span></span></a></li>`;
+    `<li><a href="${esc(p.href)}"><span class="np-ico">${siteNavIconSvg(p.id, lang)}</span><span class="np-txt"><b>${esc(p.label)}</b><span>${esc(p.blurb)}</span></span></a></li>`;
+  const menu = (title: string, items: string) =>
+    `<li class="nav-products"><details><summary>${esc(title)}</summary><ul>${items}</ul></details></li>`;
+  const group = (title: string, links: NavLink[]) =>
+    `<li class="menu-group"><p>${esc(title)}</p><ul>${links.map(li).join('')}</ul></li>`;
   return (
     `<nav class="top-nav" aria-label="${esc(t.nav)}">` +
-    `<ul class="nav-links"><li class="nav-products"><details><summary>${esc(t.products)}</summary><ul>${products.map(prod).join('')}</ul></details></li>${items.map(link).join('')}</ul>` +
+    `<ul class="nav-links">` +
+    menu(t.products, products.map(prod).join('')) +
+    menu(t.resources, resources.map(li).join('')) +
+    studio.map(li).join('') +
+    `<li class="nav-end"></li>` +
+    menu(login.label, login.items.map(li).join('')) +
+    `<li>${a(cta, 'nav-cta')}</li>` +
+    `</ul>` +
     `<details class="nav-menu"><summary><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg><span>${esc(t.menu)}</span></summary>` +
-    `<ul><li class="menu-group"><p>${esc(t.products)}</p><ul>${products.map(p => `<li><a href="${esc(p.href)}">${esc(p.label)}</a></li>`).join('')}</ul></li>${items.map(link).join('')}</ul></details>` +
+    `<ul>${group(t.products, products)}${group(t.resources, resources)}${group(t.studio, studio)}${group(login.label, login.items)}<li class="menu-cta">${a(cta, 'nav-cta')}</li></ul></details>` +
     `</nav>`
+  );
+}
+
+const colHtml = (c: SiteFooterColumn) =>
+  `<nav class="sf-col" aria-labelledby="sf-${c.id}"><h2 id="sf-${c.id}">${esc(c.title)}</h2><ul>${c.links
+    .map(l => `<li><a href="${esc(l.href)}">${esc(l.label)}</a></li>`)
+    .join('')}</ul></nav>`;
+
+/** The footer for the support sites: the same data as the marketing React `Footer`. `markHtml` is the caller's icon. */
+export function siteFooterHtml(lang: NavLang, markHtml: string, year: number): string {
+  const f = siteFooter(lang);
+  const contacts = f.brand.contacts
+    .map(
+      c =>
+        `<div><dt>${esc(c.label)}</dt><dd><a href="${esc(c.href)}"${c.id === 'whatsapp' ? ' dir="ltr"' : ''}>${esc(c.value)}</a></dd></div>`
+    )
+    .join('');
+  return (
+    `<footer class="site-footer band-dark sf"><div class="wrap">` +
+    `<div class="sf-grid"><div class="sf-brand"><p class="sf-name">${markHtml}<span>${esc(f.brand.name)}</span></p><p class="sf-mission">${esc(f.brand.mission)}</p><dl class="sf-contact">${contacts}</dl></div>` +
+    f.columns.map(colHtml).join('') +
+    `</div><div class="sf-bottom"><p class="muted small">${esc(f.copyright(year))}</p></div></div></footer>`
   );
 }
 
@@ -578,14 +885,186 @@ export const SITE_NAV_CSS =
 .top-nav{order:3;flex:1 1 100%;min-width:0;position:relative}
 .top-nav ul{list-style:none;margin:0;padding:0}
 .top-nav .nav-links{display:flex;flex-wrap:nowrap;align-items:center;gap:4px 16px;white-space:nowrap}
+.top-nav .nav-end{flex:1 1 0}
 .top-nav a{color:var(--fg);text-decoration:none;padding:6px 2px;display:inline-block}
-.top-nav a:hover{color:var(--lift)}
-.top-nav a[aria-current=page]{color:var(--lift);border-bottom:2px solid var(--lift)}
+.top-nav a:hover{color:var(--accent-text,var(--lift))}
+.top-nav a[aria-current=page]{color:var(--accent-text,var(--lift));border-bottom:2px solid var(--accent-text,var(--lift))}
+.top-nav a.nav-cta{background:var(--gold);color:var(--night);border-radius:10px;padding:8px 14px;font-weight:600;border-bottom:0}
+.top-nav a.nav-cta:hover{background:var(--lift);color:var(--night)}
 .top-nav summary{cursor:pointer;list-style:none;color:var(--fg);padding:6px 2px;display:inline-flex;align-items:center;gap:6px;min-height:44px}
 .top-nav summary::-webkit-details-marker{display:none}
 .nav-products>details>summary::after{content:"";width:6px;height:6px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin-block-start:-3px}
+.nav-end~.nav-products>details>ul{inset-inline-start:auto;inset-inline-end:-18px}
 .nav-menu>ul{position:absolute;z-index:60;min-width:230px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;margin-block-start:6px}
 .nav-menu{display:none}
 .nav-menu>ul a{display:block;padding:10px;min-height:44px}
+.nav-menu .menu-group+.menu-group{border-top:1px solid var(--line);margin-top:4px;padding-top:4px}
+.nav-menu .menu-cta{padding:8px 0 0}.nav-menu a.nav-cta{text-align:center}
 @media (max-width:1179px){.top-nav{order:0;flex:0 0 auto;margin-inline-start:auto}.top-nav .nav-links{display:none}.nav-menu{display:block}}
 `.replace(/\n/g, '') + SITE_NAV_PANEL_CSS;
+
+// ---- Islamic geometry for help, docs and status (static SVG, no script) ----
+/**
+ * The same motif family as the marketing site (`apps/marketing/public/motifs/*`: Ebda gold, brass and silver, the 8-fold star
+ * and the 12-point star, never a {6/2} hexagram, ruling MKT-NO-HEXAGRAM-1), generated here as pure strings so that the
+ * status Worker (which may import only this module) and the docs/help builds draw it without a file copy or a request.
+ * Every star is a single closed polygon of 16 or 24 vertices; the guard in tests/unit/marketing-no-hexagram.test.ts reads
+ * `SITE_ART_SVGS`. Light ground by default (`dark` raises the strokes for the night footer band).
+ */
+const ART_GOLD = BRAND.colors.gold;
+const ART_BRASS = '#8A6A36';
+const ART_SILVER = '#7D858D';
+const f1 = (n: number) => (Math.round(n * 10) / 10).toString();
+/** A closed star polygon: `n` tips, outer radius `ro`, inner radius `ri`, first tip pointing up. */
+function artStar(cx: number, cy: number, n: number, ro: number, ri: number): string {
+  const pts: string[] = [];
+  for (let k = 0; k < n * 2; k++) {
+    const a = (k * Math.PI) / n - Math.PI / 2;
+    const r = k % 2 ? ri : ro;
+    pts.push(`${f1(cx + Math.cos(a) * r)} ${f1(cy + Math.sin(a) * r)}`);
+  }
+  return `M${pts.join('L')}Z`;
+}
+/** A closed regular polygon (the octagon ring). */
+function artPoly(cx: number, cy: number, n: number, r: number, rot = 0): string {
+  const pts: string[] = [];
+  for (let k = 0; k < n; k++) {
+    const a = (k * 2 * Math.PI) / n - Math.PI / 2 + rot;
+    pts.push(`${f1(cx + Math.cos(a) * r)} ${f1(cy + Math.sin(a) * r)}`);
+  }
+  return `M${pts.join('L')}Z`;
+}
+const stroke = (d: string, c: string, o: number, w = 1) =>
+  `<path d='${d}' fill='none' stroke='${c}' stroke-opacity='${o}' stroke-width='${w}' stroke-linejoin='round'/>`;
+const svg = (w: number, h: number, body: string) =>
+  `<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}' viewBox='0 0 ${w} ${h}'>${body}</svg>`;
+const ring = (c: number, r: number, color: string, o: number) =>
+  `<circle cx='${c}' cy='${c}' r='${r}' fill='none' stroke='${color}' stroke-opacity='${o}'/>`;
+
+/** The medallions (44x44): 8-fold star, 12-point star, quatrefoil, octagon ring. */
+const medallion = {
+  m8: svg(
+    44,
+    44,
+    ring(22, 20, ART_GOLD, 0.5) +
+      stroke(artStar(22, 22, 8, 15, 9.6), ART_GOLD, 0.9) +
+      stroke(artStar(22, 22, 8, 8.4, 5.4), ART_SILVER, 0.9) +
+      `<circle cx='22' cy='22' r='1.4' fill='${ART_BRASS}'/>`
+  ),
+  m12: svg(
+    44,
+    44,
+    ring(22, 20, ART_GOLD, 0.5) +
+      stroke(artStar(22, 22, 12, 16, 11.4), ART_GOLD, 0.9) +
+      stroke(artStar(22, 22, 12, 8, 5.6), ART_SILVER, 0.9) +
+      `<circle cx='22' cy='22' r='1.4' fill='${ART_BRASS}'/>`
+  ),
+  // quatrefoil: four lobes, each a circle arc, meeting at the centre
+  mq: svg(
+    44,
+    44,
+    ring(22, 20, ART_GOLD, 0.5) +
+      stroke(
+        'M22 8A7 7 0 0 1 36 22A7 7 0 0 1 22 36A7 7 0 0 1 8 22A7 7 0 0 1 22 8Z',
+        ART_GOLD,
+        0.9
+      ) +
+      stroke(artPoly(22, 22, 4, 7, Math.PI / 4), ART_SILVER, 0.9) +
+      `<circle cx='22' cy='22' r='1.4' fill='${ART_BRASS}'/>`
+  ),
+  mo: svg(
+    44,
+    44,
+    stroke(artPoly(22, 22, 8, 20, Math.PI / 8), ART_GOLD, 0.7) +
+      stroke(artPoly(22, 22, 8, 14, 0), ART_SILVER, 0.9) +
+      `<circle cx='22' cy='22' r='4.2' fill='none' stroke='${ART_BRASS}' stroke-opacity='.9'/>`
+  ),
+};
+const strip = (c: string, o: number) =>
+  svg(
+    40,
+    16,
+    stroke(artStar(10, 8, 8, 7, 4.4), c, o) +
+      stroke('M35 8L30 13L25 8L30 3Z', c, o) +
+      `<path d='M17 8H25M35 8H40M0 8H3' stroke='${c}' stroke-opacity='${o}'/>`
+  );
+const TESS_STARS: [number, number][] = [
+  [48, 48],
+  [0, 0],
+  [96, 0],
+  [0, 96],
+  [96, 96],
+];
+const TESS_DIAMONDS: [number, number][] = [
+  [48, 0],
+  [0, 48],
+  [96, 48],
+  [48, 96],
+];
+const tess = svg(
+  96,
+  96,
+  TESS_STARS.map(([x, y]) => stroke(artStar(x, y, 8, 30, 19), ART_GOLD, 0.2)).join('') +
+    TESS_DIAMONDS.map(([x, y]) => stroke(artPoly(x, y, 4, 12, 0), ART_SILVER, 0.2)).join('')
+);
+/** Every SVG the support sites draw, raw (the no-hexagram guard reads these). */
+export const SITE_ART_SVGS = {
+  ...medallion,
+  strip: strip(ART_GOLD, 0.8),
+  stripDark: strip(BRAND.colors.lift, 0.75),
+  tess,
+} as const;
+const uri = (x: string) =>
+  `url("data:image/svg+xml,${x.replace(/%/g, '%25').replace(/#/g, '%23').replace(/</g, '%3C').replace(/>/g, '%3E')}")`;
+
+/**
+ * The art as CSS: a gold strip under the header, a strip on the footer band, medallion dividers (`<div class="medal m8">`
+ * etc., decorative), and a faint tessellation watermark on landing and index pages (`.tess`). Static data-URI SVG, no
+ * request and no JS. Purely decorative (aria-hidden, no text), so it carries no contrast duty.
+ */
+export const SITE_ART_CSS = `
+.site-header::after{content:"";display:block;height:10px;background:${uri(SITE_ART_SVGS.strip)} center/25px 10px repeat-x}
+.sf{position:relative}
+.sf::before{content:"";position:absolute;inset-inline:0;top:0;height:16px;background:${uri(SITE_ART_SVGS.stripDark)} center/40px 16px repeat-x}
+.medal{position:relative;height:44px;margin:40px auto;max-width:520px;background:var(--medal) center/44px 44px no-repeat}
+.medal::before,.medal::after{content:"";position:absolute;top:50%;height:1px;width:calc(50% - 34px);background:linear-gradient(90deg,transparent,${ART_GOLD})}
+.medal::before{inset-inline-start:0}
+.medal::after{inset-inline-end:0;transform:scaleX(-1)}
+.medal.m8{--medal:${uri(SITE_ART_SVGS.m8)}}
+.medal.m12{--medal:${uri(SITE_ART_SVGS.m12)}}
+.medal.mq{--medal:${uri(SITE_ART_SVGS.mq)}}
+.medal.mo{--medal:${uri(SITE_ART_SVGS.mo)}}
+.tess{background-image:${uri(SITE_ART_SVGS.tess)};background-size:96px 96px}
+`.replace(/\n/g, '');
+
+/** A decorative medallion divider for a page body: one of the four motifs. */
+export function siteMedalHtml(kind: 'm8' | 'm12' | 'mq' | 'mo' = 'm8'): string {
+  return `<div class="medal ${kind}" role="presentation" aria-hidden="true"></div>`;
+}
+
+/**
+ * The footer's stylesheet, shared by marketing (inlined by its `Footer`) and docs, help and status (appended to their
+ * site stylesheets). A deliberately dark band whatever the page's ground: it defines its own tokens. Five columns from
+ * 900px (brand + four link columns), two columns on a phone; logical properties, so it mirrors in Arabic.
+ */
+export const SITE_FOOTER_CSS = `
+.band-dark{--canvas:${BRAND.colors.night};--panel:#121415;--raise:#181b1c;--line:#2f3435;--line-strong:#6f7775;--fg:#f3f5f4;--muted:#a9b1af;--accent-text:${BRAND.colors.lift};background:${BRAND.colors.night};color:#f3f5f4}
+.sf{margin-top:56px;padding-block:44px 24px}
+.sf a{color:#f3f5f4;text-decoration:none}
+.sf a:hover{color:${BRAND.colors.lift};text-decoration:underline;text-underline-offset:3px}
+.sf-grid{display:grid;gap:32px 24px;grid-template-columns:repeat(2,minmax(0,1fr))}
+.sf-brand{grid-column:1/-1}
+@media (min-width:900px){.sf-grid{grid-template-columns:minmax(220px,1.4fr) repeat(4,minmax(0,1fr))}.sf-brand{grid-column:auto}}
+.sf-name{display:flex;align-items:center;gap:10px;font-weight:600;margin:0 0 6px}
+.sf-mission{color:#a9b1af;margin:0 0 16px}
+.sf-contact{margin:0;display:grid;gap:10px}
+.sf-contact dt{color:#a9b1af;font-size:.8125rem}
+.sf-contact dd{margin:0}
+.sf-col h2{font-size:.8125rem;font-weight:600;letter-spacing:.04em;color:${BRAND.colors.lift};margin:0 0 10px}
+html[lang=ar] .sf-col h2{letter-spacing:0}
+.sf-col ul{list-style:none;margin:0;padding:0;display:grid}
+.sf-col a,.sf-col button{display:inline-block;padding:9px 0;min-height:44px;color:#f3f5f4;background:none;border:0;font:inherit;text-align:start;cursor:pointer}
+.sf-col button:hover{color:${BRAND.colors.lift};text-decoration:underline;text-underline-offset:3px}
+.sf-bottom{border-top:1px solid #2f3435;margin-top:32px;padding-top:16px}
+.sf-bottom p{margin:0;color:#a9b1af}
+`.replace(/\n/g, '');
