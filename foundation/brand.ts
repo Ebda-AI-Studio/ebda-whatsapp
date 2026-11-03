@@ -14,6 +14,8 @@ export const EBDA = {
     legalNameEn: 'Ebda Studio for Artificial Intelligence, Software Development, and Digital Marketing',
     shortNameAr: 'ابدأ ستوديو للذكاء الاصطناعي',
     shortNameEn: 'Ebda AI Studio',
+    /** Founding date (Ahmad, 2026-11-03): ISO, rendered with formatLegalDate, and `foundingDate` in the Organization JSON-LD. */
+    foundedOn: '2026-09-11',
     url: 'https://ebda.app',
   },
   products: {

@@ -35,7 +35,26 @@ export const BRAND = {
       'Ebda Studio for Artificial Intelligence, Software Development, and Digital Marketing',
     shortNameAr: 'ابدأ ستوديو للذكاء الاصطناعي',
     shortNameEn: 'Ebda AI Studio',
+    /** Founding date (Ahmad, 2026-11-03): ISO, rendered with formatLegalDate, and `foundingDate` in the Organization JSON-LD. */
+    foundedOn: '2026-09-11',
     url: 'https://ebda.app',
+  },
+  /**
+   * The studio's office (Ahmad, 2026-11-03): a VIRTUAL office in Cairo. Meetings are online; in-person meetings only by
+   * appointment, so no page may imply walk-in hours. Shown on /about, /contact and the legal notice and in the Organization
+   * JSON-LD as a PostalAddress (`officePostalAddress`); never in the footer. One source: read these, never hardcode.
+   */
+  office: {
+    addressAr:
+      'مصر الجديدة، فرع الماظة — شارع الماظة الرئيسي عند تقاطعه مع شارع الثورة، عمارة بنك الإسكندرية، الدور الثامن، القاهرة',
+    addressEn:
+      'Almaza branch, Heliopolis (Masr El Gedida): Almaza Main St. at El Thawra St., Bank of Alexandria building, 8th floor, Cairo, Egypt',
+    mapUrl: 'https://maps.app.goo.gl/42gtfccR2egFvYHE7',
+    meetingAr: 'الاجتماعات أونلاين على Google Meet، ولقاءات المكتب في القاهرة بميعاد سابق بس.',
+    meetingEn: 'We meet online on Google Meet; in-person meetings in Cairo by appointment only.',
+    locality: 'Cairo',
+    region: 'Cairo',
+    country: 'EG',
   },
   tagline: 'Your store, live today.',
   taglineAr: 'متجرك أونلاين النهاردة.',
@@ -107,6 +126,29 @@ export function brandName(locale?: string | null): string {
 /** Product name for merchant/store surfaces, separate from the company identity. */
 export function productName(locale?: string | null): string {
   return locale?.toLowerCase().startsWith('ar') ? BRAND.product.nameAr : BRAND.product.nameEn;
+}
+
+/** The office for a locale: address, map link and how we meet (BRAND.office). */
+export function officeInfo(locale?: string | null) {
+  const ar = !!locale && locale.toLowerCase().startsWith('ar');
+  const o = BRAND.office;
+  return {
+    address: ar ? o.addressAr : o.addressEn,
+    mapUrl: o.mapUrl,
+    meeting: ar ? o.meetingAr : o.meetingEn,
+  };
+}
+
+/** The Organization's schema.org PostalAddress (street line in English; locality, region and country are fixed codes). */
+export function officePostalAddress() {
+  const o = BRAND.office;
+  return {
+    '@type': 'PostalAddress',
+    streetAddress: o.addressEn,
+    addressLocality: o.locality,
+    addressRegion: o.region,
+    addressCountry: o.country,
+  };
 }
 
 /** `https://<host>` for a bare hostname. */
