@@ -47,7 +47,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-    document.title = `${BRAND.productName} · ${lang === 'ar' ? 'المحادثات' : 'Inbox'}`;
+    document.title = `${lang === 'ar' && BRAND.productNameAr ? BRAND.productNameAr : BRAND.productName} ·${lang === 'ar' ? 'المحادثات' : 'Inbox'}`;
   }, [lang]);
 
   useEffect(() => {

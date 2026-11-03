@@ -1,8 +1,13 @@
 // Identity contract v1: access tokens come from the brand's accounts service (refresh cookie lives there), audience "whatsapp".
 const REFRESH_EARLY_MS = 60_000;
 
+/** The message of the error thrown after the person has been handed to sign-in (the caller must not also show a failure). */
+export const SIGNED_OUT = 'signed out';
+
 type Opts = {
   accountsUrl: string;
+  /** Names the product on the sign-in page (`product=`), so it can say which product the person is opening and return here. */
+  product?: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
   redirect?: (url: string) => void;
@@ -20,8 +25,8 @@ export function createTokenProvider(o: Opts) {
   async function fetchToken(): Promise<string> {
     const res = await f(`${o.accountsUrl}/token?aud=whatsapp`, { credentials: 'include' });
     if (res.status === 401) {
-      redirect(`${o.accountsUrl}/login?return=${encodeURIComponent(currentUrl())}`);
-      throw new Error('signed out');
+      redirect(`${o.accountsUrl}/login?${o.product ? `product=${encodeURIComponent(o.product)}&` : ''}return=${encodeURIComponent(currentUrl())}`);
+      throw new Error(SIGNED_OUT);
     }
     if (!res.ok) throw new Error(`token endpoint ${res.status}`);
     const body = (await res.json()) as { access_token?: unknown; expires_in?: unknown };
