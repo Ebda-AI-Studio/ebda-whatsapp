@@ -30,9 +30,8 @@ export const BRAND = {
   },
   /** The company behind Ebda (single source for every operator mention; ruling OPERATOR-1). */
   company: {
-    legalNameAr: 'ابدأ ستوديو للذكاء الاصطناعي والبرمجيات والتسويق الرقمي',
-    legalNameEn:
-      'Ebda Studio for Artificial Intelligence, Software Development, and Digital Marketing',
+    legalNameAr: 'ابدأ ستوديو لتكنولوجيا المعلومات',
+    legalNameEn: 'Ebda Studio',
     shortNameAr: 'ابدأ ستوديو للذكاء الاصطناعي',
     shortNameEn: 'Ebda AI Studio',
     /** Founding date (Ahmad, 2026-11-03): ISO, rendered with formatLegalDate, and `foundingDate` in the Organization JSON-LD. */
