@@ -13,11 +13,11 @@ it('deploys on a push to main and on dispatch only (Ruling WA-DEPLOY-2): no pull
   expect(on.replace(/\s+/g, ' ').trim()).toBe('push: branches: [main] workflow_dispatch:');
   expect(wf).not.toMatch(/^\s+(pull_request|pull_request_target|schedule|workflow_run|repository_dispatch):/m);
 });
-it('one deploy at a time and never cancelled halfway; bounded; runner pinned in YAML, never through a repo variable (RUNS-ON-NEVER-1)', () => {
+it('one deploy at a time and never cancelled halfway; bounded; Umbra via EBDA_RUNS_ON with a pinned ubuntu-24.04 fallback (CI-UMBRA-ON-1)', () => {
   expect(wf).toMatch(/concurrency:\n\s+group: deploy\n\s+cancel-in-progress: false/);
   expect(wf).toMatch(/timeout-minutes: \d+/);
-  expect(wf).toMatch(/^\s+runs-on: ubuntu-24\.04$/m);
-  expect(wf).not.toContain('EBDA_RUNS_ON');
+  expect(wf).toContain(`runs-on: \${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}`);
+  expect(wf).not.toMatch(/ubuntu-latest/);
 });
 const script = readFileSync(new URL('../scripts/deploy.sh', import.meta.url), 'utf8');
 

@@ -28,8 +28,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     # The secrets live on the `production` environment.
     environment: production
-    # Pinned in YAML, never through a repo variable (Ruling RUNS-ON-NEVER-1): ubuntu-latest moved to 26.04 and broke Playwright installs.
-    runs-on: ubuntu-24.04
+    # Ruling CI-UMBRA-ON-1 (Ahmad 2026-11-03, "only Umbra") supersedes RUNS-ON-NEVER-1 for this job: Umbra when EBDA_RUNS_ON is
+    # set, else the pinned GitHub-hosted ubuntu-24.04 (the floating latest image moved to 26.04 and broke Playwright). The org has no hosted minutes.
+    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
