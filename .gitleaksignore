@@ -1,3 +1,6 @@
 # Placeholder text in a docs example ("at-least-16-characters-long-secret"), not a credential; replaced in 47e4828.
 9e4ddb350be5f44557cc2d39131ecac1859f63b4:docs/site/ar/whatsapp/webhooks.mdx:generic-api-key:37
 9e4ddb350be5f44557cc2d39131ecac1859f63b4:docs/site/en/whatsapp/webhooks.mdx:generic-api-key:37
+# Ruling CI-HOSTED-2: sha256 content hashes of vendored foundation/*.json files in foundation.lock.json, not credentials.
+fc11f02439a8ec929073d14c3b33620a2244c48a:foundation.lock.json:generic-api-key:13
+fc11f02439a8ec929073d14c3b33620a2244c48a:foundation.lock.json:generic-api-key:14
