@@ -28,8 +28,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     # The secrets live on the `production` environment.
     environment: production
-    # Pinned in YAML, never through a repo variable (Ruling RUNS-ON-NEVER-1): ubuntu-latest moved to 26.04 and broke Playwright installs.
-    runs-on: ubuntu-24.04
+    # Ruling CI-UMBRA-ON-1: the production deploy has its OWN switch, EBDA_DEPLOY_RUNS_ON, separate from the PR runners'
+    # EBDA_RUNS_ON, so pointing PR jobs at the shared self-hosted VM never also moves the job that holds the production credentials.
+    # Unset = the pinned GitHub-hosted ubuntu-24.04. Durable fix: Cloudflare Workers Builds (WA-DEPLOY-3).
+    runs-on: ${{ fromJSON(vars.EBDA_DEPLOY_RUNS_ON || '"ubuntu-24.04"') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
