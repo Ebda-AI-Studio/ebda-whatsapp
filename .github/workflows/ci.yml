@@ -23,7 +23,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Umbra self-hosted runner when the repo variable EBDA_RUNS_ON is set, else GitHub-hosted.
     # EBDA_RUNS_ON must be a JSON value, e.g. ["self-hosted","umbra-ebda"], not a bare label.
-    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-latest"') }}
+    # ubuntu-latest became 26.04 (2026-11); Playwright 1.60 unsupported — Ruling CI-HOSTED-2
+    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
     # The full suite takes 19-27 min on the shared VM under load from other products' jobs (main run at 0976248: 19 min; PR #43 run 40840747987 was cut at 25 while still passing files).
     timeout-minutes: 40
     steps:

@@ -24,9 +24,9 @@ export default defineConfig({
     {
       name: 'brand-html',
       async transformIndexHtml(html) {
-        const { BRAND } = (await import(join(brandDir, 'brand.ts'))) as { BRAND: { productName: string; appleTouchIcon: string | null } };
+        const { BRAND } = (await import(join(brandDir, 'brand.ts'))) as { BRAND: { productName: string; productNameAr?: string; appleTouchIcon: string | null } };
         return html
-          .replaceAll('%PRODUCT_NAME%', BRAND.productName)
+          .replaceAll('%PRODUCT_NAME%', BRAND.productNameAr ? `${BRAND.productNameAr} | ${BRAND.productName}` : BRAND.productName)
           .replace('%APPLE_TOUCH%', BRAND.appleTouchIcon ? `<link rel="apple-touch-icon" href="${BRAND.appleTouchIcon}" />` : '');
       },
     },

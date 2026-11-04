@@ -9,7 +9,8 @@ import { makeSignOut } from './signout';
 import { SignedOutLocally } from './components/SignedOutLocally';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
 import { connectRealtime, createApiSource } from './data/api';
-import { createTokenProvider, decodeStores, decodeSub } from './data/auth';
+import { SIGNED_OUT, createTokenProvider, decodeStores, decodeSub } from './data/auth';
+import { SignInGate } from './components/SignInGate';
 import { CALLBACK_PATH, OidcSignInError, createOidcSession } from './data/oidc';
 import type { InboxSource } from './data/source';
 import { BRAND } from '@brand';
@@ -49,9 +50,21 @@ async function boot(): Promise<void> {
       tokens = session;
       oidcSession = session;
     } else {
-      tokens = createTokenProvider({ accountsUrl: ACCOUNTS_URL! });
+      // Signed out: show the brand's own sign-in entry; its button (not an automatic redirect) goes to the shared sign-in and returns here.
+      tokens = createTokenProvider({
+        accountsUrl: ACCOUNTS_URL!,
+        ...(BRAND.signInProduct ? { product: BRAND.signInProduct } : {}),
+        redirect: (url) => root.render(<SignInGate kind="signedOut" onContinue={() => location.assign(url)} />),
+      });
     }
-    const token = await tokens.getToken(); // redirects to sign-in when signed out
+    let token: string;
+    try {
+      token = await tokens.getToken();
+    } catch (e) {
+      if (e instanceof Error && e.message === SIGNED_OUT) return; // the sign-in entry is already on screen
+      root.render(<SignInGate kind="unreachable" onContinue={() => location.reload()} />);
+      return;
+    }
     // T35: an operator opening a merchant's workspace read-only (?viewAs=1&store=<id>); the server writes an audit row for every request.
     const viewAsId = viewAsStore(location.search);
     const reason = viewAsId ? (window.prompt(STRINGS.ar.viewAsPrompt) ?? '').trim() : '';

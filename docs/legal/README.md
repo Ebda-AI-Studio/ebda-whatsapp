@@ -11,7 +11,7 @@
 
 The data-deletion page is shared with other products and lives at https://ebda.app/legal/data-deletion/. The pages link to it; it is not written here.
 
-Each page carries frontmatter (title, slug, lang, updated: 2026-10-25) and the line "Arabic version prevails". Strip the frontmatter and the HTML comments when rendering; the comments are not visible text.
+Each page carries frontmatter (title, slug, lang, updated: 2026-11-03) and the line "Arabic version prevails". Strip the frontmatter and the HTML comments when rendering; the comments are not visible text.
 
 ## Clauses marked pending legal review
 - Terms 6.5 Refunds (`<!-- PENDING LEGAL REVIEW: refunds -->`): the 12-month refundable window after cancellation, 50 EGP minimum, non-refundable list. Taken from the help article, which itself says "subject to the final terms".
@@ -23,3 +23,6 @@ Each page carries frontmatter (title, slug, lang, updated: 2026-10-25) and the l
 - The Terms say the margin is currently 0% with notice before any change (from `docs/billing.md` and help 10).
 - Facts not found in the sources and left generic: retention of operational logs, retention of message bodies while the account is active (stated as "as long as the account is active"), the legal entity details of Ebda AI Studio (entity pending), a registered address, any PDPL licence or approval for cross-border transfer, a data-protection contact separate from privacy@ebda.app, and the exact refund process in the app.
 - The 72-hour breach notice and 30-day sub-processor notice are commitments from the brief; confirm operations can meet them.
+
+## Version history
+- `updated: 2026-11-03` (material): Terms section 9 bans alcohol, pork, paid-entry prize draws, mystery boxes sold for chance, fake reviews and fake scarcity (SHARIA-AUP-1, mirrors the Store acceptable-use policy v1.2); Arabic files name the product ابدأ شات and the studio ابدأ ستوديو; DPA and privacy only change the dates and names. The Store's vendored copy must be re-synced after this merges.
