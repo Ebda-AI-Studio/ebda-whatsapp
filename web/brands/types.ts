@@ -16,6 +16,12 @@ export type WebBrand = {
   appleTouchIcon: string | null;
   /** Where the access token comes from (identity contract v1); null for a tenant on its own identity provider (sign-in handled by its portal). */
   accountsUrl: string | null;
+  /** The sign-in entry's lockup: the company line, then the product, in both languages. */
+  gate?: { studio: { ar: string; en: string }; product: { ar: string; en: string } };
+  /** Sent as `product=` to the accounts sign-in so its page names this product; null for none. */
+  signInProduct?: string | null;
+  /** The Arabic product name for the tab title ("ar | en"); omitted = the English name alone. */
+  productNameAr?: string;
   /** The tenant's own OpenID Connect provider for browser sign-in; null when sign-in is `accountsUrl` or handled by the tenant's portal. */
   oidc?: OidcWebConfig | null;
   /** Where a help guide lives for the interface language (the slug is the docs/help file name without its NN- prefix). Null hides the "How?" links. */

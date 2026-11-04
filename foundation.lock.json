@@ -4,7 +4,7 @@
   "dir": "foundation",
   "parity": "test/foundation-parity.test.ts",
   "files": {
-    "foundation/brand.ts": "163c4ff3a1ee056032bfe5ba14ab958d32c45d2ac56677d25bea85ec9ec3655c",
+    "foundation/brand.ts": "c63b01e1ec0367048e9a84f5b7a0d29239ffdeec978ed220226a37cc73031a39",
     "foundation/buyer.ts": "2d5434657f733827423796f5a3782ca1d6794d0e9e802332cf0f9a6778e455e8",
     "foundation/package.json": "998888a74872410662d37e452ee7f51daf959c23718a5cbd6bdf4924f1ffc6ca",
     "foundation/phone.ts": "30d8982b7094b392d00795685fd7cb5d4f0b482d6ff564c7aec40d6eb67f5f97",

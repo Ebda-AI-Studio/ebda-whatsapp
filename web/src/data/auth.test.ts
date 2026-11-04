@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createTokenProvider, decodeStores, decodeSub } from './auth';
+import { SIGNED_OUT, createTokenProvider, decodeStores, decodeSub } from './auth';
 
 const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 const jwt = (claims: object) => `${b64({ alg: 'ES256', typ: 'at+jwt' })}.${b64(claims)}.sig`;
@@ -34,6 +34,23 @@ describe('token provider (identity v1)', () => {
     const p = createTokenProvider({ accountsUrl: 'https://accounts.ebda.app', fetchImpl: f as unknown as typeof fetch, now: () => 0, redirect, currentUrl: () => 'https://wa.ebda.app/?store=s1' });
     await expect(p.getToken()).rejects.toThrow(/signed out/);
     expect(redirect).toHaveBeenCalledWith('https://accounts.ebda.app/login?return=https%3A%2F%2Fwa.ebda.app%2F%3Fstore%3Ds1');
+  });
+
+  it('names the product in the login address when the brand has one, so the sign-in page can say Ebda Chat and return here', async () => {
+    const redirect = vi.fn();
+    const f = vi.fn(async () => new Response('', { status: 401 }));
+    const p = createTokenProvider({ accountsUrl: 'https://accounts.ebda.app', product: 'chat', fetchImpl: f as unknown as typeof fetch, now: () => 0, redirect, currentUrl: () => 'https://wa.ebda.app/' });
+    await expect(p.getToken()).rejects.toThrow(SIGNED_OUT);
+    expect(redirect).toHaveBeenCalledWith('https://accounts.ebda.app/login?product=chat&return=https%3A%2F%2Fwa.ebda.app%2F');
+  });
+
+  it('a non-401 answer is an unreachable service, not a signed-out person (no redirect)', async () => {
+    const redirect = vi.fn();
+    const f = vi.fn(async () => new Response('', { status: 503 }));
+    const p = createTokenProvider({ accountsUrl: 'https://accounts.ebda.app', fetchImpl: f as unknown as typeof fetch, now: () => 0, redirect });
+    const err = await p.getToken().catch((e: Error) => e);
+    expect((err as Error).message).not.toBe(SIGNED_OUT);
+    expect(redirect).not.toHaveBeenCalled();
   });
 
   it('reads the stores claim for the store picker (display only; the server verifies)', () => {
