@@ -12,7 +12,7 @@ it('runs on pull requests and on main, one run per PR (a newer push cancels the 
 it('the job is bounded, never runs a fork on the self-hosted runner, and falls back to GitHub-hosted when EBDA_RUNS_ON is unset', () => {
   expect(wf).toMatch(/timeout-minutes: \d+/);
   expect(wf).toContain('github.event.pull_request.head.repo.full_name == github.repository');
-  expect(wf).toContain("runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '\"ubuntu-latest\"') }}");
+  expect(wf).toContain("runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '\"ubuntu-24.04\"') }}");
 });
 it('no remote Actions cache on the self-hosted runner (the npm cache only when hosted)', () => {
   expect(wf).toContain("cache: ${{ vars.EBDA_RUNS_ON == '' && 'npm' || '' }}");
