@@ -83,3 +83,33 @@ it('no workflow that references CLOUDFLARE_API_TOKEN has a pull_request or pull_
   // negative control: the PR workflows exist and carry no such secret
   expect(readFileSync(new URL('ci.yml', dir), 'utf8')).not.toContain('CLOUDFLARE_API_TOKEN');
 });
+
+// Behavioural proof of the "commit is on main" guard against a private repo: deploy.sh must use the checkout's origin/main (no network, no credentials).
+it('the on-main guard uses the checked-out origin/main without fetching, passes for a merged commit and still FAILS for one that is not on main', async () => {
+  const { execFileSync, spawnSync } = await import('node:child_process');
+  const { mkdtempSync, mkdirSync, copyFileSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'deploy-guard-'));
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_DIR: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).trim();
+  git('init', '-q', '-b', 'main');
+  mkdirSync(join(dir, 'scripts'));
+  copyFileSync(new URL('../scripts/deploy.sh', import.meta.url), join(dir, 'scripts/deploy.sh'));
+  copyFileSync(new URL('../wrangler.jsonc', import.meta.url), join(dir, 'wrangler.jsonc'));
+  git('add', '.');
+  git('commit', '-q', '-m', 'init');
+  // origin points at an unreachable URL: any fetch would fail, so success proves no fetch happened.
+  git('remote', 'add', 'origin', 'https://invalid.invalid/none.git');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  const run = () => spawnSync('bash', ['scripts/deploy.sh'], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: dir, GIT_TERMINAL_PROMPT: '0' } });
+  const ok = run();
+  expect(ok.stderr).not.toContain('cannot fetch');
+  expect(ok.stderr).not.toContain('not an ancestor');
+  expect(ok.stderr).toContain('web/dist is missing'); // got past the guard
+  writeFileSync(join(dir, 'x'), '1');
+  git('add', 'x');
+  git('commit', '-q', '-m', 'unmerged'); // HEAD is ahead of origin/main
+  const bad = run();
+  expect(bad.status).not.toBe(0);
+  expect(bad.stderr).toContain('is not an ancestor of origin/main');
+});
