@@ -90,7 +90,10 @@ export async function runChecks({ base, expectCommit, expectBrand, peerHealth, v
     const k = await get('/kashier/webhook', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     const kBody = (await k.text()).trimStart();
     const html = /text\/html/i.test(k.headers.get('content-type') ?? '') || kBody.startsWith('<');
-    add('kashier webhook is served by the Worker', k.status >= 400 && k.status < 500 && !html, html ? `status ${k.status}, an HTML page: the static assets answered, /kashier/* is missing from run_worker_first` : `status ${k.status}`);
+    // Card off (Ruling WA-CARD-OFF-VERIFY-1): with no Kashier merchant id/API key the Worker itself answers 503 text "unavailable"
+    // (src/core/billing/topups.ts). Accept exactly that; once the keys are set an unsigned POST gets 401, so the check is strict again by itself.
+    const cardOff = k.status === 503 && kBody === 'unavailable' && !html;
+    add('kashier webhook is served by the Worker', (k.status >= 400 && k.status < 500 && !html) || cardOff, html ? `status ${k.status}, an HTML page: the static assets answered, /kashier/* is missing from run_worker_first` : cardOff ? 'status 503 unavailable: card payments off (no Kashier keys)' : `status ${k.status}`);
   } catch (e) {
     add('kashier webhook is served by the Worker', false, `unreachable: ${e.message}`);
   }
