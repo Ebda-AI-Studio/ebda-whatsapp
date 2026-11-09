@@ -39,16 +39,30 @@ it('user-facing copy never says a bare "Ebda": always Ebda AI Studio or Ebda <Pr
   expect(hits).toEqual([]);
 });
 
+// Legal pages are formal Arabic (suite rule: Egyptian for product copy, formal for legal). A whole-word match on Arabic tokens, so a
+// formal word that merely contains a marker never trips it. Add a marker here when review finds a new colloquial word.
+it('the Arabic legal files are formal Arabic: no colloquial markers, products named in Arabic', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const root = new URL('../', import.meta.url);
+  const COLLOQUIAL = ['اللي', 'بتاع', 'بتاعت', 'بتاعة', 'بيتم', 'بتتم', 'ده', 'دي', 'دول', 'مش', 'مفيش', 'عشان', 'علشان', 'إزاي', 'ازاي', 'كده', 'دلوقتي', 'بيعمل', 'بنعالج', 'بنستخدم', 'مبنبيعش'];
+  for (const f of readdirSync(new URL('docs/legal/ar/', root))) {
+    const text = readFileSync(new URL(`docs/legal/ar/${f}`, root), 'utf8');
+    const found = (text.match(/[\u0600-\u06FF]+/g) ?? []).filter((w) => COLLOQUIAL.includes(w));
+    expect([...new Set(found)], f).toEqual([]);
+    expect(text, f).not.toMatch(/Ebda Chat|Ebda AI Studio/);
+  }
+});
+
 // The Store publishes docs/legal on ebda.app from a vendored snapshot and cannot see this repo: a change here must be sent to the
 // Store session (commit id) so it re-imports. Changing a file means updating its pin, which is the reminder.
 const LEGAL_PINS: Record<string, string> = {
-  'docs/legal/README.md': '7da494a99d4e03c41410ace181e7803bd45054fa866d402f75815c646f1208e8',
-  'docs/legal/ar/whatsapp-dpa.md': 'e26cebd7ab19f59f5328cfe3e50925a7131886c6f47d50480dbf7d89bc3014b0',
-  'docs/legal/ar/whatsapp-privacy.md': '866dbffad495c4e8c02374ca907b93d670d2fb9cf61e840704619496c6dda0ed',
-  'docs/legal/ar/whatsapp-terms.md': '64809804ef026c892991b7e29b4310e79a5f6478d26e3a1a6309d1bfdd7ed0c4',
-  'docs/legal/en/whatsapp-dpa.md': '6ac85f7c63216a34ae8f54b8ee588097d9de3418d59f93efc3d7887d7a406588',
-  'docs/legal/en/whatsapp-privacy.md': '8407ec21c33ad0de56765b9977152b50022d4eac84e7fdb2fbcadba34311f1b4',
-  'docs/legal/en/whatsapp-terms.md': '27d8166012536bab2cb6c67691d426c6cd66c4ce2edc949fa6bc9d59c5c08bac',
+  'docs/legal/README.md': 'fb7d75eebe8a3110a65e6bc5856fcb74e703282864c74704e52ddedf966d8980',
+  'docs/legal/ar/whatsapp-dpa.md': '03b3d6fd5e963f7e2cce9113ca82e64fe6c33f2e76cec21204cc85745693cefa',
+  'docs/legal/ar/whatsapp-privacy.md': '641b1e66c8b1fc6d325a701bd0bcab574a47b9358c938749fe6c88388e3fd9c1',
+  'docs/legal/ar/whatsapp-terms.md': 'adf8c6cefb1566f5bbe276f550a9fb3344674b2cb787cdc1de34ae9ad9fac052',
+  'docs/legal/en/whatsapp-dpa.md': '689ae9647baa0bc03d6d22097bb6c61485bbc76aea14f1384acfd70d877f4269',
+  'docs/legal/en/whatsapp-privacy.md': '555ed1b10626550dfaee37d394028de755143ad2daba551fb731497d57c91c7e',
+  'docs/legal/en/whatsapp-terms.md': '64cc8c9fd48f1d626ca2ad9536c3842a3590777f1f3f2bbab54284f4fcacff0d',
 };
 it('legal pages are pinned: a change needs a new pin AND a message to the Store session, which publishes them', async () => {
   const { readFileSync, readdirSync } = await import('node:fs');
