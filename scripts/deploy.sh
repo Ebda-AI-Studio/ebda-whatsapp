@@ -20,7 +20,9 @@ if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] && [ "${CLOUDFLARE_ACCOUNT_ID}" != "${EXP
 fi
 
 # 2. Only reviewed, merged code: the commit being deployed must be an ancestor of origin/main, and the tree must be exactly that commit.
-git fetch --quiet origin main || fail "cannot fetch origin/main to prove the commit is merged"
+# CI checks out with fetch-depth 0 and persist-credentials: false (no token in .git/config), so origin/main is already there and a fetch would have no auth on a private repo.
+# Use the checkout's ref when present; only fetch when it is missing (a bare clone / the Mac).
+git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null || git fetch --quiet origin main || fail "cannot fetch origin/main to prove the commit is merged"
 SHA=$(git rev-parse HEAD)
 git merge-base --is-ancestor "${SHA}" origin/main || fail "${SHA} is not an ancestor of origin/main. Only commits merged to main are deployed."
 [ -z "$(git status --porcelain --untracked-files=no)" ] || fail "the working tree has uncommitted changes; deploy from a clean checkout of main"
