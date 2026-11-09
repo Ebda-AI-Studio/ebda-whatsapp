@@ -2,7 +2,8 @@
 title: Ebda Chat Data Processing Agreement
 slug: whatsapp-dpa
 lang: en
-updated: 2026-11-03
+updated: 2026-11-09
+version: 1.1
 ---
 
 Arabic version prevails.

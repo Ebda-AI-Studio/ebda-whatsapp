@@ -2,7 +2,8 @@
 title: Ebda Chat Privacy Policy
 slug: whatsapp-privacy
 lang: en
-updated: 2026-11-03
+updated: 2026-11-09
+version: 1.1
 ---
 
 Arabic version prevails.

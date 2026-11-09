@@ -11,7 +11,7 @@
 
 The data-deletion page is shared with other products and lives at https://ebda.app/legal/data-deletion/. The pages link to it; it is not written here.
 
-Each page carries frontmatter (title, slug, lang, updated: 2026-11-03) and the line "Arabic version prevails". Strip the frontmatter and the HTML comments when rendering; the comments are not visible text.
+Each page carries frontmatter (title, slug, lang, updated: 2026-11-09, version: 1.1) and the line "Arabic version prevails". Strip the frontmatter and the HTML comments when rendering; the comments are not visible text.
 
 ## Clauses marked pending legal review
 - Terms 6.5 Refunds (`<!-- PENDING LEGAL REVIEW: refunds -->`): the 12-month refundable window after cancellation, 50 EGP minimum, non-refundable list. Taken from the help article, which itself says "subject to the final terms".
@@ -26,3 +26,4 @@ Each page carries frontmatter (title, slug, lang, updated: 2026-11-03) and the l
 
 ## Version history
 - `updated: 2026-11-03` (material): Terms section 9 bans alcohol, pork, paid-entry prize draws, mystery boxes sold for chance, fake reviews and fake scarcity (SHARIA-AUP-1, mirrors the Store acceptable-use policy v1.2); Arabic files name the product ابدأ شات and the studio ابدأ ستوديو; DPA and privacy only change the dates and names. The Store's vendored copy must be re-synced after this merges.
+- `updated: 2026-11-09`, `version: 1.1` (**for counsel review**): the Arabic terms, privacy policy and DPA are rewritten clause by clause into formal legal Arabic (فصحى قانونية) with the same meaning, naming the product ابدأ شات and the studio ابدأ ستوديو للذكاء الاصطناعي in running text; the English files change only their front matter. The Store's vendored copy (`apps/marketing/legal-source`) carries the same files. `test/guards.test.ts` fails on colloquial markers (اللي، بتاع، بيتم، ده، دي، مش، عشان…) in any Arabic legal file, so a re-import cannot bring the colloquial text back.
