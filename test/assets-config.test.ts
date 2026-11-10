@@ -19,16 +19,73 @@ it('serves the SPA with security headers: CSP limited to itself and the identity
   expect(headers).toMatch(/^\/\*$/m);
   const csp = /Content-Security-Policy: (.+)$/m.exec(headers)?.[1] ?? '';
   expect(csp).toContain("default-src 'self'");
-  expect(csp).toContain("script-src 'self' https://connect.facebook.net;");
+  // Scripts: the page's own, Meta's signup SDK, and the edge-added analytics beacon (pre-QA finding 3: the policy refused it, so no visit was counted).
+  expect(csp).toContain("script-src 'self' https://connect.facebook.net https://static.cloudflareinsights.com;");
   expect(csp).toContain('frame-src https://*.facebook.com');
   expect(csp).toContain("frame-ancestors 'none'");
   expect(csp).toContain("object-src 'none'");
-  expect(csp).toContain("connect-src 'self' https://accounts.ebda.app");
+  expect(csp).toContain("connect-src 'self' https://accounts.ebda.app https://*.facebook.com;"); // the beacon reports same-origin: no analytics host here
   expect(csp).not.toContain('unsafe-eval');
   expect(csp).not.toMatch(/script-src[^;]*'unsafe-inline'/);
   expect(headers).toMatch(/Strict-Transport-Security: max-age=\d{8,}/);
   expect(headers).toContain('X-Content-Type-Options: nosniff');
   expect(headers).toContain('Referrer-Policy: strict-origin-when-cross-origin');
+});
+
+it('a shared link to the suite page has a preview: description, canonical, Open Graph image and structured data, all from the brand (pre-QA finding 3)', async () => {
+  const { shareHead } = await import('../web/brands/share-head');
+  const { BRAND } = await import('../web/brands/ebda/brand');
+  const head = shareHead(BRAND);
+  const content = (key: string) => new RegExp(`<meta (?:name|property)="${key}" content="([^"]*)" />`).exec(head)?.[1];
+  expect(content('description')).toBe(BRAND.share?.description);
+  expect((content('description') ?? '').length).toBeGreaterThanOrEqual(70);
+  expect((content('description') ?? '').length).toBeLessThanOrEqual(200);
+  expect(head).toContain('<link rel="canonical" href="https://wa.ebda.app/" />');
+  expect(content('og:url')).toBe('https://wa.ebda.app/');
+  expect(content('og:title')).toBe('ابدأ شات | Ebda Chat');
+  expect(content('og:site_name')).toBe('Ebda Chat');
+  expect(content('og:locale')).toBe('ar_EG');
+  expect(content('twitter:card')).toBe('summary_large_image');
+  // The image is an absolute address on the page's own origin, and the file is there at the size the tags declare.
+  const image = content('og:image') ?? '';
+  expect(image).toBe('https://wa.ebda.app/brand/og-chat.png');
+  expect(content('twitter:image')).toBe(image);
+  const png = readFileSync(join(import.meta.dirname, '..', 'web', 'brands', 'ebda', 'public', new URL(image).pathname));
+  expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
+  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630]);
+  expect([content('og:image:width'), content('og:image:height')]).toEqual(['1200', '630']);
+  expect(content('og:image:alt')).toBeTruthy();
+  // One JSON-LD block that parses: the product by its name, the studio by its public name, never the registered legal name.
+  const ld = JSON.parse(/<script type="application\/ld\+json">(.+?)<\/script>/.exec(head)?.[1] ?? 'null');
+  expect(ld).toMatchObject({ '@type': 'WebApplication', name: 'Ebda Chat', alternateName: 'ابدأ شات', url: 'https://wa.ebda.app/', publisher: { '@type': 'Organization', name: 'Ebda AI Studio' } });
+  expect(JSON.stringify(ld)).not.toMatch(/legalName/);
+  // Copy rule: no supplier is named (the old product names are refused repo-wide by test/guards.test.ts).
+  expect(JSON.stringify(BRAND.share)).not.toMatch(/cloudflare|gemini|openai|anthropic|\bmeta\b|facebook|ميتا|فيسبوك/i);
+});
+
+it('the share tags are written into the built page from one placeholder, and a brand with no share config gets none of them', async () => {
+  const { shareHead } = await import('../web/brands/share-head');
+  const html = readFileSync(join(import.meta.dirname, '..', 'web', 'index.html'), 'utf8');
+  expect(html.split('%SHARE_HEAD%').length).toBe(2);
+  expect(html.indexOf('%SHARE_HEAD%')).toBeLessThan(html.indexOf('</head>'));
+  const cfg = readFileSync(join(import.meta.dirname, '..', 'web', 'vite.config.ts'), 'utf8');
+  expect(cfg).toContain(".replace('%SHARE_HEAD%', () => shareHead(BRAND))");
+  const { BRAND: demo } = await import('../web/brands/demo/brand');
+  expect(demo.share).toBeUndefined();
+  expect(shareHead(demo)).toBe('');
+});
+
+it('share copy cannot break out of its attribute or the structured-data block', async () => {
+  const { shareHead } = await import('../web/brands/share-head');
+  const hostile = '"><script>alert(1)</script> & \'x\' $& </script>';
+  const head = shareHead({ share: { url: 'https://inbox.client.example/', name: hostile, title: hostile, description: hostile, locale: 'en_US', languages: ['en'], image: { path: '/brand/og.png', width: 1200, height: 630, alt: hostile }, publisher: { name: hostile, url: 'https://client.example' } } });
+  expect(head).not.toContain('<script>alert');
+  expect(head.match(/<\/script>/g)?.length).toBe(1);
+  expect(head).toContain('&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt; &amp; &#39;x&#39; $&amp; &lt;/script&gt;');
+  expect(head.match(/<script/g)?.length).toBe(1);
+  const ld = JSON.parse(/<script type="application\/ld\+json">(.+?)<\/script>/.exec(head)?.[1] ?? 'null');
+  expect(ld.name).toBe(hostile);
+  expect(head).not.toMatch(/og:locale:alternate|alternateName/);
 });
 
 it('every brand ships its own _headers with the same base policy, and only the suite brand names its accounts host', () => {

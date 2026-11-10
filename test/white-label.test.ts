@@ -25,6 +25,22 @@ describe('white-label deploy', () => {
     const out = join(tmp, 'dist-demo');
     execFileSync('npx', ['vite', 'build', 'web', '--outDir', out], { cwd: root, env: { ...process.env, BRAND: 'demo' }, stdio: 'pipe' });
     expect(JSON.parse(readFileSync(join(out, 'brand.json'), 'utf8'))).toEqual({ brand: 'demo', oidcIssuer: 'https://login.demo-company.example/realms/main' });
+    // A client's page carries none of the suite's share tags, and no unfilled placeholder is left in it.
+    const page = readFileSync(join(out, 'index.html'), 'utf8');
+    expect(page).not.toMatch(/%[A-Z_]+%/);
+    expect(page).not.toMatch(/og:|twitter:|ld\+json|rel="canonical"|name="description"|ebda/i);
+  }, 120_000);
+
+  it('the suite build writes its share tags into the page the link preview reads', () => {
+    const out = join(tmp, 'dist-ebda');
+    execFileSync('npx', ['vite', 'build', 'web', '--outDir', out], { cwd: root, env: { ...process.env, BRAND: 'ebda' }, stdio: 'pipe' });
+    const page = readFileSync(join(out, 'index.html'), 'utf8');
+    expect(page).not.toMatch(/%[A-Z_]+%/);
+    expect(page).toContain('<meta property="og:image" content="https://wa.ebda.app/brand/og-chat.png" />');
+    expect(page).toContain('<link rel="canonical" href="https://wa.ebda.app/" />');
+    expect(page.match(/<script type="application\/ld\+json">/g)).toHaveLength(1);
+    expect(page.indexOf('og:title')).toBeLessThan(page.indexOf('</head>'));
+    expect(existsSync(join(out, 'brand/og-chat.png'))).toBe(true);
   }, 120_000);
 
   it('refuses a dist built for another brand, an unstamped dist, or a missing one', () => {
