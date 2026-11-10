@@ -17,12 +17,19 @@ type Opts = {
 /**
  * The accounts service answers `{ success: true, data: { access_token, expires_in, ... } }` (the same envelope the store's
  * admin unwraps). Reading the token at the top level turned every signed-in visit into the "unreachable" gate, so the
- * envelope is the contract here; the bare OAuth shape is still read, for a brand whose token endpoint answers without one.
+ * envelope is the contract here, and it must say `success: true`; the bare OAuth shape (no `success`, no `data`) is still read, for a
+ * brand whose token endpoint answers without one.
  */
 export function readTokenBody(raw: unknown): { access_token: string; expires_in: number } | null {
   if (!raw || typeof raw !== 'object') return null;
-  const outer = raw as { data?: unknown };
-  const body = (outer.data && typeof outer.data === 'object' ? outer.data : raw) as { access_token?: unknown; expires_in?: unknown };
+  const outer = raw as { success?: unknown; data?: unknown };
+  // The envelope counts only when it says success: true; a body that names `success` with any other value is refused even if it
+  // carries a token (a `{ success: false, data: { access_token } }` on a 200 must not sign anyone in).
+  if ('success' in outer && outer.success !== true) return null;
+  const enveloped = outer.data !== undefined;
+  if (enveloped && outer.success !== true) return null;
+  const body = (enveloped ? outer.data : raw) as { access_token?: unknown; expires_in?: unknown };
+  if (!body || typeof body !== 'object') return null;
   if (typeof body.access_token !== 'string' || body.access_token === '') return null;
   if (typeof body.expires_in !== 'number' || !Number.isFinite(body.expires_in) || body.expires_in <= 0) return null;
   return { access_token: body.access_token, expires_in: body.expires_in };

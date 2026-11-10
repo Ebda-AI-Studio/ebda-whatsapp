@@ -247,13 +247,15 @@ app.post('/meta/data-deletion', async (c) => {
   }
   return c.json({ url: `${new URL(c.req.url).origin}/meta/data-deletion/status?code=${code}`, confirmation_code: code });
 });
+// The two deletion pages are HTML, and the edge adds the visit-count script to every HTML page on the zone: name its host, nothing else.
+const DELETION_PAGE_CSP = "default-src 'none'; script-src https://static.cloudflareinsights.com; frame-ancestors 'none'";
 const wantsHtml = (c: { req: { header(n: string): string | undefined } }) => (c.req.header('accept') ?? '').includes('text/html');
-app.get('/meta/data-deletion', (c) => c.html(statusPage(c.env.SUPPORT_EMAIL ?? '', null), 200, { 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; frame-ancestors 'none'" }));
+app.get('/meta/data-deletion', (c) => c.html(statusPage(c.env.SUPPORT_EMAIL ?? '', null), 200, { 'cache-control': 'no-store', 'content-security-policy': DELETION_PAGE_CSP }));
 app.get('/meta/data-deletion/status', async (c) => {
   const s = await requestStatus(c.env, c.req.query('code') ?? '');
   if (!s) return c.json({ error: 'not_found' }, 404);
   const headers = { 'cache-control': 'no-store' };
-  return wantsHtml(c) ? c.html(statusPage(c.env.SUPPORT_EMAIL ?? '', s), 200, { ...headers, 'content-security-policy': "default-src 'none'; frame-ancestors 'none'" }) : c.json(s, 200, headers);
+  return wantsHtml(c) ? c.html(statusPage(c.env.SUPPORT_EMAIL ?? '', s), 200, { ...headers, 'content-security-policy': DELETION_PAGE_CSP }) : c.json(s, 200, headers);
 });
 
 app.get('/meta/webhook', (c) => {

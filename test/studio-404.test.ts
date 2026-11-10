@@ -38,6 +38,15 @@ it('the page carries its own locked-down CSP (the Worker default would block its
   expect(res.headers.get('strict-transport-security')).toMatch(/max-age=\d{8,}/);
 });
 
+it('the 404 CSP lets the edge-added visit-count script load, and widens script-src by that one host only', async () => {
+  // Measured on production: the edge adds <script src="https://static.cloudflareinsights.com/beacon.min.js/..."> to the 404 page too.
+  const res = await SELF.fetch('https://wa.test/zzz-nope');
+  const csp = res.headers.get('content-security-policy') ?? '';
+  const scriptSrc = /(?:^|;\s*)script-src ([^;]+)/.exec(csp)?.[1]?.trim().split(/\s+/);
+  expect(scriptSrc).toEqual(['https://help.ebda.app', 'https://static.cloudflareinsights.com']);
+  expect(csp).toContain("default-src 'none'");
+});
+
 it('an unknown API path keeps the JSON 404 (a client never gets HTML)', async () => {
   const res = await SELF.fetch('https://wa.test/api/v1/nope');
   expect(res.status).toBe(404);
