@@ -10,6 +10,7 @@ Companion of `docs/erasure-and-audit.md` (erasing a person, the audit log) and `
 - **What stays**: the contact and the (possibly empty) conversation, staff notes, tags, orders, campaign rows, and every money record (wallet ledger, billable sends, payments). Erasing a person is a separate right (`DELETE /contacts/:waId`).
 - **Restore.** A restore from an old backup schedules a purge, so history the window already removed does not come back (the window is itself in the backup's `store_state`; a backup that predates it falls back to the default).
 - **Backups.** Nightly backups live 30 days (R2 lifecycle `expire-30d`); a purged message can exist in a backup for up to 30 days. A person's erasure is stronger: the restore drops them (docs/erasure-and-audit.md).
+- **Request logs.** `ebda-wa` ships its Workers trace events (request URL, method, status, outcome, console lines, exceptions; no bodies, no headers) through the account Logpush job to R2 bucket `ebda-logs`, deleted after 30 days by lifecycle. A few operator paths carry a phone number in the URL (`/contacts/:waId`, its export and erase), so a number can sit in those logs for up to 30 days after an erasure, like the backups above. Console lines never carry a number or a message body (keyed hash or last four digits only).
 - **InstaPay proofs** have their own lifecycle (W2-MONEY): deleted after the decision plus a retention period.
 - **Import files** are deleted when the import ends (7-day R2 lifecycle backstop).
 
