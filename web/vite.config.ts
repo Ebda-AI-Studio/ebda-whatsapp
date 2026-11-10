@@ -2,6 +2,8 @@ import react from '@vitejs/plugin-react';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { defineConfig } from 'vite';
+import { shareHead } from './brands/share-head';
+import type { WebBrand } from './brands/types';
 
 // The brand pack is chosen at build time: BRAND=<id> npm run build:web (default: ebda). An unknown brand fails the build.
 const brand = process.env.BRAND ?? 'ebda';
@@ -24,10 +26,12 @@ export default defineConfig({
     {
       name: 'brand-html',
       async transformIndexHtml(html) {
-        const { BRAND } = (await import(join(brandDir, 'brand.ts'))) as { BRAND: { productName: string; productNameAr?: string; appleTouchIcon: string | null } };
+        const { BRAND } = (await import(join(brandDir, 'brand.ts'))) as { BRAND: WebBrand };
         return html
           .replaceAll('%PRODUCT_NAME%', BRAND.productNameAr ? `${BRAND.productNameAr} | ${BRAND.productName}` : BRAND.productName)
-          .replace('%APPLE_TOUCH%', BRAND.appleTouchIcon ? `<link rel="apple-touch-icon" href="${BRAND.appleTouchIcon}" />` : '');
+          .replace('%APPLE_TOUCH%', BRAND.appleTouchIcon ? `<link rel="apple-touch-icon" href="${BRAND.appleTouchIcon}" />` : '')
+          // A function, so a `$` in the copy is never read as a replacement pattern.
+          .replace('%SHARE_HEAD%', () => shareHead(BRAND));
       },
     },
   ],

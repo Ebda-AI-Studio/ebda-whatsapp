@@ -30,4 +30,29 @@ export type WebBrand = {
   storeName: string | null;
   /** Where a person writes to support (shown in error copy that says to contact us); null falls back to the plain word "support". */
   supportEmail: string | null;
+  /**
+   * What a shared link to this page shows (chat preview, search result): written into the page head at build time by `shareHead`.
+   * Omitted = no description, canonical or preview tags at all; a brand never inherits another brand's.
+   */
+  share?: ShareConfig;
+};
+
+export type ShareConfig = {
+  /** The page's one public address: the canonical link and og:url. */
+  url: string;
+  /** The product's name as a search engine should file it, and its name in the page's other language. */
+  name: string;
+  alternateName?: string;
+  /** The preview's headline and its sentence (the page's first language). */
+  title: string;
+  description: string;
+  /** Open Graph locale of the copy above (ar_EG), and the other locale the page speaks. */
+  locale: string;
+  alternateLocale?: string;
+  /** BCP 47 codes for the structured data. */
+  languages: string[];
+  /** The preview image in this brand's public folder: a 1200 x 630 PNG, with the sentence a screen reader gets for it. */
+  image: { path: string; width: number; height: number; alt: string };
+  /** The company behind the product, by its public name (never the registered legal name). */
+  publisher: { name: string; url: string };
 };

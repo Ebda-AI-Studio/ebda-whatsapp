@@ -14,6 +14,20 @@ type Opts = {
   currentUrl?: () => string;
 };
 
+/**
+ * The accounts service answers `{ success: true, data: { access_token, expires_in, ... } }` (the same envelope the store's
+ * admin unwraps). Reading the token at the top level turned every signed-in visit into the "unreachable" gate, so the
+ * envelope is the contract here; the bare OAuth shape is still read, for a brand whose token endpoint answers without one.
+ */
+export function readTokenBody(raw: unknown): { access_token: string; expires_in: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const outer = raw as { data?: unknown };
+  const body = (outer.data && typeof outer.data === 'object' ? outer.data : raw) as { access_token?: unknown; expires_in?: unknown };
+  if (typeof body.access_token !== 'string' || body.access_token === '') return null;
+  if (typeof body.expires_in !== 'number' || !Number.isFinite(body.expires_in) || body.expires_in <= 0) return null;
+  return { access_token: body.access_token, expires_in: body.expires_in };
+}
+
 export function createTokenProvider(o: Opts) {
   const f = o.fetchImpl ?? fetch;
   const now = o.now ?? Date.now;
@@ -29,8 +43,8 @@ export function createTokenProvider(o: Opts) {
       throw new Error(SIGNED_OUT);
     }
     if (!res.ok) throw new Error(`token endpoint ${res.status}`);
-    const body = (await res.json()) as { access_token?: unknown; expires_in?: unknown };
-    if (typeof body.access_token !== 'string' || typeof body.expires_in !== 'number') throw new Error('token endpoint returned an invalid body');
+    const body = readTokenBody(await res.json());
+    if (!body) throw new Error('token endpoint returned an invalid body');
     cached = { token: body.access_token, expiresAt: now() + body.expires_in * 1000 };
     return body.access_token;
   }

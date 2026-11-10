@@ -1,8 +1,9 @@
 # Security headers for the inbox SPA (Cloudflare static assets). The Worker sets its own for /api, /meta, /health, /t.
 # connect-src: the API is same-origin (incl. the WebSocket); accounts.ebda.app issues the access token.
 # Meta's Embedded Signup (numbers screen): the SDK script from connect.facebook.net; its frames and calls on *.facebook.com.
+# Visit counts: the edge adds the analytics beacon script (static.cloudflareinsights.com) to the page; it reports to this origin (/cdn-cgi/rum), so connect-src gains nothing.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://connect.facebook.net; style-src 'self'; img-src 'self' blob: data: https://*.facebook.com https://*.fbcdn.net; font-src 'self'; connect-src 'self' https://accounts.ebda.app https://*.facebook.com; frame-src https://*.facebook.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://connect.facebook.net https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' blob: data: https://*.facebook.com https://*.fbcdn.net; font-src 'self'; connect-src 'self' https://accounts.ebda.app https://*.facebook.com; frame-src https://*.facebook.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
   Strict-Transport-Security: max-age=63072000; includeSubDomains
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
