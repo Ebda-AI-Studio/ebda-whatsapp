@@ -20,6 +20,7 @@ import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './medi
 import { detectOptOutMessage, matchOptIn } from './consent';
 import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
+import { writeSessionState } from './identity/session';
 import { DAILY_KINDS, addTask, dailyHour, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText, phoneDigits } from './text-normalise';
@@ -88,11 +89,16 @@ export const INLINE_BODY_BYTES = 1024;
 export const WS_EXP_HEADER = 'x-socket-token-exp';
 export const WS_ROLE_HEADER = 'x-socket-role';
 export const WS_USER_HEADER = 'x-socket-user';
+export const WS_SESSION_HEADER = 'x-socket-session';
+/** WA-6: a socket never outlives this, whatever the token's own expiry (the client reconnects through the full guard). */
+export const WS_MAX_LIFETIME_S = 600;
+/** WA-6: how often open sockets are re-checked against the live membership and the session. */
+export const WS_SWEEP_MS = 60_000;
 /** Close code for a socket whose access token has expired: the client refreshes its token and reconnects. */
 export const WS_CLOSE_TOKEN_EXPIRED = 4401;
 /** Close code for a staff socket whose seat is gone (removed, left the team, or beyond the package's limit): it receives nothing more (WA-SEATS-1). */
 export const WS_CLOSE_NO_SEAT = 4403;
-type SocketAttachment = { exp: number; role: string; userId?: string };
+type SocketAttachment = { exp: number; role: string; userId?: string; sessionId?: string };
 export const BOT_TURN_MAX_ATTEMPTS = 6;
 export const STALE_CLAIM_MS = 2 * 60 * 1000;
 /** failed sits between sent and delivered: it beats a late 'sent', but never undoes a delivery. */
@@ -1713,7 +1719,8 @@ export class WorkspaceDO extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
     // Survives hibernation: the token's expiry (epoch s) and the caller's role, so a long-lived socket is re-authorised on every push.
     const exp = Number(request.headers.get(WS_EXP_HEADER));
-    server.serializeAttachment({ exp: Number.isFinite(exp) && exp > 0 ? exp : 0, role: request.headers.get(WS_ROLE_HEADER) ?? 'unknown', userId: request.headers.get(WS_USER_HEADER) ?? '' } satisfies SocketAttachment);
+    server.serializeAttachment({ exp: Number.isFinite(exp) && exp > 0 ? exp : 0, role: request.headers.get(WS_ROLE_HEADER) ?? 'unknown', userId: request.headers.get(WS_USER_HEADER) ?? '', sessionId: request.headers.get(WS_SESSION_HEADER) ?? '' } satisfies SocketAttachment);
+    await this.schedule('ws_sweep', Date.now() + WS_SWEEP_MS);
     return new Response(null, { status: 101, webSocket: client, headers: { 'sec-websocket-protocol': 'inbox.v1' } });
   }
 
@@ -1758,6 +1765,24 @@ export class WorkspaceDO extends DurableObject<Env> {
       }
       return true;
     });
+  }
+
+  /**
+   * WA-6: an open socket is re-authorised on a timer, not only at a push: past its (capped) expiry it closes 4401; a person whose Store membership is gone, or whose session
+   * is revoked, closes 4403. A check that cannot be answered (Store or accounts down) leaves the socket for the next sweep: the lifetime cap bounds that window.
+   */
+  private async sweepSockets(nowS: number): Promise<void> {
+    const bridge = bridgeFor(this.env);
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as SocketAttachment | null;
+      const close = (code: number, why: string) => { try { ws.close(code, why); } catch { /* already closed */ } };
+      if (!att || att.exp <= nowS) { close(WS_CLOSE_TOKEN_EXPIRED, 'token expired'); continue; }
+      if (att.sessionId && (await writeSessionState(this.env, att.sessionId)) === 'revoked') { close(WS_CLOSE_NO_SEAT, 'session revoked'); continue; }
+      if (bridge && att.userId && (att.role === 'owner' || att.role === 'staff')) {
+        const live = await bridge.memberRole(this.workspaceId, att.userId);
+        if (live.ok && live.value.role === null) close(WS_CLOSE_NO_SEAT, 'not a member');
+      }
+    }
   }
 
   private broadcast(): void {
@@ -2137,6 +2162,10 @@ export class WorkspaceDO extends DurableObject<Env> {
       case 'retention_purge': {
         const r = await this.retentionPurge(now);
         return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, dailyHour('retention_purge'), BACKUP_TIME_ZONE);
+      }
+      case 'ws_sweep': {
+        await this.sweepSockets(now / 1000);
+        return this.ctx.getWebSockets().length ? now + WS_SWEEP_MS : undefined;
       }
       case 'r2_drain': {
         const stillOwed = await this.drainR2Deletes();
