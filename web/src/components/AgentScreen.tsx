@@ -4,6 +4,7 @@ import type { AgentSettingsDto, AgentSettingsUpdate } from '../../../src/core/ap
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { LoadError } from './LoadError';
+import { Skeleton } from './Skeleton';
 
 const PROMISE_FLAGS = [['allowRefund', 'promiseRefund'], ['allowDiscount', 'promiseDiscount'], ['allowFreeDelivery', 'promiseFreeDelivery'], ['allowExchange', 'promiseExchange'], ['allowGuarantee', 'promiseGuarantee']] as const;
 type Draft = Omit<AgentSettingsDto, 'hasApiKey' | 'credits' | 'knowledgeReady'> & { apiKey: string };
@@ -23,7 +24,7 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
   }, [source]);
   useEffect(load, [load]);
 
-  if (settings === undefined) return <main className="screen"><div className="placeholder">…</div></main>;
+  if (settings === undefined) return <Skeleton t={t} screen />;
   if (settings === 'error') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
   if (settings === null || !draft) return <main className="screen"><div className="placeholder">{t.ownerOnly}</div></main>;
 

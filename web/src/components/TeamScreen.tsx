@@ -7,6 +7,7 @@ import type { InboxSource, TeamApi } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { LoadError } from './LoadError';
 import { UpgradeCard, billingUrl } from './UpgradeCard';
+import { Skeleton } from './Skeleton';
 
 type Note = { kind: 'alert' | 'status'; text: string };
 
@@ -24,7 +25,7 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
   }, [api]);
   useEffect(load, [load]);
 
-  if (data === undefined) return <main className="screen"><div className="placeholder">…</div></main>;
+  if (data === undefined) return <Skeleton t={t} screen />;
   if (data === 'error') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
   if (data === null || source.role !== 'owner') return <main className="screen"><div className="placeholder">{t.ownerOnly}</div></main>;
 

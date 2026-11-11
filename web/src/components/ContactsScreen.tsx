@@ -9,6 +9,7 @@ import { Highlight } from './Highlight';
 import { LoadError } from './LoadError';
 import { EmptyState } from './EmptyState';
 import { SearchBox, optionId } from './SearchBox';
+import { Skeleton } from './Skeleton';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: ContactsApi; now: () => number };
 
@@ -68,7 +69,7 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
             <button type="button" className="chip" aria-pressed={optedOut} onClick={() => setOptedOut(true)}>{t.filterOptedOut}</button>
           </div>
           {listFailed ? <LoadError t={t} onRetry={() => { setFailed(false); setAttempt((a) => a + 1); }} />
-            : shown === null ? <div className="placeholder">…</div>
+            : shown === null ? <Skeleton t={t} />
             : shown.length === 0 ? <EmptyState icon={<Users size={22} />} title={t.contactsEmptyTitle} body={t.contactsEmpty} />
             : (
               <ul className="contact-list" id={LIST_ID} role="listbox" aria-label={t.contactsTitle}>

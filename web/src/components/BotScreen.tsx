@@ -6,6 +6,7 @@ import { hoursSchema, locationSchema, MENU_ANSWER_MAX, MENU_MAX_ITEMS, MENU_TITL
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { LoadError } from './LoadError';
+import { Skeleton } from './Skeleton';
 
 type Menu = BotSettingsDto['menu'];
 type Hours = BotSettingsDto['hours'];
@@ -54,7 +55,7 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
   return (
     <section className="settings" aria-labelledby="bot-catalog-title">
       <h2 id="bot-catalog-title">{t.catTitle}</h2>
-      {cat === undefined && <p className="muted">…</p>}
+      {cat === undefined && <Skeleton t={t} rows={2} />}
       {cat === 'error' && <LoadError t={t} onRetry={load} />}
       {cat && cat !== 'error' && (cat.catalogId
         ? (
@@ -104,7 +105,7 @@ function FunnelSection({ t, lang, source }: { t: Strings; lang: Lang; source: In
       <div role="group" aria-label={t.fnRange} className="settings-actions">
         {RANGES.map((d) => <button key={d} type="button" className={d === days ? 'btn primary' : 'btn'} aria-pressed={d === days} onClick={() => setDays(d)}>{t.fnDays(num(d, lang))}</button>)}
       </div>
-      {data === undefined && <p role="status" aria-label={t.fnLoading} className="muted">…</p>}
+      {data === undefined && <Skeleton t={t} rows={4} label={t.fnLoading} />}
       {data === 'error' && <LoadError t={t} onRetry={load} />}
       {empty && <p className="muted">{t.fnEmpty}</p>}
       {data && data !== 'error' && !empty && (
@@ -147,7 +148,7 @@ export function BotScreen({ t, lang, source }: { t: Strings; lang: Lang; source:
   }, [source]);
   useEffect(load, [load]);
 
-  if (draft === undefined) return <main className="screen"><div className="placeholder">…</div></main>;
+  if (draft === undefined) return <Skeleton t={t} screen />;
   if (draft === 'error') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
 
   const change = (next: Draft) => { setDraft(next); setStatus('idle'); };
