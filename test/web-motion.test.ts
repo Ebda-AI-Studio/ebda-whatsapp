@@ -64,3 +64,22 @@ it('regions load with a skeleton, never a bare ellipsis, and the skeleton announ
   expect(sk).toContain('aria-label');
   expect(css).toMatch(/\.skeleton-row\s*\{[^}]*height:\s*\d+px/);
 });
+
+it('each skeleton kind holds the row height measured on the loaded sample screen (phone / desktop), so no layout shift', () => {
+  // Measured with Playwright on the sample build at 390 / 820 / 1280 / 1440 (Wave 3).
+  const phone: Record<string, number> = { setting: 60, team: 74, contact: 94, number: 208, package: 102, funnel: 46, campaign: 259, wallet: 260 };
+  for (const [k, h] of Object.entries(phone)) expect(css, k).toMatch(new RegExp(`\\.skeleton-row\\[data-k='${k}'\\]\\s*\\{\\s*height:\\s*${h}px`));
+  expect(css).toMatch(/@media \(min-width: 820px\) \{[^@]*data-k='campaign'\] \{ height: 229px[^@]*data-k='wallet'\] \{ height: 263px/);
+  expect(css).toMatch(/\.skeleton-head \{ height: 60px/);
+  expect(css).toMatch(/\.skeleton-head \{ height: 68px/);
+  // The skeleton kinds in use all exist in the component's type.
+  const sk = sources['./components/Skeleton.tsx']!;
+  for (const k of Object.keys(phone)) expect(sk, k).toContain(`'${k}'`);
+});
+it('sign-in shows one language at a time with a 44 px toggle, and every how-to link has the touch target', () => {
+  const gate = sources['./components/SignInGate.tsx']!;
+  expect(gate).toContain('gate-lang');
+  expect(gate).not.toMatch(/gateBody\}<\/p>\s*<p lang="en"/);
+  expect(css).toMatch(/\.howto, \.checklist li a, a\.muted \{ display: inline-flex; align-items: center; min-height: 44px/);
+  for (const f of ['TeamScreen', 'NumbersScreen']) expect(sources[`./components/${f}.tsx`], f).toContain('className="howto"');
+});

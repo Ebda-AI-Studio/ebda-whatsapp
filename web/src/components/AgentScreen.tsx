@@ -24,7 +24,7 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
   }, [source]);
   useEffect(load, [load]);
 
-  if (settings === undefined) return <Skeleton t={t} screen />;
+  if (settings === undefined) return <Skeleton t={t} screen kind="setting" rows={4} />;
   if (settings === 'error') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
   if (settings === null || !draft) return <main className="screen"><div className="placeholder">{t.ownerOnly}</div></main>;
 

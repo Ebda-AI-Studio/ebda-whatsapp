@@ -96,7 +96,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
     return () => { clearInterval(id); window.removeEventListener('focus', on); document.removeEventListener('visibilitychange', on); };
   }, [pending, check]);
 
-  if (wallet === null) return <Skeleton t={t} screen />;
+  if (wallet === null) return <Skeleton t={t} screen kind="wallet" rows={2} />;
   if (wallet === 'error') return <main className="screen"><div className="placeholder"><p role="alert">{t.walletLoadError} <button type="button" className="btn ghost" onClick={() => void check()}>{t.retry}</button></p></div></main>;
 
   const cardOnly = wallet.funding.length > 0 && wallet.funding.every((f) => f.funding === 'merchant_card');
@@ -309,7 +309,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
       <h2 id="w-packages-title">{t.wPackagesTitle}</h2>
       <p className="muted">{t.wPackagesIntro}</p>
       <p className="muted">{t.wYearlyUpgradeNote}</p>
-      {list === 'loading' ? <Skeleton t={t} rows={2} />
+      {list === 'loading' ? <Skeleton t={t} rows={2} kind="package" />
         : list === 'error' ? <p role="alert" className="error-text">{t.wPackagesError} <button type="button" className="btn ghost" onClick={load}>{t.retry}</button></p>
         : list.length === 0 ? <p className="muted">{t.wPackagesEmpty}</p> : (
           <ul className="wallet-list">

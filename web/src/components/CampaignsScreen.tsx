@@ -44,7 +44,7 @@ export function CampaignsScreen({ t, lang, source, api, now }: Props) {
       </header>
       <div className="settings wide">
         {loadFailed ? <LoadError t={t} onRetry={load} />
-          : items === null ? <Skeleton t={t} />
+          : items === null ? <Skeleton t={t} kind="campaign" />
           : items.length === 0 ? <EmptyState icon={<Megaphone size={22} />} title={t.campaignsEmptyTitle} body={t.campaignsEmpty} />
           : items.map((c) => <CampaignRow key={c.id} c={c} t={t} lang={lang} owner={owner} api={api} onChange={replace} onRemoved={load} />)}
       </div>
