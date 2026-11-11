@@ -91,7 +91,7 @@ export type OrderStatusInfo = z.infer<typeof orderStatusSchema>;
 export const codOutcomeAckSchema = z.object({ orderNumber: z.string().nullable() });
 
 export type BridgeFailure = 'not_found' | 'not_linked' | 'out_of_stock' | 'payment_method_disabled' | 'invalid' | 'unavailable';
-export type BridgeResult<T> = { ok: true; value: T } | { ok: false; reason: BridgeFailure; message?: string; outOfStock?: string[] };
+export type BridgeResult<T> = { ok: true; value: T } | { ok: false; reason: BridgeFailure; message?: string; outOfStock?: string[]; code?: string };
 
 export type CodOutcome = 'confirmed' | 'refused' | 'no_reply';
 
@@ -134,6 +134,8 @@ export function bridgeResultSchema<T extends z.ZodType>(value: T) {
       reason: z.enum(['not_found', 'not_linked', 'out_of_stock', 'payment_method_disabled', 'invalid', 'unavailable']),
       message: z.string().optional(),
       outOfStock: z.array(z.string()).optional(),
+      /** The Store's typed refusal code (MIN_ORDER_NOT_MET, TOO_MANY_OPEN_ORDERS, PRODUCT_UNAVAILABLE ...): a permanent business refusal, never retried (Store ruling WA-RPC-8). */
+      code: z.string().max(64).optional(),
     }),
   ]);
 }

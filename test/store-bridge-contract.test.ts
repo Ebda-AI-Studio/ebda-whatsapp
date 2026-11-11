@@ -34,3 +34,12 @@ describe('Store bridge contract vectors', () => {
     for (const m of REGISTERED) expect(typeof (b as unknown as Record<string, unknown>)[m]).toBe('function');
   });
 });
+
+describe('typed business refusals (Store ruling WA-RPC-8)', () => {
+  it('the refusal code survives the adapter, so Chat can show the buyer and never retries', async () => {
+    const answer = { ok: false, reason: 'invalid', code: 'MIN_ORDER_NOT_MET', message: 'minimum order not met' };
+    const binding = { createOrderFromChat: async () => answer };
+    const b = createServiceBindingBridge({ STORE_BRIDGE: binding } as never)!;
+    expect(await b.createOrderFromChat('s', {} as never)).toEqual(answer);
+  });
+});
