@@ -244,7 +244,7 @@
       "street": "5 Abbas El Akkad"
      },
      "paymentMethod": "cod",
-     "idempotencyKey": "idem-key-0001"
+     "idempotencyKey": "example-idem-0001"
     }
    ],
    "expect": {
@@ -282,7 +282,7 @@
       "street": "5 Abbas El Akkad"
      },
      "paymentMethod": "cod",
-     "idempotencyKey": "idem-key-0001"
+     "idempotencyKey": "example-idem-0001"
     }
    ],
    "expect": {
@@ -317,7 +317,7 @@
      },
      "addressId": "a1",
      "paymentMethod": "link",
-     "idempotencyKey": "idem-key-0002"
+     "idempotencyKey": "example-idem-0002"
     }
    ],
    "expect": {
@@ -352,7 +352,7 @@
      },
      "addressId": "a1",
      "paymentMethod": "instapay",
-     "idempotencyKey": "idem-key-0003"
+     "idempotencyKey": "example-idem-0003"
     }
    ],
    "expect": {
@@ -391,7 +391,7 @@
      },
      "addressId": "a1",
      "paymentMethod": "cod",
-     "idempotencyKey": "idem-key-0004"
+     "idempotencyKey": "example-idem-0004"
     }
    ],
    "expect": {
@@ -455,7 +455,7 @@
       "street": "y"
      },
      "paymentMethod": "cod",
-     "idempotencyKey": "idem-key-0005"
+     "idempotencyKey": "example-idem-0005"
     }
    ],
    "expect": {
@@ -484,7 +484,7 @@
      },
      "addressId": "nope",
      "paymentMethod": "cod",
-     "idempotencyKey": "idem-key-0006"
+     "idempotencyKey": "example-idem-0006"
     }
    ],
    "expect": {
@@ -530,7 +530,7 @@
      "orderId": "o-1001",
      "outcome": "confirmed",
      "at": "2026-11-11T10:00:00.000Z",
-     "idempotencyKey": "idem-key-0007"
+     "idempotencyKey": "example-idem-0007"
     }
    ],
    "expect": {
@@ -549,7 +549,7 @@
      "orderId": "o-1001",
      "outcome": "confirmed",
      "at": "2026-11-11T10:00:00.000Z",
-     "idempotencyKey": "idem-key-0007"
+     "idempotencyKey": "example-idem-0007"
     }
    ],
    "expect": {
@@ -568,7 +568,7 @@
      "orderId": "o-9999",
      "outcome": "refused",
      "at": "2026-11-11T10:00:00.000Z",
-     "idempotencyKey": "idem-key-0008"
+     "idempotencyKey": "example-idem-0008"
     }
    ],
    "expect": {
