@@ -83,6 +83,20 @@ describe('tools', () => {
     expect((m.calls[1]!.messages.at(-1) as { content: string }).content).toContain('order_not_found');
   });
 
+  it('order_status with no number lists the customer\'s orders with the sender\'s phone as the proof (tools.ts listCustomerOrders)', async () => {
+    const ws = W(30);
+    const pn = await agentWs(ws);
+    // an order of this customer exists in the Store (key from the sender's phone), so a call WITHOUT the proof would be refused by the strict fake
+    await link.fake.createOrderFromChat(ws, { items: [{ variantId: 'v2', quantity: 1 }], buyer: { buyerKey: BUYER_KEY_1, phoneE164: `+${WA_1}`, name: null, locale: 'ar' }, address: { area: 'a', street: 's' }, paymentMethod: 'cod', idempotencyKey: 'example-idem-tools-1' } as never);
+    const m = model([{ tools: [{ name: 'order_status', arguments: { buyerKey: 'x'.repeat(64), phone: '+201111111111' } }] }, { text: 'دي طلباتك' }]);
+    await say(ws, pn, text('فين طلبي'), stubGraph());
+    // the tool's own call (limit 3), proof included; another path may also have listed orders with a different limit
+    expect(link.fake.calls.filter((c) => c.method === 'listCustomerOrders').map((c) => c.args)).toContainEqual([ws, BUYER_KEY_1, 3, `+${WA_1}`]);
+    const answer = (m.calls[1]!.messages.at(-1) as { content: string }).content;
+    expect(answer).not.toContain('store_unavailable');
+    expect(answer).toContain('orders');
+  });
+
   it('invalid arguments and unknown tools come back to the model as errors, not as crashes', async () => {
     const ws = W(6);
     const pn = await agentWs(ws);
