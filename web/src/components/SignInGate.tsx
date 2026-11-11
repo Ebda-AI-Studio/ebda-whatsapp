@@ -36,8 +36,18 @@ export function SignInGate({ kind, onContinue }: { kind: 'signedOut' | 'unreacha
             <p lang="en" dir="ltr">{en.gateBody}</p>
           </div>
         )}
-        <button ref={btn} type="button" className="btn gold gate-btn" onClick={onContinue}>
-          {failed ? `${ar.gateRetry} / ${en.gateRetry}` : `${ar.gateSignIn} / ${en.gateSignIn}`}
+        {/* UI audit 2026-11-11: the label is Arabic only (a Latin string inside an Arabic button flipped the bidi
+            order and put English first). The English stays in the accessible name, which still contains the visible label. */}
+        <button
+          ref={btn}
+          type="button"
+          className="btn gold gate-btn"
+          lang="ar"
+          dir="rtl"
+          aria-label={failed ? `${ar.gateRetry} / ${en.gateRetry}` : `${ar.gateSignIn} / ${en.gateSignIn}`}
+          onClick={onContinue}
+        >
+          {failed ? ar.gateRetry : ar.gateSignIn}
         </button>
       </div>
     </main>

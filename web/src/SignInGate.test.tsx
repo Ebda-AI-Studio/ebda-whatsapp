@@ -34,3 +34,10 @@ it('both languages carry every gate string', () => {
     expect(STRINGS.en[k], k).toBeTruthy();
   }
 });
+
+it('the button reads Arabic only (no Latin string inside it); English stays in the accessible name', () => {
+  render(<SignInGate kind="signedOut" onContinue={() => {}} />);
+  const b = screen.getByRole('button');
+  expect(b.textContent).toBe(STRINGS.ar.gateSignIn);
+  expect(b.getAttribute('aria-label')).toContain(STRINGS.en.gateSignIn);
+});
