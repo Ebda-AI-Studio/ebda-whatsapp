@@ -553,6 +553,8 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
       t.out.push({ kind: 'text', text: t.copy.t.outOfStock(names.length ? names : [...gone], t.session.locale) });
       return cartSummary(t);
     }
+    // The same key with different lines: this attempt can never succeed, so the next one starts a fresh order key.
+    if (res.code === 'IDEMPOTENCY_CONFLICT') d.orderKey = null;
     if (res.reason === 'payment_method_disabled') {
       t.session.state = 'choosing_payment';
       return askPayment(t);
