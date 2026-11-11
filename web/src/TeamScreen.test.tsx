@@ -48,8 +48,14 @@ describe('team and seats (WA-SEATS-1)', () => {
     await screen.findByRole('heading', { name: t.teamTitle });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: t.teamAssignFor('دينا') })));
     await screen.findByText(t.teamUsage('3', '3'));
+    // announced: the polite status region is already in the page BEFORE the click, and the card is inserted into it
+    const region = screen.getByRole('status');
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    expect(region.textContent).toBe('');
     await act(async () => fireEvent.click(screen.getByRole('button', { name: t.teamAssignFor('كريم') })));
     const card = await screen.findByLabelText(t.upgradeTeamTitle);
+    expect(region.contains(card)).toBe(true);
+    expect(region.textContent).toContain(t.teamSeatLimit('3'));
     expect(card.textContent).toContain(t.teamSeatLimit('3'));
     expect(card.querySelector('[role=alert]')).toBeNull();
     expect(screen.getByTestId('seat-u-3').textContent).toBe(t.teamSeats.none);
@@ -67,7 +73,9 @@ describe('team and seats (WA-SEATS-1)', () => {
       s.team!.list = async () => ({ ...(await real()), seats: { limit: 2, used: 3, overLimit: true } });
     });
     await open();
-    expect((await screen.findByLabelText(t.upgradeTeamTitle)).textContent).toContain(t.teamOverLimit);
+    const card = await screen.findByLabelText(t.upgradeTeamTitle);
+    expect(card.closest('[role=status]')?.getAttribute('aria-live')).toBe('polite');
+    expect(card.textContent).toContain(t.teamOverLimit);
   });
 
   it('is not offered to staff (no rail link) and a 403 from the server reads as owner only', async () => {
