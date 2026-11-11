@@ -28,6 +28,8 @@ export type WebBrand = {
   helpUrl: ((lang: 'ar' | 'en', slug: string) => string) | null;
   /** The linked store product, when the brand has one; null hides the store step everywhere. */
   storeName: string | null;
+  /** The linked store's admin origin; the upgrade card links to `<origin>/stores/<id>/billing`. Null hides the link (the card still explains). */
+  storeAdminUrl?: string | null;
   /** Where a person writes to support (shown in error copy that says to contact us); null falls back to the plain word "support". */
   supportEmail: string | null;
   /**

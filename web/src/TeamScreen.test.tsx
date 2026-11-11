@@ -49,7 +49,9 @@ describe('team and seats (WA-SEATS-1)', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: t.teamAssignFor('دينا') })));
     await screen.findByText(t.teamUsage('3', '3'));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: t.teamAssignFor('كريم') })));
-    expect((await screen.findByRole('alert')).textContent).toBe(t.teamSeatLimit('3'));
+    const card = await screen.findByLabelText(t.upgradeTeamTitle);
+    expect(card.textContent).toContain(t.teamSeatLimit('3'));
+    expect(card.querySelector('[role=alert]')).toBeNull();
     expect(screen.getByTestId('seat-u-3').textContent).toBe(t.teamSeats.none);
   });
 
@@ -65,7 +67,7 @@ describe('team and seats (WA-SEATS-1)', () => {
       s.team!.list = async () => ({ ...(await real()), seats: { limit: 2, used: 3, overLimit: true } });
     });
     await open();
-    expect((await screen.findByText(t.teamOverLimit)).getAttribute('role')).toBe('alert');
+    expect((await screen.findByLabelText(t.upgradeTeamTitle)).textContent).toContain(t.teamOverLimit);
   });
 
   it('is not offered to staff (no rail link) and a 403 from the server reads as owner only', async () => {
