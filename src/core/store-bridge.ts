@@ -112,13 +112,18 @@ export interface StoreBridge {
   getProducts(storeId: string, productIds: string[]): Promise<BridgeResult<{ items: CatalogRow[] }>>;
   createCheckoutLink(storeId: string, req: { items: OrderLine[]; buyer: Buyer }): Promise<BridgeResult<z.infer<typeof checkoutLinkSchema>>>;
   createOrderFromChat(storeId: string, req: { items: OrderLine[]; buyer: Buyer; addressId?: string; address?: NewAddress; paymentMethod: ChatPaymentMethod; idempotencyKey: string }): Promise<BridgeResult<OrderCreated>>;
-  getPaymentLink(storeId: string, orderId: string): Promise<BridgeResult<z.infer<typeof paymentLinkSchema>>>;
-  recordCodOutcome(storeId: string, req: { orderId: string; outcome: CodOutcome; at: string; idempotencyKey: string }): Promise<BridgeResult<z.infer<typeof codOutcomeAckSchema>>>;
-  attachPaymentProof(storeId: string, orderId: string, mediaUrl: string): Promise<BridgeResult<Record<string, never>>>;
-  getCustomerAddresses(storeId: string, buyerKey: string): Promise<BridgeResult<{ items: Address[] }>>;
-  saveCustomerAddress(storeId: string, buyerKey: string, address: NewAddress): Promise<BridgeResult<{ address: Address }>>;
-  getOrderStatus(storeId: string, orderNumber: string, buyerKey: string): Promise<BridgeResult<OrderStatusInfo>>;
-  listCustomerOrders(storeId: string, buyerKey: string, limit: number): Promise<BridgeResult<{ items: BridgeOrderSummary[] }>>;
+  /**
+   * Buyer proof (Store rulings WA-BRIDGE-BIND-1/2): every call that names a buyer or an order carries a proof taken from the VERIFIED WhatsApp
+   * sender (never from message text): `phoneE164` on the four key-only calls, `buyerKey` on the three order calls. The Store recomputes / compares;
+   * with WA_BRIDGE_REQUIRE_BUYER_PROOF=1 a call without it is refused.
+   */
+  getPaymentLink(storeId: string, orderId: string, buyerKey?: string): Promise<BridgeResult<z.infer<typeof paymentLinkSchema>>>;
+  recordCodOutcome(storeId: string, req: { orderId: string; buyerKey?: string; outcome: CodOutcome; at: string; idempotencyKey: string }): Promise<BridgeResult<z.infer<typeof codOutcomeAckSchema>>>;
+  attachPaymentProof(storeId: string, orderId: string, mediaUrl: string, buyerKey?: string): Promise<BridgeResult<Record<string, never>>>;
+  getCustomerAddresses(storeId: string, buyerKey: string, phoneE164?: string): Promise<BridgeResult<{ items: Address[] }>>;
+  saveCustomerAddress(storeId: string, buyerKey: string, address: NewAddress, phoneE164?: string): Promise<BridgeResult<{ address: Address }>>;
+  getOrderStatus(storeId: string, orderNumber: string, buyerKey: string, phoneE164?: string): Promise<BridgeResult<OrderStatusInfo>>;
+  listCustomerOrders(storeId: string, buyerKey: string, limit: number, phoneE164?: string): Promise<BridgeResult<{ items: BridgeOrderSummary[] }>>;
   /** Owner + active staff. `invalid` (message FORBIDDEN) = the asker is not the owner; `unavailable` = the Store could not answer (never read as "no members"). */
   listStoreMembers(storeId: string, asUserId: string): Promise<BridgeResult<{ items: StoreMember[] }>>;
   /** The live role of a user on the store; `{ role: null }` = not (or no longer) a member. `unavailable` = could not be read: callers fail closed. */

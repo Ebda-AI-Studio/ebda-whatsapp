@@ -23,6 +23,12 @@ export type FakeStoreOptions = { linked?: boolean; paymentMethods?: ChatPaymentM
  * `pending_payment`, and a COD outcome is applied once. `calls` records every method call (arguments included).
  */
 export class FakeStore implements StoreBridge {
+  /**
+   * Like the Store with WA_BRIDGE_REQUIRE_BUYER_PROOF=1 (Store rulings WA-BRIDGE-BIND-1/2): the four key-only calls need a well-formed
+   * `phoneE164`, the three order calls need the `buyerKey` stored on the order. A call without it is refused, so every flow test proves
+   * Chat sends the proof. Set false to model the relaxed rollout window.
+   */
+  requireProof = true;
   readonly calls: { method: string; args: unknown[] }[] = [];
   readonly orders = new Map<string, Order>();
   readonly addresses = new Map<string, Address[]>();
@@ -161,12 +167,24 @@ export class FakeStore implements StoreBridge {
     };
   }
 
-  getPaymentLink(storeId: string, orderId: string) {
-    return this.gate('getPaymentLink', storeId, [storeId, orderId], () => (this.orders.has(orderId) ? { ok: true, value: { url: `https://pay.example/${orderId}`, expiresAt: '2099-01-01T00:00:00.000Z' } } : { ok: false, reason: 'not_found' }));
+  private noPhone(phone?: string): BridgeResult<never> | null {
+    return this.requireProof && !/^\+[1-9]\d{7,14}$/.test(phone ?? '') ? { ok: false, reason: 'invalid', message: 'buyer proof required' } : null;
+  }
+  private orderProof(orderId: string, buyerKey?: string): BridgeResult<never> | null {
+    if (!this.requireProof) return null;
+    const o = this.orders.get(orderId);
+    if (!buyerKey) return { ok: false, reason: 'invalid', message: 'buyer proof required' };
+    return o && o.buyerKey !== buyerKey ? { ok: false, reason: 'not_found' } : null;
   }
 
-  recordCodOutcome(storeId: string, req: { orderId: string; outcome: CodOutcome; at: string; idempotencyKey: string }) {
+  getPaymentLink(storeId: string, orderId: string, buyerKey?: string) {
+    return this.gate('getPaymentLink', storeId, [storeId, orderId, ...(buyerKey ? [buyerKey] : [])], () => this.orderProof(orderId, buyerKey) ?? (this.orders.has(orderId) ? { ok: true, value: { url: `https://pay.example/${orderId}`, expiresAt: '2099-01-01T00:00:00.000Z' } } : { ok: false, reason: 'not_found' }));
+  }
+
+  recordCodOutcome(storeId: string, req: { orderId: string; buyerKey?: string; outcome: CodOutcome; at: string; idempotencyKey: string }) {
     return this.gate('recordCodOutcome', storeId, [storeId, req], () => {
+      const bad = this.orderProof(req.orderId, req.buyerKey);
+      if (bad) return bad;
       const o = this.orders.get(req.orderId);
       if (!o) return { ok: false, reason: 'not_found' };
       if (o.codOutcome === null) {
@@ -178,8 +196,10 @@ export class FakeStore implements StoreBridge {
     });
   }
 
-  attachPaymentProof(storeId: string, orderId: string, mediaUrl: string) {
-    return this.gate<Record<string, never>>('attachPaymentProof', storeId, [storeId, orderId, mediaUrl], () => {
+  attachPaymentProof(storeId: string, orderId: string, mediaUrl: string, buyerKey?: string) {
+    return this.gate<Record<string, never>>('attachPaymentProof', storeId, [storeId, orderId, mediaUrl, ...(buyerKey ? [buyerKey] : [])], () => {
+      const bad = this.orderProof(orderId, buyerKey);
+      if (bad) return bad;
       const o = this.orders.get(orderId);
       if (!o) return { ok: false, reason: 'not_found' };
       o.proofs.push(mediaUrl); // the order stays pending_payment: only the Store flips it
@@ -187,27 +207,31 @@ export class FakeStore implements StoreBridge {
     });
   }
 
-  getCustomerAddresses(storeId: string, buyerKey: string) {
-    return this.gate('getCustomerAddresses', storeId, [storeId, buyerKey], () => ({ ok: true, value: { items: this.addresses.get(buyerKey) ?? [] } }));
+  getCustomerAddresses(storeId: string, buyerKey: string, phoneE164?: string) {
+    return this.gate('getCustomerAddresses', storeId, [storeId, buyerKey, ...(phoneE164 ? [phoneE164] : [])], () => this.noPhone(phoneE164) ?? ({ ok: true, value: { items: this.addresses.get(buyerKey) ?? [] } }));
   }
 
-  saveCustomerAddress(storeId: string, buyerKey: string, address: NewAddress) {
-    return this.gate('saveCustomerAddress', storeId, [storeId, buyerKey, address], () => {
+  saveCustomerAddress(storeId: string, buyerKey: string, address: NewAddress, phoneE164?: string) {
+    return this.gate('saveCustomerAddress', storeId, [storeId, buyerKey, address, ...(phoneE164 ? [phoneE164] : [])], () => {
+      const bad = this.noPhone(phoneE164);
+      if (bad) return bad;
       const a: Address = { id: `addr-${(this.addresses.get(buyerKey)?.length ?? 0) + 1}`, label: address.label ?? null, area: address.area, street: address.street };
       this.addresses.set(buyerKey, [...(this.addresses.get(buyerKey) ?? []), a]);
       return { ok: true, value: { address: a } };
     });
   }
 
-  getOrderStatus(storeId: string, orderNumber: string, buyerKey: string) {
-    return this.gate('getOrderStatus', storeId, [storeId, orderNumber, buyerKey], () => {
+  getOrderStatus(storeId: string, orderNumber: string, buyerKey: string, phoneE164?: string) {
+    return this.gate('getOrderStatus', storeId, [storeId, orderNumber, buyerKey, ...(phoneE164 ? [phoneE164] : [])], () => {
+      const bad = this.noPhone(phoneE164);
+      if (bad) return bad;
       const o = [...this.orders.values()].find((x) => x.orderNumber === orderNumber && x.buyerKey === buyerKey);
       return o ? { ok: true, value: { orderNumber, status: o.status, paymentMethod: o.paymentMethod, shipment: null } } : { ok: false, reason: 'not_found' };
     });
   }
 
-  listCustomerOrders(storeId: string, buyerKey: string, limit: number) {
-    return this.gate('listCustomerOrders', storeId, [storeId, buyerKey, limit], () => ({
+  listCustomerOrders(storeId: string, buyerKey: string, limit: number, phoneE164?: string) {
+    return this.gate('listCustomerOrders', storeId, [storeId, buyerKey, limit, ...(phoneE164 ? [phoneE164] : [])], () => this.noPhone(phoneE164) ?? ({
       ok: true,
       value: {
         items: [...this.orders.values()].filter((o) => o.buyerKey === buyerKey).sort((a, b) => b.at - a.at).slice(0, limit).map((o) => ({

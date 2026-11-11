@@ -79,7 +79,7 @@ describe('tools', () => {
     const pn = await agentWs(ws);
     const m = model([{ tools: [{ name: 'order_status', arguments: { orderNumber: '1001', buyerKey: 'x'.repeat(64), phone: '+201111111111' } }] }, { text: 'طلبك في الطريق' }]);
     await say(ws, pn, text('فين طلبي 1001'), stubGraph());
-    expect(link.fake.lastCall('getOrderStatus')).toEqual([ws, '1001', BUYER_KEY_1]);
+    expect(link.fake.lastCall('getOrderStatus')).toEqual([ws, '1001', BUYER_KEY_1, `+${WA_1}`]); // the verified sender's phone is the proof, not the model's `phone` argument
     expect((m.calls[1]!.messages.at(-1) as { content: string }).content).toContain('order_not_found');
   });
 

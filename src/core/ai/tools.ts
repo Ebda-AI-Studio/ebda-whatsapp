@@ -147,11 +147,11 @@ async function orderStatus(ctx: ToolContext, orderNumber: string | undefined): P
   const key = await buyerKey(secret, e164);
   const bridge = ctx.bridge!;
   if (orderNumber) {
-    const res = await bridge.getOrderStatus(ctx.host.workspaceId, orderNumber, key);
+    const res = await bridge.getOrderStatus(ctx.host.workspaceId, orderNumber, key, e164);
     if (!res.ok) return { error: res.reason === 'not_found' ? 'order_not_found' : 'store_unavailable' };
     return { orderNumber: res.value.orderNumber, status: res.value.status, paymentMethod: res.value.paymentMethod, shipment: res.value.shipment };
   }
-  const res = await bridge.listCustomerOrders(ctx.host.workspaceId, key, 3);
+  const res = await bridge.listCustomerOrders(ctx.host.workspaceId, key, 3, e164);
   if (!res.ok) return { error: res.reason === 'not_found' || res.reason === 'not_linked' ? 'no_orders' : 'store_unavailable' };
   return { orders: res.value.items.map((o) => ({ orderNumber: o.orderNumber, status: o.status, paymentMethod: o.paymentMethod, total: o.totalMinor / 100, currency: o.currency, items: o.itemsCount })) };
 }

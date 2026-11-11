@@ -499,7 +499,7 @@ async function choosePayment(t: Turn, id: string): Promise<void> {
 async function askAddress(t: Turn): Promise<void> {
   const buyer = await buyerOf(t);
   if (!buyer) return unavailable(t);
-  const res = await t.bridge.getCustomerAddresses(t.ws, buyer.buyerKey);
+  const res = await t.bridge.getCustomerAddresses(t.ws, buyer.buyerKey, buyer.phoneE164);
   const saved: Address[] = res.ok ? res.value.items.slice(0, 9) : [];
   if (!saved.length) {
     say(t, loc(t, t.copy.t.askAddress));
@@ -528,7 +528,7 @@ async function placeWithText(t: Turn, text: string): Promise<void> {
   const buyer = await buyerOf(t);
   if (buyer) {
     alive(t);
-    const saved = await t.bridge.saveCustomerAddress(t.ws, buyer.buyerKey, { area, street });
+    const saved = await t.bridge.saveCustomerAddress(t.ws, buyer.buyerKey, { area, street }, buyer.phoneE164);
     if (saved.ok) return placeOrder(t, { addressId: saved.value.address.id });
   }
   return placeOrder(t, { address: { area, street } });
@@ -596,9 +596,9 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
 /** The payment page for a "pay online" order: the order's own link, else the Store's, else a checkout link for the same cart. */
 async function paymentUrl(t: Turn, o: { orderId: string; paymentUrl: string | null }): Promise<string | null> {
   if (o.paymentUrl) return o.paymentUrl;
-  const link = await t.bridge.getPaymentLink(t.ws, o.orderId);
+  const buyer = await buyerOf(t); // the verified sender's key travels as the order proof
+  const link = await t.bridge.getPaymentLink(t.ws, o.orderId, buyer?.buyerKey);
   if (link.ok) return link.value.url;
-  const buyer = await buyerOf(t);
   if (!buyer) return null;
   const checkout = await t.bridge.createCheckoutLink(t.ws, { items: t.session.data.cart.map((l) => ({ variantId: l.variantId, quantity: l.quantity })), buyer });
   return checkout.ok ? checkout.value.checkoutUrl : null;
@@ -650,7 +650,7 @@ async function receiveImage(t: Turn): Promise<void> {
     release();
     throw e;
   }
-  const res = await t.bridge.attachPaymentProof(t.ws, order.order_id, url);
+  const res = await t.bridge.attachPaymentProof(t.ws, order.order_id, url, (await buyerOf(t))?.buyerKey);
   if (!res.ok) {
     release();
     if (res.reason === 'unavailable') throw new Error('store unavailable');
@@ -667,7 +667,7 @@ async function receiveImage(t: Turn): Promise<void> {
 async function showOrders(t: Turn): Promise<void> {
   const buyer = await buyerOf(t);
   if (!buyer) return unavailable(t);
-  const res = await t.bridge.listCustomerOrders(t.ws, buyer.buyerKey, 5);
+  const res = await t.bridge.listCustomerOrders(t.ws, buyer.buyerKey, 5, buyer.phoneE164);
   if (!res.ok) return unavailable(t);
   if (!res.value.items.length) return say(t, loc(t, t.copy.t.noOrders));
   const lines = res.value.items.map((o) => t.copy.t.orderLine(o.orderNumber, t.copy.t.orderStatusNames[o.status]?.[t.session.locale] ?? o.status, t.session.locale));

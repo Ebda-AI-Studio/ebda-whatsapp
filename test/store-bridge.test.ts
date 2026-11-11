@@ -55,7 +55,7 @@ describe('fake store (the contract, in memory)', () => {
     const s = new FakeStore();
     const made = await s.createOrderFromChat(FAKE_STORE_ID, { items: [{ variantId: 'v1', quantity: 1 }], buyer, paymentMethod: 'cod', idempotencyKey: idem(5) });
     if (!made.ok) throw new Error('order failed');
-    const base = { orderId: made.value.orderId, at: new Date().toISOString(), idempotencyKey: idem(6) };
+    const base = { orderId: made.value.orderId, buyerKey: buyer.buyerKey, at: new Date().toISOString(), idempotencyKey: idem(6) };
     await s.recordCodOutcome(FAKE_STORE_ID, { ...base, outcome: 'confirmed' });
     await s.recordCodOutcome(FAKE_STORE_ID, { ...base, outcome: 'refused' });
     expect(s.orders.get(made.value.orderId)).toMatchObject({ codOutcome: 'confirmed', status: 'confirmed' });
