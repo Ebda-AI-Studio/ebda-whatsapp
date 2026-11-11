@@ -131,6 +131,24 @@ export async function runChecks({ base, expectCommit, expectBrand, peerHealth, v
   return out;
 }
 
+/**
+ * A Cloudflare deploy uploads and activates a new version, but the edge keeps answering with the previous one for a few seconds (run 43031631377: the check
+ * ran ~1 s after `wrangler deploy` and saw the old commit). So the "health commit" check is retried every `intervalMs` until it passes or `windowMs` ends;
+ * every other failure is NOT retried (it is a real defect, not a rollout). The last round's results are returned, so a stale commit still fails the run
+ * with the commit it saw. Once the commit matches, the rest of that same round was answered by the new version.
+ */
+export async function runUntilRolledOut(runOnce, { windowMs = 180_000, intervalMs = 5_000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now, log = () => {} } = {}) {
+  const started = now();
+  for (let attempt = 1; ; attempt++) {
+    const results = await runOnce();
+    const stale = results.some((r) => r.name === 'health commit' && r.ok === false);
+    if (!stale) return results;
+    if (now() - started + intervalMs > windowMs) return results;
+    log(`attempt ${attempt}: ${results.find((r) => r.name === 'health commit').detail}; the new version is not live yet, retrying in ${intervalMs / 1000}s`);
+    await sleep(intervalMs);
+  }
+}
+
 const isMain = import.meta.url === `file://${process.argv[1]}`;
 if (isMain) {
   const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
@@ -139,7 +157,8 @@ if (isMain) {
     console.error('usage: node scripts/verify-prod.mjs --base https://<host> [--expect <commit>] [--brand <brand>]');
     process.exit(2);
   }
-  const results = await runChecks({ base: base.replace(/\/$/, ''), expectCommit: arg('--expect'), expectBrand: arg('--brand'), peerHealth: arg('--peer-health'), verifyToken: process.env.META_VERIFY_TOKEN, appSecret: process.env.META_APP_SECRET, expectCron: arg('--cron'), worker: arg('--worker'), cfToken: process.env.CLOUDFLARE_API_TOKEN, cfAccount: process.env.CLOUDFLARE_ACCOUNT_ID });
+  const opts = { base: base.replace(/\/$/, ''), expectCommit: arg('--expect'), expectBrand: arg('--brand'), peerHealth: arg('--peer-health'), verifyToken: process.env.META_VERIFY_TOKEN, appSecret: process.env.META_APP_SECRET, expectCron: arg('--cron'), worker: arg('--worker'), cfToken: process.env.CLOUDFLARE_API_TOKEN, cfAccount: process.env.CLOUDFLARE_ACCOUNT_ID };
+  const results = await runUntilRolledOut(() => runChecks(opts), { windowMs: Number(process.env.VERIFY_WINDOW_S ?? 180) * 1000, intervalMs: Number(process.env.VERIFY_INTERVAL_S ?? 5) * 1000, log: (m) => console.log(m) });
   for (const r of results) console.log(`${r.ok === true ? 'PASS' : r.ok === false ? 'FAIL' : 'SKIP'}  ${r.name}: ${r.detail}`);
   const failed = results.filter((r) => r.ok === false).length;
   const skipped = results.filter((r) => r.ok === null).length;
