@@ -125,6 +125,28 @@ describe('browsing', () => {
 });
 
 describe('cart and checkout paths', () => {
+  it('an IDEMPOTENCY_CONFLICT refusal resets the order key, so the next attempt is a fresh order with a different key (Store #617)', async () => {
+    const { ws, pn } = await setup(98);
+    const g = stubGraph();
+    await toCheckout(ws, pn, g);
+    await say(ws, pn, tapBtn('pay:cod'), g);
+    const keys: string[] = [];
+    const real = link.fake.createOrderFromChat.bind(link.fake);
+    const spy = vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (s, req) => {
+      keys.push(req.idempotencyKey);
+      if (keys.length === 1) return { ok: false, reason: 'invalid', code: 'IDEMPOTENCY_CONFLICT', message: 'key reused with different lines' };
+      return real(s, req);
+    });
+    const failed = await say(ws, pn, text('المعادي، شارع 9 عمارة 4'), g);
+    expect(failed[0]!.body.text.body).toContain('معرفناش نكمّل الطلب'); // the buyer is told, nothing loops
+    expect(JSON.parse((await sessionOf(ws)).data).orderKey).toBeNull(); // the conflicting key is dropped
+    const done = await say(ws, pn, text('المعادي، شارع 9 عمارة 4'), g);
+    spy.mockRestore();
+    expect(done[0]!.body.text.body).toMatch(/طلبك رقم/);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]); // a fresh order key, not the conflicting one
+  });
+
   it('COD: pick, quantity by button, checkout, payment, typed address, order, confirmation; nothing is terminal', async () => {
     const { ws, pn } = await setup(10);
     const g = stubGraph();
