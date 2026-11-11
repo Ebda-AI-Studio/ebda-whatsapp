@@ -7,7 +7,7 @@
 3. **Visit-count script.** `script-src` gains `https://static.cloudflareinsights.com` and nothing else. Measured on production: the tag the edge adds carries a `version`, and with a version the script reports to this origin (`/cdn-cgi/rum`), which `connect-src 'self'` already allows.
 4. **Left as is: the 401 on `/token` for a signed-out visitor.** That request is how the page learns nobody is signed in (CHAT-SIGNIN-ENTRY-1); the browser logs every failed request, and the page shows the sign-in entry, not an error.
 5. **Left as is: the demo brand.** Its `_headers` and page are a client's own zone; it gets neither the analytics host nor any share tag.
-6. **Left as is: the shared "nothing here" page** (`vendor/studio/studio-pages`). Its own policy still refuses the visit-count script. That file is vendored; the change belongs in the Store's shared pages, then a sync here.
+6. **Left as is: the shared "nothing here" page** (`vendor/studio/studio-pages`). Its own policy still refuses the visit-count script. That file is vendored; the change belongs in the Store's shared pages, then a sync here. **Superseded by Ruling CHAT-BEACON-2** (the 404 now names the host through the brand pack).
 
 **Also fixed here:** `web/src/data/auth.ts` read the access token from the top of the `/token` answer, while the identity service wraps it as `{ success, data }`. Every signed-in person got the "could not reach" page (measured on production 2026-11-10). `readTokenBody` reads both shapes and refuses a 200 with no usable token.
 

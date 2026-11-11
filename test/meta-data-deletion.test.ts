@@ -132,6 +132,14 @@ describe('the status page', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('ahlan@ebda.app');
   });
+  it('both deletion pages let the edge-added visit-count script load and allow nothing else', async () => {
+    const { confirmation_code } = (await (await post(await signedRequest(PAYLOAD('82828282')))).json()) as { confirmation_code: string };
+    for (const path of ['/meta/data-deletion', `/meta/data-deletion/status?code=${confirmation_code}`]) {
+      const res = await SELF.fetch(`https://x${path}`, { headers: { accept: 'text/html' } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-security-policy')).toBe("default-src 'none'; script-src https://static.cloudflareinsights.com; frame-ancestors 'none'");
+    }
+  });
 });
 
 describe('the operator can see the requests', () => {

@@ -44,6 +44,13 @@ describe('token provider (identity v1)', () => {
     }
   });
 
+  it('refuses an envelope that does not say success: true, even when it carries a token', () => {
+    const data = { access_token: 'a.b.c', token_type: 'Bearer', expires_in: 900, expires_at: 1_800_000_900 };
+    for (const bad of [{ success: false, data }, { data }, { success: 'true', data }, { success: 1, data }, { success: null, data }, { success: false, access_token: 'a.b.c', expires_in: 900 }]) {
+      expect(readTokenBody(bad)).toBeNull();
+    }
+  });
+
   it('refreshes after the cached token is within a minute of expiry', async () => {
     let t = 0;
     const f = vi.fn(async () => new Response(JSON.stringify({ access_token: jwt({}), expires_in: 900 }), { status: 200 }));

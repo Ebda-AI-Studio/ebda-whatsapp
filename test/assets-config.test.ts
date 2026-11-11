@@ -58,7 +58,11 @@ it('a shared link to the suite page has a preview: description, canonical, Open 
   // One JSON-LD block that parses: the product by its name, the studio by its public name, never the registered legal name.
   const ld = JSON.parse(/<script type="application\/ld\+json">(.+?)<\/script>/.exec(head)?.[1] ?? 'null');
   expect(ld).toMatchObject({ '@type': 'WebApplication', name: 'Ebda Chat', alternateName: 'ابدأ شات', url: 'https://wa.ebda.app/', publisher: { '@type': 'Organization', name: 'Ebda AI Studio' } });
-  expect(JSON.stringify(ld)).not.toMatch(/legalName/);
+  // The registered names come from the vendored studio brand, so this fails the day either of them reaches the share tags.
+  const { BRAND: STUDIO } = await import('../vendor/studio/brand/index');
+  expect(STUDIO.company.legalNameAr).toBeTruthy();
+  for (const legal of [STUDIO.company.legalNameAr, STUDIO.company.legalNameEn]) expect(head).not.toContain(legal);
+  expect(ld.publisher.name).toBe(STUDIO.company.shortNameEn);
   // Copy rule: no supplier is named (the old product names are refused repo-wide by test/guards.test.ts).
   expect(JSON.stringify(BRAND.share)).not.toMatch(/cloudflare|gemini|openai|anthropic|\bmeta\b|facebook|ميتا|فيسبوك/i);
 });
@@ -68,8 +72,14 @@ it('the share tags are written into the built page from one placeholder, and a b
   const html = readFileSync(join(import.meta.dirname, '..', 'web', 'index.html'), 'utf8');
   expect(html.split('%SHARE_HEAD%').length).toBe(2);
   expect(html.indexOf('%SHARE_HEAD%')).toBeLessThan(html.indexOf('</head>'));
-  const cfg = readFileSync(join(import.meta.dirname, '..', 'web', 'vite.config.ts'), 'utf8');
-  expect(cfg).toContain(".replace('%SHARE_HEAD%', () => shareHead(BRAND))");
+  // Behaviour, not source text: run the build's own HTML step on the real page and read what it writes.
+  const { default: viteConfig } = await import('../web/vite.config');
+  const step = (viteConfig as { plugins: { name?: string; transformIndexHtml?: (h: string) => Promise<string> }[] }).plugins.flat().find((p) => p?.name === 'brand-html');
+  const { BRAND } = await import('../web/brands/ebda/brand');
+  const built = await step!.transformIndexHtml!(html);
+  expect(built).not.toContain('%SHARE_HEAD%');
+  expect(built.split(shareHead(BRAND)).length).toBe(2);
+  expect(built.indexOf(shareHead(BRAND))).toBeLessThan(built.indexOf('</head>'));
   const { BRAND: demo } = await import('../web/brands/demo/brand');
   expect(demo.share).toBeUndefined();
   expect(shareHead(demo)).toBe('');
