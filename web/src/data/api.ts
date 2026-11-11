@@ -61,6 +61,7 @@ export function createApiSource(o: Opts): LiveSource {
     // Off until the server says the store link is bound (GET /me → capabilities): never offer an action that would 404.
     capabilities: { codOutcome: false },
     // Least privilege until GET /me answers: spending actions stay hidden.
+    storeId: o.storeId,
     role: 'staff',
     currentUserId: o.currentUserId,
     userNames: o.userNames,

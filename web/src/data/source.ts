@@ -77,6 +77,8 @@ export interface InboxSource {
   /** T35: an operator looking at a merchant's workspace, read-only (every request carries the view-as headers; the server refuses writes). */
   viewAs?: boolean;
   currentUserId: string;
+  /** The store this session is for (the upgrade card builds the Store billing link from it). */
+  storeId?: string;
   /** The signed-in user's role in this store (GET /me); `staff` hides spending actions. */
   role: Role;
   /** Display names of staff for assignee labels. */

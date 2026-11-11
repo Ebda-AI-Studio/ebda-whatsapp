@@ -487,3 +487,27 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
   label:has(> input[type='checkbox']) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
   input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--gold-ink); }
 }
+
+/* W2: one empty / error state (design system "states"): icon, a few words, one sentence, one action. */
+.state { display: grid; justify-items: center; gap: 8px; text-align: center; max-width: 46ch; margin: 32px auto; padding: 24px 20px; color: var(--ink-2); }
+.state-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--sand-2); color: var(--gold-ink); }
+.state-title { margin: 4px 0 0; font-size: 16px; font-weight: 500; color: var(--ink); }
+.state-body { margin: 0; }
+.state-error { grid-auto-flow: row; margin: 16px 0; padding: 14px 16px; max-width: none; justify-items: start; background: var(--bad-tint); border: 1px solid var(--line); border-radius: var(--radius); color: var(--bad); text-align: start; grid-template-columns: auto 1fr auto; align-items: center; }
+.state-error p { margin: 0; }
+@media (max-width: 479px) {
+  .state-error { grid-template-columns: auto 1fr; }
+  .state-error .btn { grid-column: 1 / -1; width: 100%; }
+}
+
+/* Phone tab bar: the current destination shows its name beside its icon, the rest stay icons (still named for screen readers). */
+@media (max-width: 479px) {
+  .rail a[aria-current='page'] { flex: 2.4 1 0; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .rail a[aria-current='page'] > span { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: nowrap; font-size: 12px; font-weight: 500; }
+}
+
+/* Upgrade card (foundation component rule): a plan limit is a next step, never an error. Same anatomy as the empty state, one action. */
+.upgrade { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; margin: 12px 0; padding: 16px 18px; background: var(--paper); border: 1px solid var(--gold); border-radius: var(--radius); }
+.upgrade-text { display: grid; gap: 2px; }
+.upgrade .state-title { margin: 0; }
+@media (max-width: 479px) { .upgrade { grid-template-columns: auto 1fr; } .upgrade .btn { grid-column: 1 / -1; width: 100%; } }
