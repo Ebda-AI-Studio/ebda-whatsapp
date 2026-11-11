@@ -101,7 +101,8 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     if (write && principal.superAdmin && !membership) return refuse('forbidden', 403, { message: 'operator_route_required' });
     // M-135: a person token is revocation-checked on EVERY write, not only on money actions (fail closed: an unreachable accounts service refuses it).
     // A read that hands over a person's whole data is checked like a write; which reads those are is a named list (scopes.ts), and every read route must be on one list or the other.
-    const sensitiveRead = !write && SESSION_CHECKED_READS.has(`GET ${routed}`);
+    // A WebSocket upgrade is a GET that opens a stream for up to the socket lifetime (WA-6): it is session-checked like a sensitive read.
+    const sensitiveRead = !write && (SESSION_CHECKED_READS.has(`GET ${routed}`) || c.req.header('upgrade')?.toLowerCase() === 'websocket');
     if ((write || sensitiveRead) && !principal.integration) {
       const s = await writeSessionState(c.env, principal.sessionId);
       if (s === 'revoked') return refuse('forbidden', 403, { message: 'session_revoked' });

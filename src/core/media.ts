@@ -42,6 +42,14 @@ export function sniffMime(head: Uint8Array): string | null {
 /** Strips path separators and control characters from a client-supplied file name. */
 export const safeFilename = (name: string): string => name.replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 120) || 'file';
 
+/** WA-5: the hosts Meta serves media from; the bearer token is attached to nothing else. */
+const META_MEDIA_HOST = /^(?:[a-z0-9-]+\.)*(?:fbsbx\.com|fbcdn\.net|whatsapp\.net|facebook\.com)$/;
+export function isMetaMediaUrl(raw: string): boolean {
+  let u: URL;
+  try { u = new URL(raw); } catch { return false; }
+  return u.protocol === 'https:' && u.port === '' && !u.username && !u.password && META_MEDIA_HOST.test(u.hostname);
+}
+
 export const MEDIA_FETCH_MAX_ATTEMPTS = 8;
 const BUFFER_LIMIT = 16 * 1024 * 1024;
 const MAX_DOWNLOAD = 100 * 1024 * 1024;
@@ -56,6 +64,7 @@ export async function downloadToR2(env: { META_GRAPH_VERSION: string; MEDIA: R2B
   const metaRes = await fetchWithTimeout(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(mediaId)}`, { headers: auth }, { label: 'meta.media.lookup', timeoutMs: TIMEOUT_MS });
   const meta = (await metaRes.json().catch(() => null)) as { url?: string; mime_type?: string; file_size?: number } | null;
   if (!metaRes.ok || !meta?.url) throw new Error(`media lookup failed: http ${metaRes.status}`);
+  if (!isMetaMediaUrl(meta.url)) throw new Error('media url refused: not an https Meta media host'); // never send the token elsewhere
   const file = await fetchWithTimeout(meta.url, { headers: auth }, { label: 'meta.media.download', timeoutMs: TIMEOUT_MS * 2 });
   if (!file.ok || !file.body) throw new Error(`media download failed: http ${file.status}`);
   const mime = meta.mime_type ?? fallbackMime;
