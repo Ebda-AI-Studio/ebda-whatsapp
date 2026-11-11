@@ -22,41 +22,41 @@ colors:
   bad-brick: "#9a3328"
 typography:
   body:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
-    fontSize: "15px"
-    fontWeight: 400
-    lineHeight: 1.55
-    fontFeature: "tnum"
-  title:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
-    fontSize: "18px"
-    fontWeight: 500
-    lineHeight: 1.55
-  total:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
-    fontSize: "17px"
-    fontWeight: 600
-    lineHeight: 1.55
-  label:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
-    fontSize: "13px"
-    fontWeight: 400
-    lineHeight: 1.55
-  caption:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
-    fontSize: "12px"
-    fontWeight: 400
-    lineHeight: 1.55
-  strip:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
     fontSize: "14px"
     fontWeight: 400
-    lineHeight: 1.55
+    lineHeight: 1.7
+    fontFeature: "tnum"
+  title:
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
+    fontSize: "18px"
+    fontWeight: 500
+    lineHeight: 1.7
+  total:
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
+    fontSize: "18px"
+    fontWeight: 600
+    lineHeight: 1.7
+  label:
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.7
+  caption:
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
+    fontSize: "12px"
+    fontWeight: 400
+    lineHeight: 1.7
+  strip:
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.7
   pane-heading:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
     fontSize: "16px"
     fontWeight: 500
-    lineHeight: 1.55
+    lineHeight: 1.7
 rounded:
   focus: "6px"
   sm: "8px"
