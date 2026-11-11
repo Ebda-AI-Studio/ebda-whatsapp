@@ -1769,7 +1769,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /**
    * WA-6: an open socket is re-authorised on a timer, not only at a push: past its (capped) expiry it closes 4401; a person whose Store membership is gone, or whose session
-   * is revoked, closes 4403. A check that cannot be answered (Store or accounts down) leaves the socket for the next sweep: the lifetime cap bounds that window.
+   * is revoked, closes 4403; a changed role is re-read and applied (downgrade). A check that cannot be answered (Store or accounts down) leaves the socket for the next sweep: the lifetime cap bounds that window.
    */
   private async sweepSockets(nowS: number): Promise<void> {
     const bridge = bridgeFor(this.env);
@@ -1781,6 +1781,9 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (bridge && att.userId && (att.role === 'owner' || att.role === 'staff')) {
         const live = await bridge.memberRole(this.workspaceId, att.userId);
         if (live.ok && live.value.role === null) close(WS_CLOSE_NO_SEAT, 'not a member');
+        // A role that changed since the socket opened (owner demoted to staff, or the reverse) is rewritten now, so the next push applies the LIVE role: a demoted owner
+        // is then subject to the staff seat check (closeUnseatedSockets) instead of keeping owner reach for the rest of the socket's life.
+        else if (live.ok && live.value.role !== null && live.value.role !== att.role) ws.serializeAttachment({ ...att, role: live.value.role } satisfies SocketAttachment);
       }
     }
   }

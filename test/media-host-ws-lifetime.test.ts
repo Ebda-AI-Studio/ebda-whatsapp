@@ -1,3 +1,4 @@
+import { runInDurableObject } from 'cloudflare:test';
 import { SELF } from 'cloudflare:test';
 import { afterEach, describe, expect, it } from 'vitest';
 import { configureSessionCheck } from '../src/core/identity/session';
@@ -50,6 +51,13 @@ describe('WA-6: an open socket is re-authorised on a timer and capped', () => {
     link.fake.setMembers(ws, []);
     await sweep(ws);
     expect(await closed).toBe(WS_CLOSE_NO_SEAT);
+  });
+  it('an owner demoted to staff has the socket rewritten to staff at the next sweep (and stays open while seated)', async () => {
+    const { ws } = await open(4);
+    link.fake.setMembers(ws, [{ userId: OWNER, role: 'staff' }]);
+    await sweep(ws);
+    const roles = await runInDurableObject(workspace(ws), (_i, state) => state.getWebSockets().map((s) => (s.deserializeAttachment() as { role: string }).role));
+    expect(roles).toEqual(['staff']);
   });
   it('closes the socket of a revoked session', async () => {
     const { ws, closed } = await open(2);
