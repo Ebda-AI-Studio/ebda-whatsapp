@@ -469,3 +469,14 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
 .gate-btn { width: 100%; margin-top: 12px; }
 @media (prefers-reduced-motion: no-preference) { .gate-card { animation: gate-in 280ms var(--ease) both; } }
 @keyframes gate-in { from { opacity: 0; transform: translateY(6px); } }
+
+/* UI audit 2026-11-11 (P1): on touch the switches were 52x30, the "how?" links 16-36 px tall, the checkboxes 13-18 px and
+   .link-btn 32 px (its base rule sits after the coarse block above and won). Same 44 px bar as the rest of the app; the
+   switch keeps its look and grows only its hit area. Declared last on purpose. */
+@media (pointer: coarse), (max-width: 819px) {
+  .link-btn { min-height: 44px; }
+  .switch::before { content: ''; position: absolute; inset: -7px -4px; }
+  .checklist li a, a.muted { display: inline-flex; align-items: center; min-height: 44px; }
+  label:has(> input[type='checkbox']) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+  input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--gold-ink); }
+}
