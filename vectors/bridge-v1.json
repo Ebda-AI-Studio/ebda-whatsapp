@@ -1,0 +1,779 @@
+{
+ "version": 1,
+ "cases": [
+  {
+   "name": "profile",
+   "method": "getStoreProfile",
+   "args": [
+    "11111111-1111-4111-8111-111111111111"
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "name": "Dar Mona",
+     "logoUrl": "https://cdn.example/logo.png",
+     "locale": "ar",
+     "currency": "EGP",
+     "paymentMethods": [
+      "cod",
+      "link",
+      "instapay"
+     ],
+     "codEnabled": true,
+     "instapay": {
+      "ipa": "dar-mona@instapay",
+      "displayName": "Dar Mona"
+     }
+    }
+   }
+  },
+  {
+   "name": "profile of a store that does not resolve is not_found, never a default",
+   "method": "getStoreProfile",
+   "args": [
+    "33333333-3333-4333-8333-333333333333"
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "not_found",
+    "message": "store not resolved"
+   }
+  },
+  {
+   "name": "profile of an unlinked store is not_linked",
+   "method": "getStoreProfile",
+   "args": [
+    "22222222-2222-4222-8222-222222222222"
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "not_linked"
+   }
+  },
+  {
+   "name": "malformed store id is invalid",
+   "method": "getStoreProfile",
+   "args": [
+    "not-a-uuid"
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "invalid",
+    "message": "storeId"
+   }
+  },
+  {
+   "name": "catalog page 1",
+   "method": "listCatalog",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    null,
+    2
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "items": [
+      {
+       "retailerId": "v1",
+       "productId": "p-v1",
+       "title": "Item v1",
+       "titleAr": null,
+       "description": null,
+       "priceMinor": 25000,
+       "currency": "EGP",
+       "availability": "in_stock",
+       "imageUrl": null,
+       "link": "https://dar-mona.ebda.app/products/v1",
+       "brand": null
+      },
+      {
+       "retailerId": "v2",
+       "productId": "p-v2",
+       "title": "Item v2",
+       "titleAr": null,
+       "description": null,
+       "priceMinor": 40000,
+       "currency": "EGP",
+       "availability": "in_stock",
+       "imageUrl": null,
+       "link": "https://dar-mona.ebda.app/products/v2",
+       "brand": null
+      }
+     ],
+     "nextCursor": "v2"
+    }
+   }
+  },
+  {
+   "name": "catalog page 2",
+   "method": "listCatalog",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "v2",
+    2
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "items": [
+      {
+       "retailerId": "v3",
+       "productId": "p-v3",
+       "title": "Item v3",
+       "titleAr": null,
+       "description": null,
+       "priceMinor": 9900,
+       "currency": "EGP",
+       "availability": "out_of_stock",
+       "imageUrl": null,
+       "link": "https://dar-mona.ebda.app/products/v3",
+       "brand": null
+      }
+     ],
+     "nextCursor": null
+    }
+   }
+  },
+  {
+   "name": "catalog limit over 100 is invalid",
+   "method": "listCatalog",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    null,
+    101
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "invalid",
+    "message": "listCatalog: limit"
+   }
+  },
+  {
+   "name": "products by id",
+   "method": "getProducts",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    [
+     "v1",
+     "v3"
+    ]
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "items": [
+      {
+       "retailerId": "v1",
+       "productId": "p-v1",
+       "title": "Item v1",
+       "titleAr": null,
+       "description": null,
+       "priceMinor": 25000,
+       "currency": "EGP",
+       "availability": "in_stock",
+       "imageUrl": null,
+       "link": "https://dar-mona.ebda.app/products/v1",
+       "brand": null
+      },
+      {
+       "retailerId": "v3",
+       "productId": "p-v3",
+       "title": "Item v3",
+       "titleAr": null,
+       "description": null,
+       "priceMinor": 9900,
+       "currency": "EGP",
+       "availability": "out_of_stock",
+       "imageUrl": null,
+       "link": "https://dar-mona.ebda.app/products/v3",
+       "brand": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "checkout link refuses a sold-out variant",
+   "method": "createCheckoutLink",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "items": [
+      {
+       "variantId": "v3",
+       "quantity": 1
+      }
+     ],
+     "buyer": {
+      "buyerKey": "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+      "phoneE164": "+201001234567",
+      "name": "Mona Adel",
+      "locale": "ar"
+     }
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "out_of_stock",
+    "outOfStock": [
+     "v3"
+    ]
+   }
+  },
+  {
+   "name": "cod order",
+   "method": "createOrderFromChat",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "items": [
+      {
+       "variantId": "v1",
+       "quantity": 2
+      }
+     ],
+     "buyer": {
+      "buyerKey": "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+      "phoneE164": "+201001234567",
+      "name": "Mona Adel",
+      "locale": "ar"
+     },
+     "address": {
+      "area": "Nasr City",
+      "street": "5 Abbas El Akkad"
+     },
+     "paymentMethod": "cod",
+     "idempotencyKey": "idem-key-0001"
+    }
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "orderId": "o-1001",
+     "orderNumber": "EB-1001",
+     "totalMinor": 52500,
+     "currency": "EGP",
+     "paymentUrl": null,
+     "instapay": null
+    }
+   }
+  },
+  {
+   "name": "cod order replay returns the same order",
+   "method": "createOrderFromChat",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "items": [
+      {
+       "variantId": "v1",
+       "quantity": 2
+      }
+     ],
+     "buyer": {
+      "buyerKey": "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+      "phoneE164": "+201001234567",
+      "name": "Mona Adel",
+      "locale": "ar"
+     },
+     "address": {
+      "area": "Nasr City",
+      "street": "5 Abbas El Akkad"
+     },
+     "paymentMethod": "cod",
+     "idempotencyKey": "idem-key-0001"
+    }
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "orderId": "o-1001",
+     "orderNumber": "EB-1001",
+     "totalMinor": 52500,
+     "currency": "EGP",
+     "paymentUrl": null,
+     "instapay": null
+    }
+   }
+  },
+  {
+   "name": "link order carries a payment url",
+   "method": "createOrderFromChat",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "items": [
+      {
+       "variantId": "v2",
+       "quantity": 1
+      }
+     ],
+     "buyer": {
+      "buyerKey": "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+      "phoneE164": "+201001234567",
+      "name": "Mona Adel",
+      "locale": "ar"
+     },
+     "addressId": "a1",
+     "paymentMethod": "link",
+     "idempotencyKey": "idem-key-0002"
+    }
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "orderId": "o-1002",
+     "orderNumber": "EB-1002",
+     "totalMinor": 40000,
+     "currency": "EGP",
+     "paymentUrl": "https://pay.example/i/o-1002",
+     "instapay": null
+    }
+   }
+  },
+  {
+   "name": "instapay order carries ipa, amount and reference",
+   "method": "createOrderFromChat",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "items": [
+      {
+       "variantId": "v1",
+       "quantity": 1
+      }
+     ],
+     "buyer": {
+      "buyerKey": "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+      "phoneE164": "+201001234567",
+      "name": "Mona Adel",
+      "locale": "ar"
+     },
+     "addressId": "a1",
+     "paymentMethod": "instapay",
+     "idempotencyKey": "idem-key-0003"
+    }
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "orderId": "o-1003",
+     "orderNumber": "EB-1003",
+     "totalMinor": 25000,
+     "currency": "EGP",
+     "paymentUrl": null,
+     "instapay": {
+      "ipa": "dar-mona@instapay",
+      "amountMinor": 25000,
+      "reference": "EB-1003"
+     }
+    }
+   }
+  },
+  {
+   "name": "sold-out line is out_of_stock with the variant ids",
+   "method": "createOrderFromChat",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "items": [
+      {
+       "variantId": "v3",
+       "quantity": 1
+      }
+     ],
+     "buyer": {
+      "buyerKey": "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+      "phoneE164": "+201001234567",
+      "name": "Mona Adel",
+      "locale": "ar"
+     },
+     "addressId": "a1",
+     "paymentMethod": "cod",
+     "idempotencyKey": "idem-key-0004"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "out_of_stock",
+    "message": "insufficient stock",
+    "outOfStock": [
+     "v3"
+    ]
+   }
+  },
+  {
+   "name": "an order without an idempotency key is invalid",
+   "method": "createOrderFromChat",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "items": [
+      {
+       "variantId": "v1",
+       "quantity": 1
+      }
+     ],
+     "buyer": {
+      "buyerKey": "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+      "phoneE164": "+201001234567",
+      "name": "Mona Adel",
+      "locale": "ar"
+     },
+     "addressId": "a1",
+     "paymentMethod": "cod"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "invalid",
+    "message": "createOrderFromChat: idempotencyKey"
+   }
+  },
+  {
+   "name": "both address and addressId is invalid",
+   "method": "createOrderFromChat",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "items": [
+      {
+       "variantId": "v1",
+       "quantity": 1
+      }
+     ],
+     "buyer": {
+      "buyerKey": "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+      "phoneE164": "+201001234567",
+      "name": "Mona Adel",
+      "locale": "ar"
+     },
+     "addressId": "a1",
+     "address": {
+      "area": "x",
+      "street": "y"
+     },
+     "paymentMethod": "cod",
+     "idempotencyKey": "idem-key-0005"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "invalid",
+    "message": "createOrderFromChat: args"
+   }
+  },
+  {
+   "name": "unknown address is not_found",
+   "method": "createOrderFromChat",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "items": [
+      {
+       "variantId": "v1",
+       "quantity": 1
+      }
+     ],
+     "buyer": {
+      "buyerKey": "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+      "phoneE164": "+201001234567",
+      "name": "Mona Adel",
+      "locale": "ar"
+     },
+     "addressId": "nope",
+     "paymentMethod": "cod",
+     "idempotencyKey": "idem-key-0006"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "not_found",
+    "message": "address"
+   }
+  },
+  {
+   "name": "payment link for an open order",
+   "method": "getPaymentLink",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "o-1002"
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "url": "https://pay.example/i/o-1002",
+     "expiresAt": "2026-11-12T10:00:00.000Z"
+    }
+   }
+  },
+  {
+   "name": "payment link for an unknown order",
+   "method": "getPaymentLink",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "o-9999"
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "not_found",
+    "message": "order"
+   }
+  },
+  {
+   "name": "cod confirmed",
+   "method": "recordCodOutcome",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "orderId": "o-1001",
+     "outcome": "confirmed",
+     "at": "2026-11-11T10:00:00.000Z",
+     "idempotencyKey": "idem-key-0007"
+    }
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "orderNumber": "EB-1001"
+    }
+   }
+  },
+  {
+   "name": "cod confirmed replay is the same answer",
+   "method": "recordCodOutcome",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "orderId": "o-1001",
+     "outcome": "confirmed",
+     "at": "2026-11-11T10:00:00.000Z",
+     "idempotencyKey": "idem-key-0007"
+    }
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "orderNumber": "EB-1001"
+    }
+   }
+  },
+  {
+   "name": "cod outcome for an unknown order",
+   "method": "recordCodOutcome",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "orderId": "o-9999",
+     "outcome": "refused",
+     "at": "2026-11-11T10:00:00.000Z",
+     "idempotencyKey": "idem-key-0008"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "not_found",
+    "message": "order"
+   }
+  },
+  {
+   "name": "cod outcome without an idempotency key is invalid",
+   "method": "recordCodOutcome",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "orderId": "o-1001",
+     "outcome": "refused",
+     "at": "2026-11-11T10:00:00.000Z"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "invalid",
+    "message": "recordCodOutcome: idempotencyKey"
+   }
+  },
+  {
+   "name": "proof on an instapay order",
+   "method": "attachPaymentProof",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "o-1003",
+    "https://media.example/proof.jpg"
+   ],
+   "expect": {
+    "ok": true,
+    "value": {}
+   }
+  },
+  {
+   "name": "proof on a non-instapay order is not_found",
+   "method": "attachPaymentProof",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "o-1001",
+    "https://media.example/proof.jpg"
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "not_found",
+    "message": "order"
+   }
+  },
+  {
+   "name": "proof url must be https",
+   "method": "attachPaymentProof",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "o-1003",
+    "http://media.example/proof.jpg"
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "invalid",
+    "message": "attachPaymentProof: mediaUrl"
+   }
+  },
+  {
+   "name": "saved addresses",
+   "method": "getCustomerAddresses",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd"
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "items": [
+      {
+       "id": "a1",
+       "label": "Home",
+       "area": "Maadi",
+       "street": "9 Road 233"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "save an address",
+   "method": "saveCustomerAddress",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+    {
+     "label": "Work",
+     "area": "Zamalek",
+     "street": "1 Brazil St"
+    }
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "address": {
+      "id": "a2",
+      "label": "Work",
+      "area": "Zamalek",
+      "street": "1 Brazil St"
+     }
+    }
+   }
+  },
+  {
+   "name": "save an address for a buyer with no customer yet is not_found",
+   "method": "saveCustomerAddress",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "6ceb45953633dabff779c18ba4035a9fe58480c8383c822f93684a541a5c7cf5",
+    {
+     "area": "Zamalek",
+     "street": "1 Brazil St"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "not_found",
+    "message": "no customer yet"
+   }
+  },
+  {
+   "name": "order status by number and buyer",
+   "method": "getOrderStatus",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "EB-1001",
+    "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd"
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "orderNumber": "EB-1001",
+     "status": "confirmed",
+     "paymentMethod": "cod",
+     "shipment": null
+    }
+   }
+  },
+  {
+   "name": "order status for another buyer never leaks",
+   "method": "getOrderStatus",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "EB-1001",
+    "6ceb45953633dabff779c18ba4035a9fe58480c8383c822f93684a541a5c7cf5"
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "not_found",
+    "message": "order"
+   }
+  },
+  {
+   "name": "customer orders",
+   "method": "listCustomerOrders",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "e8771d4105457e95d06a8589827d6c09043f73bb1750f2ef525bccbc22d67edd",
+    5
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "items": [
+      {
+       "orderId": "o-1001",
+       "orderNumber": "EB-1001",
+       "status": "pending_confirmation",
+       "totalMinor": 52500,
+       "currency": "EGP",
+       "paymentMethod": "cod",
+       "itemsCount": 1,
+       "at": 1762800000000
+      },
+      {
+       "orderId": "o-1002",
+       "orderNumber": "EB-1002",
+       "status": "pending_confirmation",
+       "totalMinor": 40000,
+       "currency": "EGP",
+       "paymentMethod": "link",
+       "itemsCount": 1,
+       "at": 1762800000000
+      },
+      {
+       "orderId": "o-1003",
+       "orderNumber": "EB-1003",
+       "status": "pending_confirmation",
+       "totalMinor": 25000,
+       "currency": "EGP",
+       "paymentMethod": "instapay",
+       "itemsCount": 1,
+       "at": 1762800000000
+      }
+     ]
+    }
+   }
+  }
+ ]
+}
