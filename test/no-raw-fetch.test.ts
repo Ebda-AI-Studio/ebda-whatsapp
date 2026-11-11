@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { findMatches } from './helpers/grep';
 
@@ -12,8 +13,12 @@ const code = (hit: string) => !/\.test\.tsx?:/.test(hit);
 
 it('no raw global fetch under src/ outside the timeout helper', () => {
   const hits = [...findMatches(RAW_CALL, 'src'), ...findMatches(RAW_REF, 'src')].filter((h) => !HELPER.test(h) && code(h));
-  // the Durable Object's own `override async fetch(request)` method definition is not a call
-  expect(hits.filter((h) => h !== 'src/core/workspace-do.ts:1709')).toEqual([]);
+  // the Durable Object's own `override async fetch(request)` method definition is not a call; matched by its text, not a line number (a pinned line breaks on every edit above it)
+  const isMethodDef = (h: string) => {
+    const [file, line] = h.split(':');
+    return /^\s*override async fetch\(/.test(readFileSync(file!, 'utf8').split('\n')[Number(line) - 1] ?? '');
+  };
+  expect(hits.filter((h) => !isMethodDef(h))).toEqual([]);
 });
 
 it('a comment mentioning fetch() is not a call', () => {
