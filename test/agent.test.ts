@@ -338,11 +338,11 @@ describe('failures end in a handoff, never silence', () => {
     expect((await rows(ws, 'SELECT reason FROM agent_handoffs'))[0]).toEqual({ reason: 'misconfigured' });
   });
 
-  it('voice notes and files get one short "text only" note', async () => {
+  it('videos and files get one short "text only" note (a voice note is transcribed instead: test/voice-note.test.ts)', async () => {
     const ws = W(42);
     const pn = await agentWs(ws);
     const m = model([]);
-    const out = await say(ws, pn, audio(), stubGraph());
+    const out = await say(ws, pn, { ...audio(), type: 'video', video: { id: 'media-a', mime_type: 'video/mp4' } }, stubGraph());
     expect(out.map((s) => s.text)).toEqual([EBDA_AGENT_COPY.t.textOnly.ar]);
     expect(m.callCount).toBe(0);
   });

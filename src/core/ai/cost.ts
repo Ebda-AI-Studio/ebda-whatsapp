@@ -27,6 +27,12 @@ export function modelPrices(env: Pick<Env, 'AI_PRICE_INPUT_USD_PER_M' | 'AI_PRIC
   return env.AI_PRICE_INPUT_USD_PER_M && env.AI_PRICE_OUTPUT_USD_PER_M && Number.isFinite(i) && Number.isFinite(o) && i >= 0 && o >= 0 ? { inputUsdPerM: i, outputUsdPerM: o } : null;
 }
 
+/** Voice notes: the speech model's price per audio minute in USD (`AI_STT_PRICE_USD_PER_MIN`), or null when unset (then the audio's cost is unknown, never guessed). */
+export function sttPriceUsdPerMin(env: Pick<Env, 'AI_STT_PRICE_USD_PER_MIN'>): number | null {
+  const p = Number(env.AI_STT_PRICE_USD_PER_MIN);
+  return env.AI_STT_PRICE_USD_PER_MIN && Number.isFinite(p) && p >= 0 ? p : null;
+}
+
 export function turnCostEgpMicros(t: { inputTokens: number; outputTokens: number }, p: ModelPrices, egpPerUsdMicros: number): number {
   return Math.round(((t.inputTokens * p.inputUsdPerM + t.outputTokens * p.outputUsdPerM) * egpPerUsdMicros) / 1_000_000);
 }
@@ -39,12 +45,15 @@ const put = (sql: Sql, k: string, v: number): void => { sql.exec('INSERT INTO st
  * Records one turn's cost for the workspace (a rolling average per credit) and raises `ai_cost_over_threshold` (P1) once a day while the average is over the
  * plan's threshold. Returns the turn's cost in EGP micros (0 = unknown or not the platform's cost: own model key, no prices, no FX).
  */
-export function recordTurnCost(host: { env: Env; sql: Sql; workspaceId: string }, tokens: { inputTokens: number; outputTokens: number }, byoKey: boolean, now: number): number {
-  if (byoKey) return 0; // the merchant pays their own model provider
-  const prices = modelPrices(host.env);
+export function recordTurnCost(host: { env: Env; sql: Sql; workspaceId: string }, tokens: { inputTokens: number; outputTokens: number; /** Voice note audio transcribed in this turn (always the platform's cost, even with the merchant's own model key). */ audioMs?: number }, byoKey: boolean, now: number): number {
+  const sttPrice = sttPriceUsdPerMin(host.env);
   const fx = fxAt(host.sql, now);
-  if (!prices || !fx) return 0;
-  const cost = turnCostEgpMicros(tokens, prices, fx.micros);
+  if (!fx) return 0;
+  const audio = sttPrice !== null && tokens.audioMs ? Math.round(((tokens.audioMs / 60_000) * sttPrice * fx.micros)) : 0;
+  const prices = byoKey ? null : modelPrices(host.env); // a merchant's own model key: the merchant pays that provider
+  if (byoKey && audio === 0) return 0;
+  if (!byoKey && !prices) return 0;
+  const cost = (prices ? turnCostEgpMicros(tokens, prices, fx.micros) : 0) + audio;
   const turns = state(host.sql, 'ai.cost_turns');
   const avg = turns === 0 ? cost : state(host.sql, 'ai.cost_avg') * (1 - EWMA_WEIGHT) + cost * EWMA_WEIGHT;
   put(host.sql, 'ai.cost_avg', Math.round(avg));

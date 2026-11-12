@@ -495,6 +495,8 @@ export const DO_MIGRATIONS: readonly string[] = [
      assigned_at INTEGER NOT NULL,
      assigned_by TEXT NOT NULL
    );`,
+  // v40 (voice notes): the once-marker and the inbox state of a transcribed voice note. 'ok' = the transcript is the message's body; 'failed' = never transcribed (the inbox says so).
+  `ALTER TABLE messages ADD COLUMN voice_state TEXT CHECK (voice_state IN ('ok', 'failed'));`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

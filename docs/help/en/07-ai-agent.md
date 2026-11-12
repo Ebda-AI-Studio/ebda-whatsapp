@@ -20,6 +20,9 @@ The agent replies to your customers in chat in Egyptian Arabic, searches the cat
 - Every reply uses AI credits. When credits run out the agent stops and hands the conversation to staff.
 - The agent does not change prices or add discounts. Orders, prices and stock come from Ebda Store.
 
+## Voice notes
+When a customer sends a **voice note**, the agent listens to it, and the text appears under the voice note in your inbox (marked "Voice note transcript"). It then answers like it would a typed message. Voice notes longer than 2 minutes, or beyond your store's daily limit, get a polite request to type instead. If a voice note could not be understood, the inbox shows **Voice note (not transcribed)**: listen to it and reply yourself.
+
 ## Handoff to staff
 The conversation is tagged **needs_human**, is highlighted in the inbox, and you are notified. The agent stays silent until the handoff period passes or until a staff member replies. Choose **Take over** at the top of the chat to handle it yourself. When you reply to a customer (from the inbox or the WhatsApp Business app) or assign the chat to a person, the agent also stays silent for the handoff period, even if the chat was never handed over.
 Handoff happens when the customer asks for a person, the agent cannot answer, or credits run out.
@@ -34,4 +37,4 @@ Handoff happens when the customer asks for a person, the agent cannot answer, or
 - **A wrong reply:** edit the knowledge or persona, and take the conversation over.
 
 ---
-Last checked: 2026-10-25. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.
+Last checked: 2026-11-12. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.

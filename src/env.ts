@@ -37,6 +37,9 @@ export type Env = {
   /** The platform model's price in USD per million tokens (input / output), for the cost-per-credit log and alert (M-084). Unset = cost unknown, no alert. */
   AI_PRICE_INPUT_USD_PER_M?: string;
   AI_PRICE_OUTPUT_USD_PER_M?: string;
+  /** Voice-note transcription: price in USD per audio minute of the speech model (Cloudflare pricing page), and the voice notes one store may have transcribed per UTC day (default 60). */
+  AI_STT_PRICE_USD_PER_MIN?: string;
+  VOICE_DAILY_CAP?: string;
   /** The public support address shown on the data-deletion page; the brand's supportEmail (pinned to vendor/brand/store-support-email.json). */
   SUPPORT_EMAIL?: string;
   /** Phase 6: contact-import workflow (one instance per uploaded file). */
