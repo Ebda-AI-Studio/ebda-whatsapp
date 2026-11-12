@@ -8,7 +8,7 @@
 
 **Tech Stack:** as the program plan, plus `jose` 6.2.12 (ES256/JWKS on workerd) and `@sentry/cloudflare` 11.7.0.
 
-**Spec:** `docs/plans/2026-10-24-ebda-whatsapp.md` (Phase 1 row + Global Constraints), `~/Desktop/projects/Ebda-AI-Studio/business/ebda/plans/2026-10-24-ebda-identity-token-contract.md` (identity v1), `…/2026-10-24-ebda-whatsapp-store-contract.md` §6 (buyerKey + pinned vector).
+**Spec:** `docs/plans/done/2026-10-24-ebda-whatsapp.md` (Phase 1 row + Global Constraints), `~/Desktop/projects/Ebda-AI-Studio/business/ebda/plans/2026-10-24-ebda-identity-token-contract.md` (identity v1), `…/2026-10-24-ebda-whatsapp-store-contract.md` §6 (buyerKey + pinned vector).
 
 ## Global Constraints
 - Everything in the program plan's Global Constraints.

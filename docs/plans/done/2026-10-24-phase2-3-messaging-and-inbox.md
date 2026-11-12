@@ -8,7 +8,7 @@
 
 **Tech Stack:** program plan stack; UI: React 19, Vite 7 (latest versions ≥ 2 weeks old at install time, recorded in the ledger), no CSS framework unless impeccable's direction calls for one; fonts self-hosted from the brand pack's licensed families (Playfair Display, Inter) plus an Arabic face chosen in the design round.
 
-**Spec:** `docs/plans/2026-10-24-ebda-whatsapp.md` (Phases 2–3 rows, Global Constraints), `PRODUCT.md`, the Store contract (`business/ebda/plans/2026-10-24-ebda-whatsapp-store-contract.md`), and Ahmad's 2026-10-24 confirmations: templates, opt-out, Meta-limit throttle, alarm scheduler; inbox UI with Ebda branding redesigned through impeccable; messaging fast; all on Cloudflare.
+**Spec:** `docs/plans/done/2026-10-24-ebda-whatsapp.md` (Phases 2–3 rows, Global Constraints), `PRODUCT.md`, the Store contract (`business/ebda/plans/2026-10-24-ebda-whatsapp-store-contract.md`), and Ahmad's 2026-10-24 confirmations: templates, opt-out, Meta-limit throttle, alarm scheduler; inbox UI with Ebda branding redesigned through impeccable; messaging fast; all on Cloudflare.
 
 ## Global Constraints
 - Program plan Global Constraints, Phase 1 constraints (identity v1, buyerKey, no PII to logs/Sentry).
