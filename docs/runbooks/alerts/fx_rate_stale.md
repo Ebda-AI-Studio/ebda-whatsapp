@@ -1,7 +1,7 @@
 # fx_rate_stale (P1)
 **Severity:** P1 look today
 ## What it means
-The newest `fx_rates` row was published more than 48 h ago (or there is none). Fields: `newestPublishedAt`, `hours`.
+The newest OBSERVED rate day (`obs_day`, the day the rate describes, not when a row was written) is more than 48 h old, or there is none. Fields: `newestObsDay`, `hours`. A frozen feed (payload dated before yesterday) counts as a failed fetch, so it ends here too.
 ## Impact
 Prices run on an old rate. If EGP weakened meanwhile we under-charge by that drift (the buffer covers part of it).
 ## Check first

@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureSessionCheck } from '../src/core/identity/session';
+import { pullPricing, copyCursor } from '../src/core/billing/pricing';
 import { backfillFx, dailyFx } from '../src/core/billing/fx-daily';
 import { computeFxBuffer } from '../src/core/billing/fx-buffer';
 import { OP1, operatorCall, useApiKey } from './helpers/api';
@@ -35,16 +36,17 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); configureSessionC
 describe('fx backfill', () => {
   it('loads the window as source=backfill; only the NEWEST row carries a computed buffer, the rest are 700 inputs', async () => {
     const m = dated();
-    const r = await backfillFx(env, { days: 60, actor: OP1, reason: 'seed history' }, NOW, m.fn);
-    expect(r).toMatchObject({ requested: 60, fetched: 60, missing: 0, inserted: 60, existing: 0, newestDay: '2026-11-12' });
+    const r = await backfillFx(env, { days: 90, actor: OP1, reason: 'seed history' }, NOW, m.fn);
+    expect(r).toMatchObject({ requested: 90, newestDay: '2026-11-12', existing: 0 });
     const rows = await rowsOf();
-    expect(rows).toHaveLength(60);
+    expect(rows).toHaveLength(r.inserted);
+    expect(r.inserted).toBeGreaterThan(80); // 90 days minus the few the real series lacks
     expect(rows.every((x) => x.source === 'backfill' && x.actor === 'system:fx-backfill')).toBe(true);
     expect(rows.slice(0, -1).every((x) => x.buffer_bps === 700 && x.buffer_mode === 'backfill')).toBe(true);
     const newest = rows.at(-1)!;
     expect(newest.buffer_mode).toBe('computed');
-    // Equals the pure function over the same 60 days with no previous buffer (no fall limit on day 1).
-    const series = rows.map((x) => x.egp_per_usd_micros / 1e6);
+    // Equals the pure function over the same days with no previous buffer (no fall limit on day 1); 90 days is enough for 60 vol windows.
+    const series = rows.map((x) => ({ day: x.obs_day, rate: x.egp_per_usd_micros / 1e6 }));
     expect(newest.buffer_bps).toBe(computeFxBuffer(series, null).bufferBps);
     expect(newest.effective_from).toBe(Date.UTC(2026, 10, 12));
     expect(r.newestBufferBps).toBe(newest.buffer_bps);
@@ -53,31 +55,46 @@ describe('fx backfill', () => {
   it('idempotent: a re-run inserts nothing, fetches nothing, and leaves every row byte-identical', async () => {
     const before = await rowsOf();
     const m = dated();
-    const r = await backfillFx(env, { days: 60, actor: OP1, reason: 'seed history' }, NOW, m.fn);
-    expect(r).toMatchObject({ inserted: 0, fetched: 0, existing: 60 });
-    expect(m.calls).toHaveLength(0);
+    const r = await backfillFx(env, { days: 90, actor: OP1, reason: 'seed history' }, NOW, m.fn);
+    expect(r).toMatchObject({ inserted: 0, fetched: 0, existing: before.length });
+    expect(m.calls).toHaveLength(r.missing); // only the days the real series lacks are asked again; nothing already stored is
     expect(await rowsOf()).toEqual(before);
   });
 
   it('a wider window adds only the missing older days; a day that is absent, or dated differently, is a counted gap, never a row', async () => {
-    const m = dated({ gaps: ['2026-08-20'], wrongDate: ['2026-08-21'] });
-    const r = await backfillFx(env, { days: 120, actor: OP1, reason: 'seed more history' }, NOW, m.fn);
-    const todo = Array.from({ length: 60 }, (_, i) => new Date(Date.UTC(2026, 10, 13) - (120 - i) * 86_400_000).toISOString().slice(0, 10));
-    const natural = todo.filter((d) => !byDay.has(d) && d !== '2026-08-20' && d !== '2026-08-21').length; // days the real series itself lacks
-    expect(r).toMatchObject({ requested: 120, existing: 60, missing: 2 + natural, inserted: 58 - natural });
+    const m = dated({ gaps: ['2026-07-10'], wrongDate: ['2026-07-11'] });
+    const have = (await rowsOf()).length;
+    const r = await backfillFx(env, { days: 150, actor: OP1, reason: 'seed more history' }, NOW, m.fn);
+    const wanted = Array.from({ length: 150 }, (_, i) => new Date(Date.UTC(2026, 10, 13) - (150 - i) * 86_400_000).toISOString().slice(0, 10));
+    const withData = wanted.filter((d) => byDay.has(d) && d !== '2026-07-10' && d !== '2026-07-11');
+    expect(r.inserted).toBe(withData.length - have);
+    expect(r).toMatchObject({ requested: 150, existing: have, missing: 150 - have - r.inserted }); // the two injected gaps are among the missing
+    expect((await rowsOf()).length).toBe(withData.length);
     const days = (await rowsOf()).map((x) => x.obs_day);
-    expect(days).not.toContain('2026-08-20');
-    expect(days).not.toContain('2026-08-21');
-    expect(days).toHaveLength(118 - natural);
+    expect(days).not.toContain('2026-07-10');
+    expect(days).not.toContain('2026-07-11');
     // the newest row on file did not change: older days are inputs only
     expect((await rowsOf()).at(-1)!.buffer_mode).toBe('computed');
   });
 
+  it('backfilled rows are history, never prices: the workspace pricing pull does not receive a single one', async () => {
+    const snap = await pullPricing(env, '00000000-0000-4000-8000-000000007601', { rates: 0, fx: 0, settings: 0, overrides: 0 });
+    expect(snap.fx).toEqual([]);
+    expect((await rowsOf()).length).toBeGreaterThan(100);
+    // a cron row IS priceable and is the only one the pull returns
+    const last = (await rowsOf()).at(-1)!.egp_per_usd_micros / 1e6;
+    const fn = (async () => new Response(JSON.stringify({ date: '2026-11-13', usd: { egp: last } }), { status: 200 })) as typeof fetch;
+    expect(await dailyFx(env, NOW, fn)).toBe('inserted');
+    const after = await pullPricing(env, '00000000-0000-4000-8000-000000007601', { rates: 0, fx: 0, settings: 0, overrides: 0 });
+    expect(after.fx).toHaveLength(1);
+    expect(after.fx[0]!.ver).toBeGreaterThan(100);
+  });
+
   it('the daily cron then continues from the history: today gets a computed buffer (not 700) and keeps the 50 bps fall limit', async () => {
-    const last = (await rowsOf()).at(-1)!;
+    const last = (await rowsOf()).filter((x) => x.obs_day < '2026-11-13').at(-1)!;
     const m = { calls: 0 };
     const fn = (async () => { m.calls++; await sleep(5); return new Response(JSON.stringify({ date: '2026-11-13', usd: { egp: last.egp_per_usd_micros / 1e6 } }), { status: 200 }); }) as typeof fetch;
-    expect(await dailyFx(env, NOW, fn)).toBe('inserted');
+    expect(await dailyFx(env, NOW, fn)).toBe('exists'); // already inserted by the pricing test above (one row per day)
     const today = (await rowsOf()).find((x) => x.obs_day === '2026-11-13')!;
     expect(today.buffer_mode).toBe('computed');
     expect(today.buffer_bps).toBeGreaterThanOrEqual(last.buffer_bps - 50);

@@ -27,38 +27,38 @@ A merchant tops up EGP, Meta invoices USD later; I assume 2 to 4 weeks between t
 
 **Validation.** Zod on each response (`usd.egp` or `result:"success"` + `rates.EGP`, finite, 1..1000). A failing source falls through to the next (jsDelivr, Pages mirror, open.er-api).
 
-**Sanity band 5%** against the newest stored rate (any source, including hand-published). Outside it: no insert, `fx_rate_rejected` (P1) with the observed value (Ruling FX-1: the external fact is recorded in the alert and an operator publishes it by hand if real; I follow Ahmad's "reject + alert" over the memory rule "record, never abort" because no ledger write depends on this row. Cost if wrong: during a real >5% devaluation prices lag until a human publishes, covered only by the buffer). Fetch failure: last rate stays, `fx_fetch_failed` (P1). Newest row published more than 48 h ago, or no row: `fx_rate_stale` (P1).
+**Fresh feeds.** A payload dated before yesterday (UTC) is a failed source. **Sanity band 5%** against the newest stored rate (any source, including hand-published). Outside it: accepted automatically when the OTHER independent provider is fresh and within 1% (Ruling FX-5, `fx_large_move_accepted` P1 with both values; cost if wrong: two feeds sharing an upstream can both be wrong, a human sees the P1 the same day and publishes a correction); otherwise no insert, `fx_rate_rejected` (P1) with both values (Ruling FX-1: the external fact is recorded in the alert and an operator publishes it by hand if real; I follow Ahmad's "reject + alert" over the memory rule "record, never abort" because no ledger write depends on this row. Cost if wrong: during a real >5% devaluation prices lag until a human publishes, covered only by the buffer). Fetch failure: last rate stays, `fx_fetch_failed` (P1). Newest observed day (`obs_day`) more than 48 h old, or no row: `fx_rate_stale` (P1).
 
 **Holds and credits.** A hold is estimated at `now`, the charge is priced at DELIVERY time with the version in effect then (`engine.ts` `priceAt`). A falling rate therefore only lowers a later charge; the hold was reserved at the higher rate and its surplus is released, so we never under-charge on a hold. A rising rate raises the charge above the hold; that existing shortfall path (wallet plus overdraft) is what the buffer is sized for. No code change was needed to keep this invariant; the 24 h lead guarantees a quoted hold is never re-priced mid-flight.
 
 **Buffer (`src/core/billing/fx-buffer.ts`, pure).**
 `buffer = clamp(500, 700, 500 + A x max(0, vol - baseline) + B x max(0, drift))`, A = 1 bps per bps/day, B = 20 bps per percent.
-- vol: sample stdev of the last 14 daily log returns, bps/day. baseline: median of that 14-day vol over the trailing 365 days (46.2 bps/day on the real series).
+- vol: sample stdev of the daily log returns of the last 14 calendar days, bps/day. baseline: median of that 14-day vol over the trailing 365 days (46.2 bps/day on the real series).
 - drift: 14-day % move of EGP per USD, only a rise counts.
-- Jump: a one-day move above 3% sets 700 at once. Hysteresis: it rises at once, falls at most 50 bps a day. Fewer than 14 daily moves of history: 700.
+- Everything over calendar days (a gap day makes a multi-day return, normalised by sqrt(days) for vol, and is never a one-day jump). Jump: a one-day RISE above 3% (signed, like drift) sets 700 at once. Hysteresis: it rises at once, falls at most 50 bps a day, and never exceeds 700 after an unpin (a pin itself may set any value). Fewer than 60 vol windows of history: 700.
 - Stored on each row: `buffer_bps`, `vol_bps`, `drift_pct`, `buffer_mode` (computed / jump / short_history / pinned), `source`.
 - It adds to `pricing_settings.fx_buffer_bps` (existing operator extra, default 0), as `priceAt` already sums them.
 - Pin: `PUT /api/v1/operator/fx-buffer-pin {bufferBps|null, reason}` (append-only table `fx_buffer_pins`, audited); the newest pin replaces the computed value on every later daily row.
 
-**Cold start and backfill.** Without history the first 14 days would run at 700 (the safe default). Decision 2026-11-12 (Ahmad): a one-off, idempotent operator backfill (`POST /fx-backfill`, never automatic) loads up to 365 dated jsDelivr snapshots as `source=backfill` rows; only the newest inserted row gets a computed buffer (previous buffer = none), the older rows are 700-buffer inputs. Ruling FX-4: historical rows are effective at their own day start, so they can price late deliveries of those days (at 700 bps, conservative). Cost if wrong: a late charge for a past day is up to 7% above the plain rate.
+**Cold start and backfill.** Without history the first 14 days would run at 700 (the safe default). Decision 2026-11-12 (Ahmad): a one-off, idempotent operator backfill (`POST /fx-backfill`, never automatic) loads up to 365 dated jsDelivr snapshots as `source=backfill` rows; only the newest inserted row gets a computed buffer (previous buffer = none), the older rows are 700-buffer inputs. Ruling FX-4 (revised after review): backfilled rows are NEVER priceable; `pullPricing` skips `source = backfill`, so the first priced row is the first cron row (effective 24 h after it). Cost if wrong: until that first cron row takes effect there is no FX in a fresh environment (sends defer as `pending_rate`, never free).
 
 ### Calibration on the real 364-day series
-Replayed CAUSALLY, day by day, exactly as the cron would see it (history = rows before that day, baseline = median of the 14-day vol over the history so far, previous buffer = yesterday's). 350 evaluable days (the first 14 build the first window), A = 1, B = 20, with the jump rule and hysteresis:
+Replayed CAUSALLY and over CALENDAR days (the series has 364 points over 366 days; its two gaps are handled as multi-day returns), day by day exactly as the cron would see it (history = rows before that day, baseline = median of the 14-day vol over the history so far, previous buffer = yesterday's). 363 replayed days: the first 68 are `short_history` (700, fewer than 60 vol windows); the other 295 are evaluable. A = 1, B = 20, signed jump, hysteresis, cap 700:
 
-| Buffer | Days |
+| Buffer (295 evaluable days) | Days |
 |---|---|
-| exactly 500 | 36 |
-| 501 to 549 (about 500) | 226 |
+| exactly 500 | 25 |
+| 501 to 549 (about 500) | 180 |
 | 550 to 649 (about 600) | 64 |
-| 650 to 699 | 16 |
+| 650 to 699 | 18 |
 | exactly 700 | 8 |
-| nearest of 500 / 600 / 700 | 262 / 64 / 24 |
+| nearest of 500 / 600 / 700 | 205 / 64 / 26 |
 
-Calm days (vol at or below baseline, 14-day rise under 1%): 59 days, mean 504 bps, max 520. The 3 days with a 14-day rise of 9.5% or more all sit at 700. One jump day (>3%) in the year. Mean buffer 542 bps (509 over the first 60 days while the baseline is still forming, 549 afterwards: the year-long +13% drift keeps the drift term active, which is the point). Hysteresis is why only 36 days sit exactly on 500: after any rise it takes up to 4 days to come back down. With a hindsight baseline (median over the whole year at once) the same A and B give 77 / 191 / 63 / 11 / 8; the causal numbers above are what production would have charged. Larger A (2 to 20) pushed 80 to 115 days to 700 and failed the "calm sits near 500" aim, so A = 1. The calibration is in-sample on one year of one source; A and B are two constants in one file, so recalibrating is cheap.
+Mean 549 bps over the evaluable days. The 3 days with a 14-day rise of 9.5% or more all sit at 700. One jump day (a one-day rise above 3%) in the year. The year-long +13% drift keeps the drift term active, which is the point; hysteresis is why only 25 days sit exactly on 500. With the 365-day backfill the 60-window rule is satisfied at once, so production never runs the 68 short-history days. Larger A (2 to 20) pushed far more days to 700 and failed the "calm sits near 500" aim, so A = 1. In-sample on one year of one source; A and B are two constants in one file.
 
 ## 3. Ruling log
 - Ruling FX-1: see sanity band. Cost if wrong: prices lag a real >5% move until a human publishes.
-- Ruling FX-2 (revised 2026-11-12): staleness is checked by `checkFxStale` from `dailyBilling`, independent of the fetch task. Cost if wrong: if the whole cron trigger dies both stop; the missing `daily_billing` log line is the signal.
+- Ruling FX-2 (revised 2026-11-12): staleness is checked by `checkFxStale` from `dailyBilling`, independent of the fetch task, keyed on the observed day (`obs_day`), plus `/health` fields `fxObsDay` / `fxAgeHours` for the OS watchdog (alert at > 48 h). Cost if wrong: if the whole cron trigger dies both stop; the missing `daily_billing` log line is the signal.
 - Ruling FX-3: manual `POST /fx-rates` rows count for the band and `prev` buffer but not for the volatility history. Cost if wrong: a hand-published odd rate is not in the vol window.
 
 ## 4. Open
