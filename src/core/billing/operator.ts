@@ -95,8 +95,8 @@ export async function publishFx(env: Env, a: { actor: string; effectiveFrom: num
 }
 
 export async function listFx(env: Env) {
-  const { results } = await env.DB.prepare('SELECT ver, effective_from, egp_per_usd_micros, buffer_bps, published_at, actor FROM fx_rates ORDER BY ver DESC LIMIT 50').all<{ ver: number; effective_from: number; egp_per_usd_micros: number; buffer_bps: number; published_at: number; actor: string }>();
-  return results.map((r) => ({ ver: r.ver, effectiveFrom: r.effective_from, egpPerUsdMicros: r.egp_per_usd_micros, bufferBps: r.buffer_bps, publishedAt: r.published_at, actor: r.actor }));
+  const { results } = await env.DB.prepare('SELECT ver, effective_from, egp_per_usd_micros, buffer_bps, published_at, actor, source, vol_bps, drift_pct, buffer_mode FROM fx_rates ORDER BY ver DESC LIMIT 50').all<{ ver: number; effective_from: number; egp_per_usd_micros: number; buffer_bps: number; published_at: number; actor: string; source: string | null; vol_bps: number | null; drift_pct: number | null; buffer_mode: string | null }>();
+  return results.map((r) => ({ ver: r.ver, effectiveFrom: r.effective_from, egpPerUsdMicros: r.egp_per_usd_micros, bufferBps: r.buffer_bps, publishedAt: r.published_at, actor: r.actor, source: r.source, volBps: r.vol_bps, driftPct: r.drift_pct, bufferMode: r.buffer_mode }));
 }
 
 /** Who pays Meta for a number. The brand-neutral name is platform_line; the operator UI may still send the legacy alias. */

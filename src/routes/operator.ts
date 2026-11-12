@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { routePath } from 'hono/route';
 import { z } from 'zod';
 import {
-  fxPublish, instapayReject, operatorKillSwitch, operatorOffboardingRequest, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish, auditLogQuery, exportContactQuery, instapayConfirm, instapayRelease,
+  fxBufferPin, fxPublish, instapayReject, operatorKillSwitch, operatorOffboardingRequest, sharedNumberRegister, operatorAdjustmentCreate, operatorDecision, refundDashboardLink, operatorFundingSet, operatorSubscriptionSet, pricingOverridePublish, pricingSettingsPublish, rateCardPublish, trueupPublish, auditLogQuery, exportContactQuery, instapayConfirm, instapayRelease,
 } from '../core/api/contract';
 import type { Env } from '../env';
 import type { AuthVars } from '../core/identity/middleware';
@@ -12,6 +12,7 @@ import {
   changeLog, decideAdjustment, listAdjustments, listFx, listOverrides, listRateCards, listSettings, publishFx, publishOverride, publishRateCard, publishSettings, publishTrueup,
   requestAdjustment, setFunding,
 } from '../core/billing/operator';
+import { getFxBufferPin, setFxBufferPin } from '../core/billing/fx-daily';
 import { STORE_INCLUDED, setSubscription } from '../core/billing/subscriptions';
 import { executeYearlyRefund, packageRefundQuote } from '../core/billing/package-orders';
 import { currentSharedNumber, registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
@@ -89,6 +90,13 @@ operatorRoutes.post('/fx-rates', async (c) => {
   if (!b.success) return bad(c, b.error.issues[0]?.message);
   const r = await publishFx(c.env, { actor: actor(c), ...b.data });
   return r.ok ? c.json(r.value, 201) : c.json({ error: 'invalid_request', message: r.reason }, 400);
+});
+
+operatorRoutes.get('/fx-buffer-pin', async (c) => c.json(await getFxBufferPin(c.env)));
+operatorRoutes.put('/fx-buffer-pin', async (c) => {
+  const b = fxBufferPin.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, b.error.issues[0]?.message);
+  return c.json(await setFxBufferPin(c.env, { actor: actor(c), ...b.data }));
 });
 
 operatorRoutes.put('/numbers/:phoneNumberId/funding', async (c) => {

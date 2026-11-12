@@ -18,6 +18,7 @@ import { parseSignedRequest, processRequest, recordRequest, requestStatus, statu
 import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
+import { runDailyFx } from './core/billing/fx-daily';
 import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/observability';
 import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
 import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
@@ -388,6 +389,8 @@ export default Sentry.withSentry((env: Env) => {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     bindAlerts({ env, waitUntil: (p) => ctx.waitUntil(p) });
     // The log line is the proof of a real tick (the cron can't be waited on): see docs/runbooks/rollback.md.
+    // The FX pull is its own task (not inside dailyBilling, which tests drive directly): a failure in either never skips the other.
+    ctx.waitUntil(runDailyFx(env));
     ctx.waitUntil(dailyBilling(env).then(() => console.log(JSON.stringify({ cron: 'daily_billing', done: true }))));
   },
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
