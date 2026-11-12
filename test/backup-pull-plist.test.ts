@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const plist = readFileSync('ops/com.ebda.wa-backup-pull.plist', 'utf8');
+const plist = readFileSync(new URL('../ops/com.ebda.wa-backup-pull.plist', import.meta.url), 'utf8');
 
 describe('com.ebda.wa-backup-pull.plist', () => {
   it('puts Homebrew first on PATH (launchd otherwise resolves a hanging /usr/local/bin/npx)', () => {
