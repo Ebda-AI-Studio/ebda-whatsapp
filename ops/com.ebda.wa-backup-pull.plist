@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- NOT installed yet (Ahmad 2026-10-24: no extra Mac load before launch). Install: see docs/runbooks/backup-restore.md -->
+<!-- Installed 2026-11-12 (Ahmad approved M-097). Install: see docs/runbooks/backup-restore.md -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.ebda.wa-backup-pull</string>
@@ -11,6 +11,9 @@
     <string>$HOME/Desktop/projects/Ebda-AI-Studio/internal-projects/ebda-whatsapp/scripts/backup-pull.sh</string>
   </array>
   <key>StartCalendarInterval</key><dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+  <!-- launchd's PATH finds an old /usr/local/bin/npx first, which hangs; Homebrew must come first. -->
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
   <key>StandardOutPath</key><string>/tmp/com.ebda.wa-backup-pull.log</string>
   <key>StandardErrorPath</key><string>/tmp/com.ebda.wa-backup-pull.log</string>
   <key>LowPriorityIO</key><true/>
