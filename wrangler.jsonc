@@ -25,7 +25,7 @@
   // os/ops/ebda-logs.mjs and watched by its prod-watch workflow. The job must also list "ebda-wa" in its ScriptName filter
   // (ebda-store scripts/ops/cf-logs-setup.sh). URLs and console lines land there: never log a phone number or a message body.
   "logpush": true,
-  // One daily pass (Phase 7): re-send subscriptions, repair lost top-up webhooks. No cron shorter than a day.
+  // One daily pass (Phase 7): re-send subscriptions, repair lost top-up webhooks, pull the daily USD->EGP rate (WA-FX-DAILY-1). No cron shorter than a day.
   "triggers": { "crons": ["17 1 * * *"] },
   "vars": {
     "META_GRAPH_VERSION": "v25.0",

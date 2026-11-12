@@ -93,7 +93,7 @@ const P1_ALERTS = new Set([
   'webhook_unconfirmed_abandoned', 'webhook_unconfirmed_aged', 'topup_repair_failed', 'package_repair_failed', 'instapay_repair_failed', 'card_refund_reconcile_failed', 'card_refund_stuck',
   'refund_abandon_sweep_failed', 'instapay_expiry_failed', 'instapay_overdue_check_failed', 'instapay_grant_failed', 'instapay_proof_overdue', 'instapay_amount_mismatch', 'send_enqueue_failed',
   'store_event_failed', 'business_token_unavailable', 'campaign_launch_failed', 'campaign_paused_internal_error', 'campaign_wallet_settle_failed', 'campaign_wallet_unavailable',
-  'shared_sweep_failed', 'shared_template_refresh_failed', 'shared_trueup_not_published', 'pricing_pull_failed', 'pricing_copy_missing', 'queued_period_roll_failed',
+  'shared_sweep_failed', 'shared_template_refresh_failed', 'shared_trueup_not_published', 'fx_fetch_failed', 'fx_rate_rejected', 'fx_large_move_accepted', 'fx_rate_stale', 'pricing_pull_failed', 'pricing_copy_missing', 'queued_period_roll_failed',
   'store_plan_fallback_failed', 'r2_deletes_still_owed', 'scheduled_task_invalid', 'otp_failed', 'import_start_failed', 'import_workflow_failed', 'refund_id_conflict', 'refund_held',
   'refund_held_debited', 'refund_unmatched_no_credit', 'refund_excess_for_review', 'refund_reversal_blocked', 'package_refund_contention', 'package_refund_unmatched', 'package_chargeback',
   'funding_unknown', 'rate_unavailable', 'billing_unpriced_model', 'rate_missing_no_estimate', 'bot_turn_abandoned', 'media_fetch_abandoned', 'agent_model_failed', 'wallet_wait_expired',

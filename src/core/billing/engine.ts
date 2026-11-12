@@ -453,9 +453,12 @@ export class Billing {
     if (bs.category_meta === bs.charged_category) return;
     const price = priceAt(this.sql, { country: bs.country ?? 'ROW', category: bs.category_meta, t: bs.delivered_at });
     if (!price) return;
-    const oldPrice = priceAt(this.sql, { country: bs.country ?? 'ROW', category: bs.charged_category ?? bs.category_meta, t: bs.delivered_at });
-    const diffNet = price.netMinor - (oldPrice?.netMinor ?? 0);
-    const diffVat = price.vatMinor - (oldPrice?.vatMinor ?? 0);
+    // The old price is what was ACTUALLY charged (charged_minor, and the VAT posted on the ledger), never a re-price: pricing inputs may have gained a version since.
+    const posted = this.sql.exec<{ net: number; vat: number }>("SELECT coalesce(sum(net_minor), 0) AS net, coalesce(sum(vat_minor), 0) AS vat FROM wallet_ledger WHERE wamid = ? AND kind IN ('meta_charge', 'meta_adjust')", wamid).one();
+    const oldAmount = bs.charged_minor ?? -(posted.net + posted.vat);
+    const oldVat = -posted.vat;
+    const diffNet = price.netMinor - (oldAmount - oldVat);
+    const diffVat = price.vatMinor - oldVat;
     if (diffNet + diffVat !== 0) {
       this.post({
         kind: 'meta_adjust', netMinor: -diffNet, vatMinor: -diffVat, ref: `adj:${wamid}:${bs.category_meta}`, now: bs.delivered_at, wamid, category: bs.category_meta,

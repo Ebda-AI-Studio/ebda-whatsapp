@@ -18,6 +18,7 @@ import { parseSignedRequest, processRequest, recordRequest, requestStatus, statu
 import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
+import { checkFxStale, fxHealth, runDailyFx } from './core/billing/fx-daily';
 import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/observability';
 import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
 import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
@@ -228,7 +229,7 @@ app.get('/health', async (c) => {
   // D4: a value DERIVED from SUITE_BUYER_KEY_SECRET (16 hex of an HMAC over a fixed non-phone string, see buyer-key.ts), so scripts/verify-prod.mjs can prove it equals Ebda Store's
   // without the secret leaving either Worker. Absent when the secret is unset or shorter than MIN_PROBE_SECRET_LENGTH.
   const secret = c.env.SUITE_BUYER_KEY_SECRET;
-  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(await buyerKeyProbe(secret ?? '').then((buyerKeyVector) => ({ buyerKeyVector }), () => ({}))) });
+  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(await fxHealth(c.env)), ...(await buyerKeyProbe(secret ?? '').then((buyerKeyVector) => ({ buyerKeyVector }), () => ({}))) });
 });
 
 // B9: Meta's data-deletion callback and its status page (public; the signed request is the authentication).
@@ -357,6 +358,8 @@ app.post('/meta/webhook', async (c) => {
 
 /** The daily control-plane pass. Each step is independent: one failing never skips the rest. */
 export async function dailyBilling(env: Env): Promise<void> {
+  // Independent of the fetch job (src/core/billing/fx-daily.ts): the staleness alarm must still fire when the fetch is what broke.
+  await checkFxStale(env).catch((err) => alert('fx_fetch_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileEntitlements(env).catch((err) => alert('entitlement_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairTopups(env).catch((err) => alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconfirmUnconfirmed(env).catch((err) => alert('webhook_reconfirm_failed', { error: err instanceof Error ? err.name : 'error' }));
@@ -388,6 +391,8 @@ export default Sentry.withSentry((env: Env) => {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     bindAlerts({ env, waitUntil: (p) => ctx.waitUntil(p) });
     // The log line is the proof of a real tick (the cron can't be waited on): see docs/runbooks/rollback.md.
+    // The FX pull is its own task (not inside dailyBilling, which tests drive directly): a failure in either never skips the other.
+    ctx.waitUntil(runDailyFx(env));
     ctx.waitUntil(dailyBilling(env).then(() => console.log(JSON.stringify({ cron: 'daily_billing', done: true }))));
   },
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
