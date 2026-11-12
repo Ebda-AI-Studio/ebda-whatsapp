@@ -18,7 +18,7 @@ import { parseSignedRequest, processRequest, recordRequest, requestStatus, statu
 import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
-import { runDailyFx } from './core/billing/fx-daily';
+import { checkFxStale, runDailyFx } from './core/billing/fx-daily';
 import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/observability';
 import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
 import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
@@ -358,6 +358,8 @@ app.post('/meta/webhook', async (c) => {
 
 /** The daily control-plane pass. Each step is independent: one failing never skips the rest. */
 export async function dailyBilling(env: Env): Promise<void> {
+  // Independent of the fetch job (src/core/billing/fx-daily.ts): the staleness alarm must still fire when the fetch is what broke.
+  await checkFxStale(env).catch((err) => alert('fx_fetch_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileEntitlements(env).catch((err) => alert('entitlement_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairTopups(env).catch((err) => alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconfirmUnconfirmed(env).catch((err) => alert('webhook_reconfirm_failed', { error: err instanceof Error ? err.name : 'error' }));

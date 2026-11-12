@@ -7,7 +7,7 @@ Prices run on an old rate. If EGP weakened meanwhile we under-charge by that dri
 ## Check first
 Read the alert fields, then follow the steps under Fix.
 ## Fix
-1. Look for `fx_fetch_failed` / `fx_rate_rejected` in the last days: they are the cause. 2. Check the cron ran (`{"cron":"daily_billing","done":true}` in the logs, docs/runbooks/rollback.md). 3. Publish by hand with `POST /api/v1/operator/fx-rates` if the cause will not clear today. Residual: this check runs inside the daily cron, so a dead cron is caught by the missing `daily_billing` log line, not by this alert.
+1. Look for `fx_fetch_failed` / `fx_rate_rejected` in the last days: they are the cause. 2. Check the cron ran (`{"cron":"daily_billing","done":true}` in the logs, docs/runbooks/rollback.md). 3. Publish by hand with `POST /api/v1/operator/fx-rates` if the cause will not clear today. The check runs from `dailyBilling`, independent of the fetch job; if the whole cron is dead no alert fires, the missing `daily_billing` log line is the signal.
 ## Verify it is resolved
 A new row, and no further `fx_rate_stale`.
 ## Related

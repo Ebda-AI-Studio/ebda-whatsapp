@@ -40,7 +40,7 @@ A merchant tops up EGP, Meta invoices USD later; I assume 2 to 4 weeks between t
 - It adds to `pricing_settings.fx_buffer_bps` (existing operator extra, default 0), as `priceAt` already sums them.
 - Pin: `PUT /api/v1/operator/fx-buffer-pin {bufferBps|null, reason}` (append-only table `fx_buffer_pins`, audited); the newest pin replaces the computed value on every later daily row.
 
-**Cold start.** History is cron rows only, so the first 14 days run at 700 (the specified safe default). No backfill is built (the dated jsDelivr snapshots would allow one; Ahmad can ask).
+**Cold start and backfill.** Without history the first 14 days would run at 700 (the safe default). Decision 2026-11-12 (Ahmad): a one-off, idempotent operator backfill (`POST /fx-backfill`, never automatic) loads up to 365 dated jsDelivr snapshots as `source=backfill` rows; only the newest inserted row gets a computed buffer (previous buffer = none), the older rows are 700-buffer inputs. Ruling FX-4: historical rows are effective at their own day start, so they can price late deliveries of those days (at 700 bps, conservative). Cost if wrong: a late charge for a past day is up to 7% above the plain rate.
 
 ### Calibration on the real 364-day series
 Replayed CAUSALLY, day by day, exactly as the cron would see it (history = rows before that day, baseline = median of the 14-day vol over the history so far, previous buffer = yesterday's). 350 evaluable days (the first 14 build the first window), A = 1, B = 20, with the jump rule and hysteresis:
@@ -58,7 +58,7 @@ Calm days (vol at or below baseline, 14-day rise under 1%): 59 days, mean 504 bp
 
 ## 3. Ruling log
 - Ruling FX-1: see sanity band. Cost if wrong: prices lag a real >5% move until a human publishes.
-- Ruling FX-2: staleness is checked inside the same cron. Cost if wrong: a dead cron is not caught by this alert (caught by the missing `daily_billing` log line, documented in billing.md).
+- Ruling FX-2 (revised 2026-11-12): staleness is checked by `checkFxStale` from `dailyBilling`, independent of the fetch task. Cost if wrong: if the whole cron trigger dies both stop; the missing `daily_billing` log line is the signal.
 - Ruling FX-3: manual `POST /fx-rates` rows count for the band and `prev` buffer but not for the volatility history. Cost if wrong: a hand-published odd rate is not in the vol window.
 
 ## 4. Open

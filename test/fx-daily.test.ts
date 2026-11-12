@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureSessionCheck } from '../src/core/identity/session';
-import { FX_BAND_PCT, dailyFx, fetchEgpPerUsd, getFxBufferPin, setFxBufferPin } from '../src/core/billing/fx-daily';
+import { FX_BAND_PCT, checkFxStale, dailyFx, fetchEgpPerUsd, getFxBufferPin, setFxBufferPin } from '../src/core/billing/fx-daily';
+import { dailyBilling } from '../src/index';
 import { OP1, operatorCall, useApiKey } from './helpers/api';
 
 useApiKey();
@@ -91,18 +92,43 @@ describe('dailyFx: append-only daily row', () => {
     expect((await all()).at(-1)).toMatchObject({ buffer_mode: 'short_history', buffer_bps: 700 });
   });
 
-  it('stale fallback: every source failing keeps the last rate, alerts fx_fetch_failed, and fx_rate_stale fires only past 48 h', async () => {
+  it('stale fallback: every source failing keeps the last rate and alerts fx_fetch_failed; never an insert on failure', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const n = (await all()).length;
     const newest = (await all()).at(-1)!.published_at;
     const dead = mockFetch(() => new Response('down', { status: 503 }));
     expect(await dailyFx(env, newest + 47 * HOUR, dead.fn)).toBe('fetch_failed');
     expect(errLines().some((l) => l.includes('fx_fetch_failed'))).toBe(true);
-    expect(errLines().some((l) => l.includes('fx_rate_stale'))).toBe(false);
-    expect(await dailyFx(env, newest + 49 * HOUR, dead.fn)).toBe('fetch_failed');
-    expect(errLines().some((l) => l.includes('fx_rate_stale'))).toBe(true);
-    expect(await all()).toHaveLength(n); // never an insert on failure
+    expect(await all()).toHaveLength(n);
     spy.mockRestore();
+  });
+
+  it('staleness alarm: fires only past 48 h of the newest row, and is independent of the fetch job', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const newest = (await all()).at(-1)!.published_at;
+    await checkFxStale(env, newest + 47 * HOUR);
+    expect(errLines().some((l) => l.includes('fx_rate_stale'))).toBe(false);
+    await checkFxStale(env, newest + 49 * HOUR);
+    expect(errLines().some((l) => l.includes('fx_rate_stale'))).toBe(true);
+    spy.mockRestore();
+  });
+
+  it('dailyBilling runs the staleness check on its own: with the network dead and the rows old it still alarms, and it makes no FX request', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const net = vi.fn(async (_u: unknown) => { await sleep(10); throw new Error('network down'); });
+    vi.stubGlobal('fetch', net);
+    const newest = (await all()).at(-1)!.published_at;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(newest + 49 * HOUR);
+    try {
+      await dailyBilling(env);
+      expect(errLines().some((l) => l.includes('fx_rate_stale'))).toBe(true);
+      expect(net.mock.calls.filter(([u]) => /currency-api|er-api/.test(String(u)))).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      spy.mockRestore();
+    }
   });
 
   it('falls back to open.er-api when the primary hosts fail, and records the source', async () => {

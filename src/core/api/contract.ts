@@ -579,6 +579,7 @@ export const rateCardPublish = z.object({
   reason: z.string().trim().min(5).max(500),
 });
 export const fxBufferPin = z.object({ bufferBps: z.number().int().min(0).max(10_000).nullable(), reason: z.string().trim().min(5).max(500) });
+export const fxBackfill = z.object({ days: z.number().int().min(1).max(400).default(365), reason: z.string().trim().min(5).max(500) });
 export const fxPublish = z.object({ effectiveFrom: z.number().int().positive(), egpPerUsdMicros: z.number().int().min(1).max(1_000_000_000_000), bufferBps: z.number().int().min(0).max(10_000).default(0), reason: z.string().trim().min(5).max(500) });
 export const operatorFundingSet = z.object({ funding: z.enum(['merchant_card', 'platform_line']), reason: z.string().trim().min(5).max(500) });
 export const operatorSubscriptionSet = z.object({ packageId: z.string().min(1).max(64), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int().positive(), reason: z.string().trim().min(5).max(500) });
