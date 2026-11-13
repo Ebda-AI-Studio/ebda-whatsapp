@@ -1,4 +1,4 @@
-import { ArrowRight, Check, CheckCheck, ChevronUp, Clock, FileText, Paperclip, Send, Sparkles, TriangleAlert } from 'lucide-react';
+import { ArrowRight, Check, CheckCheck, ChevronUp, Clock, FileText, Mic, Paperclip, Send, Sparkles, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ConversationDto, MessageDto, OrderSummaryDto, TemplateDto } from '../../../src/core/api/contract';
 import type { Lang, Strings } from '../i18n';
@@ -81,6 +81,8 @@ export function ChatPane({ t, lang, now, conversation, source, userNames, curren
           return [sep, (
             <div key={m.id} className={`bubble ${m.direction}`} data-client-id={m.clientId ?? undefined}>
               {m.media && <MediaView t={t} media={m.media} source={source} />}
+              {m.voice === 'not_transcribed' && <span className="voice-mark" data-voice="not_transcribed">{t.voiceNotTranscribed}</span>}
+              {m.voice === 'transcribed' && <span className="voice-mark" data-voice="transcribed"><Mic size={12} aria-hidden />{t.voiceTranscript}</span>}
               {m.text && <bdi dir="auto" className="text">{fullText[m.id] ?? m.text}</bdi>}
               {m.author === 'agent' && <span className="ai-mark"><Sparkles size={12} aria-hidden />{t.agentReply}</span>}
               {m.hasLongBody && fullText[m.id] === undefined && source.longBody && (

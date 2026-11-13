@@ -267,6 +267,8 @@ textarea { caret-color: var(--gold-ink); }
 .human-chip { font-size: 12px; color: var(--warn); background: #fbf1e4; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .human-banner { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 10px 20px; background: #fbf1e4; color: var(--warn); border-bottom: 1px solid var(--line); font-size: 14px; }
 .ai-mark { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--gold-ink); margin-top: 2px; }
+.voice-mark { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; opacity: 0.75; margin-top: 2px; }
+.voice-mark[data-voice="not_transcribed"] { font-style: italic; }
 @media (max-width: 819px) { .screen { grid-column: 1 / -1; } .settings { padding: 18px 16px 40px; } .screen-head { padding: 14px 16px; } }
 
 /* Campaigns + contacts (Phase 6) */

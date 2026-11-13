@@ -7,7 +7,7 @@
 import { isSuspended } from '../numbers/health';
 import { WINDOW_MS } from '../dto';
 import { errClass, alert } from '../observability';
-import { turnGone, orderingActive, runBotTurnLocked, type BotInput } from '../ordering/bot';
+import { turnGone, orderingActive, runBotTurnLocked, serialisedTurn, type BotInput } from '../ordering/bot';
 import type { SendJob } from '../send-queue';
 import { bridgeFor } from '../store-link';
 import type { LinkHost } from '../store-link/host';
@@ -26,6 +26,8 @@ import { getAgentState, promisePolicyOf, providerFor, putAgentState, readAgentSe
 import { MAX_CALLS_PER_ROUND, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_ROUNDS, runTool, toolDefs, type ToolContext } from './tools';
 import { maskForModel } from './mask';
 import { guardReply, Trusted } from './reply-guard';
+import { transcribeVoiceNote } from './transcribe';
+import { botMaySpeak } from './gates';
 
 export const AGENT_MAX_TOKENS = 450;
 /** One credit buys at most this many model calls: up to MAX_TOOL_ROUNDS rounds that use tools, then the last call that must answer (M-084). */
@@ -63,11 +65,11 @@ const windowOpen = (host: LinkHost, waId: string, now: number): boolean => {
   return !!r?.last_inbound_at && r.last_inbound_at * 1000 + WINDOW_MS > now;
 };
 
-/** AI turns this customer used in the last 24 h (answered, ordered or handed over by the model; the cap's own handoff and text-only notes are free). */
+/** AI turns this customer used in the last 24 h (answered, ordered or handed over by the model, and a voice note that could not be transcribed: the speech model was paid for it; the cap's own handoff, text-only notes and notes refused before any model call are free). */
 function turnsUsed(host: LinkHost, waId: string, now: number): number {
   return host.sql.exec<{ n: number }>(
     `SELECT count(*) AS n FROM agent_turns t JOIN messages m ON m.id = t.message_id JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
-     WHERE ct.wa_id = ? AND t.at > ? AND t.outcome NOT IN ('text_only', 'handoff:turn_cap')`,
+     WHERE ct.wa_id = ? AND t.at > ? AND t.outcome NOT IN ('text_only', 'handoff:turn_cap', 'voice_declined')`,
     waId, now - 86_400_000,
   ).one().n;
 }
@@ -263,7 +265,8 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
   }
   if (turnGone(host, input)) return;
   if (!windowOpen(host, input.from, now)) return; // AI replies (the text-only note included) only inside the 24 h window
-  if (input.type !== 'text' || !input.text) {
+  const isVoice = input.type === 'audio';
+  if (!isVoice && (input.type !== 'text' || !input.text)) {
     if (await sayNow(host, input, 'textonly', copy.t.textOnly[locale], now)) host.storage.transactionSync(() => recordTurn(host, input, 'text_only', now));
     return;
   }
@@ -295,24 +298,69 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     let answered = 0;
     let inputTokens = 0;
     let outputTokens = 0;
+    let audioMs = 0;
     const startedAt = Date.now();
-    const turnPoint = (outcome: string) => markAiTurn(host.env, host.workspaceId, { outcome, inputTokens, outputTokens, rounds: answered, ms: Date.now() - startedAt, credits: real.byoKey || answered === 0 ? 0 : AI_TURN_CREDITS, costEgpMicros: answered === 0 ? 0 : recordTurnCost(host, { inputTokens, outputTokens }, real.byoKey, Date.now()) });
+    const turnPoint = (outcome: string) => markAiTurn(host.env, host.workspaceId, { outcome, inputTokens, outputTokens, rounds: answered, ms: Date.now() - startedAt, credits: real.byoKey || answered === 0 ? 0 : AI_TURN_CREDITS, costEgpMicros: answered === 0 && audioMs === 0 ? 0 : recordTurnCost(host, { inputTokens, outputTokens, audioMs }, real.byoKey, Date.now()) });
     // Hold times use the real clock: a turn can outlast the moment it started. Each round tells the hold the turn is still alive.
     const provider: LlmProvider = { byoKey: real.byoKey, complete: async (r) => { if (!real.byoKey) heartbeatHold(host.sql, holdRef, Date.now()); const out = await real.complete(r); answered++; inputTokens += out.usage?.inputTokens ?? 0; outputTokens += out.usage?.outputTokens ?? 0; return out; } };
     const finishHold = () => {
       if (real.byoKey) return;
       host.storage.transactionSync(() => (answered > 0 ? settleHold(host.sql, holdRef, Date.now(), host.workspaceId) : releaseHold(host.sql, holdRef, Date.now())));
     };
+    // A voice note is heard first (once), then it is a text turn like any other: the transcript is the message's text. The hold above is given back on every exit.
+    let heard: BotInput = input;
+    let heardLocale = locale;
+    if (isVoice) {
+      let v;
+      try {
+        v = await transcribeVoiceNote(host, input, settings.language);
+      } catch (err) {
+        finishHold();
+        throw err; // the file is not stored yet: the scheduler retries the turn
+      }
+      // The speech model may have been billed on every path below: the audio cost is recorded even when no answer follows.
+      if (v.kind === 'gone') {
+        audioMs = v.audioMs ?? 0;
+        finishHold();
+        if (audioMs) turnPoint('voice_gone');
+        return;
+      }
+      if (v.kind !== 'text') {
+        audioMs = v.kind === 'failed' ? (v.audioMs ?? 0) : 0;
+        finishHold();
+        if (audioMs) turnPoint('voice_failed');
+        const outcome = v.kind === 'declined' ? 'voice_declined' : 'voice_failed';
+        const said = host.storage.transactionSync(() => {
+          if (turnGone(host, input)) return false;
+          storeReplies(host, input, [{ key: `${keyPrefix(input)}voice`, text: (v.kind === 'declined' ? copy.t.voiceDeclined : copy.t.voiceFailed)[locale] }], now);
+          recordTurn(host, input, outcome, now);
+          return true;
+        });
+        if (said) await deliverStored(host, input);
+        return;
+      }
+      audioMs = v.audioMs;
+      heard = { ...input, type: 'text', text: v.text.slice(0, 1024) };
+      heardLocale = localeFor(settings, v.text);
+      if (isHumanRequest(v.text)) {
+        finishHold();
+        turnPoint('handoff:asked');
+        return await handoff(host, heard, 'asked', heardLocale, now);
+      }
+    }
     let outcome: Outcome;
     const turn = { trusted: new Trusted(), system: '' };
     try {
-      outcome = await converse(host, input, provider, settings, locale, now, await retrieveKnowledge(host, input.text ?? ''), turn);
+      outcome = await converse(host, heard, provider, settings, heardLocale, now, await retrieveKnowledge(host, heard.text ?? ''), turn);
     } catch (err) {
       finishHold();
-      if (err instanceof Aborted) return;
+      if (err instanceof Aborted) {
+        if (audioMs) turnPoint('aborted');
+        return;
+      }
       turnPoint('error');
       alert('agent_model_failed', { workspace: host.workspaceId, error: errClass(err) });
-      return await handoff(host, input, 'provider_error', locale, now);
+      return await handoff(host, input, 'provider_error', heardLocale, now);
     }
     finishHold();
     if (outcome.kind === 'reply') {
@@ -324,13 +372,13 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
       }
     }
     turnPoint(outcome.kind === 'handoff' ? `handoff:${outcome.reason}` : outcome.kind);
-    if (outcome.kind === 'handoff') return await handoff(host, input, outcome.reason, locale, now);
+    if (outcome.kind === 'handoff') return await handoff(host, input, outcome.reason, heardLocale, now);
     if (outcome.kind === 'order') {
       host.storage.transactionSync(() => {
         if (turnGone(host, input)) throw new Aborted();
         recordTurn(host, input, 'order', now);
       });
-      return await runBotTurnLocked(host, input, now, { restart: true });
+      return await runBotTurnLocked(host, heard, now, { restart: true });
     }
     host.storage.transactionSync(() => {
       if (turnGone(host, input)) throw new Aborted();
@@ -342,4 +390,30 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
   } catch (err) {
     if (!(err instanceof Aborted)) throw err; // a storage or send failure: the scheduler retries the task
   }
+}
+
+/**
+ * The last attempt of a voice note's turn failed (its file never reached R2): mark it not transcribed and ask the customer to type, once.
+ * Same guards as a normal turn: a finished turn, an erased customer, a closed 24 h window, a suspended or unpaid store, a handoff or closed hours send nothing.
+ */
+export async function abandonVoiceTurn(host: LinkHost, input: BotInput, now: number): Promise<void> {
+  const copy = agentConfig().copy;
+  if (!copy || !agentActive(host)) return;
+  await serialisedTurn(host, input.from, async () => {
+    if (host.sql.exec('SELECT 1 FROM agent_turns WHERE message_id = ?', input.messageId).toArray().length) return;
+    if (turnGone(host, input) || !windowOpen(host, input.from, now)) return;
+    // Only a note that was never heard is "couldn't hear you": a transcribed one failed later (storing or sending) and the customer is not told otherwise.
+    if (host.sql.exec<{ voice_state: string | null }>('SELECT voice_state FROM messages WHERE id = ?', input.messageId).toArray()[0]?.voice_state === 'ok') return;
+    // The router's gates: no package, a person on the conversation or closed shop hours stop this message too.
+    if (!botMaySpeak(host, input.from, now)) { host.recordVoice(input.messageId, null); return; }
+    host.recordVoice(input.messageId, null);
+    const locale = localeFor(readAgentSettings(host.sql), null);
+    const said = host.storage.transactionSync(() => {
+      if (turnGone(host, input)) return false;
+      storeReplies(host, input, [{ key: `${keyPrefix(input)}voice`, text: copy.t.voiceFailed[locale] }], now);
+      recordTurn(host, input, 'voice_failed', now);
+      return true;
+    });
+    if (said) await deliverStored(host, input);
+  });
 }

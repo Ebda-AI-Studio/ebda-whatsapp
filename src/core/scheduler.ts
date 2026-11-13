@@ -15,6 +15,12 @@ export type DueTask = { id: number; kind: TaskKind; due_at: number; payload: str
 /** 30 s, 1 min, 2 min … capped at 1 h. `attempts` counts failures including the one just recorded. */
 export const backoffMs = (attempts: number): number => Math.min(30_000 * 2 ** Math.min(attempts - 1, 20), 3_600_000);
 
+/** A failure whose cause is known to clear fast: the FIRST retry waits `ms` instead of the 30 s backoff step (later retries keep the normal ladder). */
+export class QuickRetryError extends Error {
+  constructor(message: string, readonly ms: number) { super(message); }
+}
+export const retryDelayMs = (err: unknown, attempts: number): number => (err instanceof QuickRetryError && attempts === 1 ? err.ms : backoffMs(attempts));
+
 export function addTask(sql: SqlStorage, kind: TaskKind, dueAt: number, payload?: unknown): void {
   const body = payload === undefined ? null : JSON.stringify(payload);
   if (SINGLETONS.has(kind)) {

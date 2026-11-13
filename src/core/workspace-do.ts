@@ -21,7 +21,7 @@ import { detectOptOutMessage, matchOptIn } from './consent';
 import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
 import { writeSessionState } from './identity/session';
-import { DAILY_KINDS, addTask, dailyHour, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
+import { DAILY_KINDS, addTask, dailyHour, retryDelayMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText, phoneDigits } from './text-normalise';
 import { conversationDto, type ConversationRow } from './dto';
@@ -47,6 +47,7 @@ import { funnelOnce } from './funnel';
 import { digestCounts, digestEnabled, setDigestEnabled } from './digest';
 import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
+import { abandonVoiceTurn } from './ai/agent';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
 import { OTP_RATE_WINDOW_MS } from './otp-policy';
@@ -1094,6 +1095,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       ensureConversation: (waId, now, profileName) => this.ensureConversation(waId, now, profileName),
       insertOutbound: (conversationId, row, now) => this.insertOutbound(conversationId, row, now),
       emitConversationUpdated: (id) => this.emitConversationUpdated(id),
+      recordVoice: (id, transcript) => this.recordVoice(id, transcript),
       arm: () => this.arm(),
       eraseContact: (waId) => this.eraseContact(waId),
       deliver: (job) => this.deliverNow(job),
@@ -1833,6 +1835,20 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (row) this.recordEvent({ type: 'message.created', conversationId: row.conversation_id, message: messageDto(row, this.workspaceId) });
   }
 
+  /** Voice note outcome (see LinkHost.recordVoice). The transcript is stored like typed text: body, preview, search index. */
+  private recordVoice(messageId: number, transcript: string | null): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      const cur = this.sql.exec<{ voice_state: string | null }>('SELECT voice_state FROM messages WHERE id = ?', messageId).toArray()[0];
+      if (!cur) return false; // erased meanwhile
+      if (cur.voice_state) return true; // first write wins (a retried task never rewrites it)
+      const preview = transcript ? previewOf(transcript) : null;
+      this.sql.exec('UPDATE messages SET voice_state = ?, body = ?, preview = ?, updated_at = ? WHERE id = ?', transcript ? 'ok' : 'failed', transcript, preview, Date.now(), messageId);
+      this.indexMessage(messageId, preview);
+      this.emitMessageCreated(messageId);
+      return true;
+    });
+  }
+
   private emitMessageStatus(messageId: number): void {
     const m = this.sql.exec<{ conversation_id: number; status: string | null; error_code: number | null }>('SELECT conversation_id, status, error_code FROM messages WHERE id = ?', messageId).toArray()[0];
     if (m?.status) this.recordEvent({ type: 'message.status', conversationId: m.conversation_id, messageId, status: m.status, errorCode: m.error_code });
@@ -2144,7 +2160,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         } catch (err) {
           failed++;
           const attempts = t.attempts + 1;
-          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', attempts, now + backoffMs(attempts), safeMessage(err), t.id, t.kind);
+          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', attempts, now + retryDelayMs(err, attempts), safeMessage(err), t.id, t.kind);
           alert(`${t.kind}_failed`, { workspace: this.workspaceId, attempts, error: errClass(err) });
         }
       }
@@ -2232,6 +2248,8 @@ export class WorkspaceDO extends DurableObject<Env> {
           // Give up quietly after a few tries: the customer can simply write again.
           if (attempts + 1 < BOT_TURN_MAX_ATTEMPTS) throw err;
           alert('bot_turn_abandoned', { workspace: this.workspaceId, attempts: attempts + 1, error: errClass(err) });
+          // A voice note whose file never arrived is never dropped silently: the inbox says so and the customer is asked to type.
+          if (input.data.type === 'audio') await abandonVoiceTurn(this.host(), input.data, now).catch(() => undefined);
         }
         return undefined;
       }

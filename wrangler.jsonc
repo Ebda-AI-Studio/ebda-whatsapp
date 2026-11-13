@@ -38,6 +38,8 @@
     // Workers AI price of the default model @cf/meta/llama-3.3-70b-instruct-fp8-fast, USD per million tokens; verified 2026-10-27 against https://developers.cloudflare.com/workers-ai/platform/pricing/
     "AI_PRICE_INPUT_USD_PER_M": "0.293",
     "AI_PRICE_OUTPUT_USD_PER_M": "2.253",
+    // Voice-note speech-to-text @cf/openai/whisper-large-v3-turbo, USD per audio minute; verified 2026-11-12 against https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/ (46.63 neurons/min). Var VOICE_DAILY_CAP (default 60) = voice notes one store may have transcribed per UTC day.
+    "AI_STT_PRICE_USD_PER_MIN": "0.000513",
     "SUPPORT_EMAIL": "ahlan@ebda.app",
     // This Worker's public origin: tracked campaign links and Store proof links are built on it.
     "PUBLIC_BASE_URL": "https://wa.ebda.app",

@@ -39,6 +39,8 @@ export const messageDto = z.object({
   at: z.number().int(), // epoch ms
   /** Who wrote an outgoing message, so the inbox can mark it (additive; absent = a person or a system message). */
   author: z.enum(['agent', 'bot', 'staff', 'app']).nullable().optional(),
+  /** An inbound voice note the agent heard: its `text` is the transcript ('transcribed'), or it could not be heard ('not_transcribed'). Absent = not a voice note the agent handled. */
+  voice: z.enum(['transcribed', 'not_transcribed']).optional(),
 });
 
 export const conversationDto = z.object({
