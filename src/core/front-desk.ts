@@ -114,6 +114,12 @@ function awayStillWaiting(host: Pick<LinkHost, 'sql'>, waId: string): boolean {
   return !!r && !['accepted', 'sent', 'delivered', 'read', 'failed'].includes(r.status);
 }
 
+/** Pure twin of runHoursGate's first and last decisions: false while the shop is closed and takes no orders then (the bot and agent send nothing but the away message). */
+export function hoursAllowBot(host: Pick<LinkHost, 'sql'>, now: number): boolean {
+  const hours = readSettings(host).hours;
+  return !storeLink().copy || isOpen(hours, now) || hours.ordersWhileClosed;
+}
+
 /**
  * Business hours. While the shop is closed, the first message of the closed period gets the merchant's away message (once per
  * customer per period: the period is named by the moment the shop next opens). 'stop' = the away message replaces the bot and agent.

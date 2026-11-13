@@ -21,7 +21,7 @@ import { detectOptOutMessage, matchOptIn } from './consent';
 import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
 import { writeSessionState } from './identity/session';
-import { DAILY_KINDS, addTask, dailyHour, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
+import { DAILY_KINDS, addTask, dailyHour, retryDelayMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText, phoneDigits } from './text-normalise';
 import { conversationDto, type ConversationRow } from './dto';
@@ -2160,7 +2160,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         } catch (err) {
           failed++;
           const attempts = t.attempts + 1;
-          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', attempts, now + backoffMs(attempts), safeMessage(err), t.id, t.kind);
+          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', attempts, now + retryDelayMs(err, attempts), safeMessage(err), t.id, t.kind);
           alert(`${t.kind}_failed`, { workspace: this.workspaceId, attempts, error: errClass(err) });
         }
       }

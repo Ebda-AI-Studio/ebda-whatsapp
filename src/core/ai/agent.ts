@@ -27,6 +27,7 @@ import { MAX_CALLS_PER_ROUND, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_ROUNDS, runTool,
 import { maskForModel } from './mask';
 import { guardReply, Trusted } from './reply-guard';
 import { transcribeVoiceNote } from './transcribe';
+import { botMaySpeak } from './gates';
 
 export const AGENT_MAX_TOKENS = 450;
 /** One credit buys at most this many model calls: up to MAX_TOOL_ROUNDS rounds that use tools, then the last call that must answer (M-084). */
@@ -64,11 +65,11 @@ const windowOpen = (host: LinkHost, waId: string, now: number): boolean => {
   return !!r?.last_inbound_at && r.last_inbound_at * 1000 + WINDOW_MS > now;
 };
 
-/** AI turns this customer used in the last 24 h (answered, ordered or handed over by the model; the cap's own handoff and text-only notes are free). */
+/** AI turns this customer used in the last 24 h (answered, ordered or handed over by the model, and a voice note that could not be transcribed: the speech model was paid for it; the cap's own handoff, text-only notes and notes refused before any model call are free). */
 function turnsUsed(host: LinkHost, waId: string, now: number): number {
   return host.sql.exec<{ n: number }>(
     `SELECT count(*) AS n FROM agent_turns t JOIN messages m ON m.id = t.message_id JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
-     WHERE ct.wa_id = ? AND t.at > ? AND t.outcome NOT IN ('text_only', 'handoff:turn_cap', 'voice_declined', 'voice_failed')`,
+     WHERE ct.wa_id = ? AND t.at > ? AND t.outcome NOT IN ('text_only', 'handoff:turn_cap', 'voice_declined')`,
     waId, now - 86_400_000,
   ).one().n;
 }
@@ -317,9 +318,17 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
         finishHold();
         throw err; // the file is not stored yet: the scheduler retries the turn
       }
-      if (v.kind === 'gone') return finishHold();
-      if (v.kind !== 'text') {
+      // The speech model may have been billed on every path below: the audio cost is recorded even when no answer follows.
+      if (v.kind === 'gone') {
+        audioMs = v.audioMs ?? 0;
         finishHold();
+        if (audioMs) turnPoint('voice_gone');
+        return;
+      }
+      if (v.kind !== 'text') {
+        audioMs = v.kind === 'failed' ? (v.audioMs ?? 0) : 0;
+        finishHold();
+        if (audioMs) turnPoint('voice_failed');
         const outcome = v.kind === 'declined' ? 'voice_declined' : 'voice_failed';
         const said = host.storage.transactionSync(() => {
           if (turnGone(host, input)) return false;
@@ -345,7 +354,10 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
       outcome = await converse(host, heard, provider, settings, heardLocale, now, await retrieveKnowledge(host, heard.text ?? ''), turn);
     } catch (err) {
       finishHold();
-      if (err instanceof Aborted) return;
+      if (err instanceof Aborted) {
+        if (audioMs) turnPoint('aborted');
+        return;
+      }
       turnPoint('error');
       alert('agent_model_failed', { workspace: host.workspaceId, error: errClass(err) });
       return await handoff(host, input, 'provider_error', heardLocale, now);
@@ -382,7 +394,7 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
 
 /**
  * The last attempt of a voice note's turn failed (its file never reached R2): mark it not transcribed and ask the customer to type, once.
- * Same guards as a normal turn: a finished turn, an erased customer or a closed 24 h window sends nothing.
+ * Same guards as a normal turn: a finished turn, an erased customer, a closed 24 h window, a suspended or unpaid store, a handoff or closed hours send nothing.
  */
 export async function abandonVoiceTurn(host: LinkHost, input: BotInput, now: number): Promise<void> {
   const copy = agentConfig().copy;
@@ -390,6 +402,10 @@ export async function abandonVoiceTurn(host: LinkHost, input: BotInput, now: num
   await serialisedTurn(host, input.from, async () => {
     if (host.sql.exec('SELECT 1 FROM agent_turns WHERE message_id = ?', input.messageId).toArray().length) return;
     if (turnGone(host, input) || !windowOpen(host, input.from, now)) return;
+    // Only a note that was never heard is "couldn't hear you": a transcribed one failed later (storing or sending) and the customer is not told otherwise.
+    if (host.sql.exec<{ voice_state: string | null }>('SELECT voice_state FROM messages WHERE id = ?', input.messageId).toArray()[0]?.voice_state === 'ok') return;
+    // The router's gates: no package, a person on the conversation or closed shop hours stop this message too.
+    if (!botMaySpeak(host, input.from, now)) { host.recordVoice(input.messageId, null); return; }
     host.recordVoice(input.messageId, null);
     const locale = localeFor(readAgentSettings(host.sql), null);
     const said = host.storage.transactionSync(() => {

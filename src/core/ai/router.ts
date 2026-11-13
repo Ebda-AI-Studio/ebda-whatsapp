@@ -4,12 +4,11 @@
  */
 import type { LinkHost } from '../store-link/host';
 import { orderingActive, orderingEngaged, runBotTurnLocked, serialisedTurn, turnGone, type BotInput } from '../ordering/bot';
-import { serviceAllowed } from '../billing/entitlements';
 import { recordFunnel } from '../bot-funnel';
 import { frontDeskActive, runFrontDesk, runHoursGate } from '../front-desk';
 import { agentConfig } from './config';
 import { agentActive, handoff, isHumanRequest, runAgentTurn } from './agent';
-import { isSuspended } from '../numbers/health';
+import { serviceOpen } from './gates';
 import { handoffActive } from './handoff';
 import { readAgentSettings } from './settings';
 
@@ -19,8 +18,7 @@ const ORDERING_TYPES = new Set(['text', 'interactive', 'order', 'image']);
 export async function runTurn(host: LinkHost, input: BotInput, now: number): Promise<void> {
   await serialisedTurn(host, input.from, async () => {
     // WA-NOFREE-1: no package, no bot, no menu, no AI agent (the inbound itself is already stored: reading stays open).
-    if (!serviceAllowed(host.sql, now)) return;
-    if (isSuspended(host.sql)) return; // W2-OPS: a suspended store's bot, menu, ordering and agent are all off (the inbound is stored; nothing answers)
+    if (!serviceOpen(host, now)) return; // no package or a suspended store: bot, menu, ordering and agent are all off (the inbound is stored; nothing answers)
     const agentOn = agentActive(host);
     const orderingOn = orderingActive(host);
     if (!agentOn && !orderingOn && !frontDeskActive(host)) return;

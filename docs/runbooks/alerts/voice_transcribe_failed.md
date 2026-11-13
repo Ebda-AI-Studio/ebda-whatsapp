@@ -3,7 +3,7 @@
 ## What it means
 Fires in src/core/ai/transcribe.ts when a customer's voice note could not be transcribed: the speech model call threw, or the AI binding is missing (`error: no_binding`), or the file never reached R2 before the turn was abandoned. Fields: `workspace`, `error` (an error class name only; never audio, transcript or token).
 ## Impact
-That voice note is marked "voice note (not transcribed)" in the inbox and the customer is asked to type. No money moves and no AI credit is spent for the unheard note. One failure is normal (a corrupt file); a run of them is not.
+That voice note is marked "voice note (not transcribed)" in the inbox and the customer is asked to type. No AI credit is spent for the unheard note (the audio minutes are still recorded as platform cost when the speech call ran, and the note counts as one of that customer's daily AI turns). One failure is normal (a corrupt file); a run of them is not.
 ## Check first
 1. Search logs for `{"alert":"voice_transcribe_failed"...}` and note `error`.
 2. `no_binding` on every workspace = the `AI` binding is missing from the deploy (also `binding_missing`); one workspace only = look at its recent voice notes.

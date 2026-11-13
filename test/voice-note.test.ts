@@ -2,7 +2,9 @@ import { SELF, env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import { abandonVoiceTurn } from '../src/core/ai/agent';
 import { EBDA_AGENT_COPY } from '../src/addons/ebda/agent-copy';
-import { VOICE_MAX_BYTES, audioDurationMs, fitTranscript, oggOpusDurationMs, type Transcriber } from '../src/core/ai/transcribe';
+import { VOICE_MAX_BYTES, VOICE_TIMEOUT, audioDurationMs, fitTranscript, oggOpusDurationMs, type Transcriber } from '../src/core/ai/transcribe';
+import { configureAgent } from '../src/core/ai/config';
+import { QuickRetryError, retryDelayMs } from '../src/core/scheduler';
 import { ScriptedProvider, useAgent } from './helpers/agent';
 import { agentWorkspace, say, sendCount, text, wamid } from './helpers/agent-chat';
 import { stubGraph } from './helpers/graph';
@@ -239,5 +241,193 @@ describe('caps and failures never go quiet', () => {
     expect(out).toHaveLength(1);
     expect(speech.calls.length).toBe(before);
     expect(await dto(ws)).not.toHaveProperty('voice');
+  });
+});
+
+// ---- review fixes (PR #74) -----------------------------------------------------------------------------------------------------
+
+const FX = 'INSERT OR IGNORE INTO pricing_fx (src_id, ver, effective_from, egp_per_usd_micros, buffer_bps) VALUES (1, 1, 0, 50000000, 0)';
+const aiPoints = (spy: { mock: { calls: unknown[][] } }, outcome: string) => spy.mock.calls.map((c) => c[0] as AnalyticsEngineDataPoint).filter((x) => x.blobs?.[0] === 'ai_turn' && x.blobs?.[2] === outcome);
+const stateOf = async (ws: string, key: string) => (await rows<{ value: string }>(ws, 'SELECT value FROM store_state WHERE key = ?', key))[0]?.value;
+const voiceInput = (row: { id: number }, pn: string) => ({ messageId: row.id, wamid: 'x', from: WA_1, phoneNumberId: pn, profileName: null, type: 'audio', text: null, reply: null, order: null });
+const abandon = (ws: string, input: ReturnType<typeof voiceInput>) => runInDurableObject(workspace(ws), (inst) => abandonVoiceTurn((inst as unknown as { host(): never }).host(), input, Date.now()));
+/** A voice note whose media never reaches R2 (the Graph download fails): the turn keeps retrying and nothing is said yet. */
+const stuckVoice = async (ws: string, mediaId: string) => {
+  const pn = await setup(ws);
+  const g = stubGraph((c) => (c.method === 'GET' && c.url.endsWith(`/${mediaId}`) ? { status: 500, json: { error: 'down' } } : { status: 200, json: { messages: [{ id: `wamid.o.${Math.random()}` }] } }));
+  await say(ws, pn, audioMsg(mediaId), g);
+  return { pn, row: await inboundAudio(ws) };
+};
+
+describe('review fix 1: the length is not the customer\'s claim', () => {
+  it('a forged trailing page cannot make a big file look short: the size sets a floor on the length (cap and billing)', async () => {
+    expect(audioDurationMs(ogg(1_000, 3_000_000))).toBe(Math.ceil(3_000_000 / 64)); // claims 1 s, a 3 MB Opus file is at least 46.9 s
+    expect(audioDurationMs(ogg(12_500))).toBe(12_500); // an honest file keeps its own length
+    const ws = W(30);
+    const pn = await setup(ws);
+    agent.model = new ScriptedProvider([{ text: 'ok', usage: { inputTokens: 1000, outputTokens: 500 } }]);
+    await exec(ws, FX);
+    const ae = vi.spyOn(env.USAGE, 'writeDataPoint');
+    await say(ws, pn, audioMsg('media-v30'), graphWith(ogg(1_000, 3_000_000)));
+    const p = aiPoints(ae, 'reply')[0]!;
+    expect(p.doubles![5]).toBe(70_975 + Math.round((46_875 / 60_000) * 25_650)); // billed by 46.9 s, not by the forged 1 s (which is 428)
+  });
+});
+
+describe('review fix 2: one customer cannot burn the store\'s daily voice cap', () => {
+  it('noise notes count as that customer\'s AI turns, so they stop at turnsPerDay and the store cap keeps its room', async () => {
+    const ws = W(31);
+    const pn = await setup(ws);
+    configureAgent({ turnsPerDay: 3, transcriber: () => stt('   ').fn });
+    const before = speech.calls.length;
+    for (let i = 0; i < 5; i++) await say(ws, pn, audioMsg(`media-v31-${i}`), graphWith(ogg(3_000)));
+    expect(await stateOf(ws, 'voice.count')).toBe('3'); // the 4th and 5th notes never reached the speech model
+    expect((await rows<{ n: number }>(ws, "SELECT count(*) AS n FROM agent_handoffs WHERE reason = 'turn_cap'"))[0]!.n).toBe(1);
+    expect(speech.calls.length).toBe(before); // (the swapped-in model is a different stub; the shared one is untouched)
+  });
+});
+
+describe('review fix 3: an abandoned voice turn obeys the router\'s gates', () => {
+  it('a conversation a person has taken over gets no bot message', async () => {
+    const ws = W(32);
+    const { pn, row } = await stuckVoice(ws, 'media-v32');
+    await exec(ws, "INSERT INTO agent_handoffs (wa_id, started_at, until_at, reason) VALUES (?, ?, ?, 'staff')", WA_1, Date.now(), Date.now() + 3_600_000);
+    await abandon(ws, voiceInput(row, pn));
+    expect(await outTexts(ws)).toEqual([]);
+  });
+  it('a store with no package gets no bot message', async () => {
+    const ws = W(33);
+    const { pn, row } = await stuckVoice(ws, 'media-v33');
+    await exec(ws, 'DELETE FROM entitlements');
+    await abandon(ws, voiceInput(row, pn));
+    expect(await outTexts(ws)).toEqual([]);
+  });
+  it('closed shop hours that stop the bot get no bot message', async () => {
+    const ws = W(34);
+    const { pn, row } = await stuckVoice(ws, 'media-v34');
+    const away = { ar: 'مقفولين', en: 'closed' };
+    expect((await workspace(ws).setStoreLinkSettings({ hours: { enabled: true, timezone: 'Africa/Cairo', week: { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }, awayMessage: away, ordersWhileClosed: false } } as never)).ok).toBe(true);
+    await abandon(ws, voiceInput(row, pn));
+    expect(await outTexts(ws)).toEqual([]);
+  });
+});
+
+describe('review fix 4: the audio is billed on every path after a model call', () => {
+  const run = async (n: number, answer: Transcriber, outcome: string, model?: ScriptedProvider) => {
+    const ws = W(n);
+    const pn = await setup(ws);
+    configureAgent({ transcriber: () => answer });
+    if (model) agent.model = model;
+    await exec(ws, FX);
+    const ae = vi.spyOn(env.USAGE, 'writeDataPoint');
+    await say(ws, pn, audioMsg(`media-v${n}`), graphWith(ogg(60_000)));
+    const pts = aiPoints(ae, outcome);
+    ae.mockRestore();
+    return { ws, pts };
+  };
+  it('transcriber error', async () => {
+    const { pts } = await run(40, async () => { throw new TypeError('boom'); }, 'voice_failed');
+    expect(pts).toHaveLength(1);
+    expect(pts[0]!.doubles![5]).toBe(25_650);
+  });
+  it('empty transcript', async () => {
+    const { pts } = await run(41, async () => '   ', 'voice_failed');
+    expect(pts).toHaveLength(1);
+    expect(pts[0]!.doubles![5]).toBe(25_650);
+  });
+  it('the note is erased while it is being transcribed', async () => {
+    const ws = W(42);
+    const { pts } = await run(42, async () => { await new Promise((r) => setTimeout(r, 10)); await exec(W(42), "DELETE FROM messages WHERE direction = 'in'"); return 'كلام'; }, 'voice_gone');
+    void ws;
+    expect(pts).toHaveLength(1);
+    expect(pts[0]!.doubles![5]).toBe(25_650);
+  });
+  it('the customer is erased while the language model answers (aborted turn)', async () => {
+    const model = new ScriptedProvider([{ text: 'ok', usage: { inputTokens: 0, outputTokens: 0 } }]);
+    const orig = model.complete.bind(model);
+    model.complete = async (r) => { const out = await orig(r); await exec(W(43), "DELETE FROM messages WHERE direction = 'in'"); return out; };
+    const { pts } = await run(43, async () => 'كلام', 'aborted', model);
+    expect(pts).toHaveLength(1);
+    expect(pts[0]!.doubles![5]).toBeGreaterThanOrEqual(25_650);
+  });
+});
+
+describe('review fix 5: "couldn\'t hear you" only when transcription failed', () => {
+  it('a transcribed note whose later step failed is not reported as unheard', async () => {
+    const ws = W(50);
+    const pn = await setup(ws);
+    await say(ws, pn, audioMsg('media-v50'), graphWith(ogg(5_000)));
+    const row = await inboundAudio(ws);
+    expect(row.voice_state).toBe('ok');
+    await exec(ws, 'DELETE FROM agent_turns'); // the turn never finished recording
+    await abandon(ws, voiceInput(row, pn));
+    expect(await outTexts(ws)).toEqual(['عندنا ورد بلدي متاح النهارده']); // only the earlier answer; no voiceFailed
+  });
+});
+
+describe('review fix 6: the daily slot survives a retry and is given back on a failed call', () => {
+  it('a retried message finds its slot already taken (no second slot) after the model ran but the transcript was never stored', async () => {
+    const ws = W(51);
+    const pn = await setup(ws);
+    await say(ws, pn, audioMsg('media-v51'), graphWith(ogg(5_000)));
+    const row = await inboundAudio(ws);
+    const day = new Date().toISOString().slice(0, 10);
+    expect(await stateOf(ws, 'voice.count')).toBe('1');
+    // the DO was evicted after the model answered and before the transcript was stored: marker present, no voice_state, no finished turn
+    await exec(ws, "UPDATE messages SET voice_state = NULL WHERE id = ?", row.id);
+    await exec(ws, 'DELETE FROM agent_turns');
+    await exec(ws, 'INSERT INTO store_state (key, value) VALUES (?, ?)', `voice.slot.${row.id}`, day);
+    const noise = stt('   ');
+    configureAgent({ transcriber: () => noise.fn });
+    const { transcribeVoiceNote } = await import('../src/core/ai/transcribe');
+    const v = await runInDurableObject(workspace(ws), (inst) => transcribeVoiceNote((inst as unknown as { host(): never }).host(), voiceInput(row, pn) as never, 'ar'));
+    expect(v.kind).toBe('failed'); // (silence keeps the test off the search index, which the first run already filled)
+    expect(noise.calls).toHaveLength(1); // the model ran again (its first answer was lost with the eviction), but under the slot already taken
+    expect(await stateOf(ws, 'voice.count')).toBe('1'); // not 2
+    expect(await stateOf(ws, `voice.slot.${row.id}`)).toBeUndefined();
+  });
+  it('a call that threw gives its slot back', async () => {
+    const ws = W(52);
+    const pn = await setup(ws);
+    configureAgent({ transcriber: () => stt(new Error('down')).fn });
+    await say(ws, pn, audioMsg('media-v52'), graphWith(ogg(5_000)));
+    expect(await stateOf(ws, 'voice.count')).toBe('0');
+    expect((await rows(ws, "SELECT key FROM store_state WHERE key LIKE 'voice.slot.%'"))).toEqual([]);
+  });
+});
+
+describe('review fix 7: the speech call has a time limit', () => {
+  it('a model that never answers is cut off: the customer is asked to type and the turn lock is free for the next message', async () => {
+    const ws = W(53);
+    const pn = await setup(ws);
+    configureAgent({ transcriber: () => stt('نص متأخر', 400).fn });
+    const was = VOICE_TIMEOUT.ms;
+    VOICE_TIMEOUT.ms = 30;
+    try {
+      await say(ws, pn, audioMsg('media-v53'), graphWith(ogg(5_000)));
+    } finally {
+      VOICE_TIMEOUT.ms = was;
+    }
+    expect((await inboundAudio(ws)).voice_state).toBe('failed');
+    expect(await outTexts(ws)).toEqual([EBDA_AGENT_COPY.t.voiceFailed.ar]);
+    expect(await stateOf(ws, 'voice.count')).toBe('0'); // timed out: slot given back
+    agent.model = new ScriptedProvider([{ text: 'تمام' }]);
+    expect((await say(ws, pn, text('عايز ورد'), stubGraph()))).toHaveLength(1); // the lock was released
+  });
+});
+
+describe('review fix 8: a voice note whose media is not stored yet is retried quickly, once', () => {
+  it('the retry ladder: quick first retry only for that case', () => {
+    expect(retryDelayMs(new QuickRetryError('x', 5_000), 1)).toBe(5_000);
+    expect(retryDelayMs(new QuickRetryError('x', 5_000), 2)).toBe(60_000);
+    expect(retryDelayMs(new Error('x'), 1)).toBe(30_000);
+    expect(retryDelayMs(new Error('x'), 3)).toBe(120_000);
+  });
+  it('the first bot_turn retry is due within seconds, not 30 s', async () => {
+    const ws = W(54);
+    await stuckVoice(ws, 'media-v54');
+    const t = (await rows<{ attempts: number; due_at: number }>(ws, "SELECT attempts, due_at FROM scheduled_tasks WHERE kind = 'bot_turn'"))[0]!;
+    expect(t.attempts).toBe(1);
+    expect(t.due_at - Date.now()).toBeLessThanOrEqual(6_000);
   });
 });

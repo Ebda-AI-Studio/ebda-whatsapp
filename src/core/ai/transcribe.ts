@@ -9,6 +9,7 @@
 import type { Env } from '../../env';
 import { alert, errClass } from '../observability';
 import type { BotInput } from '../ordering/bot';
+import { QuickRetryError } from '../scheduler';
 import type { LinkHost } from '../store-link/host';
 import { agentConfig } from './config';
 
@@ -21,6 +22,12 @@ export const VOICE_DEFAULT_DAILY_CAP = 60;
 const TRANSCRIPT_MAX_BYTES = 1024;
 /** Audio whose length cannot be read (not Ogg/Opus) is judged at 16 KB/s, 128 kbps: generous for speech, so only long files are refused. */
 const UNKNOWN_BYTES_PER_MS = 16;
+/** Opus tops out at 510 kbps (about 64 bytes/ms): a file cannot hold more than this per millisecond of audio, so size gives a hard LOWER bound on its length. */
+const OPUS_MAX_BYTES_PER_MS = 64;
+/** The speech call is abandoned after this long: the turn lock is released and the turn takes the failure path. A mutable holder only so a test can shorten it. */
+export const VOICE_TIMEOUT = { ms: 45_000 };
+/** The media task has not stored the audio yet: the first retry comes quickly (the download normally finishes in a second or two). */
+export const MEDIA_WAIT_RETRY_MS = 5_000;
 
 export type Transcriber = (audio: Uint8Array, opts: { language?: 'ar' | 'en' }) => Promise<string>;
 
@@ -55,7 +62,20 @@ export function oggOpusDurationMs(b: Uint8Array): number | null {
   return null;
 }
 
-export const audioDurationMs = (b: Uint8Array): number => oggOpusDurationMs(b) ?? Math.round(b.length / UNKNOWN_BYTES_PER_MS);
+/**
+ * The length used for the cap AND for billing. The Ogg granule position is the customer's claim (a forged trailing page can say 1 s over 5 MB), so for
+ * Ogg/Opus the larger of the claim and the shortest length the file's size allows is used; anything else is estimated from its size.
+ */
+export const audioDurationMs = (b: Uint8Array): number => {
+  const claimed = oggOpusDurationMs(b);
+  return claimed === null ? Math.round(b.length / UNKNOWN_BYTES_PER_MS) : Math.max(claimed, Math.ceil(b.length / OPUS_MAX_BYTES_PER_MS));
+};
+
+const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('transcription timed out')), ms); });
+  return Promise.race([p, limit]).finally(() => clearTimeout(timer));
+};
 
 /** The transcript cut to the inline limit on a character boundary. */
 export function fitTranscript(raw: string): string {
@@ -75,8 +95,9 @@ export function fitTranscript(raw: string): string {
 export type VoiceResult =
   | { kind: 'text'; text: string; audioMs: number }
   | { kind: 'declined'; why: 'too_long' | 'too_big' | 'daily_cap' }
-  | { kind: 'failed' }
-  | { kind: 'gone' };
+  /** `audioMs` is set when the speech model was (or may have been) called, so the caller bills the audio on this path too. */
+  | { kind: 'failed'; audioMs?: number }
+  | { kind: 'gone'; audioMs?: number };
 
 const dailyCap = (env: Pick<Env, 'VOICE_DAILY_CAP'>): number => {
   const n = Number(env.VOICE_DAILY_CAP);
@@ -85,16 +106,32 @@ const dailyCap = (env: Pick<Env, 'VOICE_DAILY_CAP'>): number => {
 
 type VoiceRow = { media_r2_key: string | null; media_size: number | null; voice_state: string | null; body: string | null; preview: string | null };
 
-/** Counts one transcription against today's (UTC) cap for the workspace. False = the cap is reached. Synchronous, so concurrent turns cannot overshoot. */
-function takeDailySlot(host: LinkHost, now: number): boolean {
+const slotKey = (messageId: number) => `voice.slot.${messageId}`;
+const getState = (host: LinkHost, k: string): string | undefined => host.sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', k).toArray()[0]?.value;
+const putState = (host: LinkHost, k: string, v: string): void => { host.sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, v); };
+
+/**
+ * Counts one transcription against today's (UTC) cap for the workspace and leaves an in-flight marker for the message, so a retry of the same message
+ * (a DO evicted between the model call and the stored transcript) finds its slot already taken and does not take a second. False = the cap is reached.
+ * Synchronous, so concurrent turns cannot overshoot. Markers of earlier days are swept here.
+ */
+function takeDailySlot(host: LinkHost, messageId: number, now: number): boolean {
   const day = new Date(now).toISOString().slice(0, 10);
-  const get = (k: string) => host.sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', k).toArray()[0]?.value;
-  const used = get('voice.day') === day ? Number(get('voice.count') ?? 0) : 0;
+  host.sql.exec("DELETE FROM store_state WHERE key LIKE 'voice.slot.%' AND value != ?", day);
+  if (getState(host, slotKey(messageId)) === day) return true;
+  const used = getState(host, 'voice.day') === day ? Number(getState(host, 'voice.count') ?? 0) : 0;
   if (used >= dailyCap(host.env)) return false;
-  const put = (k: string, v: string) => host.sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, v);
-  put('voice.day', day);
-  put('voice.count', String(used + 1));
+  putState(host, 'voice.day', day);
+  putState(host, 'voice.count', String(used + 1));
+  putState(host, slotKey(messageId), day);
   return true;
+}
+
+/** The call failed outright (error or timeout: nothing was returned, so nothing is owed for it): give the slot back. */
+function refundDailySlot(host: LinkHost, messageId: number): void {
+  const day = getState(host, slotKey(messageId));
+  if (day && getState(host, 'voice.day') === day) putState(host, 'voice.count', String(Math.max(0, Number(getState(host, 'voice.count') ?? 0) - 1)));
+  host.sql.exec('DELETE FROM store_state WHERE key = ?', slotKey(messageId));
 }
 
 /**
@@ -106,8 +143,8 @@ export async function transcribeVoiceNote(host: LinkHost, input: BotInput, langu
   if (!row) return { kind: 'gone' };
   if (row.voice_state === 'ok' && (row.body ?? row.preview)) return { kind: 'text', text: (row.body ?? row.preview)!, audioMs: 0 };
   if (row.voice_state === 'failed') return { kind: 'failed' };
-  if (!row.media_r2_key) throw new Error('voice note is not stored yet');
-  const fail = (result: VoiceResult): VoiceResult => { host.recordVoice(input.messageId, null); return result; };
+  if (!row.media_r2_key) throw new QuickRetryError('voice note is not stored yet', MEDIA_WAIT_RETRY_MS);
+  const fail = (result: VoiceResult): VoiceResult => { host.recordVoice(input.messageId, null); host.sql.exec('DELETE FROM store_state WHERE key = ?', slotKey(input.messageId)); return result; };
   if ((row.media_size ?? 0) > VOICE_MAX_BYTES) return fail({ kind: 'declined', why: 'too_big' });
   const transcriber = agentConfig().transcriber(host.env);
   if (!transcriber) {
@@ -120,14 +157,18 @@ export async function transcribeVoiceNote(host: LinkHost, input: BotInput, langu
   if (bytes.length > VOICE_MAX_BYTES) return fail({ kind: 'declined', why: 'too_big' });
   const audioMs = audioDurationMs(bytes);
   if (audioMs > VOICE_MAX_MS) return fail({ kind: 'declined', why: 'too_long' });
-  if (!takeDailySlot(host, Date.now())) return fail({ kind: 'declined', why: 'daily_cap' });
+  if (!takeDailySlot(host, input.messageId, Date.now())) return fail({ kind: 'declined', why: 'daily_cap' });
   let text: string;
   try {
-    text = fitTranscript(await transcriber(bytes, language === 'auto' ? {} : { language }));
+    text = fitTranscript(await withTimeout(transcriber(bytes, language === 'auto' ? {} : { language }), VOICE_TIMEOUT.ms));
   } catch (err) {
     alert('voice_transcribe_failed', { workspace: host.workspaceId, error: errClass(err) });
-    return fail({ kind: 'failed' });
+    // Ruling VOICE-SLOT-1 - a call that threw or timed out gives its slot back; an empty transcript (silence, noise) keeps it, because the model ran. Abuse by
+    // noise is bounded per customer instead: voice_failed counts as one of the customer's AI turns per day. Cost if wrong: a flaky model call that was billed anyway is not counted against the daily cap.
+    refundDailySlot(host, input.messageId);
+    return fail({ kind: 'failed', audioMs }); // the model may have been billed: the caller records the audio cost
   }
-  if (!text) return fail({ kind: 'failed' }); // silence or noise: nothing to answer
-  return host.recordVoice(input.messageId, text) ? { kind: 'text', text, audioMs } : { kind: 'gone' };
+  if (!text) return fail({ kind: 'failed', audioMs }); // silence or noise: nothing to answer, but the model ran and is billed
+  host.sql.exec('DELETE FROM store_state WHERE key = ?', slotKey(input.messageId));
+  return host.recordVoice(input.messageId, text) ? { kind: 'text', text, audioMs } : { kind: 'gone', audioMs };
 }
