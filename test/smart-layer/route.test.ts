@@ -131,6 +131,21 @@ describe('assistant route: turns', () => {
   });
 });
 
+describe('GET /me tells the panel whether to appear', () => {
+  it('capabilities.assistant follows the store mode and the platform kill switch', async () => {
+    const s = storeId(7030);
+    const { call } = await apiFor(s);
+    const flag = async () => ((await (await call('GET', '/me')).json()) as { capabilities: { assistant?: boolean } }).capabilities.assistant;
+    expect(await flag()).toBe(false);
+    await setMode(s, 'answer-only');
+    expect(await flag()).toBe(true);
+    await env.DB.prepare("INSERT INTO platform_flags (key, value, updated_at) VALUES ('sl.product.chat', '{\"kill\":true}', 0)").run();
+    expect(await flag()).toBe(false);
+    await env.DB.prepare("DELETE FROM platform_flags WHERE key = 'sl.product.chat'").run();
+    expect(await flag()).toBe(true);
+  });
+});
+
 describe('assistant route: conversation and feedback', () => {
   it('a conversation id never opens another member\'s chat', async () => {
     const s = storeId(7020);

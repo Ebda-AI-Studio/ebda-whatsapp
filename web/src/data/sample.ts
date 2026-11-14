@@ -6,6 +6,7 @@ import { normaliseText } from '../../../src/core/text-normalise';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
 import type { SharedTemplatesApi } from './shared-templates';
 import type { InboxSource, TeamApi } from './source';
+import type { AssistantApi } from './assistant';
 
 // Sample data for preview only (labelled in the UI). Names and orders are invented; no real customers.
 const BASE = Date.UTC(2026, 9, 24, 17, 0);
@@ -159,7 +160,7 @@ export function createSampleSource(): InboxSource {
   let nextId = 1000;
   return {
     kind: 'sample',
-    capabilities: { codOutcome: true, numbers: true },
+    capabilities: { codOutcome: true, numbers: true, assistant: true },
     role: 'owner',
     currentUserId: 'u-me',
     userNames: { 'u-me': 'أنا', 'u-dina': 'دينا' },
@@ -307,6 +308,7 @@ export function createSampleSource(): InboxSource {
         };
       })(),
     },
+    assistant: createSampleAssistant(),
     team: createSampleTeam(),
     wallet: createSampleWallet(),
     operator: createSampleOperator('u-me'),
@@ -374,6 +376,21 @@ function createSampleSharedTemplates(): SharedTemplatesApi {
 }
 
 /** Sample team for the preview: the owner, three staff and a package with room for two staff seats (the owner counts as one of three). */
+/** The preview's assistant: one canned grounded answer, so the panel can be seen without a server. */
+function createSampleAssistant(): AssistantApi {
+  return {
+    turn: async () => ({
+      status: 'answered', previews: [], turnId: crypto.randomUUID(),
+      segments: [
+        { kind: 'text', text: 'تقدر تشحن المحفظة من شاشة المحفظة، وبتختار الكارت أو إنستاباي. ' },
+        { kind: 'cap', capabilityId: 'wallet.view', label: 'المحفظة', appPath: '/wallet' },
+      ],
+    }),
+    conversation: async () => [],
+    feedback: async () => undefined,
+  };
+}
+
 function createSampleTeam(): TeamApi {
   const people = [
     { userId: 'u-me', displayName: 'ليلى', role: 'owner' as const, addedAt: '2026-09-01T00:00:00.000Z' },

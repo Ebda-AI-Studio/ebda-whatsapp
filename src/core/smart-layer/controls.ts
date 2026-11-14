@@ -39,6 +39,13 @@ export async function chatControls(env: Pick<Env, 'DB'>, ws: { assistantMode(): 
   }
 }
 
+/** Whether the panel should be offered at all: the same decision the turn route makes (mode other than off after the kill switches). A fail-closed read is simply false. */
+export async function assistantEnabled(env: Pick<Env, 'DB' | 'WORKSPACE_DO'>, storeId: string): Promise<boolean> {
+  if (!(await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(storeId).first())) return false; // a Durable Object is never created for an unknown id
+  const ws = env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(storeId));
+  return (await chatControls(env, ws)).mode !== 'off';
+}
+
 export async function setPlatformFlag(env: Pick<Env, 'DB'>, key: string, value: unknown, actor: string, now = Date.now()): Promise<void> {
   await env.DB.prepare('INSERT INTO platform_flags (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by')
     .bind(key, JSON.stringify(value), now, actor).run();
