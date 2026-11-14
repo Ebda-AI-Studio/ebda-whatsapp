@@ -59,8 +59,9 @@ export async function runInstapayDigest(env: Env, now = Date.now()): Promise<{ s
   const page = results.slice(0, PAGE);
   const oldest = page[0]!.confirmed_at ?? page[0]!.created_at;
   if (now - oldest > STALE_DIGEST_MS) alert('instapay_auto_digest_stale', { severity: 'P1', oldestAgeHours: Math.floor((now - oldest) / 3_600_000) });
-  if (!(await notifyBrain(env, 'digest', page.map(item), now))) return { sent: 0, pending: results.length };
+  const pendingNow = async () => (await env.DB.prepare("SELECT count(*) AS n FROM instapay_auto_confirmations WHERE state = 'auto_confirmed' AND digest_sent_at IS NULL").first<{ n: number }>())!.n;
+  if (!(await notifyBrain(env, 'digest', page.map(item), now))) return { sent: 0, pending: await pendingNow() };
   const stamp = env.DB.prepare("UPDATE instapay_auto_confirmations SET digest_sent_at = ? WHERE id = ? AND state = 'auto_confirmed' AND digest_sent_at IS NULL");
   await env.DB.batch(page.map((a) => stamp.bind(now, a.id)));
-  return { sent: page.length, pending: results.length - page.length };
+  return { sent: page.length, pending: await pendingNow() };
 }
