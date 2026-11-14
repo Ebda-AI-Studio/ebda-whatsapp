@@ -25,7 +25,8 @@ export async function buildAssets() {
   const dir = join(ROOT, 'capabilities');
   const entries = readdirSync(dir).filter((f) => f.endsWith('.capability.json')).sort()
     .map((f) => capabilitySchema.parse(JSON.parse(readFileSync(join(dir, f), 'utf8'))));
-  const registry = [...toRegistryView(entries).caps.values()];
+  // uiLabels are derived from the titles when the registry is read (registry.ts), so they are not stored twice.
+  const registry = [...toRegistryView(entries).caps.values()].map(({ uiLabels: _derived, ...cap }) => cap);
 
   const docs = [];
   for (const lang of ['ar', 'en']) {
