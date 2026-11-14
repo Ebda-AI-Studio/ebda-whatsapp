@@ -3,12 +3,12 @@ import { z } from 'zod';
 import { checkTemplateResponse, createTemplateResponse, editTemplateResponse, listTemplatesResponse, templateDraftRequest, type TemplateDto } from '../core/api/contract';
 import { listSharedRequestsResponse, listSharedTemplatesResponse, sharedRequestCreate } from '../core/api/contract';
 import { createRequest, listRequests, sharedNumberOf, sharedTemplatesFor } from '../core/shared/shared-template-requests';
-import { fromStoredComponents, type TemplateDraft } from '../core/template-draft';
+import type { TemplateDraft } from '../core/template-draft';
 import { checkOnly, createTemplate, deleteTemplate, editTemplate, installDefaults, syncTemplates, type Failure, type TemplatesCtx } from '../core/templates-service';
 import { componentsSchema } from '../core/templates';
 import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 
-/** The first shape of POST /templates (Meta components as they are). Still accepted: it is converted to a draft and goes through the same gate. */
+/** A starter-set entry (Meta components as they are) and the operator's platform-template submission. A merchant POST /templates takes the draft shape only. */
 export const submitTemplateRequest = z.object({
   name: z.string().regex(/^[a-z0-9_]{1,512}$/),
   language: z.string().min(2).max(10),
@@ -32,6 +32,8 @@ const isResponse = (x: TemplatesCtx | Response): x is Response => x instanceof R
 /** One place that turns a service failure into HTTP. Meta's text travels in `message`; the screen speaks Arabic from `message`/`issues`. */
 function failed(c: ApiContext, f: Failure): Response {
   switch (f.reason) {
+    case 'hash_required': return apiError(c, 400, 'invalid_request', 'hash_required');
+    case 'edit_in_progress': return apiError(c, 409, 'invalid_request', 'edit_in_progress');
     case 'invalid': return c.json({ error: 'invalid_request', message: 'invalid_template', issues: f.issues }, 400);
     case 'not_found': return apiError(c, 404, 'not_found', 'template_not_found');
     case 'edit_limit': return c.json({ error: 'invalid_request', message: 'edit_limit', ...(f.retryAt !== undefined ? { retryAt: f.retryAt } : {}) }, 409);
@@ -42,17 +44,8 @@ function failed(c: ApiContext, f: Failure): Response {
   }
 }
 
-/** A draft from either POST shape, or null when the body is neither. */
-function draftFrom(raw: unknown): { draft: TemplateDraft; expectedHash?: string } | null {
-  const d = templateDraftRequest.safeParse(raw);
-  if (d.success) {
-    const { expectedHash, ...draft } = d.data;
-    return { draft: draft as TemplateDraft, ...(expectedHash ? { expectedHash } : {}) };
-  }
-  const old = submitTemplateRequest.safeParse(raw);
-  if (!old.success) return null;
-  return { draft: fromStoredComponents(old.data.components, { name: old.data.name, language: old.data.language, category: old.data.category, label: null }) };
-}
+/** The bound hash of a submission, or null when the body carries none: no unbound submission ever reaches Meta (spec section 4: the confirm is bound to the payload). */
+const hasHash = (raw: unknown): boolean => typeof raw === 'object' && raw !== null && typeof (raw as { expectedHash?: unknown }).expectedHash === 'string' && /^[0-9a-f]{64}$/.test((raw as { expectedHash: string }).expectedHash);
 
 /** Template routes. `defaults` is the product's starter set (supplied by an addon, never imported here). */
 export function templatesRoutes(defaults: readonly TemplateSeed[]) {
@@ -76,7 +69,7 @@ export function templatesRoutes(defaults: readonly TemplateSeed[]) {
     if (!canManage(c)) return apiError(c, 403, 'forbidden');
     const ctx = await context(c);
     if (isResponse(ctx)) return ctx;
-    const res = await installDefaults(ctx, defaults.map((s) => submitTemplateRequest.parse(s)));
+    const res = await installDefaults(ctx, defaults); // each entry is validated in the service: a bad one is reported in `failed`, never a 500
     if (res.ok && res.failed.length === 0) await ctx.ws.markStarterInstalled(ctx.number.wabaId);
     return res.ok ? c.json({ submitted: res.submitted, skipped: res.skipped, failed: res.failed }) : failed(c, res);
   });
@@ -126,23 +119,28 @@ export function templatesRoutes(defaults: readonly TemplateSeed[]) {
 
   r.post('/stores/:storeId/templates', async (c) => {
     if (!canManage(c)) return apiError(c, 403, 'forbidden');
-    const parsed = draftFrom(await c.req.json().catch(() => null));
-    if (!parsed) return apiError(c, 400, 'invalid_request');
+    const raw = await c.req.json().catch(() => null);
+    if (!hasHash(raw)) return apiError(c, 400, 'invalid_request', 'hash_required');
+    const parsed = templateDraftRequest.safeParse(raw);
+    if (!parsed.success) return apiError(c, 400, 'invalid_request');
     const ctx = await context(c);
     if (isResponse(ctx)) return ctx;
-    const res = await createTemplate(ctx, parsed.draft, parsed.expectedHash ? { expectedHash: parsed.expectedHash } : {});
+    const { expectedHash, ...draft } = parsed.data;
+    const res = await createTemplate(ctx, draft as TemplateDraft, { expectedHash });
     if (!res.ok) return failed(c, res);
     return c.json({ name: res.name, language: res.language, status: res.status, category: res.category as TemplateDto['category'], categoryChanged: res.categoryChanged } satisfies z.infer<typeof createTemplateResponse>, 201);
   });
 
   r.put('/stores/:storeId/templates/:name/:language', async (c) => {
     if (!canManage(c)) return apiError(c, 403, 'forbidden');
-    const parsed = templateDraftRequest.safeParse(await c.req.json().catch(() => null));
+    const raw = await c.req.json().catch(() => null);
+    if (!hasHash(raw)) return apiError(c, 400, 'invalid_request', 'hash_required');
+    const parsed = templateDraftRequest.safeParse(raw);
     if (!parsed.success || parsed.data.name !== c.req.param('name') || parsed.data.language !== c.req.param('language')) return apiError(c, 400, 'invalid_request');
     const ctx = await context(c);
     if (isResponse(ctx)) return ctx;
     const { expectedHash, ...draft } = parsed.data;
-    const res = await editTemplate(ctx, draft as TemplateDraft, expectedHash ? { expectedHash } : {});
+    const res = await editTemplate(ctx, draft as TemplateDraft, { expectedHash });
     return res.ok ? c.json({ status: res.status } satisfies z.infer<typeof editTemplateResponse>) : failed(c, res);
   });
 

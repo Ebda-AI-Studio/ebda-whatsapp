@@ -137,7 +137,8 @@ export const templateDraftSchema = z.object({
   auth: z.object({ expiryMinutes: z.number().int().nullable(), securityRecommendation: z.boolean() }).optional(),
 });
 export type TemplateDraftInput = z.infer<typeof templateDraftSchema>;
-export const templateDraftRequest = templateDraftSchema.extend({ expectedHash: z.string().regex(/^[0-9a-f]{64}$/).optional() });
+/** `expectedHash` is REQUIRED: the approval to submit is bound to the payload that was checked and previewed (the hash `POST /templates/check` returned). */
+export const templateDraftRequest = templateDraftSchema.extend({ expectedHash: z.string().regex(/^[0-9a-f]{64}$/) });
 export const templateIssueDto = z.object({ code: z.string(), severity: z.enum(['error', 'warning']), field: z.string(), params: z.record(z.string(), z.union([z.string(), z.number()])).optional() });
 export const checkTemplateResponse = z.object({ issues: z.array(templateIssueDto), payloadHash: z.string() });
 export const createTemplateResponse = z.object({ name: z.string(), language: z.string(), status: z.string(), category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']), categoryChanged: z.boolean() });

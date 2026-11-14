@@ -328,7 +328,7 @@ const ar = {
   tplSent: 'اتبعت لميتا. بتاخد لحد 24 ساعة.',
   tplRecat: 'ميتا صنّفت القالب ده «رسائل تسويق» مش رسائل خدمة. ده معناه إن العميل لازم يكون موافق على التسويق، وإن سعر الرسالة أعلى، وإنه يتحسب ضمن حملاتك.', tplDone: 'تمام',
   tplErrExists: 'عندك قالب بنفس الاسم واللغة. افتحه وعدّله بدل ما تعمل واحد جديد.', tplErrChanged: 'القالب اتغيّر بعد ما راجعته. راجعه تاني وابعته.',
-  tplErrMeta: (m: string) => `ميتا رفضت الطلب: ${m}`, tplErrUnavailable: 'ميتا مش متاحة دلوقتي. جرّب بعد شوية.', tplErrNotEditable: 'القالب ده مينفعش يتعدّل دلوقتي.', tplErrToken: 'الربط مع واتساب محتاج تجديد. افتح صفحة الأرقام.', tplErrGeneric: 'حصل خطأ. جرّب تاني.',
+  tplErrMeta: (m: string) => `ميتا رفضت الطلب: ${m}`, tplErrUnavailable: 'ميتا مش متاحة دلوقتي. جرّب بعد شوية.', tplErrNotEditable: 'القالب ده مينفعش يتعدّل دلوقتي.', tplErrToken: 'الربط مع واتساب محتاج تجديد. افتح صفحة الأرقام.', tplErrGeneric: 'حصل خطأ. جرّب تاني.', tplErrEditInProgress: 'تعديل تاني للقالب ده شغّال دلوقتي. استنى لحظات وبعدين جرّب تاني.',
   tplErrEditLimit: (when: string) => `ميتا بتسمح بتعديل القالب المعتمد مرة كل 24 ساعة (و10 مرات في الشهر). تقدر تعدّله تاني بعد ${when}.`,
   tplDetailBack: 'رجوع للقوالب',
   tplTimeline: {
@@ -660,7 +660,7 @@ const en: typeof ar = {
   tplSent: 'Sent to Meta. Review takes up to 24 hours.',
   tplRecat: 'Meta classified this template as "marketing messages", not service messages. That means the customer must have agreed to marketing, each message costs more, and it counts toward your campaigns.', tplDone: 'Done',
   tplErrExists: 'You already have a template with this name and language. Open it and edit it instead of creating a new one.', tplErrChanged: 'The template changed after you reviewed it. Review it again and send.',
-  tplErrMeta: (m) => `Meta refused the request: ${m}`, tplErrUnavailable: 'Meta is not available right now. Try again shortly.', tplErrNotEditable: 'This template cannot be edited right now.', tplErrToken: 'The WhatsApp connection needs renewing. Open Numbers.', tplErrGeneric: 'Something went wrong. Try again.',
+  tplErrMeta: (m) => `Meta refused the request: ${m}`, tplErrUnavailable: 'Meta is not available right now. Try again shortly.', tplErrNotEditable: 'This template cannot be edited right now.', tplErrToken: 'The WhatsApp connection needs renewing. Open Numbers.', tplErrGeneric: 'Something went wrong. Try again.', tplErrEditInProgress: 'Another edit of this template is running right now. Wait a moment and try again.',
   tplErrEditLimit: (when) => `Meta lets you edit an approved template once every 24 hours (and 10 times a month). You can edit it again after ${when}.`,
   tplDetailBack: 'Back to templates',
   tplTimeline: {

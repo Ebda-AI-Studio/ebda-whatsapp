@@ -183,14 +183,14 @@ Templates live on the store's **own** WhatsApp account; a store with no connecte
 | `GET /templates/{name}/{language}` | One template with its components and edit allowance |
 | `POST /templates/check` | Check a draft against Meta's rules without calling Meta: `{ issues: [{ code, severity, field, params }], payloadHash }` |
 | `POST /templates/sync` | Pull the current templates and their review status from Meta |
-| `POST /templates` | Submit a draft for review: `201 { name, language, status, category, categoryChanged }`. **Owner only**. The first body shape (`{ name, language, category, components }`) still works |
+| `POST /templates` | Submit a draft for review: `201 { name, language, status, category, categoryChanged }`. **Owner only**. Takes the draft shape below and a required `expectedHash` |
 | `PUT /templates/{name}/{language}` | Edit and resubmit: `{ status }`. **Owner only** |
 | `DELETE /templates/{name}/{language}` | Delete one language of a template: `204`. **Owner only** |
 | `POST /templates/install-defaults` | Submit the ready-made template set. **Owner only** |
 
-A draft is `{ name, label, language, category, header, body: { text, examples }, footer, buttons, auth }`: `header` is `{ text, example? }` or `null`; `buttons` are `QUICK_REPLY { text }`, `URL { text, url, example? }`, `PHONE_NUMBER { text, phone }` or `COPY_CODE { example }`; `auth` is `{ expiryMinutes, securityRecommendation }` for `AUTHENTICATION`. Send the `payloadHash` you got from `check` as `expectedHash` on `POST` and `PUT`: if the draft is not the one that was checked you get `409 payload_changed`.
+A draft is `{ name, label, language, category, header, body: { text, examples }, footer, buttons, auth }`: `header` is `{ text, example? }` or `null`; `buttons` are `QUICK_REPLY { text }`, `URL { text, url, example? }`, `PHONE_NUMBER { text, phone }` or `COPY_CODE { example }`; `auth` is `{ expiryMinutes, securityRecommendation }` for `AUTHENTICATION`. `expectedHash` is **required** on `POST` and `PUT`: send the `payloadHash` that `check` returned for exactly this draft. Without it you get `400` with `message: "hash_required"` and nothing reaches Meta; if the draft is not the one that was checked you get `409 payload_changed`.
 
-Errors on the write routes: `400` with `message: "invalid_template"` and `issues` (a rule failed, nothing was sent to Meta) or with Meta's own message (Meta refused); `409` with `message` = `exists` (same name and language), `payload_changed`, `not_editable` (including a locked category), `not_deletable` (a disabled template), `in_use` (a campaign or queued message still uses it) or `edit_limit` with `retryAt` (Meta allows one edit of an approved template per 24 hours and ten per 30 days); `503` when Meta or the WhatsApp connection is unavailable.
+Errors on the write routes: `400` with `message: "invalid_template"` and `issues` (a rule failed, nothing was sent to Meta) or with Meta's own message (Meta refused); `409` with `message` = `exists` (same name and language), `payload_changed`, `not_editable` (including a locked category), `not_deletable` (a disabled template), `in_use` (a campaign or queued message still uses it) `edit_in_progress` (another edit of the same template is running) or `edit_limit` with `retryAt` (Meta allows one edit of an approved template per 24 hours and ten per 30 days); `503` when Meta or the WhatsApp connection is unavailable.
 
 Only `APPROVED` templates can be sent.
 

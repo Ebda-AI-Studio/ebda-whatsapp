@@ -908,11 +908,11 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** One template with everything the detail screen and the editor need; null when we do not have it. */
-  async getTemplate(name: string, language: string, now = Date.now()): Promise<(TemplateDto & { metaId: string | null; label: string | null; components: NonNullable<TemplateDto['components']> }) | null> {
-    const t = this.sql.exec<TemplateRowSql>(`SELECT ${TEMPLATE_COLS} FROM templates WHERE name = ? AND language = ?`, name, language).toArray()[0];
+  async getTemplate(name: string, language: string, now = Date.now()): Promise<(TemplateDto & { metaId: string | null; label: string | null; submittedAt: number | null; components: NonNullable<TemplateDto['components']> }) | null> {
+    const t = this.sql.exec<TemplateRowSql>(`SELECT ${TEMPLATE_COLS}, submitted_at FROM templates WHERE name = ? AND language = ?`, name, language).toArray()[0];
     if (!t) return null;
     const comps = componentsSchema.safeParse(JSON.parse(t.components));
-    return { ...this.templateDto(t, now), metaId: t.meta_id, label: t.label, components: comps.success ? comps.data : [] };
+    return { ...this.templateDto(t, now), metaId: t.meta_id, label: t.label, submittedAt: (t as TemplateRowSql & { submitted_at: number | null }).submitted_at, components: comps.success ? comps.data : [] };
   }
 
   private editAllowanceOf(name: string, language: string, status: string, now: number): NonNullable<TemplateDto['editAllowance']> {
@@ -930,6 +930,22 @@ export class WorkspaceDO extends DurableObject<Env> {
   async editAllowance(name: string, language: string, now = Date.now()): Promise<NonNullable<TemplateDto['editAllowance']>> {
     const t = this.sql.exec<{ status: string }>('SELECT status FROM templates WHERE name = ? AND language = ?', name, language).toArray()[0];
     return this.editAllowanceOf(name, language, t?.status ?? '', now);
+  }
+
+  /**
+   * One edit of a template in flight at a time (the DO runs this synchronously, so two callers can never both win). A claim older than two
+   * minutes is dead (the call that took it was cut off) and is taken over. False = another edit is running.
+   */
+  async claimTemplateEdit(name: string, language: string, now = Date.now()): Promise<boolean> {
+    const r = this.sql.exec(
+      "INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE CAST(store_state.value AS INTEGER) < ?",
+      `templates.editing:${name}:${language}`, String(now), now - 120_000,
+    );
+    return r.rowsWritten > 0;
+  }
+
+  async releaseTemplateEdit(name: string, language: string): Promise<void> {
+    this.sql.exec('DELETE FROM store_state WHERE key = ?', `templates.editing:${name}:${language}`);
   }
 
   async recordTemplateEdit(name: string, language: string, at: number): Promise<void> {
@@ -1015,6 +1031,9 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Meta's template-status webhook (or a sweep). Unknown templates are ignored (they arrive with the next sync). Reason NONE/empty is no reason; APPROVED clears it. */
   async applyTemplateStatus(name: string, language: string, status: string, reason: string | null, metaId: string | null = null): Promise<{ applied: boolean }> {
+    // Meta redelivers and does not keep order: a PENDING that arrives after a decision is a replay, never a step backwards. (Our own re-review after an
+    // edit is written by saveSubmittedTemplate, not by a webhook, so it is unaffected; an appeal that is really decided arrives as APPROVED / REJECTED.)
+    if (status === 'PENDING' && this.sql.exec("SELECT 1 FROM templates WHERE name = ? AND language = ? AND status <> 'PENDING'", name, language).toArray().length > 0) return { applied: false };
     const clean = status === 'APPROVED' || !reason || reason === 'NONE' ? null : reason;
     const r = this.sql.exec('UPDATE templates SET status = ?, rejected_reason = ?, meta_id = COALESCE(?, meta_id), updated_at = ? WHERE name = ? AND language = ?', status, clean, metaId, Date.now(), name, language);
     return { applied: r.rowsWritten > 0 };

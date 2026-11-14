@@ -155,6 +155,15 @@ describe('submit flow', () => {
     expect(screen.getByRole('alert').textContent).toContain('Template name already exists');
   });
 
+  it('an edit already in progress says so in words; a missing hash is never sent (the confirm step always carries the checked hash)', async () => {
+    const approved = tpl({ name: 'my_t', label: 'قالبي', status: 'REJECTED' });
+    const api = open(fakeApi({ edit: vi.fn(async () => { throw new ApiError('invalid_request', 409, 'edit_in_progress'); }) }), { mode: 'edit', template: approved });
+    await act(async () => fireEvent.click(submit()));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'أيوه، ابعته لميتا' })));
+    expect(screen.getByRole('alert').textContent).toContain('تعديل تاني للقالب ده شغّال دلوقتي');
+    for (const call of (api.edit as ReturnType<typeof vi.fn>).mock.calls) expect(call[3]).toMatch(/^[0-9a-f]{64}$/);
+  });
+
   it('categoryChanged shows the recategorisation notice (opt-in, price, campaigns)', async () => {
     open(fakeApi({ create: vi.fn(async (d) => ({ name: d.name, language: d.language, status: 'PENDING', category: 'MARKETING' as const, categoryChanged: true })) }));
     fill();

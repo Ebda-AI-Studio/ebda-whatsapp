@@ -6,6 +6,7 @@ import { checkTemplate, type ExistingTemplate, type RuleIssue } from './meta/tem
 import { graphTokenFor, TokenUnavailable } from './numbers/token';
 import { payloadHash, toMetaComponents, type TemplateDraft } from './template-draft';
 import { bodyTextOf, componentsSchema } from './templates';
+import { z } from 'zod';
 
 /**
  * The ONE template API: the Templates screen and the AI Smart Layer call exactly these functions. Failures are values, never throws;
@@ -15,9 +16,9 @@ import { bodyTextOf, componentsSchema } from './templates';
  * are `confirm` (a submission cannot be recalled). The policy lives in the capability registry, not here.
  */
 export type TemplatesCtx = { env: Env; ws: DurableObjectStub<WorkspaceDO>; workspaceId: string; number: { phoneNumberId: string; wabaId: string } };
-export type FailureReason = 'invalid' | 'exists' | 'not_found' | 'not_editable' | 'edit_limit' | 'in_use' | 'not_deletable' | 'payload_changed' | 'token_unavailable' | 'meta_unavailable' | 'meta_rejected';
+export type FailureReason = 'hash_required' | 'edit_in_progress' | 'invalid' | 'exists' | 'not_found' | 'not_editable' | 'edit_limit' | 'in_use' | 'not_deletable' | 'payload_changed' | 'token_unavailable' | 'meta_unavailable' | 'meta_rejected';
 export type Failure = { ok: false; reason: FailureReason; issues?: RuleIssue[]; retryAt?: number; message?: string };
-export type TemplateSeedInput = { name: string; language: string; category: string; components: unknown[] };
+export type TemplateSeedInput = { name: string };
 
 const fail = (reason: FailureReason, extra: Omit<Failure, 'ok' | 'reason'> = {}): Failure => ({ ok: false, reason, ...extra });
 const metaFail = (r: { message: string; retryable: boolean }): Failure => fail(r.retryable ? 'meta_unavailable' : 'meta_rejected', { message: r.message });
@@ -45,25 +46,62 @@ export async function checkOnly(ctx: TemplatesCtx, draft: TemplateDraft): Promis
   return { ok: true, issues: checkTemplate(draft, await existingOf(ctx)), payloadHash: await payloadHash(draft) };
 }
 
-/** The gate shared by create and edit: rule errors, then "is this what was confirmed". */
+/** A claim that has had no answer for a minute is not a call in flight (every Meta call times out at 15 s): it is an ambiguous leftover. */
+const CLAIM_STALE_MS = 60_000;
+
+/**
+ * The gate shared by create and edit: the approval is bound to the payload, so a hash is REQUIRED (no unbound submission ever reaches Meta),
+ * then rule errors, then "is this what was confirmed".
+ */
 async function gate(ctx: TemplatesCtx, draft: TemplateDraft, expectedHash: string | undefined): Promise<Failure | null> {
+  if (!expectedHash) return fail('hash_required');
   const { issues, payloadHash: hash } = await checkOnly(ctx, draft);
   if (issues.some((i) => i.severity === 'error')) return fail('invalid', { issues });
-  if (expectedHash !== undefined && expectedHash !== hash) return fail('payload_changed');
+  if (expectedHash !== hash) return fail('payload_changed');
   return null;
 }
 
-export async function createTemplate(ctx: TemplatesCtx, draft: TemplateDraft, opts: { expectedHash?: string } = {}): Promise<{ ok: true; name: string; language: string; status: string; category: string; categoryChanged: boolean } | Failure> {
+/** What Meta lists for one template, or null (Meta does not have it), or a Failure (Meta could not be asked). */
+async function findAtMeta(a: Auth, name: string, language: string): Promise<MetaTemplate | null | Failure> {
+  const r = await fetchTemplates(a, { name });
+  if (!r.ok) return metaFail(r);
+  return r.value.find((t) => t.name === name && t.language === language) ?? null;
+}
+
+/** Takes Meta's copy of a template into the workspace (status, category, id, reason), keeping the merchant's title. */
+async function adopt(ctx: TemplatesCtx, hit: MetaTemplate, label: string | null): Promise<void> {
+  await ctx.ws.saveSubmittedTemplate({ name: hit.name, language: hit.language, category: hit.category, status: hit.status, components: hit.components, metaId: hit.id || null, label });
+  const reason = hit.rejected_reason && hit.rejected_reason !== 'NONE' ? hit.rejected_reason : null;
+  if (hit.status !== 'PENDING') await ctx.ws.applyTemplateStatus(hit.name, hit.language, hit.status, reason, hit.id || null);
+}
+
+export async function createTemplate(ctx: TemplatesCtx, draft: TemplateDraft, opts: { expectedHash: string }): Promise<{ ok: true; name: string; language: string; status: string; category: string; categoryChanged: boolean } | Failure> {
   const blocked = await gate(ctx, draft, opts.expectedHash);
   if (blocked) return blocked;
   const a = await auth(ctx);
   if (isFailure(a)) return a;
   const components = toMetaComponents(draft);
+  const claim = () => ctx.ws.reserveTemplate({ name: draft.name, language: draft.language, category: draft.category, components, label: draft.label });
   // Claim the name first (atomic in the DO): a double tap or a second staff tab loses HERE, before any Meta call.
-  if (!(await ctx.ws.reserveTemplate({ name: draft.name, language: draft.language, category: draft.category, components, label: draft.label }))) return fail('exists');
+  if (!(await claim())) {
+    // A claim that stayed behind after an ambiguous failure (timeout, 5xx: Meta may have created the template) is reconciled, never hidden.
+    const row = await ctx.ws.getTemplate(draft.name, draft.language);
+    const leftover = row && row.status === 'PENDING' && !row.metaId && row.submittedAt !== null && Date.now() - row.submittedAt > CLAIM_STALE_MS;
+    if (!leftover) return fail('exists');
+    const found = await findAtMeta(a, draft.name, draft.language);
+    if (found !== null && !('ok' in found)) { await adopt(ctx, found, draft.label); return fail('exists'); } // Meta has it: it is shown now, not resubmitted
+    if (found !== null) return fail('exists'); // Meta could not be asked: keep the claim, say so
+    await ctx.ws.removeTemplate(draft.name, draft.language); // Meta never got it: the leftover is dead
+    if (!(await claim())) return fail('exists');
+  }
   const res = await submitTemplate(a, { name: draft.name, language: draft.language, category: draft.category, components });
   if (!res.ok) {
-    await ctx.ws.removeTemplate(draft.name, draft.language);
+    // Retryable (timeout, 5xx, 429) = the outcome is UNKNOWN: Meta may have the template. The claim stays PENDING and the sweep resolves it by name.
+    if (res.retryable) return metaFail(res);
+    await ctx.ws.removeTemplate(draft.name, draft.language); // a definite refusal releases the name
+    // "Already exists" is not a dead end: if Meta does have it, the merchant sees that template now.
+    const found = await findAtMeta(a, draft.name, draft.language);
+    if (found !== null && !('ok' in found)) { await adopt(ctx, found, draft.label); return fail('exists', { message: res.message }); }
     return metaFail(res);
   }
   await ctx.ws.saveSubmittedTemplate({ name: draft.name, language: draft.language, category: res.value.category, status: res.value.status, components, metaId: res.value.id, label: draft.label });
@@ -79,7 +117,8 @@ async function resolveMetaId(a: Auth, name: string, language: string): Promise<{
   return { id: hit?.id || null };
 }
 
-export async function editTemplate(ctx: TemplatesCtx, draft: TemplateDraft, opts: { expectedHash?: string } = {}): Promise<{ ok: true; status: string } | Failure> {
+export async function editTemplate(ctx: TemplatesCtx, draft: TemplateDraft, opts: { expectedHash: string }): Promise<{ ok: true; status: string } | Failure> {
+  if (!opts.expectedHash) return fail('hash_required');
   const row = await ctx.ws.getTemplate(draft.name, draft.language);
   if (!row) return fail('not_found');
   const blocked = await gate(ctx, draft, opts.expectedHash);
@@ -89,21 +128,27 @@ export async function editTemplate(ctx: TemplatesCtx, draft: TemplateDraft, opts
   if (row.status === 'APPROVED' && draft.category !== row.category) return fail('not_editable', { message: 'category_locked' });
   const a = await auth(ctx);
   if (isFailure(a)) return a;
-  let metaId = row.metaId;
-  if (!metaId) {
-    const found = await resolveMetaId(a, draft.name, draft.language);
-    if ('ok' in found) return found;
-    if (!found.id) return fail('not_found');
-    metaId = found.id;
+  // One edit in flight per template: the allowance check above is not a lock, so the second of two taps is refused HERE, before Meta.
+  if (!(await ctx.ws.claimTemplateEdit(draft.name, draft.language))) return fail('edit_in_progress');
+  try {
+    let metaId = row.metaId;
+    if (!metaId) {
+      const found = await resolveMetaId(a, draft.name, draft.language);
+      if ('ok' in found) return found;
+      if (!found.id) return fail('not_found');
+      metaId = found.id;
+    }
+    const components = toMetaComponents(draft);
+    const res = await metaEdit(a, metaId, { ...(row.status === 'APPROVED' ? {} : { category: draft.category }), components });
+    if (!res.ok) return metaFail(res);
+    // Meta's edit limits count APPROVED templates only (REJECTED/PAUSED are unlimited), so only those edits are logged: Ruling TPL-EDIT-COUNT-1.
+    if (row.status === 'APPROVED') await ctx.ws.recordTemplateEdit(draft.name, draft.language, Date.now());
+    await ctx.ws.saveSubmittedTemplate({ name: draft.name, language: draft.language, category: row.status === 'APPROVED' ? row.category : draft.category, status: res.value.status, components, metaId, label: draft.label });
+    console.log(JSON.stringify({ audit: 'template_edited', workspace: ctx.workspaceId, name: draft.name, language: draft.language, category: draft.category, status: res.value.status }));
+    return { ok: true, status: res.value.status };
+  } finally {
+    await ctx.ws.releaseTemplateEdit(draft.name, draft.language);
   }
-  const components = toMetaComponents(draft);
-  const res = await metaEdit(a, metaId, { ...(row.status === 'APPROVED' ? {} : { category: draft.category }), components });
-  if (!res.ok) return metaFail(res);
-  // Meta's edit limits count APPROVED templates only (REJECTED/PAUSED are unlimited), so only those edits are logged: Ruling TPL-EDIT-COUNT-1.
-  if (row.status === 'APPROVED') await ctx.ws.recordTemplateEdit(draft.name, draft.language, Date.now());
-  await ctx.ws.saveSubmittedTemplate({ name: draft.name, language: draft.language, category: row.status === 'APPROVED' ? row.category : draft.category, status: res.value.status, components, metaId, label: draft.label });
-  console.log(JSON.stringify({ audit: 'template_edited', workspace: ctx.workspaceId, name: draft.name, language: draft.language, category: draft.category, status: res.value.status }));
-  return { ok: true, status: res.value.status };
 }
 
 export async function deleteTemplate(ctx: TemplatesCtx, p: { name: string; language: string }): Promise<{ ok: true } | Failure> {
@@ -146,19 +191,35 @@ export async function syncTemplates(ctx: TemplatesCtx): Promise<{ ok: true; upse
   return { ok: true, ...(await ctx.ws.syncTemplates(fetched.value.map(toSyncItem))) };
 }
 
+/** A pack entry as Meta wants it. Checked here, so one bad entry in a brand's starter set is reported and skipped, never a 500 or a stopped install. */
+const seedSchema = z.object({
+  name: z.string().regex(/^[a-z0-9_]{1,512}$/),
+  language: z.string().min(2).max(10),
+  category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']),
+  components: componentsSchema.min(1).refine((cs) => cs.some((c) => c.type.toUpperCase() === 'BODY'), 'a BODY component is required'),
+});
+
 /** Submits every seed this workspace does not have yet. Seeds are Meta-shaped (`components`), already reviewed copy, so no rule check. */
-export async function installDefaults(ctx: TemplatesCtx, seeds: readonly TemplateSeedInput[]): Promise<{ ok: true; submitted: string[]; skipped: string[]; failed: string[] } | Failure> {
+export async function installDefaults(ctx: TemplatesCtx, seeds: readonly unknown[]): Promise<{ ok: true; submitted: string[]; skipped: string[]; failed: string[] } | Failure> {
   const a = await auth(ctx);
   if (isFailure(a)) return a;
   const out = { ok: true as const, submitted: [] as string[], skipped: [] as string[], failed: [] as string[] };
-  for (const seed of seeds) {
+  for (const raw of seeds) {
+    const parsed = seedSchema.safeParse(raw);
+    if (!parsed.success) {
+      const name = typeof (raw as { name?: unknown } | null)?.name === 'string' ? (raw as { name: string }).name : 'invalid_entry';
+      out.failed.push(name);
+      console.warn(JSON.stringify({ warn: 'starter_template_entry_invalid', workspace: ctx.workspaceId, name }));
+      continue;
+    }
+    const seed = parsed.data;
     if (!(await ctx.ws.reserveTemplate({ ...seed, label: null }))) {
       out.skipped.push(seed.name);
       continue;
     }
     const res = await submitTemplate(a, seed);
     if (!res.ok) {
-      await ctx.ws.removeTemplate(seed.name, seed.language);
+      if (!res.retryable) await ctx.ws.removeTemplate(seed.name, seed.language); // a refusal releases the name; an ambiguous failure keeps the claim for the sweep
       out.failed.push(seed.name);
       continue;
     }

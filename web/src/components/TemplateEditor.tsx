@@ -128,6 +128,7 @@ export function TemplateEditor({ t, lang, api, mode, template, existing, onSaved
       if (e.detail === 'payload_changed') return t.tplErrChanged;
       if (e.detail === 'edit_limit') return t.tplErrEditLimit(e.extra?.retryAt ? dateTime(e.extra.retryAt, lang) : '…');
       if (e.detail === 'not_editable') return t.tplErrNotEditable;
+      if (e.detail === 'edit_in_progress') return t.tplErrEditInProgress;
       if (e.detail === 'token_unavailable') return t.tplErrToken;
       if (e.status === 503) return t.tplErrUnavailable;
       if (e.status === 400 && e.detail && e.detail !== 'invalid_template') return t.tplErrMeta(e.detail);
@@ -151,11 +152,12 @@ export function TemplateEditor({ t, lang, api, mode, template, existing, onSaved
   };
 
   const send = async () => {
+    if (!hash) return; // the confirm step is only reachable after a check, so the checked hash is always there; nothing is ever sent unbound
     setPhase('sending');
     setError(null);
     try {
-      if (mode === 'edit' && template) await api.edit(template.name, template.language, d, hash ?? undefined);
-      else setRecat((await api.create(d, hash ?? undefined)).categoryChanged);
+      if (mode === 'edit' && template) await api.edit(template.name, template.language, d, hash);
+      else setRecat((await api.create(d, hash)).categoryChanged);
       setPhase('sent');
     } catch (e) {
       if (e instanceof ApiError && e.detail === 'invalid_template' && e.extra?.issues) setServerIssues(e.extra.issues);

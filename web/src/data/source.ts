@@ -35,8 +35,8 @@ export interface TemplatesApi {
   detail(name: string, language: string): Promise<TemplateDto>;
   /** Free: Meta's rules against a draft, and the hash that `create` / `edit` must carry to prove the sent draft is the checked one. */
   check(d: TemplateDraft): Promise<{ issues: RuleIssue[]; payloadHash: string }>;
-  create(d: TemplateDraft, expectedHash?: string): Promise<{ name: string; language: string; status: string; category: TemplateDto['category']; categoryChanged: boolean }>;
-  edit(name: string, language: string, d: TemplateDraft, expectedHash?: string): Promise<{ status: string }>;
+  create(d: TemplateDraft, expectedHash: string): Promise<{ name: string; language: string; status: string; category: TemplateDto['category']; categoryChanged: boolean }>;
+  edit(name: string, language: string, d: TemplateDraft, expectedHash: string): Promise<{ status: string }>;
   remove(name: string, language: string): Promise<void>;
   sync(): Promise<{ upserted: number; removed: number }>;
   installDefaults(): Promise<{ submitted: string[]; skipped: string[]; failed: string[] }>;

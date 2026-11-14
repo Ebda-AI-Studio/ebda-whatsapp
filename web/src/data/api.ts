@@ -93,8 +93,8 @@ export function createApiSource(o: Opts): LiveSource {
       list: async () => { const r = await call('/templates', listTemplatesResponse); return { items: r.items, starterInstalled: r.starterInstalled === true }; },
       detail: (name, lang) => call(`/templates/${encodeURIComponent(name)}/${encodeURIComponent(lang)}`, templateDto),
       check: (d) => call('/templates/check', checkTemplateResponse, post(d)) as Promise<{ issues: RuleIssue[]; payloadHash: string }>,
-      create: (d, expectedHash) => call('/templates', createTemplateResponse, post(expectedHash ? { ...d, expectedHash } : d)),
-      edit: (name, lang, d, expectedHash) => call(`/templates/${encodeURIComponent(name)}/${encodeURIComponent(lang)}`, editTemplateResponse, { method: 'PUT', body: JSON.stringify(expectedHash ? { ...d, expectedHash } : d) }),
+      create: (d, expectedHash) => call('/templates', createTemplateResponse, post({ ...d, expectedHash })),
+      edit: (name, lang, d, expectedHash) => call(`/templates/${encodeURIComponent(name)}/${encodeURIComponent(lang)}`, editTemplateResponse, { method: 'PUT', body: JSON.stringify({ ...d, expectedHash }) }),
       remove: async (name, lang) => {
         const res = await f(`${root}/templates/${encodeURIComponent(name)}/${encodeURIComponent(lang)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
         if (!res.ok) {

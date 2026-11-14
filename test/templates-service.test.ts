@@ -23,6 +23,8 @@ async function ctx(n: number): Promise<TemplatesCtx> {
   await seedNumber(`pn-${id}`, id);
   return { env, ws: workspace(id), workspaceId: id, number: { phoneNumberId: `pn-${id}`, wabaId: 'waba-1' } };
 }
+const mk = async (c: TemplatesCtx, d: TemplateDraft) => createTemplate(c, d, { expectedHash: await payloadHash(d) });
+const ed = async (c: TemplatesCtx, d: TemplateDraft) => editTemplate(c, d, { expectedHash: await payloadHash(d) });
 const ok = (json: unknown = { id: 'meta-1', status: 'PENDING', category: 'UTILITY' }) => ({ status: 200, json });
 const metaCalls = () => graph!.calls.filter((c) => c.url.includes('/message_templates') || /\/v[\d.]+\/(meta-|tpl-)/.test(c.url));
 
@@ -42,7 +44,7 @@ describe('createTemplate', () => {
   it('submits toMetaComponents output and stores PENDING with the merchant label', async () => {
     const c = await ctx(401);
     graph = graphStub(() => ok());
-    const r = await createTemplate(c, draft());
+    const r = await mk(c, draft());
     expect(r).toEqual({ ok: true, name: 'shipping_update', language: 'ar', status: 'PENDING', category: 'UTILITY', categoryChanged: false });
     expect(metaCalls()[0]).toMatchObject({ method: 'POST', url: 'https://graph.facebook.com/v25.0/waba-1/message_templates', body: { name: 'shipping_update', language: 'ar', category: 'UTILITY', components: [{ type: 'BODY', text: draft().body.text, example: { body_text: [['أحمد', '1001', 'يومين']] } }] } });
     expect(await rows(c.workspaceId, 'SELECT name, status, meta_id, label FROM templates')).toEqual([{ name: 'shipping_update', status: 'PENDING', meta_id: 'meta-1', label: 'تحديث الشحن' }]);
@@ -50,7 +52,7 @@ describe('createTemplate', () => {
   it('an error issue is invalid and Graph is never called', async () => {
     const c = await ctx(402);
     graph = graphStub(() => ok());
-    const r = await createTemplate(c, draft({ body: { text: '{{1}} أهلاً', examples: ['x'] } }));
+    const r = await mk(c, draft({ body: { text: '{{1}} أهلاً', examples: ['x'] } }));
     expect(r).toMatchObject({ ok: false, reason: 'invalid' });
     expect(metaCalls()).toEqual([]);
     expect(await rows(c.workspaceId, 'SELECT 1 FROM templates')).toEqual([]);
@@ -58,27 +60,59 @@ describe('createTemplate', () => {
   it('a second create of the same name+language is exists, Graph called once only', async () => {
     const c = await ctx(403);
     graph = graphStub(() => ok());
-    expect((await createTemplate(c, draft())).ok).toBe(true);
-    expect(await createTemplate(c, draft())).toMatchObject({ ok: false, reason: 'exists' });
+    expect((await mk(c, draft())).ok).toBe(true);
+    expect(await mk(c, draft())).toMatchObject({ ok: false, reason: 'exists' });
     expect(metaCalls()).toHaveLength(1);
   });
   it('two taps at once (slow Meta) submit ONCE: the loser is exists before any Meta call', async () => {
     const c = await ctx(404);
     graph = graphStub(() => ok(), 40);
-    const [a, b] = await Promise.all([createTemplate(c, draft()), createTemplate(c, draft())]);
+    const [a, b] = await Promise.all([mk(c, draft()), mk(c, draft())]);
     expect([a.ok, b.ok].sort()).toEqual([false, true]);
     expect([a, b].find((x) => !x.ok)).toMatchObject({ reason: 'exists' });
     expect(metaCalls()).toHaveLength(1);
   });
-  it('a failed submission leaves nothing behind, so the merchant can fix and retry', async () => {
+  it('a definite Meta refusal (4xx) releases the name so the merchant can fix and retry', async () => {
     const c = await ctx(405);
-    graph = graphStub(() => ({ status: 400, json: { error: { message: 'Template name already exists' } } }));
-    expect(await createTemplate(c, draft())).toEqual({ ok: false, reason: 'meta_rejected', message: 'Template name already exists' });
+    graph = graphStub(() => ({ status: 400, json: { error: { message: 'Invalid parameter' } } }));
+    expect(await mk(c, draft())).toEqual({ ok: false, reason: 'meta_rejected', message: 'Invalid parameter' });
     expect(await rows(c.workspaceId, 'SELECT 1 FROM templates')).toEqual([]);
-    graph.restore();
+  });
+  it('an ambiguous failure (503 / timeout) KEEPS the claim as PENDING: Meta may have created it, and the sweep reconciles it', async () => {
+    const c = await ctx(430);
     graph = graphStub(() => ({ status: 503, json: {} }));
-    expect(await createTemplate(c, draft())).toMatchObject({ ok: false, reason: 'meta_unavailable' });
-    expect(await rows(c.workspaceId, 'SELECT 1 FROM templates')).toEqual([]);
+    expect(await mk(c, draft())).toMatchObject({ ok: false, reason: 'meta_unavailable' });
+    expect(await rows(c.workspaceId, 'SELECT name, status, meta_id FROM templates')).toEqual([{ name: 'shipping_update', status: 'PENDING', meta_id: null }]);
+    expect(await rows(c.workspaceId, "SELECT kind FROM scheduled_tasks WHERE kind = 'template_refresh'")).toEqual([{ kind: 'template_refresh' }]);
+    expect(await mk(c, draft())).toMatchObject({ ok: false, reason: 'exists' }); // a quick retry is the same claim, never a second submission
+    expect(metaCalls()).toHaveLength(1);
+  });
+  it('a stale ambiguous claim that Meta DOES have is adopted on retry and shown, never hidden behind "already exists"', async () => {
+    const c = await ctx(431);
+    graph = graphStub(() => ({ status: 503, json: {} }));
+    await mk(c, draft());
+    graph.restore();
+    await exec(c.workspaceId, 'UPDATE templates SET submitted_at = 1, updated_at = 1');
+    graph = graphStub((call) => (call.method === 'GET' ? { status: 200, json: { data: [{ id: 'at-meta', name: 'shipping_update', language: 'ar', category: 'UTILITY', status: 'APPROVED', components: [{ type: 'BODY', text: 'x y.' }] }] } } : { status: 400, json: { error: { message: 'Template name already exists' } } }));
+    expect(await mk(c, draft())).toMatchObject({ ok: false, reason: 'exists' });
+    expect(await rows(c.workspaceId, 'SELECT status, meta_id, label FROM templates')).toEqual([{ status: 'APPROVED', meta_id: 'at-meta', label: 'تحديث الشحن' }]);
+    expect(graph.calls.filter((x) => x.method === 'POST')).toEqual([]); // adopted, not resubmitted
+  });
+  it('a stale ambiguous claim that Meta does NOT have is dropped and the retry submits fresh', async () => {
+    const c = await ctx(432);
+    graph = graphStub(() => ({ status: 503, json: {} }));
+    await mk(c, draft());
+    graph.restore();
+    await exec(c.workspaceId, 'UPDATE templates SET submitted_at = 1, updated_at = 1');
+    graph = graphStub((call) => (call.method === 'GET' ? { status: 200, json: { data: [] } } : ok()));
+    expect(await mk(c, draft())).toMatchObject({ ok: true, status: 'PENDING' });
+    expect(await rows(c.workspaceId, 'SELECT meta_id FROM templates')).toEqual([{ meta_id: 'meta-1' }]);
+  });
+  it('a definite "already exists" from Meta for a template we do not have adopts the existing one and says so', async () => {
+    const c = await ctx(433);
+    graph = graphStub((call) => (call.method === 'GET' ? { status: 200, json: { data: [{ id: 'old-1', name: 'shipping_update', language: 'ar', category: 'UTILITY', status: 'REJECTED', rejected_reason: 'INVALID_FORMAT', components: [{ type: 'BODY', text: 'x y.' }] }] } } : { status: 400, json: { error: { message: 'Template name already exists' } } }));
+    expect(await mk(c, draft())).toMatchObject({ ok: false, reason: 'exists' });
+    expect(await rows(c.workspaceId, 'SELECT status, meta_id, rejected_reason FROM templates')).toEqual([{ status: 'REJECTED', meta_id: 'old-1', rejected_reason: 'INVALID_FORMAT' }]);
   });
   it('expectedHash mismatch is payload_changed and Graph is never called; a matching hash submits', async () => {
     const c = await ctx(406);
@@ -92,7 +126,7 @@ describe('createTemplate', () => {
   it("Meta answering MARKETING for a requested UTILITY is categoryChanged and the stored category is MARKETING", async () => {
     const c = await ctx(407);
     graph = graphStub(() => ok({ id: 'meta-2', status: 'PENDING', category: 'MARKETING' }));
-    const r = await createTemplate(c, draft());
+    const r = await mk(c, draft());
     expect(r).toMatchObject({ ok: true, category: 'MARKETING', categoryChanged: true });
     expect(await rows(c.workspaceId, 'SELECT category FROM templates')).toEqual([{ category: 'MARKETING' }]);
   });
@@ -101,12 +135,24 @@ describe('createTemplate', () => {
     await env.DB.prepare("INSERT OR REPLACE INTO waba_credentials (waba_id, workspace_id, token_enc, kind, created_at, updated_at) VALUES ('waba-1', ?, 'garbage', 'own', 1, 1)").bind(c.workspaceId).run();
     graph = graphStub(() => ok());
     try {
-      expect(await createTemplate(c, draft())).toMatchObject({ ok: false, reason: 'token_unavailable' });
+      expect(await mk(c, draft())).toMatchObject({ ok: false, reason: 'token_unavailable' });
       expect(metaCalls()).toEqual([]);
       expect(await rows(c.workspaceId, 'SELECT 1 FROM templates')).toEqual([]);
     } finally {
       await env.DB.prepare("DELETE FROM waba_credentials WHERE waba_id = 'waba-1'").run();
     }
+  });
+});
+
+describe('expectedHash is required (the approval is bound to the previewed payload)', () => {
+  it('createTemplate and editTemplate without a hash are hash_required and never reach Meta, nor claim a name', async () => {
+    const c = await ctx(434);
+    graph = graphStub(() => ok());
+    expect(await createTemplate(c, draft(), {} as never)).toMatchObject({ ok: false, reason: 'hash_required' });
+    expect(await createTemplate(c, draft(), { expectedHash: '' })).toMatchObject({ ok: false, reason: 'hash_required' });
+    expect(await editTemplate(c, draft(), {} as never)).toMatchObject({ ok: false, reason: 'hash_required' });
+    expect(metaCalls()).toEqual([]);
+    expect(await rows(c.workspaceId, 'SELECT 1 FROM templates')).toEqual([]);
   });
 });
 
@@ -121,26 +167,26 @@ describe('editTemplate', () => {
     const at = Date.now() - 5_000;
     await c.ws.recordTemplateEdit('shipping_update', 'ar', at);
     graph = graphStub(() => ({ status: 200, json: { success: true } }));
-    expect(await editTemplate(c, draft())).toEqual({ ok: false, reason: 'edit_limit', retryAt: at + DAY });
+    expect(await ed(c, draft())).toEqual({ ok: false, reason: 'edit_limit', retryAt: at + DAY });
     expect(metaCalls()).toEqual([]);
   });
   it('an APPROVED template cannot change category: not_editable', async () => {
     const c = await seed(410, 'APPROVED');
     graph = graphStub(() => ({ status: 200, json: { success: true } }));
-    expect(await editTemplate(c, draft({ category: 'MARKETING' }))).toMatchObject({ ok: false, reason: 'not_editable' });
+    expect(await ed(c, draft({ category: 'MARKETING' }))).toMatchObject({ ok: false, reason: 'not_editable' });
     expect(metaCalls()).toEqual([]);
   });
   it('a PENDING template is not editable', async () => {
     const c = await seed(411, 'PENDING');
     graph = graphStub(() => ({ status: 200, json: { success: true } }));
-    expect(await editTemplate(c, draft())).toMatchObject({ ok: false, reason: 'not_editable' });
+    expect(await ed(c, draft())).toMatchObject({ ok: false, reason: 'not_editable' });
   });
   it('REJECTED edit succeeds: posts to the Meta id with components, status PENDING, reason cleared, not counted against the approved limit', async () => {
     const c = await seed(412, 'REJECTED');
     await exec(c.workspaceId, "UPDATE templates SET rejected_reason = 'INVALID_FORMAT'");
     graph = graphStub(() => ({ status: 200, json: { success: true } }));
     const d = draft({ category: 'MARKETING' }); // a rejected template may change category
-    expect(await editTemplate(c, d)).toEqual({ ok: true, status: 'PENDING' });
+    expect(await ed(c, d)).toEqual({ ok: true, status: 'PENDING' });
     expect(metaCalls()[0]).toMatchObject({ method: 'POST', url: 'https://graph.facebook.com/v25.0/meta-1', body: { category: 'MARKETING', components: [{ type: 'BODY', text: d.body.text }] } });
     expect(await rows(c.workspaceId, 'SELECT status, category, rejected_reason FROM templates')).toEqual([{ status: 'PENDING', category: 'MARKETING', rejected_reason: null }]);
     expect(await rows(c.workspaceId, 'SELECT 1 FROM template_edits')).toEqual([]);
@@ -148,7 +194,7 @@ describe('editTemplate', () => {
   it('an APPROVED edit is recorded in the edit log and does not send category', async () => {
     const c = await seed(413, 'APPROVED');
     graph = graphStub(() => ({ status: 200, json: { success: true } }));
-    expect(await editTemplate(c, draft())).toEqual({ ok: true, status: 'PENDING' });
+    expect(await ed(c, draft())).toEqual({ ok: true, status: 'PENDING' });
     expect(metaCalls()[0]!.body).not.toHaveProperty('category');
     expect((await rows(c.workspaceId, 'SELECT name FROM template_edits')).length).toBe(1);
     expect(await c.ws.getTemplate('shipping_update', 'ar')).toMatchObject({ status: 'PENDING' }); // Meta re-reviews an edited template
@@ -157,13 +203,30 @@ describe('editTemplate', () => {
     const c = await seed(414, 'REJECTED', { metaId: '' });
     await exec(c.workspaceId, "UPDATE templates SET meta_id = NULL");
     graph = graphStub((call) => (call.method === 'GET' ? { status: 200, json: { data: [{ id: 'found-7', name: 'shipping_update', language: 'ar', category: 'UTILITY', status: 'REJECTED', components: [] }] } } : { status: 200, json: { success: true } }));
-    expect(await editTemplate(c, draft())).toEqual({ ok: true, status: 'PENDING' });
+    expect(await ed(c, draft())).toEqual({ ok: true, status: 'PENDING' });
     expect(graph.calls.find((x) => x.method === 'POST')!.url).toBe('https://graph.facebook.com/v25.0/found-7');
+  });
+  it('two concurrent edits of the same template: one runs, the other is edit_in_progress, Meta is called once and one edit is logged', async () => {
+    const c = await seed(435, 'APPROVED');
+    graph = graphStub(() => ({ status: 200, json: { success: true } }), 40);
+    const [a, b] = await Promise.all([ed(c, draft()), ed(c, draft())]);
+    expect([a.ok, b.ok].sort()).toEqual([false, true]);
+    expect([a, b].find((x) => !x.ok)).toMatchObject({ reason: 'edit_in_progress' });
+    expect(graph.calls.filter((x) => x.method === 'POST')).toHaveLength(1);
+    expect((await rows(c.workspaceId, 'SELECT 1 FROM template_edits')).length).toBe(1);
+  });
+  it('the edit claim is released after a failure, so the merchant can try again', async () => {
+    const c = await seed(436, 'REJECTED');
+    graph = graphStub(() => ({ status: 400, json: { error: { message: 'no' } } }));
+    expect(await ed(c, draft())).toMatchObject({ ok: false, reason: 'meta_rejected' });
+    graph.restore();
+    graph = graphStub(() => ({ status: 200, json: { success: true } }));
+    expect(await ed(c, draft())).toEqual({ ok: true, status: 'PENDING' });
   });
   it('an unknown template is not_found; a changed payload is payload_changed', async () => {
     const c = await seed(415, 'REJECTED');
     graph = graphStub(() => ({ status: 200, json: { success: true } }));
-    expect(await editTemplate(c, draft({ name: 'nope' }))).toMatchObject({ ok: false, reason: 'not_found' });
+    expect(await ed(c, draft({ name: 'nope' }))).toMatchObject({ ok: false, reason: 'not_found' });
     expect(await editTemplate(c, draft(), { expectedHash: 'deadbeef' })).toMatchObject({ ok: false, reason: 'payload_changed' });
     expect(metaCalls()).toEqual([]);
   });
@@ -241,6 +304,21 @@ describe('syncTemplates / installDefaults / refreshPending', () => {
     await seedTemplate(c.workspaceId, { name: 'order_confirmation', category: 'UTILITY', status: 'APPROVED', components: '[]' });
     graph = graphStub(() => ok({ id: '9', status: 'PENDING' }));
     expect(await installDefaults(c, EBDA_DEFAULT_TEMPLATES)).toEqual({ ok: true, submitted: ['cod_confirmation', 'shipping_update', 'otp_code', 'cart_recovery', 'shipping_tracking', 'shipping_status'], skipped: ['order_confirmation'], failed: [] });
+  });
+  it('installDefaults reports a bad pack entry in failed and still installs the good ones (never throws)', async () => {
+    const c = await ctx(437);
+    graph = graphStub(() => ok({ id: '9', status: 'PENDING' }));
+    const good = EBDA_DEFAULT_TEMPLATES[0]!;
+    const r = await installDefaults(c, [{ name: 'Bad Name!', language: 'ar', category: 'UTILITY', components: [] }, { nope: 1 } as never, good]);
+    expect(r).toEqual({ ok: true, submitted: [good.name], skipped: [], failed: ['Bad Name!', 'invalid_entry'] });
+    expect(metaCalls()).toHaveLength(1);
+  });
+  it('installDefaults keeps the claim of an ambiguous (5xx) submission and releases a refused one', async () => {
+    const c = await ctx(438);
+    graph = graphStub((call) => (call.body?.name === 'order_confirmation' ? { status: 503, json: {} } : call.body?.name === 'cod_confirmation' ? { status: 400, json: { error: { message: 'no' } } } : ok({ id: 'x', status: 'PENDING' })));
+    const r = await installDefaults(c, EBDA_DEFAULT_TEMPLATES.slice(0, 3));
+    expect(r).toMatchObject({ ok: true, submitted: ['shipping_update'], failed: ['order_confirmation', 'cod_confirmation'] });
+    expect((await rows<{ name: string }>(c.workspaceId, 'SELECT name FROM templates ORDER BY name')).map((x) => x.name)).toEqual(['order_confirmation', 'shipping_update']);
   });
   it('refreshPending updates a stale PENDING row from Meta, and drops an orphan reservation Meta never saw', async () => {
     const c = await ctx(425);

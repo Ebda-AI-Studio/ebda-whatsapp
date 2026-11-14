@@ -50,25 +50,47 @@ it('a failing sync changes nothing', async () => {
 it('POST /templates submits to Meta and stores it as PENDING; staff may not', async () => {
   const api = await apiFor(W(102));
   graph = graphStub(() => ({ status: 200, json: { id: '123', status: 'PENDING', category: 'UTILITY' } }));
-  const body = { name: 'shipping_update', language: 'ar', category: 'UTILITY', components: [{ type: 'BODY', text: 'شحنتك {{1}} خرجت', example: { body_text: [['1001']] } }] };
+  const body = await signed(api, draftBody());
   const res = await api.call('POST', '/templates', body);
   expect(res.status).toBe(201);
-  expect(graph.calls[0]!.url).toBe('https://graph.facebook.com/v25.0/waba-1/message_templates');
-  expect(graph.calls[0]!.body).toEqual(body);
+  expect(graph.calls.filter((c) => c.method === 'POST')[0]!.url).toBe('https://graph.facebook.com/v25.0/waba-1/message_templates');
+  expect(graph.calls.filter((c) => c.method === 'POST')[0]!.body).toMatchObject({ name: 'shipping_update', language: 'ar', category: 'UTILITY', components: [{ type: 'BODY', example: { body_text: [['أحمد', '1001', 'يومين']] } }] });
   expect(await rows(W(102), 'SELECT name, status FROM templates')).toEqual([{ name: 'shipping_update', status: 'PENDING' }]);
   const staff = await apiFor(W(102), 'staff');
   expect((await staff.call('POST', '/templates', body)).status).toBe(403);
-  expect((await api.call('POST', '/templates', { ...body, name: 'Bad Name!' })).status).toBe(400);
+  expect((await api.call('POST', '/templates', await signed(api, draftBody({ name: 'Bad Name!' })))).status).toBe(400);
+});
+
+it('a submission without expectedHash is refused 400 hash_required and never reaches Meta, whatever the body shape (the approval is bound to the previewed payload)', async () => {
+  const api = await apiFor(W(120));
+  graph = graphStub(() => ({ status: 200, json: { id: '1', status: 'PENDING', category: 'UTILITY' } }));
+  for (const body of [draftBody(), { name: 'old_shape', language: 'ar', category: 'UTILITY', components: [{ type: 'BODY', text: 'أهلاً {{1}} طلبك.', example: { body_text: [['1001']] } }] }]) {
+    const res = await api.call('POST', '/templates', body);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_request', message: 'hash_required' });
+  }
+  const put = await api.call('PUT', '/templates/shipping_update/ar', draftBody());
+  expect(put.status).toBe(400);
+  expect(await put.json()).toEqual({ error: 'invalid_request', message: 'hash_required' });
+  expect((await api.call('POST', '/templates', { ...draftBody(), expectedHash: 'not-a-hash' })).status).toBe(400);
+  expect(graph.calls.filter((c) => c.url.includes('message_templates'))).toEqual([]);
+  expect(await rows(W(120), 'SELECT 1 FROM templates')).toEqual([]);
 });
 
 it('Meta rejecting a submission surfaces as 400 with its message, and stores nothing', async () => {
   const api = await apiFor(W(103));
-  graph = graphStub(() => ({ status: 400, json: { error: { code: 100, message: 'Template name already exists' } } }));
-  const res = await api.call('POST', '/templates', { name: 'dup', language: 'ar', category: 'UTILITY', components: [{ type: 'BODY', text: 'x' }] });
+  graph = graphStub((c) => (c.method === 'GET' ? { status: 200, json: { data: [] } } : { status: 400, json: { error: { code: 100, message: 'Invalid parameter' } } }));
+  const res = await api.call('POST', '/templates', await signed(api, draftBody({ name: 'dup' })));
   expect(res.status).toBe(400);
-  expect(await res.json()).toEqual({ error: 'invalid_request', message: 'Template name already exists' });
+  expect(await res.json()).toEqual({ error: 'invalid_request', message: 'Invalid parameter' });
   expect(await rows(W(103), 'SELECT 1 FROM templates')).toEqual([]);
 });
+
+/** The draft plus the hash the last `check` answered: what the screen sends after the merchant confirmed the preview. */
+async function signed(api: Awaited<ReturnType<typeof apiFor>>, body: Record<string, unknown>) {
+  const r = (await (await api.call('POST', '/templates/check', body)).json()) as { payloadHash: string };
+  return { ...body, expectedHash: r.payloadHash };
+}
 
 it('install-defaults submits only the Ebda templates that are missing', async () => {
   const api = await apiFor(W(104));
@@ -161,13 +183,13 @@ it('POST /templates/check returns issues and a hash, never calls Graph, and staf
 it('POST /templates with the draft body submits and answers 201 with the confirmed category', async () => {
   const api = await apiFor(W(111));
   graph = graphStub(() => ({ status: 200, json: { id: 'm-1', status: 'PENDING', category: 'MARKETING' } }));
-  const res = await api.call('POST', '/templates', draftBody());
+  const res = await api.call('POST', '/templates', await signed(api, draftBody()));
   expect(res.status).toBe(201);
   expect(await res.json()).toEqual({ name: 'shipping_update', language: 'ar', status: 'PENDING', category: 'MARKETING', categoryChanged: true });
   expect(graph.calls[0]!.body.components[0]).toMatchObject({ type: 'BODY', example: { body_text: [['أحمد', '1001', 'يومين']] } });
-  const dup = await api.call('POST', '/templates', draftBody());
+  const dup = await api.call('POST', '/templates', await signed(api, draftBody()));
   expect(dup.status).toBe(409);
-  const bad = await api.call('POST', '/templates', draftBody({ name: 'other_one', body: { text: '{{1}} أهلاً', examples: ['x'] } }));
+  const bad = await api.call('POST', '/templates', await signed(api, draftBody({ name: 'other_one', body: { text: '{{1}} أهلاً', examples: ['x'] } })));
   expect(bad.status).toBe(400);
   expect(await bad.json()).toMatchObject({ error: 'invalid_request', issues: [{ code: 'variable_at_edge' }] });
   const stale = await api.call('POST', '/templates', { ...draftBody({ name: 'third_one', body: { text: 'أهلاً {{1}}، شحنتك {{2}} وصلت اليوم.', examples: ['أحمد', '1001'] } }), expectedHash: 'a'.repeat(64) });
@@ -178,8 +200,9 @@ it('POST /templates with the draft body submits and answers 201 with the confirm
 it('staff may read but not create, edit or delete; no integrator write', async () => {
   const staff = await apiFor(W(112), 'staff');
   expect((await staff.call('GET', '/templates')).status).toBe(200);
-  expect((await staff.call('POST', '/templates', draftBody())).status).toBe(403);
-  expect((await staff.call('PUT', '/templates/shipping_update/ar', draftBody())).status).toBe(403);
+  const hashed = { ...draftBody(), expectedHash: 'a'.repeat(64) };
+  expect((await staff.call('POST', '/templates', hashed)).status).toBe(403);
+  expect((await staff.call('PUT', '/templates/shipping_update/ar', hashed)).status).toBe(403);
   expect((await staff.call('DELETE', '/templates/shipping_update/ar')).status).toBe(403);
   expect((await staff.call('POST', '/templates/install-defaults')).status).toBe(403);
 });
@@ -190,14 +213,14 @@ it('PUT within 24 h of the last edit is 409 with retryAt; a REJECTED one is edit
   const at = Date.now() - 5_000;
   await exec(W(113), 'INSERT INTO template_edits (name, language, at) VALUES (?, ?, ?)', 'shipping_update', 'ar', at);
   graph = graphStub(() => ({ status: 200, json: { success: true } }));
-  const res = await api.call('PUT', '/templates/shipping_update/ar', draftBody());
+  const res = await api.call('PUT', '/templates/shipping_update/ar', await signed(api, draftBody()));
   expect(res.status).toBe(409);
   expect(await res.json()).toEqual({ error: 'invalid_request', message: 'edit_limit', retryAt: at + 86_400_000 });
   await exec(W(113), "UPDATE templates SET status = 'REJECTED'");
-  const ok = await api.call('PUT', '/templates/shipping_update/ar', draftBody());
+  const ok = await api.call('PUT', '/templates/shipping_update/ar', await signed(api, draftBody()));
   expect(ok.status).toBe(200);
   expect(await ok.json()).toEqual({ status: 'PENDING' });
-  expect((await api.call('PUT', '/templates/shipping_update/en', draftBody())).status).toBe(400); // url and body must agree
+  expect((await api.call('PUT', '/templates/shipping_update/en', await signed(api, draftBody()))).status).toBe(400); // url and body must agree
 });
 
 it('DELETE: in use is 409, ok is 204 and the row is gone, unknown is 404', async () => {
@@ -234,7 +257,7 @@ it('a store with no active number gets 404 no_active_number on every template ro
   void api;
   const token = await tokenFor(id, 600);
   const call = (method: string, path: string, body?: unknown) => SELF.fetch(`https://x/api/v1/stores/${id}${path}`, { method, headers: { authorization: `Bearer ${token}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
-  for (const [m, p, b] of [['GET', '/templates'], ['POST', '/templates/sync'], ['POST', '/templates', draftBody()], ['POST', '/templates/check', draftBody()], ['DELETE', '/templates/x/ar']] as [string, string, unknown?][]) {
+  for (const [m, p, b] of [['GET', '/templates'], ['POST', '/templates/sync'], ['POST', '/templates', { ...draftBody(), expectedHash: 'a'.repeat(64) }], ['POST', '/templates/check', draftBody()], ['DELETE', '/templates/x/ar']] as [string, string, unknown?][]) {
     const res = await call(m, p, b);
     expect(res.status, `${m} ${p}`).toBe(404);
     expect(await res.json()).toEqual({ error: 'not_found', message: 'no_active_number' });

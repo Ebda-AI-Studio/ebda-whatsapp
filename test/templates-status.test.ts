@@ -82,3 +82,31 @@ it('the list carries plain advice for a rejected template', async () => {
   expect(byName.r!.rejectedReason).toBe('INVALID_FORMAT'); // the raw code is still there
   expect(byName.ok!.advice).toBeUndefined();
 });
+
+it('a late or replayed PENDING never moves an APPROVED or REJECTED template backwards', async () => {
+  const { id, ctx, waba } = await setup(507);
+  await ctx.ws.saveSubmittedTemplate({ name: 'late', language: 'ar', category: 'UTILITY', status: 'PENDING', components: [], metaId: 'meta-1', label: null });
+  await postWebhook(SELF, templateStatusPayload(waba, { event: 'APPROVED', name: 'late', language: 'ar' }));
+  await postWebhook(SELF, templateStatusPayload(waba, { event: 'PENDING', name: 'late', language: 'ar' })); // Meta redelivers out of order
+  expect(await rows(id, 'SELECT status FROM templates')).toEqual([{ status: 'APPROVED' }]);
+  await postWebhook(SELF, templateStatusPayload(waba, { event: 'REJECTED', name: 'late', language: 'ar', reason: 'INVALID_FORMAT' }));
+  await postWebhook(SELF, templateStatusPayload(waba, { event: 'PENDING', name: 'late', language: 'ar' }));
+  await postWebhook(SELF, templateStatusPayload(waba, { event: 'IN_APPEAL', name: 'late', language: 'ar' }));
+  expect(await rows(id, 'SELECT status, rejected_reason FROM templates')).toEqual([{ status: 'REJECTED', rejected_reason: 'INVALID_FORMAT' }]);
+});
+
+it('PENDING still applies to a PENDING row, and a real decision after it still applies', async () => {
+  const { id, ctx, waba } = await setup(508);
+  await ctx.ws.saveSubmittedTemplate({ name: 'late', language: 'ar', category: 'UTILITY', status: 'PENDING', components: [], metaId: null, label: null });
+  expect(await ctx.ws.applyTemplateStatus('late', 'ar', 'PENDING', null, 'meta-5')).toEqual({ applied: true });
+  expect(await rows(id, 'SELECT status, meta_id FROM templates')).toEqual([{ status: 'PENDING', meta_id: 'meta-5' }]);
+  await postWebhook(SELF, templateStatusPayload(waba, { event: 'APPROVED', name: 'late', language: 'ar' }));
+  expect(await rows(id, 'SELECT status FROM templates')).toEqual([{ status: 'APPROVED' }]);
+});
+
+it('our own edit puts an APPROVED template back to PENDING (re-review) and that is not a webhook regression', async () => {
+  const { id, ctx } = await setup(509);
+  await ctx.ws.saveSubmittedTemplate({ name: 'late', language: 'ar', category: 'UTILITY', status: 'APPROVED', components: [], metaId: 'meta-1', label: null });
+  await ctx.ws.saveSubmittedTemplate({ name: 'late', language: 'ar', category: 'UTILITY', status: 'PENDING', components: [], metaId: 'meta-1', label: null });
+  expect(await rows(id, 'SELECT status FROM templates')).toEqual([{ status: 'PENDING' }]);
+});

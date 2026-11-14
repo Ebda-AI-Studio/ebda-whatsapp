@@ -281,3 +281,23 @@ describe('createApiSource team seats (WA-SEATS-1)', () => {
     expect(c.src.noSeat).toBeUndefined();
   });
 });
+
+describe('createApiSource templates', () => {
+  const draft = { name: 'n_one', label: 'ن', language: 'ar', category: 'UTILITY' as const, header: null, body: { text: 'أهلاً شكراً لطلبك.', examples: [] }, footer: null, buttons: [] };
+  const HASH = 'c'.repeat(64);
+  it('create and edit always carry the checked hash in the body (the approval is bound to the payload)', async () => {
+    const { f, calls } = fetchStub({
+      '/templates/n_one/ar': () => ({ status: 200, body: { status: 'PENDING' } }),
+      '/templates': () => ({ status: 201, body: { name: 'n_one', language: 'ar', status: 'PENDING', category: 'UTILITY', categoryChanged: false } }),
+    });
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    await src.templatesApi!.create(draft, HASH);
+    await src.templatesApi!.edit('n_one', 'ar', draft, HASH);
+    expect(calls.map((c) => [c.init?.method, JSON.parse(String(c.init?.body)).expectedHash])).toEqual([['POST', HASH], ['PUT', HASH]]);
+  });
+  it('a 409 edit_in_progress and an edit_limit surface with their detail and retryAt', async () => {
+    const { f } = fetchStub({ '/templates/n_one/ar': () => ({ status: 409, body: { error: 'invalid_request', message: 'edit_limit', retryAt: 1234 } }) });
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    await expect(src.templatesApi!.edit('n_one', 'ar', draft, HASH)).rejects.toMatchObject({ status: 409, detail: 'edit_limit', extra: { retryAt: 1234 } });
+  });
+});
