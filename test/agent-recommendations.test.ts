@@ -99,7 +99,7 @@ describe('recommend_products', () => {
     expect(lastTool(m)).toMatchObject({ error: 'store_unavailable' });
   });
 
-  it('the merchant toggle: off means the tool is not offered and a forced call does nothing', async () => {
+  it('the merchant toggle: off means the tool is not offered and a call made anyway does nothing', async () => {
     const id = W(7);
     const pn = await shop(id, { recommendProducts: false });
     link.fake.recs.v1 = ['v2'];
