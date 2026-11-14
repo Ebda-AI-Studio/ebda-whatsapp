@@ -54,6 +54,11 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/conversations/:conversationId/notes`]: 'person_only',
   [`POST ${S}/conversations/:conversationId/read`]: 'person_only',
   [`PUT ${S}/conversations/:conversationId/tags`]: 'person_only',
+  // Quick replies (A25): a team's canned texts for the composer, used by people in the inbox; no integration token needs them.
+  [`GET ${S}/quick-replies`]: 'person_only',
+  [`POST ${S}/quick-replies`]: 'person_only',
+  [`PUT ${S}/quick-replies/:quickReplyId`]: 'person_only',
+  [`DELETE ${S}/quick-replies/:quickReplyId`]: 'person_only',
 
   [`GET ${S}/digest`]: 'person_only', // the merchant's own usage summary
   [`PUT ${S}/digest`]: 'person_only',
@@ -188,6 +193,7 @@ export const SESSION_UNCHECKED_READS: Readonly<Record<string, string>> = {
   'GET /stores/:storeId/segments/:segmentId/preview': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/ws': "WebSocket upgrade: the token is verified once at the upgrade; a revoked session's socket is closed by the realtime layer",
   'GET /stores/:storeId/conversations/:conversationId/notes': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/quick-replies': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/agent': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/connectors': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/store-link/settings': "settings read of the merchant's own configuration: no customer data",
