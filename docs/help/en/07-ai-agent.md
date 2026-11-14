@@ -1,5 +1,6 @@
 ---
 capabilities:
+  - agent.credits-topup@2
   - agent.credits-view@2
   - agent.enable@2
   - agent.faq@1
@@ -23,7 +24,7 @@ The agent replies to your customers in chat in Egyptian Arabic, searches the cat
 
 ## What you need before you start
 - A connected number and a synced catalog.
-- **AI credits.** Your package gives you credits each month; there is no way today to buy extra credits: if they run out, wait for next month or upgrade your package.
+- **AI credits.** Your package gives you credits each month; if they run out, buy a credit pack by card in **Wallet > Buy AI credits** (the owner does this; see the wallet guide), wait for next month, or upgrade your package.
 - A few lines about your store policies (shipping, returns, opening hours) so the agent can answer accurately.
 
 ## Steps

@@ -15,6 +15,7 @@ import {
 import { backfillFx, getFxBufferPin, setFxBufferPin } from '../core/billing/fx-daily';
 import { STORE_INCLUDED, setSubscription } from '../core/billing/subscriptions';
 import { executeYearlyRefund, packageRefundQuote } from '../core/billing/package-orders';
+import { listPendingRequests, markRequestExecuted } from '../core/billing/yearly-refund-request';
 import { currentSharedNumber, registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
 import { listAllRequests, markRequestsDone } from '../core/shared/shared-template-requests';
 import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type SharedTemplateFailure } from '../core/shared/shared-templates';
@@ -258,10 +259,14 @@ operatorRoutes.post('/package-orders/:orderId/yearly-refund', async (c) => {
   if (!body.success) return bad(c, 'reason_required');
   const r = await executeYearlyRefund(c.env, c.req.param('orderId'), { actor: actor(c), reason: body.data.reason });
   if (!r.ok) return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
+  await markRequestExecuted(c.env, r.orderId, actor(c)); // a merchant's open request for this period is done (idempotent)
   console.log(JSON.stringify({ audit: 'operator_yearly_refund', orderId: r.orderId, shortenedMonths: r.shortenedMonths, debtSettledMinor: r.debtSettledMinor, cashRefundMinor: r.cashRefundMinor, actor: actor(c) }));
   const { ok: _ok, ...out } = r;
   return c.json(out);
 });
+
+// Merchants' yearly-refund requests waiting for a person (self-service A22): the console lists them, then runs the yearly refund above for the order.
+operatorRoutes.get('/yearly-refund-requests', async (c) => c.json({ items: await listPendingRequests(c.env) }));
 
 operatorRoutes.get('/change-log', async (c) => {
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? 50) || 50));
