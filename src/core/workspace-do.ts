@@ -15,7 +15,6 @@ import { dropErased } from './erasure';
 import { deleteTargets } from './erasure-targets';
 import { exportContact, mergeContacts, renameContact } from './contact-data';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
-import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptOutMessage, matchOptIn } from './consent';
 import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
@@ -28,6 +27,9 @@ import { conversationDto, type ConversationRow } from './dto';
 import type { ConversationDto, NoteDto } from './api/contract';
 import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './throttle';
 import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
+import { rejectionAdvice } from './template-advice';
+import { refreshPendingWith } from './templates-service';
+import { graphTokenFor } from './numbers/token';
 import type { TemplateDto } from './api/contract';
 import type { StoreEvent } from './api/store-events';
 import type { z } from 'zod';
@@ -117,6 +119,7 @@ const TEMPLATE_EDIT_DAY_MS = 86_400_000;
 const TEMPLATE_EDIT_MONTH_MS = 30 * 86_400_000;
 const TEMPLATE_EDITS_PER_MONTH = 10;
 const TEMPLATE_INFLIGHT_MS = 5 * 60_000;
+const TEMPLATE_PENDING_AFTER_MS = 60 * 60_000;
 
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'plan_required' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
@@ -900,6 +903,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       name: t.name, language: t.language, category: t.category as TemplateDto['category'], status: t.status as TemplateDto['status'],
       bodyText: bodyTextOf(parts), paramCount: paramCount(parts, t.category), rejectedReason: t.rejected_reason,
       label: t.label, components: parts, updatedAt: t.updated_at, editAllowance: this.editAllowanceOf(t.name, t.language, t.status, now),
+      ...(rejectionAdvice(t.rejected_reason, t.status) ? { advice: rejectionAdvice(t.rejected_reason, t.status)! } : {}),
     };
   }
 
@@ -978,6 +982,8 @@ export class WorkspaceDO extends DurableObject<Env> {
   async saveSubmittedTemplate(t: { name: string; language: string; category: string; status: string; components: unknown[]; metaId?: string | null; label?: string | null }): Promise<void> {
     const now = Date.now();
     this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), null, now, t.metaId ?? null, t.label ?? null, now);
+    // Meta's answer normally arrives by webhook within minutes; if it is lost (or beat this save) the sweep asks Meta once the row is an hour old.
+    if (t.status === 'PENDING') await this.schedule('template_refresh', now + TEMPLATE_PENDING_AFTER_MS);
   }
 
   /**
@@ -990,6 +996,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       "INSERT INTO templates (name, language, category, status, components, rejected_reason, updated_at, meta_id, label, submitted_at) VALUES (?, ?, ?, 'PENDING', ?, NULL, ?, NULL, ?, ?) ON CONFLICT(name, language) DO NOTHING",
       t.name, t.language, t.category, JSON.stringify(t.components), now, t.label, now,
     );
+    if (r.rowsWritten > 0) await this.schedule('template_refresh', now + TEMPLATE_PENDING_AFTER_MS);
     return r.rowsWritten > 0;
   }
 
@@ -2276,6 +2283,16 @@ export class WorkspaceDO extends DurableObject<Env> {
       case 'retention_purge': {
         const r = await this.retentionPurge(now);
         return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, dailyHour('retention_purge'), BACKUP_TIME_ZONE);
+      }
+      case 'template_refresh': {
+        // No polling while nothing is waiting: the task is armed by a submission and ends when no template is PENDING any more.
+        const number = await this.env.DB.prepare("SELECT waba_id FROM phone_numbers WHERE workspace_id = ? AND status = 'active' ORDER BY rowid LIMIT 1").bind(this.workspaceId).first<{ waba_id: string }>();
+        if (number && (await this.pendingTemplates(0, now)).length > 0) {
+          const a = { token: await graphTokenFor(this.env, { wabaId: number.waba_id }), graphVersion: this.env.META_GRAPH_VERSION, wabaId: number.waba_id };
+          const r = await refreshPendingWith(this, a, TEMPLATE_PENDING_AFTER_MS, now);
+          if (!r.ok) throw new Error(`template refresh: ${r.message}`); // a Graph failure retries on the task backoff ladder
+        }
+        return this.sql.exec("SELECT 1 FROM templates WHERE status = 'PENDING' LIMIT 1").toArray().length > 0 ? now + TEMPLATE_PENDING_AFTER_MS : undefined;
       }
       case 'ws_sweep': {
         await this.sweepSockets(now / 1000);

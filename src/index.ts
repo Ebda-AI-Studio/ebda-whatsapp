@@ -282,7 +282,7 @@ app.post('/meta/webhook', async (c) => {
   for (const t of extractTemplateStatuses(payload)) {
     await applySharedTemplateEvent(c.env, t.wabaId, t.name, t.language, { status: t.status, reason: t.reason }); // the platform WABA's own catalog (no workspace owns it)
     for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
-      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
+      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason, t.templateId);
     }
   }
   for (const t of extractTemplateCategoryUpdates(payload)) {

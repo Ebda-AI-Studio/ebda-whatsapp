@@ -115,6 +115,8 @@ export const templateDto = z.object({
   components: z.array(z.record(z.string(), z.any())).optional(),
   updatedAt: z.number().int().optional(),
   editAllowance: templateEditAllowance.optional(),
+  /** Plain Arabic / English advice for a rejected, paused or disabled template (Meta's raw `rejectedReason` stays alongside it). */
+  advice: z.object({ ar: z.string(), en: z.string(), kind: z.enum(['format', 'policy', 'length', 'duplicate', 'category', 'unknown']) }).optional(),
 });
 const draftButton = z.discriminatedUnion('type', [
   z.object({ type: z.literal('QUICK_REPLY'), text: z.string().max(200) }),

@@ -22,7 +22,7 @@ export type TemplateSeedInput = { name: string; language: string; category: stri
 const fail = (reason: FailureReason, extra: Omit<Failure, 'ok' | 'reason'> = {}): Failure => ({ ok: false, reason, ...extra });
 const metaFail = (r: { message: string; retryable: boolean }): Failure => fail(r.retryable ? 'meta_unavailable' : 'meta_rejected', { message: r.message });
 
-type Auth = { token: string; graphVersion: string; wabaId: string };
+export type Auth = { token: string; graphVersion: string; wabaId: string };
 async function auth(ctx: TemplatesCtx): Promise<Auth | Failure> {
   try {
     return { token: await graphTokenFor(ctx.env, { wabaId: ctx.number.wabaId }), graphVersion: ctx.env.META_GRAPH_VERSION, wabaId: ctx.number.wabaId };
@@ -168,28 +168,40 @@ export async function installDefaults(ctx: TemplatesCtx, seeds: readonly Templat
   return out;
 }
 
+/** What the sweep needs from the workspace: a stub from outside, or the Durable Object itself when its own alarm runs the sweep. */
+export type RefreshStore = {
+  pendingTemplates(olderThanMs: number, now?: number): Promise<{ name: string; language: string; metaId: string | null }[]>;
+  removeTemplate(name: string, language: string): Promise<boolean>;
+  applyTemplateStatus(name: string, language: string, status: string, reason: string | null, metaId?: string | null): Promise<{ applied: boolean }>;
+  applyTemplateCategory(name: string, language: string, category: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION'): Promise<unknown>;
+};
+
 /**
  * Stale PENDING rows (the status webhook can be lost, or arrive before our save): ask Meta by name and apply its answer.
  * A PENDING row Meta has never heard of and that holds no Meta id is an orphan of a crashed submit and is dropped.
  */
-export async function refreshPending(ctx: TemplatesCtx, olderThanMs: number): Promise<{ ok: true; checked: number; updated: number } | Failure> {
-  const pending = await ctx.ws.pendingTemplates(olderThanMs);
-  if (pending.length === 0) return { ok: true, checked: 0, updated: 0 };
-  const a = await auth(ctx);
-  if (isFailure(a)) return a;
+export async function refreshPendingWith(store: RefreshStore, a: Auth, olderThanMs: number, now = Date.now()): Promise<{ ok: true; checked: number; updated: number } | Failure> {
+  const pending = await store.pendingTemplates(olderThanMs, now);
   let updated = 0;
   for (const p of pending) {
     const r = await fetchTemplates(a, { name: p.name });
     if (!r.ok) return metaFail(r);
     const hit = r.value.find((t) => t.name === p.name && t.language === p.language);
     if (!hit) {
-      if (p.metaId === null && (await ctx.ws.removeTemplate(p.name, p.language))) updated++;
+      if (p.metaId === null && (await store.removeTemplate(p.name, p.language))) updated++;
       continue;
     }
     const reason = hit.rejected_reason && hit.rejected_reason !== 'NONE' ? hit.rejected_reason : null;
-    await ctx.ws.applyTemplateStatus(p.name, p.language, hit.status, reason, hit.id || null);
+    await store.applyTemplateStatus(p.name, p.language, hit.status, reason, hit.id || null);
     if (hit.status !== 'PENDING') updated++;
-    if (['MARKETING', 'UTILITY', 'AUTHENTICATION'].includes(hit.category)) await ctx.ws.applyTemplateCategory(p.name, p.language, hit.category as 'MARKETING' | 'UTILITY' | 'AUTHENTICATION');
+    if (['MARKETING', 'UTILITY', 'AUTHENTICATION'].includes(hit.category)) await store.applyTemplateCategory(p.name, p.language, hit.category as 'MARKETING' | 'UTILITY' | 'AUTHENTICATION');
   }
   return { ok: true, checked: pending.length, updated };
+}
+
+export async function refreshPending(ctx: TemplatesCtx, olderThanMs: number): Promise<{ ok: true; checked: number; updated: number } | Failure> {
+  if ((await ctx.ws.pendingTemplates(olderThanMs)).length === 0) return { ok: true, checked: 0, updated: 0 };
+  const a = await auth(ctx);
+  if (isFailure(a)) return a;
+  return refreshPendingWith(ctx.ws, a, olderThanMs);
 }
