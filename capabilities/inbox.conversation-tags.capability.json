@@ -1,0 +1,41 @@
+{
+  "id": "inbox.conversation-tags",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "وضع تاج على المحادثة",
+  "titleEn": "Tag a conversation",
+  "screens": [],
+  "api": [
+    "PUT /stores/:storeId/conversations/:id/tags"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/notes-tags-and-quick-replies",
+  "questions": {
+    "ar": [
+      "ازاي اعمل تاج للعميل؟",
+      "عايز اصنف المحادثات",
+      "ازاي وضع تاج على المحادثة؟"
+    ],
+    "en": [
+      "How do I tag a conversation?"
+    ]
+  },
+  "steps": [
+    "API only; system tags cod_pending and needs_human are shown"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "NO merchant UI to add/remove tags"
+  ]
+}

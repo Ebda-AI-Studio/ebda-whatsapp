@@ -1,6 +1,6 @@
 import { ApiError } from './api';
 import type {
-  AgentSettingsDto, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+  AgentSettingsDto, BotFunnelDto, BotSettingsDto, BotSwitchesDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
 import { normaliseText } from '../../../src/core/text-normalise';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
@@ -121,6 +121,8 @@ export function createSampleSource(): InboxSource {
     windowOpenUntil: s.windowH === null ? null : BASE + s.windowH * H,
   }));
   let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', tone: 'warm', notifyPhone: null, provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, hasApiKey: false, credits: 500, knowledgeReady: false };
+  let switches: BotSwitchesDto = { orderingBot: true, orderConfirmations: false, otpViaWhatsApp: false };
+  const pendingConfirms = new Set<string>();
   let bot: BotSettingsDto = {
     menu: { enabled: false, items: [] },
     hours: { enabled: false, timezone: 'Africa/Cairo', week: { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }, awayMessage: { ar: 'احنا مقفولين دلوقتي، هنرد عليك أول ما نفتح.', en: 'We are closed right now; we will reply as soon as we open.' }, ordersWhileClosed: true },
@@ -211,6 +213,16 @@ export function createSampleSource(): InboxSource {
     async saveBotSettings(update) {
       bot = structuredClone(update);
       return structuredClone(bot);
+    },
+    switches: {
+      async get() { return { ...switches }; },
+      async preview() { const confirmToken = crypto.randomUUID().replace(/-/g, '').padEnd(64, '0'); pendingConfirms.add(confirmToken); return { confirmToken }; },
+      async save(change, confirmToken) {
+        if ((change.orderConfirmations === true || change.otpViaWhatsApp === true) && !(confirmToken && pendingConfirms.delete(confirmToken))) throw Object.assign(new Error('confirm_required'), { detail: confirmToken ? 'confirm_invalid' : 'confirm_required' });
+        switches = { ...switches, ...change };
+        return { ...switches };
+      },
+      async throttle() { return { tier: 1000, mps: 80, usedInWindow: 120, waiting: 0, nextSlotAt: null }; },
     },
     async botFunnel(days) {
       const totals = { 7: [120, 96, 54, 31, 22, 40, 9], 30: [520, 410, 236, 140, 101, 170, 38], 90: [1480, 1150, 650, 390, 281, 470, 104] }[days];
@@ -356,6 +368,7 @@ function createSampleSharedTemplates(): SharedTemplatesApi {
   return {
     list: async () => items.map((t) => ({ ...t })),
     sync: async () => ({ upserted: items.length, removed: 0 }),
+    requests: async () => [{ id: 'sr-1', workspaceId: 'ws-sample-1', name: 'order_ready', language: 'ar', category: 'UTILITY', body: 'أهلًا {{1}}، طلبك {{2}} جاهز للاستلام.', status: 'open', createdAt: BASE - 3 * H, decidedAt: null }],
     submit: async (input) => { items.push({ name: input.name, language: input.language, category: input.category, status: 'PENDING', bodyText: input.components[0]!.text, paramCount: 0, rejectedReason: null }); return { status: 'PENDING' }; },
   };
 }

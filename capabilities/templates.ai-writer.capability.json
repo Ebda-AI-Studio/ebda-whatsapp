@@ -1,0 +1,40 @@
+{
+  "id": "templates.ai-writer",
+  "status": "planned",
+  "plan": "spec 2026-11-14-self-service-and-ebda-assistant-design.md section 6.7 (needs templates screen first)",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "المساعد بيكتب القوالب ويصلح الرفض",
+  "titleEn": "Assistant writes Meta-ready templates and fixes rejections",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "اكتبلي رسالة للعميل",
+      "ليه القالب اترفض وازاي اصلحه؟",
+      "عايز template بالعربي المصري"
+    ],
+    "en": [
+      "Write a template for me",
+      "Why was it rejected and how do I fix it?"
+    ]
+  },
+  "steps": [
+    "Pick category and language, write body with examples, check locally, preview, confirm, submit, track, explain rejection and propose a fix"
+  ],
+  "edgeCases": [],
+  "gaps": [],
+  "assistantNote": "Today say: not available yet; give the template rules from help 04"
+}

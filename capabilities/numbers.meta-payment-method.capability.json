@@ -1,0 +1,43 @@
+{
+  "id": "numbers.meta-payment-method",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إضافة وسيلة دفع على ميتا",
+  "titleEn": "Add a payment method on Meta for your own number",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/meta-fees-explained",
+  "questions": {
+    "ar": [
+      "ميتا بتطلب كارت",
+      "مين بيدفع لميتا؟",
+      "الرسايل فشلت بسبب الدفع",
+      "meta bt2ool card"
+    ],
+    "en": [
+      "Meta asks for a payment method, why?"
+    ]
+  },
+  "steps": [
+    "Own number: Meta bills the merchant card directly; add it during Embedded Signup or in Meta Billing"
+  ],
+  "edgeCases": [
+    "Sends fail with 2494051 when no valid payment method",
+    "Shared number: wallet pays"
+  ],
+  "gaps": [
+    "2494051 not translated to an Arabic merchant message in the UI"
+  ]
+}

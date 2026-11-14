@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { conversationDto, getMessagesResponse, listConversationsResponse, noteDto, searchResponse, type ConversationDto } from '../src/core/api/contract';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
-import { BUDGET_RATIO, baselineMs, overBudget } from './helpers/bench';
+import { BUDGET_RATIO, baselineMs, overBudget, unthrottleApiForBench } from './helpers/bench';
 import { seedConversations } from './helpers/seed';
 import { openChat, rows, workspace } from './helpers/workspace';
 
@@ -164,6 +164,7 @@ it('long bodies are served from /messages/:id/body', async () => {
 // Opt-in like test/perf.test.ts (BENCH=1, scripts/bench-local.mjs). The budget is a FIXED multiple of a same-run baseline (test/helpers/bench.ts), so it holds on
 // any runner; the 150 ms absolute figure is asserted only where BENCH_ABSOLUTE_MS is set (the local script).
 it.runIf(env.BENCH === '1')('speed: listing 50 of 5,000 conversations and opening a chat stay under the 150 ms p95 budget', async () => {
+  unthrottleApiForBench();
   const ws = W(210);
   const api = await apiFor(ws);
   await seedConversations(ws);

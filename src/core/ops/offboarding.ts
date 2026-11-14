@@ -32,8 +32,11 @@ export const OFFBOARD_TABLES = {
     phone_numbers: 'workspace_id', waba_credentials: 'workspace_id', shared_number_members: 'workspace_id', shared_routes: 'workspace_id', shared_sent: 'workspace_id',
     shared_number_sends: 'workspace_id', shared_number_strikes: 'workspace_id', shared_number_errors: 'workspace_id', workspace_subscriptions: 'workspace_id',
     store_plan_applied: 'workspace_id',
+    shared_template_requests: 'workspace_id', // the template asks of a store on the shared number: template text only, deleted with the workspace
     waba_signup_users: 'workspace_id', workspace_notices: 'workspace_id', workspace_owners: 'workspace_id', new_cap_usage: 'workspace_id', // final review: Meta-user links, owner notices, the Store owner and the campaign-cap usage go with the workspace
     audit_reasons: 'workspace_id', // operators' free-text reasons (AUDIT-RETENTION-1): deletable on purpose
+    instapay_auto_workspace: 'workspace_id', // the per-workspace auto-confirm switch: configuration, nothing to keep
+    money_confirmations: 'workspace_id', // single-use money-action tokens (hash only): worthless after the workspace is gone, and they name a user id
     erasure_records: 'workspace_id', // the workspace's backups are erased with it, so nothing is left for a restore to bring back
   } as Record<string, string>,
   keep: {
@@ -41,10 +44,13 @@ export const OFFBOARD_TABLES = {
     package_orders: { people: ['created_by'], clear: [] },
     package_refund_plans: { people: [], clear: [] },
     instapay_requests: { people: ['created_by'], clear: ['proof_key', 'proof_mime'] },
+    instapay_auto_confirmations: { people: [], clear: [] }, // the auto-confirm decision of an InstaPay request: amounts, reference, reasons, dates; no payer data, no free text (a revert's reason is in audit_reasons)
     refund_requests: { people: ['requested_by'], clear: ['note'] },
     card_refunds: { people: [], clear: ['note'] },
     wallet_adjustments: { people: [], clear: [] }, // requested_by / approved_by are our operators
     shared_number_usage: { people: [], clear: [] },
+    credit_orders: { people: ['created_by'], clear: [] }, // a card purchase of AI credits: amount, credits, provider transaction id; a record of money, kept like topups
+    yearly_refund_requests: { people: ['requested_by'], clear: [] }, // a merchant's request to cancel a yearly package and refund unused months: figures only (executed_by is our operator)
   } as Record<string, { people: string[]; clear: string[] }>,
   // Immutable by trigger (a row can be neither updated nor deleted): they keep the opaque workspace id, which names no one once everything above is erased.
   audit: ['operator_actions', 'offboarding', 'offboarding_log', 'ledger_mirror', 'billing_audit', 'workspace_pricing_overrides', 'audit_log', 'operator_view_log'], // operator_view_log: who looked at a workspace, when and which route (no text, the reason is in audit_reasons and goes with the workspace)
@@ -255,7 +261,7 @@ export async function cancelOffboarding(env: Env, a: { workspaceId: string; acto
 
 /**
  * Work in flight that a deletion must not cut off. Null = clear to go. Money is held on ANY open row however old (a late confirmation would otherwise credit a
- * deleted workspace, review item 2): an open refund, a card refund, a top-up or package order still pending, a paid-but-ungranted order, an InstaPay request
+ * deleted workspace, review item 2): an open refund, a card refund, a pending yearly-refund request, a top-up, credit-pack or package order still pending, a paid-but-ungranted order, an InstaPay request
  * awaiting proof or review (or confirmed and not granted).
  */
 async function moneyHold(env: Env, ws: string): Promise<string | null> {
@@ -264,6 +270,8 @@ async function moneyHold(env: Env, ws: string): Promise<string | null> {
   if (await q("SELECT 1 FROM card_refunds WHERE workspace_id = ? AND state IN ('planned', 'sending', 'calling', 'pending', 'uncertain', 'held')", ws)) return 'open_card_refund';
   if (await q("SELECT 1 FROM topups WHERE workspace_id = ? AND state = 'pending'", ws)) return 'payment_in_flight';
   if (await q("SELECT 1 FROM package_orders WHERE workspace_id = ? AND (status = 'pending' OR (status = 'paid' AND granted_at IS NULL))", ws)) return 'payment_in_flight';
+  if (await q("SELECT 1 FROM credit_orders WHERE workspace_id = ? AND state = 'pending'", ws)) return 'payment_in_flight'; // an AI-credit card purchase still waiting for its payment
+  if (await q("SELECT 1 FROM yearly_refund_requests WHERE workspace_id = ? AND state = 'pending'", ws)) return 'open_yearly_refund_request'; // the merchant asked to cancel a yearly package and be refunded: a person must run it first
   if (await q("SELECT 1 FROM instapay_requests WHERE workspace_id = ? AND (state IN ('awaiting_proof', 'under_review') OR (state = 'confirmed' AND granted_at IS NULL))", ws)) return 'payment_in_flight';
   return null;
 }

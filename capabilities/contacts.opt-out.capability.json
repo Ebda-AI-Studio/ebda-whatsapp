@@ -1,0 +1,46 @@
+{
+  "id": "contacts.opt-out",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "الإيقاف التلقائي لما العميل يكتب وقف",
+  "titleEn": "Automatic opt-out (STOP keywords and buttons)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "العميل كتب STOP ايه اللي بيحصل؟",
+      "ازاي العميل يوقف الرسايل؟",
+      "مين بطل يستقبل مني؟",
+      "el 3amil ketab stop"
+    ],
+    "en": [
+      "What happens when a customer sends STOP?"
+    ]
+  },
+  "steps": [
+    "STOP, STOP ALL, UNSUBSCRIBE, CANCEL, OPTOUT, إلغاء، وقف، توقف، ايقاف، بطل (whole-message match) or Stop buttons"
+  ],
+  "edgeCases": [
+    "\"please cancel my order\" is NOT an opt-out",
+    "A bare \"Cancel\" button is not an opt-out",
+    "Opt-out recorded at the Store too",
+    "Service/order messages continue",
+    "Shared number: STOP opts out of every store that wrote to them when ambiguous"
+  ],
+  "gaps": [
+    "No merchant control to see/edit opt-out wording or add keywords (brand pack only)"
+  ]
+}

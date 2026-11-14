@@ -1,0 +1,45 @@
+{
+  "id": "numbers.meta-verification",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "توثيق النشاط التجاري عند ميتا",
+  "titleEn": "Meta Business Verification (outside the product)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/verify-your-business-on-meta",
+  "questions": {
+    "ar": [
+      "إزاي اوثق الشركة عند ميتا؟",
+      "إيه الورق المطلوب؟",
+      "التوثيق اترفض",
+      "verification meta egypt"
+    ],
+    "en": [
+      "How do I verify my business on Meta?",
+      "My verification was rejected"
+    ]
+  },
+  "steps": [
+    "Meta Business Suite > Security Center > Start verification; legal name exactly as on commercial register + tax card"
+  ],
+  "edgeCases": [
+    "Name/address mismatch is the usual rejection",
+    "Takes 1 to several business days",
+    "Ebda can guide but Meta decides"
+  ],
+  "gaps": [
+    "No in-product verification status; no webhook handler for verification state"
+  ]
+}

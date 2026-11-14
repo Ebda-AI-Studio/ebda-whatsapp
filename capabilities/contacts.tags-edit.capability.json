@@ -1,0 +1,41 @@
+{
+  "id": "contacts.tags-edit",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تعديل تاجات العميل",
+  "titleEn": "Edit a contact's tags",
+  "screens": [],
+  "api": [
+    "PUT /stores/:storeId/contacts/:waId/tags"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/notes-tags-and-quick-replies",
+  "questions": {
+    "ar": [
+      "ازاي اضيف تاج VIP؟",
+      "عايز اقسم العملاء",
+      "ينفع اشيل تاج؟"
+    ],
+    "en": [
+      "How do I tag a customer as VIP?"
+    ]
+  },
+  "steps": [
+    "Tags display in Contacts; edit only through the API (and import CSV tags column)"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "NO merchant UI to edit tags (display only + CSV import)"
+  ]
+}

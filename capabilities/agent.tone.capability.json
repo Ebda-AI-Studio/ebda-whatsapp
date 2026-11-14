@@ -1,0 +1,43 @@
+{
+  "id": "agent.tone",
+  "status": "in-pr",
+  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "نبرة المساعد",
+  "titleEn": "Agent tone presets",
+  "screens": [
+    "AgentScreen (pr 79)",
+    "view:AgentScreen",
+    "/agent"
+  ],
+  "api": [
+    "PUT /stores/:storeId/agent {tone: warm|professional|playful}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "عايز المساعد رسمي أكتر",
+      "نبرة مرحة",
+      "ازاي نبرة المساعد؟"
+    ],
+    "en": [
+      "Make the agent more formal"
+    ]
+  },
+  "steps": [
+    "Pick warm / professional / playful; added to the reply style"
+  ],
+  "edgeCases": [],
+  "gaps": []
+}

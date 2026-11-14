@@ -510,7 +510,19 @@ export const DO_MIGRATIONS: readonly string[] = [
    );
    CREATE INDEX catalog_items_product ON catalog_items (product_id);
    CREATE INDEX catalog_items_status ON catalog_items (status);`,
-  // v42 (Chat agent, review I2): when the owner was told about this handoff. Lives on the row (erased by wa_id with the contact), not as a phone-keyed agent_state key.
+  // v42 (merchant template self-service): Meta's template id (an edit and a one-language delete need it), the merchant's own title, when we submitted it, and the edit log
+  // Meta's edit limits are counted from (APPROVED: 1 per 24 h, 10 per 30 days). All additive.
+  `ALTER TABLE templates ADD COLUMN meta_id TEXT;
+   ALTER TABLE templates ADD COLUMN label TEXT;
+   ALTER TABLE templates ADD COLUMN submitted_at INTEGER;
+   CREATE TABLE template_edits (
+     id INTEGER PRIMARY KEY,
+     name TEXT NOT NULL,
+     language TEXT NOT NULL,
+     at INTEGER NOT NULL
+   );
+   CREATE INDEX template_edits_lookup ON template_edits (name, language, at);`,
+  // v43 (Chat agent, review I2): when the owner was told about this handoff. Lives on the row (erased by wa_id with the contact), not as a phone-keyed agent_state key.
   `ALTER TABLE agent_handoffs ADD COLUMN notified_at INTEGER;`,
 ];
 

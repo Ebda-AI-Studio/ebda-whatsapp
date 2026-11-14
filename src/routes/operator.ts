@@ -15,10 +15,13 @@ import {
 import { backfillFx, getFxBufferPin, setFxBufferPin } from '../core/billing/fx-daily';
 import { STORE_INCLUDED, setSubscription } from '../core/billing/subscriptions';
 import { executeYearlyRefund, packageRefundQuote } from '../core/billing/package-orders';
+import { listPendingRequests, markRequestExecuted } from '../core/billing/yearly-refund-request';
 import { currentSharedNumber, registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
+import { listAllRequests, markRequestsDone } from '../core/shared/shared-template-requests';
 import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type SharedTemplateFailure } from '../core/shared/shared-templates';
 import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
+import { backfillDedupeHistory, listAutoConfirmations, revertAutoConfirmed, setAutoMode, setWorkspaceAuto, getAutoMode, instapayAutoReady } from '../core/billing/instapay-auto';
 import { confirmInstapay, listForOperator, rejectInstapay, releaseInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
 import { rotateTokenKey, rotationStatus } from '../core/enc-rotation';
@@ -146,8 +149,16 @@ operatorRoutes.post('/shared-templates', async (c) => {
   if (!b.success) return bad(c, b.error.issues[0]?.message);
   const r = await submitSharedTemplate(c.env, b.data as Parameters<typeof submitSharedTemplate>[1]);
   if (!r.ok) return sharedTemplateFailure(c, r);
+  await markRequestsDone(c.env, b.data.name, b.data.language); // a store asked for exactly this template: it is made
   console.log(JSON.stringify({ audit: 'shared_template_submitted', actor: actor(c), name: b.data.name, language: b.data.language, category: b.data.category }));
   return c.json({ name: b.data.name, language: b.data.language, status: r.status }, 201);
+});
+
+// What stores on the shared number asked the team to make (utility / authentication only). Shows the workspace id; no message content.
+operatorRoutes.get('/shared-template-requests', async (c) => {
+  if (!sharedEnabled(c.env)) return c.json({ error: 'not_found' }, 404);
+  const status = c.req.query('status');
+  return c.json({ items: await listAllRequests(c.env, status === 'open' || status === 'done' || status === 'declined' ? status : undefined) });
 });
 
 operatorRoutes.get('/refund-requests', async (c) => c.json({ items: await listRefundRequests(c.env, { ...(c.req.query('state') ? { state: c.req.query('state')! } : {}) }) }));
@@ -248,10 +259,14 @@ operatorRoutes.post('/package-orders/:orderId/yearly-refund', async (c) => {
   if (!body.success) return bad(c, 'reason_required');
   const r = await executeYearlyRefund(c.env, c.req.param('orderId'), { actor: actor(c), reason: body.data.reason });
   if (!r.ok) return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
+  await markRequestExecuted(c.env, r.orderId, actor(c)); // a merchant's open request for this period is done (idempotent)
   console.log(JSON.stringify({ audit: 'operator_yearly_refund', orderId: r.orderId, shortenedMonths: r.shortenedMonths, debtSettledMinor: r.debtSettledMinor, cashRefundMinor: r.cashRefundMinor, actor: actor(c) }));
   const { ok: _ok, ...out } = r;
   return c.json(out);
 });
+
+// Merchants' yearly-refund requests waiting for a person (self-service A22): the console lists them, then runs the yearly refund above for the order.
+operatorRoutes.get('/yearly-refund-requests', async (c) => c.json({ items: await listPendingRequests(c.env) }));
 
 operatorRoutes.get('/change-log', async (c) => {
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? 50) || 50));
@@ -278,6 +293,34 @@ operatorRoutes.post('/instapay/:id/confirm', async (c) => {
   const b = instapayConfirm.safeParse(await c.req.json().catch(() => ({})));
   if (!b.success) return bad(c, b.error.issues[0]?.message === 'no_reference_needs_reason' ? 'reason_required' : 'bank_reference_invalid');
   return decided(c, await confirmInstapay(c.env, { id: c.req.param('id'), actor: actor(c), ...(b.data.bankRef ? { bankRef: b.data.bankRef } : {}), ...(b.data.noReference ? { noReference: { reason: b.data.reason! } } : {}) }));
+});
+// ---- InstaPay auto-confirm (super admin): verdicts, "not received", and the two kill switches. Each change needs a reason and is audited. ----
+const autoReason = z.object({ reason: z.string().trim().min(5).max(300) });
+operatorRoutes.get('/instapay/auto', async (c) => c.json({ mode: await getAutoMode(c.env), ready: instapayAutoReady(c.env), items: await listAutoConfirmations(c.env, c.req.query('state') || undefined) }));
+operatorRoutes.post('/instapay/auto/:id/revert', async (c) => {
+  const b = autoReason.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  const r = await revertAutoConfirmed(c.env, { id: c.req.param('id'), actor: actor(c), reason: b.data.reason });
+  if (r.ok) return c.json(r);
+  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+});
+operatorRoutes.post('/instapay/auto/backfill', async (c) => {
+  const b = z.object({ reason: z.string().trim().min(5).max(300), after: z.string().max(100).nullable().optional() }).safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  const r = await backfillDedupeHistory(c.env, { actor: actor(c), reason: b.data.reason, after: b.data.after ?? null }); // one page per call: repeat with `next` until it is null
+  return r.ok ? c.json(r) : r.reason === 'not_ready' ? c.json({ error: 'rate_limited', message: 'dedupe_index_not_bound' }, 503) : bad(c, r.reason);
+});
+operatorRoutes.put('/instapay/auto/mode', async (c) => {
+  const b = z.object({ mode: z.enum(['off', 'shadow', 'live']), reason: z.string().trim().min(5).max(300) }).safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'invalid_request');
+  const r = await setAutoMode(c.env, { mode: b.data.mode, actor: actor(c), reason: b.data.reason });
+  return r.ok ? c.json({ mode: b.data.mode }) : bad(c, r.reason);
+});
+operatorRoutes.put('/instapay/auto/workspaces/:workspaceId', async (c) => {
+  const b = z.object({ enabled: z.boolean(), reason: z.string().trim().min(5).max(300) }).safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'invalid_request');
+  const r = await setWorkspaceAuto(c.env, { workspaceId: c.req.param('workspaceId'), enabled: b.data.enabled, actor: actor(c), reason: b.data.reason });
+  return r.ok ? c.json({ workspaceId: c.req.param('workspaceId'), enabled: b.data.enabled }) : bad(c, r.reason);
 });
 operatorRoutes.post('/instapay/:id/release', async (c) => {
   const b = instapayRelease.safeParse(await c.req.json().catch(() => null));

@@ -1,0 +1,41 @@
+{
+  "id": "access.sign-out",
+  "status": "live",
+  "area": "access",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تسجيل الخروج",
+  "titleEn": "Sign out",
+  "screens": [
+    "Rail sign-out button (web signout.ts)"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/sign-in-language-and-sign-out",
+  "questions": {
+    "ar": [
+      "ازاي اطلع من الحساب؟",
+      "عايز اعمل logout",
+      "ازاي تسجيل الخروج؟"
+    ],
+    "en": [
+      "How do I sign out?"
+    ]
+  },
+  "steps": [
+    "Press Sign out at the bottom of the rail"
+  ],
+  "edgeCases": [
+    "Provider session ended where possible; local tokens cleared"
+  ],
+  "gaps": []
+}

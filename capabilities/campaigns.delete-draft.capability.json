@@ -1,0 +1,44 @@
+{
+  "id": "campaigns.delete-draft",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مسح مسودة حملة",
+  "titleEn": "Delete a draft campaign",
+  "screens": [
+    "CampaignsScreen Delete draft",
+    "view:CampaignsScreen",
+    "/campaigns"
+  ],
+  "api": [
+    "DELETE /stores/:storeId/campaigns/:id"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "امسح المسودة",
+      "مسودة قديمة عايز اشيلها",
+      "ازاي مسح مسودة حملة؟"
+    ],
+    "en": [
+      "Delete a draft"
+    ]
+  },
+  "steps": [
+    "Open the draft > Delete draft"
+  ],
+  "edgeCases": [
+    "Only drafts: other states answer bad_state"
+  ],
+  "gaps": []
+}

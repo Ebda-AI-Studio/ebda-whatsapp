@@ -1,3 +1,11 @@
+---
+capabilities:
+  - access.roles@1
+  - team.seat-assign@1
+  - team.seat-remove@1
+  - team.seats-view@1
+---
+
 # Your team and seats in Ebda Chat
 
 Your package says how many people can work in Ebda Chat, **you included**: Starter and Store-included 2, Growth 5, Pro 15. You decide who gets the seats.

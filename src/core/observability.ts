@@ -86,12 +86,12 @@ type AlertDeps = {
 /** P0 = wake someone (money or consent integrity). P1 = degraded, a human must look today. Everything else is `info` (logs only) unless the caller says otherwise. */
 const P0_ALERTS = new Set([
   'ledger_mirror_mismatch', 'refund_debit_incomplete', 'card_refund_over_refundable', 'package_paid_not_granted', 'instapay_confirmed_not_granted',
-  'duplicate_success', 'package_amount_mismatch', 'topup_amount_mismatch', 'shared_sent_not_recorded', 'number_restricted',
+  'duplicate_success', 'package_amount_mismatch', 'topup_amount_mismatch', 'credit_pack_amount_mismatch', 'shared_sent_not_recorded', 'number_restricted',
 ]);
 const P1_ALERTS = new Set([
   'send_dlq', 'unhandled_error', 'secret_misconfigured', 'binding_missing', 'entitlement_push_failed', 'entitlement_reconcile_failed', 'entitlement_event_not_queued', 'webhook_reconfirm_failed',
   'webhook_unconfirmed_abandoned', 'webhook_unconfirmed_aged', 'topup_repair_failed', 'package_repair_failed', 'instapay_repair_failed', 'card_refund_reconcile_failed', 'card_refund_stuck',
-  'refund_abandon_sweep_failed', 'instapay_expiry_failed', 'instapay_overdue_check_failed', 'instapay_grant_failed', 'instapay_proof_overdue', 'instapay_amount_mismatch', 'send_enqueue_failed',
+  'refund_abandon_sweep_failed', 'instapay_expiry_failed', 'instapay_overdue_check_failed', 'instapay_grant_failed', 'instapay_auto_digest_stale', 'instapay_proof_overdue', 'instapay_amount_mismatch', 'send_enqueue_failed',
   'store_event_failed', 'business_token_unavailable', 'campaign_launch_failed', 'campaign_paused_internal_error', 'campaign_wallet_settle_failed', 'campaign_wallet_unavailable',
   'shared_sweep_failed', 'shared_template_refresh_failed', 'shared_trueup_not_published', 'fx_fetch_failed', 'fx_rate_rejected', 'fx_large_move_accepted', 'fx_rate_stale', 'pricing_pull_failed', 'pricing_copy_missing', 'queued_period_roll_failed',
   'store_plan_fallback_failed', 'r2_deletes_still_owed', 'scheduled_task_invalid', 'otp_failed', 'import_start_failed', 'import_workflow_failed', 'refund_id_conflict', 'refund_held',
@@ -99,6 +99,8 @@ const P1_ALERTS = new Set([
   'funding_unknown', 'rate_unavailable', 'billing_unpriced_model', 'rate_missing_no_estimate', 'bot_turn_abandoned', 'media_fetch_abandoned', 'agent_model_failed', 'voice_transcribe_failed', 'wallet_wait_expired',
   'topup_webhook_failed', 'package_webhook_failed', 'cod_outcome_push_failed', 'inquiry_multiple_success', 'topup_unknown_order', 'topup_refunded_by_provider', 'signup_not_configured',
   'business_id_unverified', 'refund_refused', 'refund_id_conflict',
+  // AI credit packs (self-service A9): money in, so the same classes as the top-up alerts.
+  'credit_pack_refunded', 'credit_pack_repair_failed', 'credit_pack_webhook_failed',
   // Added in review: each of these was silently `info` and a human must see it.
   'instapay_sla_not_scheduled', 'proof_url_not_configured', 'catalog_mass_delete_refused', 'catalog_business_mismatch', 'catalog_sync_stuck', 'catalog_permission_missing', 'rate_missing_estimate_charged', 'bot_buyer_key_unavailable',
   'package_refunded', 'package_partial_refund', 'number_quality_flagged', 'number_error_spike', 'number_member_abuse', 'shared_health_push_failed',
@@ -106,12 +108,14 @@ const P1_ALERTS = new Set([
 ]);
 /** Known and deliberately log-only. A NEW alert name must be added to exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS (test/guards.test.ts fails otherwise). */
 export const INFO_ALERTS = new Set([
+  'instapay_auto_error', // a request waits for a person after an unexpected error in the auto-confirm attempt; read in the weekly log pass
   'agent_no_credits', 'agent_tool_failed', 'agent_turn_cap', 'agent_reply_blocked', 'campaign_content_blocked', 'ai_overdraw_refused', 'catalog_not_linked', 'catalog_provision_failed', 'catalog_items_rejected', 'catalog_vector_search_failed', 'cod_outcome_refused', 'ai_credits_low',
   'cod_request_details_missing', 'connector_call_crashed', 'connector_call_failed', 'kb_index_unavailable', 'kb_retrieve_failed', 'r2_delete_failed', 'rate_missing_pending',
   'send_tier_exhausted', 'shared_pick_id_refused', 'shared_trueup_no_rebate', 'topup_inquiry_unsupported', 'wallet_low_balance', 'webhook_unconfirmed',
   'seats_over_limit', // WA-SEATS-1: a downgrade left more seated staff than the package allows; nothing is deleted, the owner sees it on the Team screen
   // Chat agent context (Rulings CHAT-AGENT-2/4): each is a degraded answer or a notice that could not be delivered, never a stopped service; the customer is still answered.
   'agent_policies_unavailable', 'agent_profile_unavailable', 'agent_faq_not_indexed', 'handoff_owner_unreachable', 'handoff_owner_notice_failed', 'handoff_digest_failed',
+  'starter_templates_failed', // the brand's starter templates could not be put in place on connect (Meta slow or refused); the Templates screen retries by itself and has a retry button
   'instapay_no_reference', // DUP-REF-REQUIRED-1: an operator confirmed an InstaPay transfer with the audited "no reference" box ticked; review the weekly count
 ]);
 

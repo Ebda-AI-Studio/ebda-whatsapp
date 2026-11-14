@@ -41,7 +41,8 @@ function meta(waba: string, pn: string, over: Record<string, GraphReply | ((c: G
   };
 }
 // Final review I5: the server also asks Meta (debug_token) who the exchanged token belongs to; that call is checked in meta-deletion-review.test.ts and left out of the signup call lists here.
-const signupCalls = () => graph!.calls.filter((c) => !new URL(c.url).pathname.endsWith('/debug_token'));
+// The starter-template install runs in the background after a connect (test/templates-on-connect.test.ts), so its calls are not part of the signup.
+const signupCalls = () => graph!.calls.filter((c) => !new URL(c.url).pathname.endsWith('/debug_token') && !new URL(c.url).pathname.endsWith('/message_templates'));
 const paths = () => signupCalls().map((c) => `${c.method} ${new URL(c.url).pathname.replace(/^\/v[\d.]+\//, '')}`);
 const row = async (pn: string) => (await env.DB.prepare('SELECT * FROM phone_numbers WHERE phone_number_id = ?').bind(pn).first<Record<string, any>>())!;
 

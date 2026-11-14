@@ -2,6 +2,7 @@
  * The inbox API contract: one file shared by the Worker (validation) and the web app (typed client).
  * All routes live under /api/v1/stores/:storeId/ and require a bearer token (identity v1).
  */
+import { REASON_ORDER } from '../../../foundation/instapay-decision';
 import { z } from 'zod';
 import { hoursSchema, locationSchema, menuSchema } from '../store-link/bot-settings';
 
@@ -89,22 +90,77 @@ export const apiError = z.object({
     'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable', 'package_required', 'plan_feature', 'plan_required', 'vat_locked', 'yearly_queued', 'seat_limit', 'no_seat',
   ]),
   message: z.string().optional(),
+  /** templates: the rule issues behind a 400, or the moment a 409 edit_limit unlocks (epoch ms). */
+  issues: z.array(z.object({ code: z.string(), severity: z.enum(['error', 'warning']), field: z.string(), params: z.record(z.string(), z.union([z.string(), z.number()])).optional() })).optional(),
+  retryAt: z.number().int().optional(),
   /** plan_feature: which plan feature the package lacks (the client shows the upgrade CTA for it). */
   feature: z.enum(['campaigns', 'order_in_chat', 'api']).optional(),
   /** write_off_required: the wallet balance the requester has to agree to give up (piasters). */
   amountMinor: z.number().int().optional(),
 });
 
+export const templateEditAllowance = z.union([
+  z.object({ allowed: z.literal(true) }),
+  z.object({ allowed: z.literal(false), reason: z.enum(['status', 'daily', 'monthly']), retryAt: z.number().int().nullable() }),
+]);
 export const templateDto = z.object({
   name: z.string(),
   language: z.string(),
   category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']),
-  status: z.enum(['APPROVED', 'PENDING', 'REJECTED', 'PAUSED', 'DISABLED']),
+  status: z.enum(['APPROVED', 'PENDING', 'REJECTED', 'PAUSED', 'DISABLED', 'PENDING_DELETION']),
   bodyText: z.string(),
   paramCount: z.number().int().nonnegative(),
   rejectedReason: z.string().nullable(),
+  // additive (merchant template self-service): the merchant's own title, Meta's components, last change, and whether Meta still lets this one be edited
+  label: z.string().nullable().optional(),
+  components: z.array(z.record(z.string(), z.any())).optional(),
+  updatedAt: z.number().int().optional(),
+  editAllowance: templateEditAllowance.optional(),
+  /** Plain Arabic / English advice for a rejected, paused or disabled template (Meta's raw `rejectedReason` stays alongside it). */
+  advice: z.object({ ar: z.string(), en: z.string(), kind: z.enum(['format', 'policy', 'length', 'duplicate', 'category', 'unknown']) }).optional(),
 });
-export const listTemplatesResponse = z.object({ items: z.array(templateDto) });
+const draftButton = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('QUICK_REPLY'), text: z.string().max(200) }),
+  z.object({ type: z.literal('URL'), text: z.string().max(200), url: z.string().max(2100), example: z.string().max(2100).optional() }),
+  z.object({ type: z.literal('PHONE_NUMBER'), text: z.string().max(200), phone: z.string().max(40) }),
+  z.object({ type: z.literal('COPY_CODE'), example: z.string().max(40) }),
+]);
+/** What the Templates screen and the Smart Layer send to check / create / edit. The server re-runs Meta's rules on it; `expectedHash` is the hash of the last check. */
+export const templateDraftSchema = z.object({
+  name: z.string().min(1).max(512),
+  label: z.string().trim().min(1).max(80),
+  language: z.string().regex(/^[a-z]{2}(_[A-Z]{2})?$/),
+  category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']),
+  header: z.object({ text: z.string().max(200), example: z.string().max(200).optional() }).nullable(),
+  body: z.object({ text: z.string().max(2000), examples: z.array(z.string().max(300)).max(20) }),
+  footer: z.string().max(200).nullable(),
+  buttons: z.array(draftButton).max(20),
+  auth: z.object({ expiryMinutes: z.number().int().nullable(), securityRecommendation: z.boolean() }).optional(),
+});
+export type TemplateDraftInput = z.infer<typeof templateDraftSchema>;
+/** `expectedHash` is REQUIRED: the approval to submit is bound to the payload that was checked and previewed (the hash `POST /templates/check` returned). */
+export const templateDraftRequest = templateDraftSchema.extend({ expectedHash: z.string().regex(/^[0-9a-f]{64}$/) });
+export const templateIssueDto = z.object({ code: z.string(), severity: z.enum(['error', 'warning']), field: z.string(), params: z.record(z.string(), z.union([z.string(), z.number()])).optional() });
+export const checkTemplateResponse = z.object({ issues: z.array(templateIssueDto), payloadHash: z.string() });
+export const createTemplateResponse = z.object({ name: z.string(), language: z.string(), status: z.string(), category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']), categoryChanged: z.boolean() });
+export const editTemplateResponse = z.object({ status: z.string() });
+/** A platform template a store on the shared number may use (APPROVED utility / authentication only). */
+export const sharedTemplateDto = z.object({ name: z.string(), language: z.string(), category: z.enum(['UTILITY', 'AUTHENTICATION']), bodyText: z.string(), paramCount: z.number().int().nonnegative() });
+export const listSharedTemplatesResponse = z.object({ items: z.array(sharedTemplateDto) });
+export const sharedRequestCreate = z.object({
+  name: z.string().regex(/^[a-z0-9_]{1,512}$/),
+  language: z.string().regex(/^[a-z]{2}(_[A-Z]{2})?$/),
+  category: z.enum(['UTILITY', 'AUTHENTICATION', 'MARKETING']),
+  body: z.string().trim().min(1).max(1024),
+});
+export const sharedRequestDto = z.object({
+  id: z.string(), name: z.string(), language: z.string(), category: z.enum(['UTILITY', 'AUTHENTICATION']), body: z.string(),
+  status: z.enum(['open', 'done', 'declined']), createdAt: z.number().int(), decidedAt: z.number().int().nullable(),
+});
+export const listSharedRequestsResponse = z.object({ items: z.array(sharedRequestDto) });
+export type SharedTemplateDto = z.infer<typeof sharedTemplateDto>;
+export type SharedRequestDto = z.infer<typeof sharedRequestDto>;
+export const listTemplatesResponse = z.object({ items: z.array(templateDto), /** the brand's starter set is in place for the connected number (the screen installs it once when this is false and the list is empty) */ starterInstalled: z.boolean().optional() });
 
 export const noteDto = z.object({ id: z.number().int(), authorUserId: z.string(), text: z.string(), at: z.number().int() });
 export const addNoteRequest = z.object({ text: z.string().min(1).max(2000) });
@@ -185,6 +241,15 @@ export type CatalogStatusDto = z.infer<typeof catalogStatusDto>;
 export const provisionCatalogRequest = z.object({ name: z.string().trim().min(1).max(100).optional() }).strict();
 export const provisionCatalogResponse = z.object({ catalogId: z.string() });
 export const botSettingsDto = storeLinkSettingsResponse.pick({ menu: true, hours: true, location: true });
+/** The three owner switches (A31-A33): ordering bot, order confirmation messages, store-login codes over WhatsApp. */
+export const botSwitchesDto = storeLinkSettingsResponse.pick({ orderingBot: true, orderConfirmations: true, otpViaWhatsApp: true });
+export type BotSwitchesDto = z.infer<typeof botSwitchesDto>;
+/** The same change the PATCH will carry; the preview answer is the single-use token the PATCH must present to turn sending ON (SETTINGS-CONFIRM-1). */
+export const settingsPreviewResponse = z.object({ confirmToken: z.string().regex(/^[0-9a-f]{64}$/), expiresAt: z.number().int() });
+export const confirmTokenField = z.object({ confirmToken: z.string().regex(/^[0-9a-f]{64}$/).optional() });
+/** GET /throttle (A28): the number's Meta tier (new conversations per 24 h), its speed, use in the window, sends waiting, and when the next slot frees. */
+export const throttleReportDto = z.object({ tier: z.number().int(), mps: z.number(), usedInWindow: z.number().int(), waiting: z.number().int(), nextSlotAt: z.number().int().nullable() });
+export type ThrottleReportDto = z.infer<typeof throttleReportDto>;
 export type BotSettingsDto = z.infer<typeof botSettingsDto>;
 export const storeLinkSettingsPatch = z.object({
   orderConfirmations: z.boolean(),
@@ -550,6 +615,28 @@ export const packageDto = z.object({
   maxMembers: z.number().int().min(1), features: z.array(z.enum(PACKAGE_FEATURE_KEYS)), periodMonths: z.number().int().positive(),
 });
 export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired', 'refunded']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
+// ---- Merchant money surfaces (self-service A9 Chat half, A21, A22). Every money action is two calls: a preview that issues a single-use confirmation, then the action with it. ----
+export const confirmToken = z.object({ confirmId: z.string().uuid(), token: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
+export const confirmIssuedDto = z.object({ confirmId: z.string().uuid(), token: z.string(), expiresAt: z.number().int() });
+/** `platform_line` parses on purpose: the route answers it with a plain 403, so a merchant is told the platform line is the operator's, not "invalid request". */
+export const numberFundingChoice = z.object({ funding: z.enum(['merchant_card', 'platform_line']) }).strict();
+export const numberFundingConfirm = numberFundingChoice.extend(confirmToken.shape).strict();
+export const numberFundingPreviewDto = z.object({ phoneNumberId: z.string(), current: z.enum(['merchant_card', 'platform_line', 'unknown']), funding: z.literal('merchant_card'), confirm: confirmIssuedDto });
+export const yearlyRefundQuoteDto = z.object({
+  orderId: z.string(), packageId: z.string(), periodMonths: z.number().int(), monthlyMinor: z.number().int(), unusedMonths: z.number().int(), grossMinor: z.number().int(),
+  debtMinor: z.number().int(), debtSettledMinor: z.number().int(), refundMinor: z.number().int(),
+});
+export const yearlyRefundRequestDto = z.object({ id: z.string(), orderId: z.string(), state: z.enum(['pending', 'executed']), unusedMonths: z.number().int(), debtSettledMinor: z.number().int(), refundMinor: z.number().int(), createdAt: z.number().int() });
+export const yearlyRefundViewDto = z.object({
+  quote: yearlyRefundQuoteDto.nullable(), reason: z.enum(['no_running_package', 'not_yearly', 'not_paid', 'queued_periods', 'order_queued']).nullable(), request: yearlyRefundRequestDto.nullable(),
+});
+export const yearlyRefundPreviewDto = z.object({ quote: yearlyRefundQuoteDto, confirm: confirmIssuedDto });
+export const creditPackDto = z.object({ id: z.string(), credits: z.number().int().positive(), priceMinor: z.number().int().positive() });
+export const creditPacksDto = z.object({ items: z.array(creditPackDto), enabled: z.boolean() });
+export const creditPackPick = z.object({ packId: z.string().min(1).max(32) }).strict();
+export const creditPackBuy = creditPackPick.extend(confirmToken.shape).strict();
+export const creditPackPreviewDto = z.object({ pack: creditPackDto, confirm: confirmIssuedDto });
+export const creditOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired']), credits: z.number().int(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
 // ---- InstaPay billing (INSTAPAY_BILLING_ENABLED). Additive. The amount is the server's: a package's price, or a top-up within the card top-up bounds. ----
 export const instapayState = z.enum(['awaiting_proof', 'under_review', 'confirmed', 'rejected', 'expired']);
 export const instapayCreate = z.discriminatedUnion('kind', [
@@ -560,9 +647,11 @@ export const instapayPayeeDto = z.object({ handle: z.string(), name: z.string(),
 export const instapayRequestDto = z.object({
   id: z.string(), reference: z.string(), kind: z.enum(['package', 'topup']), packageId: z.string().nullable(), amountMinor: z.number().int(), currency: z.string(), state: instapayState,
   createdAt: z.number().int(), expiresAt: z.number().int(), hasProof: z.boolean(), rejectReason: z.string().nullable(), decidedAt: z.number().int().nullable(),
+  /** InstaPay auto-confirm: confirmed by the system, being checked right now, or reverted ("not received") with the end of its 48 h grace. All optional: older servers send none. */
+  autoConfirmed: z.boolean().optional(), checking: z.boolean().optional(), revertedAt: z.number().int().nullable().optional(), graceUntil: z.number().int().nullable().optional(),
 });
 /** GET /wallet/instapay: `payee` is null when the brand has no InstaPay account configured (the card is then shown as unavailable). */
-export const instapayViewDto = z.object({ enabled: z.boolean(), payee: instapayPayeeDto.nullable(), items: z.array(instapayRequestDto) });
+export const instapayViewDto = z.object({ enabled: z.boolean(), payee: instapayPayeeDto.nullable(), items: z.array(instapayRequestDto), revert: z.object({ requestId: z.string(), kind: z.enum(['package', 'topup']), graceUntil: z.number().int() }).nullable().optional() });
 export const instapayCreatedDto = instapayRequestDto.extend({ payee: instapayPayeeDto });
 export const operatorInstapayDto = instapayRequestDto.extend({
   workspaceId: z.string(), createdBy: z.string(), proofAt: z.number().int().nullable(), firstApprover: z.string().nullable(), decidedBy: z.string().nullable(), proofMime: z.string().nullable(),
@@ -634,6 +723,9 @@ export const ROUTES = {
   search: 'GET /search',
   templates: 'GET|POST /templates',
   templatesSync: 'POST /templates/sync',
+  templatesCheck: 'POST /templates/check',
+  template: 'GET|PUT|DELETE /templates/:name/:language',
+  templatesInstallDefaults: 'POST /templates/install-defaults',
   media: 'GET /media/:messageId',
   upload: 'POST /media',
   events: 'GET /events',
@@ -756,3 +848,14 @@ export const sharedNumberRegister = z.object({
   displayPhone: z.string().trim().min(5).max(30).optional(),
   reason: z.string().trim().min(5).max(500),
 });
+
+/** InstaPay auto-confirm (operator): one decision per request, with every reason code (the console shows a label for each). */
+export const AUTO_REASON_CODES = REASON_ORDER;
+export const operatorAutoDto = z.object({
+  requestId: z.string(), workspaceId: z.string(), workspaceName: z.string().nullable(), kind: z.enum(['package', 'topup']).nullable(),
+  state: z.enum(['pending_decision', 'auto_confirmed', 'needs_human', 'reverted', 'failed']), verdict: z.string().nullable(), reasons: z.array(z.string()),
+  amountMinor: z.number().int().nullable(), expectedAmountMinor: z.number().int().nullable(), isFirstPayment: z.boolean().nullable(), confirmedAt: z.number().int().nullable(),
+  digestSentAt: z.number().int().nullable(), revertedAt: z.number().int().nullable(), graceUntil: z.number().int().nullable(), creditsRemovedMinor: z.number().int().nullable(),
+  creditsUsedMinor: z.number().int().nullable(), aiCreditsRemoved: z.number().int().nullable(), aiCreditsUsed: z.number().int().nullable(), createdAt: z.number().int(),
+});
+export const operatorAutoListDto = z.object({ mode: z.enum(['off', 'shadow', 'live']), ready: z.object({ ready: z.boolean(), missing: z.array(z.string()) }), items: z.array(operatorAutoDto) });

@@ -1,3 +1,18 @@
+---
+capabilities:
+  - inbox.coexistence-echo@1
+  - numbers.coexistence@1
+  - numbers.connect@1
+  - numbers.disconnect@1
+  - numbers.display-name@1
+  - numbers.finish-registration@1
+  - numbers.health@1
+  - numbers.history-contacts-sync@1
+  - numbers.migrate@1
+  - numbers.overview@1
+  - numbers.refresh@1
+---
+
 # Connect your own number to Ebda Chat
 
 You can connect your own WhatsApp number so customers see your business name. The connection happens inside Ebda Chat using Meta's official flow (Embedded Signup).

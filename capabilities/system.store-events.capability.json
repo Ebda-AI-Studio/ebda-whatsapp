@@ -1,0 +1,42 @@
+{
+  "id": "system.store-events",
+  "status": "live",
+  "area": "system",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "أحداث المتجر",
+  "titleEn": "Store events queue (order, product, plan events)",
+  "screens": [],
+  "api": [
+    "queue ebda-wa-events"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "التغيير في المتجر مابيظهرش في الشات",
+      "ازاي أحداث المتجر؟",
+      "فين أحداث المتجر؟"
+    ],
+    "en": [
+      "A store change did not reach Chat"
+    ]
+  },
+  "steps": [
+    "Store emits events; Chat consumes; DLQ on failure"
+  ],
+  "edgeCases": [
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires"
+  ],
+  "gaps": [
+    "roles unverified"
+  ]
+}

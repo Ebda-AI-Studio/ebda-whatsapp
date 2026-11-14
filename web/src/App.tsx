@@ -11,6 +11,7 @@ import { CampaignsScreen, dateTime } from './components/CampaignsScreen';
 import { ContactsScreen } from './components/ContactsScreen';
 import { NumbersScreen } from './components/NumbersScreen';
 import { OperatorScreen } from './components/OperatorScreen';
+import { TemplatesScreen } from './components/TemplatesScreen';
 import { TeamScreen } from './components/TeamScreen';
 import { WalletScreen } from './components/WalletScreen';
 import type { WalletDto } from './data/billing';
@@ -105,6 +106,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     const plan = walletDto.plan;
     if (plan && plan.packageId !== 'store-included' && (plan.status === 'active' || plan.status === 'trialing') && plan.periodEnd > now() && plan.periodEnd - now() <= 7 * 86_400_000) lines.push(t.wBannerRenew(dateTime(plan.periodEnd, lang)));
     if (walletDto.instapayNotice) lines.push(t.ipRejectedBanner(walletDto.instapayNotice.reason));
+    if (walletDto.aiCredits.low) lines.push(t.wBannerCreditsLow); // the banner link opens the wallet, where the credits card sits
     if (walletDto.lowBalance || walletDto.debtMinor > 0) {
       const money: string[] = [];
       if (walletDto.debtMinor > 0) money.push(t.wBannerDebt(formatMoney(walletDto.debtMinor, 'EGP', lang)));
@@ -244,10 +246,11 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   return (
     <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
       {source.viewAs && <p className="view-as-banner" role="status" aria-label={t.viewAsBanner}>{t.viewAsBanner}</p>}
-      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} />
+      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
-        : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} />
+        : view === 'templates' && source.templatesApi ? <TemplatesScreen t={t} lang={lang} source={source} api={source.templatesApi} onNavigate={setView} />
+        : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} onNavigate={source.templatesApi ? setView : undefined} />
         : view === 'wallet' && source.wallet ? <WalletScreen t={t} lang={lang} source={source} api={source.wallet} now={now} />
         : view === 'operator' && source.operator && source.role === 'super_admin' ? <OperatorScreen t={t} lang={lang} source={source} api={source.operator} now={now} />
         : view === 'team' && source.team ? <TeamScreen t={t} lang={lang} source={source} api={source.team} />

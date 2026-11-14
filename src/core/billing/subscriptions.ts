@@ -125,7 +125,7 @@ export async function setSubscription(env: Env, a: SetSubscription, now = Date.n
       period_start = CASE WHEN ${RUNNING} THEN workspace_subscriptions.period_start ELSE excluded.period_start END,
       period_end = CASE WHEN ${o.renewal ? 'TRUE' : 'FALSE'} AND ${RUNNING} THEN workspace_subscriptions.period_end ELSE excluded.period_end END,
       queued_periods = CASE WHEN ${o.renewal ? 'TRUE' : 'FALSE'} AND ${RUNNING} THEN workspace_subscriptions.queued_periods + 1 ELSE workspace_subscriptions.queued_periods END,
-      cancelled_at = excluded.cancelled_at, version = workspace_subscriptions.version + 1, updated_at = excluded.updated_at, source = excluded.source,
+      cancelled_at = excluded.cancelled_at, version = workspace_subscriptions.version + 1, updated_at = excluded.updated_at, source = excluded.source, payment_unconfirmed_until = NULL,
       past_due_since = CASE WHEN excluded.status = 'past_due' THEN coalesce(?, CASE WHEN workspace_subscriptions.status = 'past_due' THEN workspace_subscriptions.past_due_since END, ?) ELSE NULL END
     WHERE ${o.guard?.sql ?? '1'}
     RETURNING version`;

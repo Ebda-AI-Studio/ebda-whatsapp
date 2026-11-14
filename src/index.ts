@@ -23,6 +23,7 @@ import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/ob
 import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
 import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
 import { operatorRoutes } from './routes/operator';
+import { internalInstapayRoutes } from './routes/internal-instapay';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { TIER_LIMITS } from './core/throttle';
@@ -32,6 +33,7 @@ import { conversationsRoutes } from './routes/conversations';
 import { mediaRoutes } from './routes/media';
 import { realtimeRoutes } from './routes/ws';
 import { templatesRoutes } from './routes/templates';
+import { registerStarterSet } from './core/starter-templates';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
 import { sendOtp, type OtpResult } from './core/otp';
@@ -52,9 +54,12 @@ import { numbersRoutes } from './routes/numbers';
 import { reconcileEntitlements } from './core/billing/subscriptions';
 import { repairPackageOrders } from './core/billing/package-orders';
 import { reconcileCardRefunds, sweepAbandonedRefunds } from './core/billing/card-refunds';
+import { instapayAutoReady, sweepAutoConfirm } from './core/billing/instapay-auto';
+import { runInstapayDigest } from './core/billing/instapay-notify';
 import { expireInstapay, overdueInstapay, purgeInstapayProofs, repairInstapay } from './core/billing/instapay';
 import { paymentProvider } from './core/billing/payments';
 import { handleProviderWebhook, reconfirmUnconfirmed, repairTopups } from './core/billing/topups';
+import { repairCreditOrders } from './core/billing/credit-packs';
 import { packageRoutes } from './routes/packages';
 import { walletRoutes } from './routes/wallet';
 import { instapayProofRoutes, instapayRoutes } from './routes/instapay';
@@ -178,6 +183,7 @@ api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
+registerStarterSet(PACK.templates);
 api.route('/', templatesRoutes(PACK.templates));
 api.route('/', proofRoutes);
 api.route('/', agentRoutes);
@@ -196,6 +202,7 @@ api.route('/', sharedNumberRoutes);
 api.route('/', offboardingRoutes);
 api.route('/', membersRoutes);
 app.route('/api/v1', api);
+app.route('/internal', internalInstapayRoutes);
 /** The /api/v1 routes, exported so a test can walk them (every store route needs a scope decision in core/identity/scopes.ts). */
 export const apiRoutes = api;
 
@@ -229,7 +236,7 @@ app.get('/health', async (c) => {
   // D4: a value DERIVED from SUITE_BUYER_KEY_SECRET (16 hex of an HMAC over a fixed non-phone string, see buyer-key.ts), so scripts/verify-prod.mjs can prove it equals Ebda Store's
   // without the secret leaving either Worker. Absent when the secret is unset or shorter than MIN_PROBE_SECRET_LENGTH.
   const secret = c.env.SUITE_BUYER_KEY_SECRET;
-  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(await fxHealth(c.env)), ...(await buyerKeyProbe(secret ?? '').then((buyerKeyVector) => ({ buyerKeyVector }), () => ({}))) });
+  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, instapayAuto: instapayAutoReady(c.env), ...(await fxHealth(c.env)), ...(await buyerKeyProbe(secret ?? '').then((buyerKeyVector) => ({ buyerKeyVector }), () => ({}))) });
 });
 
 // B9: Meta's data-deletion callback and its status page (public; the signed request is the authentication).
@@ -282,7 +289,7 @@ app.post('/meta/webhook', async (c) => {
   for (const t of extractTemplateStatuses(payload)) {
     await applySharedTemplateEvent(c.env, t.wabaId, t.name, t.language, { status: t.status, reason: t.reason }); // the platform WABA's own catalog (no workspace owns it)
     for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
-      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
+      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason, t.templateId);
     }
   }
   for (const t of extractTemplateCategoryUpdates(payload)) {
@@ -362,12 +369,15 @@ export async function dailyBilling(env: Env): Promise<void> {
   await checkFxStale(env).catch((err) => alert('fx_fetch_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileEntitlements(env).catch((err) => alert('entitlement_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairTopups(env).catch((err) => alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await repairCreditOrders(env).catch((err) => alert('credit_pack_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconfirmUnconfirmed(env).catch((err) => alert('webhook_reconfirm_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileCardRefunds(env, paymentProvider(env)).catch((err) => alert('card_refund_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await sweepAbandonedRefunds(env).catch((err) => alert('refund_abandon_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));
   await expireInstapay(env).catch((err) => alert('instapay_expiry_failed', { error: err instanceof Error ? err.name : 'error' }));
   await purgeInstapayProofs(env).catch((err) => alert('instapay_proof_purge_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairInstapay(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await sweepAutoConfirm(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error', what: 'auto_confirm_sweep' }));
+  await runInstapayDigest(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error', what: 'auto_confirm_digest' }));
   await overdueInstapay(env).catch((err) => alert('instapay_overdue_check_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairPackageOrders(env).catch((err) => alert('package_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await runDueOffboardings(env).catch((err) => alert('offboarding_failed', { error: err instanceof Error ? err.name : 'error' }));

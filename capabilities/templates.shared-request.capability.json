@@ -1,0 +1,47 @@
+{
+  "status": "live",
+  "area": "templates",
+  "versionDate": "2026-11-14",
+  "mcpTool": null,
+  "id": "templates.shared-request",
+  "version": 1,
+  "titleAr": "طلب قالب خدمة على الرقم المشترك",
+  "titleEn": "Request a service template on the shared number",
+  "screens": [
+    "view:templates",
+    "/templates"
+  ],
+  "api": [
+    "POST /stores/:storeId/templates/shared-requests"
+  ],
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible",
+    "note": "the request goes to the platform team; it can be left unanswered but not withdrawn"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "عايز قالب خدمة على الرقم المشترك",
+      "ازاي اطلب قالب جديد من الفريق؟",
+      "قالب كود التحقق على الرقم المشترك"
+    ],
+    "en": [
+      "How do I ask the team for a template on the shared number?"
+    ]
+  },
+  "steps": [
+    "Request a service template: name, language, type (service or verification code), the text you need; the team creates it and the request closes by itself"
+  ],
+  "edgeCases": [
+    "MARKETING is refused (marketing_not_on_shared_number)",
+    "At most 5 open requests per store (429 too_many_open_requests)",
+    "Staff may list requests, only the owner may send one"
+  ],
+  "gaps": [],
+  "assistantNote": "sends a request to the Ebda team; confirm first"
+}

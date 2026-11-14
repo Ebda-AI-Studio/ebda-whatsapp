@@ -1,0 +1,49 @@
+{
+  "id": "bot.funnel",
+  "status": "live",
+  "area": "bot",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "نتايج البوت (مراحل الطلب)",
+  "titleEn": "Bot results (ordering funnel)",
+  "screens": [
+    "BotScreen funnel (7/30/90 days)",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "GET /stores/:storeId/bot/funnel?from=&to="
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/service-menu-hours-and-location",
+  "questions": {
+    "ar": [
+      "كام عميل كمل الطلب؟",
+      "العملاء بيقفوا فين؟",
+      "عايز اشوف أداء البوت",
+      "el bot byesht3"
+    ],
+    "en": [
+      "Where do customers drop off in ordering?"
+    ]
+  },
+  "steps": [
+    "Bot > Bot results; pick period; steps: started chat, saw products, cart, checkout, order, menu, person"
+  ],
+  "edgeCases": [
+    "Counts per Cairo day; returning customer counted on each day",
+    "No customer identity kept"
+  ],
+  "gaps": [
+    "No analytics beyond this funnel: no revenue attribution, no agent resolution rate, no response-time report (docs/analytics.md covers funnel only)"
+  ]
+}

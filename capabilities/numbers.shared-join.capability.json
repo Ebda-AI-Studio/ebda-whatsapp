@@ -1,0 +1,57 @@
+{
+  "id": "numbers.shared-join",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "استخدام الرقم المشترك",
+  "titleEn": "Use the shared platform number",
+  "screens": [
+    "NumbersScreen shared card",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [
+    "GET /stores/:storeId/shared-number",
+    "POST /stores/:storeId/shared-number/join",
+    "POST /stores/:storeId/shared-number/leave"
+  ],
+  "mcpTool": null,
+  "planGate": "package that includes shared number; feature flag (404 when off)",
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/use-the-shared-number",
+  "questions": {
+    "ar": [
+      "عايز ابدأ من غير ما اربط رقم",
+      "إيه الرقم المشترك؟",
+      "الرقم المشترك بكام؟",
+      "el ra2am el moshtarak"
+    ],
+    "en": [
+      "Can I start without my own number?",
+      "What is the shared number?"
+    ]
+  },
+  "steps": [
+    "Numbers > Turn on the shared number, confirm store name customers see, accept add-on terms, top up the wallet, send a test"
+  ],
+  "edgeCases": [
+    "Package lacks it: 402 package_required",
+    "Name too similar to another store: sharedNameTaken",
+    "Replies reach the store that wrote last; ambiguity asks the customer which store",
+    "Package ends: replies still arrive, new template conversations blocked",
+    "STOP opts out of every store that wrote",
+    "No marketing, no OTP on shared number",
+    "Wallet empty: service messages up to 50 EGP overdraft"
+  ],
+  "gaps": [
+    "Add-on price \"set by the team\" (no in-product price)"
+  ],
+  "assistantNote": "joining changes who pays Meta (wallet)"
+}

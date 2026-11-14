@@ -1,3 +1,13 @@
+---
+capabilities:
+  - contacts.erase@1
+  - contacts.export@1
+  - contacts.list@1
+  - contacts.merge@1
+  - contacts.rename@1
+  - contacts.retention@1
+---
+
 # Your customers' data: retention, download, rename, merge
 
 All of this is on the **Contacts** screen.

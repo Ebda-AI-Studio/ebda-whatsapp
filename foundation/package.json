@@ -1,16 +1,32 @@
 {
   "name": "@ebda/foundation",
-  "version": "0.1.0",
-  "foundationCommit": "6e307bd69aff0d60b1ee8c048ab93f264694e7fe",
+  "version": "0.3.1",
+  "foundationCommit": "ee185f498d1a88a40d49592a113651eefc5dd241",
   "private": true,
   "license": "UNLICENSED",
   "exports": {
     "./brand": "./brand.ts",
     "./buyer": "./buyer.ts",
+    "./capability": "./capability.ts",
+    "./capability-coverage": "./capability-coverage.ts",
+    "./capability-registry": "./capability-registry.ts",
+    "./help-article": "./help-article.ts",
+    "./instapay-decision": "./instapay-decision.ts",
+    "./instapay-dedupe": "./instapay-dedupe.ts",
+    "./instapay-digest": "./instapay-digest.ts",
+    "./instapay-extract": "./instapay-extract.ts",
+    "./instapay-state": "./instapay-state.ts",
     "./phone": "./phone.ts",
+    "./ratchet": "./ratchet.ts",
+    "./self-service-routes": "./self-service-routes.ts",
     "./slugs": "./slugs.ts",
+    "./smart-layer": "./smart-layer/index.ts",
+    "./smart-layer-bypass": "./smart-layer-bypass.ts",
     "./text": "./text.ts",
     "./tokens": "./tokens.ts",
     "./tokens.css": "./tokens.css"
+  },
+  "peerDependencies": {
+    "zod": "4.6.7"
   }
 }

@@ -1,0 +1,57 @@
+{
+  "id": "inbox.send-text",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "الرد على العميل برسالة",
+  "titleEn": "Reply to a customer with text",
+  "screens": [
+    "ChatPane composer",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [
+    "POST /stores/:storeId/conversations/:id/messages {type:text}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "ازاي ارد على العميل؟",
+      "الرسالة مابتتبعتش",
+      "ليه الرسالة جنبها علامة غلط؟",
+      "el message mesh btetba3t"
+    ],
+    "en": [
+      "How do I reply to a customer?",
+      "Why did my message fail?"
+    ]
+  },
+  "steps": [
+    "Open the chat",
+    "Type and press Send",
+    "Status ticks: sending, sent, delivered, read, not sent (Try again)"
+  ],
+  "edgeCases": [
+    "24-hour window closed: free text blocked (Meta 131047), only an approved template can be sent",
+    "No active package: sends, agent and number connect answer 403 plan_required (no free plan, WA-NOFREE-1); a past_due package keeps replies/confirmations up to 7 days",
+    "No active number connected: 409 no_active_number",
+    "Per-number throughput limit (130429 / 131056 pair limit): sends are queued and retried by the throttle",
+    "Workspace suspended by Ebda: every write answers 403 workspace_suspended (reading, paying and erasing a contact still work)",
+    "Customer opted out of marketing: service replies still work",
+    "Offline: queued in browser and sent when back online",
+    "Enqueue failure marks the row failed (never an orphan queued)"
+  ],
+  "gaps": [],
+  "assistantNote": "sends a message to a customer"
+}

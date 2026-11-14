@@ -1,20 +1,45 @@
+---
+capabilities:
+  - agent.credits-topup@2
+  - agent.credits-view@2
+  - agent.enable@2
+  - agent.faq@1
+  - agent.notify-phone@1
+  - agent.persona-language@1
+  - agent.promises@1
+  - agent.provider-byok@1
+  - agent.store-facts@1
+  - agent.store-search@1
+  - agent.tone@1
+  - agent.voice-notes@1
+  - inbox.assign-takeover@1
+  - inbox.handoff-needs-human@1
+  - inbox.voice-note-transcript@1
+  - orders.tracking@1
+---
+
 # The AI agent
 
 The agent replies to your customers in chat in Egyptian Arabic, searches the catalog, reports order status and starts a new order. Whenever a customer asks for a person, it hands over to you.
 
 ## What you need before you start
 - A connected number and a synced catalog.
-- **AI credits** (some come with your package, and you can add more).
+- **AI credits.** Your package gives you credits each month; if they run out, buy a credit pack by card in **Wallet > Buy AI credits** (the owner does this; see the wallet guide), wait for next month, or upgrade your package.
 - A few lines about your store policies (shipping, returns, opening hours) so the agent can answer accurately.
 
 ## Steps
-1. Open **AI agent** in Settings.
-2. Turn on **Enable agent**.
-3. Choose the **persona** (how it speaks, in your own words), the **agent tone** (warm, formal or playful) and the language.
-4. Write your store's questions, answers and policies in the knowledge field. If it is under about 3,000 characters the agent reads all of it on every reply; if it is longer, the agent searches it, and the screen warns you until it is ready for search.
-5. To get a WhatsApp message when a customer needs a team member, enter your number in **Your WhatsApp number for alerts** in international format (for example +201001234567).
-6. Set the **handoff period** (default two hours).
-7. Save, then test from your own phone.
+1. Open **AI agent** in the side rail.
+2. Turn on **Turn on the AI agent**.
+3. In **Reply style** write how it should speak in your own words (for example: friendly and brief). In **Reply language** choose Arabic, English or **Same as the customer**.
+4. Choose the **agent tone** (warm, formal or playful).
+5. In **Your store Q&A** write your shipping, exchange and payment details and any policy, so the agent answers with them. If it is under about 3,000 characters the agent reads all of it on every reply; if it is longer, the agent searches it, and the screen warns you until it is ready for search.
+6. To get a WhatsApp message when a customer needs a team member, enter your number in **Your WhatsApp number for alerts** in international format (for example +201001234567).
+7. In **What the agent may promise** switch on, yourself, anything you allow (refunds, discounts, free delivery, exchanges, guarantee). **Everything is off by default**, and the agent promises none of it unless you switch it on, even if your Q&A mentions it.
+8. Set **how long it stays silent after handing over** in minutes (default 120).
+9. Choose the **AI engine**: the built-in one (uses your credits) or your own OpenAI-compatible key (stored encrypted and never shown again).
+10. Save, then test from your own phone.
+
+Only the store owner can change these settings. Your AI credit balance shows at the top of the screen.
 
 ## What the agent knows about your store and the customer
 - **Your store:** its name, shipping zones and fees, cash-on-delivery fee, return window, payment methods, opening hours and address, all read from your Ebda Store settings. Anything you did not fill in there, the agent says it will check; it never guesses a figure.
@@ -46,4 +71,4 @@ Handoff happens when the customer asks for a person, the agent cannot answer, or
 - **A wrong reply:** edit the knowledge or persona, and take the conversation over.
 
 ---
-Last checked: 2026-11-12. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.
+Last checked: 2026-11-14. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.

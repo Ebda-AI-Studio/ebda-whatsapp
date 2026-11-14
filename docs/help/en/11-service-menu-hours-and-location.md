@@ -1,3 +1,11 @@
+---
+capabilities:
+  - bot.funnel@1
+  - bot.hours-away@1
+  - bot.location@1
+  - bot.service-menu@2
+---
+
 # Service menu, opening hours and your location
 
 Your customers get quick answers from the bot without waiting for you: a menu of your common questions, an automatic reply when you are closed, and your store's location on a tap.
@@ -7,7 +15,7 @@ Your customers get quick answers from the bot without waiting for you: a menu of
 - The owner account. Staff can see these settings but cannot change them.
 
 ## The service menu
-1. Open **Bot** in Settings, then **Service menu**.
+1. Open **Bot** in the side rail, then **Service menu**.
 2. Press **Add a question**. Give it a short name (up to 24 characters) and an answer (up to 1024 characters), in Arabic and in English. Customers see the language they write in.
 3. Use **Move up** and **Move down** to order the questions, and **Remove** to delete one. You can add up to 8.
 4. Turn on **Turn on the service menu** and save.
@@ -54,4 +62,4 @@ At the top of the Bot screen, **Bot results** shows how many customers reached e
 - Test from your own phone after saving.
 
 ---
-Last checked: 2026-10-25. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.
+Last checked: 2026-11-14. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.

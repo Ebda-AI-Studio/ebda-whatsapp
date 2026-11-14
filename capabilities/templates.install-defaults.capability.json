@@ -1,0 +1,48 @@
+{
+  "status": "live",
+  "area": "templates",
+  "versionDate": "2026-11-14",
+  "mcpTool": null,
+  "id": "templates.install-defaults",
+  "version": 2,
+  "titleAr": "تركيب مجموعة القوالب الجاهزة",
+  "titleEn": "Install the ready-made template set",
+  "screens": [
+    "view:templates",
+    "/templates"
+  ],
+  "api": [
+    "POST /stores/:storeId/templates/install-defaults"
+  ],
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible",
+    "note": "each starter template is submitted to Meta"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "فين القوالب الجاهزة؟",
+      "عايز اركب قوالب التأكيد والشحن",
+      "install default templates",
+      "القوالب الجاهزة مش ظاهرة"
+    ],
+    "en": [
+      "How do I install the ready-made templates?"
+    ]
+  },
+  "steps": [
+    "Normally automatic when the number connects; an empty Templates screen installs them once, and the button retries after a failure"
+  ],
+  "edgeCases": [
+    "Existing names are skipped; failures are listed and a bad pack entry is reported, never a 500",
+    "A timeout keeps the claim for the sweep",
+    "Own number not connected: 404 no_active_number (a store on the shared number sees the platform templates instead, never an empty list)"
+  ],
+  "gaps": [],
+  "assistantNote": "submits several templates to Meta; irreversible"
+}

@@ -1,0 +1,49 @@
+{
+  "id": "packages.plan-status",
+  "status": "live",
+  "area": "billing",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "حالة الباقة",
+  "titleEn": "Plan status: trial, active, past due, cancelled, expired",
+  "screens": [
+    "WalletScreen Plan card",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "GET /stores/:storeId/wallet"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/wallet-top-ups-and-refunds",
+  "questions": {
+    "ar": [
+      "الباقة خلصت؟",
+      "ليه مش قادر ابعت؟",
+      "إيه معنى past due؟",
+      "el baqa khelset"
+    ],
+    "en": [
+      "Is my plan active?",
+      "Why can I not send messages?"
+    ]
+  },
+  "steps": [
+    "Plan card shows name, status, end date"
+  ],
+  "edgeCases": [
+    "No active package: sends, agent and number connect answer 403 plan_required (no free plan, WA-NOFREE-1); a past_due package keeps replies/confirmations up to 7 days",
+    "Inbox reading, packages and buying remain available without a plan",
+    "Operator can assign a package (goodwill/deal)"
+  ],
+  "gaps": []
+}
