@@ -306,7 +306,7 @@ const ar = {
   tplInstallFailed: 'معرفناش نجهّز قوالب البداية دلوقتي. اضغط الزر وجرّب تاني.', tplInstallRetry: 'جهّز قوالب البداية',
   tplNoNumberTitle: 'اربط رقم واتساب الأول', tplNoNumber: 'القوالب بتتبعت على حساب واتساب بتاعك، ولسه مفيش رقم متصل. اربط رقمك وبعدها هتلاقي قوالب البداية جاهزة هنا.', tplGoNumbers: 'روح لصفحة الأرقام',
   tplTokenTitle: 'الربط مع واتساب محتاج تجديد', tplToken: 'مقدرناش نوصل لحسابك في واتساب لأن صلاحية الربط خلصت أو اتقفلت. افتح صفحة الأرقام وأعد ربط الرقم.',
-  tplStaffNote: 'إنت بتشوف القوالب للقراءة بس. صاحب المتجر هو اللي يقدر ينشئ أو يعدّل أو يمسح.', tplRawReason: 'كود السبب من ميتا',
+  tplStaffNote: 'إنت بتشوف القوالب للقراءة بس. صاحب المتجر هو اللي يقدر ينشئ أو يعدّل أو يمسح.', tplRawReason: 'كود السبب من ميتا', tplReasonHelp: 'اقرا إزاي تفهم سبب الرفض',
   tplBack: 'رجوع للقوالب', tplEditorNewTitle: 'قالب جديد', tplEditorEditTitle: 'تعديل القالب',
   tplKindLabel: 'القالب ده لإيه؟',
   tplKinds: {
@@ -638,7 +638,7 @@ const en: typeof ar = {
   tplInstallFailed: 'We could not set up the starter templates right now. Press the button to try again.', tplInstallRetry: 'Set up the starter templates',
   tplNoNumberTitle: 'Connect a WhatsApp number first', tplNoNumber: 'Templates live on your own WhatsApp account, and no number is connected yet. Connect your number and the starter templates will be ready here.', tplGoNumbers: 'Go to Numbers',
   tplTokenTitle: 'The WhatsApp connection needs renewing', tplToken: 'We cannot reach your WhatsApp account because the connection expired or was closed. Open Numbers and reconnect the number.',
-  tplStaffNote: 'You can view templates only. The store owner creates, edits and deletes them.', tplRawReason: 'Reason code from Meta',
+  tplStaffNote: 'You can view templates only. The store owner creates, edits and deletes them.', tplRawReason: 'Reason code from Meta', tplReasonHelp: 'How to read a rejection reason',
   tplBack: 'Back to templates', tplEditorNewTitle: 'New template', tplEditorEditTitle: 'Edit template',
   tplKindLabel: 'What is this template for?',
   tplKinds: {

@@ -3,10 +3,14 @@ capabilities:
   - inbox.send-template@1
   - inbox.send-text@1
   - inbox.window-status@1
-  - templates.create-submit@1
-  - templates.install-defaults@1
-  - templates.list@1
-  - templates.sync@1
+  - templates.install-defaults@2
+  - templates.list@2
+  - templates.shared-list@1
+  - templates.shared-number-marketing@1
+  - templates.shared-request@1
+  - templates.starter-on-connect@2
+  - templates.sync@2
+appPath: /templates
 ---
 
 # Templates and the 24-hour window

@@ -27,7 +27,7 @@ import { conversationDto, type ConversationRow } from './dto';
 import type { ConversationDto, NoteDto } from './api/contract';
 import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './throttle';
 import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
-import { rejectionAdvice } from './template-advice';
+import { isEnumLikeReason, knownReason, rejectionAdvice } from './template-advice';
 import { refreshPendingWith } from './templates-service';
 import { graphTokenFor } from './numbers/token';
 import type { TemplateDto } from './api/contract';
@@ -1035,6 +1035,8 @@ export class WorkspaceDO extends DurableObject<Env> {
     // edit is written by saveSubmittedTemplate, not by a webhook, so it is unaffected; an appeal that is really decided arrives as APPROVED / REJECTED.)
     if (status === 'PENDING' && this.sql.exec("SELECT 1 FROM templates WHERE name = ? AND language = ? AND status <> 'PENDING'", name, language).toArray().length > 0) return { applied: false };
     const clean = status === 'APPROVED' || !reason || reason === 'NONE' ? null : reason;
+    // The real set of rejection codes is not in Meta's docs: an unfamiliar enum is logged (code only, never free text) so it can be added to the advice and the fixture.
+    if (clean && status === 'REJECTED' && !knownReason(clean) && isEnumLikeReason(clean)) console.log(JSON.stringify({ event: 'template_reason_unmapped', code: clean }));
     const r = this.sql.exec('UPDATE templates SET status = ?, rejected_reason = ?, meta_id = COALESCE(?, meta_id), updated_at = ? WHERE name = ? AND language = ?', status, clean, metaId, Date.now(), name, language);
     return { applied: r.rowsWritten > 0 };
   }

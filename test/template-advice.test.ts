@@ -42,3 +42,13 @@ describe('rejectionAdvice', () => {
     for (const s of ['APPROVED', 'PENDING', 'PENDING_DELETION']) expect(rejectionAdvice('INVALID_FORMAT', s)).toBeNull();
   });
 });
+
+describe('knownReason', () => {
+  it('knows the documented codes and the wording themes, and not an unfamiliar enum', async () => {
+    const { knownReason } = await import('../src/core/template-advice');
+    for (const r of fixture.reasons) expect(knownReason(r.code), r.code).toBe(true);
+    expect(knownReason('Parameter format is wrong')).toBe(true);
+    expect(knownReason('BRAND_NEW_META_CODE')).toBe(false);
+    expect(knownReason(null)).toBe(true); // nothing to capture
+  });
+});

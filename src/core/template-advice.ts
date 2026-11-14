@@ -41,6 +41,15 @@ const BY_WORDING: [RegExp, AdviceKind][] = [
   [/categor/i, 'category'],
 ];
 
+/** Whether a reason maps to a documented code or theme. `null` (no reason) has nothing to capture. */
+export function knownReason(reason: string | null): boolean {
+  if (!reason || reason === 'NONE') return true;
+  return reason in BY_CODE || BY_WORDING.some(([re]) => re.test(reason));
+}
+
+/** Meta's reason codes are enum-like. Only a value of that shape is safe to log for capture: anything else could carry a merchant's own words. */
+export const isEnumLikeReason = (reason: string): boolean => /^[A-Z][A-Z0-9_]{2,63}$/.test(reason);
+
 /**
  * Plain advice for a template Meta did not accept. Only the KIND is derived from the reason: the reason text itself is never echoed (it can
  * carry merchant text), and the screen shows the raw code separately. Healthy and in-flight statuses have no advice.

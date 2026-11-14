@@ -11,7 +11,6 @@
     "superadmin-route-unreasoned|GET /operator/instapay/:id/proof-link",
     "superadmin-route-unreasoned|GET /operator/package-orders/:orderId/refund-quote",
     "superadmin-route-unreasoned|GET /operator/pricing-overrides/:workspaceId",
-    "superadmin-route-unreasoned|GET /operator/shared-templates",
     "superadmin-route-unreasoned|GET /operator/view-log",
     "superadmin-route-unreasoned|GET /operator/workspaces/:workspaceId/contacts/:waId/export",
     "superadmin-route-unreasoned|GET /operator/workspaces/:workspaceId/wallet",
@@ -21,8 +20,6 @@
     "superadmin-route-unreasoned|POST /operator/instapay/:id/release",
     "superadmin-route-unreasoned|POST /operator/package-orders/:orderId/yearly-refund",
     "superadmin-route-unreasoned|POST /operator/pricing-overrides/:workspaceId",
-    "superadmin-route-unreasoned|POST /operator/shared-templates",
-    "superadmin-route-unreasoned|POST /operator/shared-templates/sync",
     "superadmin-route-unreasoned|PUT /operator/workspaces/:workspaceId/subscription"
   ]
 }

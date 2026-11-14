@@ -1,37 +1,38 @@
 {
-  "id": "templates.create-submit",
-  "status": "planned",
-  "plan": "business/ebda/audits/2026-11-14-self-service-and-ai-assistant-audit.md #1 + spec 2026-11-14-self-service-and-ebda-assistant-design.md section 7.2 (register row: NOT BUILT)",
+  "status": "live",
   "area": "templates",
-  "version": 1,
   "versionDate": "2026-11-14",
+  "mcpTool": null,
+  "id": "templates.create-submit",
+  "version": 2,
   "titleAr": "عمل قالب وتقديمه لميتا",
-  "titleEn": "Create and submit a template to Meta (own WABA)",
+  "titleEn": "Create and submit a template to Meta (own WhatsApp account)",
   "screens": [
-    "none (planned Templates screen)"
+    "view:templates",
+    "/templates"
   ],
   "api": [
-    "POST /stores/:storeId/templates {name,language,category,components}"
+    "POST /stores/:storeId/templates",
+    "POST /stores/:storeId/templates/check"
   ],
-  "mcpTool": null,
   "planGate": "package in good standing + active number",
   "roles": [
-    "owner",
-    "super_admin"
+    "owner"
   ],
   "policy": "confirm",
   "undo": {
-    "class": "irreversible"
+    "class": "irreversible",
+    "note": "a submission to Meta cannot be recalled; the template can be edited or deleted afterwards"
   },
-  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "helpArticle": "whatsapp/write-and-submit-a-template",
   "questions": {
     "ar": [
       "عايز اعمل رسالة بلغ بيها العميل إن الأوردر اتشحن",
       "ازاي اعمل template؟",
       "عايز قالب للعروض",
       "a3mel template ezay",
-      "القالب اترفض ليه؟",
-      "عايز رسالة ترحيب"
+      "عايز رسالة ترحيب",
+      "ينفع اكتب قالب بنفسي؟"
     ],
     "en": [
       "How do I create a message template?",
@@ -39,27 +40,21 @@
     ]
   },
   "steps": [
-    "Today: raw API only (name [a-z0-9_], language, category MARKETING/UTILITY/AUTHENTICATION, BODY required)",
-    "Planned: Templates screen + assistant template-writer (spec section 6.7)"
+    "Templates, New template: pick what it is for, language, a title for yourself",
+    "Write the text, add variables with an example each, optional header, footer and buttons; Meta's rules are checked while typing and again by the server (check)",
+    "Review and send: the preview and the irreversible notice, then confirm; the confirm is bound to the checked payload by a hash",
+    "Meta reviews for up to 24 hours"
   ],
   "edgeCases": [
-    "Meta may require example values for variables; our schema is permissive so Meta may reject (unverified)",
-    "Rejections: wrong category, vague text, prohibited content, variable formatting, promotional content in UTILITY",
-    "Meta can recategorise UTILITY to MARKETING (category-update webhook re-checks held sends)",
-    "Name reuse: rejected name needs a new name (no edit API)",
-    "Quality rating of a template can drop to low and pause it (not tracked in our DB)",
-    "Template limits per WABA (250/6000 by verification) not surfaced",
-    "Meta unreachable or rate-limited: 503 rate_limited, retry shortly; nothing is lost",
-    "No active number connected: 409 no_active_number",
-    "No active package: sends, agent and number connect answer 403 plan_required (no free plan, WA-NOFREE-1); a past_due package keeps replies/confirmations up to 7 days",
-    "On the shared platform number: marketing templates are refused, templates come from the platform catalogue, wallet pays Meta"
+    "A variable at the start or end of the text, or a gap in numbering, is refused before Meta with the field named",
+    "Two taps or two staff tabs submit once (the name is claimed first)",
+    "A timeout or 5xx keeps the claim as pending and the sweep reconciles it with Meta",
+    "Meta may recategorise UTILITY to MARKETING: the stored category is Meta's and the merchant is told what it changes (opt-in, price, campaigns)",
+    "Own number not connected: 404 no_active_number (a store on the shared number sees the platform templates instead, never an empty list)",
+    "Connection to WhatsApp expired or closed: 503 token_unavailable, reconnect the number on the Numbers screen",
+    "Submitting without expectedHash is refused 400 hash_required",
+    "On the shared number: use the request form instead (templates.shared-request)"
   ],
-  "gaps": [
-    "NO merchant UI (BLOCKER #1 in audit)",
-    "No template edit/delete endpoint (gap #17)",
-    "No rejection reason screen",
-    "No quality-rating tracking",
-    "Help 04 doc/code mismatch"
-  ],
-  "assistantNote": "a submission to Meta on the merchant account; cannot be withdrawn, edit not supported by our API"
+  "gaps": [],
+  "assistantNote": "a submission to Meta on the merchant's account; irreversible (cannot be withdrawn): confirm with the payload preview, pass the hash from check"
 }

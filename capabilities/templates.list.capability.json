@@ -1,20 +1,20 @@
 {
-  "id": "templates.list",
   "status": "live",
   "area": "templates",
-  "version": 1,
   "versionDate": "2026-11-14",
-  "titleAr": "قايمة القوالب وحالتها",
-  "titleEn": "List templates and their status",
+  "mcpTool": null,
+  "id": "templates.list",
+  "version": 2,
+  "titleAr": "قايمة القوالب وحالتها عند ميتا",
+  "titleEn": "List templates with Meta review status and rejection reason",
   "screens": [
-    "none (inbox picker and CampaignForm list only APPROVED)",
-    "view:CampaignForm",
-    "/campaigns"
+    "view:templates",
+    "/templates"
   ],
   "api": [
-    "GET /stores/:storeId/templates"
+    "GET /stores/:storeId/templates",
+    "GET /stores/:storeId/templates/:name/:language"
   ],
-  "mcpTool": null,
   "planGate": null,
   "roles": [
     "owner",
@@ -30,7 +30,8 @@
       "فين القوالب بتاعتي؟",
       "القالب اتقبل ولا اترفض؟",
       "امتى القالب هيتفعل؟",
-      "el templates feen"
+      "el templates feen",
+      "ليه القالب اترفض؟"
     ],
     "en": [
       "Where are my templates?",
@@ -38,13 +39,14 @@
     ]
   },
   "steps": [
-    "No templates page: approved ones appear in the chat template picker and the campaign form"
+    "Open Templates in the side menu: every template with its type, language and Meta status (live, in Meta review, rejected, paused, disabled, being deleted)",
+    "Open one for its preview, the rejection reason in plain words (Meta's code below it) and what can be done"
   ],
   "edgeCases": [
-    "Empty list for an own-number merchant until templates are submitted by API"
+    "Own number not connected: 404 no_active_number (a store on the shared number sees the platform templates instead, never an empty list)",
+    "Connection to WhatsApp expired or closed: 503 token_unavailable, reconnect the number on the Numbers screen",
+    "A template made in WhatsApp Manager shows after Sync with Meta, with its raw name when it has no title",
+    "Staff see the list and detail read-only"
   ],
-  "gaps": [
-    "NO merchant Templates screen (help 04 describes one that does not exist)",
-    "Status and rejectedReason exist in TemplateDto but no screen renders them for merchants"
-  ]
+  "gaps": []
 }
