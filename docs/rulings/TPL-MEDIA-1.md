@@ -1,0 +1,3 @@
+# TPL-MEDIA-1 - template headers are text only in v1
+
+Ruling TPL-MEDIA-1 - v1 of merchant template self-service supports text headers only. Image, video and document template headers need Meta's Resumable Upload handle and a media pipeline this work does not build. Sends of already-approved media-header templates keep working (`renderTemplate` in `src/core/templates.ts` still renders them). Evidence: Meta's components doc requires an upload handle for media headers (`developers.facebook.com/documentation/business-messaging/whatsapp/templates/components`). Cost if wrong: a merchant wanting a product-image template must create it once in WhatsApp Manager and press Sync.
