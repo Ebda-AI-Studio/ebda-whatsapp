@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { DigestDto, OpsStatusDto, StatementDto, WalletDto } from '../../../src/core/api/contract';
-import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto, auditLogItemDto, offboardingDto, operatorOffboardingDto } from '../../../src/core/api/contract';
+import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto, auditLogItemDto, offboardingDto, operatorOffboardingDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto } from '../../../src/core/api/contract';
 
 export type { DigestDto, OpsStatusDto, StatementDto, WalletDto };
 export type CostEstimateDto = z.infer<typeof costEstimateDto>;
@@ -8,6 +8,16 @@ export type TopupDto = z.infer<typeof topupDto>;
 export type PackageDto = z.infer<typeof packageDto>;
 export type PackageOrderDto = z.infer<typeof packageOrderDto>;
 export type RefundRequest = z.infer<typeof refundRequestDto>;
+export type NumberFundingPreview = z.infer<typeof numberFundingPreviewDto>;
+export type YearlyRefundView = z.infer<typeof yearlyRefundViewDto>;
+export type YearlyRefundPreview = z.infer<typeof yearlyRefundPreviewDto>;
+export type YearlyRefundRequest = z.infer<typeof yearlyRefundRequestDto>;
+export type CreditPacks = z.infer<typeof creditPacksDto>;
+export type CreditPack = CreditPacks['items'][number];
+export type CreditPackPreview = z.infer<typeof creditPackPreviewDto>;
+export type CreditOrder = z.infer<typeof creditOrderDto>;
+/** What a preview hands back and the action sends back: the id and the single-use token. */
+export type ConfirmToken = { confirmId: string; token: string };
 export type InstapayRequest = z.infer<typeof instapayRequestDto>;
 export type InstapayView = z.infer<typeof instapayViewDto>;
 export type InstapayCreated = z.infer<typeof instapayCreatedDto>;
@@ -66,6 +76,19 @@ export interface WalletApi {
   uploadInstapayProof(requestId: string, file: File): Promise<InstapayRequest>;
   refundRequests(): Promise<RefundRequest[]>;
   requestRefund(amountMinor: number, note: string): Promise<RefundRequest>;
+  /** Owner. Who pays Meta for an OWN number: preview issues a single-use confirmation, then the write. Only the card is offered; the platform line is the operator's (403). */
+  previewNumberFunding(phoneNumberId: string): Promise<NumberFundingPreview>;
+  confirmNumberFunding(phoneNumberId: string, confirm: ConfirmToken): Promise<void>;
+  /** Owner. The running yearly package's refund quote (the operator's own figures) and any request already filed. */
+  yearlyRefund(): Promise<YearlyRefundView>;
+  previewYearlyRefund(): Promise<YearlyRefundPreview>;
+  /** Files a REQUEST only: no money moves; a person runs the cancellation. */
+  requestYearlyRefund(confirm: ConfirmToken): Promise<YearlyRefundRequest>;
+  /** Owner. AI credit packs: the server owns the price; credits arrive only when the provider confirms the payment. */
+  creditPacks(): Promise<CreditPacks>;
+  previewCreditPack(packId: string): Promise<CreditPackPreview>;
+  buyCreditPack(packId: string, confirm: ConfirmToken): Promise<CreditOrder>;
+  creditOrderState(orderId: string): Promise<CreditOrder>;
   /** OFFBOARD-1 (owner): delete the workspace after a 14-day cooling-off. A wallet balance has to be given up explicitly (`acceptWriteOff`), else 409 `wallet_balance_remains`. */
   offboarding(): Promise<OffboardingView>;
   requestOffboarding(opts: { acceptWriteOff?: true }): Promise<OffboardingView>;
@@ -136,6 +159,8 @@ export interface OperatorApi {
   yearlyRefundQuote(orderId: string): Promise<YearlyRefundQuoteView>;
   /** Cancels the yearly plan at the end of the current month and settles the wallet debt first. Idempotent: a replay returns the same figures. */
   yearlyRefundExecute(orderId: string, reason: string): Promise<YearlyRefundDone>;
+  /** Merchants' yearly-refund requests waiting for a person. */
+  yearlyRefundRequests(): Promise<(YearlyRefundRequest & { workspaceId: string })[]>;
 }
 export type YearlyRefundQuoteView = { orderId: string; packageId: string; periodMonths: number; monthlyMinor: number; unusedMonths: number; grossMinor: number; debtMinor: number; debtSettledMinor: number; refundMinor: number };
 export type YearlyRefundDone = { orderId: string; shortenedMonths: number; debtSettledMinor: number; cashRefundMinor: number; noMoneyOut: boolean; periodEnd: number };

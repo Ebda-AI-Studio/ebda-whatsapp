@@ -59,6 +59,7 @@ import { runInstapayDigest } from './core/billing/instapay-notify';
 import { expireInstapay, overdueInstapay, purgeInstapayProofs, repairInstapay } from './core/billing/instapay';
 import { paymentProvider } from './core/billing/payments';
 import { handleProviderWebhook, reconfirmUnconfirmed, repairTopups } from './core/billing/topups';
+import { repairCreditOrders } from './core/billing/credit-packs';
 import { packageRoutes } from './routes/packages';
 import { walletRoutes } from './routes/wallet';
 import { instapayProofRoutes, instapayRoutes } from './routes/instapay';
@@ -368,6 +369,7 @@ export async function dailyBilling(env: Env): Promise<void> {
   await checkFxStale(env).catch((err) => alert('fx_fetch_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileEntitlements(env).catch((err) => alert('entitlement_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairTopups(env).catch((err) => alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await repairCreditOrders(env).catch((err) => alert('credit_pack_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconfirmUnconfirmed(env).catch((err) => alert('webhook_reconfirm_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileCardRefunds(env, paymentProvider(env)).catch((err) => alert('card_refund_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await sweepAbandonedRefunds(env).catch((err) => alert('refund_abandon_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));

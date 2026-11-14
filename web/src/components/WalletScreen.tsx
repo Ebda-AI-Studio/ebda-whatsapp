@@ -11,6 +11,7 @@ import { useFocusOn } from '../lib/useFocusOn';
 import { useLoad } from '../lib/useLoad';
 import { dateTime } from './CampaignsScreen';
 import { LoadError } from './LoadError';
+import { CreditPacksCard, NumberFundingAction, YearlyRefundCard } from './MoneySurfaces';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: WalletApi; now: () => number; go?: (url: string) => void };
 
@@ -119,7 +120,11 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
             <div><dt>{t.wHeld}</dt><dd>{money(wallet.heldMinor)}</dd></div>
             <div><dt>{t.wAiCredits}</dt><dd>{num(wallet.aiCredits.available, lang)}</dd></div>
           </dl>
-          {wallet.aiCredits.low && <p className="wallet-debt" role="status">{t.wAiCreditsLow(num(wallet.aiCredits.available, lang), num(wallet.aiCredits.lowThreshold, lang))}</p>}
+          {wallet.aiCredits.low && (
+            <p className="wallet-debt" role="status">{t.wAiCreditsLow(num(wallet.aiCredits.available, lang), num(wallet.aiCredits.lowThreshold, lang))}
+              {owner && <> <a href="#w-credits" onClick={(e) => { e.preventDefault(); const h = document.getElementById('w-credits-title'); h?.scrollIntoView?.({ block: 'start' }); h?.focus(); }}>{t.wCrBuyLink}</a></>}
+            </p>
+          )}
           <p className="muted">{t.wAiCreditDefinition}</p>
           {wallet.debtMinor > 0 && <p className="wallet-debt">{t.wDebtLine(money(wallet.debtMinor))}</p>}
           {paused && <p className="wallet-debt">{t.wMarketingPaused}</p>}
@@ -136,6 +141,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
                     <b><bdi dir="ltr">{f.displayPhone ?? f.phoneNumberId}</bdi></b>
                     <span className="flag" data-ok={f.funding === 'merchant_card'}>{f.funding === 'merchant_card' ? t.opFundingCard : f.funding === 'unknown' ? t.opFundingUnknown : t.opFundingWallet}</span>
                     <p className="muted">{f.funding === 'merchant_card' ? t.wFundingCard : f.funding === 'unknown' ? t.wFundingUnknown : t.wFundingWallet}</p>
+                    {owner && f.funding === 'unknown' && <NumberFundingAction t={t} api={api} phoneNumberId={f.phoneNumberId} onDone={() => void api.wallet().then(setWallet, () => undefined)} />}
                   </li>
                 ))}
               </ul>
@@ -158,6 +164,8 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
           <TopupCard t={t} lang={lang} api={api} wallet={wallet} pending={pending} note={topupNote} go={go} now={now}
             onStarted={(p) => { writePending(p); setPending(p); setTopupNote('waiting'); }} cardOnly={cardOnly} />
         )}
+        {owner && <CreditPacksCard t={t} lang={lang} api={api} now={now} go={go} onCredited={() => void api.wallet().then(setWallet, () => undefined)} />}
+        {owner && <YearlyRefundCard t={t} lang={lang} api={api} />}
         {owner && wallet.cardCheckout !== false && <PackagesCard t={t} lang={lang} api={api} go={go} now={now} onActivated={() => void api.wallet().then(setWallet, () => undefined)} />}
         {owner && <InstapayCard t={t} lang={lang} api={api} />}
         <DigestCard t={t} lang={lang} api={api} owner={owner} />

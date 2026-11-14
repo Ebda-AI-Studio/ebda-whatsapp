@@ -611,6 +611,28 @@ export const packageDto = z.object({
   maxMembers: z.number().int().min(1), features: z.array(z.enum(PACKAGE_FEATURE_KEYS)), periodMonths: z.number().int().positive(),
 });
 export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired', 'refunded']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
+// ---- Merchant money surfaces (self-service A9 Chat half, A21, A22). Every money action is two calls: a preview that issues a single-use confirmation, then the action with it. ----
+export const confirmToken = z.object({ confirmId: z.string().uuid(), token: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
+export const confirmIssuedDto = z.object({ confirmId: z.string().uuid(), token: z.string(), expiresAt: z.number().int() });
+/** `platform_line` parses on purpose: the route answers it with a plain 403, so a merchant is told the platform line is the operator's, not "invalid request". */
+export const numberFundingChoice = z.object({ funding: z.enum(['merchant_card', 'platform_line']) }).strict();
+export const numberFundingConfirm = numberFundingChoice.extend(confirmToken.shape).strict();
+export const numberFundingPreviewDto = z.object({ phoneNumberId: z.string(), current: z.enum(['merchant_card', 'platform_line', 'unknown']), funding: z.literal('merchant_card'), confirm: confirmIssuedDto });
+export const yearlyRefundQuoteDto = z.object({
+  orderId: z.string(), packageId: z.string(), periodMonths: z.number().int(), monthlyMinor: z.number().int(), unusedMonths: z.number().int(), grossMinor: z.number().int(),
+  debtMinor: z.number().int(), debtSettledMinor: z.number().int(), refundMinor: z.number().int(),
+});
+export const yearlyRefundRequestDto = z.object({ id: z.string(), orderId: z.string(), state: z.enum(['pending', 'executed']), unusedMonths: z.number().int(), debtSettledMinor: z.number().int(), refundMinor: z.number().int(), createdAt: z.number().int() });
+export const yearlyRefundViewDto = z.object({
+  quote: yearlyRefundQuoteDto.nullable(), reason: z.enum(['no_running_package', 'not_yearly', 'not_paid', 'queued_periods', 'order_queued']).nullable(), request: yearlyRefundRequestDto.nullable(),
+});
+export const yearlyRefundPreviewDto = z.object({ quote: yearlyRefundQuoteDto, confirm: confirmIssuedDto });
+export const creditPackDto = z.object({ id: z.string(), credits: z.number().int().positive(), priceMinor: z.number().int().positive() });
+export const creditPacksDto = z.object({ items: z.array(creditPackDto), enabled: z.boolean() });
+export const creditPackPick = z.object({ packId: z.string().min(1).max(32) }).strict();
+export const creditPackBuy = creditPackPick.extend(confirmToken.shape).strict();
+export const creditPackPreviewDto = z.object({ pack: creditPackDto, confirm: confirmIssuedDto });
+export const creditOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired']), credits: z.number().int(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
 // ---- InstaPay billing (INSTAPAY_BILLING_ENABLED). Additive. The amount is the server's: a package's price, or a top-up within the card top-up bounds. ----
 export const instapayState = z.enum(['awaiting_proof', 'under_review', 'confirmed', 'rejected', 'expired']);
 export const instapayCreate = z.discriminatedUnion('kind', [

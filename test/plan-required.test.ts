@@ -336,6 +336,10 @@ describe('route walk: every non-GET store route is decided (sends and number set
     // Template management talks to Meta's template catalog, not to a customer: no message leaves.
     'POST /stores/:storeId/templates/sync', 'POST /stores/:storeId/templates', 'POST /stores/:storeId/templates/install-defaults',
     'POST /stores/:storeId/templates/check', 'PUT /stores/:storeId/templates/:name/:language', 'DELETE /stores/:storeId/templates/:name/:language', // self-service: a check calls nobody; edit and delete act on Meta's catalog
+    // Money surfaces (self-service A9, A21, A22): previews and confirmed actions on funding, a yearly-refund request and AI credit packs; no WhatsApp message leaves (a lapsed merchant may still buy credits or ask to cancel).
+    'POST /stores/:storeId/numbers/:phoneNumberId/funding/preview', 'PUT /stores/:storeId/numbers/:phoneNumberId/funding',
+    'POST /stores/:storeId/wallet/yearly-refund/preview', 'POST /stores/:storeId/wallet/yearly-refund/requests',
+    'POST /stores/:storeId/wallet/credit-packs/preview', 'POST /stores/:storeId/wallet/credit-packs/orders',
     'POST /stores/:storeId/templates/shared-requests', // a store on the shared number asks the platform team for a template: a row, no message
   ]);
   const mutating = (apiRoutes.routes as { method: string; path: string }[])
