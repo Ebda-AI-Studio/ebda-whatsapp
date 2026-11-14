@@ -522,6 +522,80 @@ export const DO_MIGRATIONS: readonly string[] = [
      at INTEGER NOT NULL
    );
    CREATE INDEX template_edits_lookup ON template_edits (name, language, at);`,
+  // v43 (Smart Layer assistant, SL-CHAT-1): the assistant's journal. Masked text only (secrets and phones are masked before anything is written), 90-day retention,
+  // gone with the workspace. Previews/applied/approvals are used from the preview and confirm phases; the status columns are the single-winner compare-and-set.
+  `CREATE TABLE sl_turns (
+     seq INTEGER PRIMARY KEY,
+     id TEXT NOT NULL,
+     store_id TEXT NOT NULL,
+     thread_id TEXT NOT NULL,
+     user_id TEXT NOT NULL,
+     role TEXT NOT NULL,
+     masked_text TEXT NOT NULL,
+     at INTEGER NOT NULL,
+     release_id TEXT NOT NULL
+   );
+   CREATE INDEX sl_turns_conv ON sl_turns (store_id, thread_id, seq);
+   CREATE INDEX sl_turns_at ON sl_turns (at);
+   CREATE TABLE sl_audit (
+     seq INTEGER PRIMARY KEY,
+     id TEXT NOT NULL,
+     store_id TEXT NOT NULL,
+     user_id TEXT NOT NULL,
+     at INTEGER NOT NULL,
+     json TEXT NOT NULL
+   );
+   CREATE INDEX sl_audit_store_at ON sl_audit (store_id, at);
+   CREATE TABLE sl_previews (
+     id TEXT NOT NULL,
+     store_id TEXT NOT NULL,
+     user_id TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     status TEXT NOT NULL,
+     json TEXT NOT NULL,
+     PRIMARY KEY (store_id, id)
+   );
+   CREATE INDEX sl_previews_at ON sl_previews (created_at);
+   CREATE TABLE sl_applied (
+     id TEXT NOT NULL,
+     store_id TEXT NOT NULL,
+     user_id TEXT NOT NULL,
+     applied_at INTEGER NOT NULL,
+     undone_at INTEGER,
+     json TEXT NOT NULL,
+     PRIMARY KEY (store_id, id)
+   );
+   CREATE INDEX sl_applied_at ON sl_applied (applied_at);
+   CREATE TABLE sl_approvals (
+     id TEXT NOT NULL,
+     store_id TEXT NOT NULL,
+     user_id TEXT NOT NULL,
+     preview_id TEXT NOT NULL,
+     token_hash TEXT NOT NULL,
+     payload_hash TEXT NOT NULL,
+     expires_at INTEGER NOT NULL,
+     status TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (store_id, id)
+   );
+   CREATE INDEX sl_approvals_at ON sl_approvals (created_at);
+   CREATE TABLE sl_decisions (
+     seq INTEGER PRIMARY KEY,
+     approval_id TEXT NOT NULL,
+     store_id TEXT NOT NULL,
+     decider TEXT NOT NULL,
+     decision TEXT NOT NULL,
+     reason TEXT,
+     at INTEGER NOT NULL
+   );
+   CREATE INDEX sl_decisions_approval ON sl_decisions (store_id, approval_id);
+   CREATE INDEX sl_decisions_at ON sl_decisions (at);
+   CREATE TABLE sl_counters (
+     seq INTEGER PRIMARY KEY,
+     key TEXT NOT NULL,
+     at INTEGER NOT NULL
+   );
+   CREATE INDEX sl_counters_key ON sl_counters (key, at);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
