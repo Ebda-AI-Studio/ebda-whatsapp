@@ -42,9 +42,9 @@ describe('help publication lag', () => {
     expect(contentHash('  x  ')).toBe(contentHash('x'));
     expect(contentHash(stripFrontMatter('---\ncapabilities:\n  - a.b@1\n---\n\n# T\n'))).toBe(contentHash('# T'));
   });
-  it('reads the 17 guides in both languages with front matter stripped', () => {
+  it('reads the 29 guides in both languages with front matter stripped', () => {
     const s = readSources(undefined, () => NOW);
-    expect(s).toHaveLength(34);
+    expect(s).toHaveLength(58);
     expect(s.every((x: { hash: string }) => /^[0-9a-f]{64}$/.test(x.hash))).toBe(true);
   });
 });

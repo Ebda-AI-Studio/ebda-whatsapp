@@ -18,6 +18,21 @@ Content for help.ebda.app (plan task 8.5). One file per topic, same slug in `ar/
 | 12 | delete-your-workspace | Owner-initiated workspace deletion, the 14-day wait, what is kept (OFFBOARD-1) |
 | 13 | your-customers-data | Message retention, downloading one customer's data, renaming, merging numbers (B4, B5, M-175) |
 | 14 | team-members-and-seats | Package seats (owner included), giving and removing a seat, what a downgrade does (WA-SEATS-1) |
+| 15 | your-products-on-whatsapp | Your products on WhatsApp: catalogue, product cards, cart orders |
+| 16 | write-and-submit-a-template | Writing and submitting a template |
+| 17 | template-review-and-rejections | Template statuses, rejections, edit and delete |
+| 18 | sign-in-language-and-sign-out | Sign in with the Ebda AI Studio account, language button, sign out, sign-in problems |
+| 19 | find-your-conversations | Inbox filters, search, read marking |
+| 20 | read-a-conversation-and-live-updates | Reading a thread, long messages, media, live updates |
+| 21 | send-files-in-chat | Sending images, video, audio and PDFs, real size limits |
+| 22 | failed-messages-and-sending-limits | Try again, Meta error codes, daily conversation limit, throughput |
+| 23 | notes-tags-and-quick-replies | What exists today for notes, tags and quick replies (several have no screen) |
+| 24 | weekly-summary | The Wallet "This week" card |
+| 25 | alerts-and-notices | In-app alerts (no e-mail or push) and the removed-app notice |
+| 26 | verification-codes-on-whatsapp | OTP on WhatsApp from your own number, limits |
+| 27 | connect-your-systems | API tokens (Pro) and the AI agent connectors |
+| 28 | terms-privacy-and-meta-data-deletion | Legal pages and Meta's data-deletion request |
+| 29 | all-ebda-chat-guides | Index of every guide |
 
 ## Front matter (capability links)
 Each guide starts with a front-matter block listing the capabilities it documents, `id@version` (the registry is `capabilities/*.capability.json`):

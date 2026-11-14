@@ -1,6 +1,7 @@
 ---
 capabilities:
   - templates.edit-delete@2
+  - templates.status-webhook@1
 appPath: /templates
 ---
 
@@ -31,6 +32,9 @@ Open the template and press **Edit and resubmit**. A rejected template keeps its
 
 ## Delete
 Open the template and press **Delete the template**. Every campaign that uses it must finish first, and a message still waiting to be sent counts too. Deleting removes one language only. The name of an approved template cannot be used again for 30 days after deleting it. A disabled template cannot be deleted.
+
+## Meta tells us by itself
+As soon as Meta decides (approves, rejects, pauses or disables a template) it sends us the status and the reason, and the app updates the template without you doing anything. A review takes from minutes to about a day. You see the reason when you open the template.
 
 ## When Meta changes the type
 If Meta decides a "service" template is really marketing, it changes the category. From then on the customer must have agreed to marketing, each message costs more, and it counts toward your campaigns. The Templates page shows the type Meta chose, never the one you asked for.

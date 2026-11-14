@@ -18,8 +18,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
-  "helpGap": "docs/legal/{ar,en}/whatsapp-{terms,privacy,dpa}.md",
+  "helpArticle": "whatsapp/terms-privacy-and-meta-data-deletion",
   "questions": {
     "ar": [
       "فين شروط الاستخدام؟",

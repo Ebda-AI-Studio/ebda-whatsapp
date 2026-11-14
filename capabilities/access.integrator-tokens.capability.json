@@ -22,8 +22,7 @@
   "undo": {
     "class": "reversible"
   },
-  "helpArticle": null,
-  "helpGap": "docs/site/{ar,en}/whatsapp/api.mdx",
+  "helpArticle": "whatsapp/connect-your-systems",
   "questions": {
     "ar": [
       "عايز اربط السيستم بتاعي بالواتساب",

@@ -2,7 +2,7 @@
   "id": "agent.enable",
   "status": "live",
   "area": "agent",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "تشغيل المساعد الذكي",
   "titleEn": "Turn the AI agent on or off",

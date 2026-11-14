@@ -20,7 +20,7 @@
   "undo": {
     "class": "reversible"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/notes-tags-and-quick-replies",
   "questions": {
     "ar": [
       "ازاي اعمل تاج للعميل؟",
@@ -36,7 +36,6 @@
   ],
   "edgeCases": [],
   "gaps": [
-    "NO merchant UI to add/remove tags",
-    "No help article"
+    "NO merchant UI to add/remove tags"
   ]
 }

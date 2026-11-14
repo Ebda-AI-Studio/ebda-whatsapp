@@ -6,7 +6,7 @@ capabilities:
   - wallet.card-topup@1
   - wallet.instapay@1
   - wallet.instapay-auto-confirm@2
-  - wallet.refund-request@1
+  - wallet.refund-request@2
   - wallet.statement@1
   - wallet.view@1
 ---
@@ -75,7 +75,7 @@ From **Wallet > Statement** choose a month to see every entry (top-up, message, 
 - **Not refundable:** card fees already paid, AI credits that came with the package, the current package period (it keeps working until the period ends), and purchased AI credits that were used or are older than 14 days.
 - Financial records are kept even after you cancel or ask for data deletion, as the law requires.
 
-To request one, write to the Ebda AI Studio team at ahlan@ebda.app, or use the refund request in your account if available. For a yearly package, the whole months left after the current one are refundable at the package's monthly price (the yearly price ÷ 12), up to what you paid for that year; the current month is not refunded.
+To request one, open **Wallet** and press **Request a refund**, enter the amount (at least 50 EGP and no more than your available balance) and an optional note, then send it. It appears under **Your requests** and the Ebda AI Studio team reviews it and gets back to you. You can ask after your plan ends or is cancelled, within 12 months. For help, write to ahlan@ebda.app. For a yearly package, the whole months left after the current one are refundable at the package's monthly price (the yearly price ÷ 12), up to what you paid for that year; the current month is not refunded.
 
 ## Troubleshooting
 - **I paid but the balance did not grow:** wait a few minutes. If it persists, email the transaction number to ahlan@ebda.app.
@@ -83,4 +83,4 @@ To request one, write to the Ebda AI Studio team at ahlan@ebda.app, or use the r
 - **I was charged for a message that did not arrive:** we only charge messages Meta counts as billable.
 
 ---
-Last checked: 2026-10-25. Refunds and fees are subject to the final terms of service. Meta's rules change.
+Last checked: 2026-11-14. Refunds and fees are subject to the final terms of service. Meta's rules change.

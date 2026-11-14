@@ -21,7 +21,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/read-a-conversation-and-live-updates",
   "questions": {
     "ar": [
       "الرسايل الجديدة مابتظهرش لوحدها",
@@ -40,7 +40,5 @@
     "Integration tokens poll /events (no WS)",
     "WS lifetime is capped; reconnects automatically"
   ],
-  "gaps": [
-    "No help article"
-  ]
+  "gaps": []
 }

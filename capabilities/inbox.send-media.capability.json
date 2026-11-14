@@ -25,7 +25,7 @@
   "undo": {
     "class": "irreversible"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/send-files-in-chat",
   "questions": {
     "ar": [
       "ازاي ابعت صورة للعميل؟",
@@ -46,7 +46,5 @@
     "Size limits per Meta media type",
     "24-hour window closed: free text blocked (Meta 131047), only an approved template can be sent"
   ],
-  "gaps": [
-    "Exact size/type limits not in any help article"
-  ]
+  "gaps": []
 }

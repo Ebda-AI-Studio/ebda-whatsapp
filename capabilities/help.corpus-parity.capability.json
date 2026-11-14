@@ -18,8 +18,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
-  "helpGap": "docs/help/{ar,en}/01..15 + docs/site/{ar,en}/whatsapp/{overview,connect-your-number,api,webhooks}.mdx",
+  "helpArticle": "whatsapp/all-ebda-chat-guides",
   "questions": {
     "ar": [
       "فين الشرح؟",
@@ -34,9 +33,5 @@
     "01 verify business, 02 connect number, 03 shared number, 04 templates + 24h, 05 COD, 06 InstaPay orders, 07 AI agent, 08 campaigns, 09 wallet, 10 Meta fees, 11 menu/hours/location, 12 delete workspace, 13 customer data, 14 team seats, 15 products on WhatsApp"
   ],
   "edgeCases": [],
-  "gaps": [
-    "MISSING guides: sign-in problems, inbox basics (assign/notes/tags/quick replies), contacts tags, segments, connectors, OTP, handoff alerts, notifications, number health recovery, template writing (04 describes screen that does not exist), analytics/funnel (only in 11), erasure, API tokens (site mdx only), migration, multi-number, Ramadan/seasonal campaigns",
-    "help 07/11 say \"Settings\" but navigation has no Settings",
-    "Prices left to \"set by the team\""
-  ]
+  "gaps": []
 }

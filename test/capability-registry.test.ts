@@ -98,9 +98,9 @@ describe('templates self-service registry entries (plan 2 task 13)', () => {
 
 describe('capability help guard: every live merchant-facing capability has a linked ar+en guide (sources)', () => {
   const articles = guideArticles();
-  it('reads the 17 guides in both languages', () => {
-    expect(articles.filter((a) => a.lang === 'ar')).toHaveLength(17);
-    expect(articles.filter((a) => a.lang === 'en')).toHaveLength(17);
+  it('reads the 29 guides in both languages', () => {
+    expect(articles.filter((a) => a.lang === 'ar')).toHaveLength(29);
+    expect(articles.filter((a) => a.lang === 'en')).toHaveLength(29);
   });
   it('has no new help violation and no stale baseline id (the 23 needs-help ids are the debt)', () => {
     expect(judge('help', checkHelp(entries, articles, guardConfig)).failures).toEqual([]);
