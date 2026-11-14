@@ -66,6 +66,7 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/connectors/:connectorId/test`]: 'person_only',
   [`GET ${S}/store-link/settings`]: 'person_only', // bot settings
   [`PATCH ${S}/store-link/settings`]: 'person_only',
+  [`POST ${S}/store-link/settings/preview`]: 'person_only', // confirm token for turning customer sending on
   [`GET ${S}/bot/funnel`]: 'person_only', // bot analytics
   [`GET ${S}/store-link/catalog`]: 'person_only',
   [`POST ${S}/store-link/catalog/provision`]: 'person_only',

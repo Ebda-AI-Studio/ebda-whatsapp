@@ -33,6 +33,7 @@ Content for help.ebda.app (plan task 8.5). One file per topic, same slug in `ar/
 | 27 | connect-your-systems | API tokens (Pro) and the AI agent connectors |
 | 28 | terms-privacy-and-meta-data-deletion | Legal pages and Meta's data-deletion request |
 | 29 | all-ebda-chat-guides | Index of every guide |
+| 30 | bot-switches-and-sending-speed | Ordering bot, order confirmation messages and store-login codes switches (confirm before turning sending on), sending speed and tier use |
 
 ## Front matter (capability links)
 Each guide starts with a front-matter block listing the capabilities it documents, `id@version` (the registry is `capabilities/*.capability.json`):

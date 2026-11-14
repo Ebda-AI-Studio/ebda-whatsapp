@@ -5,6 +5,7 @@ import type { BotFunnelDto, BotSettingsDto, CatalogStatusDto } from '../../../sr
 import { hoursSchema, locationSchema, MENU_ANSWER_MAX, MENU_MAX_ITEMS, MENU_TITLE_MAX, menuSchema, HOURS_AWAY_MAX } from '../../../src/core/store-link/bot-settings';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { BotSwitches } from './BotSwitches';
 import { LoadError } from './LoadError';
 
 type Menu = BotSettingsDto['menu'];
@@ -262,6 +263,7 @@ export function BotScreen({ t, lang, source }: { t: Strings; lang: Lang; source:
         <h1 id="bot-title">{t.botTitle}</h1>
         {guide && <a className="muted" href={guide} target="_blank" rel="noopener">{t.botGuide}</a>}
       </header>
+      {source.switches && <BotSwitches t={t} lang={lang} source={source} readOnly={readOnly} />}
       {source.botFunnel && <FunnelSection t={t} lang={lang} source={source} />}
       {source.catalog && <CatalogSection t={t} lang={lang} source={source} readOnly={readOnly} />}
       <form className="settings" onSubmit={(e) => { e.preventDefault(); void save(); }}>

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
@@ -128,6 +128,14 @@ export function createApiSource(o: Opts): LiveSource {
     },
     async saveBotSettings(update) {
       return call('/store-link/settings', botSettingsDto, { method: 'PATCH', body: JSON.stringify(update) });
+    },
+    switches: {
+      get: () => call('/store-link/settings', botSwitchesDto),
+      preview: (change) => call('/store-link/settings/preview', settingsPreviewResponse, post(change)),
+      save: (change, confirmToken) => call('/store-link/settings', botSwitchesDto, { method: 'PATCH', body: JSON.stringify(confirmToken ? { ...change, confirmToken } : change) }),
+      async throttle() {
+        try { return await call('/throttle', throttleReportDto); } catch (e) { if (e instanceof ApiError && e.status === 404) return null; throw e; }
+      },
     },
     async botFunnel(days) {
       const day = (ms: number) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(ms).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
