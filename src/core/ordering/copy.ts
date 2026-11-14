@@ -87,6 +87,8 @@ export type OrderingCopy = {
       cartRepriced: Localised;
       /** Every cart line was gone: nothing left to order. */
       cartAllGone: Localised;
+      /** The cart came from a catalogue that is not this store's. */
+      cartOtherCatalogue: Localised;
     };
   };
 };

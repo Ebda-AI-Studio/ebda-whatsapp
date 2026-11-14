@@ -8,7 +8,7 @@ import { buyerKey } from '../buyer-key';
 import { errClass, alert } from '../observability';
 import { isE164 } from '../phone';
 import type { LinkHost } from '../store-link/host';
-import type { CatalogRow, StoreBridge } from '../store-bridge';
+import { MAX_RETAILER_ID, type CatalogRow, type StoreBridge } from '../store-bridge';
 import { storeLink } from '../store-link';
 import { normaliseText } from '../text-normalise';
 import { buildCatalogCard, buildProductCards, cardableIds, catalogueOpenable, type BuiltCard } from '../store-link/product-cards';
@@ -68,7 +68,7 @@ export function toolDefs(a: ToolAvailability): ToolDef[] {
 
 export type ToolOutcome = { content: string } | { handoff: true } | { startOrder: true };
 /** `cards` collects the catalogue messages a turn asked for; the agent sends them after its text. */
-export type ToolContext = { host: LinkHost; from: string; bridge: StoreBridge | null; availability: ToolAvailability; locale: 'ar' | 'en'; cards: BuiltCard[] };
+export type ToolContext = { host: LinkHost; from: string; bridge: StoreBridge | null; availability: ToolAvailability; locale: 'ar' | 'en'; cards: BuiltCard[]; /** Rows shown by show_products this turn: one product message is built from all of them (WA-CAT-5). */ shown?: CatalogRow[] };
 
 const searchArgs = z.object({ query: z.string().trim().min(1).max(120) });
 const showArgs = z.object({ ids: z.array(z.string().trim().min(1).max(200)).min(1).max(10) });
@@ -127,7 +127,10 @@ const toHit = (r: CatalogRow): Hit => ({ id: r.retailerId, name: r.title, nameAr
  * and the model writes a text reply instead.
  */
 async function showProducts(ctx: ToolContext, ids: string[]): Promise<unknown> {
-  const res = await ctx.bridge!.getProducts(ctx.host.workspaceId, [...new Set(ids)]);
+  // The Store refuses the whole call for one id over 64 characters: drop those (the model sent something that is not a retailer id of ours).
+  const askable = [...new Set(ids)].filter((id) => id.length <= MAX_RETAILER_ID);
+  if (!askable.length) return { error: 'not_available' };
+  const res = await ctx.bridge!.getProducts(ctx.host.workspaceId, askable);
   if (!res.ok) return { error: 'store_unavailable' };
   const inStock = res.value.items.filter((r) => r.availability === 'in_stock');
   if (!inStock.length) return { error: 'not_available' };
@@ -135,7 +138,9 @@ async function showProducts(ctx: ToolContext, ids: string[]): Promise<unknown> {
   const cardable = copy ? cardableIds(ctx.host, inStock.map((r) => r.retailerId)) : null;
   if (!copy || !cardable) return { cards_unavailable: true, products: inStock.slice(0, SEARCH_RESULTS).map(toHit) };
   const shown = inStock.filter((r) => cardable.ids.includes(r.retailerId));
-  ctx.cards.push(...buildProductCards(shown, cardable.catalogId, copy, ctx.locale));
+  // One product message per turn, however many calls the model makes: every row shown so far, deduplicated and capped by the builder.
+  const all = (ctx.shown = [...new Map([...(ctx.shown ?? []), ...shown].map((r) => [r.retailerId, r])).values()]);
+  ctx.cards.splice(0, ctx.cards.length, ...buildProductCards(all, cardable.catalogId, copy, ctx.locale), ...ctx.cards.filter((c) => c.spec.kind === 'catalog'));
   return { cards_sent: shown.length, products: shown.map(toHit), without_card: inStock.filter((r) => !cardable.ids.includes(r.retailerId)).map(toHit) };
 }
 

@@ -17,7 +17,7 @@ import { buyerKey } from '../buyer-key';
 import type { InboundOrder, InboundReply } from '../meta/webhook-schema';
 import { isE164 } from '../phone';
 import type { SendJob } from '../send-queue';
-import type { Address, Buyer, CatalogRow, ChatPaymentMethod, OrderLine, StoreBridge, StoreProfile } from '../store-bridge';
+import { MAX_RETAILER_ID, type Address, type Buyer, type CatalogRow, type ChatPaymentMethod, type OrderLine, type StoreBridge, type StoreProfile } from '../store-bridge';
 import { bridgeFor, storeLink } from '../store-link';
 import type { LinkHost } from '../store-link/host';
 import { upsertOrder } from '../store-link/order-store';
@@ -456,14 +456,17 @@ async function receiveCart(t: Turn): Promise<void> {
   const mine = readSettings(t.host).catalogId;
   const asked = new Map<string, { quantity: number; metaPriceMinor: number | null }>();
   // A cart from another catalogue (ids could collide with ours) is not ours to read.
-  if (!(mine && order.catalogId && order.catalogId !== mine)) {
+  const foreign = Boolean(mine && order.catalogId && order.catalogId !== mine);
+  if (!foreign) {
     for (const it of order.items) {
       if (!it.retailerId || asked.size >= MAX_CART_LINES && !asked.has(it.retailerId)) continue;
       const have = asked.get(it.retailerId);
       asked.set(it.retailerId, { quantity: Math.min(MAX_LINE_QTY, (have?.quantity ?? 0) + Math.max(1, Math.min(MAX_LINE_QTY, it.quantity))), metaPriceMinor: parseMinor(it.price) });
     }
   }
-  const res = asked.size ? await t.bridge.getProducts(t.ws, [...asked.keys()]) : null;
+  // The Store refuses a whole call for one id over 64 characters: such a line cannot be ours, so it is dropped here (reported as unknown below), never allowed to fail the cart.
+  const askable = [...asked.keys()].filter((id) => id.length <= MAX_RETAILER_ID);
+  const res = askable.length ? await t.bridge.getProducts(t.ws, askable) : null;
   if (res && !res.ok) return unavailable(t);
   const live = new Map((res?.ok ? res.value.items : []).map((r) => [r.retailerId, r]));
   const cart: Line[] = [];
@@ -486,7 +489,7 @@ async function receiveCart(t: Turn): Promise<void> {
   t.session.data.payment = null;
   t.session.data.orderKey = cart.length ? `cart:${t.input.wamid}` : null;
   if (!cart.length) {
-    say(t, loc(t, t.copy.t.cards.cartAllGone));
+    say(t, loc(t, foreign ? t.copy.t.cards.cartOtherCatalogue : t.copy.t.cards.cartAllGone));
     t.session.state = 'idle';
     return;
   }

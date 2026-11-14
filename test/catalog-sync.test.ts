@@ -133,7 +133,8 @@ describe('catalog sync (events)', () => {
     const g = stubGraph();
     await deliver([up(ws, 'p1', ['v1'])]);
     await workspace(ws).runDueTasks(later());
-    expect(batches(g.calls)).toEqual([]);
+    // never an upsert Meta would refuse; only a (harmless) DELETE in case an older push left the item there (WA-CAT-5)
+    expect(batches(g.calls).flatMap((b) => b.requests.map((r) => r.method))).toEqual(['DELETE']);
     expect(await rows(ws, 'SELECT 1 FROM catalog_dirty')).toEqual([]);
   });
 });

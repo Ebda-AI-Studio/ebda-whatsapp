@@ -140,21 +140,28 @@ const forget = (host: LinkHost, ids: string[]): void => {
 /** The retailer ids the ledger holds for a product (empty before the first pass). */
 export const idsOfProduct = (host: Pick<LinkHost, 'sql'>, productId: string): string[] => host.sql.exec<{ retailer_id: string }>('SELECT retailer_id FROM catalog_items WHERE product_id = ?', productId).toArray().map((r) => r.retailer_id);
 
-/** Rows to requests; the rows Meta would refuse are recorded as left out (a row that was in the catalogue and now cannot be is archived). */
-function plan(host: LinkHost, rows: CatalogRow[], preferArabic: boolean, pass: number, now: number): { requests: CatalogRequest[]; excluded: number } {
+/**
+ * Rows to requests. A row Meta would refuse is left out. If it was in the catalogue (ledger `synced`) it is DELETEd; on the event path
+ * (`phantomDelete`) it is DELETEd unless the ledger already says it is excluded, because the ledger may be empty for items the pre-ledger code
+ * pushed and a phantom DELETE is harmless. (The full pass instead deletes what Meta really lists and we exclude, at its end.)
+ * The ledger is NOT written here: `commit()` writes it, and the caller calls it only after Meta accepted the batch, so the ledger never claims
+ * more than Meta holds and a failed send is simply planned again (WA-CAT-5).
+ */
+function plan(host: LinkHost, rows: CatalogRow[], preferArabic: boolean, pass: number, now: number, phantomDelete = false): { requests: CatalogRequest[]; excluded: number; commit: () => void } {
   const requests: CatalogRequest[] = [];
+  const writes: (() => void)[] = [];
   let excluded = 0;
   for (const r of rows) {
     const f = feedItem(r, preferArabic);
     const was = host.sql.exec<{ status: string }>('SELECT status FROM catalog_items WHERE retailer_id = ?', r.retailerId).toArray()[0]?.status;
-    ledger(host, r, f, pass, now);
+    writes.push(() => ledger(host, r, f, pass, now));
     if ('item' in f) requests.push(f.item);
     else {
       excluded++;
-      if (was === 'synced') requests.push({ method: 'DELETE', data: { id: r.retailerId } });
+      if (was === 'synced' || (phantomDelete && was !== 'excluded')) requests.push({ method: 'DELETE', data: { id: r.retailerId } });
     }
   }
-  return { requests, excluded };
+  return { requests, excluded, commit: () => { for (const w of writes) w(); } };
 }
 
 const asPermission = (message: string, code?: number) => Object.assign(new Error(`catalog items_batch: ${message}`), { metaCode: code });
@@ -261,13 +268,16 @@ async function syncOnce(host: LinkHost, now: number): Promise<number | undefined
     rows.push(...res.value.items);
   }
   const archive: string[] = [];
-  for (const d of liveDirty) {
+  // An ok but empty answer for products that were just changed is more likely a Store fault than a mass removal: archive nothing now, let a full pass (guarded) decide.
+  const emptyAnswer = liveDirty.length > 0 && rows.length === 0;
+  if (emptyAnswer) ensureCatalogReconcile(host, now, true);
+  for (const d of emptyAnswer ? [] : liveDirty) {
     const mine = rows.filter((r) => r.productId === d.product_id);
     // A variant that left a live product, or a product the Store no longer has rows for, leaves the catalogue too.
     const keep = new Set(mine.map((r) => r.retailerId));
     archive.push(...idsOfProduct(host, d.product_id).filter((id) => !keep.has(id)));
   }
-  const planned = plan(host, rows, preferArabic, pass, now);
+  const planned = plan(host, rows, preferArabic, pass, now, true);
   requests.push(...planned.requests);
   // The Store sends no ids for a deleted product: what the ledger holds for it (plus any ids the event did carry, plus its own id for a simple product) is archived.
   for (const d of dirty.filter((x) => x.deleted === 1)) {
@@ -279,6 +289,7 @@ async function syncOnce(host: LinkHost, now: number): Promise<number | undefined
   await send(host, auth, requests);
   host.storage.transactionSync(() => {
     forget(host, gone);
+    planned.commit();
     for (const d of dirty) host.sql.exec('DELETE FROM catalog_dirty WHERE product_id = ? AND updated_at = ?', d.product_id, d.updated_at);
   });
   putState(host, LAST_SYNC_KEY, String(now));
@@ -311,18 +322,21 @@ async function reconcileOnce(host: LinkHost, now: number, opts: { allowMassDelet
   const profile = await bridge.getStoreProfile(host.workspaceId);
   const preferArabic = profile.ok ? profile.value.locale === 'ar' : true;
   const requests: CatalogRequest[] = [];
+  const commits: (() => void)[] = [];
   let excluded = 0;
   let done = false;
   for (let page = 0; page < RECONCILE_PAGES_PER_RUN; page++) {
     const res = await bridge.listCatalog(host.workspaceId, pass.cursor, CATALOG_PAGE);
     if (!res.ok) throw new Error(`catalog read from the Store failed: ${res.reason}`);
     const planned = plan(host, res.value.items, preferArabic, pass.id, now);
+    commits.push(planned.commit);
     requests.push(...planned.requests);
     excluded += planned.excluded;
     pass = { ...pass, cursor: res.value.nextCursor, seen: pass.seen + res.value.items.length };
     if (!pass.cursor) { done = true; break; }
   }
   await send(host, auth, requests);
+  host.storage.transactionSync(() => { for (const c of commits) c(); }); // the ledger follows what Meta accepted
   putState(host, PASS_KEY, JSON.stringify(pass));
   if (!done) {
     console.log(JSON.stringify({ audit: 'catalog_reconcile_progress', workspace: host.workspaceId, sent: requests.length, seen: pass.seen }));
@@ -330,7 +344,8 @@ async function reconcileOnce(host: LinkHost, now: number, opts: { allowMassDelet
   }
   const have = await listRetailerIds(auth);
   if (!have.ok) throw new Error(`catalog list from Meta failed: ${have.message}`);
-  const wanted = new Set(host.sql.exec<{ retailer_id: string }>('SELECT retailer_id FROM catalog_items WHERE pass = ?', pass.id).toArray().map((r) => r.retailer_id));
+  // Wanted = what the Store sells AND we put in: an item we exclude that Meta still holds (an old push, a lost DELETE) is an extra (WA-CAT-5).
+  const wanted = new Set(host.sql.exec<{ retailer_id: string }>("SELECT retailer_id FROM catalog_items WHERE pass = ? AND status != 'excluded'", pass.id).toArray().map((r) => r.retailer_id));
   let extras = pass.seen ? have.value.filter((id) => !wanted.has(id)) : [];
   // A wrong catalog, a half-read Store list or a bug must not be able to empty a live catalog in one automatic run.
   if (!opts.allowMassDelete && extras.length > MASS_DELETE_MIN && extras.length > have.value.length * MASS_DELETE_SHARE) {

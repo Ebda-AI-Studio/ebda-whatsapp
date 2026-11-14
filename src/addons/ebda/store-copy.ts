@@ -109,6 +109,7 @@ export const EBDA_ORDERING_COPY: OrderingCopy = {
         ? `للأسف ${names.join('، ')} مبقاش متاح عندنا، وشيلته من السلة. شوف باقي الطلب.`
         : `Sorry, ${names.join(', ')} is no longer available, so I took it out of your cart. Have a look at the rest.`),
       cartRepriced: L('الأسعار اتحدثت حسب أسعار المتجر دلوقتي، والإجمالي تحت هو الصح.', 'Prices were updated to the store\'s current prices, so the total below is the right one.'),
+      cartOtherCatalogue: L('السلة دي جاية من كتالوج تاني مش بتاعنا، فمقدرتش أقرأها. افتح الكتالوج بتاعنا وضيف منه.', 'This cart came from a different catalogue than ours, so I could not read it. Open our catalogue and add from there.'),
       cartAllGone: L('للأسف المنتجات اللي في السلة مبقتش متاحة. افتح الكتالوج واختار من الجديد.', 'Sorry, the products in your cart are no longer available. Open the catalogue and pick again.'),
     },
   },

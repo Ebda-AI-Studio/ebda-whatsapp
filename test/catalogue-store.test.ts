@@ -236,6 +236,78 @@ describe('items left out are listed, not dropped', () => {
   });
 });
 
+describe('a failed send never loses a delete or invents a card (WA-CAT-5)', () => {
+  const lose = (id: string, pid: string) => [row(id, pid, { imageUrl: null })];
+
+  it('an item that loses its image while the first items_batch fails still ends up deleted from Meta', async () => {
+    link.fake = new FakeStore('*', { catalog: [row('v1', 'p1')] });
+    const ws = W(60);
+    await configured(ws);
+    let failing = false;
+    const g = graph([], (c) => (failing && path(c) === `${CAT}/items_batch` ? { status: 500, json: { error: { message: 'boom' } } } : undefined));
+    await deliver([up(ws, 'p1', ['v1'], Date.now() - 5000)]);
+    await workspace(ws).runDueTasks(later());
+    link.fake.catalog = lose('v1', 'p1');
+    failing = true;
+    await deliver([up(ws, 'p1', ['v1'], Date.now())]);
+    expect((await workspace(ws).runDueTasks(later(120_000))).failed).toBe(1);
+    failing = false;
+    const failedCalls = batches(g.calls).length;
+    await workspace(ws).runDueTasks(later(6 * 3_600_000));
+    expect(batches(g.calls).length).toBeGreaterThan(failedCalls); // the retry really reached Meta
+    const last = batches(g.calls).at(-1)!.requests;
+    expect(last.map((r) => [r.method, r.data.id])).toEqual([['DELETE', 'v1']]);
+    expect(await rows(ws, 'SELECT 1 FROM catalog_dirty')).toEqual([]);
+  });
+
+  it('the first pass after the ledger exists treats an excluded item Meta still holds as an extra and deletes it', async () => {
+    link.fake = new FakeStore('*', { catalog: [row('v1', 'p1', { imageUrl: 'http://img.example/v1.jpg' }), row('v2', 'p2')] });
+    const ws = W(61);
+    await configured(ws);
+    const g = graph(['v1', 'v2']); // the old code had pushed v1; the ledger is empty
+    await reconcileNow(ws);
+    const deletes = sentReqs(g.calls).filter((r) => r.method === 'DELETE').map((r) => r.data.id);
+    expect(deletes).toContain('v1');
+    expect(deletes).not.toContain('v2');
+  });
+
+  it('a nightly pass deletes an item the ledger says is excluded but Meta still has (self-healing)', async () => {
+    link.fake = new FakeStore('*', { catalog: [...lose('v1', 'p1'), row('v2', 'p2')] });
+    const ws = W(62);
+    await configured(ws);
+    await exec(ws, "INSERT INTO catalog_items (retailer_id, product_id, group_id, status, reason, pass, updated_at) VALUES ('v1', 'p1', NULL, 'excluded', 'no_image', 0, 1)");
+    const g = graph(['v1', 'v2']);
+    await reconcileNow(ws);
+    const closing = batches(g.calls).at(-1)!.requests;
+    expect(closing.map((r) => [r.method, r.data.id])).toEqual([['DELETE', 'v1']]);
+  });
+
+  it('a send that fails leaves no synced row behind, so no card goes out for an item Meta never got', async () => {
+    link.fake = new FakeStore('*', { catalog: [row('v1', 'p1')] });
+    const ws = W(63);
+    await configured(ws);
+    graph([], (c) => (path(c) === `${CAT}/items_batch` ? { status: 500, json: { error: { message: 'boom' } } } : undefined));
+    await deliver([up(ws, 'p1', ['v1'])]);
+    expect((await workspace(ws).runDueTasks(later())).failed).toBe(1);
+    expect(await rows(ws, "SELECT 1 FROM catalog_items WHERE status = 'synced'")).toEqual([]);
+  });
+
+  it('an ok but EMPTY Store answer for live dirty products archives nothing at once; a full pass is scheduled to decide', async () => {
+    link.fake = new FakeStore('*', { catalog: [row('v1', 'p1')] });
+    const ws = W(64);
+    await configured(ws);
+    const g = graph();
+    await deliver([up(ws, 'p1', ['v1'], Date.now() - 5000)]);
+    await workspace(ws).runDueTasks(later());
+    link.fake.catalog = [];
+    await deliver([up(ws, 'p1', ['v1'], Date.now())]);
+    await workspace(ws).runDueTasks(later(120_000));
+    expect(sentReqs(g.calls).filter((r) => r.method === 'DELETE')).toEqual([]);
+    expect(await rows(ws, "SELECT 1 FROM scheduled_tasks WHERE kind = 'catalog_reconcile'")).toHaveLength(1);
+    expect(await rows(ws, "SELECT 1 FROM catalog_items WHERE retailer_id = 'v1' AND status = 'synced'")).toHaveLength(1);
+  });
+});
+
 describe('failures are visible and actionable', () => {
   it('a Meta permission error is stored as missing_permission for the merchant, and the sync keeps retrying', async () => {
     link.fake = new FakeStore('*', { catalog: [row('v1', 'p1')] });
@@ -316,6 +388,39 @@ describe('the shop button and the cart on the number', () => {
     await reconcileNow(ws);
     expect(meta.commerce).toEqual({ visible: false, cart: true });
     expect(g.calls.filter((c) => c.method === 'POST' && /whatsapp_commerce_settings/.test(c.url))).toHaveLength(1);
+  });
+
+  it('the owner turning the button off while a pass is mid-flight wins: the pass writes nothing and records nothing', async () => {
+    link.fake = new FakeStore('*', { catalog: [row('v1', 'p1')] });
+    const ws = W(43);
+    await configured(ws);
+    let flipped = false;
+    const g = graph([], undefined, async (c) => {
+      if (!flipped && c.method === 'GET' && /whatsapp_commerce_settings/.test(c.url)) {
+        flipped = true;
+        await exec(ws, "INSERT INTO store_state (key, value) VALUES ('catalog.commerce_want', '{\"catalogVisible\":false,\"cartEnabled\":true}') ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+      }
+    });
+    await reconcileNow(ws);
+    expect(flipped).toBe(true);
+    expect(g.calls.filter((c) => c.method === 'POST' && /whatsapp_commerce_settings/.test(c.url))).toEqual([]);
+    expect(meta.commerce.visible).toBe(false);
+  });
+
+  it('a change that lands while the pass is writing is not overwritten in the stored state either (nothing recorded for the stale want)', async () => {
+    link.fake = new FakeStore('*', { catalog: [row('v1', 'p1')] });
+    const ws = W(44);
+    await configured(ws);
+    let flipped = false;
+    graph([], undefined, async (c) => {
+      if (!flipped && c.method === 'POST' && /whatsapp_commerce_settings/.test(c.url)) {
+        flipped = true;
+        await exec(ws, "INSERT INTO store_state (key, value) VALUES ('catalog.commerce_want', '{\"catalogVisible\":false,\"cartEnabled\":true}') ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+      }
+    });
+    await reconcileNow(ws);
+    expect(flipped).toBe(true);
+    expect((await status(ws)).commerce).toBeNull();
   });
 
   it('staff cannot change it, and a body that does not parse is a 400', async () => {

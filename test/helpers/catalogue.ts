@@ -18,7 +18,7 @@ export const freshMeta = () => {
 export const path = (c: GraphCall) => new URL(c.url).pathname.replace(/^\/v[\d.]+\//, '');
 
 /** Graph as Meta answers it for the catalogue edges and sends. `metaIds` is what Meta already holds in the catalogue. */
-export function graph(metaIds: string[] = [], over?: (c: GraphCall) => GraphReply | undefined) {
+export function graph(metaIds: string[] = [], over?: (c: GraphCall) => GraphReply | undefined, before?: (c: GraphCall) => Promise<void> | void) {
   let n = 0;
   return graphStub((c) => {
     const o = over?.(c);
@@ -37,5 +37,5 @@ export function graph(metaIds: string[] = [], over?: (c: GraphCall) => GraphRepl
       return { status: 200, json: { data: [{ is_cart_enabled: meta.commerce.cart, is_catalog_visible: meta.commerce.visible, id: 'x' }] } };
     }
     return { status: 200, json: { messages: [{ id: `wamid.out${++n}` }] } };
-  });
+  }, undefined, before);
 }

@@ -66,13 +66,17 @@ export async function ensureCommerce(host: LinkHost, auth: { token: string; grap
   const numbers = await numbersOf(host, wabaId);
   if (!numbers.length) return null;
   const edge = { token: auth.token, graphVersion: auth.graphVersion };
+  // The merchant's choice wins over a run that read `want` before awaiting Meta (Durable Object calls interleave at every fetch): re-read it before each write and before recording.
+  const superseded = () => { const cur = readWant(host); return cur.catalogVisible !== want.catalogVisible || cur.cartEnabled !== want.cartEnabled; };
   for (const phoneNumberId of numbers) {
     const now = await getCommerceSettings({ ...edge, phoneNumberId });
     if (!now.ok) return failed(host, now, want);
     if (now.value.catalogVisible === want.catalogVisible && now.value.cartEnabled === want.cartEnabled) continue;
+    if (superseded()) return readCommerce(host);
     const set = await setCommerceSettings({ ...edge, phoneNumberId, ...want });
     if (!set.ok) return failed(host, set, want);
   }
+  if (superseded()) return readCommerce(host);
   return record(host, { ...want, at: Date.now(), failed: null });
 }
 

@@ -111,6 +111,26 @@ describe('the agent sends product cards', () => {
     expect(cat.footer.text.length).toBeLessThanOrEqual(60);
   });
 
+  it('one turn sends ONE product message however many show_products calls the model makes (deduplicated, at most 30), plus at most one catalogue message', async () => {
+    const ws = W(8);
+    const pn = await shop(ws);
+    model([{ tools: [show('v1', 'v2'), show('v2', 'v3'), { name: 'open_catalog', arguments: {} }] }, { tools: [show('v4'), { name: 'open_catalog', arguments: {} }] }, { text: 'دي اختياراتنا' }]);
+    const out = await say(ws, pn, text('وريني حاجات'), graph());
+    const kinds = out.map((s) => (s.body.interactive as { type?: string } | undefined)?.type ?? s.kind);
+    expect(kinds.filter((k) => k === 'product' || k === 'product_list')).toEqual(['product_list']);
+    expect(kinds.filter((k) => k === 'catalog_message')).toHaveLength(1);
+    const list = interactive(out.find((s) => s.body.interactive?.type === 'product_list')!);
+    expect(list.action.sections.flatMap((s: { product_items: { product_retailer_id: string }[] }) => s.product_items.map((i) => i.product_retailer_id))).toEqual(['v1', 'v2', 'v3', 'v4']);
+  });
+
+  it('an id longer than 64 characters is dropped from show_products; the others still get their card', async () => {
+    const ws = W(9);
+    const pn = await shop(ws);
+    model([{ tools: [show('x'.repeat(100), 'v3')] }, { text: 'تمام' }]);
+    const out = await say(ws, pn, text('v3'), graph());
+    expect(interactive(out.find((s) => s.body.interactive?.type === 'product')!)).toMatchObject({ action: { product_retailer_id: 'v3' } });
+  });
+
   it('open_catalog without a catalogue answers catalogue_unavailable', async () => {
     const ws = W(7);
     const pn = await shop(ws, { connect: false });
@@ -224,11 +244,23 @@ describe('a cart sent from the catalogue becomes one real Store order', () => {
     expect(out.some((s) => s.body.interactive?.action?.buttons)).toBe(false);
   });
 
+  it('one over-long retailer id in a cart drops only that line; the rest of the cart is read', async () => {
+    const { ws, pn, g } = await cartShop(40);
+    const out = await say(ws, pn, catalogOrder(wm(), [{ id: 'y'.repeat(70), qty: 1, price: 1 }, { id: 'v1', qty: 1, price: 100 }], WA_1, CAT), g);
+    expect(link.fake.count('getProducts')).toBe(1);
+    expect((link.fake.lastCall('getProducts')[1] as string[])).toEqual(['v1']);
+    const all = out.map(body).join('\n');
+    expect(all).not.toContain('حصلت مشكلة صغيرة');
+    expect(out.at(-1)!.body.interactive.body.text).toContain('1 × Item 1 (ع)');
+  });
+
   it('a cart from another catalogue is not read (its ids could collide with ours)', async () => {
     const { ws, pn, g } = await cartShop(22);
     const out = await say(ws, pn, catalogOrder(wm(), [{ id: 'v1', qty: 1, price: 100 }], WA_1, '999999999'), g);
     expect(link.fake.count('getProducts')).toBe(0);
-    expect(out.map(body).join('\n')).toContain('مبقتش متاحة');
+    const all = out.map(body).join('\n');
+    expect(all).toContain('كتالوج تاني'); // its own line, not "everything is gone"
+    expect(all).not.toContain('مبقتش متاحة');
   });
 
   it('cart -> checkout -> COD -> address -> a real order priced by the Store, confirmed to the customer', async () => {
