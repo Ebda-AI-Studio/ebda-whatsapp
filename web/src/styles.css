@@ -571,3 +571,18 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
 .tpl-requests { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .tpl-requests li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; }
 .tpl-mine { display: grid; gap: 8px; }
+
+/* Inbox tools: quick replies, notes, tags, segments (self-service A25-A27, A29, A30) */
+.quick-edit, .conv-tools { display: grid; gap: 10px; padding: 12px 20px; background: var(--paper); border-block: 1px solid var(--line); max-height: 45vh; overflow-y: auto; }
+.quick-list, .note-list, .segment-list, .tag-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.quick-list li { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; }
+.quick-list input, .quick-edit textarea, .conv-tools textarea { min-height: 44px; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; background: var(--cream); color: var(--ink); font: inherit; }
+.note-list li { background: var(--cream); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; overflow-wrap: anywhere; }
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-list .tag { gap: 6px; }
+.tag-list .tag .icon-btn { width: 24px; height: 24px; border-radius: 999px; border: 0; }
+.inline-add { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+.segment-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.segment-list .order-actions { grid-template-columns: auto auto; }
+.confirm-box { display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.segments-panel select { min-height: 44px; border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; background: var(--paper); color: var(--ink); font: inherit; }

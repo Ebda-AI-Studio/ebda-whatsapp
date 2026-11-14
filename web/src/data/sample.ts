@@ -1,6 +1,6 @@
 import { ApiError } from './api';
 import type {
-  AgentSettingsDto, BotFunnelDto, BotSettingsDto, BotSwitchesDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+  AgentSettingsDto, BotFunnelDto, BotSettingsDto, BotSwitchesDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, NoteDto, OrderSummaryDto, QuickReplyDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
 import { normaliseText } from '../../../src/core/text-normalise';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
@@ -82,7 +82,7 @@ const CAMPAIGNS: CampaignDto[] = [
   sampleCampaign({ id: 'c-3', name: 'تخفيضات نص الشهر', status: 'paused', pauseReason: 'wallet_empty' }, { recipients: 2100, pending: 1500, sent: 600, delivered: 571, read: 290, failed: 12, skipped: 8 }),
   sampleCampaign({ id: 'c-4', name: 'العملاء الجداد', status: 'completed', finishedAt: BASE - 9 * D, createdAt: BASE - 12 * D, startedAt: BASE - 11 * D }, { recipients: 410, pending: 0, sent: 402, delivered: 396, read: 301, failed: 6, skipped: 8 }),
 ];
-const SEGMENTS: SegmentDto[] = [
+const SEGMENT_SEED: SegmentDto[] = [
   { id: 1, name: 'عملاء VIP', criteria: { tags: { any: ['vip'] } }, createdAt: BASE - 30 * D, updatedAt: BASE - 30 * D },
   { id: 2, name: 'كلمونا آخر 30 يوم', criteria: { lastInboundAfter: BASE - 30 * D }, createdAt: BASE - 20 * D, updatedAt: BASE - 20 * D },
 ];
@@ -134,6 +134,10 @@ export function createSampleSource(): InboxSource {
     ...SEEDS.map((x): ContactDto => ({ waId: x.waId, name: x.name, optedOut: false, tags: x.tags.filter((t) => t !== 'needs_human' && t !== 'cod_pending'), consent: x.id % 2 ? { source: 'keyword_start', at: BASE - 10 * D } : null, lastInboundAt: BASE - x.ago })),
     ...structuredClone(MORE_CONTACTS),
   ];
+  const segments = structuredClone(SEGMENT_SEED);
+  const quick: QuickReplyDto[] = [];
+  const notes = new Map<number, NoteDto[]>();
+  let toolId = 100;
   const campaigns = structuredClone(CAMPAIGNS);
   const numbers = structuredClone(NUMBERS);
   const num = (id: string) => {
@@ -248,6 +252,40 @@ export function createSampleSource(): InboxSource {
         return v;
       },
     },
+    inboxTools: {
+      quickReplies: {
+        list: async () => quick.map((q) => ({ ...q })),
+        async create(text) {
+          if (quick.length >= 20 || quick.some((q) => q.text === text)) throw new ApiError('invalid_request', 409);
+          const q: QuickReplyDto = { id: ++toolId, text, position: quick.length + 1, createdAt: Date.now() };
+          quick.push(q);
+          return { ...q };
+        },
+        async update(id, text) {
+          const q = quick.find((x) => x.id === id);
+          if (!q) throw new ApiError('not_found', 404);
+          q.text = text;
+          return { ...q };
+        },
+        async remove(id) {
+          const i = quick.findIndex((x) => x.id === id);
+          if (i < 0) throw new ApiError('not_found', 404);
+          quick.splice(i, 1);
+        },
+      },
+      notes: async (id) => [...(notes.get(id) ?? [])],
+      async addNote(id, text) {
+        const n: NoteDto = { id: ++toolId, authorUserId: 'u-me', text, at: Date.now() };
+        notes.set(id, [...(notes.get(id) ?? []), n]);
+        return n;
+      },
+      async setTags(id, tags) {
+        const c = convs.find((x) => x.id === id);
+        if (!c) throw new ApiError('not_found', 404);
+        c.tags = [...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))];
+        return { ...c };
+      },
+    },
     async assign(id, userId) {
       const c = convs.find((x) => x.id === id);
       if (c) {
@@ -259,7 +297,7 @@ export function createSampleSource(): InboxSource {
       list: async () => campaigns.map((c) => ({ ...c })).sort((a, b) => b.createdAt - a.createdAt),
       get: async (id) => ({ ...find(id) }),
       async create(req) {
-        const criteria = 'segmentId' in req.audience ? SEGMENTS.find((x) => x.id === (req.audience as { segmentId: number }).segmentId)!.criteria : req.audience.criteria;
+        const criteria = 'segmentId' in req.audience ? segments.find((x) => x.id === (req.audience as { segmentId: number }).segmentId)!.criteria : req.audience.criteria;
         const audience = preview(criteria).count;
         const c = sampleCampaign({
           id: `c-${nextId++}`, name: req.name, status: 'draft', template: req.template, params: req.params ?? [], linkUrl: req.linkUrl ?? null,
@@ -281,7 +319,7 @@ export function createSampleSource(): InboxSource {
       async resume(id) { return { ...Object.assign(find(id), { status: 'running', pauseReason: null }) }; },
       async cancel(id) { return { ...Object.assign(find(id), { status: 'cancelled', pauseReason: null, finishedAt: Date.now() }) }; },
       async remove(id) { campaigns.splice(campaigns.findIndex((x) => x.id === id), 1); },
-      segments: async () => SEGMENTS,
+      segments: async () => segments.map((x) => ({ ...x })),
       preview: async (k) => preview(k),
     },
     numbers: {
@@ -331,6 +369,33 @@ export function createSampleSource(): InboxSource {
       },
       imports: async () => imports.map((i) => ({ ...i })),
       rejects: async () => [{ line: 14, reason: 'invalid_phone' }, { line: 37, reason: 'duplicate_in_file' }],
+      async setContactTags(waId, tags) {
+        const c = contacts.find((x) => x.waId === waId);
+        if (!c) throw new ApiError('not_found', 404);
+        c.tags = [...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))];
+        return { tags: c.tags };
+      },
+      segments: {
+        list: async () => segments.map((x) => ({ ...x })),
+        async create(name, criteria) {
+          if (segments.some((x) => x.name === name)) throw new ApiError('invalid_request', 409, 'name_taken');
+          const seg: SegmentDto = { id: ++toolId, name, criteria, createdAt: Date.now(), updatedAt: Date.now() };
+          segments.push(seg);
+          return { ...seg };
+        },
+        async update(id, patch) {
+          const seg = segments.find((x) => x.id === id);
+          if (!seg) throw new ApiError('not_found', 404);
+          Object.assign(seg, patch, { updatedAt: Date.now() });
+          return { ...seg };
+        },
+        async remove(id) {
+          const i = segments.findIndex((x) => x.id === id);
+          if (i < 0) throw new ApiError('not_found', 404);
+          segments.splice(i, 1);
+        },
+        preview: async (k) => preview(k),
+      },
       async renameContact(waId, name) {
         const c = contacts.find((x) => x.waId === waId);
         if (!c) throw new ApiError('not_found', 404);

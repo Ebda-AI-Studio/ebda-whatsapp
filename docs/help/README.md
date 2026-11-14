@@ -26,7 +26,7 @@ Content for help.ebda.app (plan task 8.5). One file per topic, same slug in `ar/
 | 20 | read-a-conversation-and-live-updates | Reading a thread, long messages, media, live updates |
 | 21 | send-files-in-chat | Sending images, video, audio and PDFs, real size limits |
 | 22 | failed-messages-and-sending-limits | Try again, Meta error codes, daily conversation limit, throughput |
-| 23 | notes-tags-and-quick-replies | What exists today for notes, tags and quick replies (several have no screen) |
+| 23 | notes-tags-and-quick-replies | Quick replies (editable), internal notes, conversation and customer tags, saved segments (self-service A25-A27, A29, A30) |
 | 24 | weekly-summary | The Wallet "This week" card |
 | 25 | alerts-and-notices | In-app alerts (no e-mail or push) and the removed-app notice |
 | 26 | verification-codes-on-whatsapp | OTP on WhatsApp from your own number, limits |

@@ -2,11 +2,15 @@
   "id": "segments.manage",
   "status": "live",
   "area": "segments",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "عمل وتعديل وحذف شرائح العملاء",
   "titleEn": "Create, edit, delete saved segments",
-  "screens": [],
+  "screens": [
+    "ContactsScreen segments panel",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
   "api": [
     "GET /stores/:storeId/segments",
     "POST /stores/:storeId/segments",
@@ -19,9 +23,9 @@
   "roles": [
     "owner"
   ],
-  "policy": "preview",
+  "policy": "confirm",
   "undo": {
-    "class": "reversible"
+    "class": "irreversible"
   },
   "helpArticle": "whatsapp/campaigns-and-opt-out",
   "questions": {
@@ -35,11 +39,16 @@
     ]
   },
   "steps": [
-    "API only; Campaigns > audience shows saved segments or a tag filter"
+    "Contacts > Customer segments: type a name, set the rules (any tags, all tags, orders, last wrote to us, or everyone), press Show the count, then Create the segment",
+    "Edit opens the segment in the same form; Save the change",
+    "Delete shows what is kept and asks you to type the segment name before Delete the segment",
+    "Campaigns > audience lists the saved segments"
   ],
-  "edgeCases": [],
-  "gaps": [
-    "NO merchant UI to create/edit/delete segments (CampaignForm only lists them; falls back to tag/everyone)",
-    "Guide 08 step \"Segment\" implies a screen"
-  ]
+  "edgeCases": [
+    "Owner only: staff do not see the panel and the server answers 403",
+    "Deleting a segment does not delete customers or campaigns already made",
+    "Opted-out and no-consent customers are always left out of a segment's audience",
+    "A segment id from another workspace answers 404"
+  ],
+  "gaps": []
 }
