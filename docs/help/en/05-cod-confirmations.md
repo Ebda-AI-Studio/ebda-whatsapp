@@ -1,3 +1,11 @@
+---
+capabilities:
+  - bot.order-confirmations-toggle@1
+  - inbox.cod-outcome@1
+  - inbox.customer-orders-pane@1
+  - orders.cod-confirmation@1
+---
+
 # Cash-on-delivery (COD) confirmations
 
 The goal is fewer orders refused at the door. As soon as a COD order is created in Ebda Store, we send the customer a WhatsApp message to confirm it.

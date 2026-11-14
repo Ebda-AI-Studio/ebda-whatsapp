@@ -1,0 +1,39 @@
+{
+  "id": "catalogue.google-feeds-clash",
+  "status": "live",
+  "area": "catalogue",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "فيدات المنتجات وكتالوج واتساب",
+  "titleEn": "Product feeds vs the WhatsApp catalogue (single source)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/your-products-on-whatsapp",
+  "questions": {
+    "ar": [
+      "المنتجات ظهرت مرتين في الكتالوج",
+      "اربط فيد جوجل بالكتالوج؟",
+      "ازاي فيدات المنتجات وكتالوج واتساب؟"
+    ],
+    "en": [
+      "Products appear twice in the catalogue"
+    ]
+  },
+  "steps": [
+    "Never connect the Google feed link to the WhatsApp catalogue; make a separate catalogue for ads (Store PR #756 adds feeds)"
+  ],
+  "edgeCases": [
+    "One catalogueItemId is shared across feeds, pixels and the bridge"
+  ],
+  "gaps": []
+}

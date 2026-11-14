@@ -1,3 +1,27 @@
+---
+capabilities:
+  - campaigns.auto-pause@1
+  - campaigns.cancel@1
+  - campaigns.consent-gating@1
+  - campaigns.content-guard@1
+  - campaigns.create@1
+  - campaigns.freq-cap-131049@1
+  - campaigns.list@1
+  - campaigns.new-workspace-cap@1
+  - campaigns.pause@1
+  - campaigns.resume@1
+  - campaigns.schedule@1
+  - campaigns.send-now@1
+  - campaigns.tracked-links@1
+  - contacts.consent-proof@1
+  - contacts.import-csv@1
+  - contacts.opt-in-keyword@1
+  - contacts.opt-out@1
+  - numbers.tier-limit@1
+  - segments.manage@1
+  - segments.preview@1
+---
+
 # الحملات وإلغاء الاشتراك
 
 الحملة رسالة تسويقية بتتبعتها لمجموعة من عملائك بقالب موافق عليه. ولازم العميل يكون وافق يستلم منك.

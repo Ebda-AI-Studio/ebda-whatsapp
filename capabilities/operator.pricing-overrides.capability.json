@@ -1,0 +1,53 @@
+{
+  "id": "operator.pricing-overrides",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "هامش خاص لحساب",
+  "titleEn": "Per-workspace margin override",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/pricing-overrides/:workspaceId",
+    "POST /operator/pricing-overrides/:workspaceId"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": null,
+    "text": "commercial exception per account",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل هامش خاص لحساب؟",
+      "ليه مش لاقي هامش خاص لحساب عندي؟",
+      "عايز هامش خاص لحساب اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Per-workspace margin override?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none (commercial deal)"
+  ]
+}

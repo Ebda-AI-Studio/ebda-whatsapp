@@ -1,0 +1,55 @@
+{
+  "id": "operator.adjustments-trueups",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تسويات الرصيد",
+  "titleEn": "Wallet adjustments and trueups",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/adjustments",
+    "POST /operator/workspaces/:workspaceId/adjustments",
+    "POST /operator/adjustments/:id/decision",
+    "POST /operator/trueups"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "money-dispute",
+    "text": "money dispute: two-person rule",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل تسويات الرصيد؟",
+      "ليه مش لاقي تسويات الرصيد عندي؟",
+      "عايز تسويات الرصيد اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Wallet adjustments and trueups?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none (credit/debit corrections)"
+  ]
+}

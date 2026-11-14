@@ -1,0 +1,51 @@
+{
+  "id": "bot.location",
+  "status": "live",
+  "area": "bot",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "موقع المحل",
+  "titleEn": "Store location pin",
+  "screens": [
+    "BotScreen store location",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "PATCH /stores/:storeId/store-link/settings {location}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/service-menu-hours-and-location",
+  "questions": {
+    "ar": [
+      "العميل بيسأل العنوان",
+      "ازاي اضيف لوكيشن المحل؟",
+      "ينفع اخلي العميل يلاقي الخريطة؟",
+      "location el ma7al"
+    ],
+    "en": [
+      "How do I let customers get my store location?"
+    ]
+  },
+  "steps": [
+    "Fill place name, address, latitude, longitude",
+    "Open on the map to check",
+    "Save; Clear the location to remove"
+  ],
+  "edgeCases": [
+    "Triggers on \"address\", \"location\", \"فين\"",
+    "Empty location: those words are plain messages"
+  ],
+  "gaps": [
+    "No map picker or address search; lat/lng typed by hand"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "id": "wallet.funding",
+  "status": "live",
+  "area": "billing",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مين بيدفع لميتا",
+  "titleEn": "Who pays WhatsApp (card on Meta vs wallet)",
+  "screens": [
+    "WalletScreen Who pays WhatsApp?",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/meta-fees-explained",
+  "questions": {
+    "ar": [
+      "مين بيدفع تكلفة الرسايل؟",
+      "ليه الرصيد مش بيتخصم؟",
+      "الرقم بتاعي بيتحاسب منين؟",
+      "meen byedfa3 lel rasael"
+    ],
+    "en": [
+      "Who pays Meta for my messages?"
+    ]
+  },
+  "steps": [
+    "Own number: Meta bills your card; shared number: the wallet; unknown: sending not ready until set"
+  ],
+  "edgeCases": [
+    "Funding set by an operator (see operator.funding)"
+  ],
+  "gaps": [
+    "Unknown funding blocks sending with no self-service way to choose"
+  ]
+}

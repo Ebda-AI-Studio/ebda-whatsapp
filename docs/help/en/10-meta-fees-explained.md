@@ -1,3 +1,10 @@
+---
+capabilities:
+  - numbers.meta-payment-method@1
+  - wallet.cost-estimate@1
+  - wallet.funding@1
+---
+
 # Meta fees, explained simply
 
 Meta charges for messages by **message type**, not by word count. Prices differ by the country you send to and change from time to time.

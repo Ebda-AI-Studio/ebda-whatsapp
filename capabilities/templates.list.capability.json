@@ -1,0 +1,50 @@
+{
+  "id": "templates.list",
+  "status": "live",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "قايمة القوالب وحالتها",
+  "titleEn": "List templates and their status",
+  "screens": [
+    "none (inbox picker and CampaignForm list only APPROVED)",
+    "view:CampaignForm",
+    "/campaigns"
+  ],
+  "api": [
+    "GET /stores/:storeId/templates"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "فين القوالب بتاعتي؟",
+      "القالب اتقبل ولا اترفض؟",
+      "امتى القالب هيتفعل؟",
+      "el templates feen"
+    ],
+    "en": [
+      "Where are my templates?",
+      "Was my template approved?"
+    ]
+  },
+  "steps": [
+    "No templates page: approved ones appear in the chat template picker and the campaign form"
+  ],
+  "edgeCases": [
+    "Empty list for an own-number merchant until templates are submitted by API"
+  ],
+  "gaps": [
+    "NO merchant Templates screen (help 04 describes one that does not exist)",
+    "Status and rejectedReason exist in TemplateDto but no screen renders them for merchants"
+  ]
+}

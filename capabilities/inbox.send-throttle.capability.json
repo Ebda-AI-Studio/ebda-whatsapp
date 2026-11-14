@@ -1,0 +1,44 @@
+{
+  "id": "inbox.send-throttle",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "سرعة الإرسال وحد الرسايل اليومي",
+  "titleEn": "Sending throughput and tier usage",
+  "screens": [],
+  "api": [
+    "GET /stores/:storeId/throttle"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "ليه الرسايل بتتأخر؟",
+      "وصلت للحد اليومي؟",
+      "leh el campaign batee2a"
+    ],
+    "en": [
+      "Why are my messages delayed?"
+    ]
+  },
+  "steps": [
+    "API shows how much of the Meta tier is used and how many sends wait"
+  ],
+  "edgeCases": [
+    "Messaging-limit tier reached (TIER_50/250/1K/10K/100K/unlimited): extra new conversations wait until the next day automatically",
+    "Per-number throughput limit (130429 / 131056 pair limit): sends are queued and retried by the throttle"
+  ],
+  "gaps": [
+    "No merchant UI for throttle; Numbers shows tier line only"
+  ]
+}

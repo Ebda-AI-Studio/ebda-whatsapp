@@ -1,0 +1,54 @@
+{
+  "id": "access.integrator-tokens",
+  "status": "live",
+  "area": "access",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "ربط سيرفرك بالـ API بتوكن مخصص",
+  "titleEn": "Call the API from your own server (integration tokens, scopes)",
+  "screens": [],
+  "api": [
+    "all GET routes scoped via ROUTE_SCOPES",
+    "POST /stores/:storeId/conversations/:id/messages (messages:send)",
+    "PUT .../contacts/:waId/tags (contacts:write)",
+    "GET .../events (polling)"
+  ],
+  "mcpTool": null,
+  "planGate": "feat_api (Pro)",
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": null,
+  "helpGap": "docs/site/{ar,en}/whatsapp/api.mdx",
+  "questions": {
+    "ar": [
+      "عايز اربط السيستم بتاعي بالواتساب",
+      "فين الـ API key؟",
+      "ينفع اعمل توكن لسيرفري؟",
+      "api token fein?"
+    ],
+    "en": [
+      "Can I connect my own server to Ebda Chat?",
+      "Where do I get an API token?"
+    ]
+  },
+  "steps": [
+    "Plan must include API (Pro)",
+    "Token is issued by accounts.ebda.app with scopes conversations:read, messages:send, templates:read, contacts:read/write, campaigns:read",
+    "Poll /events with `after`; no websocket for tokens"
+  ],
+  "edgeCases": [
+    "Unlisted route = 403 (default deny)",
+    "Revoked integration (kill switch) = 403",
+    "Rate limits per API route class"
+  ],
+  "gaps": [
+    "No merchant screen in Chat to issue/revoke a token (issuance lives in accounts service; unverified where merchant does it)",
+    "Docs live only in site mdx"
+  ],
+  "assistantNote": "Assistant may explain and deep-link; issuing a token is a confirm action in accounts, not exposed from Chat"
+}

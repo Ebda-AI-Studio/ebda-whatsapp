@@ -1,0 +1,54 @@
+{
+  "id": "agent.credits-view",
+  "status": "live",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "رصيد كريديت الـ AI",
+  "titleEn": "AI credits balance",
+  "screens": [
+    "AgentScreen header + WalletScreen AI credits",
+    "view:AgentScreen",
+    "/agent",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "GET /stores/:storeId/agent (credits)",
+    "GET /stores/:storeId/wallet"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "الكريديت خلص؟",
+      "يعني إيه credit؟",
+      "كام ريبلاي فاضل؟",
+      "el credits khelset?"
+    ],
+    "en": [
+      "What is an AI credit?",
+      "Did my credits run out?"
+    ]
+  },
+  "steps": [
+    "1 credit = one agent reply regardless of length; package gives monthly credits (Starter 300, Growth 1500, Pro 5000; store-included 100)"
+  ],
+  "edgeCases": [
+    "AI credits run out: the agent stops and hands the chat to staff",
+    "Low-credit warning in Wallet",
+    "Yearly packages grant credits monthly"
+  ],
+  "gaps": [
+    "Credits per month unused do not roll over"
+  ]
+}

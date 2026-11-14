@@ -1,0 +1,59 @@
+{
+  "id": "contacts.import-csv",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "استيراد جهات اتصال من ملف CSV",
+  "titleEn": "Import contacts from CSV (with consent attestation)",
+  "screens": [
+    "ContactsScreen import card",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
+  "api": [
+    "POST /stores/:storeId/imports (multipart, consented, wording, mapping)",
+    "GET /stores/:storeId/imports",
+    "GET /stores/:storeId/imports/:id",
+    "GET /stores/:storeId/imports/:id/rejects"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "ازاي ارفع قايمة عملاء؟",
+      "الملف اترفض ليه؟",
+      "إيه شكل الـ CSV المطلوب؟",
+      "refa3 contacts CSV ezay"
+    ],
+    "en": [
+      "How do I upload a customer list?",
+      "Why were rows rejected?"
+    ]
+  },
+  "steps": [
+    "Prepare CSV with a phone column (name and tags optional), up to 10 MB",
+    "Choose file",
+    "Tick consent ONLY if you can prove it",
+    "Start import; see Recent files and rejected rows"
+  ],
+  "edgeCases": [
+    "Rejects: empty_phone, invalid_phone, duplicate_in_file, unreadable_row",
+    "Errors: no_header, no_phone_column",
+    "Import never undoes an opt-out or overwrites consent",
+    "File deleted after import; 7-day expiry",
+    "Egypt numbers normalised to E.164"
+  ],
+  "gaps": [
+    "Column mapping supported by API; UI has no mapping step (verify)"
+  ],
+  "assistantNote": "the consent tick is a legal attestation: the merchant must tick it themselves"
+}

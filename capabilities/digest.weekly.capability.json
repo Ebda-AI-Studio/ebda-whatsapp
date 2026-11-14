@@ -1,0 +1,50 @@
+{
+  "id": "digest.weekly",
+  "status": "live",
+  "area": "notifications",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "الملخص الأسبوعي",
+  "titleEn": "Weekly summary",
+  "screens": [
+    "WalletScreen This week card",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "GET /stores/:storeId/digest",
+    "PUT /stores/:storeId/digest {enabled}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "فين ملخص الأسبوع؟",
+      "عايز اوقف الملخص",
+      "el molakhas el esbou3y"
+    ],
+    "en": [
+      "Where is my weekly summary?",
+      "Turn it off"
+    ]
+  },
+  "steps": [
+    "Wallet > This week: customers, in/out/failed messages, assistant replies, handoffs, spend, balance; switch on/off"
+  ],
+  "edgeCases": [
+    "Counts only, never personal data",
+    "Low wallet / AI credits warning"
+  ],
+  "gaps": [
+    "Not delivered anywhere outside the app"
+  ]
+}

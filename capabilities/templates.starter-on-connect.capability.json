@@ -1,0 +1,41 @@
+{
+  "id": "templates.starter-on-connect",
+  "status": "planned",
+  "plan": "self-service audit #2; spec section 7.3",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تركيب القوالب الجاهزة تلقائي عند ربط الرقم",
+  "titleEn": "Auto-install starter templates and sync when a number is connected",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "ليه مفيش قوالب عندي بعد ما ربطت الرقم؟",
+      "القوالب بتتركب لوحدها؟",
+      "ازاي تركيب القوالب الجاهزة تلقائي عند ربط الرقم؟"
+    ],
+    "en": [
+      "Why are there no templates after I connected my number?"
+    ]
+  },
+  "steps": [
+    "Planned: on successful connect, install defaults and sync from Meta automatically"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "Not built (register: NOT BUILT)"
+  ],
+  "assistantNote": "Today the assistant must say templates are not auto-installed and offer to run install-defaults (confirm)"
+}

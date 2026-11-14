@@ -1,0 +1,43 @@
+{
+  "id": "access.language",
+  "status": "live",
+  "area": "access",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تغيير اللغة عربي/إنجليزي",
+  "titleEn": "Switch between Arabic and English",
+  "screens": [
+    "inbox header language toggle (App.tsx lang state)"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "ازاي اغير اللغة لإنجليزي؟",
+      "الواجهة بالعربي وعايزها English",
+      "3ayez a8ayyar el logha"
+    ],
+    "en": [
+      "How do I change the app language?"
+    ]
+  },
+  "steps": [
+    "Use the language button; direction flips RTL/LTR; default Arabic"
+  ],
+  "edgeCases": [
+    "Arabic/RTL: phone numbers, URLs and API keys stay LTR inside RTL text"
+  ],
+  "gaps": [
+    "Choice is not persisted server-side (inferred from web state, not verified)"
+  ]
+}

@@ -1,3 +1,15 @@
+---
+capabilities:
+  - packages.list-checkout@1
+  - packages.plan-status@1
+  - packages.yearly-switch@1
+  - wallet.card-topup@1
+  - wallet.instapay@1
+  - wallet.refund-request@1
+  - wallet.statement@1
+  - wallet.view@1
+---
+
 # Wallet, top-ups and refunds
 
 The wallet is a prepaid balance in Egyptian pounds. It pays Meta's cost on the **shared number**, and the cost of AI credits depending on your package.

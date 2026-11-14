@@ -1,3 +1,15 @@
+---
+capabilities:
+  - packages.list-checkout@1
+  - packages.plan-status@1
+  - packages.yearly-switch@1
+  - wallet.card-topup@1
+  - wallet.instapay@1
+  - wallet.refund-request@1
+  - wallet.statement@1
+  - wallet.view@1
+---
+
 # المحفظة والشحن والاسترداد
 
 المحفظة رصيد مدفوع مقدمًا بالجنيه المصري. بتدفع منه تكلفة Meta على **الرقم المشترك**، وتكلفة كريدت الذكاء الاصطناعي حسب الباقة.

@@ -1,0 +1,43 @@
+{
+  "id": "bot.order-confirmations-toggle",
+  "status": "live",
+  "area": "bot",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تشغيل رسايل تأكيد الطلب",
+  "titleEn": "Turn order confirmation messages on or off",
+  "screens": [],
+  "api": [
+    "PATCH /stores/:storeId/store-link/settings {orderConfirmations}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/cod-confirmations",
+  "questions": {
+    "ar": [
+      "العميل مش بيوصله تأكيد الأوردر",
+      "عايز اوقف رسايل التأكيد",
+      "order confirmation msh byewsal"
+    ],
+    "en": [
+      "Customers do not get order confirmations"
+    ]
+  },
+  "steps": [
+    "API only (default ON)"
+  ],
+  "edgeCases": [
+    "Needs an approved order_confirmation / cod_confirmation template",
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires"
+  ],
+  "gaps": [
+    "NO merchant UI toggle"
+  ]
+}

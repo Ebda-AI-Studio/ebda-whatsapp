@@ -1,0 +1,40 @@
+{
+  "id": "compliance.audit-trail",
+  "status": "planned",
+  "plan": "self-service rule candidate",
+  "area": "compliance",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "سجل العمليات",
+  "titleEn": "Merchant-visible action log",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين غير الإعدادات دي؟",
+      "عايز اشوف سجل العمليات",
+      "who changed this setting"
+    ],
+    "en": [
+      "Who changed this setting?"
+    ]
+  },
+  "steps": [
+    "Every write is audited (actor, action, ids) but only the operator reads it (audit-log); merchant sees nothing"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "No merchant audit view (operator-only /audit-log)"
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "id": "campaigns.consent-gating",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مين بيوصله الحملة (الموافقة)",
+  "titleEn": "Who a campaign can reach (consent rule)",
+  "screens": [
+    "CampaignForm consentRule + excluded line",
+    "view:CampaignForm",
+    "/campaigns"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "ليه عملاء مش هيوصلهم؟",
+      "ينفع ابعت لكل الناس؟",
+      "مين وافق على العروض؟"
+    ],
+    "en": [
+      "Why are some customers skipped?"
+    ]
+  },
+  "steps": [
+    "Only customers with consent on record and not opted out; cannot be switched off"
+  ],
+  "edgeCases": [
+    "Imported without the tick = added but skipped"
+  ],
+  "gaps": []
+}

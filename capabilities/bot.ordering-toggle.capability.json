@@ -1,0 +1,42 @@
+{
+  "id": "bot.ordering-toggle",
+  "status": "live",
+  "area": "bot",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تشغيل أو إيقاف بوت الطلبات",
+  "titleEn": "Turn the ordering bot on or off",
+  "screens": [],
+  "api": [
+    "PATCH /stores/:storeId/store-link/settings {orderingBot}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/instapay-orders-in-whatsapp",
+  "questions": {
+    "ar": [
+      "عايز اوقف البوت",
+      "العميل يطلب من الشات ازاي؟",
+      "eqaf el bot"
+    ],
+    "en": [
+      "How do I turn the ordering bot off?"
+    ]
+  },
+  "steps": [
+    "API only (default ON)"
+  ],
+  "edgeCases": [
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires"
+  ],
+  "gaps": [
+    "NO merchant UI toggle (help 06 says \"switched on in the store-link settings\": no such screen)"
+  ]
+}

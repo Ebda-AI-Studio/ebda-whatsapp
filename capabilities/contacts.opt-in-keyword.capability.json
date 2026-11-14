@@ -1,0 +1,41 @@
+{
+  "id": "contacts.opt-in-keyword",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "العميل يوافق بالرد على واتساب",
+  "titleEn": "Customer opts in by replying (ابدأ)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "العميل يوافق على العروض ازاي؟",
+      "إيه كلمة الاشتراك؟",
+      "ezay el 3amil yeshtarek fel 3orood"
+    ],
+    "en": [
+      "How does a customer opt in to offers on WhatsApp?"
+    ]
+  },
+  "steps": [
+    "Replying ابدأ/ابدا records opt-in with source \"Customer reply on WhatsApp\"",
+    "Checkout/link at the store also records consent"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "Opt-in keyword help text absent from guides (08 documents opt-out only)",
+    "pr 78 changed help 15 with a bare \"إبدأ\" that fails guards.test (pre-existing failure noted in pr 79)"
+  ]
+}

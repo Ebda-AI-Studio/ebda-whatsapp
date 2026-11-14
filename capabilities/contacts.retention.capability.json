@@ -1,0 +1,49 @@
+{
+  "id": "contacts.retention",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مدة الاحتفاظ بالرسايل",
+  "titleEn": "Message retention period",
+  "screens": [
+    "ContactsScreen retention card",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
+  "api": [
+    "GET /stores/:storeId/retention",
+    "PUT /stores/:storeId/retention {days|null}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/your-customers-data",
+  "questions": {
+    "ar": [
+      "الرسايل بتتمسح امتى؟",
+      "ازاي اقلل مدة الاحتفاظ؟",
+      "عايز احتفظ بالرسايل سنة"
+    ],
+    "en": [
+      "How long are messages kept?",
+      "Can I shorten it?"
+    ]
+  },
+  "steps": [
+    "Pick 90 days, 6 months, 1 year, 2 years (default), 3, 5 or 10 years",
+    "Save"
+  ],
+  "edgeCases": [
+    "Deletes messages and media older than the period; notes/orders/payments kept",
+    "Irreversible"
+  ],
+  "gaps": [],
+  "assistantNote": "shortening deletes messages permanently"
+}

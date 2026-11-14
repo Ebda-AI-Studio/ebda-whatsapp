@@ -1,0 +1,50 @@
+{
+  "id": "agent.notify-phone",
+  "status": "in-pr",
+  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تنبيه واتساب ليك لما حد محتاج فريق",
+  "titleEn": "Owner alert when a customer needs a person",
+  "screens": [
+    "AgentScreen alert number (pr 79)",
+    "view:AgentScreen",
+    "/agent"
+  ],
+  "api": [
+    "PUT /stores/:storeId/agent {notifyPhone E.164|null}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "عايز اتنبه لما عميل يحتاج حد",
+      "مش بيجيلني تنبيه",
+      "fein el tanbeeh lama el 3amil yetlob insan"
+    ],
+    "en": [
+      "How do I get alerted when a customer needs a person?"
+    ]
+  },
+  "steps": [
+    "Enter your WhatsApp number in +20... form; one notice per handoff + 10:00 Cairo digest"
+  ],
+  "edgeCases": [
+    "Outside the owner's 24h window needs the handoff_alert UTILITY template approved by Meta (NOT VERIFIED live)",
+    "Else alert handoff_owner_unreachable and only the inbox badge",
+    "No web push or e-mail path exists",
+    "Owner sees a chat with themselves in the inbox"
+  ],
+  "gaps": [
+    "On main the owner is never notified"
+  ]
+}

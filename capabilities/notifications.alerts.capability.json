@@ -1,0 +1,44 @@
+{
+  "id": "notifications.alerts",
+  "status": "live",
+  "area": "notifications",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إزاي بيوصلني التنبيهات",
+  "titleEn": "How the merchant is alerted (banners, digest, owner WhatsApp)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "هتنبهوني لما الرصيد يخلص؟",
+      "لما يحصل مشكلة هعرف ازاي؟",
+      "el tanbeehat byewsalouni ezay"
+    ],
+    "en": [
+      "How will I be told about problems?"
+    ]
+  },
+  "steps": [
+    "In-app banners: renewal due (a week before), low wallet, debt, InstaPay rejected, number quality, removed-app notice",
+    "Weekly summary in Wallet",
+    "pr 79: WhatsApp alert for handoffs"
+  ],
+  "edgeCases": [
+    "No e-mail, no web push to merchants from this repo"
+  ],
+  "gaps": [
+    "No notification preferences screen",
+    "No e-mail/push channel at all"
+  ]
+}

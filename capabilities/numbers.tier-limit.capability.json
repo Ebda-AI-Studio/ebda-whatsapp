@@ -1,0 +1,48 @@
+{
+  "id": "numbers.tier-limit",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "حد الرسايل اليومي",
+  "titleEn": "Daily messaging limit (tier)",
+  "screens": [
+    "NumbersScreen tier line",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [
+    "POST /meta/webhook (tier update)"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "كام عميل اقدر ابعتله في اليوم؟",
+      "ازاي ازود الحد؟",
+      "إيه الـTier؟",
+      "el 7ad el yawmi kam"
+    ],
+    "en": [
+      "How many new customers can I message per day?",
+      "How do I raise my limit?"
+    ]
+  },
+  "steps": [
+    "Tiers: 50, 250, 1K, 10K, 100K, unlimited; Meta raises with verification + quality"
+  ],
+  "edgeCases": [
+    "Messaging-limit tier reached (TIER_50/250/1K/10K/100K/unlimited): extra new conversations wait until the next day automatically",
+    "Unverified businesses start low (250 per guide; code also knows TIER_50)"
+  ],
+  "gaps": []
+}

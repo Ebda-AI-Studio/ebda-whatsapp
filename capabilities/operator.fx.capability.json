@@ -1,0 +1,56 @@
+{
+  "id": "operator.fx",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "سعر الدولار",
+  "titleEn": "FX rates, backfill and buffer pin",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/fx-rates",
+    "POST /operator/fx-rates",
+    "POST /operator/fx-backfill",
+    "GET /operator/fx-buffer-pin",
+    "PUT /operator/fx-buffer-pin"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "platform-wide config",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل سعر الدولار؟",
+      "ليه مش لاقي سعر الدولار عندي؟",
+      "عايز سعر الدولار اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: FX rates, backfill and buffer pin?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none (platform-wide)"
+  ]
+}

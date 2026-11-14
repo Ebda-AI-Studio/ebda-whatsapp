@@ -1,3 +1,10 @@
+---
+capabilities:
+  - numbers.meta-payment-method@1
+  - wallet.cost-estimate@1
+  - wallet.funding@1
+---
+
 # رسوم Meta بالبساطة
 
 Meta بتحاسب على الرسايل حسب **نوع الرسالة** مش حسب عدد الكلمات. الأسعار بتختلف حسب الدولة اللي بتبعت لها، وبتتغير من وقت للتاني.

@@ -1,0 +1,43 @@
+{
+  "id": "campaigns.content-guard",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "فلتر محتوى الحملات",
+  "titleEn": "Campaign content guard (what gets refused)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "ليه الحملة اترفضت؟",
+      "إيه الكلام الممنوع في الحملة؟",
+      "leh el hamla etrafadet"
+    ],
+    "en": [
+      "Why was my campaign refused?",
+      "What content is not allowed?"
+    ]
+  },
+  "steps": [
+    "Refusals: link_shortener, link_ip, link_not_https, link_punycode, link_invalid, pattern (forex/crypto signals/guaranteed profit/casino/betting in English and Arabic)"
+  ],
+  "edgeCases": [
+    "It is a floor; Meta template review sits behind it",
+    "Chat AUP (docs/rulings/CHAT-AUP-1.md) defines acceptable use"
+  ],
+  "gaps": [
+    "No guide lists refusal reasons in merchant words"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "id": "numbers.history-contacts-sync",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "نقل المحادثات والأسماء القديمة",
+  "titleEn": "Old chats and contacts sync status",
+  "screens": [
+    "NumbersScreen sync lines (historySync / contactsSync with deadline)",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [
+    "POST /meta/webhook (smb_app_state_sync, history)"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "المحادثات القديمة مجتش",
+      "فاتني الـ24 ساعة",
+      "ازاي اجيب المحادثات القديمة؟"
+    ],
+    "en": [
+      "My old chats did not come over"
+    ]
+  },
+  "steps": [
+    "States: requested, received, declined, refused; deadline shown"
+  ],
+  "edgeCases": [
+    "Missed the 24h: disconnect and connect again"
+  ],
+  "gaps": []
+}

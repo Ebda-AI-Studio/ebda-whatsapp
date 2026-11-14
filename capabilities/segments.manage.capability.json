@@ -1,0 +1,45 @@
+{
+  "id": "segments.manage",
+  "status": "live",
+  "area": "segments",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "عمل وتعديل وحذف شرائح العملاء",
+  "titleEn": "Create, edit, delete saved segments",
+  "screens": [],
+  "api": [
+    "GET /stores/:storeId/segments",
+    "POST /stores/:storeId/segments",
+    "GET /stores/:storeId/segments/:id",
+    "PUT /stores/:storeId/segments/:id",
+    "DELETE /stores/:storeId/segments/:id"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "ازاي اعمل شريحة عملاء؟",
+      "عايز اقسم العملاء حسب التاج",
+      "فين الشرايح المحفوظة؟"
+    ],
+    "en": [
+      "How do I save a customer segment?"
+    ]
+  },
+  "steps": [
+    "API only; Campaigns > audience shows saved segments or a tag filter"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "NO merchant UI to create/edit/delete segments (CampaignForm only lists them; falls back to tag/everyone)",
+    "Guide 08 step \"Segment\" implies a screen"
+  ]
+}

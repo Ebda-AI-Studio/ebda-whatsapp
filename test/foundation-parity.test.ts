@@ -39,6 +39,12 @@ describe('foundation lock', () => {
     expect(lock.commit).toMatch(/^[0-9a-f]{40}$/);
     expect(pkg.foundationCommit).toBe(lock.commit);
   });
+  it("the vendored package's peer dependencies are declared by the product's package.json at the exact version", () => {
+    const vendored = JSON.parse(readFileSync(join(ROOT, lock.dir, 'package.json'), 'utf8')) as { peerDependencies?: Record<string, string> };
+    const own = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as Record<string, Record<string, string> | undefined>;
+    const have = { ...own.peerDependencies, ...own.devDependencies, ...own.dependencies };
+    for (const [name, want] of Object.entries(vendored.peerDependencies ?? {})) expect(have[name], `add ${name}@${want} to package.json`).toBe(want);
+  });
   it('the parity test itself is the locked one', () => {
     expect(lock.parity in lock.files).toBe(true);
   });

@@ -1,3 +1,11 @@
+---
+capabilities:
+  - bot.order-confirmations-toggle@1
+  - inbox.cod-outcome@1
+  - inbox.customer-orders-pane@1
+  - orders.cod-confirmation@1
+---
+
 # تأكيد طلبات الدفع عند الاستلام (COD)
 
 الهدف: تقلّل الطلبات اللي بتترفض وقت التسليم. أول ما طلب COD يتعمل في Ebda Store، بنبعت للعميل على واتساب رسالة يأكّد فيها طلبه.

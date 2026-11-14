@@ -1,3 +1,17 @@
+---
+capabilities:
+  - catalogue.commerce-toggles@1
+  - catalogue.google-feeds-clash@1
+  - catalogue.left-out@1
+  - catalogue.link-existing@1
+  - catalogue.product-cards@1
+  - catalogue.provision@1
+  - catalogue.resync@1
+  - catalogue.status@1
+  - orders.cart-to-order@1
+  - storelink.bridge-health@1
+---
+
 # Your products on WhatsApp
 
 Your Ebda Store products appear inside WhatsApp as a shop: a **shop button** on your business profile, **product cards** that the AI agent sends in the chat, and a **cart** the customer sends you, which becomes a real order in your store.

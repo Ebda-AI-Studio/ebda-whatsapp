@@ -1,3 +1,14 @@
+---
+capabilities:
+  - inbox.send-template@1
+  - inbox.send-text@1
+  - inbox.window-status@1
+  - templates.create-submit@1
+  - templates.install-defaults@1
+  - templates.list@1
+  - templates.sync@1
+---
+
 # القوالب ونافذة الـ 24 ساعة
 
 دي أهم قاعدة في واتساب للأعمال: **تقدر تكتب للعميل كلام حر بس لو هو كلّمك في آخر 24 ساعة.** بعد كده لازم تستخدم قالب موافق عليه من Meta.

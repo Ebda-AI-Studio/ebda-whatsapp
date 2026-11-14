@@ -1,0 +1,41 @@
+{
+  "id": "agent.voice-notes",
+  "status": "live",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "المساعد بيفهم الفويس نوت",
+  "titleEn": "Agent understands voice notes",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "العميل بيبعت فويس والمساعد بيرد؟",
+      "لازم العميل يكتب؟",
+      "ازاي المساعد بيفهم الفويس نوت؟"
+    ],
+    "en": [
+      "Does the agent understand voice notes?"
+    ]
+  },
+  "steps": [
+    "Transcribed with Workers AI whisper; limits 2 min, 5 MB, 60/day"
+  ],
+  "edgeCases": [
+    "Fails closed: asks customer to type"
+  ],
+  "gaps": [
+    "Register row is stale (says not built)"
+  ]
+}
