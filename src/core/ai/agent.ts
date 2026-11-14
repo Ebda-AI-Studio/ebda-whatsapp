@@ -366,8 +366,8 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     return await handoff(host, input, 'turn_cap', locale, now);
   }
 
-  // The turn will be answered from here on (text, voice, handoff note): show read + typing now, before the model and the Store are asked.
-  await showTyping(host, input);
+  // The turn will be answered from here on (text, voice, handoff note): show read + typing now, alongside the model and the Store reads.
+  void showTyping(host, input); // not awaited: a slow Graph call (5 s timeout) must not delay the model and the Store reads; it never throws
   try {
     const real = await providerFor(host.env, host.workspaceId, host.sql, settings);
     if (!real) return await handoff(host, input, 'misconfigured', locale, now);

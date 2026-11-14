@@ -61,11 +61,19 @@ export function renderPolicies(p: StorePolicies): string {
 /** Facts could not be loaded this turn: the model must not fill the gap from memory. */
 export const POLICIES_UNAVAILABLE = 'The store facts (shipping, returns, hours, payment details) could not be loaded this turn. Do not state any shipping fee, delivery time, return window or opening hours; say you will check.';
 
+/** The same alert at most once per UTC day per workspace (a Store that is down would otherwise page on every turn); the marker is a day string, no customer data. */
+function alertOncePerDay(host: LinkHost, key: string, name: string, data: Record<string, unknown>): void {
+  const day = new Date().toISOString().slice(0, 10);
+  if (getAgentState(host.sql, key) === day) return;
+  putAgentState(host.sql, key, day);
+  alert(name, { workspace: host.workspaceId, ...data });
+}
+
 export async function loadPolicies(host: LinkHost, bridge: StoreBridge | null): Promise<StorePolicies | null> {
   if (!bridge) return null;
   const r = await bridge.getStorePolicies(host.workspaceId);
   if (!r.ok) {
-    alert('agent_policies_unavailable', { workspace: host.workspaceId, reason: r.reason });
+    alertOncePerDay(host, 'policies_alert', 'agent_policies_unavailable', { reason: r.reason });
     return null;
   }
   return r.value;
@@ -99,14 +107,14 @@ export async function loadProfile(host: LinkHost, bridge: StoreBridge | null, wa
   try {
     const r = await bridge.getCustomerProfile(host.workspaceId, phone);
     if (!r.ok) {
-      if (r.reason !== 'not_found') alert('agent_profile_unavailable', { workspace: host.workspaceId, reason: r.reason });
+      if (r.reason !== 'not_found') alertOncePerDay(host, 'profile_alert', 'agent_profile_unavailable', { reason: r.reason });
       return null; // not cached: the next turn asks again
     }
     if (profiles.size >= PROFILE_CACHE_MAX) profiles.delete(profiles.keys().next().value as string);
     profiles.set(key, { at: now, profile: r.value });
     return r.value;
   } catch (err) {
-    alert('agent_profile_unavailable', { workspace: host.workspaceId, error: errClass(err) });
+    alertOncePerDay(host, 'profile_alert', 'agent_profile_unavailable', { error: errClass(err) });
     return null;
   }
 }
