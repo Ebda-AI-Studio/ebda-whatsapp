@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { DigestDto, OpsStatusDto, StatementDto, WalletDto } from '../../../src/core/api/contract';
-import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto, auditLogItemDto, offboardingDto, operatorOffboardingDto } from '../../../src/core/api/contract';
+import { changeLogItemDto, costEstimateDto, instapayCreatedDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, refundRequestDto, topupDto, auditLogItemDto, offboardingDto, operatorOffboardingDto } from '../../../src/core/api/contract';
 
 export type { DigestDto, OpsStatusDto, StatementDto, WalletDto };
 export type CostEstimateDto = z.infer<typeof costEstimateDto>;
@@ -12,6 +12,9 @@ export type InstapayRequest = z.infer<typeof instapayRequestDto>;
 export type InstapayView = z.infer<typeof instapayViewDto>;
 export type InstapayCreated = z.infer<typeof instapayCreatedDto>;
 export type OperatorInstapay = z.infer<typeof operatorInstapayDto>;
+export type OperatorAuto = z.infer<typeof operatorAutoDto>;
+export type OperatorAutoList = z.infer<typeof operatorAutoListDto>;
+export type AutoMode = OperatorAutoList['mode'];
 export type PricingSettings = z.infer<typeof pricingSettingsDto>;
 export type ChangeLogItem = z.infer<typeof changeLogItemDto>;
 export type AuditLogItem = z.infer<typeof auditLogItemDto>;
@@ -105,6 +108,14 @@ export interface OperatorApi {
   /** C2: lifts a duplicate hold after a person compared both transfers (a reason of 5+ characters; audited). */
   releaseInstapay(id: string, reason: string): Promise<OperatorInstapay>;
   rejectInstapay(id: string, reason: string): Promise<OperatorInstapay>;
+  /** InstaPay auto-confirm: the mode, what the server is missing to run it, and every decision with its reason codes. */
+  autoConfirmations(): Promise<OperatorAutoList>;
+  /** "Not received": back to unpaid with a 48 h grace, unused credits of THAT payment removed (a reason of 5+ characters; audited; idempotent). */
+  revertAutoConfirmed(requestId: string, reason: string): Promise<void>;
+  /** The global kill switch: off | shadow | live (a reason of 5+ characters; audited; effective on the very next decision). */
+  setAutoMode(mode: AutoMode, reason: string): Promise<void>;
+  /** The per-workspace switch (a reason of 5+ characters; audited). */
+  setWorkspaceAuto(workspaceId: string, enabled: boolean, reason: string): Promise<void>;
   adjustments(): Promise<Adjustment[]>;
   createAdjustment(workspaceId: string, amountMinor: number, reason: string): Promise<Adjustment>;
   decideAdjustment(id: string, decision: 'approve' | 'reject'): Promise<Adjustment>;

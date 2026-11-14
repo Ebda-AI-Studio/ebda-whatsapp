@@ -53,11 +53,14 @@ const COLS = 'id, reference, workspace_id, kind, package_id, amount_minor, curre
 export type InstapayRequestDto = {
   id: string; reference: string; kind: 'package' | 'topup'; packageId: string | null; amountMinor: number; currency: string; state: RequestState;
   createdAt: number; expiresAt: number; hasProof: boolean; rejectReason: string | null; decidedAt: number | null;
+  /** InstaPay auto-confirm: confirmed by the system / being checked now / reverted ("not received") with the end of its grace. */
+  autoConfirmed: boolean; revertedAt: number | null; checking?: boolean; graceUntil?: number | null;
 };
 export type OperatorInstapayDto = InstapayRequestDto & { workspaceId: string; createdBy: string; proofAt: number | null; firstApprover: string | null; decidedBy: string | null; proofMime: string | null; heldReason: Row['held_reason']; heldOf: string | null; bankRef: string | null };
 const dto = (r: Row): InstapayRequestDto => ({
   id: r.id, reference: r.reference, kind: r.kind, packageId: r.package_id, amountMinor: r.amount_minor, currency: r.currency, state: r.state, createdAt: r.created_at, expiresAt: r.expires_at,
   hasProof: r.proof_key !== null, rejectReason: r.reject_reason, decidedAt: r.decided_at,
+  autoConfirmed: r.decided_by === 'system:auto-confirm', revertedAt: r.reverted_at,
 });
 const opDto = (r: Row): OperatorInstapayDto => ({ ...dto(r), workspaceId: r.workspace_id, createdBy: r.created_by, proofAt: r.proof_at, firstApprover: r.first_approver, decidedBy: r.decided_by, proofMime: r.proof_mime, heldReason: r.held_reason, heldOf: r.held_of, bankRef: r.bank_ref });
 /**
@@ -128,7 +131,9 @@ export async function createInstapayRequest(env: Env, a: { workspaceId: string; 
 
 export async function listForWorkspace(env: Env, workspaceId: string): Promise<InstapayRequestDto[]> {
   const { results } = await env.DB.prepare(`SELECT ${COLS} FROM instapay_requests WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 20`).bind(workspaceId).all<Row>();
-  return results.map(dto);
+  const autos = await env.DB.prepare("SELECT request_id, state, grace_until FROM instapay_auto_confirmations WHERE workspace_id = ? AND state IN ('pending_decision', 'reverted')").bind(workspaceId).all<{ request_id: string; state: string; grace_until: number | null }>();
+  const by = new Map(autos.results.map((a) => [a.request_id, a]));
+  return results.map((r) => { const a = by.get(r.id); return { ...dto(r), ...(a?.state === 'pending_decision' ? { checking: true } : {}), ...(a?.state === 'reverted' ? { graceUntil: a.grace_until } : {}) }; });
 }
 export async function listForOperator(env: Env, state?: string): Promise<OperatorInstapayDto[]> {
   const ok = state && ['awaiting_proof', 'under_review', 'confirmed', 'rejected', 'expired'].includes(state);
