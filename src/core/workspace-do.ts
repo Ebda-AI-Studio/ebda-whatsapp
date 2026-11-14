@@ -1733,7 +1733,9 @@ export class WorkspaceDO extends DurableObject<Env> {
       // INSTAPAY-REVERT-1: what is removed is max(0, min(credited - spend recorded SINCE that top-up, available balance)). Money that arrived later (a card top-up after
       // this one) is never taken: spend after the top-up is counted against it first, and the balance only caps the result. No credit row = nothing was credited.
       const credit = this.sql.exec<{ id: number }>('SELECT id FROM wallet_ledger WHERE ref = ?', a.creditRef).toArray()[0];
-      const spent = credit ? this.sql.exec<{ s: number }>('SELECT coalesce(-sum(amount_minor), 0) AS s FROM wallet_ledger WHERE id > ? AND amount_minor < 0', credit.id).one().s : 0;
+      // Only CONSUMPTION counts as spend (Meta charges and their adjustments, AI charges): never another revert's removal (`instapay-revert:` adjustments), an operator
+      // adjustment, a refund or a chargeback, which are not this money being used (review N1).
+      const spent = credit ? this.sql.exec<{ s: number }>("SELECT coalesce(-sum(amount_minor), 0) AS s FROM wallet_ledger WHERE id > ? AND amount_minor < 0 AND kind IN ('meta_charge', 'meta_adjust', 'ai_charge')", credit.id).one().s : 0;
       const removedMinor = credit ? unusedCreditsToRemove({ granted: a.creditedMinor, consumed: Math.min(a.creditedMinor, spent), balance: Math.max(0, this.billing.available()) }) : 0;
       if (removedMinor > 0) this.billing.post({ kind: 'adjustment', netMinor: -removedMinor, ref: a.ref, now, actor: a.actor, note: a.note });
       const res = { removedMinor, usedMinor: Math.max(0, a.creditedMinor - removedMinor) };

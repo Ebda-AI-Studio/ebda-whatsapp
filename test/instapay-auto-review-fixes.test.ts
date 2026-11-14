@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { D1DuplicateIndex, type D1Like } from '../foundation/instapay-dedupe';
 import * as auto from '../src/core/billing/instapay-auto';
-import { CONFIRM_CLAIM_SQL, confirmInstapay, rejectInstapay } from '../src/core/billing/instapay';
+import { confirmInstapay, rejectInstapay } from '../src/core/billing/instapay';
 import { configurePayments } from '../src/core/billing/payments';
 import { configureSessionCheck } from '../src/core/identity/session';
 import { storeId as W0, useApiKey } from './helpers/api';
@@ -66,7 +66,7 @@ describe('I2 + M7: claims are kept while the payment can still be confirmed, rel
     const db = {
       prepare: (sql: string) => {
         const st = real.prepare(sql);
-        if (sql !== CONFIRM_CLAIM_SQL) return st;
+        if (sql !== auto.autoConfirmClaimSql()) return st;
         return { bind: (...v: unknown[]) => ({ run: async () => { await real.prepare(`UPDATE instapay_requests SET state = ?, decided_by = 'op-human' WHERE id = ?`).bind(to, id).run(); return st.bind(...v).run(); } }) };
       },
       batch: real.batch.bind(real), exec: real.exec.bind(real),
@@ -142,7 +142,7 @@ describe('I6 (INSTAPAY-REVERT-1): a top-up revert never takes money that arrived
     const r = await request(ws, 'topup');
     await setMode('live');
     expect((await auto.autoConfirmInstapay(aiEnv(goodAnswer(20_000)), r.id)).state).toBe('auto_confirmed');
-    await workspace(ws).postWallet({ kind: 'adjustment', netMinor: -15_000, ref: 'spend-i6', actor: 'test', note: 'spent' });
+    await workspace(ws).postWallet({ kind: 'meta_adjust', netMinor: -15_000, ref: 'spend-i6', actor: 'test', note: 'Meta usage' }); // consumption (N1: only usage counts as spend)
     await workspace(ws).postWallet({ kind: 'topup', netMinor: 50_000, ref: 'kashier:card-later' });
     expect(await wallet(ws)).toBe(55_000);
     expect(await auto.revertAutoConfirmed(env, { id: r.id, ...OP })).toMatchObject({ ok: true, creditsRemovedMinor: 5_000, creditsUsedMinor: 15_000 });
@@ -165,5 +165,96 @@ describe('M9: a revert finished by a second call writes its audit rows and the w
     expect(await n('instapay_auto_reverted_credits')).toBe(1);
     expect(await n('instapay_auto_workspace_toggled')).toBe(1);
     expect((await autoRow(r.id))!.credits_removed_minor).toBe(20_000);
+  });
+});
+
+// Opus re-review @ fc66bca: one test per finding, each failing on that head.
+describe('N1: "spend since the top-up" counts consumption only', () => {
+  it('two 300 EGP auto top-ups, both reverted: 600 removed (the first revert is not "spend" for the second)', async () => {
+    const ws = W(20);
+    await seedSub(ws);
+    const earlier = await request(ws, 'topup', { amountMinor: 10_000 });
+    await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = 'op-human', decided_at = 1 WHERE id = ?").bind(earlier.id).run(); // a clean payment: no first-payment cap
+    const a = await request(ws, 'topup', { amountMinor: 30_000 });
+    const b = await request(ws, 'topup', { amountMinor: 30_000 });
+    await setMode('live');
+    expect((await auto.autoConfirmInstapay(aiEnv(goodAnswer(30_000)), a.id)).state).toBe('auto_confirmed');
+    expect((await auto.autoConfirmInstapay(aiEnv(goodAnswer(30_000)), b.id)).state).toBe('auto_confirmed');
+    expect(await wallet(ws)).toBe(60_000);
+    const ra = await auto.revertAutoConfirmed(env, { id: a.id, ...OP });
+    const rb = await auto.revertAutoConfirmed(env, { id: b.id, ...OP });
+    expect([ra, rb].map((x) => (x as { creditsRemovedMinor: number }).creditsRemovedMinor)).toEqual([30_000, 30_000]);
+    expect(await wallet(ws)).toBe(0);
+  });
+});
+
+describe('N2: the cumulative cap is checked IN the confirm write', () => {
+  it('five 200 EGP proofs of one workspace decided concurrently under a 500 EGP plan month: at most 2 confirm, the rest wait with FIRST_PAYMENT_OVER_CAP', async () => {
+    const ws = W(21);
+    await seedSub(ws);
+    const reqs: Array<{ id: string }> = [];
+    for (let i = 0; i < 5; i++) reqs.push(await request(ws, 'topup'));
+    await setMode('live');
+    const outs = await Promise.all(reqs.map((r) => auto.autoConfirmInstapay(aiEnv(goodAnswer(20_000)), r.id)));
+    const confirmed = outs.filter((o) => o.state === 'auto_confirmed').length;
+    expect(confirmed).toBeLessThanOrEqual(2);
+    expect(confirmed).toBeGreaterThanOrEqual(1);
+    expect(outs.filter((o) => o.state === 'needs_human').every((o) => o.reasons.includes('FIRST_PAYMENT_OVER_CAP'))).toBe(true);
+    const sum = await env.DB.prepare("SELECT coalesce(sum(amount_minor), 0) AS s FROM instapay_requests WHERE workspace_id = ? AND decided_by = 'system:auto-confirm' AND state = 'confirmed'").bind(ws).first<{ s: number }>();
+    expect(sum!.s).toBeLessThanOrEqual(50_000);
+    expect(await wallet(ws)).toBe(sum!.s);
+  });
+});
+
+describe('M7: expiry releases claims like a rejection', () => {
+  it('a request that expires gives back what it holds in the shared index', async () => {
+    const ws = W(22);
+    await seedSub(ws);
+    const r = await request(ws, 'topup');
+    await setMode('live');
+    await auto.autoConfirmInstapay(aiEnv({ ...goodAnswer(20_000), amount: '199.99' }), r.id); // needs a person, claim held
+    expect(await held()).toBe(2);
+    await env.DB.prepare("UPDATE instapay_requests SET state = 'awaiting_proof', expires_at = 1 WHERE id = ?").bind(r.id).run(); // an expirable state with a held claim
+    const { expireInstapay } = await import('../src/core/billing/instapay');
+    expect((await expireInstapay(env)).expired).toBeGreaterThanOrEqual(1);
+    expect(await held()).toBe(0);
+  });
+});
+
+describe('N3: the reference is stored before the claim; the backfill is paged', () => {
+  it('a decision that dies right after its claim still lets a later rejection release it', async () => {
+    const ws = W(23);
+    await seedSub(ws);
+    const r = await request(ws, 'topup');
+    await setMode('live');
+    const e = aiEnv(goodAnswer(20_000));
+    const real = e.DB;
+    const dying = { ...e, DB: { prepare: (sql: string) => { if (sql.includes('(bank_ref = ?1 OR pending_bank_ref = ?1) AND id <> ?2')) throw new Error('isolate died'); return real.prepare(sql); }, batch: real.batch.bind(real), exec: real.exec.bind(real) } } as unknown as typeof env;
+    await auto.autoConfirmInstapay(dying, r.id);
+    expect(await held()).toBe(2);
+    expect((await rejectInstapay(env, { id: r.id, actor: 'op-human', reason: 'cannot verify' })).ok).toBe(true);
+    expect(await held()).toBe(0);
+  });
+  it('the backfill returns one bounded page and a cursor; following the cursor covers every confirmed request exactly once', async () => {
+    const ws = W(24);
+    await seedSub(ws);
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const r = await request(ws, 'topup');
+      await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = 'op-old', decided_at = ?, bank_ref = ? WHERE id = ?").bind(9_000_000_000_000 + i, nextRef(), r.id).run();
+      ids.push(r.id);
+    }
+    let after: string | null = '8999999999999:0';
+    let burned = 0, calls = 0;
+    do {
+      const out = await auto.backfillDedupeHistory(env, { actor: 'op-1', reason: 'paged backfill test', after, limit: 1 });
+      if (!out.ok) throw new Error(out.reason);
+      burned += out.burned;
+      after = out.next;
+      calls++;
+    } while (after && calls < 10);
+    expect(burned).toBe(3);
+    expect(calls).toBe(3);
+    expect(await auto.backfillDedupeHistory(env, { actor: 'op-1', reason: 'paged backfill test', after: 'not a cursor' })).toEqual({ ok: false, reason: 'bad_cursor' });
   });
 });

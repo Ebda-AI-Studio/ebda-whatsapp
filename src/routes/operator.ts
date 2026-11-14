@@ -300,9 +300,9 @@ operatorRoutes.post('/instapay/auto/:id/revert', async (c) => {
   return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
 });
 operatorRoutes.post('/instapay/auto/backfill', async (c) => {
-  const b = autoReason.safeParse(await c.req.json().catch(() => null));
+  const b = z.object({ reason: z.string().trim().min(5).max(300), after: z.string().max(100).nullable().optional() }).safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, 'reason_required');
-  const r = await backfillDedupeHistory(c.env, { actor: actor(c), reason: b.data.reason });
+  const r = await backfillDedupeHistory(c.env, { actor: actor(c), reason: b.data.reason, after: b.data.after ?? null }); // one page per call: repeat with `next` until it is null
   return r.ok ? c.json(r) : r.reason === 'not_ready' ? c.json({ error: 'rate_limited', message: 'dedupe_index_not_bound' }, 503) : bad(c, r.reason);
 });
 operatorRoutes.put('/instapay/auto/mode', async (c) => {

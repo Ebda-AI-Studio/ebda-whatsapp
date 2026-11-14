@@ -30,7 +30,7 @@ const topup = async (ws: string, amount = 20_000) => {
   expect((await autoConfirmInstapay(aiEnv(goodAnswer(amount)), r.id)).state).toBe('auto_confirmed');
   return r;
 };
-const spendWallet = (ws: string, minor: number, ref: string) => workspace(ws).postWallet({ kind: 'adjustment', netMinor: -minor, ref, actor: 'test', note: 'simulated spend' });
+const spendWallet = (ws: string, minor: number, ref: string) => workspace(ws).postWallet({ kind: 'meta_adjust', netMinor: -minor, ref, actor: 'test', note: 'simulated Meta usage' });
 const spendAi = (ws: string, credits: number, ref: string) => runInDurableObject(workspace(ws), (_i, state) => { postCredit(state.storage.sql, { kind: 'ai_charge', amount: -credits, ref, now: Date.now() }); });
 const OP = { actor: 'telegram-owner', reason: 'not received (owner tap)' };
 

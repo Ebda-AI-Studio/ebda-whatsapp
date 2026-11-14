@@ -486,14 +486,16 @@ export async function rejectInstapay(env: Env, a: { id: string; actor: string; r
 
 /** 48 h without a proof: the request and its order expire. A request with a proof waits for a person and is never expired by the clock. */
 export async function expireInstapay(env: Env, now = Date.now()): Promise<{ expired: number }> {
-  const res = await env.DB.prepare("UPDATE instapay_requests SET state = 'expired', pending_bank_ref = NULL WHERE state = 'awaiting_proof' AND expires_at <= ?").bind(now).run();
-  if (res.meta.changes) {
+  const res = await env.DB.prepare(`UPDATE instapay_requests SET state = 'expired', pending_bank_ref = NULL WHERE state = 'awaiting_proof' AND expires_at <= ? RETURNING ${COLS}`).bind(now).all<Row>();
+  // M7: an expired request gives back whatever the shared duplicate index holds for it (same rule as a rejection; a proof-less request normally holds nothing).
+  for (const r of res.results) if (r.proof_sha256) await releaseClaimsOf(env, r);
+  if (res.results.length) {
     await env.DB.batch([
       env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE provider = 'instapay' AND status = 'pending' AND order_id IN (SELECT id FROM instapay_requests WHERE state = 'expired')"),
       env.DB.prepare("UPDATE topups SET state = 'expired' WHERE provider = 'instapay' AND state = 'pending' AND order_id IN (SELECT id FROM instapay_requests WHERE state = 'expired')"),
     ]);
   }
-  return { expired: res.meta.changes };
+  return { expired: res.results.length };
 }
 
 /** A confirmed request whose grant never finished (a crash between the claim and the grant) is completed now, once, and reported. Drains every page (M-178). */

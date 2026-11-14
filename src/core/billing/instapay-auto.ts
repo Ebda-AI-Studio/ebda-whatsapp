@@ -106,8 +106,8 @@ async function finalize(env: Env, autoId: string, event: Extract<AutoEvent, 'dec
   const to = nextAutoState('pending_decision', event);
   if (to === 'illegal') throw new Error('illegal auto-confirm transition');
   const res = await env.DB.prepare(
-    `UPDATE instapay_auto_confirmations SET state = ?, verdict = ?, reasons_json = ?, amount_minor = ?, expected_amount_minor = ?, is_first_payment = ?, extracted_json = ?, confirmed_at = ?, updated_at = ?
-      WHERE id = ? AND state = 'pending_decision'`,
+    `UPDATE instapay_auto_confirmations SET state = ?, verdict = ?, reasons_json = ?, amount_minor = ?, expected_amount_minor = ?, is_first_payment = ?, extracted_json = coalesce(?, extracted_json), confirmed_at = ?, updated_at = ?
+      WHERE id = ? AND state = 'pending_decision'`, // never wipe the reference stored before the claim (N3)
   ).bind(to, f.verdict, JSON.stringify(f.reasons), f.amountMinor ?? null, f.expectedMinor ?? null, f.isFirst === undefined ? null : f.isFirst ? 1 : 0, f.extracted === undefined ? null : JSON.stringify(f.extracted), f.confirmedAt ?? null, now, autoId).run();
   return res.meta.changes > 0;
 }
@@ -144,6 +144,20 @@ async function paymentHistory(env: Env, workspaceId: string, exceptId: string, n
     else if (auto && p.reverted_at === null) uncleanAutoMinor += p.amount_minor;
   }
   return { first, uncleanAutoMinor };
+}
+
+/**
+ * N2: the auto path's confirm carries the cumulative first-payment cap IN the write (`?9` = one month of the plan, NULL when the workspace already has a clean payment):
+ * D1 runs each statement atomically, so concurrent decisions of one workspace cannot all pass a sum read before any of them wrote. "Unclean" = confirmed by the system,
+ * not reverted, and not listed in a digest sent after it (INSTAPAY-CLEAN-1).
+ */
+const UNCLEAN_AUTO_SUM_SQL = `(SELECT coalesce(sum(o.amount_minor), 0) FROM instapay_requests o LEFT JOIN instapay_auto_confirmations ac ON ac.request_id = o.id
+  WHERE o.workspace_id = ?6 AND o.decided_by = 'system:auto-confirm' AND o.state = 'confirmed' AND o.reverted_at IS NULL AND o.id <> ?1
+    AND (ac.digest_sent_at IS NULL OR ac.digest_sent_at < o.decided_at))`;
+/** Built on first use, not at module load: `instapay.ts` and this file import each other, so CONFIRM_CLAIM_SQL is not defined yet while this module evaluates. */
+export const autoConfirmClaimSql = (): string => `${CONFIRM_CLAIM_SQL} AND (?9 IS NULL OR ${UNCLEAN_AUTO_SUM_SQL} + ?7 <= ?9)`;
+async function uncleanAutoSum(env: Env, workspaceId: string, exceptId: string): Promise<number> {
+  return (await env.DB.prepare(`SELECT ${UNCLEAN_AUTO_SUM_SQL.replace(/\?6/g, '?2').replace(/\?1/g, '?1')} AS n`).bind(exceptId, workspaceId).first<{ n: number }>())?.n ?? 0;
 }
 
 type Expected = { amountMinor: number; capMonthlyMinor: number | null; reviewKind: boolean; priceDrift: boolean };
@@ -265,6 +279,8 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
     if (!index || !refKey || !r.proof_sha256) duplicate = 'both';
     else {
       try {
+        // N3: the reference is written on the row BEFORE the claim, so a later reject or expiry can release it even if this decision dies before it finishes.
+        await env.DB.prepare("UPDATE instapay_auto_confirmations SET extracted_json = ?, updated_at = ? WHERE id = ? AND state = 'pending_decision'").bind(JSON.stringify({ reference: extract.reference }), now, autoId).run();
         claim = await index.claim({ referenceKey: refKey, imageSha256: r.proof_sha256, product: 'chat', ownerId: r.workspace_id, paymentId: r.id });
       } catch (err) {
         alert('instapay_auto_error', { id: r.id, workspace: r.workspace_id, error: errName(err), where: 'dedupe' });
@@ -314,7 +330,7 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
   }
   let claimed: D1Result | null = null;
   try {
-    claimed = await env.DB.prepare(CONFIRM_CLAIM_SQL).bind(r.id, SYSTEM_ACTOR, now, bankRef, 0, r.workspace_id, r.amount_minor, now - NO_REF_WINDOW_MS).run();
+    claimed = await env.DB.prepare(autoConfirmClaimSql()).bind(r.id, SYSTEM_ACTOR, now, bankRef, 0, r.workspace_id, r.amount_minor, now - NO_REF_WINDOW_MS, first ? firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor }) : null).run();
   } catch (err) {
     if (!/UNIQUE/i.test(errMsg(err))) throw err;
   }
@@ -323,7 +339,9 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
     // the payment is gone, so the claim is released. Still under review (held, another reference) = a person decides, the claim stays.
     const cur = await getRequestRow(env, r.id);
     if (cur && (cur.state === 'rejected' || cur.state === 'expired')) await releaseClaimsOf(env, cur, extract!.reference);
-    return done('decide_human', { ...base, verdict: 'needs_human', reasons: ['DUPLICATE_REFERENCE'] }, true);
+    // N2: still under review and the cap no longer fits = another decision of this workspace confirmed first (the cap is checked IN the write): a person decides.
+    const capLost = first && cur?.state === 'under_review' && (await uncleanAutoSum(env, r.workspace_id, r.id)) + r.amount_minor > firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor });
+    return done('decide_human', { ...base, verdict: 'needs_human', reasons: [capLost ? 'FIRST_PAYMENT_OVER_CAP' : 'DUPLICATE_REFERENCE'] }, true);
   }
   await billingAudit(env, { at: now, actor: SYSTEM_ACTOR, action: 'instapay_auto_confirmed', workspaceId: r.workspace_id, ref: r.id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor, isFirstPayment: first } });
   const confirmed = (await getRequestRow(env, r.id))!;
@@ -383,33 +401,40 @@ export async function releaseClaimsOf(env: Env, r: InstapayRow, readReference?: 
 
 /**
  * I1 one-off backfill (idempotent, re-runnable): every CONFIRMED request's bank reference + proof hash is BURNED in the shared duplicate index, so a receipt confirmed
- * before the index existed (or by a person while it was unbound) can never be confirmed again in either product. Keyset pages of 200; a reference with letters cannot
+ * before the index existed (or by a person while it was unbound) can never be confirmed again in either product. One page of at most 200 per call; a reference with letters cannot
  * be a key and is counted as skipped (the bank_ref unique index still guards it). Burning a row another payment holds changes nothing (it is already blocked).
  */
-export async function backfillDedupeHistory(env: Env, a: { actor: string; reason: string }, now = Date.now()): Promise<{ ok: true; burned: number; skipped: number } | { ok: false; reason: 'reason_required' | 'not_ready' }> {
+export const BACKFILL_PAGE = 200;
+export type BackfillResult = { ok: true; burned: number; skipped: number; next: string | null } | { ok: false; reason: 'reason_required' | 'not_ready' | 'bad_cursor' };
+/** ONE bounded page per call (keyset on decided_at, id) so a call stays far under the Workers subrequest limit; call again with `next` until it is null (N3). */
+export async function backfillDedupeHistory(env: Env, a: { actor: string; reason: string; after?: string | null; limit?: number }, now = Date.now()): Promise<BackfillResult> {
   const reason = a.reason.trim();
   if (reason.length < 5) return { ok: false, reason: 'reason_required' };
   const index = getDuplicateIndex(env);
   if (!index) return { ok: false, reason: 'not_ready' };
-  let burned = 0, skipped = 0;
   let after: [number, string] | null = null;
-  for (;;) {
-    const page: Array<{ id: string; workspace_id: string; bank_ref: string | null; proof_sha256: string | null; decided_at: number | null }> = (await env.DB.prepare(
-      `SELECT id, workspace_id, bank_ref, proof_sha256, decided_at FROM instapay_requests WHERE state = 'confirmed' ${after ? 'AND (coalesce(decided_at, 0) > ?1 OR (coalesce(decided_at, 0) = ?1 AND id > ?2))' : ''}
-        ORDER BY coalesce(decided_at, 0), id LIMIT 200`,
-    ).bind(...(after ?? [])).all<{ id: string; workspace_id: string; bank_ref: string | null; proof_sha256: string | null; decided_at: number | null }>()).results;
-    if (page.length === 0) break;
-    for (const r of page) {
-      const key = r.bank_ref ? normalizeReferenceKey(r.bank_ref) : null;
-      if (!key || !r.proof_sha256 || !/^[0-9a-f]{64}$/.test(r.proof_sha256)) { skipped++; continue; }
-      await index.burn({ referenceKey: key, imageSha256: r.proof_sha256, product: 'chat', ownerId: r.workspace_id, paymentId: r.id });
-      burned++;
-    }
-    const last = page[page.length - 1]!;
-    after = [last.decided_at ?? 0, last.id];
+  if (a.after) {
+    const m = /^(\d{1,16}):([\w-]{1,64})$/.exec(a.after);
+    if (!m) return { ok: false, reason: 'bad_cursor' };
+    after = [Number(m[1]), m[2]!];
   }
-  await billingAudit(env, { at: now, actor: a.actor, action: 'instapay_dedupe_backfill', workspaceId: PLATFORM_WORKSPACE, after: { burned, skipped }, reason });
-  return { ok: true, burned, skipped };
+  const limit = Math.min(BACKFILL_PAGE, Math.max(1, Math.floor(a.limit ?? BACKFILL_PAGE)));
+  const page = (await env.DB.prepare(
+    `SELECT id, workspace_id, bank_ref, proof_sha256, decided_at FROM instapay_requests WHERE state = 'confirmed' ${after ? 'AND (coalesce(decided_at, 0) > ?1 OR (coalesce(decided_at, 0) = ?1 AND id > ?2))' : ''}
+      ORDER BY coalesce(decided_at, 0), id LIMIT ${limit + 1}`,
+  ).bind(...(after ?? [])).all<{ id: string; workspace_id: string; bank_ref: string | null; proof_sha256: string | null; decided_at: number | null }>()).results;
+  const rows = page.slice(0, limit);
+  let burned = 0, skipped = 0;
+  for (const r of rows) {
+    const key = r.bank_ref ? normalizeReferenceKey(r.bank_ref) : null;
+    if (!key || !r.proof_sha256 || !/^[0-9a-f]{64}$/.test(r.proof_sha256)) { skipped++; continue; }
+    await index.burn({ referenceKey: key, imageSha256: r.proof_sha256, product: 'chat', ownerId: r.workspace_id, paymentId: r.id });
+    burned++;
+  }
+  const last = rows[rows.length - 1];
+  const next = page.length > limit && last ? `${last.decided_at ?? 0}:${last.id}` : null;
+  await billingAudit(env, { at: now, actor: a.actor, action: 'instapay_dedupe_backfill', workspaceId: PLATFORM_WORKSPACE, after: { burned, skipped, more: next !== null }, reason });
+  return { ok: true, burned, skipped, next };
 }
 
 /** An audit row written at most once per (action, request): a revert finished by a second call never writes it twice (M9). */
