@@ -20,7 +20,7 @@
   "undo": {
     "class": "reversible"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/notes-tags-and-quick-replies",
   "questions": {
     "ar": [
       "ازاي اضيف تاج VIP؟",
@@ -36,7 +36,6 @@
   ],
   "edgeCases": [],
   "gaps": [
-    "NO merchant UI to edit tags (display only + CSV import)",
-    "No help article"
+    "NO merchant UI to edit tags (display only + CSV import)"
   ]
 }

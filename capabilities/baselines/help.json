@@ -1,31 +1,3 @@
 {
-  "ids": [
-    "help-missing|access.integrator-tokens",
-    "help-missing|access.language",
-    "help-missing|access.sign-out",
-    "help-missing|access.signin",
-    "help-missing|agent.connectors",
-    "help-missing|campaigns.delete-draft",
-    "help-missing|compliance.meta-deletion-callback",
-    "help-missing|compliance.privacy-terms",
-    "help-missing|contacts.tags-edit",
-    "help-missing|digest.weekly",
-    "help-missing|help.corpus-parity",
-    "help-missing|inbox.conversation-tags",
-    "help-missing|inbox.failed-retry",
-    "help-missing|inbox.list-filter",
-    "help-missing|inbox.mark-read",
-    "help-missing|inbox.notes",
-    "help-missing|inbox.quick-replies",
-    "help-missing|inbox.read-thread",
-    "help-missing|inbox.realtime",
-    "help-missing|inbox.search",
-    "help-missing|inbox.send-media",
-    "help-missing|inbox.send-throttle",
-    "help-missing|notifications.alerts",
-    "help-missing|numbers.removed-app-notice",
-    "help-missing|otp.platform",
-    "help-missing|otp.toggle",
-    "help-missing|templates.status-webhook"
-  ]
+  "ids": []
 }

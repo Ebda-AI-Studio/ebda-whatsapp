@@ -25,7 +25,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/sign-in-language-and-sign-out",
   "questions": {
     "ar": [
       "ازاي ادخل على ابدأ شات؟",
@@ -51,8 +51,6 @@
     "Arabic/RTL: phone numbers, URLs and API keys stay LTR inside RTL text",
     "Mobile: rail collapses to a bottom/side nav; the orders pane opens as a sheet"
   ],
-  "gaps": [
-    "No help article for sign-in problems"
-  ],
+  "gaps": [],
   "assistantNote": "Assistant can explain only; it never handles credentials"
 }

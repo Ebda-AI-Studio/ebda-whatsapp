@@ -22,8 +22,7 @@
   "undo": {
     "class": "reversible"
   },
-  "helpArticle": null,
-  "helpGap": "docs/connectors.md (developer doc only)",
+  "helpArticle": "whatsapp/connect-your-systems",
   "questions": {
     "ar": [
       "ينفع المساعد يشوف الحجوزات بتاعتي؟",
@@ -42,8 +41,6 @@
     "Erased/STOP customers make no connector call",
     "10 tools, 10 params per tool"
   ],
-  "gaps": [
-    "NO merchant UI and NO merchant help article"
-  ],
+  "gaps": [],
   "assistantNote": "gives the agent tool access to external systems"
 }

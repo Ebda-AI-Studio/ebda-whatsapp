@@ -20,7 +20,7 @@
   "undo": {
     "class": "reversible"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/verification-codes-on-whatsapp",
   "questions": {
     "ar": [
       "ينفع كود التحقق يوصل على واتساب؟",
@@ -42,7 +42,6 @@
     "Platform sign-in codes use a separate platform number (WA-OTP-SENDER-1), not the merchant number"
   ],
   "gaps": [
-    "NO merchant UI and NO help article",
     "No per-merchant policy editing (country, rate)"
   ],
   "assistantNote": "each code costs money"

@@ -2,7 +2,7 @@
   "id": "wallet.refund-request",
   "status": "live",
   "area": "billing",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "طلب استرداد رصيد المحفظة",
   "titleEn": "Request a refund of the wallet balance",
