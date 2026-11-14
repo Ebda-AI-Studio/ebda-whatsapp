@@ -1721,16 +1721,20 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /**
-   * InstaPay auto-confirm revert, wallet half: removes the part of ONE top-up that is still unused (never more than the available balance, never a negative balance,
-   * consumed credits are not clawed back). Idempotent under `ref`: the first answer is stored in `store_state`, a replay returns it and posts nothing (even when the
+   * InstaPay auto-confirm revert, wallet half (INSTAPAY-REVERT-1): removes the part of ONE top-up nobody spent since it arrived, never more than the available balance and
+   * never money that arrived later; consumed credits are not clawed back. Idempotent under `ref`: the first answer is stored in `store_state`, a replay returns it and posts nothing (even when the
    * first answer was "nothing to remove").
    */
-  async revertInstapayWallet(a: { creditedMinor: number; ref: string; actor: string; note: string }, now = Date.now()): Promise<{ removedMinor: number; usedMinor: number }> {
+  async revertInstapayWallet(a: { creditedMinor: number; creditRef: string; ref: string; actor: string; note: string }, now = Date.now()): Promise<{ removedMinor: number; usedMinor: number }> {
     const out = this.ctx.storage.transactionSync(() => {
       const key = `instapay.revert:${a.ref}`;
       const prior = this.sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', key).toArray()[0];
       if (prior) return JSON.parse(prior.value) as { removedMinor: number; usedMinor: number };
-      const removedMinor = unusedCreditsToRemove({ granted: a.creditedMinor, consumed: 0, balance: this.billing.available() });
+      // INSTAPAY-REVERT-1: what is removed is max(0, min(credited - spend recorded SINCE that top-up, available balance)). Money that arrived later (a card top-up after
+      // this one) is never taken: spend after the top-up is counted against it first, and the balance only caps the result. No credit row = nothing was credited.
+      const credit = this.sql.exec<{ id: number }>('SELECT id FROM wallet_ledger WHERE ref = ?', a.creditRef).toArray()[0];
+      const spent = credit ? this.sql.exec<{ s: number }>('SELECT coalesce(-sum(amount_minor), 0) AS s FROM wallet_ledger WHERE id > ? AND amount_minor < 0', credit.id).one().s : 0;
+      const removedMinor = credit ? unusedCreditsToRemove({ granted: a.creditedMinor, consumed: Math.min(a.creditedMinor, spent), balance: Math.max(0, this.billing.available()) }) : 0;
       if (removedMinor > 0) this.billing.post({ kind: 'adjustment', netMinor: -removedMinor, ref: a.ref, now, actor: a.actor, note: a.note });
       const res = { removedMinor, usedMinor: Math.max(0, a.creditedMinor - removedMinor) };
       this.sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?)', key, JSON.stringify(res));

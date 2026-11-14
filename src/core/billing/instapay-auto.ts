@@ -13,7 +13,7 @@
  *    removed (top-up wallet credits and package AI credits), consumed credits are never clawed back, nothing goes negative, every step idempotent under its own ref.
  * Mode `off` (default) and `shadow` never activate anything; only `live` does, and only for a workspace whose own switch is on.
  */
-import { decideInstapay, type DecisionInput, type ReasonCode } from '../../../foundation/instapay-decision';
+import { REASON_ORDER, decideInstapay, type DecisionInput, type ReasonCode } from '../../../foundation/instapay-decision';
 import { D1DuplicateIndex, normalizeReferenceKey, type ClaimResult, type D1Like, type DuplicateIndex } from '../../../foundation/instapay-dedupe';
 import { parseReceiptExtraction, type ParsedExtraction, type ReceiptExtract } from '../../../foundation/instapay-extract';
 import { autoConfirmKey, firstPaymentCapMinor, isCleanPayment, nextAutoState, revertGraceUntil, revertKey, type AutoEvent, type AutoState } from '../../../foundation/instapay-state';
@@ -22,6 +22,7 @@ import type { Env } from '../../env';
 import { billingAudit, PLATFORM_WORKSPACE } from '../audit-reason';
 import { announceSubscription } from './subscriptions';
 import { alert } from '../observability';
+import { isOffboarded } from '../ops/offboarded';
 import { adjustmentThreshold } from './operator';
 import { planPurchase } from './package-orders';
 import { proofReaderAvailable, readProofForAutoConfirm } from './instapay-reader';
@@ -124,30 +125,43 @@ async function currentMonthlyPrice(env: Env, workspaceId: string, now: number): 
   return s ? monthlyPriceOf(env, s.package_id) : null;
 }
 
-/** INSTAPAY-CLEAN-1: the workspace has had no earlier confirmed InstaPay payment that is "clean" (human-confirmed, or auto-confirmed and listed in a digest that was SENT). */
-async function isFirstPayment(env: Env, workspaceId: string, exceptId: string, now: number): Promise<boolean> {
+/**
+ * INSTAPAY-CLEAN-1 + INSTAPAY-CAP-1. `first`: the workspace has no earlier confirmed InstaPay payment that is "clean" (human-confirmed, or auto-confirmed and listed in a
+ * digest that was SENT). `uncleanAutoMinor`: what the system already auto-confirmed for this workspace and nobody has seen in a sent digest yet (not reverted). The
+ * first-payment cap is CUMULATIVE over that window: unclean auto amounts + this payment <= one month of the plan, so several small payments in a row cannot add up past it.
+ */
+async function paymentHistory(env: Env, workspaceId: string, exceptId: string, now: number): Promise<{ first: boolean; uncleanAutoMinor: number }> {
   const { results } = await env.DB.prepare(
-    `SELECT r.decided_by, r.decided_at, r.reverted_at, a.digest_sent_at FROM instapay_requests r LEFT JOIN instapay_auto_confirmations a ON a.request_id = r.id
+    `SELECT r.decided_by, r.decided_at, r.reverted_at, r.amount_minor, a.digest_sent_at FROM instapay_requests r LEFT JOIN instapay_auto_confirmations a ON a.request_id = r.id
       WHERE r.workspace_id = ? AND r.state = 'confirmed' AND r.id <> ?`,
-  ).bind(workspaceId, exceptId).all<{ decided_by: string | null; decided_at: number | null; reverted_at: number | null; digest_sent_at: number | null }>();
-  return !results.some((p) => isCleanPayment({ confirmedBy: p.decided_by === SYSTEM_ACTOR ? 'auto' : 'human', confirmedAt: p.decided_at ?? 0, digestSentAt: p.digest_sent_at, revertedAt: p.reverted_at }, now));
+  ).bind(workspaceId, exceptId).all<{ decided_by: string | null; decided_at: number | null; reverted_at: number | null; amount_minor: number; digest_sent_at: number | null }>();
+  let first = true;
+  let uncleanAutoMinor = 0;
+  for (const p of results) {
+    const auto = p.decided_by === SYSTEM_ACTOR;
+    const clean = isCleanPayment({ confirmedBy: auto ? 'auto' : 'human', confirmedAt: p.decided_at ?? 0, digestSentAt: p.digest_sent_at, revertedAt: p.reverted_at }, now);
+    if (clean) first = false;
+    else if (auto && p.reverted_at === null) uncleanAutoMinor += p.amount_minor;
+  }
+  return { first, uncleanAutoMinor };
 }
 
-type Expected = { amountMinor: number; capMonthlyMinor: number | null; reviewKind: boolean };
+type Expected = { amountMinor: number; capMonthlyMinor: number | null; reviewKind: boolean; priceDrift: boolean };
 async function expectedFor(env: Env, r: InstapayRow, now: number): Promise<Expected> {
-  if (r.kind === 'topup') return { amountMinor: r.amount_minor, capMonthlyMinor: await currentMonthlyPrice(env, r.workspace_id, now), reviewKind: false };
+  if (r.kind === 'topup') return { amountMinor: r.amount_minor, capMonthlyMinor: await currentMonthlyPrice(env, r.workspace_id, now), reviewKind: false, priceDrift: false };
   const plan = await planPurchase(env, r.workspace_id, r.package_id ?? '', now);
-  if (!plan.ok) return { amountMinor: r.amount_minor, capMonthlyMinor: null, reviewKind: true };
+  if (!plan.ok) return { amountMinor: r.amount_minor, capMonthlyMinor: null, reviewKind: true, priceDrift: false };
   // Only a purchase that STARTS a period is automatic. A renewal queued behind the running period, an upgrade or a queued switch changes someone's running plan: a person looks.
   const running = await env.DB.prepare("SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND package_id = ? AND period_end > ? AND status IN ('active', 'trialing')").bind(r.workspace_id, r.package_id, now).first();
-  return { amountMinor: plan.amountMinor, capMonthlyMinor: await monthlyPriceOf(env, r.package_id ?? ''), reviewKind: plan.kind !== 'purchase' || !!running };
+  // The amount due is the ORDER's (what the merchant was told to pay and what the grant checks); a price that moved since the order was written waits for a person.
+  return { amountMinor: r.amount_minor, capMonthlyMinor: await monthlyPriceOf(env, r.package_id ?? ''), reviewKind: plan.kind !== 'purchase' || !!running, priceDrift: plan.amountMinor !== r.amount_minor };
 }
 
 // ---- the decision ---------------------------------------------------------------------------------------------------------------------------------------------
 
 const orderReasons = (xs: Iterable<ReasonCode>): ReasonCode[] => {
   const set = new Set(xs);
-  return (['KILL_GLOBAL', 'KILL_STORE', 'SHADOW_MODE'] as const).filter((c) => set.has(c));
+  return REASON_ORDER.filter((c) => set.has(c));
 };
 
 /**
@@ -173,19 +187,40 @@ export async function autoConfirmInstapay(env: Env, requestId: string, now = Dat
   try {
     return await decide(env, r, autoId, now);
   } catch (err) {
-    // Anything unexpected before the money moved fails CLOSED: a person decides. (A confirm that already committed is handled inside `decide`.)
     const cur = await getRequestRow(env, r.id);
     if (cur?.state === 'confirmed' && cur.decided_by === SYSTEM_ACTOR) {
+      // The system confirmed it, so the money decision stands: the row stays `pending_decision` (never `failed`) and the sweep finishes it as `auto_confirmed`
+      // once the grant is done, so it reaches the digest and can be reverted (I3).
       alert('instapay_grant_failed', { severity: 'P1', id: r.id, workspace: r.workspace_id, error: errName(err) });
-      await finalize(env, autoId, 'activation_failed', { verdict: 'activation_failed', reasons: [] }, now);
-    } else {
-      await finalize(env, autoId, 'decide_human', { verdict: 'needs_human', reasons: ['EXTRACT_INCOMPLETE'] }, now);
-      alert('instapay_auto_error', { id: r.id, workspace: r.workspace_id, error: errName(err) }); // info: the request is simply waiting for a person
+      return outcome((await autoByRequest(env, r.id))!);
     }
+    // Anything unexpected before the money moved fails CLOSED: a person decides.
+    await finalize(env, autoId, 'decide_human', { verdict: 'needs_human', reasons: ['EXTRACT_INCOMPLETE'] }, now);
+    alert('instapay_auto_error', { id: r.id, workspace: r.workspace_id, error: errName(err) }); // info: the request is simply waiting for a person
     const row = (await autoByRequest(env, r.id))!;
     if (row.state === 'needs_human') await notifyWaiting(env, row, r).catch(() => undefined);
     return outcome(row);
   }
+}
+
+/**
+ * A request the SYSTEM confirmed whose row is still `pending_decision` (the grant failed, or the isolate died after the confirm): grant it (idempotent) and end the row
+ * `auto_confirmed` with the confirm time, so the digest lists it and "not received" works. An offboarded workspace (nothing can be granted) ends `failed`.
+ */
+async function completeActivation(env: Env, r: InstapayRow, autoId: string, now: number, base: Omit<Final, 'verdict' | 'reasons'> = {}): Promise<AutoOutcome> {
+  try {
+    await grant(env, r, now);
+  } catch (err) {
+    alert('instapay_grant_failed', { severity: 'P1', id: r.id, workspace: r.workspace_id, error: errName(err) });
+    return outcome((await autoByRequest(env, r.id))!); // still pending: the daily repair + sweep try again
+  }
+  const after = await getRequestRow(env, r.id);
+  if (after?.granted_at == null) {
+    if (await isOffboarded(env, r.workspace_id)) await finalize(env, autoId, 'activation_failed', { ...base, verdict: 'not_granted', reasons: [] }, now); // credit_after_offboard (P1) was raised by the grant path
+    return outcome((await autoByRequest(env, r.id))!);
+  }
+  await finalize(env, autoId, 'decide_auto', { amountMinor: r.amount_minor, expectedMinor: r.amount_minor, ...base, verdict: 'auto_confirm', reasons: [], confirmedAt: r.decided_at ?? now }, now);
+  return outcome((await autoByRequest(env, r.id))!);
 }
 
 async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Promise<AutoOutcome> {
@@ -195,6 +230,8 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
     if (notify && row.state === 'needs_human') await notifyWaiting(env, row, r).catch(() => undefined);
     return outcome(row);
   };
+  // A take-over of a decision whose confirm already committed: finish the activation, never re-decide.
+  if (r.state === 'confirmed' && r.decided_by === SYSTEM_ACTOR) return completeActivation(env, r, autoId, now);
   const mode = await getAutoMode(env);
   const wsOn = await workspaceAutoEnabled(env, r.workspace_id);
   const ready = instapayAutoReady(env);
@@ -211,13 +248,15 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
   }
 
   const expected = await expectedFor(env, r, now);
-  const first = await isFirstPayment(env, r.workspace_id, r.id, now);
+  const history = await paymentHistory(env, r.workspace_id, r.id, now);
+  const first = history.first;
   const obj = await env.MEDIA.get(r.proof_key);
   const bytes = obj ? await obj.arrayBuffer() : null;
   const parsed: ParsedExtraction = (bytes && r.proof_mime ? await readProofForAutoConfirm(env, bytes, r.proof_mime) : null) ?? parseReceiptExtraction(null);
   const extract: ReceiptExtract | null = parsed.extract;
 
   // The duplicate index is claimed BEFORE the decision. No index, an index that throws, or an unreadable reference = a duplicate (fail closed).
+  // A claim is KEPT whatever happens next (a person may still confirm this request); only a rejection releases it (M7) and a revert burns it.
   const index = getDuplicateIndex(env);
   const refKey = extract ? normalizeReferenceKey(extract.reference) : null;
   let claim: ClaimResult | null = null;
@@ -239,35 +278,37 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
     const other = bank ? await env.DB.prepare("SELECT id FROM instapay_requests WHERE (bank_ref = ?1 OR pending_bank_ref = ?1) AND id <> ?2 AND state NOT IN ('rejected', 'expired') LIMIT 1").bind(bank, r.id).first() : null;
     if (other) duplicate = duplicate === 'image' || duplicate === 'both' ? 'both' : 'reference';
   }
-  const claimedHere = claim === 'claimed';
-  const release = async () => {
-    if (claimedHere && index && extract && refKey && r.proof_sha256) await index.release({ referenceKey: refKey, imageSha256: r.proof_sha256, product: 'chat', ownerId: r.workspace_id, paymentId: r.id }).catch(() => undefined);
-  };
 
   const input: DecisionInput = {
     extract,
     expected: { amountMinor: expected.amountMinor, payeeHandle: payeeHandle(env) ?? '' },
     now, mode, storeEnabled: wsOn, isFirstPayment: first,
-    firstPaymentCapMinor: firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor }),
+    // INSTAPAY-CAP-1: the cap left after what was already auto-confirmed and not yet seen in a sent digest.
+    firstPaymentCapMinor: Math.max(0, firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor }) - history.uncleanAutoMinor),
     // The two-approver threshold ALWAYS wins (a threshold of 0 sends a kind a person must review straight to a person).
     dualControlThresholdMinor: expected.reviewKind ? 0 : adjustmentThreshold(env),
     duplicate,
     flags: parsed.flags,
   };
-  const decision = decideInstapay(input);
+  const raw = decideInstapay(input);
+  const reasons = orderReasons([...raw.reasons, ...(expected.priceDrift ? (['AMOUNT_MISMATCH'] as const) : [])]); // I4: a price that moved since the order
+  const decision = { verdict: reasons.length === 0 ? raw.verdict : ('needs_human' as const), reasons };
   const mask = extract ? { amountMinor: extract.amountMinor, reference: extract.reference, transferredAt: extract.transferredAt, flags: parsed.flags } : { flags: parsed.flags };
   const base = { amountMinor: extract?.amountMinor, expectedMinor: expected.amountMinor, isFirst: first, extracted: mask };
 
   if (decision.verdict !== 'auto_confirm') {
     // The would-be verdict of a shadow decision is kept (so the rollout can compare it with what a person did).
-    const would = mode === 'shadow' ? decideInstapay({ ...input, mode: 'live' }).verdict : 'needs_human';
+    const would = mode === 'shadow' && orderReasons([...decideInstapay({ ...input, mode: 'live' }).reasons, ...(expected.priceDrift ? (['AMOUNT_MISMATCH'] as const) : [])]).length === 0 ? 'auto_confirm' : 'needs_human';
     return done('decide_human', { ...base, verdict: would, reasons: decision.reasons }, true);
   }
 
   // ---- live + every check passed: confirm, then grant ----
   const bankRef = normaliseBankRef(extract!.reference);
-  if (!bankRef || !(await orderMatches(env, r))) {
-    await release();
+  if (!bankRef) {
+    alert('instapay_auto_error', { id: r.id, workspace: r.workspace_id, where: 'bank_ref_invalid' }); // M9: a reference the bank_ref column cannot hold, not an amount problem
+    return done('decide_human', { ...base, verdict: 'needs_human', reasons: ['EXTRACT_INCOMPLETE'] }, true);
+  }
+  if (!(await orderMatches(env, r))) {
     alert('instapay_amount_mismatch', { severity: 'P1', id: r.id, workspace: r.workspace_id });
     return done('decide_human', { ...base, verdict: 'needs_human', reasons: ['AMOUNT_MISMATCH'] }, true);
   }
@@ -275,29 +316,18 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
   try {
     claimed = await env.DB.prepare(CONFIRM_CLAIM_SQL).bind(r.id, SYSTEM_ACTOR, now, bankRef, 0, r.workspace_id, r.amount_minor, now - NO_REF_WINDOW_MS).run();
   } catch (err) {
-    if (!/UNIQUE/i.test(errMsg(err))) {
-      await release();
-      throw err;
-    }
+    if (!/UNIQUE/i.test(errMsg(err))) throw err;
   }
   if (!claimed?.meta.changes) {
-    // Lost the race (a person decided, the reference was taken between the check and the write): compensate and wait for a person.
-    await release();
+    // Lost the race (I2): look again. Confirmed by a person meanwhile = the claim stays (it now guards THAT confirmation; a revert would burn it). Rejected or expired =
+    // the payment is gone, so the claim is released. Still under review (held, another reference) = a person decides, the claim stays.
+    const cur = await getRequestRow(env, r.id);
+    if (cur && (cur.state === 'rejected' || cur.state === 'expired')) await releaseClaimsOf(env, cur, extract!.reference);
     return done('decide_human', { ...base, verdict: 'needs_human', reasons: ['DUPLICATE_REFERENCE'] }, true);
   }
-  await billingAudit(env, { at: now, actor: SYSTEM_ACTOR, action: 'instapay_auto_confirmed', workspaceId: r.workspace_id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor, isFirstPayment: first } });
-  try {
-    await grant(env, (await getRequestRow(env, r.id))!, now);
-  } catch (err) {
-    // Confirmed but not granted: the daily repair finishes the grant (idempotent), a person is told now. The auto row says `failed`, never a half state.
-    alert('instapay_grant_failed', { severity: 'P1', id: r.id, workspace: r.workspace_id, error: errName(err) });
-    return done('activation_failed', { ...base, verdict: 'activation_failed', reasons: [] }, false);
-  }
-  if ((await getRequestRow(env, r.id))?.granted_at == null) {
-    // An offboarded workspace: nothing was granted (credit_after_offboard, P1, was raised by the grant path) and nobody is messaged.
-    return done('activation_failed', { ...base, verdict: 'not_granted', reasons: [] }, false);
-  }
-  return done('decide_auto', { ...base, verdict: 'auto_confirm', reasons: [], confirmedAt: now }, false);
+  await billingAudit(env, { at: now, actor: SYSTEM_ACTOR, action: 'instapay_auto_confirmed', workspaceId: r.workspace_id, ref: r.id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor, isFirstPayment: first } });
+  const confirmed = (await getRequestRow(env, r.id))!;
+  return completeActivation(env, confirmed, autoId, now, base);
 }
 const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -319,15 +349,73 @@ export async function triggerAutoConfirm(env: Env, requestId: string, now = Date
 }
 
 /** The daily repair: a request under review with a proof for 10+ minutes and no decision row (a trigger that never ran) is decided now; an abandoned decision is resumed. */
-export async function sweepAutoConfirm(env: Env, now = Date.now()): Promise<{ decided: number }> {
-  if ((await getAutoMode(env)) === 'off') return { decided: 0 };
+export async function sweepAutoConfirm(env: Env, now = Date.now()): Promise<{ decided: number; completed: number }> {
+  // I3, whatever the mode: a request the SYSTEM confirmed whose row is still pending (a grant that failed, an isolate that died after the confirm) is finished first,
+  // so it ends `auto_confirmed` (digest + revert) once granted. The money already moved; the switches only govern NEW decisions.
+  const stuck = await env.DB.prepare(
+    `SELECT a.request_id AS id FROM instapay_auto_confirmations a JOIN instapay_requests r ON r.id = a.request_id
+      WHERE a.state = 'pending_decision' AND a.updated_at <= ? AND r.state = 'confirmed' AND r.decided_by = ? ORDER BY a.updated_at, a.id LIMIT 100`,
+  ).bind(now - DECISION_LEASE_MS, SYSTEM_ACTOR).all<{ id: string }>();
+  for (const x of stuck.results) await autoConfirmInstapay(env, x.id, now).catch((err) => alert('instapay_grant_failed', { severity: 'P1', id: x.id, error: errName(err) }));
+  if ((await getAutoMode(env)) === 'off') return { decided: 0, completed: stuck.results.length };
   const { results } = await env.DB.prepare(
     `SELECT r.id FROM instapay_requests r LEFT JOIN instapay_auto_confirmations a ON a.request_id = r.id
       WHERE r.state = 'under_review' AND r.proof_key IS NOT NULL AND r.held_reason IS NULL AND r.proof_at <= ?1
         AND (a.id IS NULL OR (a.state = 'pending_decision' AND a.updated_at <= ?2)) ORDER BY r.proof_at, r.id LIMIT 100`,
   ).bind(now - SWEEP_AFTER_MS, now - DECISION_LEASE_MS).all<{ id: string }>();
   for (const x of results) await triggerAutoConfirm(env, x.id, now);
-  return { decided: results.length };
+  return { decided: results.length, completed: stuck.results.length };
+}
+
+/**
+ * M7: a request that is rejected or expired gives back what the shared duplicate index holds for it (only rows this payment owns and only while `held`; burned rows stay).
+ * The keys are the reference the receipt was read as (or the confirmed bank reference) and the proof's hash. Never throws.
+ */
+export async function releaseClaimsOf(env: Env, r: InstapayRow, readReference?: string): Promise<void> {
+  const index = getDuplicateIndex(env);
+  if (!index || !r.proof_sha256) return;
+  const row = await autoByRequest(env, r.id);
+  let read: string | null = null;
+  try { read = row?.extracted_json ? (JSON.parse(row.extracted_json) as { reference?: string }).reference ?? null : null; } catch { read = null; }
+  const keys = new Set([readReference ?? null, read, r.bank_ref].map((k) => (k ? normalizeReferenceKey(k) : null)).filter((k): k is string => !!k));
+  for (const referenceKey of keys) await index.release({ referenceKey, imageSha256: r.proof_sha256, product: 'chat', ownerId: r.workspace_id, paymentId: r.id }).catch(() => undefined);
+}
+
+/**
+ * I1 one-off backfill (idempotent, re-runnable): every CONFIRMED request's bank reference + proof hash is BURNED in the shared duplicate index, so a receipt confirmed
+ * before the index existed (or by a person while it was unbound) can never be confirmed again in either product. Keyset pages of 200; a reference with letters cannot
+ * be a key and is counted as skipped (the bank_ref unique index still guards it). Burning a row another payment holds changes nothing (it is already blocked).
+ */
+export async function backfillDedupeHistory(env: Env, a: { actor: string; reason: string }, now = Date.now()): Promise<{ ok: true; burned: number; skipped: number } | { ok: false; reason: 'reason_required' | 'not_ready' }> {
+  const reason = a.reason.trim();
+  if (reason.length < 5) return { ok: false, reason: 'reason_required' };
+  const index = getDuplicateIndex(env);
+  if (!index) return { ok: false, reason: 'not_ready' };
+  let burned = 0, skipped = 0;
+  let after: [number, string] | null = null;
+  for (;;) {
+    const page: Array<{ id: string; workspace_id: string; bank_ref: string | null; proof_sha256: string | null; decided_at: number | null }> = (await env.DB.prepare(
+      `SELECT id, workspace_id, bank_ref, proof_sha256, decided_at FROM instapay_requests WHERE state = 'confirmed' ${after ? 'AND (coalesce(decided_at, 0) > ?1 OR (coalesce(decided_at, 0) = ?1 AND id > ?2))' : ''}
+        ORDER BY coalesce(decided_at, 0), id LIMIT 200`,
+    ).bind(...(after ?? [])).all<{ id: string; workspace_id: string; bank_ref: string | null; proof_sha256: string | null; decided_at: number | null }>()).results;
+    if (page.length === 0) break;
+    for (const r of page) {
+      const key = r.bank_ref ? normalizeReferenceKey(r.bank_ref) : null;
+      if (!key || !r.proof_sha256 || !/^[0-9a-f]{64}$/.test(r.proof_sha256)) { skipped++; continue; }
+      await index.burn({ referenceKey: key, imageSha256: r.proof_sha256, product: 'chat', ownerId: r.workspace_id, paymentId: r.id });
+      burned++;
+    }
+    const last = page[page.length - 1]!;
+    after = [last.decided_at ?? 0, last.id];
+  }
+  await billingAudit(env, { at: now, actor: a.actor, action: 'instapay_dedupe_backfill', workspaceId: PLATFORM_WORKSPACE, after: { burned, skipped }, reason });
+  return { ok: true, burned, skipped };
+}
+
+/** An audit row written at most once per (action, request): a revert finished by a second call never writes it twice (M9). */
+async function auditOnceFor(env: Env, a: Parameters<typeof billingAudit>[1] & { ref: string }): Promise<void> {
+  if (await env.DB.prepare('SELECT 1 FROM billing_audit WHERE action = ? AND ref = ? LIMIT 1').bind(a.action, a.ref).first()) return;
+  await billingAudit(env, a);
 }
 
 // ---- revert ------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -379,7 +467,7 @@ async function finishRevert(env: Env, row: AutoRow, actor: string, reason: strin
   if (r.kind === 'topup') {
     const t = await env.DB.prepare('SELECT amount_minor FROM topups WHERE order_id = ?').bind(r.id).first<{ amount_minor: number }>();
     if (t && r.granted_at !== null) {
-      const out = await stubOf(env, r.workspace_id).revertInstapayWallet({ creditedMinor: t.amount_minor, ref: `${revertKey('chat', r.id)}:wallet`, actor, note }, now);
+      const out = await stubOf(env, r.workspace_id).revertInstapayWallet({ creditedMinor: t.amount_minor, creditRef: `instapay:${r.reference}`, ref: `${revertKey('chat', r.id)}:wallet`, actor, note }, now);
       removedMinor = out.removedMinor;
       usedMinor = out.usedMinor;
     }
@@ -410,9 +498,10 @@ async function finishRevert(env: Env, row: AutoRow, actor: string, reason: strin
   if (index && bank && r.proof_sha256) await index.burn({ referenceKey: bank, imageSha256: r.proof_sha256, product: 'chat', ownerId: r.workspace_id, paymentId: r.id });
   else alert('instapay_auto_error', { id: r.id, workspace: r.workspace_id, where: 'burn_unavailable' });
   await env.DB.prepare('UPDATE instapay_requests SET reverted_at = coalesce(reverted_at, ?) WHERE id = ?').bind(row.reverted_at ?? now, r.id).run();
-  await setWorkspaceAuto(env, { workspaceId: r.workspace_id, enabled: false, actor, reason: 'reverted payment' }, now);
-  await billingAudit(env, { at: now, actor, action: 'instapay_auto_reverted', workspaceId: r.workspace_id, after: { id: r.id, graceUntil: grace }, reason });
-  await billingAudit(env, { at: now, actor, action: 'instapay_auto_reverted_credits', workspaceId: r.workspace_id, after: { id: r.id, creditsRemovedMinor: removedMinor, creditsUsedMinor: usedMinor, aiCreditsRemoved: aiRemoved, aiCreditsUsed: aiUsed } });
+  // Switched off once per revert: a second finishing call neither re-writes the switch nor re-audits it (M9). Already off (by the owner) = left as it is.
+  if (await workspaceAutoEnabled(env, r.workspace_id)) await setWorkspaceAuto(env, { workspaceId: r.workspace_id, enabled: false, actor, reason: 'reverted payment' }, now);
+  await auditOnceFor(env, { at: now, actor, action: 'instapay_auto_reverted', workspaceId: r.workspace_id, ref: r.id, after: { id: r.id, graceUntil: grace }, reason });
+  await auditOnceFor(env, { at: now, actor, action: 'instapay_auto_reverted_credits', workspaceId: r.workspace_id, ref: r.id, after: { id: r.id, creditsRemovedMinor: removedMinor, creditsUsedMinor: usedMinor, aiCreditsRemoved: aiRemoved, aiCreditsUsed: aiUsed } });
   // Amounts LAST: this is the completion marker.
   await env.DB.prepare('UPDATE instapay_auto_confirmations SET credits_removed_minor = ?, credits_used_minor = ?, ai_credits_removed = ?, ai_credits_used = ?, updated_at = ? WHERE id = ? AND credits_removed_minor IS NULL')
     .bind(removedMinor, usedMinor, aiRemoved, aiUsed, now, row.id).run();

@@ -15,7 +15,8 @@
     "GET /operator/instapay/auto",
     "POST /operator/instapay/auto/:id/revert",
     "PUT /operator/instapay/auto/mode",
-    "PUT /operator/instapay/auto/workspaces/:workspaceId"
+    "PUT /operator/instapay/auto/workspaces/:workspaceId",
+    "POST /operator/instapay/auto/backfill"
   ],
   "mcpTool": null,
   "planGate": null,
@@ -45,7 +46,8 @@
   },
   "steps": [
     "Super admin only; every write needs a reason, re-checks the session (fails closed) and is audited with actor and reason",
-    "Mode off | shadow | live takes effect on the very next decision (never cached); a revert is idempotent"
+    "Mode off | shadow | live takes effect on the very next decision (never cached); a revert is idempotent",
+    "POST /operator/instapay/auto/backfill (reason) burns every confirmed bank reference + proof hash in the shared duplicate index once; re-runnable, idempotent"
   ],
   "edgeCases": [
     "Revert only applies to payments the system confirmed",

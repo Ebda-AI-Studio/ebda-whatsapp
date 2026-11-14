@@ -127,7 +127,7 @@ describe('C3: decide and confirm', () => {
     expect(await autoConfirmInstapay(aiEnv(goodAnswer(50_000)), r.id)).toMatchObject({ state: 'needs_human', reasons: expect.arrayContaining(['ABOVE_DUAL_CONTROL_THRESHOLD']) });
   });
 
-  it('a tampered order (amount differs from its request) is refused BEFORE anything is confirmed: P1 alert, the dedupe claim this call made is released', async () => {
+  it('a tampered order (amount differs from its request) is refused BEFORE anything is confirmed: P1 alert; the dedupe claim stays held while a person decides (M7: released only on reject)', async () => {
     const ws = W(11);
     await seedSub(ws);
     const r = await request(ws, 'topup');
@@ -138,30 +138,44 @@ describe('C3: decide and confirm', () => {
     expect(out).toEqual({ state: 'needs_human', reasons: ['AMOUNT_MISMATCH'] });
     expect((await reqRow(r.id))!.state).toBe('under_review');
     expect(spy.mock.calls.map((c) => String(c[0])).some((l) => l.includes('instapay_amount_mismatch'))).toBe(true);
-    expect(await env.INSTAPAY_DEDUPE_DB!.prepare('SELECT count(*) AS n FROM instapay_dedupe').first<{ n: number }>()).toEqual({ n: 0 });
+    expect(await env.INSTAPAY_DEDUPE_DB!.prepare("SELECT count(*) AS n FROM instapay_dedupe WHERE state = 'held'").first<{ n: number }>()).toEqual({ n: 2 });
   });
 
-  it('activation failure after the confirm (the grant throws): the row is failed, the request stays confirmed for the daily repair, P1 alert, the claim stays held', async () => {
+  it('I3: a grant that fails after the confirm leaves the row pending (never failed); the daily repair + sweep then end it auto_confirmed, digest- and revert-eligible', async () => {
     const ws = W(15);
     await seedSub(ws);
     const r = await request(ws, 'topup');
     await setMode('live');
     const spy = vi.spyOn(console, 'error');
     const e = aiEnv(goodAnswer(20_000));
-    // The wallet credit is refused after the request was confirmed: break the workspace DO call.
     const real = e.WORKSPACE_DO;
     const broken = { ...e, WORKSPACE_DO: { idFromName: real.idFromName.bind(real), get: () => ({ postWallet: async () => { throw new Error('do down'); } }) } } as unknown as typeof env;
-    const out = await autoConfirmInstapay(broken, r.id);
-    expect(out).toEqual({ state: 'failed', reasons: [] });
+    const t = Date.now();
+    expect(await autoConfirmInstapay(broken, r.id, t)).toEqual({ state: 'pending_decision', reasons: [] });
     expect((await reqRow(r.id))!.state).toBe('confirmed');
     expect((await reqRow(r.id))!.granted_at).toBeNull();
     expect(spy.mock.calls.map((c) => String(c[0])).some((l) => l.includes('instapay_grant_failed'))).toBe(true);
-    // the daily repair finishes the grant exactly once
     const { repairInstapay } = await import('../src/core/billing/instapay');
+    const { sweepAutoConfirm, revertAutoConfirmed } = await import('../src/core/billing/instapay-auto');
     await repairInstapay(env);
     expect(await walletBalance(ws)).toBe(20_000);
-    await repairInstapay(env);
+    await setMode('off'); // the sweep finishes a system-confirmed payment whatever the mode
+    expect((await sweepAutoConfirm(env, t + 6 * 60_000)).completed).toBe(1);
+    expect(await autoRow(r.id)).toMatchObject({ state: 'auto_confirmed', confirmed_at: t });
+    expect(await walletBalance(ws)).toBe(20_000); // the repair granted once; the sweep did not grant again
+    expect(await revertAutoConfirmed(env, { id: r.id, actor: 'telegram-owner', reason: 'not received (owner tap)' })).toMatchObject({ ok: true, result: 'reverted', creditsRemovedMinor: 20_000 });
+  });
+
+  it('I3: a take-over of a pending row whose request the system already confirmed finishes the activation instead of re-deciding (no "not reviewable" skip)', async () => {
+    const ws = W(16);
+    await seedSub(ws);
+    const r = await request(ws, 'topup');
+    await setMode('live');
+    await env.DB.prepare("UPDATE instapay_requests SET state = 'confirmed', decided_by = 'system:auto-confirm', decided_at = 1000, bank_ref = '700099990001' WHERE id = ?").bind(r.id).run();
+    await env.DB.prepare("INSERT INTO instapay_auto_confirmations (id, request_id, workspace_id, state, idempotency_key, created_at, updated_at) VALUES ('stuck-conf', ?, ?, 'pending_decision', ?, 0, 0)").bind(r.id, ws, `instapay-auto:chat:${r.id}`).run();
+    expect(await autoConfirmInstapay(aiEnv(goodAnswer(20_000)), r.id)).toEqual({ state: 'auto_confirmed', reasons: [] });
     expect(await walletBalance(ws)).toBe(20_000);
+    expect(await autoRow(r.id)).toMatchObject({ confirmed_at: 1000 });
   });
 
   it('no dedupe binding, or a model failure: needs a person (fail closed)', async () => {

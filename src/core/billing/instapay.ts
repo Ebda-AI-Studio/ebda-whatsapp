@@ -26,7 +26,8 @@ import { alert } from '../observability';
 import { LAST_REASON_ID, REASON_PLACEHOLDER, billingAudit, reasonStmt } from '../audit-reason';
 import { frozenForOffboarding } from '../ops/offboarded';
 import { DRAIN_PAGE, drainKeyset, type PassOpts } from './drain';
-import { triggerAutoConfirm } from './instapay-auto';
+import { getDuplicateIndex, releaseClaimsOf, triggerAutoConfirm } from './instapay-auto';
+import { normalizeReferenceKey } from '../../../foundation/instapay-dedupe';
 
 export type { InstapayPayee };
 export const INSTAPAY_TTL_MS = 48 * 3_600_000;
@@ -277,7 +278,7 @@ async function audit(env: Env, a: { at: number; actor: string; action: string; w
 
 export type DecideResult =
   | { ok: true; request: OperatorInstapayDto; needsSecond?: true }
-  | { ok: false; reason: 'not_found' | 'not_reviewable' | 'self_approval_refused' | 'second_approver_required' | 'amount_mismatch' | 'held' | 'duplicate_reference' | 'bad_reference' | 'releaser_cannot_approve' | 'bank_reference_required' | 'reference_mismatch' | 'reason_required' };
+  | { ok: false; reason: 'duplicate_check_unavailable' | 'not_found' | 'not_reviewable' | 'self_approval_refused' | 'second_approver_required' | 'amount_mismatch' | 'held' | 'duplicate_reference' | 'bad_reference' | 'releaser_cannot_approve' | 'bank_reference_required' | 'reference_mismatch' | 'reason_required' };
 
 /** Grants what the request paid for, through the card payment's own paths. Idempotent: the reference decides, so a retry changes nothing. */
 export async function grant(env: Env, r: Row, now: number): Promise<void> {
@@ -375,6 +376,21 @@ export async function confirmInstapay(env: Env, a: { id: string; actor: string; 
     }
     if (r.first_approver === a.actor) return { ok: false, reason: 'second_approver_required' };
   }
+  // I1: a person's confirmation claims the platform-global duplicate index too (shared with the Store), so a receipt a person confirmed here can never be confirmed
+  // again in either product. A receipt the index already holds for another payment is HELD (a person compares the transfers), never confirmed. The bank reference is
+  // the key when it is all digits (InstaPay references are); a reference with letters cannot be a key and is guarded by the bank_ref unique index alone. No index
+  // bound = today's behaviour (the per-product checks above); an index that fails = refuse (a person retries), never confirm unchecked.
+  const refKey = ref ? normalizeReferenceKey(ref) : null;
+  const index = getDuplicateIndex(env);
+  if (index && refKey && r.proof_sha256) {
+    let hit: string;
+    try {
+      hit = await index.claim({ referenceKey: refKey, imageSha256: r.proof_sha256, product: 'chat', ownerId: r.workspace_id, paymentId: r.id });
+    } catch {
+      return { ok: false, reason: 'duplicate_check_unavailable' };
+    }
+    if (hit === 'duplicate_reference' || hit === 'duplicate_image') return holdForReference(env, r, 'dedupe-index', now);
+  }
   let claim: D1Result;
   try {
     claim = await env.DB.prepare(CONFIRM_CLAIM_SQL).bind(r.id, a.actor, now, ref, noRefReason !== null ? 1 : 0, r.workspace_id, r.amount_minor, now - NO_REF_WINDOW_MS).run();
@@ -462,6 +478,7 @@ export async function rejectInstapay(env: Env, a: { id: string; actor: string; r
     env.DB.prepare("UPDATE topups SET state = 'failed' WHERE order_id = ? AND provider = 'instapay' AND state = 'pending'").bind(r.id),
   ]);
   await audit(env, { at: now, actor: a.actor, action: 'instapay_rejected', workspaceId: r.workspace_id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor }, reason: a.reason });
+  await releaseClaimsOf(env, r); // M7: a rejected payment no longer holds its receipt in the shared duplicate index (a burned one stays burned)
   return { ok: true, request: opDto((await get(env, r.id))!) };
 }
 

@@ -51,14 +51,14 @@ describe('C4: trigger and sweep', () => {
     const now = Date.now();
     await env.DB.prepare('UPDATE instapay_requests SET proof_at = ? WHERE id IN (?, ?)').bind(now - 11 * 60_000, stale.id, decided.id).run();
     const e = aiEnv((n) => goodAnswer(20_000, { reference: `55000000000${n}` }));
-    expect(await sweepAutoConfirm(e, now)).toEqual({ decided: 1 });
+    expect(await sweepAutoConfirm(e, now)).toEqual({ decided: 1, completed: 0 });
     expect((await reqRow(stale.id))!.state).toBe('confirmed');
     expect(await autoRow(fresh.id)).toBeNull();
     expect((await autoRow(decided.id))!.state).toBe('needs_human');
-    expect(await sweepAutoConfirm(e, now)).toEqual({ decided: 0 });
+    expect(await sweepAutoConfirm(e, now)).toEqual({ decided: 0, completed: 0 });
     expect(aiCalls(e)).toBe(1);
     // off: the sweep does nothing at all
     await setMode('off');
-    expect(await sweepAutoConfirm(e, now + 3_600_000)).toEqual({ decided: 0 });
+    expect(await sweepAutoConfirm(e, now + 3_600_000)).toEqual({ decided: 0, completed: 0 });
   });
 });
