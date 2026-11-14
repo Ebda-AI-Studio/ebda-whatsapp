@@ -29,19 +29,26 @@ export type ChatItem =
   | { id: string; role: 'merchant'; text: string }
   | { id: string; role: 'assistant'; segments: AssistantSegment[]; turnId?: string; status?: AssistantTurnResponse['status'] };
 
-const KEY = (storeId: string) => `assistant.conversation.${storeId}`;
-/** The conversation id survives a reload (per store, per browser tab session); storage can throw (private window), then it is simply a new one. */
-export function conversationIdFor(storeId: string): string {
+const PREFIX = 'assistant.conversation.';
+const KEY = (storeId: string, userId: string) => `${PREFIX}${storeId}.${userId}`;
+/** The conversation id survives a reload, per STORE AND PERSON (a shared shop computer: the next person to sign in never inherits it); storage can throw (private window), then it is simply a new one. */
+export function conversationIdFor(storeId: string, userId: string): string {
   try {
-    const have = sessionStorage.getItem(KEY(storeId));
+    const have = sessionStorage.getItem(KEY(storeId, userId));
     if (have) return have;
     const fresh = crypto.randomUUID();
-    sessionStorage.setItem(KEY(storeId), fresh);
+    sessionStorage.setItem(KEY(storeId, userId), fresh);
     return fresh;
   } catch {
     return crypto.randomUUID();
   }
 }
-export function forgetConversation(storeId: string): void {
-  try { sessionStorage.removeItem(KEY(storeId)); } catch { /* nothing to forget */ }
+export function forgetConversation(storeId: string, userId: string): void {
+  try { sessionStorage.removeItem(KEY(storeId, userId)); } catch { /* nothing to forget */ }
+}
+/** Sign-out: every conversation id of this browser tab goes, whoever it belonged to. */
+export function clearAssistantConversations(): void {
+  try {
+    for (const k of Object.keys(sessionStorage)) if (k.startsWith(PREFIX)) sessionStorage.removeItem(k);
+  } catch { /* storage unavailable: nothing was kept */ }
 }

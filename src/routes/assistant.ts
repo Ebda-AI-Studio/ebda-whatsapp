@@ -34,6 +34,8 @@ export function configureAssistant(o: { ai?: AiBinding; help?: HelpDeps }): type
   override = o;
   return previous;
 }
+/** `<user>:<client id>`: one history per (store, user, conversation). Turns of another member under the same client id are simply a different conversation. */
+const ownConversation = (userId: string, conversationId: string): string => `${userId}:${conversationId}`;
 export const ASSISTANT_CAPABILITY = 'assistant.ebda-assistant';
 
 /** Assistant routes. `api` is the app these routes are mounted on: a tool calls one of ITS routes in-process with the merchant's own Authorization header (SL-CHAT-1). */
@@ -64,7 +66,9 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
       c.executionCtx.waitUntil(ensureHelpIndex(helpDeps(c.env), CORPUS).catch((e) => { indexKicked = false; alert('assistant_help_index_failed', { error: e instanceof Error ? e.name : 'unknown' }); }));
     }
     release ??= computeReleaseId({ systemPrompt: buildSystemPrompt('ar'), tools: adapter.tools(), models: adapter.models, budget: BUDGET });
-    const ctx: TurnCtx = { product: 'chat', storeId, userId: c.get('principal').userId, role: c.get('storeRole'), locale: body.data.locale, now: Date.now(), conversationId: body.data.conversationId, releaseId: await release };
+    // The history key carries the CALLER: the engine loads turns by conversation id alone, so a client-chosen id can never open (or plant text in) another member's history.
+    const userId = c.get('principal').userId;
+    const ctx: TurnCtx = { product: 'chat', storeId, userId, role: c.get('storeRole'), locale: body.data.locale, now: Date.now(), conversationId: ownConversation(userId, body.data.conversationId), releaseId: await release };
     const res = await runTurn(adapter, ctx, { text: body.data.text });
     return c.json({ status: res.status, segments: res.segments, previews: res.previews, turnId: res.turnId });
   });
@@ -76,7 +80,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     const ws = await workspaceStub(c);
     if (!ws) return apiError(c, 404, 'not_found');
     const me = c.get('principal').userId;
-    const turns = (await ws.smartLayer('loadTurns', [c.req.param('storeId'), id.data, 40])) as Array<{ id: string; userId: string; role: string; maskedText: string; at: number }>;
+    const turns = (await ws.smartLayer('loadTurns', [c.req.param('storeId'), ownConversation(me, id.data), 40])) as Array<{ id: string; userId: string; role: string; maskedText: string; at: number }>;
     return c.json({ items: turns.filter((t) => t.userId === me).map((t) => ({ id: t.id, role: t.role, text: t.maskedText, at: t.at })) });
   });
 
@@ -85,7 +89,15 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     if (!body.success) return apiError(c, 400, 'invalid_request');
     const ws = await workspaceStub(c);
     if (!ws) return apiError(c, 404, 'not_found');
-    await ws.smartLayer('appendAudit', [{ id: crypto.randomUUID(), storeId: c.req.param('storeId'), userId: c.get('principal').userId, turnId: body.data.turnId, at: Date.now(), releaseId: 'feedback', maskedPrompt: '', maskedOutput: '', rails: { thumb: body.data.thumb }, toolsOffered: [], toolCalls: [], outcome: 'answered', inputTokens: 0, outputTokens: 0, model: 'none' }]);
+    const storeId = c.req.param('storeId')!;
+    const userId = c.get('principal').userId;
+    // A person rates a handful of answers a minute; more is a script filling the journal for 90 days.
+    if (((await ws.smartLayer('bump', [`fbrate:${storeId}:${userId}`, 60_000, Date.now()])) as number) > 30) return apiError(c, 429, 'rate_limited');
+    // Only an answer THIS person received, once: another member's turn id or an invented one is a plain 404.
+    const st = (await ws.smartLayer('turnState', [storeId, userId, body.data.turnId])) as { own: boolean; rated: boolean };
+    if (!st.own) return apiError(c, 404, 'not_found');
+    if (st.rated) return c.json({ ok: true });
+    await ws.smartLayer('appendAudit', [{ id: crypto.randomUUID(), storeId, userId, turnId: body.data.turnId, at: Date.now(), releaseId: 'feedback', maskedPrompt: '', maskedOutput: '', rails: { thumb: body.data.thumb }, toolsOffered: [], toolCalls: [], outcome: 'answered', inputTokens: 0, outputTokens: 0, model: 'none' }]);
     return c.json({ ok: true });
   });
 

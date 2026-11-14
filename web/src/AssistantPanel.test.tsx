@@ -16,7 +16,7 @@ const fakeApi = (over: Partial<AssistantApi> = {}): AssistantApi & { turn: Retur
   turn: vi.fn(async () => reply()), conversation: vi.fn(async () => []), feedback: vi.fn(async () => undefined), ...over,
 }) as never;
 const mount = (api: AssistantApi, extra: { onNavigate?: (v: string) => void; onClose?: () => void; onUnavailable?: () => void } = {}) =>
-  render(<AssistantPanel t={t} lang="ar" storeId="s1" api={api} onNavigate={(extra.onNavigate ?? (() => undefined)) as never} onClose={extra.onClose ?? (() => undefined)} onUnavailable={extra.onUnavailable ?? (() => undefined)} />);
+  render(<AssistantPanel t={t} lang="ar" storeId="s1" userId="u1" api={api} onNavigate={(extra.onNavigate ?? (() => undefined)) as never} onClose={extra.onClose ?? (() => undefined)} onUnavailable={extra.onUnavailable ?? (() => undefined)} />);
 const ask = async (text = 'ازاي أشحن المحفظة؟') => {
   fireEvent.change(screen.getByLabelText(t.assistantPlaceholder), { target: { value: text } });
   fireEvent.click(screen.getByRole('button', { name: t.assistantSend }));
@@ -158,5 +158,20 @@ describe('assistant in the app shell', () => {
     fireEvent.keyDown(window, { key: 'j', metaKey: true });
     expect(await screen.findByTestId('assistant-panel')).toBeTruthy();
     expect(within(screen.getByTestId('assistant-panel')).getByRole('heading', { name: t.assistantTitle })).toBeTruthy();
+  });
+});
+
+describe('conversation id belongs to the person (review of PR 85)', () => {
+  it('is kept per store AND user, and sign-out clears every one', async () => {
+    const { conversationIdFor, clearAssistantConversations } = await import('./data/assistant');
+    const owner = conversationIdFor('s1', 'owner');
+    const staff = conversationIdFor('s1', 'staff');
+    expect(owner).not.toBe(staff);
+    expect(conversationIdFor('s1', 'owner')).toBe(owner);
+    const { makeSignOut } = await import('./signout');
+    makeSignOut({ stopRealtime: () => undefined, session: { signOut: async () => 'local' }, onLocal: () => undefined })();
+    expect(Object.keys(sessionStorage).filter((k) => k.startsWith('assistant.conversation.'))).toEqual([]);
+    expect(conversationIdFor('s1', 'staff')).not.toBe(staff);
+    clearAssistantConversations();
   });
 });

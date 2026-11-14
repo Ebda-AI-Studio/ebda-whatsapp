@@ -33,14 +33,14 @@ function Segments({ t, segments, onNavigate }: { t: Strings; segments: Assistant
  * The side panel (answer-only). Opens from the rail or Ctrl/Cmd + J, closes with Esc, keeps focus inside while open and gives it back on close.
  * It shows what the server says and nothing more: every limit, refusal and "not covered" arrives as words from the server in the asked language.
  */
-export function AssistantPanel({ t, lang, storeId, api, onNavigate, onClose, onUnavailable }: { t: Strings; lang: Lang; storeId: string; api: AssistantApi; onNavigate: (v: View) => void; onClose: () => void; onUnavailable: () => void }) {
+export function AssistantPanel({ t, lang, storeId, userId, api, onNavigate, onClose, onUnavailable }: { t: Strings; lang: Lang; storeId: string; userId: string; api: AssistantApi; onNavigate: (v: View) => void; onClose: () => void; onUnavailable: () => void }) {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [off, setOff] = useState(false);
   const [rated, setRated] = useState<Record<string, 'up' | 'down'>>({});
-  const conv = useRef(conversationIdFor(storeId));
+  const conv = useRef(conversationIdFor(storeId, userId));
   const panel = useRef<HTMLElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
@@ -105,7 +105,7 @@ export function AssistantPanel({ t, lang, storeId, api, onNavigate, onClose, onU
     <section ref={panel} id="assistant-panel" className="assistant" role="dialog" aria-modal="false" aria-labelledby="assistant-title" data-testid="assistant-panel">
       <header className="as-head">
         <h2 id="assistant-title">{t.assistantTitle}</h2>
-        {items.length > 0 && <button type="button" className="btn ghost as-new" onClick={() => { forgetConversation(storeId); conv.current = conversationIdFor(storeId); setItems([]); setFailed(null); }}>{t.assistantNew}</button>}
+        {items.length > 0 && <button type="button" className="btn ghost as-new" onClick={() => { forgetConversation(storeId, userId); conv.current = conversationIdFor(storeId, userId); setItems([]); setFailed(null); }}>{t.assistantNew}</button>}
         <button type="button" className="as-close" aria-label={t.assistantClose} onClick={onClose}><X size={20} aria-hidden /></button>
       </header>
 

@@ -90,7 +90,7 @@ it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / IN
   const sets = { P0: setOf('P0_ALERTS'), P1: setOf('P1_ALERTS'), INFO: setOf('INFO_ALERTS') };
   expect(sets.P0.size).toBeGreaterThan(5);
   expect(sets.P1.size).toBeGreaterThan(40);
-  expect(sets.INFO.size).toBe(31); // + assistant_handoff, assistant_help_index_failed (Smart Layer assistant) + instapay_auto_error (InstaPay auto-confirm: the request waits for a person); 20 + starter_templates_failed (template self-service: the screen retries) + catalog_items_rejected (WhatsApp catalogue) + P1b: seats_over_limit + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
+  expect(sets.INFO.size).toBe(32); // + assistant_handoff, assistant_help_index_failed, assistant_status_failed (Smart Layer assistant) + instapay_auto_error (InstaPay auto-confirm: the request waits for a person); 20 + starter_templates_failed (template self-service: the screen retries) + catalog_items_rejected (WhatsApp catalogue) + P1b: seats_over_limit + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
   const used = new Set<string>();
   for (const hit of findMatches(/\balert\(/, 'src')) {
     const [file, line] = hit.split(':') as [string, string];
