@@ -198,11 +198,12 @@ export function toWaId(raw: string): string | null {
 }
 
 function CustomerTools({ t, api, owner, contact, onRenamed, onMerged }: { t: Strings; api: ContactsApi; owner: boolean; contact: ContactDto | null; onRenamed: (name: string) => void; onMerged: () => void }) {
+  const [eraseTyped, setEraseTyped] = useState('');
   const [name, setName] = useState('');
   const [into, setInto] = useState('');
   const [msg, setMsg] = useState<{ kind: 'ok' | 'alert'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setName(contact?.name ?? ''); setInto(''); }, [contact?.waId, contact?.name]);
+  useEffect(() => { setName(contact?.name ?? ''); setInto(''); setEraseTyped(''); }, [contact?.waId, contact?.name]);
   useEffect(() => { if (contact) setMsg(null); }, [contact?.waId]); // a message about the last action stays until another customer is picked
   const run = async (fn: () => Promise<void>, ok: string) => {
     setBusy(true); setMsg(null);
@@ -237,6 +238,12 @@ function CustomerTools({ t, api, owner, contact, onRenamed, onMerged }: { t: Str
               <label className="field"><span>{t.cdMergeInto}</span><input dir="ltr" inputMode="tel" value={into} onChange={(e) => setInto(e.target.value)} /></label>
               <div className="settings-actions">
                 <button type="button" className="btn danger" disabled={busy || !target || target === contact.waId} onClick={() => void run(async () => { await api.mergeContacts(contact.waId, target!); onMerged(); }, t.cdMerged)}>{t.cdMergeGo}</button>
+              </div>
+              <h3 className="pane-sub">{t.cdEraseTitle}</h3>
+              <p className="muted small">{t.cdEraseWarn}</p>
+              <label className="field"><span>{t.cdEraseConfirm}</span><input dir="ltr" inputMode="numeric" value={eraseTyped} onChange={(e) => setEraseTyped(e.target.value.trim())} /></label>
+              <div className="settings-actions">
+                <button type="button" className="btn danger" disabled={busy || eraseTyped !== contact.waId.slice(-4)} onClick={() => void run(async () => { await api.eraseContact(contact.waId); onMerged(); }, t.cdErased)}>{t.cdEraseGo}</button>
               </div>
             </>
           )}

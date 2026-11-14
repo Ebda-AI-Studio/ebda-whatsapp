@@ -220,6 +220,7 @@ export function createApiSource(o: Opts): LiveSource {
         }
         return { ...out, messages, nextAfter: null };
       },
+      eraseContact: async (waId) => { await call(`/contacts/${encodeURIComponent(waId)}`, z.unknown(), { method: 'DELETE' }); },
       mergeContacts: async (fromWaId, intoWaId) => { await call('/contacts/merge', z.unknown(), post({ fromWaId, intoWaId })); },
       retention: () => call('/retention', retentionDto),
       setRetention: (days) => call('/retention', retentionDto, { method: 'PUT', body: JSON.stringify({ days }) }),
