@@ -7,7 +7,7 @@ Content for help.ebda.app (plan task 8.5). One file per topic, same slug in `ar/
 | 01 | verify-your-business-on-meta | Meta Business Verification in Egypt (commercial register + tax card) |
 | 02 | connect-your-own-number | Embedded Signup, own number, display name, Meta bills your card (WA-FUND-1) |
 | 03 | use-the-shared-number | Shared number add-on, "on behalf of your store", wallet, free-reply true-up (WA-SHARED-1, WA-SHARED-FREE-1) |
-| 04 | templates-and-the-24-hour-window | Templates and the 24 h window |
+| 04 | templates-and-the-24-hour-window | The 24 h window, the Templates screen (starter set on connect, create and submit, edit, delete), Meta's limits, shared-number stores (matches the real screen, 2026-11-14) |
 | 05 | cod-confirmations | COD confirmations |
 | 06 | instapay-orders-in-whatsapp | InstaPay orders (PAY-INSTAPAY-1) |
 | 07 | ai-agent | AI agent, handoff, AI credits |

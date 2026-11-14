@@ -95,7 +95,7 @@ export function TemplateEditor({ t, lang, api, mode, template, existing, onSaved
   const auth = d.category === 'AUTHENTICATION';
   const lockedCategory = mode === 'edit' && template?.status === 'APPROVED';
 
-  // Instant feedback from the same rules the server enforces; the server `check` stays the gate.
+  // Instant feedback from the same rules the server applies; the server `check` stays the gate.
   const others = useMemo(() => toExisting(existing), [existing]);
   const issues = useMemo(() => {
     const local = checkTemplate(d, others);
