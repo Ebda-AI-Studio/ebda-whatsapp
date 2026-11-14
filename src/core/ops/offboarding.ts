@@ -261,7 +261,7 @@ export async function cancelOffboarding(env: Env, a: { workspaceId: string; acto
 
 /**
  * Work in flight that a deletion must not cut off. Null = clear to go. Money is held on ANY open row however old (a late confirmation would otherwise credit a
- * deleted workspace, review item 2): an open refund, a card refund, a top-up or package order still pending, a paid-but-ungranted order, an InstaPay request
+ * deleted workspace, review item 2): an open refund, a card refund, a pending yearly-refund request, a top-up, credit-pack or package order still pending, a paid-but-ungranted order, an InstaPay request
  * awaiting proof or review (or confirmed and not granted).
  */
 async function moneyHold(env: Env, ws: string): Promise<string | null> {
@@ -270,6 +270,8 @@ async function moneyHold(env: Env, ws: string): Promise<string | null> {
   if (await q("SELECT 1 FROM card_refunds WHERE workspace_id = ? AND state IN ('planned', 'sending', 'calling', 'pending', 'uncertain', 'held')", ws)) return 'open_card_refund';
   if (await q("SELECT 1 FROM topups WHERE workspace_id = ? AND state = 'pending'", ws)) return 'payment_in_flight';
   if (await q("SELECT 1 FROM package_orders WHERE workspace_id = ? AND (status = 'pending' OR (status = 'paid' AND granted_at IS NULL))", ws)) return 'payment_in_flight';
+  if (await q("SELECT 1 FROM credit_orders WHERE workspace_id = ? AND state = 'pending'", ws)) return 'payment_in_flight'; // an AI-credit card purchase still waiting for its payment
+  if (await q("SELECT 1 FROM yearly_refund_requests WHERE workspace_id = ? AND state = 'pending'", ws)) return 'open_yearly_refund_request'; // the merchant asked to cancel a yearly package and be refunded: a person must run it first
   if (await q("SELECT 1 FROM instapay_requests WHERE workspace_id = ? AND (state IN ('awaiting_proof', 'under_review') OR (state = 'confirmed' AND granted_at IS NULL))", ws)) return 'payment_in_flight';
   return null;
 }

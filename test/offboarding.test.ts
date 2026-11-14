@@ -373,6 +373,22 @@ describe('the deletion itself', () => {
     expect(await d1('SELECT state FROM offboarding WHERE workspace_id = ?', ws)).toEqual([{ state: 'done' }]);
   });
 
+  it.each([
+    ['a pending yearly refund request', 'open_yearly_refund_request', (ws: string) => env.DB.prepare("INSERT INTO yearly_refund_requests (id, workspace_id, order_id, unused_months, gross_minor, debt_settled_minor, refund_minor, state, requested_by, created_at) VALUES (?, ?, 'o1', 3, 300, 0, 300, 'pending', 'u', 1)").bind(`yr-hold-${ws}`, ws).run(), (ws: string) => env.DB.prepare("UPDATE yearly_refund_requests SET state = 'executed' WHERE id = ?").bind(`yr-hold-${ws}`).run()],
+    ['a pending credit-pack order', 'payment_in_flight', (ws: string) => env.DB.prepare("INSERT INTO credit_orders (order_id, workspace_id, credits, amount_minor, state, created_by, created_at) VALUES (?, ?, 100, 23000, 'pending', 'u', 1)").bind(`cp_hold_${ws}`, ws).run(), (ws: string) => env.DB.prepare("UPDATE credit_orders SET state = 'failed' WHERE order_id = ?").bind(`cp_hold_${ws}`).run()],
+  ])('holds the deletion (touches nothing) for %s, and says why; it goes ahead once that is settled', async (_n, reason, open, settle) => {
+    const ws = W(reason === 'payment_in_flight' ? 2014 : 2015);
+    await populate(ws);
+    await open(ws);
+    await operatorCall(OP1, 'POST', `/workspaces/${ws}/offboarding`, { reason: REASON, immediate: true });
+    expect((await runDueOffboardings(env, Date.now() + 1000)).held).toBeGreaterThanOrEqual(1);
+    expect((await d1<{ last_error: string; steps_done: string }>('SELECT last_error, steps_done FROM offboarding WHERE workspace_id = ?', ws))[0]).toMatchObject({ last_error: `held:${reason}`, steps_done: '' });
+    expect((await env.MEDIA.list({ prefix: `media/${ws}/` })).objects).toHaveLength(1);
+    await settle(ws);
+    await runDueOffboardings(env, Date.now() + 2000);
+    expect(await d1('SELECT state FROM offboarding WHERE workspace_id = ?', ws)).toEqual([{ state: 'done' }]);
+  });
+
   it('after the numbers are unrouted a late webhook finds no workspace', async () => {
     const ws = W(2013);
     const pn = await populate(ws);
@@ -390,7 +406,7 @@ describe('money surfaces at deletion (A9, A21, A22)', () => {
     await own(ws, pn);
     await env.DB.batch([
       env.DB.prepare("INSERT INTO credit_orders (order_id, workspace_id, credits, amount_minor, state, created_by, created_at, transaction_id, paid_at) VALUES (?, ?, 100, 23000, 'paid', 'user-merchant', 1, 'TX-1', 2)").bind(`cp_${ws}`, ws),
-      env.DB.prepare("INSERT INTO yearly_refund_requests (id, workspace_id, order_id, unused_months, gross_minor, debt_settled_minor, refund_minor, state, requested_by, created_at) VALUES (?, ?, 'o1', 3, 300, 0, 300, 'pending', 'user-merchant', 1)").bind(`yr-${ws}`, ws),
+      env.DB.prepare("INSERT INTO yearly_refund_requests (id, workspace_id, order_id, unused_months, gross_minor, debt_settled_minor, refund_minor, state, requested_by, created_at) VALUES (?, ?, 'o1', 3, 300, 0, 300, 'executed', 'user-merchant', 1)").bind(`yr-${ws}`, ws),
       env.DB.prepare("INSERT INTO money_confirmations (id, workspace_id, user_id, action, payload_hash, token_hash, expires_at, created_at) VALUES (?, ?, 'user-merchant', 'credit_pack', 'h', 't', 9, 1)").bind(`mc-${ws}`, ws),
     ]);
     await ownerCall(ws, 'POST', { confirm: true });
