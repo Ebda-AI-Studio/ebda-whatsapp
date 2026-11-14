@@ -34,6 +34,7 @@ import { mediaRoutes } from './routes/media';
 import { realtimeRoutes } from './routes/ws';
 import { templatesRoutes } from './routes/templates';
 import { assistantRoutes } from './routes/assistant';
+import { assistantEnabled } from './core/smart-layer/controls';
 import { registerStarterSet } from './core/starter-templates';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
@@ -166,9 +167,9 @@ api.use('/operator/*', requireSuperAdmin(getVerifier));
 api.use('*', auditWrites()); // every state-changing call: who, what, which ids (src/core/audit.ts)
 api.use('*', apiContentTypes()); // after auth: 401/403 first, then 415 for a body type the route class does not take
 api.route('/operator', operatorRoutes);
-api.get('/stores/:storeId/me', (c) => {
+api.get('/stores/:storeId/me', async (c) => {
   const p = c.get('principal');
-  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env) } });
+  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env), assistant: await assistantEnabled(c.env, c.req.param('storeId')!) } });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   // The member's own right to erase (STORE-ROUTES-OWNER-1): the owner, or a super admin who is a MEMBER of the store (requireStoreAccess already refused a non-member's write; that operator uses the operator route, which needs a stated reason).

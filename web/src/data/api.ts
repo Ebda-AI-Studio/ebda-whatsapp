@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  agentSettingsDto, apiError, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
@@ -183,6 +183,11 @@ export function createApiSource(o: Opts): LiveSource {
         leave: () => call('/shared-number/leave', sharedNumberDto, post({})),
       },
     },
+    assistant: {
+      turn: (body) => call('/assistant/turn', assistantTurnResponse, post(body)),
+      conversation: async (id) => (await call(`/assistant/conversations/${encodeURIComponent(id)}`, assistantConversationResponse)).items,
+      feedback: async (turnId, thumb) => { await call('/assistant/feedback', z.object({ ok: z.boolean() }).loose(), post({ turnId, thumb })); },
+    },
     team: {
       list: () => call('/members', listMembersResponse),
       assign: async (userId) => { await call(`/members/${encodeURIComponent(userId)}/seat`, seatResponse, { method: 'PUT' }); },
@@ -337,7 +342,7 @@ export function createApiSource(o: Opts): LiveSource {
     async loadCapabilities() {
       try {
         const me = await call('/me', meResponse.partial().loose());
-        source.capabilities = { codOutcome: me.capabilities?.codOutcome === true, numbers: me.capabilities?.numbers === true };
+        source.capabilities = { codOutcome: me.capabilities?.codOutcome === true, numbers: me.capabilities?.numbers === true, assistant: me.capabilities?.assistant === true };
         if (me.role) source.role = me.role;
       } catch (e) {
         source.capabilities = { codOutcome: false };
