@@ -24,7 +24,6 @@
     "policy-irreversible|numbers.removed-app-notice",
     "policy-irreversible|numbers.tier-limit",
     "policy-irreversible|segments.preview",
-    "policy-must-confirm|campaigns.create",
-    "policy-must-confirm|segments.manage"
+    "policy-must-confirm|campaigns.create"
   ]
 }
