@@ -280,6 +280,7 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   trusted.addText(persona, settings.faqText, facts ?? '', ...knowledge);
   for (const p of profilePrices(profile)) trusted.prices.add(p);
   trusted.setPolicy(promisePolicyOf(settings));
+  if (policies) trusted.setDeclared({ freeOver: [...policies.shipping.zones, ...policies.shipping.governorates].flatMap((z) => (z.freeOverMinor !== null ? [z.freeOverMinor / 100] : [])), returnDays: policies.returns.windowDays });
   const prompt = (p: string, k: string[], rich: boolean) => `${copy.systemPrompt({ persona: p, language: settings.language, tone: settings.tone, storeName: policies?.name ?? null, knowledge: k, tools: tools.map((t) => t.name), facts: rich ? facts : null, customer: rich ? customer : null, faq: rich ? faq : null })}\n\n${BOUNDARY}`;
   const system = prompt(persona, knowledge, true);
   // What a reply must never recite: the rules, without the merchant's own persona, knowledge and facts (those may be quoted).

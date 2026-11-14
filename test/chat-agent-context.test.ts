@@ -67,6 +67,17 @@ describe('store facts reach the prompt and the guard (D1, D5)', () => {
     expect(await outcome(ws)).toBe('handoff:guarded');
   });
 
+  it('a declared free-shipping threshold and return window can be stated (no promise flag needed); a money-back promise cannot (review I4)', async () => {
+    for (const [n, reply, ok] of [[85, 'الشحن مجاني فوق 1000 جنيه', true], [86, 'ينفع استرجاع خلال 14 يوم', true], [87, 'الشحن مجاني', false], [88, 'هرجعلك فلوسك خلال 14 يوم', false]] as const) {
+      const ws = W(n);
+      const pn = await agentWs(ws);
+      model([{ text: reply }]);
+      const out = await say(ws, pn, text('الشحن والاسترجاع ازاي؟'), stubGraph());
+      expect(out.map((s) => s.text)).toEqual(ok ? [reply] : [EBDA_AGENT_COPY.t.handoffAck.ar]);
+      expect(await outcome(ws)).toBe(ok ? 'reply' : 'handoff:guarded');
+    }
+  });
+
   it('undeclared return window and hours are marked, not defaulted', async () => {
     const ws = W(5);
     const pn = await agentWs(ws);
