@@ -28,6 +28,8 @@ import { maskForModel } from './mask';
 import { guardReply, Trusted } from './reply-guard';
 import { transcribeVoiceNote } from './transcribe';
 import { botMaySpeak } from './gates';
+import { cardJob, type BuiltCard, type CardSpec } from '../store-link/product-cards';
+import { storeLink } from '../store-link';
 
 export const AGENT_MAX_TOKENS = 450;
 /** One credit buys at most this many model calls: up to MAX_TOOL_ROUNDS rounds that use tools, then the last call that must answer (M-084). */
@@ -88,13 +90,45 @@ function storeReplies(host: LinkHost, input: BotInput, texts: { key: string; tex
   }
 }
 
+const cardsKey = (input: BotInput) => `cards:${input.messageId}`;
+const CARD_KEY = (input: BotInput, i: number) => `${keyPrefix(input)}card:${i}`;
+
+/** Stores the catalogue messages of this turn as outbound rows (the preview is what the inbox shows) and keeps their specs (no addressee) until they are delivered. Call inside a transaction. */
+function storeCards(host: LinkHost, input: BotInput, cards: BuiltCard[], now: number): void {
+  if (!cards.length) return;
+  const { conversationId } = host.ensureConversation(input.from, now);
+  cards.forEach((c, i) => {
+    const key = CARD_KEY(input, i);
+    if (host.sql.exec('SELECT 1 FROM messages WHERE idempotency_key = ?', key).toArray().length) return;
+    host.insertOutbound(conversationId, { type: 'interactive', preview: c.preview, body: c.preview, key, author: 'agent' }, now);
+  });
+  putAgentState(host.sql, cardsKey(input), JSON.stringify(cards.map((c) => c.spec)));
+}
+
+/** Hands the stored catalogue messages to the send pipeline, in order (a replay re-delivers; an already claimed message is skipped there). */
+async function deliverCards(host: LinkHost, input: BotInput): Promise<void> {
+  const raw = getAgentState(host.sql, cardsKey(input));
+  if (!raw) return;
+  let specs: CardSpec[];
+  try {
+    specs = JSON.parse(raw) as CardSpec[];
+  } catch {
+    return;
+  }
+  for (let i = 0; i < specs.length; i++) {
+    if (host.sendGapMs > 0) await sleep(host.sendGapMs);
+    await host.deliver(cardJob({ workspaceId: host.workspaceId, phoneNumberId: input.phoneNumberId, to: input.from, idempotencyKey: CARD_KEY(input, i) }, specs[i]!));
+  }
+  host.sql.exec('DELETE FROM agent_state WHERE key = ?', cardsKey(input));
+}
+
 function recordTurn(host: LinkHost, input: BotInput, outcome: string, now: number): void {
   host.sql.exec('INSERT OR IGNORE INTO agent_turns (message_id, outcome, at) VALUES (?, ?, ?)', input.messageId, outcome, now);
 }
 
 /** Hands every stored reply of this turn to the send pipeline, in order. Idempotent: a message already claimed is skipped there. */
 async function deliverStored(host: LinkHost, input: BotInput): Promise<void> {
-  const rows = host.sql.exec<{ idempotency_key: string; body: string | null }>('SELECT idempotency_key, body FROM messages WHERE idempotency_key LIKE ? ORDER BY id', `${keyPrefix(input)}%`).toArray();
+  const rows = host.sql.exec<{ idempotency_key: string; body: string | null }>('SELECT idempotency_key, body FROM messages WHERE idempotency_key LIKE ? AND idempotency_key NOT LIKE ? ORDER BY id', `${keyPrefix(input)}%`, `${keyPrefix(input)}card:%`).toArray();
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i]!;
     if (!r.body) continue;
@@ -180,7 +214,7 @@ export function cleanReply(raw: string | undefined): string | null {
   return Array.from(t).length > REPLY_MAX_CHARS ? `${Array.from(t).slice(0, REPLY_MAX_CHARS - 1).join('')}…` : t;
 }
 
-type Outcome = { kind: 'reply'; text: string } | { kind: 'handoff'; reason: HandoffReason } | { kind: 'order' };
+type Outcome = { kind: 'reply'; text: string; cards: BuiltCard[] } | { kind: 'handoff'; reason: HandoffReason } | { kind: 'order' };
 
 /** `turn` is filled with the system prompt and with every text the merchant (or the Store) vouches for in this turn: the reply guard checks the answer against it. */
 async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, settings: AgentSettings, locale: Locale, now: number, knowledge: string[], turn: { trusted: Trusted; system: string }): Promise<Outcome> {
@@ -200,7 +234,7 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   const system = prompt(persona, knowledge);
   // What a reply must never recite: the rules, without the merchant's own persona and knowledge (those may be quoted).
   turn.system = prompt('', []);
-  const ctx: ToolContext = { host, from: input.from, bridge, availability };
+  const ctx: ToolContext = { host, from: input.from, bridge, availability, locale, cards: [] };
   const messages = historyOf(host, input);
   const started = Date.now();
   // A slow model is announced before it is asked: the recent answer time of this workspace decides.
@@ -219,8 +253,9 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
     if (!calls.length) {
       const elapsed = Date.now() - started;
       putAgentState(host.sql, 'latency_ewma_ms', String(Math.round(recent > 0 ? recent * 0.7 + elapsed * 0.3 : elapsed)));
-      const text = cleanReply(res.text);
-      return text ? { kind: 'reply', text } : { kind: 'handoff', reason: res.text ? 'bad_output' : 'no_answer' };
+      // Cards without words still go out, with the store's own one-line lead-in.
+      const text = cleanReply(res.text) ?? (ctx.cards.length ? (storeLink().copy?.t.cards.listBody[locale] ?? null) : null);
+      return text ? { kind: 'reply', text, cards: ctx.cards } : { kind: 'handoff', reason: res.text ? 'bad_output' : 'no_answer' };
     }
     if (!acked && Date.now() - started >= agentConfig().slowMs) await ack();
     messages.push({ role: 'assistant', content: res.text ?? '', toolCalls: calls });
@@ -260,7 +295,10 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
   const done = host.sql.exec<{ outcome: string }>('SELECT outcome FROM agent_turns WHERE message_id = ?', input.messageId).toArray()[0];
   if (done) {
     if (done.outcome === 'order') await runBotTurnLocked(host, input, now, { restart: true });
-    else await deliverStored(host, input);
+    else {
+      await deliverStored(host, input);
+      await deliverCards(host, input);
+    }
     return;
   }
   if (turnGone(host, input)) return;
@@ -383,10 +421,12 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     host.storage.transactionSync(() => {
       if (turnGone(host, input)) throw new Aborted();
       storeReplies(host, input, [{ key: `${keyPrefix(input)}0`, text: outcome.text }], now);
+      storeCards(host, input, outcome.cards, now);
       recordTurn(host, input, 'reply', now);
       funnelOnce(host, 'first_ai_reply');
     });
     await deliverStored(host, input);
+    await deliverCards(host, input);
   } catch (err) {
     if (!(err instanceof Aborted)) throw err; // a storage or send failure: the scheduler retries the task
   }

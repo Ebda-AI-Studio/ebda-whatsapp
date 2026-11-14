@@ -90,6 +90,9 @@ export const orderStatusSchema = z.object({
 export type OrderStatusInfo = z.infer<typeof orderStatusSchema>;
 export const codOutcomeAckSchema = z.object({ orderNumber: z.string().nullable() });
 
+/** The Store's bridge schema refuses a whole `getProducts` call when one id is longer than this. */
+export const MAX_RETAILER_ID = 64;
+
 export type BridgeFailure = 'not_found' | 'not_linked' | 'out_of_stock' | 'payment_method_disabled' | 'invalid' | 'unavailable';
 export type BridgeResult<T> = { ok: true; value: T } | { ok: false; reason: BridgeFailure; message?: string; outOfStock?: string[]; code?: string };
 

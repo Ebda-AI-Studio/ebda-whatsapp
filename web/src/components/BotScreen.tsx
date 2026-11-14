@@ -31,6 +31,7 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState(false);
+  const [resynced, setResynced] = useState(false);
   const load = useCallback(() => { setCat(undefined); void api.status().then(setCat, () => setCat('error')); }, [api]);
   useEffect(load, [load]);
 
@@ -50,6 +51,33 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
     }
   };
 
+  const resync = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.resync();
+      load();
+      setResynced(true);
+    } catch {
+      setError(t.catErrGeneric);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggle = async (v: { catalogVisible: boolean; cartEnabled: boolean }) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const done = await api.setCommerce(v);
+      setCat((c) => (c && c !== 'error' ? { ...c, commerce: { ...done, failed: null } } : c));
+    } catch (e) {
+      const detail = (e as { detail?: string }).detail;
+      setError(detail === 'missing_permission' ? t.catErrPermission : detail === 'meta_error' ? t.catErrMeta : t.catErrGeneric);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const when = (ms: number) => new Date(ms).toLocaleString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
   return (
     <section className="settings" aria-labelledby="bot-catalog-title">
@@ -61,6 +89,30 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
           <>
             <p dir="auto">{t.catId(cat.catalogId)}</p>
             <p className="muted">{cat.lastSyncAt ? t.catLastSync(when(cat.lastSyncAt)) : t.catNoSync}</p>
+            {cat.error && <p role="alert" className="error-text">{cat.error === 'missing_permission' ? t.catErrPermission : t.catErrSync}</p>}
+            {cat.syncing && <p role="status" className="muted">{t.catSyncing}</p>}
+            {cat.items && <p className="muted">{t.catItems(cat.items.synced, cat.items.excluded + cat.items.rejected)}{cat.pending ? ` ${t.catPending(cat.pending)}` : ''}</p>}
+            {cat.items && cat.items.synced === 0 && !cat.syncing && !cat.error && cat.lastSyncAt !== null && <p className="muted">{t.catEmpty}</p>}
+            {cat.leftOut && cat.leftOut.length > 0 && (
+              <details>
+                <summary>{t.catLeftOutTitle}</summary>
+                <p className="muted">{t.catLeftOutHint}</p>
+                <ul aria-label={t.catLeftOutTitle}>
+                  {cat.leftOut.map((i) => <li key={i.retailerId} dir="auto">{i.retailerId}: {t.catReasons[i.reason] ?? i.reason}</li>)}
+                </ul>
+              </details>
+            )}
+            {cat.commerce && (
+              <fieldset className="field" disabled={readOnly || busy}>
+                <legend>{t.catShopTitle}</legend>
+                <label><input type="checkbox" checked={cat.commerce.catalogVisible} onChange={(e) => void toggle({ catalogVisible: e.target.checked, cartEnabled: cat.commerce!.cartEnabled })} /> {t.catShopButton}</label>
+                <label><input type="checkbox" checked={cat.commerce.cartEnabled} onChange={(e) => void toggle({ catalogVisible: cat.commerce!.catalogVisible, cartEnabled: e.target.checked })} /> {t.catCart}</label>
+                {cat.commerce.failed && <p role="alert" className="error-text">{cat.commerce.failed === 'missing_permission' ? t.catErrPermission : t.catErrMeta}</p>}
+              </fieldset>
+            )}
+            {readOnly
+              ? <p className="notice" role="note">{t.catOwnerOnly}</p>
+              : <div className="settings-actions"><button type="button" className="btn ghost" disabled={busy} onClick={() => void resync()}>{t.catResync}</button></div>}
           </>
         )
         : (
@@ -72,6 +124,7 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
           </>
         ))}
       {busy && <p role="status" className="muted">{t.catCreating}</p>}
+      {resynced && !busy && <p role="status" className="muted">{t.catResynced}</p>}
       {created && !busy && <p role="status" className="muted">{t.catCreated}</p>}
       {error && <p role="alert" className="error-text">{error}</p>}
     </section>

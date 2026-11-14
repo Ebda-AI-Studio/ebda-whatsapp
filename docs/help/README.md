@@ -25,3 +25,4 @@ Content for help.ebda.app (plan task 8.5). One file per topic, same slug in `ar/
 - Copy rules: product name "Ebda Chat", company "Ebda AI Studio"; no infrastructure provider names. Undecided values (package prices, add-on price) are deliberately left to "set by the Ebda AI Studio team".
 - Guide 09 refund text is marked "subject to final terms of service": align it with the terms before launch (legal check pending). Margin is stated as 0% "for now" (WA-MARGIN-1 is operator-editable); update guides 03 and 10 if it changes.
 - No screenshots are included (none of this product's screens are final); add them in the help app once the onboarding UI is audited.
+| 15 | your-products-on-whatsapp | Your Ebda Store products as a shop in WhatsApp: the shop button, product cards from the AI agent, carts that become orders, what is left out and why, one source only (WA-CAT-1..5) |

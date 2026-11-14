@@ -107,7 +107,14 @@ export interface InboxSource {
   botSettings?(): Promise<BotSettingsDto>;
   saveBotSettings?(update: BotSettingsDto): Promise<BotSettingsDto>;
   /** The merchant's Meta catalog. `provision` rejects with an error carrying `detail` = missing_permission | no_business | business_mismatch | catalog_already_set | meta_error. */
-  catalog?: { status(): Promise<CatalogStatusDto>; provision(name?: string): Promise<{ catalogId: string }> };
+  catalog?: {
+    status(): Promise<CatalogStatusDto>;
+    provision(name?: string): Promise<{ catalogId: string }>;
+    /** Starts a fresh full pass of the sync (owner). Rejects with `detail` = catalog_not_set. */
+    resync(): Promise<{ started: boolean }>;
+    /** Turns the shop button and the cart on the number on or off (owner). Rejects with `detail` = missing_permission | catalog_not_set | meta_error. */
+    setCommerce(v: { catalogVisible: boolean; cartEnabled: boolean }): Promise<{ catalogVisible: boolean; cartEnabled: boolean }>;
+  };
   /** Bot results: customers per step over the last 7, 30 or 90 days (Cairo calendar days, today included). Counts only; owner and staff read. */
   botFunnel?(days: 7 | 30 | 90): Promise<BotFunnelDto>;
   /** Assign a conversation (null = unassign). */

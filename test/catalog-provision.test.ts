@@ -182,9 +182,9 @@ describe('catalog provisioning', () => {
     const { ws, api } = await owner(6011);
     graphStub(meta());
     const status = async () => (await api.call('GET', '/store-link/catalog')).json();
-    expect(await status()).toEqual({ catalogId: null, lastSyncAt: null });
+    expect(await status()).toMatchObject({ catalogId: null, lastSyncAt: null });
     expect((await provision(api, { name: 'Shop' })).status).toBe(200);
-    expect(await status()).toEqual({ catalogId: NEW_CAT, lastSyncAt: null });
+    expect(await status()).toMatchObject({ catalogId: NEW_CAT, lastSyncAt: null });
     await workspace(ws).runDueTasks(Date.now() + 60_000); // the first full reconcile
     const after = (await status()) as { lastSyncAt: number | null };
     expect(after.lastSyncAt).toEqual(expect.any(Number));

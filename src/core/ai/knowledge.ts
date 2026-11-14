@@ -202,6 +202,7 @@ export async function runCatalogEmbed(host: LinkHost, now: number): Promise<numb
 }
 
 /** Product ids the vector index thinks match, best first; null when the index is unavailable or empty (the caller falls back). */
+/** Retailer ids of the catalogue rows closest in meaning to `query` (best first), or null when there is no index / no good hit. */
 export async function catalogCandidates(host: LinkHost, query: string): Promise<string[] | null> {
   try {
     if (!host.sql.exec('SELECT 1 FROM catalog_vectors LIMIT 1').toArray().length) return null;
@@ -212,7 +213,12 @@ export async function catalogCandidates(host: LinkHost, query: string): Promise<
     const [vector] = await embed([maskForModel(query).slice(0, 200)]);
     if (!vector) return null;
     const hits = await store.query(vector, { namespace: nsCatalog(host.workspaceId), topK: 8 });
-    const ids = [...new Set(hits.filter((h) => h.score >= KB_MIN_SCORE).map((h) => h.metadata?.productId).filter((x): x is string => !!x))];
+    // A hit's vector id maps to the RETAILER id in catalog_vectors (the id the Store's getProducts answers to; for a product with
+    // variants that is a variant id, never the product id). Returned in score order.
+    const good = hits.filter((h) => h.score >= KB_MIN_SCORE).map((h) => h.id);
+    if (!good.length) return null;
+    const byVec = new Map(host.sql.exec<{ retailer_id: string; vec_id: string }>(`SELECT retailer_id, vec_id FROM catalog_vectors WHERE vec_id IN (${good.map(() => '?').join(',')})`, ...good).toArray().map((r) => [r.vec_id, r.retailer_id]));
+    const ids = [...new Set(good.map((v) => byVec.get(v)).filter((x): x is string => !!x))];
     return ids.length ? ids : null;
   } catch (err) {
     alert('catalog_vector_search_failed', { workspace: host.workspaceId, error: errClass(err) });

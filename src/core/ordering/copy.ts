@@ -72,5 +72,23 @@ export type OrderingCopy = {
     orderLine: (orderNumber: string, status: string, locale: Locale) => string;
     noOrders: Localised;
     orderStatusNames: Record<string, Localised>;
+    /** WhatsApp catalogue messages (product cards, the catalogue button) and the cart sent from the catalogue. Limits: header 60, section title 24, footer 60, body 1024. */
+    cards: {
+      single: (title: string, price: string, locale: Locale) => string;
+      listHeader: Localised;
+      listBody: Localised;
+      listSection: Localised;
+      moreSection: Localised;
+      catalogBody: Localised;
+      catalogFooter: Localised;
+      /** A cart line the Store no longer sells (or whose id it does not know). */
+      cartUnknown: (names: string[], locale: Locale) => string;
+      /** The cart's prices were not the live prices: the live ones apply. */
+      cartRepriced: Localised;
+      /** Every cart line was gone: nothing left to order. */
+      cartAllGone: Localised;
+      /** The cart came from a catalogue that is not this store's. */
+      cartOtherCatalogue: Localised;
+    };
   };
 };

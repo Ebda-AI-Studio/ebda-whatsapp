@@ -161,7 +161,24 @@ export const storeLinkSettingsResponse = z.object({
 });
 /** The merchant-written part of the settings (service menu, business hours, location): what the Bot screen edits. */
 /** The Meta catalog of the store link: its id (null = none yet) and when a sync last succeeded. */
-export const catalogStatusDto = z.object({ catalogId: z.string().nullable(), lastSyncAt: z.number().int().nullable() });
+export const catalogStatusDto = z.object({
+  catalogId: z.string().nullable(),
+  lastSyncAt: z.number().int().nullable(),
+  /** Items by state: in Meta's catalogue, left out by us (no image, bad image link, no title), refused by Meta. Absent from an older server. */
+  items: z.object({ synced: z.number().int(), excluded: z.number().int(), rejected: z.number().int() }).optional(),
+  /** The first few items not in the catalogue, with the reason code (no_image, bad_image, no_title, meta_rejected). */
+  leftOut: z.array(z.object({ retailerId: z.string(), reason: z.string() })).optional(),
+  /** The shop button and the cart on the number (null = not read yet). `failed` = the last attempt to set them did not work. */
+  commerce: z.object({ catalogVisible: z.boolean(), cartEnabled: z.boolean(), failed: z.enum(['missing_permission', 'meta_error']).nullable() }).nullable().optional(),
+  /** The last sync failed: `missing_permission` = reconnect and approve catalogue access; `sync_failed` = Meta or the Store did not answer. Null = fine. */
+  error: z.enum(['missing_permission', 'sync_failed']).nullable().optional(),
+  /** A full pass is running (large catalogues take several runs). */
+  syncing: z.boolean().optional(),
+  /** Changes waiting to be sent. */
+  pending: z.number().int().optional(),
+});
+export const catalogCommerceRequest = z.object({ catalogVisible: z.boolean(), cartEnabled: z.boolean() }).strict();
+export const catalogResyncResponse = z.object({ started: z.boolean() });
 export type RetentionDto = z.infer<typeof retentionDto>;
 export type CatalogStatusDto = z.infer<typeof catalogStatusDto>;
 /** Strict on purpose: the business is never taken from the client (a business id in the body is a 400). */

@@ -497,6 +497,19 @@ export const DO_MIGRATIONS: readonly string[] = [
    );`,
   // v40 (voice notes): the once-marker and the inbox state of a transcribed voice note. 'ok' = the transcript is the message's body; 'failed' = never transcribed (the inbox says so).
   `ALTER TABLE messages ADD COLUMN voice_state TEXT CHECK (voice_state IN ('ok', 'failed'));`,
+  // v41 (WhatsApp catalogue): what this workspace has put into the Meta catalogue, one row per retailer id. It lets a deleted product or a removed variant be archived
+  // (the Store sends no ids for a deleted product), keeps the pass a full reconcile is on, and is the merchant's list of items left out and why. Rebuilt by every pass; not backed up.
+  `CREATE TABLE catalog_items (
+     retailer_id TEXT PRIMARY KEY,
+     product_id TEXT NOT NULL,
+     group_id TEXT,
+     status TEXT NOT NULL CHECK (status IN ('synced', 'excluded', 'rejected')),
+     reason TEXT,
+     pass INTEGER NOT NULL DEFAULT 0,
+     updated_at INTEGER NOT NULL
+   );
+   CREATE INDEX catalog_items_product ON catalog_items (product_id);
+   CREATE INDEX catalog_items_status ON catalog_items (status);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
