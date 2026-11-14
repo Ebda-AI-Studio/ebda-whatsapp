@@ -75,8 +75,8 @@ it('install-defaults submits only the Ebda templates that are missing', async ()
   graph = graphStub(() => ({ status: 200, json: { id: '9', status: 'PENDING' } }));
   const res = await api.call('POST', '/templates/install-defaults');
   expect(res.status).toBe(200);
-  expect(await res.json()).toEqual({ submitted: ['cod_confirmation', 'shipping_update', 'otp_code', 'cart_recovery', 'shipping_tracking', 'shipping_status'], skipped: ['order_confirmation'], failed: [] });
-  expect(EBDA_DEFAULT_TEMPLATES.map((t) => t.name)).toEqual(['order_confirmation', 'cod_confirmation', 'shipping_update', 'otp_code', 'cart_recovery', 'shipping_tracking', 'shipping_status']);
+  expect(await res.json()).toEqual({ submitted: ['cod_confirmation', 'shipping_update', 'otp_code', 'cart_recovery', 'shipping_tracking', 'handoff_alert', 'handoff_alert', 'shipping_status'], skipped: ['order_confirmation'], failed: [] });
+  expect(EBDA_DEFAULT_TEMPLATES.map((t) => t.name)).toEqual(['order_confirmation', 'cod_confirmation', 'shipping_update', 'otp_code', 'cart_recovery', 'shipping_tracking', 'handoff_alert', 'handoff_alert', 'shipping_status']);
 });
 
 it('refuses a send whose parameter count does not match', async () => {

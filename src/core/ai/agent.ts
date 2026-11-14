@@ -17,6 +17,7 @@ import { loadConnectors, runConnectorTool } from '../connectors/registry';
 import { agentConfig } from './config';
 import { recordFunnel } from '../bot-funnel';
 import { markHandoff, type HandoffReason } from './handoff';
+import { notifyOwnerOfHandoff, prepareOwnerNotice } from './handoff-notify';
 import { knowledgeReady, retrieveKnowledge } from './knowledge';
 import { POLICIES_UNAVAILABLE, faqIndexAlert, faqInline, loadPolicies, loadProfile, renderCustomer, renderPolicies } from './context';
 import { AI_TURN_CREDITS, heartbeatHold, holdCredits, releaseHold, settleHold } from './credits';
@@ -179,10 +180,12 @@ async function sayNow(host: LinkHost, input: BotInput, suffix: string, text: str
 /** Tells the customer a person will take over, tags the conversation and silences the bot for the handoff window. */
 export async function handoff(host: LinkHost, input: BotInput, reason: HandoffReason, locale: Locale, now: number): Promise<void> {
   const copy = agentConfig().copy!;
+  await prepareOwnerNotice(host);
   const done = host.storage.transactionSync(() => {
     if (turnGone(host, input)) return false;
     storeReplies(host, input, [{ key: `${keyPrefix(input)}handoff`, text: copy.t.handoffAck[locale] }], now);
     markHandoff(host, input.from, reason, now);
+    notifyOwnerOfHandoff(host, { waId: input.from, phoneNumberId: input.phoneNumberId, profileName: input.profileName, now });
     recordTurn(host, input, `handoff:${reason}`, now);
     return true;
   });

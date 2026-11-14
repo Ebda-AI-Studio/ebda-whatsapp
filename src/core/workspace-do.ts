@@ -51,6 +51,7 @@ import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable,
 import { staffReplied } from './ai/handoff';
 import { abandonVoiceTurn } from './ai/agent';
 import { dropProfile } from './ai/context';
+import { DIGEST_HOUR_LOCAL, ensureDigestTask, prepareOwnerNotice, runHandoffDigest } from './ai/handoff-notify';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
 import { OTP_RATE_WINDOW_MS } from './otp-policy';
@@ -1486,6 +1487,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       writeAgentSettings(this.sql, plan.settings, plan.secret);
       if (faqChanged) stageFaq(this.host(), chunks, Date.now());
       if (plan.settings.enabled && !before.enabled) scheduleCatalogEmbed(this.host(), Date.now(), 0);
+      if (plan.settings.notifyPhone) ensureDigestTask(this.host(), Date.now());
     });
     await this.arm();
     return { ok: true, settings: this.agentDto() };
@@ -2201,6 +2203,12 @@ export class WorkspaceDO extends DurableObject<Env> {
       case 'retention_purge': {
         const r = await this.retentionPurge(now);
         return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, dailyHour('retention_purge'), BACKUP_TIME_ZONE);
+      }
+      case 'handoff_digest': {
+        const pn = (await this.env.DB.prepare("SELECT phone_number_id FROM phone_numbers WHERE workspace_id = ? AND status = 'active' ORDER BY phone_number_id LIMIT 1").bind(this.workspaceId).first<{ phone_number_id: string }>())?.phone_number_id ?? null;
+        await prepareOwnerNotice(this.host());
+        runHandoffDigest(this.host(), pn, now);
+        return readAgentSettings(this.sql).notifyPhone ? nextLocalHour(now + 3_600_000, DIGEST_HOUR_LOCAL, BACKUP_TIME_ZONE) : undefined; // asked for only while an owner number is set
       }
       case 'ws_sweep': {
         await this.sweepSockets(now / 1000);

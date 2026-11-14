@@ -10,6 +10,7 @@ import { isSuspended } from './numbers/health';
 import { recordFunnel } from './bot-funnel';
 import { isOpen, nextOpenAt } from './front-desk-hours';
 import { markHandoff } from './ai/handoff';
+import { notifyOwnerOfHandoff, prepareOwnerNotice } from './ai/handoff-notify';
 import type { Locale } from './ordering/copy';
 import { orderingActive, orderingEngaged, runBotTurnLocked, toJob, turnGone, type BotInput, type BotMsg } from './ordering/bot';
 import type { LinkHost } from './store-link/host';
@@ -173,9 +174,11 @@ export async function runFrontDesk(host: LinkHost, input: BotInput, now: number,
       return 'handled';
     }
     if (tap[2] === 'human') {
+      await prepareOwnerNotice(host);
       const ok = host.storage.transactionSync(() => {
         if (turnGone(host, input)) return false;
         markHandoff(host, input.from, 'asked', now);
+        notifyOwnerOfHandoff(host, { waId: input.from, phoneNumberId: input.phoneNumberId, profileName: input.profileName, now });
         return true;
       });
       if (ok) {
