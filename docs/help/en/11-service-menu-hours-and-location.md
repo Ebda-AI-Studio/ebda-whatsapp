@@ -1,3 +1,11 @@
+---
+capabilities:
+  - bot.funnel@1
+  - bot.hours-away@1
+  - bot.location@1
+  - bot.service-menu@1
+---
+
 # Service menu, opening hours and your location
 
 Your customers get quick answers from the bot without waiting for you: a menu of your common questions, an automatic reply when you are closed, and your store's location on a tap.

@@ -1,3 +1,14 @@
+---
+capabilities:
+  - inbox.send-template@1
+  - inbox.send-text@1
+  - inbox.window-status@1
+  - templates.create-submit@1
+  - templates.install-defaults@1
+  - templates.list@1
+  - templates.sync@1
+---
+
 # Templates and the 24-hour window
 
 This is the most important rule in WhatsApp Business: **you can write free text to a customer only if they messaged you in the last 24 hours.** After that you must use a template approved by Meta.

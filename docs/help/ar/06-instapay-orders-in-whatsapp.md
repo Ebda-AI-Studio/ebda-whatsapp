@@ -1,3 +1,9 @@
+---
+capabilities:
+  - bot.ordering-toggle@1
+  - orders.instapay-in-chat@1
+---
+
 # طلبات InstaPay على واتساب
 
 العميل يقدر يطلب من الكتالوج على واتساب ويدفع بـ InstaPay. الطلب بيفضل **في انتظار الدفع** لحد ما متجرك يأكّد إن الفلوس وصلت.

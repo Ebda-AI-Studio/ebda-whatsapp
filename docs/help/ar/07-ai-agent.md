@@ -1,3 +1,22 @@
+---
+capabilities:
+  - agent.credits-view@1
+  - agent.enable@1
+  - agent.faq@1
+  - agent.notify-phone@1
+  - agent.persona-language@1
+  - agent.promises@1
+  - agent.provider-byok@1
+  - agent.store-facts@1
+  - agent.store-search@1
+  - agent.tone@1
+  - agent.voice-notes@1
+  - inbox.assign-takeover@1
+  - inbox.handoff-needs-human@1
+  - inbox.voice-note-transcript@1
+  - orders.tracking@1
+---
+
 # المساعد الذكي (AI Agent)
 
 المساعد بيرد على عملائك في الشات بالعربي المصري، يدوّر في الكتالوج، يقول حالة الطلب، ويبدأ طلب جديد. وأي وقت العميل يطلب موظف، بيسلّم لك.

@@ -1,3 +1,8 @@
+---
+capabilities:
+  - offboarding.request@1
+---
+
 # Delete your Ebda Chat workspace
 
 The store owner can ask us to delete the workspace and everything in it. Support can also do it at your request.

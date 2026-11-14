@@ -41,3 +41,19 @@ jobs:
         env:
           BENCH: '1'
         run: npx vitest run test/perf.test.ts test/inbox-api.test.ts test/scale-spike.test.ts --reporter=verbose
+
+  help-publication-lag:
+    name: Help publication lag
+    # Off until Ebda Store's import emits the same body bytes as the source (plan 1 task 18); then set the repo variable HELP_PUBLICATION_LAG=1.
+    if: (github.event_name != 'schedule' || vars.EBDA_RUNS_ON != '') && vars.HELP_PUBLICATION_LAG == '1'
+    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: A guide not published within 48 hours fails
+        run: node scripts/help-publication-lag.mjs

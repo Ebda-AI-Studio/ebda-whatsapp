@@ -1,3 +1,9 @@
+---
+capabilities:
+  - numbers.shared-join@1
+  - templates.shared-catalogue@1
+---
+
 # Use the shared number
 
 The shared number is one WhatsApp number run by the Ebda AI Studio team that you can use without verification or connecting your own. It suits you if you want to start quickly.

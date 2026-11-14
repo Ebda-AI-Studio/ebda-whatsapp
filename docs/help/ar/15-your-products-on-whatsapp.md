@@ -1,3 +1,17 @@
+---
+capabilities:
+  - catalogue.commerce-toggles@1
+  - catalogue.google-feeds-clash@1
+  - catalogue.left-out@1
+  - catalogue.link-existing@1
+  - catalogue.product-cards@1
+  - catalogue.provision@1
+  - catalogue.resync@1
+  - catalogue.status@1
+  - orders.cart-to-order@1
+  - storelink.bridge-health@1
+---
+
 # منتجاتك على واتساب
 
 منتجات متجرك على إبدأ ستور بتظهر جوه واتساب زي متجر حقيقي: **زر المتجر** في بروفايل رقمك، و**كروت المنتجات** اللي المساعد الذكي بيبعتها في الشات، و**سلة** العميل بيبعتهالك فتتحول لطلب حقيقي في متجرك.

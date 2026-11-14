@@ -1,3 +1,18 @@
+---
+capabilities:
+  - inbox.coexistence-echo@1
+  - numbers.coexistence@1
+  - numbers.connect@1
+  - numbers.disconnect@1
+  - numbers.display-name@1
+  - numbers.finish-registration@1
+  - numbers.health@1
+  - numbers.history-contacts-sync@1
+  - numbers.migrate@1
+  - numbers.overview@1
+  - numbers.refresh@1
+---
+
 # ربط رقمك الخاص بـ Ebda Chat
 
 تقدر تربط رقم واتساب بتاعك إنت، وعملاؤك يشوفوا اسم نشاطك. الربط بيتم من جوه Ebda Chat بخطوات Meta الرسمية (Embedded Signup).

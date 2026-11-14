@@ -1,3 +1,9 @@
+---
+capabilities:
+  - bot.ordering-toggle@1
+  - orders.instapay-in-chat@1
+---
+
 # InstaPay orders in WhatsApp
 
 A customer can order from your catalog on WhatsApp and pay with InstaPay. The order stays **awaiting payment** until your store confirms the money arrived.

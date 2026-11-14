@@ -19,6 +19,18 @@ Content for help.ebda.app (plan task 8.5). One file per topic, same slug in `ar/
 | 13 | your-customers-data | Message retention, downloading one customer's data, renaming, merging numbers (B4, B5, M-175) |
 | 14 | team-members-and-seats | Package seats (owner included), giving and removing a seat, what a downgrade does (WA-SEATS-1) |
 
+## Front matter (capability links)
+Each guide starts with a front-matter block listing the capabilities it documents, `id@version` (the registry is `capabilities/*.capability.json`):
+
+```
+---
+capabilities:
+  - packages.list-checkout@1
+---
+```
+
+`capabilities` is the only key; `appPath` is left out on purpose because the help site builds app links against the Store host. Bump the version here when a capability's `version` changes (`help-stale`). The guard (`test/capability-registry.test.ts`) checks the sources at PR time; `scripts/help-publication-lag.mjs` (nightly, `help-publication-lag` job) proves the Store import published them within 48 hours.
+
 ## Publishing note (for the Store session's `apps/help`)
 - Files are plain Markdown with relative links between guides (`NN-slug.md`); they are published as the **Ebda Chat** section of the suite help site: Arabic `https://help.ebda.app/whatsapp/<slug>/`, English `https://help.ebda.app/en/whatsapp/<slug>/` (Store repo `apps/help` imports them as `content/{ar,en}/whatsapp/<slug>.mdx`, frontmatter `section: "Ebda Chat"`). Arabic is the default locale; render RTL. The inbox links to exactly this shape (`helpUrl` in `web/brands/ebda/brand.ts`), where the slug is the file name without its `NN-` prefix (a test reads this folder, so a renamed guide fails it).
 - Each guide ends with "Last checked" (2026-10-25). Re-check every guide against Meta's current screens before launch and when Meta changes its flows; update the date.
