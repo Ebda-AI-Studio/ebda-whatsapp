@@ -110,6 +110,33 @@ describe('the owner is told (D3)', () => {
     expect(await toOwner(ws)).toHaveLength(1);
   });
 
+  it('the dedupe marker lives on the handoff row, not under the phone in agent_state, and erasure removes it (review I2)', async () => {
+    const ws = W(7);
+    const pn = await agentWs(ws, { notifyPhone: OWNER });
+    await approveAlertTemplate(ws);
+    const g = stubGraph();
+    await say(ws, pn, text('عايز اكلم حد'), g);
+    expect(await toOwner(ws)).toHaveLength(1);
+    const dump = async () => JSON.stringify(await rows(ws, 'SELECT key, value FROM agent_state'));
+    expect(await dump()).not.toContain(WA_1);
+    expect(await dump()).not.toContain('handoff_notice');
+    expect((await rows<{ notified_at: number | null }>(ws, 'SELECT notified_at FROM agent_handoffs WHERE wa_id = ?', WA_1))[0]!.notified_at).not.toBeNull();
+    await workspace(ws).eraseContact(WA_1);
+    expect(await rows(ws, 'SELECT * FROM agent_handoffs')).toEqual([]);
+    expect(await dump()).not.toContain(WA_1);
+  });
+
+  it('a handoff that opened after a staff reply (no notice yet) still notifies once', async () => {
+    const ws = W(8);
+    const pn = await agentWs(ws, { notifyPhone: OWNER });
+    await approveAlertTemplate(ws);
+    const g = stubGraph();
+    await say(ws, pn, text('عايز اكلم حد'), g);
+    await exec(ws, 'DELETE FROM agent_handoffs WHERE wa_id = ?', WA_1); // the window elapsed
+    await say(ws, pn, text('لسه عايز موظف'), g);
+    expect(await toOwner(ws)).toHaveLength(2);
+  });
+
   it('the owner testing their own shop is not paged about themselves', async () => {
     const ws = W(6);
     const pn = await agentWs(ws, { notifyPhone: `+${WA_1}` });

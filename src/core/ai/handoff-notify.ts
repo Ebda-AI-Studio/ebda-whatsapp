@@ -16,7 +16,7 @@ import { cleanParam, queueFreeText, queueTemplate } from '../store-link/outbound
 import type { LinkHost } from '../store-link/host';
 import { maskForModel } from './mask';
 import { NEEDS_HUMAN_TAG } from './handoff';
-import { getAgentState, putAgentState, readAgentSettings } from './settings';
+import { readAgentSettings } from './settings';
 
 export const HANDOFF_TEMPLATE = 'handoff_alert';
 /** The owner's digest goes out at 10:00 Africa/Cairo (a shop owner's morning, not the middle of the night). */
@@ -58,11 +58,12 @@ export function notifyOwnerOfHandoff(host: LinkHost, a: { waId: string; phoneNum
     const owner = readAgentSettings(host.sql).notifyPhone?.slice(1);
     if (!owner) return 'off';
     if (owner === a.waId) return 'self';
-    const started = host.sql.exec<{ started_at: number }>('SELECT started_at FROM agent_handoffs WHERE wa_id = ?', a.waId).toArray()[0]?.started_at;
-    if (started === undefined) return 'off';
-    const marker = `handoff_notice:${a.waId}`;
-    if (getAgentState(host.sql, marker) === String(started)) return 'duplicate';
-    putAgentState(host.sql, marker, String(started));
+    // The once-marker is `notified_at` on the handoff row itself: erased with the contact (by wa_id) and gone when the window elapses, so a later handoff pages again (review I2).
+    const row = host.sql.exec<{ started_at: number; notified_at: number | null }>('SELECT started_at, notified_at FROM agent_handoffs WHERE wa_id = ?', a.waId).toArray()[0];
+    if (!row) return 'off';
+    const started = row.started_at;
+    if (row.notified_at !== null) return 'duplicate';
+    host.sql.exec('UPDATE agent_handoffs SET notified_at = ? WHERE wa_id = ?', a.now, a.waId);
     ensureDigestTask(host, a.now);
     const lines = lastLines(host, a.waId);
     const who = cleanParam(a.profileName, 'عميل', 40);

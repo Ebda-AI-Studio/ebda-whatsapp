@@ -510,6 +510,8 @@ export const DO_MIGRATIONS: readonly string[] = [
    );
    CREATE INDEX catalog_items_product ON catalog_items (product_id);
    CREATE INDEX catalog_items_status ON catalog_items (status);`,
+  // v42 (Chat agent, review I2): when the owner was told about this handoff. Lives on the row (erased by wa_id with the contact), not as a phone-keyed agent_state key.
+  `ALTER TABLE agent_handoffs ADD COLUMN notified_at INTEGER;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
