@@ -98,9 +98,17 @@ describe('templates self-service registry entries (plan 2 task 13)', () => {
 
 describe('capability help guard: every live merchant-facing capability has a linked ar+en guide (sources)', () => {
   const articles = guideArticles();
-  it('reads the 17 guides in both languages', () => {
-    expect(articles.filter((a) => a.lang === 'ar')).toHaveLength(17);
-    expect(articles.filter((a) => a.lang === 'en')).toHaveLength(17);
+  const slugs = (lang: 'ar' | 'en') => articles.filter((a) => a.lang === lang).map((a) => a.slug).sort();
+  it('has the same guides in ar and en (count and slugs), with no hard-coded total', () => {
+    expect(slugs('ar').length).toBeGreaterThan(0);
+    expect(slugs('ar').length).toBe(slugs('en').length);
+    expect(slugs('ar')).toEqual(slugs('en'));
+  });
+  it('every guide an entry points to exists in both languages, and no guide is orphaned', () => {
+    const referenced = new Set(entries.map((e) => e.helpArticle).filter((x): x is string => !!x));
+    const have = new Set(slugs('ar'));
+    expect([...referenced].filter((x) => !have.has(x) || !slugs('en').includes(x))).toEqual([]);
+    expect([...have].filter((x) => !referenced.has(x))).toEqual([]);
   });
   it('has no new help violation and no stale baseline id (the 23 needs-help ids are the debt)', () => {
     expect(judge('help', checkHelp(entries, articles, guardConfig)).failures).toEqual([]);

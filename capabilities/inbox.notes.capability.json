@@ -21,7 +21,7 @@
   "undo": {
     "class": "irreversible"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/notes-tags-and-quick-replies",
   "questions": {
     "ar": [
       "ينفع اكتب ملاحظة عن العميل؟",
@@ -39,8 +39,6 @@
     "Notes included in contact export and erasure"
   ],
   "gaps": [
-    "NO merchant UI: no screen calls notes",
-    "No help article",
-    "help 13 mentions notes as data only"
+    "NO merchant UI: no screen calls notes"
   ]
 }

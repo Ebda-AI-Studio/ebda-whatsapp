@@ -2,7 +2,7 @@
   "id": "bot.order-confirmations-toggle",
   "status": "live",
   "area": "bot",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "تشغيل رسايل تأكيد الطلب",
   "titleEn": "Turn order confirmation messages on or off",

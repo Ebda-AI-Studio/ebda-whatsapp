@@ -2,7 +2,7 @@
   "id": "agent.credits-view",
   "status": "live",
   "area": "agent",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "رصيد كريديت الـ AI",
   "titleEn": "AI credits balance",

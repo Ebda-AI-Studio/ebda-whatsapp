@@ -22,7 +22,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/notes-tags-and-quick-replies",
   "questions": {
     "ar": [
       "ازاي اضيف رد سريع بتاعي؟",
@@ -40,7 +40,6 @@
     "Arabic/RTL: phone numbers, URLs and API keys stay LTR inside RTL text"
   ],
   "gaps": [
-    "Not merchant-editable: no UI, no API, no storage",
-    "No help article"
+    "Not merchant-editable: no UI, no API, no storage"
   ]
 }

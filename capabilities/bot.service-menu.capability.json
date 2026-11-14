@@ -2,7 +2,7 @@
   "id": "bot.service-menu",
   "status": "live",
   "area": "bot",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "قايمة الخدمات والأسئلة الجاهزة",
   "titleEn": "Service menu (ready-made questions)",

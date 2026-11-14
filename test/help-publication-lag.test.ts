@@ -42,9 +42,11 @@ describe('help publication lag', () => {
     expect(contentHash('  x  ')).toBe(contentHash('x'));
     expect(contentHash(stripFrontMatter('---\ncapabilities:\n  - a.b@1\n---\n\n# T\n'))).toBe(contentHash('# T'));
   });
-  it('reads the 17 guides in both languages with front matter stripped', () => {
+  it('reads every guide in both languages with front matter stripped', () => {
     const s = readSources(undefined, () => NOW);
-    expect(s).toHaveLength(34);
+    const by = (l: string) => s.filter((x: { lang: string }) => x.lang === l).map((x: { slug: string }) => x.slug).sort();
+    expect(by('ar').length).toBeGreaterThan(0);
+    expect(by('ar')).toEqual(by('en'));
     expect(s.every((x: { hash: string }) => /^[0-9a-f]{64}$/.test(x.hash))).toBe(true);
   });
 });
