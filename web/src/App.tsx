@@ -249,7 +249,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
         : view === 'templates' && source.templatesApi ? <TemplatesScreen t={t} lang={lang} source={source} api={source.templatesApi} onNavigate={setView} />
-        : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} />
+        : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} onNavigate={source.templatesApi ? setView : undefined} />
         : view === 'wallet' && source.wallet ? <WalletScreen t={t} lang={lang} source={source} api={source.wallet} now={now} />
         : view === 'operator' && source.operator && source.role === 'super_admin' ? <OperatorScreen t={t} lang={lang} source={source} api={source.operator} now={now} />
         : view === 'team' && source.team ? <TeamScreen t={t} lang={lang} source={source} api={source.team} />
