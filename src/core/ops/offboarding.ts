@@ -36,6 +36,7 @@ export const OFFBOARD_TABLES = {
     waba_signup_users: 'workspace_id', workspace_notices: 'workspace_id', workspace_owners: 'workspace_id', new_cap_usage: 'workspace_id', // final review: Meta-user links, owner notices, the Store owner and the campaign-cap usage go with the workspace
     audit_reasons: 'workspace_id', // operators' free-text reasons (AUDIT-RETENTION-1): deletable on purpose
     instapay_auto_workspace: 'workspace_id', // the per-workspace auto-confirm switch: configuration, nothing to keep
+    money_confirmations: 'workspace_id', // single-use money-action tokens (hash only): worthless after the workspace is gone, and they name a user id
     erasure_records: 'workspace_id', // the workspace's backups are erased with it, so nothing is left for a restore to bring back
   } as Record<string, string>,
   keep: {
@@ -48,6 +49,8 @@ export const OFFBOARD_TABLES = {
     card_refunds: { people: [], clear: ['note'] },
     wallet_adjustments: { people: [], clear: [] }, // requested_by / approved_by are our operators
     shared_number_usage: { people: [], clear: [] },
+    credit_orders: { people: ['created_by'], clear: [] }, // a card purchase of AI credits: amount, credits, provider transaction id; a record of money, kept like topups
+    yearly_refund_requests: { people: ['requested_by'], clear: [] }, // a merchant's request to cancel a yearly package and refund unused months: figures only (executed_by is our operator)
   } as Record<string, { people: string[]; clear: string[] }>,
   // Immutable by trigger (a row can be neither updated nor deleted): they keep the opaque workspace id, which names no one once everything above is erased.
   audit: ['operator_actions', 'offboarding', 'offboarding_log', 'ledger_mirror', 'billing_audit', 'workspace_pricing_overrides', 'audit_log', 'operator_view_log'], // operator_view_log: who looked at a workspace, when and which route (no text, the reason is in audit_reasons and goes with the workspace)

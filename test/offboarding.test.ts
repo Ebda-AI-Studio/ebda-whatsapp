@@ -383,6 +383,27 @@ describe('the deletion itself', () => {
   });
 });
 
+describe('money surfaces at deletion (A9, A21, A22)', () => {
+  it('credit orders and yearly refund requests are kept under the pseudonym with the person erased; confirmation tokens are deleted', async () => {
+    const ws = W(5791);
+    const pn = `pn-${ws.slice(-8)}`;
+    await own(ws, pn);
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO credit_orders (order_id, workspace_id, credits, amount_minor, state, created_by, created_at, transaction_id, paid_at) VALUES (?, ?, 100, 23000, 'paid', 'user-merchant', 1, 'TX-1', 2)").bind(`cp_${ws}`, ws),
+      env.DB.prepare("INSERT INTO yearly_refund_requests (id, workspace_id, order_id, unused_months, gross_minor, debt_settled_minor, refund_minor, state, requested_by, created_at) VALUES (?, ?, 'o1', 3, 300, 0, 300, 'pending', 'user-merchant', 1)").bind(`yr-${ws}`, ws),
+      env.DB.prepare("INSERT INTO money_confirmations (id, workspace_id, user_id, action, payload_hash, token_hash, expires_at, created_at) VALUES (?, ?, 'user-merchant', 'credit_pack', 'h', 't', 9, 1)").bind(`mc-${ws}`, ws),
+    ]);
+    await ownerCall(ws, 'POST', { confirm: true });
+    await runDueOffboardings(env, Date.now() + COOLING_OFF_MS + 1000);
+    const pseudo = (await pseudonymFor(env, ws))!;
+    expect(await d1('SELECT state FROM offboarding WHERE workspace_id = ?', ws)).toEqual([{ state: 'done' }]);
+    expect(await d1('SELECT amount_minor, credits, created_by FROM credit_orders WHERE workspace_id = ?', pseudo)).toEqual([{ amount_minor: 23_000, credits: 100, created_by: pseudo }]);
+    expect(await d1('SELECT refund_minor, requested_by FROM yearly_refund_requests WHERE workspace_id = ?', pseudo)).toEqual([{ refund_minor: 300, requested_by: pseudo }]);
+    expect(await d1('SELECT 1 FROM money_confirmations WHERE workspace_id = ?', ws)).toEqual([]);
+    expect(await d1('SELECT 1 FROM credit_orders WHERE workspace_id = ?', ws)).toEqual([]);
+  });
+});
+
 describe('every D1 table that names a workspace has a deletion decision', () => {
   it('classifies each table with a workspace_id column or a foreign key to workspaces (a new table fails here until someone decides)', async () => {
     const tables = await d1<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf%' ESCAPE '\\' AND name NOT LIKE 'd1_%'");
