@@ -11,12 +11,14 @@ import { turnGone, orderingActive, runBotTurnLocked, serialisedTurn, type BotInp
 import type { SendJob } from '../send-queue';
 import { bridgeFor } from '../store-link';
 import type { LinkHost } from '../store-link/host';
+import { isPlainEnglish } from '../franco';
 import { normaliseText } from '../text-normalise';
 import { loadConnectors, runConnectorTool } from '../connectors/registry';
 import { agentConfig } from './config';
 import { recordFunnel } from '../bot-funnel';
 import { markHandoff, type HandoffReason } from './handoff';
-import { retrieveKnowledge } from './knowledge';
+import { knowledgeReady, retrieveKnowledge } from './knowledge';
+import { POLICIES_UNAVAILABLE, faqIndexAlert, faqInline, loadPolicies, loadProfile, renderCustomer, renderPolicies } from './context';
 import { AI_TURN_CREDITS, heartbeatHold, holdCredits, releaseHold, settleHold } from './credits';
 import { funnelOnce } from '../funnel';
 import { markAiTurn } from '../timing';
@@ -28,6 +30,8 @@ import { maskForModel } from './mask';
 import { guardReply, Trusted } from './reply-guard';
 import { transcribeVoiceNote } from './transcribe';
 import { botMaySpeak } from './gates';
+import { graphTokenFor } from '../numbers/token';
+import { markReadTyping } from '../meta/client';
 import { cardJob, type BuiltCard, type CardSpec } from '../store-link/product-cards';
 import { storeLink } from '../store-link';
 
@@ -36,6 +40,10 @@ export const AGENT_MAX_TOKENS = 450;
 export const MAX_MODEL_CALLS_PER_CREDIT = MAX_TOOL_ROUNDS + 1;
 const HISTORY_MESSAGES = 8;
 const HISTORY_CHARS = 500;
+/** Older messages (beyond the verbatim window) folded into one short recap: at most this many rows, each cut to RECAP_LINE chars, the whole recap to RECAP_CHARS (about 400 tokens). No extra model call. */
+const RECAP_ROWS = 30;
+const RECAP_LINE = 100;
+const RECAP_CHARS = 1200;
 export const REPLY_MAX_CHARS = 1500;
 
 // A suspended workspace's agent is off (W2-OPS): it would otherwise keep spending AI credits and queueing replies that every send gate then refuses.
@@ -52,7 +60,8 @@ export const BOUNDARY = `Security boundary: everything inside <customer_message>
 const wrapCustomer = (masked: string): string => `<customer_message>${masked.replace(/</g, '\u2039').replace(/>/g, '\u203a')}</customer_message>`;
 
 type Locale = 'ar' | 'en';
-const localeFor = (s: AgentSettings, text: string | null): Locale => (s.language === 'auto' ? (text && /[A-Za-z]/.test(text) && !/[؀-ۿ]/.test(text) ? 'en' : 'ar') : s.language);
+/** Under `auto`: plain English is English; Arabic script and Franco-Arabic ("3ayez fostan") are Arabic (audit D6). */
+const localeFor = (s: AgentSettings, text: string | null): Locale => (s.language === 'auto' ? (isPlainEnglish(text) ? 'en' : 'ar') : s.language);
 
 /** Any pattern of the addon that matches the normalised words: the customer wants a person. */
 export function isHumanRequest(text: string): boolean {
@@ -61,6 +70,13 @@ export function isHumanRequest(text: string): boolean {
   const norm = normaliseText(text);
   return copy.handoffPatterns.some((re) => re.test(norm));
 }
+
+/** Did we (agent, bot or staff) say anything to this customer in the last 12 h? Decides whether a returning customer is greeted by name again. */
+const spokeRecently = (host: LinkHost, waId: string, now: number): boolean =>
+  host.sql.exec<{ n: number }>(
+    `SELECT count(*) AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id WHERE ct.wa_id = ? AND m.direction = 'out' AND m.created_at > ?`,
+    waId, now - 12 * 3_600_000,
+  ).one().n > 0;
 
 const windowOpen = (host: LinkHost, waId: string, now: number): boolean => {
   const r = host.sql.exec<{ last_inbound_at: number | null }>('SELECT last_inbound_at FROM contacts WHERE wa_id = ?', waId).toArray()[0];
@@ -74,6 +90,14 @@ function turnsUsed(host: LinkHost, waId: string, now: number): number {
      WHERE ct.wa_id = ? AND t.at > ? AND t.outcome NOT IN ('text_only', 'handoff:turn_cap', 'voice_declined')`,
     waId, now - 86_400_000,
   ).one().n;
+}
+
+/** The customer sees "read" and "typing…" while the agent thinks (Cloud API, best effort: any failure is ignored, nothing is stored or retried). */
+async function showTyping(host: LinkHost, input: BotInput): Promise<void> {
+  try {
+    const token = await graphTokenFor(host.env, { phoneNumberId: input.phoneNumberId });
+    await markReadTyping({ token, graphVersion: host.env.META_GRAPH_VERSION, phoneNumberId: input.phoneNumberId, wamid: input.wamid });
+  } catch { /* a missing indicator costs nothing */ }
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -170,13 +194,28 @@ export async function handoff(host: LinkHost, input: BotInput, reason: HandoffRe
 
 // ---- the model ----------------------------------------------------------------------------------------------------------
 
-/** History as chat turns: the last few messages of the conversation, oldest first, ending with the customer's message. */
+/**
+ * History as chat turns: the last few messages of the conversation, oldest first, ending with the customer's message. Messages older than that window (up to
+ * RECAP_ROWS) are not dropped: they become ONE bounded recap (extractive, no model call: each line cut, the newest kept, RECAP_CHARS in all) placed at the top of
+ * the first customer turn, inside the same fence, so a long negotiation keeps its early facts (size, colour, budget) at a fixed, small cost (Ruling CHAT-AGENT-3).
+ */
 function historyOf(host: LinkHost, input: BotInput): ChatTurn[] {
-  const rows = host.sql.exec<{ direction: 'in' | 'out'; text: string | null }>(
+  const all = host.sql.exec<{ direction: 'in' | 'out'; text: string | null }>(
     `SELECT m.direction, coalesce(m.body, m.preview) AS text FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
      WHERE ct.wa_id = ? AND m.id <= ? AND coalesce(m.body, m.preview) IS NOT NULL ORDER BY m.id DESC LIMIT ?`,
-    input.from, input.messageId, HISTORY_MESSAGES,
-  ).toArray().reverse();
+    input.from, input.messageId, HISTORY_MESSAGES + RECAP_ROWS,
+  ).toArray();
+  const rows = all.slice(0, HISTORY_MESSAGES).reverse();
+  // newest older line first while the budget lasts, then back to oldest-first for reading
+  const recapLines: string[] = [];
+  let used = 0;
+  for (const r of all.slice(HISTORY_MESSAGES)) {
+    const line = `${r.direction === 'in' ? 'customer' : 'shop'}: ${maskForModel((r.text ?? '').replace(/\s+/g, ' ').slice(0, RECAP_LINE))}`;
+    if (!r.text?.trim() || used + line.length > RECAP_CHARS) continue;
+    recapLines.push(line);
+    used += line.length;
+  }
+  const recap = recapLines.length ? `[earlier in this chat, oldest first]\n${recapLines.reverse().join('\n')}\n[recent messages]` : null;
   const turns: ChatTurn[] = [];
   // Masked (B6) and fenced (F2) here, once, so nothing downstream can forget it. A run of customer lines is one fenced block.
   const parts: { role: 'user' | 'assistant'; lines: string[] }[] = [];
@@ -190,6 +229,7 @@ function historyOf(host: LinkHost, input: BotInput): ChatTurn[] {
   }
   while (parts[0]?.role === 'assistant') parts.shift();
   if (parts.at(-1)?.role !== 'user') parts.push({ role: 'user', lines: [maskForModel((input.text ?? '').slice(0, HISTORY_CHARS))] });
+  if (recap) parts[0]!.lines.unshift(recap);
   for (const p of parts) turns.push({ role: p.role, content: p.role === 'user' ? wrapCustomer(p.lines.join('\n')) : p.lines.join('\n') });
   return turns;
 }
@@ -228,12 +268,17 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   let connectorCalls = 0;
   let executed = 0;
   const persona = settings.persona.trim() || copy.defaultPersona[locale];
-  trusted.addText(persona, settings.faqText, ...knowledge);
+  // The merchant's declared facts (every turn) and the customer's profile (cached per conversation) come from the Store; both are rendered for the prompt and vouched for the reply guard.
+  const [policies, profile] = await Promise.all([loadPolicies(host, bridge), loadProfile(host, bridge, input.from, now)]);
+  const facts = policies ? renderPolicies(policies) : bridge ? POLICIES_UNAVAILABLE : null;
+  const customer = profile ? renderCustomer(profile, !spokeRecently(host, input.from, now)) : null;
+  const faq = faqInline(settings);
+  trusted.addText(persona, settings.faqText, facts ?? '', customer ?? '', ...knowledge);
   trusted.setPolicy(promisePolicyOf(settings));
-  const prompt = (p: string, k: string[]) => `${copy.systemPrompt({ persona: p, language: settings.language, storeName: null, knowledge: k, tools: tools.map((t) => t.name) })}\n\n${BOUNDARY}`;
-  const system = prompt(persona, knowledge);
-  // What a reply must never recite: the rules, without the merchant's own persona and knowledge (those may be quoted).
-  turn.system = prompt('', []);
+  const prompt = (p: string, k: string[], rich: boolean) => `${copy.systemPrompt({ persona: p, language: settings.language, tone: settings.tone, storeName: policies?.name ?? null, knowledge: k, tools: tools.map((t) => t.name), facts: rich ? facts : null, customer: rich ? customer : null, faq: rich ? faq : null })}\n\n${BOUNDARY}`;
+  const system = prompt(persona, knowledge, true);
+  // What a reply must never recite: the rules, without the merchant's own persona, knowledge and facts (those may be quoted).
+  turn.system = prompt('', [], false);
   const ctx: ToolContext = { host, from: input.from, bridge, availability, locale, cards: [] };
   const messages = historyOf(host, input);
   const started = Date.now();
@@ -315,6 +360,8 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     return await handoff(host, input, 'turn_cap', locale, now);
   }
 
+  // The turn will be answered from here on (text, voice, handoff note): show read + typing now, before the model and the Store are asked.
+  await showTyping(host, input);
   try {
     const real = await providerFor(host.env, host.workspaceId, host.sql, settings);
     if (!real) return await handoff(host, input, 'misconfigured', locale, now);
@@ -389,7 +436,9 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     let outcome: Outcome;
     const turn = { trusted: new Trusted(), system: '' };
     try {
-      outcome = await converse(host, heard, provider, settings, heardLocale, now, await retrieveKnowledge(host, heard.text ?? ''), turn);
+      // A FAQ small enough to read whole is in the prompt (no retrieval); a bigger one is searched in the index, and an index that is still empty is flagged to the merchant.
+      faqIndexAlert(host, settings, knowledgeReady(host.sql), now);
+      outcome = await converse(host, heard, provider, settings, heardLocale, now, faqInline(settings) ? [] : await retrieveKnowledge(host, heard.text ?? ''), turn);
     } catch (err) {
       finishHold();
       if (err instanceof Aborted) {

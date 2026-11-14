@@ -40,6 +40,44 @@ export const catalogPageSchema = z.object({ items: z.array(catalogRowSchema), ne
 export type CatalogPage = z.infer<typeof catalogPageSchema>;
 export const productsSchema = z.object({ items: z.array(catalogRowSchema) });
 
+/**
+ * Chat-agent context (Store ruling CHAT-AGENT-1). Policies: only what the merchant DECLARED; absent = null / empty, never a default,
+ * so the agent may not state a fee, window or hours the Store did not return. Money is integer minor units (piasters).
+ */
+export const shippingZoneSchema = z.object({
+  name: z.string(), nameAr: z.string().nullable(), areas: z.array(z.string()), feeMinor: z.number().int().nonnegative(),
+  freeOverMinor: z.number().int().nonnegative().nullable(), etaDaysMin: z.number().int().nullable(), etaDaysMax: z.number().int().nullable(),
+});
+export const governorateRateSchema = z.object({
+  governorate: z.string(), governorateAr: z.string(), feeMinor: z.number().int().nonnegative(), feeMaxMinor: z.number().int().nonnegative(), freeOverMinor: z.number().int().nonnegative().nullable(),
+});
+export const storePoliciesSchema = z.object({
+  name: z.string(), nameAr: z.string().nullable(), currency: z.string().length(3), locale: z.enum(['ar', 'en']),
+  paymentMethods: z.array(chatPaymentMethod), instapay: z.boolean(),
+  cod: z.object({ available: z.boolean(), fixedFeeMinor: z.number().int().nonnegative().nullable(), percentBps: z.number().int().nonnegative().nullable() }),
+  shipping: z.object({ zones: z.array(shippingZoneSchema), governorates: z.array(governorateRateSchema) }),
+  returns: z.object({ windowDays: z.number().int().nonnegative().nullable(), feesPaidBy: z.enum(['merchant', 'customer']).nullable() }),
+  hours: z.string().nullable(),
+  location: z.object({ address: z.string().nullable(), addressAr: z.string().nullable(), mapsUrl: z.string().nullable() }).nullable(),
+});
+export type StorePolicies = z.infer<typeof storePoliciesSchema>;
+
+const orderStatusEnum = z.enum(['pending_confirmation', 'pending_payment', 'confirmed', 'refused', 'shipped', 'delivered', 'cancelled', 'returned']);
+export const fullAddressSchema = z.object({
+  id: z.string(), label: z.string().nullable(), area: z.string(), street: z.string(), governorate: z.string().nullable(), buildingNumber: z.string().nullable(), notes: z.string().nullable(),
+});
+export type FullAddress = z.infer<typeof fullAddressSchema>;
+/** `null` = no such customer in this store (an unknown phone answers like this, never an error). */
+export const customerProfileSchema = z.object({
+  firstName: z.string().nullable(), preferredLocale: z.enum(['ar', 'en']).nullable(), defaultAddress: fullAddressSchema.nullable(),
+  recentOrders: z.array(z.object({
+    orderNumber: z.string(), status: orderStatusEnum, totalMinor: z.number().int(), currency: z.string().length(3), at: z.number().int(),
+    items: z.array(z.object({ name: z.string(), quantity: z.number().int().positive() })),
+  })),
+}).nullable();
+export type CustomerProfile = NonNullable<z.infer<typeof customerProfileSchema>>;
+export type SearchOptions = { maxPriceMinor?: number; limit: number };
+
 export const buyerSchema = z.object({
   buyerKey: z.string().regex(/^[0-9a-f]{64}$/),
   phoneE164: z.string().regex(/^\+[1-9]\d{7,14}$/),
@@ -113,6 +151,11 @@ export interface StoreBridge {
   getStoreProfile(storeId: string): Promise<BridgeResult<StoreProfile>>;
   listCatalog(storeId: string, cursor: string | null, limit: number): Promise<BridgeResult<CatalogPage>>;
   getProducts(storeId: string, productIds: string[]): Promise<BridgeResult<{ items: CatalogRow[] }>>;
+  /** The Store's own ranked search (stemming, Franco/dialect terms, meaning leg). `maxPriceMinor` is PIASTERS. An empty list is a real "no match". */
+  searchProducts(storeId: string, query: string, opts: SearchOptions): Promise<BridgeResult<{ items: CatalogRow[] }>>;
+  getStorePolicies(storeId: string): Promise<BridgeResult<StorePolicies>>;
+  /** The phone is the buyer proof (the Store rebuilds the key). `{ ok: true, value: null }` = unknown customer. */
+  getCustomerProfile(storeId: string, phoneE164: string): Promise<BridgeResult<z.infer<typeof customerProfileSchema>>>;
   createCheckoutLink(storeId: string, req: { items: OrderLine[]; buyer: Buyer }): Promise<BridgeResult<z.infer<typeof checkoutLinkSchema>>>;
   createOrderFromChat(storeId: string, req: { items: OrderLine[]; buyer: Buyer; addressId?: string; address?: NewAddress; paymentMethod: ChatPaymentMethod; idempotencyKey: string }): Promise<BridgeResult<OrderCreated>>;
   getPaymentLink(storeId: string, orderId: string): Promise<BridgeResult<z.infer<typeof paymentLinkSchema>>>;

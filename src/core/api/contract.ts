@@ -203,6 +203,10 @@ export const agentSettingsFields = z.object({
   language: z.enum(['ar', 'en', 'auto']),
   handoffMinutes: z.number().int().min(5).max(1440),
   faqText: z.string().max(20_000),
+  /** How the agent sounds (Ruling CHAT-AGENT-2): three presets in Egyptian Arabic and English. The merchant's own persona text still comes first. */
+  tone: z.enum(['warm', 'professional', 'playful']),
+  /** Where the owner is told a customer needs a person (E.164, WhatsApp), or null = no WhatsApp alert (the inbox badge and the digest still show it). */
+  notifyPhone: z.string().regex(/^\+[1-9]\d{7,14}$/).nullable(),
   provider: z.enum(['workers-ai', 'openai-compatible']),
   /** Only for `openai-compatible`; the platform chooses the Workers AI model. */
   model: z.string().min(1).max(100).regex(/^[\w./:@+-]+$/).nullable(),

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Env } from '../../env';
 import {
   addressSchema, bridgeResultSchema, memberRoleSchema, storeMembersSchema, catalogPageSchema, checkoutLinkSchema, codOutcomeAckSchema, customerOrdersSchema, orderCreatedSchema, orderStatusSchema, paymentLinkSchema, productsSchema,
-  storeProfileSchema, type BridgeResult, type StoreBridge,
+  storeProfileSchema, storePoliciesSchema, customerProfileSchema, type BridgeResult, type StoreBridge,
 } from '../../core/store-bridge';
 
 /** The methods the Store's `WhatsAppBridge` entrypoint exposes over the Service Binding (contract section 5). */
@@ -63,6 +63,9 @@ export function createServiceBindingBridge(env: Pick<Env, 'STORE_BRIDGE'>): Stor
     getStoreProfile: (s) => call('getStoreProfile', storeProfileSchema, s),
     listCatalog: (s, cursor, limit) => call('listCatalog', catalogPageSchema, s, cursor, limit),
     getProducts: (s, ids) => call('getProducts', productsSchema, s, ids),
+    searchProducts: (s, query, opts) => call('searchProducts', productsSchema, s, query, opts),
+    getStorePolicies: (s) => call('getStorePolicies', storePoliciesSchema, s),
+    getCustomerProfile: (s, phone) => call('getCustomerProfile', customerProfileSchema, s, phone),
     createCheckoutLink: (s, req) => call('createCheckoutLink', checkoutLinkSchema, s, req),
     createOrderFromChat: (s, req) => call('createOrderFromChat', orderCreatedSchema, s, req),
     getPaymentLink: (s, orderId) => call('getPaymentLink', paymentLinkSchema, s, orderId),

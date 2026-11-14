@@ -2,7 +2,7 @@ import { SELF, env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import { abandonVoiceTurn } from '../src/core/ai/agent';
 import { EBDA_AGENT_COPY } from '../src/addons/ebda/agent-copy';
-import { VOICE_MAX_BYTES, VOICE_TIMEOUT, audioDurationMs, fitTranscript, oggOpusDurationMs, type Transcriber } from '../src/core/ai/transcribe';
+import { EGYPTIAN_STT_PROMPT, VOICE_MAX_BYTES, VOICE_TIMEOUT, workersAiTranscriber, audioDurationMs, fitTranscript, oggOpusDurationMs, type Transcriber } from '../src/core/ai/transcribe';
 import { configureAgent } from '../src/core/ai/config';
 import { QuickRetryError, retryDelayMs } from '../src/core/scheduler';
 import { ScriptedProvider, useAgent } from './helpers/agent';
@@ -74,6 +74,27 @@ describe('the pure parts', () => {
     const long = fitTranscript('س'.repeat(2000));
     expect(new TextEncoder().encode(long).byteLength).toBeLessThanOrEqual(1024);
     expect(long).toMatch(/^س+$/);
+  });
+});
+
+describe('Egyptian / code-switch hint for the speech model (D7)', () => {
+  it('every call carries the fixed Egyptian prompt next to the language hint, and the Workers AI shape uses initial_prompt', async () => {
+    const seen: { language?: string; prompt?: string }[] = [];
+    const prev = configureAgent({ transcriber: () => async (_a, o) => { seen.push({ ...(o.language ? { language: o.language } : {}), ...(o.prompt ? { prompt: o.prompt } : {}) }); return 'عايز dress احمر'; } });
+    try {
+      const ws = W(60);
+      const pn = await setup(ws);
+      await say(ws, pn, audioMsg('media-v60'), graphWith(ogg(4_000)));
+      expect(seen).toEqual([{ language: 'ar', prompt: EGYPTIAN_STT_PROMPT }]);
+      expect(EGYPTIAN_STT_PROMPT).toMatch(/المصرية/);
+      expect(EGYPTIAN_STT_PROMPT).not.toMatch(/\d{5,}|@/); // a fixed phrase: no number, mail or customer data
+      const calls: unknown[] = [];
+      const t = workersAiTranscriber({ AI: { run: async (_m: string, i: unknown) => { calls.push(i); return { text: 'x' }; } } } as never)!;
+      await t(new Uint8Array([1, 2, 3]), { language: 'ar', prompt: 'p' });
+      expect(calls[0]).toMatchObject({ language: 'ar', initial_prompt: 'p' });
+    } finally {
+      configureAgent(prev);
+    }
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fx from '../vectors/bridge-v1.json';
+import ctx from '../vectors/bridge-chat-context-v1.json';
 import { createServiceBindingBridge } from '../src/addons/ebda/store-bridge';
 import type { StoreBridge } from '../src/core/store-bridge';
 
@@ -33,6 +34,23 @@ describe('Store bridge contract vectors', () => {
     const b = createServiceBindingBridge({ STORE_BRIDGE: {} } as never) as StoreBridge;
     for (const m of REGISTERED) expect(typeof (b as unknown as Record<string, unknown>)[m]).toBe('function');
   });
+});
+
+describe('chat-context contract vectors (Store ruling CHAT-AGENT-1)', () => {
+  const chat = ctx.cases as Case[];
+  it('covers the three context RPCs', () => {
+    expect([...new Set(chat.map(c => c.method))].sort()).toEqual(['getCustomerProfile', 'getStorePolicies', 'searchProducts']);
+  });
+  for (const c of chat) {
+    it(c.name, async () => {
+      const calls: unknown[][] = [];
+      const binding = new Proxy({}, { get: (_t, m: string) => async (...a: unknown[]) => { calls.push([m, ...a]); return c.expect; } });
+      const bridge = createServiceBindingBridge({ STORE_BRIDGE: binding } as never) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+      const got = await bridge[c.method]!(...c.args);
+      expect(calls).toEqual([[c.method, ...c.args]]);
+      expect(got, 'adapter must accept the Store answer as recorded').toEqual(c.expect);
+    });
+  }
 });
 
 describe('typed business refusals (Store ruling WA-RPC-8)', () => {

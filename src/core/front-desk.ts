@@ -1,3 +1,4 @@
+import { isPlainEnglish } from './franco';
 import { isSuspended } from './numbers/health';
 /**
  * The front desk: what answers a customer before the ordering bot and the AI agent do. The merchant's service menu (a list of
@@ -56,7 +57,8 @@ function awaitingAddress(host: Pick<LinkHost, 'sql'>, from: string, now: number)
 
 function localeOfText(host: Pick<LinkHost, 'sql'>, input: BotInput): Locale {
   if (input.text && /[؀-ۿ]/.test(input.text)) return 'ar';
-  if (input.text && /[A-Za-z]/.test(input.text)) return 'en';
+  if (isPlainEnglish(input.text)) return 'en';
+  if (input.text && /[A-Za-z]/.test(input.text)) return 'ar'; // Franco-Arabic ("3ayez menu")
   const row = host.sql.exec<{ locale: string }>('SELECT locale FROM bot_sessions WHERE wa_id = ?', input.from).toArray()[0];
   return row?.locale === 'en' ? 'en' : 'ar';
 }

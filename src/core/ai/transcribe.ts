@@ -29,14 +29,17 @@ export const VOICE_TIMEOUT = { ms: 45_000 };
 /** The media task has not stored the audio yet: the first retry comes quickly (the download normally finishes in a second or two). */
 export const MEDIA_WAIT_RETRY_MS = 5_000;
 
-export type Transcriber = (audio: Uint8Array, opts: { language?: 'ar' | 'en' }) => Promise<string>;
+/** Context for the speech model (Workers AI `initial_prompt`, verified 2026-11-14 on the model page): Egyptian dialect with English product words mixed in. A fixed phrase, never store or customer data. */
+export const EGYPTIAN_STT_PROMPT = 'كلام بالعامية المصرية، وفيه كلمات إنجليزي زي dress و size و order. مثال: ازيك، عايز أطلب dress أحمر مقاس medium، والشحن بكام للقاهرة؟';
+
+export type Transcriber = (audio: Uint8Array, opts: { language?: 'ar' | 'en'; prompt?: string }) => Promise<string>;
 
 /** Workers AI whisper through the AI binding; null when the binding is absent (then every voice note fails closed). */
 export function workersAiTranscriber(env: Pick<Env, 'AI'>): Transcriber | null {
   const ai = env.AI;
   if (!ai) return null;
   return async (audio, opts) => {
-    const out = (await ai.run(STT_MODEL, { audio: toBase64(audio), ...(opts.language ? { language: opts.language } : {}) })) as { text?: unknown };
+    const out = (await ai.run(STT_MODEL, { audio: toBase64(audio), ...(opts.language ? { language: opts.language } : {}), ...(opts.prompt ? { initial_prompt: opts.prompt } : {}) })) as { text?: unknown };
     if (typeof out?.text !== 'string') throw new Error('transcription answer malformed');
     return out.text;
   };
@@ -160,7 +163,7 @@ export async function transcribeVoiceNote(host: LinkHost, input: BotInput, langu
   if (!takeDailySlot(host, input.messageId, Date.now())) return fail({ kind: 'declined', why: 'daily_cap' });
   let text: string;
   try {
-    text = fitTranscript(await withTimeout(transcriber(bytes, language === 'auto' ? {} : { language }), VOICE_TIMEOUT.ms));
+    text = fitTranscript(await withTimeout(transcriber(bytes, { ...(language === 'auto' ? {} : { language }), prompt: EGYPTIAN_STT_PROMPT }), VOICE_TIMEOUT.ms));
   } catch (err) {
     alert('voice_transcribe_failed', { workspace: host.workspaceId, error: errClass(err) });
     // Ruling VOICE-SLOT-1 - a call that threw or timed out gives its slot back; an empty transcript (silence, noise) keeps it, because the model ran. Abuse by

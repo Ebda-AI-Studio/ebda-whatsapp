@@ -50,6 +50,7 @@ import { digestCounts, digestEnabled, setDigestEnabled } from './digest';
 import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { abandonVoiceTurn } from './ai/agent';
+import { dropProfile } from './ai/context';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
 import { OTP_RATE_WINDOW_MS } from './otp-policy';
@@ -2434,6 +2435,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       const contact = this.sql.exec<{ id: number; buyer_key: string | null }>('SELECT id, buyer_key FROM contacts WHERE wa_id = ?', waId).toArray()[0];
       if (!contact) return { found: false, keys: 0, messages: 0, statusEvents: 0 };
       forgetBuyer(this.host(), contact.buyer_key);
+      dropProfile(this.host(), waId); // the agent's in-memory copy of the customer's Store profile (name, address) goes with the contact
       const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
       const msgs = conv
         ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null; media_r2_key: string | null; idempotency_key: string | null; direction: string }>('SELECT wamid, body_r2_key, media_r2_key, idempotency_key, direction FROM messages WHERE conversation_id = ?', conv.id).toArray()
