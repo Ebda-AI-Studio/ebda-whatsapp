@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { checkTemplateResponse, createTemplateResponse, editTemplateResponse, listTemplatesResponse, templateDraftRequest, type TemplateDto } from '../core/api/contract';
+import { listSharedRequestsResponse, listSharedTemplatesResponse, sharedRequestCreate } from '../core/api/contract';
+import { createRequest, listRequests, sharedNumberOf, sharedTemplatesFor } from '../core/shared/shared-template-requests';
 import { fromStoredComponents, type TemplateDraft } from '../core/template-draft';
 import { checkOnly, createTemplate, deleteTemplate, editTemplate, installDefaults, syncTemplates, type Failure, type TemplatesCtx } from '../core/templates-service';
 import { componentsSchema } from '../core/templates';
@@ -87,6 +89,30 @@ export function templatesRoutes(defaults: readonly TemplateSeed[]) {
     if (isResponse(ctx)) return ctx;
     const { issues, payloadHash } = await checkOnly(ctx, parsed.data as TemplateDraft);
     return c.json({ issues, payloadHash } satisfies z.infer<typeof checkTemplateResponse>);
+  });
+
+  // A store on the SHARED number (no own number): the platform's sendable templates, and asks for a new utility one. Anything else is 404.
+  r.get('/stores/:storeId/templates/shared', async (c) => {
+    if (!(await workspaceStub(c)) || !(await sharedNumberOf(c.env, c.req.param('storeId')!))) return apiError(c, 404, 'not_found');
+    return c.json({ items: await sharedTemplatesFor(c.env) } satisfies z.infer<typeof listSharedTemplatesResponse>);
+  });
+
+  r.get('/stores/:storeId/templates/shared-requests', async (c) => {
+    if (!(await workspaceStub(c)) || !(await sharedNumberOf(c.env, c.req.param('storeId')!))) return apiError(c, 404, 'not_found');
+    return c.json({ items: await listRequests(c.env, c.req.param('storeId')!) } satisfies z.infer<typeof listSharedRequestsResponse>);
+  });
+
+  r.post('/stores/:storeId/templates/shared-requests', async (c) => {
+    if (!canManage(c)) return apiError(c, 403, 'forbidden');
+    const parsed = sharedRequestCreate.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return apiError(c, 400, 'invalid_request');
+    if (!(await workspaceStub(c)) || !(await sharedNumberOf(c.env, c.req.param('storeId')!))) return apiError(c, 404, 'not_found');
+    // WA-SHARED-NOCAMP-1: marketing could never be sent from the shared number, so it is not even asked for.
+    if (parsed.data.category === 'MARKETING') return apiError(c, 400, 'invalid_request', 'marketing_not_on_shared_number');
+    const made = await createRequest(c.env, c.req.param('storeId')!, { ...parsed.data, category: parsed.data.category });
+    if (!made.ok) return apiError(c, 429, 'rate_limited', 'too_many_open_requests');
+    console.log(JSON.stringify({ audit: 'shared_template_requested', workspace: c.req.param('storeId'), name: parsed.data.name, language: parsed.data.language, category: parsed.data.category }));
+    return c.json(made.request, 201);
   });
 
   r.get('/stores/:storeId/templates/:name/:language', async (c) => {

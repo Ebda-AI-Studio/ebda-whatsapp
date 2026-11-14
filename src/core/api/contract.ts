@@ -142,6 +142,22 @@ export const templateIssueDto = z.object({ code: z.string(), severity: z.enum(['
 export const checkTemplateResponse = z.object({ issues: z.array(templateIssueDto), payloadHash: z.string() });
 export const createTemplateResponse = z.object({ name: z.string(), language: z.string(), status: z.string(), category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']), categoryChanged: z.boolean() });
 export const editTemplateResponse = z.object({ status: z.string() });
+/** A platform template a store on the shared number may use (APPROVED utility / authentication only). */
+export const sharedTemplateDto = z.object({ name: z.string(), language: z.string(), category: z.enum(['UTILITY', 'AUTHENTICATION']), bodyText: z.string(), paramCount: z.number().int().nonnegative() });
+export const listSharedTemplatesResponse = z.object({ items: z.array(sharedTemplateDto) });
+export const sharedRequestCreate = z.object({
+  name: z.string().regex(/^[a-z0-9_]{1,512}$/),
+  language: z.string().regex(/^[a-z]{2}(_[A-Z]{2})?$/),
+  category: z.enum(['UTILITY', 'AUTHENTICATION', 'MARKETING']),
+  body: z.string().trim().min(1).max(1024),
+});
+export const sharedRequestDto = z.object({
+  id: z.string(), name: z.string(), language: z.string(), category: z.enum(['UTILITY', 'AUTHENTICATION']), body: z.string(),
+  status: z.enum(['open', 'done', 'declined']), createdAt: z.number().int(), decidedAt: z.number().int().nullable(),
+});
+export const listSharedRequestsResponse = z.object({ items: z.array(sharedRequestDto) });
+export type SharedTemplateDto = z.infer<typeof sharedTemplateDto>;
+export type SharedRequestDto = z.infer<typeof sharedRequestDto>;
 export const listTemplatesResponse = z.object({ items: z.array(templateDto), /** the brand's starter set is in place for the connected number (the screen installs it once when this is false and the list is empty) */ starterInstalled: z.boolean().optional() });
 
 export const noteDto = z.object({ id: z.number().int(), authorUserId: z.string(), text: z.string(), at: z.number().int() });

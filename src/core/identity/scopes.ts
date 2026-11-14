@@ -28,6 +28,8 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
 
   [`GET ${S}/templates`]: 'templates:read',
   [`GET ${S}/templates/:name/:language`]: 'templates:read',
+  [`GET ${S}/templates/shared`]: 'templates:read',
+  [`GET ${S}/templates/shared-requests`]: 'person_only',
   [`POST ${S}/templates/check`]: 'templates:read', // free: Meta's rules against a draft, no Meta call
 
   [`GET ${S}/contacts`]: 'contacts:read',
@@ -110,6 +112,7 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/templates`]: 'person_only',
   [`POST ${S}/templates/sync`]: 'person_only',
   [`POST ${S}/templates/install-defaults`]: 'person_only',
+  [`POST ${S}/templates/shared-requests`]: 'person_only',
   [`PUT ${S}/templates/:name/:language`]: 'person_only',
   [`DELETE ${S}/templates/:name/:language`]: 'person_only',
   [`POST ${S}/campaigns`]: 'person_only',
@@ -163,6 +166,8 @@ export const SESSION_UNCHECKED_READS: Readonly<Record<string, string>> = {
   'GET /stores/:storeId/events': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/throttle': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/templates': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/templates/shared': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/templates/shared-requests': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/templates/:name/:language': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/contacts': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/contacts/:waId/orders': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",

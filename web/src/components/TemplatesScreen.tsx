@@ -1,6 +1,6 @@
 import { FileText, Plus, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { TemplateDto } from '../../../src/core/api/contract';
+import type { SharedRequestDto, SharedTemplateDto, TemplateDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
 import type { InboxSource, TemplatesApi } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
@@ -9,6 +9,7 @@ import { dateTime } from './CampaignsScreen';
 import { EmptyState } from './EmptyState';
 import { LoadError } from './LoadError';
 import type { View } from './Rail';
+import { SharedNumberTemplates } from './SharedNumberTemplates';
 import { TemplateDetail } from './TemplateDetail';
 import { TemplateEditor } from './TemplateEditor';
 
@@ -17,6 +18,7 @@ type Load =
   | { kind: 'loading' }
   | { kind: 'ok'; items: TemplateDto[]; starterInstalled: boolean }
   | { kind: 'no_number' }
+  | { kind: 'shared'; templates: SharedTemplateDto[]; requests: SharedRequestDto[] }
   | { kind: 'token' }
   | { kind: 'error' };
 type Mode = { kind: 'list' } | { kind: 'new' } | { kind: 'detail'; template: TemplateDto } | { kind: 'edit'; template: TemplateDto };
@@ -43,7 +45,19 @@ export function TemplatesScreen({ t, lang, source, api, onNavigate }: Props) {
       setState({ kind: 'ok', items: r.items, starterInstalled: r.starterInstalled });
       return r;
     } catch (e) {
-      setState((s) => (s.kind === 'ok' ? s : classify(e))); // a failed refresh keeps the table that is already on screen
+      const next = classify(e);
+      // No own number: a store on the shared number still has something to show (the platform's templates and its asks); anything else keeps the prompt.
+      if (next.kind === 'no_number' && api.shared) {
+        try {
+          const [templates, requests] = await Promise.all([api.shared.list(), api.shared.requests()]);
+          setState({ kind: 'shared', templates, requests });
+          return null;
+        } catch (e2) {
+          setState((s) => (s.kind === 'ok' ? s : e2 instanceof ApiError && e2.status === 404 ? next : classify(e2)));
+          return null;
+        }
+      }
+      setState((s) => (s.kind === 'ok' ? s : next)); // a failed refresh keeps the table that is already on screen
       return null;
     }
   }, [api]);
@@ -107,7 +121,9 @@ export function TemplatesScreen({ t, lang, source, api, onNavigate }: Props) {
         <p className="tpl-note" role="status" aria-live="polite">{note}</p>
         {state.kind === 'loading' ? <div className="placeholder">{t.tplLoading}</div>
           : state.kind === 'error' ? <LoadError t={t} onRetry={() => { setState({ kind: 'loading' }); void load(); }} />
-          : state.kind === 'no_number' ? (
+          : state.kind === 'shared' && api.shared ? (
+            <SharedNumberTemplates t={t} lang={lang} owner={owner} shared={api.shared} templates={state.templates} requests={state.requests} onNavigate={onNavigate} onSent={() => void load()} />
+          ) : state.kind === 'no_number' ? (
             <EmptyState icon={<FileText size={22} />} title={t.tplNoNumberTitle} body={t.tplNoNumber} />
           ) : state.kind === 'token' ? (
             <EmptyState icon={<FileText size={22} />} title={t.tplTokenTitle} body={t.tplToken} />
@@ -137,7 +153,7 @@ export function TemplatesScreen({ t, lang, source, api, onNavigate }: Props) {
               </tbody>
             </table>
           )}
-        {state.kind === 'no_number' && onNavigate && <button type="button" className="btn primary" onClick={() => onNavigate('numbers')}>{t.tplGoNumbers}</button>}
+        {(state.kind === 'no_number') && onNavigate && <button type="button" className="btn primary" onClick={() => onNavigate('numbers')}>{t.tplGoNumbers}</button>}
         {state.kind === 'token' && onNavigate && <button type="button" className="btn primary" onClick={() => onNavigate('numbers')}>{t.tplGoNumbers}</button>}
       </div>
     </main>

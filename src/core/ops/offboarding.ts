@@ -32,6 +32,7 @@ export const OFFBOARD_TABLES = {
     phone_numbers: 'workspace_id', waba_credentials: 'workspace_id', shared_number_members: 'workspace_id', shared_routes: 'workspace_id', shared_sent: 'workspace_id',
     shared_number_sends: 'workspace_id', shared_number_strikes: 'workspace_id', shared_number_errors: 'workspace_id', workspace_subscriptions: 'workspace_id',
     store_plan_applied: 'workspace_id',
+    shared_template_requests: 'workspace_id', // the template asks of a store on the shared number: template text only, deleted with the workspace
     waba_signup_users: 'workspace_id', workspace_notices: 'workspace_id', workspace_owners: 'workspace_id', new_cap_usage: 'workspace_id', // final review: Meta-user links, owner notices, the Store owner and the campaign-cap usage go with the workspace
     audit_reasons: 'workspace_id', // operators' free-text reasons (AUDIT-RETENTION-1): deletable on purpose
     erasure_records: 'workspace_id', // the workspace's backups are erased with it, so nothing is left for a restore to bring back

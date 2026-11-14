@@ -356,6 +356,7 @@ function createSampleSharedTemplates(): SharedTemplatesApi {
   return {
     list: async () => items.map((t) => ({ ...t })),
     sync: async () => ({ upserted: items.length, removed: 0 }),
+    requests: async () => [{ id: 'sr-1', workspaceId: 'ws-sample-1', name: 'order_ready', language: 'ar', category: 'UTILITY', body: 'أهلًا {{1}}، طلبك {{2}} جاهز للاستلام.', status: 'open', createdAt: BASE - 3 * H, decidedAt: null }],
     submit: async (input) => { items.push({ name: input.name, language: input.language, category: input.category, status: 'PENDING', bodyText: input.components[0]!.text, paramCount: 0, rejectedReason: null }); return { status: 'PENDING' }; },
   };
 }

@@ -1,6 +1,6 @@
 import type {
   AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
-  ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
+  ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto,
 } from '../../../src/core/api/contract';
 
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
@@ -40,6 +40,13 @@ export interface TemplatesApi {
   remove(name: string, language: string): Promise<void>;
   sync(): Promise<{ upserted: number; removed: number }>;
   installDefaults(): Promise<{ submitted: string[]; skipped: string[]; failed: string[] }>;
+  /** A store on the SHARED number (no own number): the platform's sendable templates and its asks for new utility ones. `list` rejects with 404 for a store that is not on the shared number. */
+  shared?: {
+    list(): Promise<SharedTemplateDto[]>;
+    requests(): Promise<SharedRequestDto[]>;
+    /** Rejects with an ApiError `rate_limited` (429, `too_many_open_requests`) at 5 open requests, and 400 `marketing_not_on_shared_number`. */
+    request(r: { name: string; language: string; category: 'UTILITY' | 'AUTHENTICATION'; body: string }): Promise<SharedRequestDto>;
+  };
 }
 
 /** Team seats (owner only; WA-SEATS-1). `assign` rejects with an ApiError `seat_limit` (status 403) when the package has no seat left, and 503 when the team cannot be read. */

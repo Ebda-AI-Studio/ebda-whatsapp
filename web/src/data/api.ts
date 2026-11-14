@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
+  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
@@ -103,6 +103,11 @@ export function createApiSource(o: Opts): LiveSource {
         }
       },
       sync: () => call('/templates/sync', z.object({ upserted: z.number(), removed: z.number() }), post({})),
+      shared: {
+        list: async () => (await call('/templates/shared', listSharedTemplatesResponse)).items,
+        requests: async () => (await call('/templates/shared-requests', listSharedRequestsResponse)).items,
+        request: (r) => call('/templates/shared-requests', sharedRequestDto, post(r)),
+      },
       installDefaults: () => call('/templates/install-defaults', z.object({ submitted: z.array(z.string()), skipped: z.array(z.string()), failed: z.array(z.string()) }), post({})),
     },
     async recordCodOutcome(waId, orderNumber, outcome) {
@@ -289,6 +294,7 @@ export function createApiSource(o: Opts): LiveSource {
       list: async () => (await op('/shared-templates', listTemplatesResponse)).items,
       sync: () => op('/shared-templates/sync', z.object({ upserted: z.number(), removed: z.number() }), post({})),
       submit: (input) => op('/shared-templates', z.object({ status: z.string() }).loose(), post(input)),
+      requests: async () => (await op('/shared-template-requests', z.object({ items: z.array(sharedRequestDto.extend({ workspaceId: z.string() })) }))).items,
     },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });

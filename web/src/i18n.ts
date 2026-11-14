@@ -347,6 +347,8 @@ const ar = {
   tplSharedName: 'اسم القالب (حروف إنجليزي صغيرة وشرطة سفلية)', tplSharedBody: 'نص الرسالة اللي محتاجها', tplSharedSend: 'ابعت الطلب للفريق', tplSharedSent: 'اتبعت للفريق',
   tplSharedMine: 'طلباتك', tplSharedNone: 'لسه مبعتّش طلبات.', tplSharedLimit: 'عندك 5 طلبات مفتوحة. استنى الفريق يخلّصها وبعدها اطلب تاني.', tplSharedBadName: 'الاسم لازم يبقى حروف إنجليزي صغيرة وأرقام وشرطة سفلية بس.',
   tplSharedStatuses: { open: 'مستني الفريق', done: 'اتعمل', declined: 'اتّرفض' } as Record<string, string>,
+  tplSharedType: 'نوع القالب', tplSharedLoading: 'بنجيب القوالب الجاهزة…',
+  opSharedRequestsTitle: 'طلبات المتاجر على الرقم المشترك', opSharedRequestsEmpty: 'مفيش طلبات من المتاجر دلوقتي.', opSharedReqStore: 'المتجر', opSharedReqText: 'النص المطلوب', opSharedReqHelp: 'متاجر على الرقم المشترك طلبت قوالب خدمة. لما تبعت القالب من الفورم اللي فوق بنفس الاسم واللغة، الطلب بيتقفل لوحده.',
 };
 
 const en: typeof ar = {
@@ -677,6 +679,8 @@ const en: typeof ar = {
   tplSharedName: 'Template name (lowercase English letters and underscores)', tplSharedBody: 'The message text you need', tplSharedSend: 'Send the request to the team', tplSharedSent: 'Sent to the team',
   tplSharedMine: 'Your requests', tplSharedNone: 'You have not sent any requests yet.', tplSharedLimit: 'You have 5 open requests. Wait for the team to finish them, then request again.', tplSharedBadName: 'The name must be lowercase English letters, digits and underscores only.',
   tplSharedStatuses: { open: 'Waiting for the team', done: 'Done', declined: 'Declined' },
+  tplSharedType: 'Template type', tplSharedLoading: 'Loading the ready-made templates…',
+  opSharedRequestsTitle: 'Store requests on the shared number', opSharedRequestsEmpty: 'No store requests right now.', opSharedReqStore: 'Store', opSharedReqText: 'Requested text', opSharedReqHelp: 'Stores on the shared number asked for service templates. When you submit the template with the same name and language from the form above, the request closes by itself.',
 };
 
 export const STRINGS = { ar, en };

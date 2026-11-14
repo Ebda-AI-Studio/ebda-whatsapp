@@ -16,6 +16,7 @@ import { backfillFx, getFxBufferPin, setFxBufferPin } from '../core/billing/fx-d
 import { STORE_INCLUDED, setSubscription } from '../core/billing/subscriptions';
 import { executeYearlyRefund, packageRefundQuote } from '../core/billing/package-orders';
 import { currentSharedNumber, registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
+import { listAllRequests, markRequestsDone } from '../core/shared/shared-template-requests';
 import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type SharedTemplateFailure } from '../core/shared/shared-templates';
 import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
@@ -146,8 +147,16 @@ operatorRoutes.post('/shared-templates', async (c) => {
   if (!b.success) return bad(c, b.error.issues[0]?.message);
   const r = await submitSharedTemplate(c.env, b.data as Parameters<typeof submitSharedTemplate>[1]);
   if (!r.ok) return sharedTemplateFailure(c, r);
+  await markRequestsDone(c.env, b.data.name, b.data.language); // a store asked for exactly this template: it is made
   console.log(JSON.stringify({ audit: 'shared_template_submitted', actor: actor(c), name: b.data.name, language: b.data.language, category: b.data.category }));
   return c.json({ name: b.data.name, language: b.data.language, status: r.status }, 201);
+});
+
+// What stores on the shared number asked the team to make (utility / authentication only). Shows the workspace id; no message content.
+operatorRoutes.get('/shared-template-requests', async (c) => {
+  if (!sharedEnabled(c.env)) return c.json({ error: 'not_found' }, 404);
+  const status = c.req.query('status');
+  return c.json({ items: await listAllRequests(c.env, status === 'open' || status === 'done' || status === 'declined' ? status : undefined) });
 });
 
 operatorRoutes.get('/refund-requests', async (c) => c.json({ items: await listRefundRequests(c.env, { ...(c.req.query('state') ? { state: c.req.query('state')! } : {}) }) }));
