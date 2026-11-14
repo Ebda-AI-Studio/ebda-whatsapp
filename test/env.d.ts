@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import type { D1Migration } from 'cloudflare:test';
 import type { Env as AppEnv } from '../src/env';
 
