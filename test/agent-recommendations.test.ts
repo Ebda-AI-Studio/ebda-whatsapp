@@ -140,6 +140,22 @@ describe('recommend_products', () => {
     expect(lastTool(m)).toMatchObject({ error: 'rate_limited' });
   });
 
+  it('the ration is a 24 h window: sets older than a day no longer count, and an erased-looking stale row is pruned', async () => {
+    const id = W(15);
+    const pn = await shop(id);
+    link.fake.recs = { v1: ['v2'], v3: ['v4'], v5: ['v6'], v7: ['v8'] };
+    const g = graph();
+    const ask = (seed: string) => rec({ basis: 'similar', productId: seed });
+    const m = model([{ tools: [ask('v1')] }, { text: 'a' }, { tools: [ask('v3')] }, { text: 'b' }, { tools: [ask('v5')] }, { text: 'c' }, { tools: [ask('v7')] }, { text: 'd' }]);
+    for (const t of ['1', '2', '3']) await say(id, pn, text(t), g);
+    // age every stored set by 25 h: the customer is back under the cap
+    await workspace(id).runDueTasks(Date.now());
+    const { exec } = await import('./helpers/workspace');
+    await exec(id, "UPDATE agent_state SET value = json_set(value, '$.at', json_extract(value, '$.at') - 90000000) WHERE key LIKE 'recs:%'");
+    expect(retailerIdsIn(await say(id, pn, text('4'), g))).toEqual(['v8']);
+    expect(lastTool(m)).not.toMatchObject({ error: 'rate_limited' });
+  });
+
   it('one set per turn: a second call in the same turn is refused', async () => {
     const id = W(10);
     const pn = await shop(id);
