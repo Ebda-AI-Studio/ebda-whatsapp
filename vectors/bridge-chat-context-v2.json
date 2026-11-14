@@ -1,5 +1,5 @@
 {
- "version": 1,
+ "version": 2,
  "cases": [
   {
    "name": "meaning search with a budget",
@@ -29,7 +29,8 @@
        "link": "https://dar-mona.ebda.app/products/v1",
        "brand": null
       }
-     ]
+     ],
+     "degraded": false
     }
    }
   },
@@ -46,8 +47,90 @@
    "expect": {
     "ok": true,
     "value": {
-     "items": []
+     "items": [],
+     "degraded": false
     }
+   }
+  },
+  {
+   "name": "an empty search whose meaning leg was skipped is degraded, not a real negative",
+   "method": "searchProducts",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "dg",
+    {
+     "limit": 5
+    }
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "items": [],
+     "degraded": true
+    }
+   }
+  },
+  {
+   "name": "search with an opaque shopper searcher id",
+   "method": "searchProducts",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "هدية",
+    {
+     "limit": 5,
+     "searcher": "k9f2-shopper_1"
+    }
+   ],
+   "expect": {
+    "ok": true,
+    "value": {
+     "items": [
+      {
+       "retailerId": "v1",
+       "productId": "p-v1",
+       "title": "Item v1",
+       "titleAr": null,
+       "description": null,
+       "priceMinor": 25000,
+       "currency": "EGP",
+       "availability": "in_stock",
+       "imageUrl": null,
+       "link": "https://dar-mona.ebda.app/products/v1",
+       "brand": null
+      },
+      {
+       "retailerId": "v2",
+       "productId": "p-v2",
+       "title": "Item v2",
+       "titleAr": null,
+       "description": null,
+       "priceMinor": 40000,
+       "currency": "EGP",
+       "availability": "in_stock",
+       "imageUrl": null,
+       "link": "https://dar-mona.ebda.app/products/v2",
+       "brand": null
+      }
+     ],
+     "degraded": false
+    }
+   }
+  },
+  {
+   "name": "search with a malformed searcher id is invalid",
+   "method": "searchProducts",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "x",
+    {
+     "limit": 5,
+     "searcher": "not ok/.."
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "reason": "invalid",
+    "message": "searchProducts: searcher"
    }
   },
   {
@@ -160,7 +243,7 @@
    "method": "getCustomerProfile",
    "args": [
     "11111111-1111-4111-8111-111111111111",
-    "+201001234567"
+    "+201000000000"
    ],
    "expect": {
     "ok": true,

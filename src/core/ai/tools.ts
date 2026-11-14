@@ -165,7 +165,7 @@ export function rankRows(rows: CatalogRow[], query: string): CatalogRow[] {
 
 /**
  * Catalogue search. The Store's own ranked search answers first (stemming, Franco/dialect search terms, meaning leg; Store ruling CHAT-AGENT-1): an empty
- * answer from it is a real "the store does not have that". Only when it cannot answer (Store unavailable) does this fall back to the agent's own index and then
+ * answer from it is a real "the store does not have that" unless it says `degraded` (its meaning leg was skipped: Store ruling CHAT-AGENT-6), which is `uncertain` like the fallback. Only when it cannot answer (Store unavailable) does this fall back to the agent's own index and then
  * the plain word match over the catalogue; that path is weaker (no stemming, at most 500 variants read), so an empty result there is marked `uncertain`
  * (and `incomplete` when the catalogue was larger than what was read): the prompt tells the model to say it will check, never "we don't have it" (audit D2).
  * Prices, stock and links are always the Store's, read just now.
@@ -174,8 +174,12 @@ async function searchCatalog(ctx: ToolContext, query: string, maxPrice?: number)
   const bridge = ctx.bridge!;
   const ceiling = maxPrice === undefined ? undefined : Math.round(maxPrice * 100);
   const within = (r: CatalogRow) => ceiling === undefined || r.priceMinor <= ceiling;
-  const found = await bridge.searchProducts(ctx.host.workspaceId, query, { limit: SEARCH_RESULTS, ...(ceiling !== undefined ? { maxPriceMinor: ceiling } : {}) });
-  if (found.ok) return { results: found.value.items.slice(0, SEARCH_RESULTS).map(toHit) };
+  // An opaque per-shopper id for the Store's query-embed rate limit: the hashed buyer key, never the phone.
+  const secret = storeLink().buyerSecret(ctx.host.env);
+  const searcher = secret && isE164(`+${ctx.from}`) ? await buyerKey(secret, `+${ctx.from}`) : undefined;
+  const found = await bridge.searchProducts(ctx.host.workspaceId, query, { limit: SEARCH_RESULTS, ...(ceiling !== undefined ? { maxPriceMinor: ceiling } : {}), ...(searcher ? { searcher } : {}) });
+  // A real negative only when the Store ran every leg: an empty answer with `degraded` (meaning leg skipped) falls through to the weaker path, whose empty result is `uncertain`.
+  if (found.ok && (found.value.items.length > 0 || !found.value.degraded)) return { results: found.value.items.slice(0, SEARCH_RESULTS).map(toHit) };
   // Fallback. The index only names candidate products; what is shown (price, stock, link) is read from the Store right now.
   const ids = await catalogCandidates(ctx.host, query);
   if (ids) {

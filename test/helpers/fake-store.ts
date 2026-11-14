@@ -47,6 +47,8 @@ export class FakeStore implements StoreBridge {
     this.stock = opts.stock ?? Object.fromEntries(this.catalog.map((c) => [c.retailerId, 50]));
   }
 
+  /** `degraded` on the search answer: the Store skipped the meaning leg (Store ruling CHAT-AGENT-6). */
+  searchDegraded = false;
   /** What `searchProducts` answers (the Store's ranked search): default = rows whose title contains a query word, in catalogue order, cheaper than the ceiling. A test may replace it (meaning search, Franco). */
   searchImpl: (query: string, opts: SearchOptions) => CatalogRow[] = (query, opts) => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -136,7 +138,7 @@ export class FakeStore implements StoreBridge {
   }
 
   searchProducts(storeId: string, query: string, opts: SearchOptions) {
-    return this.gate('searchProducts', storeId, [storeId, query, opts], () => ({ ok: true, value: { items: this.searchImpl(query, opts).map((c) => ({ ...c, availability: (this.stock[c.retailerId] ?? 0) > 0 ? ('in_stock' as const) : ('out_of_stock' as const) })) } }));
+    return this.gate('searchProducts', storeId, [storeId, query, opts], () => ({ ok: true, value: { items: this.searchImpl(query, opts).map((c) => ({ ...c, availability: (this.stock[c.retailerId] ?? 0) > 0 ? ('in_stock' as const) : ('out_of_stock' as const) })), degraded: this.searchDegraded } }));
   }
 
   getStorePolicies(storeId: string) {

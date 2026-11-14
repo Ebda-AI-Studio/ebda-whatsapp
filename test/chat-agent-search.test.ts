@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider, useAgent } from './helpers/agent';
 import { agentWorkspace, say, text } from './helpers/agent-chat';
 import { stubGraph } from './helpers/graph';
-import { useStoreLink } from './helpers/store-link';
+import { WA_1, useStoreLink } from './helpers/store-link';
 import { workspace } from './helpers/workspace';
 
 const link = useStoreLink();
@@ -23,7 +23,8 @@ describe('search_catalog uses the Store search first (Ruling CHAT-AGENT-1)', () 
     const m = model([{ tools: [{ name: 'search_catalog', arguments: { query: 'item 3' } }] }, { text: 'تمام' }]);
     await say(ws, pn, text('عايز item 3'), stubGraph());
     expect(link.fake.count('searchProducts')).toBe(1);
-    expect(link.fake.lastCall('searchProducts')).toEqual([ws, 'item 3', { limit: 5 }]);
+    expect(link.fake.lastCall('searchProducts')).toEqual([ws, 'item 3', { limit: 5, searcher: expect.stringMatching(/^[0-9a-f]{64}$/) }]);
+    expect(JSON.stringify(link.fake.lastCall('searchProducts'))).not.toContain(WA_1); // an opaque hashed id, never the phone
     expect(toolResult(m).results[0]).toMatchObject({ id: 'v3', price: 110, inStock: true });
   });
 
@@ -32,7 +33,7 @@ describe('search_catalog uses the Store search first (Ruling CHAT-AGENT-1)', () 
     const pn = await agentWs(ws);
     const m = model([{ tools: [{ name: 'search_catalog', arguments: { query: 'item', maxPrice: 105 } }] }, { text: 'ده المتاح' }]);
     await say(ws, pn, text('عايز item تحت 105'), stubGraph());
-    expect(link.fake.lastCall('searchProducts')).toEqual([ws, 'item', { limit: 5, maxPriceMinor: 10500 }]);
+    expect(link.fake.lastCall('searchProducts')).toEqual([ws, 'item', { limit: 5, maxPriceMinor: 10500, searcher: expect.stringMatching(/^[0-9a-f]{64}$/) }]);
     expect((toolResult(m).results as { price: number }[]).every((r) => r.price <= 105)).toBe(true);
   });
 
@@ -52,6 +53,26 @@ describe('search_catalog uses the Store search first (Ruling CHAT-AGENT-1)', () 
     const m = model([{ tools: [{ name: 'search_catalog', arguments: { query: 'طيارة' } }] }, { text: 'مش موجود عندنا' }]);
     await say(ws, pn, text('عندكم طيارة؟'), stubGraph());
     expect(toolResult(m)).toEqual({ results: [] }); // a fallback miss would carry uncertain: true
+  });
+
+  it('an EMPTY answer with degraded (meaning leg skipped) is uncertain, not a real negative (Store ruling CHAT-AGENT-6)', async () => {
+    const ws = W(20);
+    const pn = await agentWs(ws);
+    link.fake.searchImpl = () => [];
+    link.fake.searchDegraded = true;
+    const m = model([{ tools: [{ name: 'search_catalog', arguments: { query: 'حاجة تتهدي' } }] }, { text: 'هشوف لحضرتك' }]);
+    await say(ws, pn, text('عايز حاجة تتهدي'), stubGraph());
+    expect(toolResult(m)).toMatchObject({ results: [], uncertain: true });
+  });
+
+  it('a degraded answer that still has hits returns them as they are', async () => {
+    const ws = W(21);
+    const pn = await agentWs(ws);
+    link.fake.searchDegraded = true;
+    const m = model([{ tools: [{ name: 'search_catalog', arguments: { query: 'item 3' } }] }, { text: 'تمام' }]);
+    await say(ws, pn, text('عايز item 3'), stubGraph());
+    expect(toolResult(m).results[0]).toMatchObject({ id: 'v3' });
+    expect(toolResult(m).uncertain).toBeUndefined();
   });
 
   it('when the Store search is unavailable it falls back to the catalogue and marks the answer uncertain, never a flat "we do not have it"', async () => {

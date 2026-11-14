@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Env } from '../../env';
 import {
-  addressSchema, bridgeResultSchema, memberRoleSchema, storeMembersSchema, catalogPageSchema, checkoutLinkSchema, codOutcomeAckSchema, customerOrdersSchema, orderCreatedSchema, orderStatusSchema, paymentLinkSchema, productsSchema,
+  addressSchema, bridgeResultSchema, memberRoleSchema, storeMembersSchema, catalogPageSchema, checkoutLinkSchema, codOutcomeAckSchema, customerOrdersSchema, orderCreatedSchema, orderStatusSchema, paymentLinkSchema, productsSchema, searchResultSchema,
   storeProfileSchema, storePoliciesSchema, customerProfileSchema, type BridgeResult, type StoreBridge,
 } from '../../core/store-bridge';
 
@@ -63,7 +63,7 @@ export function createServiceBindingBridge(env: Pick<Env, 'STORE_BRIDGE'>): Stor
     getStoreProfile: (s) => call('getStoreProfile', storeProfileSchema, s),
     listCatalog: (s, cursor, limit) => call('listCatalog', catalogPageSchema, s, cursor, limit),
     getProducts: (s, ids) => call('getProducts', productsSchema, s, ids),
-    searchProducts: (s, query, opts) => call('searchProducts', productsSchema, s, query, opts),
+    searchProducts: (s, query, opts) => call('searchProducts', searchResultSchema, s, query, opts),
     getStorePolicies: (s) => call('getStorePolicies', storePoliciesSchema, s),
     getCustomerProfile: (s, phone) => call('getCustomerProfile', customerProfileSchema, s, phone),
     createCheckoutLink: (s, req) => call('createCheckoutLink', checkoutLinkSchema, s, req),

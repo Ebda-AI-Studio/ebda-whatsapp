@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fx from '../vectors/bridge-v1.json';
-import ctx from '../vectors/bridge-chat-context-v1.json';
+import ctx from '../vectors/bridge-chat-context-v2.json';
 import { createServiceBindingBridge } from '../src/addons/ebda/store-bridge';
 import type { StoreBridge } from '../src/core/store-bridge';
 

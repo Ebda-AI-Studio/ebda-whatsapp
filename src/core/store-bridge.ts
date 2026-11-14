@@ -39,6 +39,9 @@ export type CatalogRow = z.infer<typeof catalogRowSchema>;
 export const catalogPageSchema = z.object({ items: z.array(catalogRowSchema), nextCursor: z.string().nullable() });
 export type CatalogPage = z.infer<typeof catalogPageSchema>;
 export const productsSchema = z.object({ items: z.array(catalogRowSchema) });
+/** The Store's ranked search: `degraded` = the meaning leg was wanted but skipped (budget, limit, outage), so an EMPTY list is not a real negative (Store ruling CHAT-AGENT-6). */
+export const searchResultSchema = z.object({ items: z.array(catalogRowSchema), degraded: z.boolean().default(false) });
+export type SearchResult = z.infer<typeof searchResultSchema>;
 
 /**
  * Chat-agent context (Store ruling CHAT-AGENT-1). Policies: only what the merchant DECLARED; absent = null / empty, never a default,
@@ -76,7 +79,8 @@ export const customerProfileSchema = z.object({
   })),
 }).nullable();
 export type CustomerProfile = NonNullable<z.infer<typeof customerProfileSchema>>;
-export type SearchOptions = { maxPriceMinor?: number; limit: number };
+/** `searcher`: an opaque per-shopper id (the hashed buyer key, never a phone) for the Store's query-embed rate limit. */
+export type SearchOptions = { maxPriceMinor?: number; limit: number; searcher?: string };
 
 export const buyerSchema = z.object({
   buyerKey: z.string().regex(/^[0-9a-f]{64}$/),
@@ -151,8 +155,8 @@ export interface StoreBridge {
   getStoreProfile(storeId: string): Promise<BridgeResult<StoreProfile>>;
   listCatalog(storeId: string, cursor: string | null, limit: number): Promise<BridgeResult<CatalogPage>>;
   getProducts(storeId: string, productIds: string[]): Promise<BridgeResult<{ items: CatalogRow[] }>>;
-  /** The Store's own ranked search (stemming, Franco/dialect terms, meaning leg). `maxPriceMinor` is PIASTERS. An empty list is a real "no match". */
-  searchProducts(storeId: string, query: string, opts: SearchOptions): Promise<BridgeResult<{ items: CatalogRow[] }>>;
+  /** The Store's own ranked search (stemming, Franco/dialect terms, meaning leg). `maxPriceMinor` is PIASTERS. An empty list is a real "no match" unless `degraded` is true. */
+  searchProducts(storeId: string, query: string, opts: SearchOptions): Promise<BridgeResult<SearchResult>>;
   getStorePolicies(storeId: string): Promise<BridgeResult<StorePolicies>>;
   /** The phone is the buyer proof (the Store rebuilds the key). `{ ok: true, value: null }` = unknown customer. */
   getCustomerProfile(storeId: string, phoneE164: string): Promise<BridgeResult<z.infer<typeof customerProfileSchema>>>;
