@@ -8,8 +8,7 @@ import { buildSystemPrompt, computeReleaseId } from '../../foundation/smart-laye
 import type { TurnCtx } from '../../foundation/smart-layer/types';
 import { alert } from '../core/observability';
 import { chatAdapter } from '../core/smart-layer/adapter';
-import { viewOf } from '../core/smart-layer/registry';
-import type { RegistryCap } from '../../foundation/smart-layer/types';
+import { viewOf, type StoredCap } from '../core/smart-layer/registry';
 import type { HelpCorpus, HelpDeps } from '../core/smart-layer/help-index';
 import type { AiBinding } from '../../foundation/smart-layer/provider';
 import registryJson from '../../assistant/registry.generated.json';
@@ -26,7 +25,7 @@ const feedbackBody = z.object({ turnId: z.string().uuid(), thumb: z.enum(['up', 
 let release: Promise<string> | undefined;
 let contractChecked = false;
 let indexKicked = false;
-const REGISTRY = viewOf(registryJson as unknown as RegistryCap[]);
+const REGISTRY = viewOf(registryJson as unknown as StoredCap[]);
 const CORPUS = corpusJson as unknown as HelpCorpus;
 /** Test seam (like `configureAgent`): a scripted model binding and a fake help index. Production never sets it. */
 let override: { ai?: AiBinding; help?: HelpDeps } = {};

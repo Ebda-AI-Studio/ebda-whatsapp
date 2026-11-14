@@ -1,21 +1,21 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { checkAdapterContract } from '../../foundation/smart-layer/eval/adapter-contract';
-import type { RegistryCap, TurnCtx } from '../../foundation/smart-layer/types';
+import type { TurnCtx } from '../../foundation/smart-layer/types';
 import registryJson from '../../assistant/registry.generated.json';
 import corpusJson from '../../assistant/help-corpus.generated.json';
 import { chatAdapter } from '../../src/core/smart-layer/adapter';
 import { chatControls, setPlatformFlag } from '../../src/core/smart-layer/controls';
 import { HASH_KEY, IDS_KEY, ensureHelpIndex, helpFigureSources, helpSearch, type HelpCorpus, type HelpDeps } from '../../src/core/smart-layer/help-index';
 import { chatQuota, holdRef } from '../../src/core/smart-layer/quota';
-import { viewOf } from '../../src/core/smart-layer/registry';
+import { viewOf, type StoredCap } from '../../src/core/smart-layer/registry';
 import { rpcStorage } from '../../src/core/smart-layer/storage-do';
 import { ToolApiError, readTools, type CallApi } from '../../src/core/smart-layer/tools/read.tools';
 import { HOLD_TTL_MS, creditsAvailable, grantCredits } from '../../src/core/ai/credits';
 import { rows, workspace } from '../helpers/workspace';
 
 const W = (n: number) => `00000000-0000-4000-8000-0000000072${String(n).padStart(2, '0')}`;
-const REGISTRY = viewOf(registryJson as unknown as RegistryCap[]);
+const REGISTRY = viewOf(registryJson as unknown as StoredCap[]);
 const CORPUS = corpusJson as unknown as HelpCorpus;
 const ctx = (storeId: string, over: Partial<TurnCtx> = {}): TurnCtx => ({ product: 'chat', storeId, userId: 'u1', role: 'owner', locale: 'ar', now: 1_800_000_000_000, conversationId: 'c1', releaseId: 'r', ...over });
 const noHelp: HelpDeps = { db: env.DB, vectors: undefined, embed: undefined };
