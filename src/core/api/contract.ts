@@ -269,6 +269,8 @@ export const agentSettingsFields = z.object({
   allowFreeDelivery: z.boolean(),
   allowExchange: z.boolean(),
   allowGuarantee: z.boolean(),
+  /** The agent may recommend products from the catalogue (similar items, complements, after an order, budget asks). Default on; off = it only answers what was asked. */
+  recommendProducts: z.boolean(),
 });
 export const agentSettingsDto = agentSettingsFields.extend({
   hasApiKey: z.boolean(),

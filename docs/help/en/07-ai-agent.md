@@ -6,6 +6,7 @@ capabilities:
   - agent.notify-phone@1
   - agent.persona-language@1
   - agent.promises@1
+  - agent.recommendations@1
   - agent.provider-byok@1
   - agent.store-facts@1
   - agent.store-search@1
@@ -38,6 +39,13 @@ The agent replies to your customers in chat in Egyptian Arabic, searches the cat
 - The agent replies **only inside the 24-hour window**. Outside it you need a template ([guide 4](04-templates-and-the-24-hour-window.md)).
 - Every reply uses AI credits. When credits run out the agent stops and hands the conversation to staff.
 - The agent does not change prices or add discounts. Orders, prices and stock come from Ebda Store.
+
+## Product recommendations
+The agent suggests products from your catalog as picture cards: items similar to one the customer liked, something that goes with it, ideas after an order, or a pick within a budget ("هدية تحت 300 جنيه", "3ayez 7aga ta7t 500"). It only suggests products that are active, public and **in stock**, and the price on the card is always read from your store at that moment.
+- It does not push products: it suggests when the customer asks (or once after an order), at most **3 suggestions per customer per day**, and never the same product twice in a day.
+- It follows your **persona** (tone) when it introduces the cards.
+- To switch it off, turn off **Agent recommends products** in Settings > AI agent. Your automatic recommendations on the storefront are a separate switch in Ebda Store.
+- Suggestions are only sent inside the 24-hour window; there is no automatic follow-up after it.
 
 ## Voice notes
 When a customer sends a **voice note**, the agent listens to it, and the text appears under the voice note in your inbox (marked "Voice note transcript"). It then answers like it would a typed message. Voice notes longer than 2 minutes, or beyond your store's daily limit, get a polite request to type instead. If a voice note could not be understood, the inbox shows **Voice note (not transcribed)**: listen to it and reply yourself.

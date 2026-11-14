@@ -14,6 +14,7 @@ import { normaliseText } from '../text-normalise';
 import { buildCatalogCard, buildProductCards, cardableIds, catalogueOpenable, type BuiltCard } from '../store-link/product-cards';
 import { catalogCandidates } from './knowledge';
 import type { ToolCall, ToolDef } from './provider';
+import { recommendArgs, recommendProducts, recommendToolDef } from './recommend';
 
 export const MAX_TOOL_ROUNDS = 3;
 export const MAX_CALLS_PER_ROUND = 3;
@@ -23,7 +24,7 @@ const SEARCH_PAGES = 5;
 const SEARCH_PAGE_SIZE = 100;
 const SEARCH_RESULTS = 5;
 
-export type ToolAvailability = { catalog: boolean; orders: boolean; ordering: boolean };
+export type ToolAvailability = { catalog: boolean; orders: boolean; ordering: boolean; /** The merchant allows product recommendations (setting `recommendProducts`) and the Store is reachable. */ recommend?: boolean };
 
 export function toolDefs(a: ToolAvailability): ToolDef[] {
   const defs: ToolDef[] = [];
@@ -44,6 +45,7 @@ export function toolDefs(a: ToolAvailability): ToolDef[] {
       parameters: { type: 'object', properties: {} },
     });
   }
+  if (a.catalog && a.recommend) defs.push(recommendToolDef);
   if (a.orders) {
     defs.push({
       name: 'order_status',
@@ -68,7 +70,7 @@ export function toolDefs(a: ToolAvailability): ToolDef[] {
 
 export type ToolOutcome = { content: string } | { handoff: true } | { startOrder: true };
 /** `cards` collects the catalogue messages a turn asked for; the agent sends them after its text. */
-export type ToolContext = { host: LinkHost; from: string; bridge: StoreBridge | null; availability: ToolAvailability; locale: 'ar' | 'en'; cards: BuiltCard[]; /** Rows shown by show_products this turn: one product message is built from all of them (WA-CAT-5). */ shown?: CatalogRow[] };
+export type ToolContext = { host: LinkHost; from: string; bridge: StoreBridge | null; availability: ToolAvailability; locale: 'ar' | 'en'; cards: BuiltCard[]; /** The message this turn answers (keys the per-customer recommendation ration). */ messageId: number; /** A recommendation set was already sent this turn. */ recommended?: boolean; /** Rows shown by show_products this turn: one product message is built from all of them (WA-CAT-5). */ shown?: CatalogRow[] };
 
 const searchArgs = z.object({ query: z.string().trim().min(1).max(120) });
 const showArgs = z.object({ ids: z.array(z.string().trim().min(1).max(200)).min(1).max(10) });
@@ -90,6 +92,12 @@ export async function runTool(ctx: ToolContext, call: ToolCall): Promise<ToolOut
         const args = showArgs.safeParse(call.arguments);
         if (!args.success) return err('invalid_arguments');
         return json(await showProducts(ctx, args.data.ids));
+      }
+      case 'recommend_products': {
+        if (!ctx.availability.catalog || !ctx.availability.recommend || !ctx.bridge) return err('unavailable');
+        const args = recommendArgs.safeParse(call.arguments);
+        if (!args.success) return err('invalid_arguments');
+        return json(await recommendProducts(ctx, args.data, { show: showProducts, search: searchCatalog }));
       }
       case 'open_catalog': {
         if (!ctx.availability.catalog) return err('unavailable');

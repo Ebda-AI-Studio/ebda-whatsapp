@@ -1,38 +1,56 @@
 {
   "id": "agent.recommendations",
-  "status": "planned",
-  "plan": "register: Product recommendations in the Chat agent (NOT BUILT)",
+  "status": "in-pr",
+  "pr": "ebda-whatsapp (this PR) + ebda-store bridge getRecommendations (stacked on Store #742)",
   "area": "agent",
   "version": 1,
   "versionDate": "2026-11-14",
   "titleAr": "ترشيحات المنتجات من المساعد",
   "titleEn": "Product recommendations by the agent",
-  "screens": [],
-  "api": [],
+  "screens": [
+    "Settings > AI agent > Agent recommends products"
+  ],
+  "api": [
+    "PUT /stores/:storeId/agent {recommendProducts}"
+  ],
   "mcpTool": null,
   "planGate": null,
   "roles": [
     "owner",
     "staff"
   ],
-  "policy": "free",
+  "policy": "confirm",
   "undo": {
-    "class": "none"
+    "class": "reversible"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/ai-agent",
   "questions": {
     "ar": [
       "عايز المساعد يرشح منتجات مكملة",
       "upsell ازاي",
-      "ازاي ترشيحات المنتجات من المساعد؟"
+      "ازاي ترشيحات المنتجات من المساعد؟",
+      "المساعد بيقترح منتجات كتير للعميل",
+      "اقفل ترشيحات المنتجات"
     ],
     "en": [
-      "Can the agent recommend related products?"
+      "Can the agent recommend related products?",
+      "How do I turn off product suggestions in chat?"
     ]
   },
   "steps": [
-    "Not built; depends on Store #742 data"
+    "Settings > AI agent > switch Agent recommends products (on by default)",
+    "The agent calls recommend_products only when the customer asks for ideas, alternatives, a complement or a budget, or once after an order",
+    "Cards are built from the Store's own recommendation engine (curated, AI, bought-together, similar), re-read live: active, public, in stock, price from the Store",
+    "At most 3 suggestion sets per customer per 24 h, one per turn, never the same product twice in 24 h"
   ],
-  "edgeCases": [],
-  "gaps": []
+  "edgeCases": [
+    "Window closed: the agent does not answer, so nothing is suggested (no template nudge yet)",
+    "Store bridge down: the model is told store_unavailable and answers in text",
+    "Nothing in stock / nothing similar: the agent says so plainly, no invented products",
+    "Merchant switched off Store automatic recommendations: curated picks only",
+    "Catalogue not synced to Meta: text answer with names, prices and links instead of cards"
+  ],
+  "gaps": [
+    "No proactive 'you might also like' after an order outside the 24 h window (needs an approved template)"
+  ]
 }

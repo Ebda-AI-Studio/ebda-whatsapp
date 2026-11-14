@@ -75,6 +75,13 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
           <textarea id="agent-faq" dir="auto" rows={6} maxLength={20000} value={draft.faqText} onChange={(e) => set('faqText', e.target.value)} aria-describedby="faq-hint" />
           <small id="faq-hint" className="muted">{t.agentFaqHint} · {settings.knowledgeReady ? t.agentKbReady : t.agentKbPending}</small>
         </div>
+        <div className="field">
+          <div className="setting-row">
+            <span id="agent-recommend-label">{t.agentRecommend}</span>
+            <button type="button" role="switch" aria-checked={draft.recommendProducts} aria-labelledby="agent-recommend-label" aria-describedby="agent-recommend-hint" className="switch" onClick={() => set('recommendProducts', !draft.recommendProducts)}><span /></button>
+          </div>
+          <small id="agent-recommend-hint" className="muted">{t.agentRecommendHint}</small>
+        </div>
         <fieldset className="field">
           <legend>{t.agentPromises}</legend>
           <small className="muted">{t.agentPromisesHint}</small>

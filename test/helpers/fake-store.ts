@@ -1,6 +1,6 @@
 import { mintedKey, mintedRoles } from './issuer';
 import type {
-  Address, BridgeFailure, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, StoreBridge, StoreProfile,
+  Address, BridgeFailure, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, RecommendationRequest, StoreBridge, StoreProfile,
 } from '../../src/core/store-bridge';
 
 type Order = {
@@ -113,6 +113,24 @@ export class FakeStore implements StoreBridge {
   getProducts(storeId: string, productIds: string[]) {
     // The real bridge schema caps an id at 64 characters and refuses the WHOLE call for one longer (schemas.ts getProducts).
     return this.gate('getProducts', storeId, [storeId, productIds], () => productIds.some((id) => id.length > 64) ? { ok: false, reason: 'invalid' } : ({ ok: true, value: { items: this.catalog.filter((c) => productIds.includes(c.retailerId)).map((c) => ({ ...c, availability: (this.stock[c.retailerId] ?? 0) > 0 ? ('in_stock' as const) : ('out_of_stock' as const) })) } }));
+  }
+
+  /** Recommendation seeds -> retailer ids the engine would return (set by a test). `hidden` = inactive / non-public / other-store products the real Store re-read drops. */
+  recs: Record<string, string[]> = {};
+  hidden = new Set<string>();
+  /** Like the Store: re-read live, so out-of-stock, hidden and over-budget rows never come back; an unknown order or a wrong buyer key is `not_found`. */
+  getRecommendations(storeId: string, req: RecommendationRequest) {
+    return this.gate('getRecommendations', storeId, [storeId, req], () => {
+      let seeds = req.seedIds;
+      if (req.orderNumber !== undefined) {
+        const o = [...this.orders.values()].find((x) => x.orderNumber === req.orderNumber && x.buyerKey === req.buyerKey);
+        if (!o) return { ok: false, reason: 'not_found' };
+        seeds = o.lines.map((l) => l.variantId);
+      }
+      const ids = [...new Set(seeds.flatMap((s) => this.recs[s] ?? []))].filter((id) => !seeds.includes(id) && !this.hidden.has(id));
+      const items = ids.map((id) => this.catalog.find((c) => c.retailerId === id)).filter((c): c is CatalogRow => !!c && (this.stock[c.retailerId] ?? 0) > 0 && (req.maxPriceMinor === undefined || c.priceMinor <= req.maxPriceMinor));
+      return { ok: true, value: { items: items.slice(0, req.limit).map((c) => ({ ...c, availability: 'in_stock' as const })) } };
+    });
   }
 
   createCheckoutLink(storeId: string, req: { items: OrderLine[]; buyer: Buyer }) {
