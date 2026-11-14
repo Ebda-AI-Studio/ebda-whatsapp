@@ -1,5 +1,5 @@
 import type { OrderSummaryDto } from '../../../src/core/api/contract';
-import { STRINGS, num, type Lang } from '../i18n';
+import { STRINGS, num, type Lang, type Strings } from '../i18n';
 
 export function formatMoney(minor: number, currency: string, lang: Lang): string {
   const digits = minor % 100 === 0 ? 0 : 2; // whole pounds stay clean; piasters are never rounded away
@@ -45,4 +45,9 @@ export function orderStops(status: OrderSummaryDto['status']): Stop[] {
 /** Money with an explicit minus (U+2212) up front, so a negative amount reads the same in Arabic and English runs. */
 export function formatSigned(minor: number, lang: Lang): string {
   return (minor < 0 ? '−' : '') + formatMoney(Math.abs(minor), 'EGP', lang);
+}
+
+/** The name a template is shown by: the merchant's own title, else the shipped Arabic name of a starter template, else the raw name. */
+export function templateTitle(t: Strings, x: { name: string; label?: string | null }): string {
+  return x.label?.trim() || t.templateNames[x.name] || x.name;
 }

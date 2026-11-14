@@ -3,6 +3,8 @@ import type {
   ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
 } from '../../../src/core/api/contract';
 
+import type { RuleIssue } from '../../../src/core/meta/template-rules';
+import type { TemplateDraft } from '../../../src/core/template-draft';
 import type { OperatorApi, WalletApi } from './billing';
 import type { SharedTemplatesApi } from './shared-templates';
 
@@ -22,6 +24,22 @@ export interface CampaignsApi {
   remove(id: string): Promise<void>;
   segments(): Promise<SegmentDto[]>;
   preview(criteria: SegmentCriteria): Promise<SegmentPreviewDto>;
+}
+
+/**
+ * Merchant template self-service on the merchant's OWN WhatsApp account. The server checks every role; the UI only hides what the role cannot do.
+ * Rejections are ApiErrors: `detail` = exists | in_use | edit_limit (with `extra.retryAt`) | payload_changed | not_editable | not_deletable | token_unavailable | invalid_template (with `extra.issues`) | no_active_number (404).
+ */
+export interface TemplatesApi {
+  list(): Promise<{ items: TemplateDto[]; starterInstalled: boolean }>;
+  detail(name: string, language: string): Promise<TemplateDto>;
+  /** Free: Meta's rules against a draft, and the hash that `create` / `edit` must carry to prove the sent draft is the checked one. */
+  check(d: TemplateDraft): Promise<{ issues: RuleIssue[]; payloadHash: string }>;
+  create(d: TemplateDraft, expectedHash?: string): Promise<{ name: string; language: string; status: string; category: TemplateDto['category']; categoryChanged: boolean }>;
+  edit(name: string, language: string, d: TemplateDraft, expectedHash?: string): Promise<{ status: string }>;
+  remove(name: string, language: string): Promise<void>;
+  sync(): Promise<{ upserted: number; removed: number }>;
+  installDefaults(): Promise<{ submitted: string[]; skipped: string[]; failed: string[] }>;
 }
 
 /** Team seats (owner only; WA-SEATS-1). `assign` rejects with an ApiError `seat_limit` (status 403) when the package has no seat left, and 503 when the team cannot be read. */
@@ -120,6 +138,8 @@ export interface InboxSource {
   /** Assign a conversation (null = unassign). */
   assign?(conversationId: number, userId: string | null): Promise<void>;
   campaigns?: CampaignsApi;
+  /** Create, submit, edit and delete templates; absent in builds that cannot manage them. */
+  templatesApi?: TemplatesApi;
   numbers?: NumbersApi;
   /** The team and its seats; offered to the owner only. */
   team?: TeamApi;
