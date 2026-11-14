@@ -453,3 +453,41 @@ describe('confirmation tokens', () => {
     expect((await json(await a.call('POST', '/wallet/credit-packs/orders', { packId: 'credits-100', ...tok(first.confirm) }))).message).toBe('confirmation_missing');
   });
 });
+
+describe('the offboarding freeze (OFFBOARD-FREEZE-1) holds on every money surface', () => {
+  const freeze = (ws: string) => env.DB.prepare("INSERT INTO offboarding (workspace_id, state, requested_by, requested_role, requested_at, execute_after) VALUES (?, 'pending', 'u1', 'owner', ?, ?)").bind(ws, Date.now(), Date.now() + 14 * DAY).run();
+  it('own-number funding: preview and write are refused with offboarding_pending, nothing written', async () => {
+    const ws = W(50);
+    await seedNumber('pn-o50', ws);
+    await env.DB.prepare('DELETE FROM number_funding WHERE phone_number_id = ?').bind('pn-o50').run();
+    const a = await apiFor(ws);
+    const prev = await json(await a.call('POST', '/numbers/pn-o50/funding/preview', { funding: 'merchant_card' })); // issued before the freeze
+    await freeze(ws);
+    const p = await a.call('POST', '/numbers/pn-o50/funding/preview', { funding: 'merchant_card' });
+    expect([p.status, (await json(p)).message]).toEqual([409, 'offboarding_pending']);
+    const put = await a.call('PUT', '/numbers/pn-o50/funding', { funding: 'merchant_card', ...tok(prev.confirm) });
+    expect([put.status, (await json(put)).message]).toEqual([409, 'offboarding_pending']);
+    expect(await fundingOf('pn-o50')).toBeNull();
+  });
+  it('yearly refund: preview and request are refused with offboarding_pending, no request filed', async () => {
+    const ws = W(51);
+    await buyYearly(ws);
+    const a = await apiFor(ws);
+    const prev = await json(await a.call('POST', '/wallet/yearly-refund/preview', {}));
+    await freeze(ws);
+    const p = await a.call('POST', '/wallet/yearly-refund/preview', {});
+    expect([p.status, (await json(p)).message]).toEqual([409, 'offboarding_pending']);
+    const r = await a.call('POST', '/wallet/yearly-refund/requests', tok(prev.confirm));
+    expect([r.status, (await json(r)).message]).toEqual([409, 'offboarding_pending']);
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM yearly_refund_requests WHERE workspace_id = ?').bind(ws).first()).toEqual({ n: 0 });
+  });
+  it('credit packs stay refused too (the reference behaviour)', async () => {
+    const ws = W(52);
+    await seedNumber('pn-o52', ws);
+    const a = await apiFor(ws);
+    const prev = await json(await a.call('POST', '/wallet/credit-packs/preview', { packId: 'credits-100' }));
+    await freeze(ws);
+    const r = await a.call('POST', '/wallet/credit-packs/orders', { packId: 'credits-100', ...tok(prev.confirm) });
+    expect([r.status, (await json(r)).message]).toEqual([409, 'offboarding_pending']);
+  });
+});
