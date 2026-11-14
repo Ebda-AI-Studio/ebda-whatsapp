@@ -6,16 +6,21 @@
   "versionDate": "2026-11-14",
   "titleAr": "تشغيل رسايل تأكيد الطلب",
   "titleEn": "Turn order confirmation messages on or off",
-  "screens": [],
+  "screens": [
+    "BotScreen Switches: order confirmations",
+    "view:BotScreen",
+    "/bot"
+  ],
   "api": [
-    "PATCH /stores/:storeId/store-link/settings {orderConfirmations}"
+    "POST /stores/:storeId/store-link/settings/preview",
+    "PATCH /stores/:storeId/store-link/settings"
   ],
   "mcpTool": null,
   "planGate": null,
   "roles": [
     "owner"
   ],
-  "policy": "preview",
+  "policy": "confirm",
   "undo": {
     "class": "reversible"
   },
@@ -31,13 +36,15 @@
     ]
   },
   "steps": [
-    "API only (default ON)"
+    "Open Bot in Settings, then Switches",
+    "Turn Order confirmation messages on: the screen asks you to confirm because customers will receive messages",
+    "Turning it off needs no confirmation"
   ],
   "edgeCases": [
     "Needs an approved order_confirmation / cod_confirmation template",
-    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires"
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires",
+    "Turning ON needs a single-use confirm token from the preview step, bound to the exact change; a replay or an edited change is refused (409 confirm_invalid / confirm_expired)",
+    "Every toggle writes an audit row (store_link.toggle) naming the switch and the value"
   ],
-  "gaps": [
-    "NO merchant UI toggle"
-  ]
+  "gaps": []
 }

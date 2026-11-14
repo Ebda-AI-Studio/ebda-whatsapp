@@ -241,6 +241,15 @@ export type CatalogStatusDto = z.infer<typeof catalogStatusDto>;
 export const provisionCatalogRequest = z.object({ name: z.string().trim().min(1).max(100).optional() }).strict();
 export const provisionCatalogResponse = z.object({ catalogId: z.string() });
 export const botSettingsDto = storeLinkSettingsResponse.pick({ menu: true, hours: true, location: true });
+/** The three owner switches (A31-A33): ordering bot, order confirmation messages, store-login codes over WhatsApp. */
+export const botSwitchesDto = storeLinkSettingsResponse.pick({ orderingBot: true, orderConfirmations: true, otpViaWhatsApp: true });
+export type BotSwitchesDto = z.infer<typeof botSwitchesDto>;
+/** The same change the PATCH will carry; the preview answer is the single-use token the PATCH must present to turn sending ON (SETTINGS-CONFIRM-1). */
+export const settingsPreviewResponse = z.object({ confirmToken: z.string().regex(/^[0-9a-f]{64}$/), expiresAt: z.number().int() });
+export const confirmTokenField = z.object({ confirmToken: z.string().regex(/^[0-9a-f]{64}$/).optional() });
+/** GET /throttle (A28): the number's Meta tier (new conversations per 24 h), its speed, use in the window, sends waiting, and when the next slot frees. */
+export const throttleReportDto = z.object({ tier: z.number().int(), mps: z.number(), usedInWindow: z.number().int(), waiting: z.number().int(), nextSlotAt: z.number().int().nullable() });
+export type ThrottleReportDto = z.infer<typeof throttleReportDto>;
 export type BotSettingsDto = z.infer<typeof botSettingsDto>;
 export const storeLinkSettingsPatch = z.object({
   orderConfirmations: z.boolean(),

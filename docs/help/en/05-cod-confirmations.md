@@ -23,7 +23,7 @@ The order itself (status, price, stock) belongs to Ebda Store. Ebda Chat only re
 - Your store linked to Ebda Chat.
 - A connected number ([your own](02-connect-your-own-number.md) or [the shared number](03-use-the-shared-number.md)).
 - An approved COD confirmation template ([Templates](04-templates-and-the-24-hour-window.md)).
-- **Order confirmations.** They are on by default and there is no switch for it on screen today: if you want to stop them or check they are on, write to ahlan@ebda.app.
+- **Order confirmation messages** switched on. They are on by default; to stop them or check, open **Bot**, then **Bot switches** ([guide 30](30-bot-switches-and-sending-speed.md)).
 - A running package. Without one no confirmation is sent and the app says "a package is required" ([wallet guide](09-wallet-top-ups-and-refunds.md)). If a renewal fails, confirmations keep working for up to 7 days.
 
 ## If the customer does not tap a button

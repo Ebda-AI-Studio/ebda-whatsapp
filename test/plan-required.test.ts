@@ -327,7 +327,7 @@ describe('route walk: every non-GET store route is decided (sends and number set
     'PUT /stores/:storeId/contacts/:waId/tags', 'POST /stores/:storeId/conversations/:conversationId/assign', 'POST /stores/:storeId/conversations/:conversationId/notes',
     'POST /stores/:storeId/conversations/:conversationId/read', 'PUT /stores/:storeId/conversations/:conversationId/tags', 'POST /stores/:storeId/imports',
     'POST /stores/:storeId/wallet/instapay', 'PUT /stores/:storeId/wallet/instapay/:requestId/proof', 'POST /stores/:storeId/numbers/:phoneNumberId/disconnect', 'POST /stores/:storeId/numbers/notices/:noticeId/dismiss',
-    'POST /stores/:storeId/numbers/:phoneNumberId/refresh', 'PATCH /stores/:storeId/store-link/settings', 'POST /stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outcome',
+    'POST /stores/:storeId/numbers/:phoneNumberId/refresh', 'PATCH /stores/:storeId/store-link/settings', 'POST /stores/:storeId/store-link/settings/preview', 'POST /stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outcome',
     'POST /stores/:storeId/store-link/catalog/provision', 'POST /stores/:storeId/store-link/catalog/resync', 'PUT /stores/:storeId/store-link/catalog/commerce', 'POST /stores/:storeId/packages/:packageId/checkout', 'DELETE /stores/:storeId/segments/:segmentId',
     'POST /stores/:storeId/segments', 'POST /stores/:storeId/segments/preview', 'PUT /stores/:storeId/segments/:segmentId', 'POST /stores/:storeId/shared-number/leave',
     'POST /stores/:storeId/wallet/refund-requests', 'POST /stores/:storeId/wallet/topups', 'PUT /stores/:storeId/digest',
