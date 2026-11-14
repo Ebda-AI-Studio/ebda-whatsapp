@@ -223,8 +223,17 @@ export function createSampleSource(): InboxSource {
         return { ...catalog };
       },
       async provision() {
-        catalog = { catalogId: '1234567890123', lastSyncAt: null };
+        catalog = { catalogId: '1234567890123', lastSyncAt: null, items: { synced: 0, excluded: 0, rejected: 0 }, leftOut: [], commerce: { catalogVisible: true, cartEnabled: true, failed: null }, error: null, syncing: true, pending: 0 };
         return { catalogId: '1234567890123' };
+      },
+      async resync() {
+        if (!catalog.catalogId) throw Object.assign(new Error('catalog_not_set'), { detail: 'catalog_not_set' });
+        catalog = { ...catalog, syncing: true };
+        return { started: true };
+      },
+      async setCommerce(v) {
+        catalog = { ...catalog, commerce: { ...v, failed: null } };
+        return v;
       },
     },
     async assign(id, userId) {
