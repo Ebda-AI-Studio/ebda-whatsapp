@@ -1,10 +1,10 @@
-import { FileText, LogOut, Megaphone, MessagesSquare, Bot, Phone, ShieldCheck, Sparkles, Users, UsersRound, Wallet } from 'lucide-react';
+import { FileText, LogOut, Megaphone, MessagesSquare, Bot, Phone, Plug, ShieldCheck, Sparkles, Users, UsersRound, Wallet } from 'lucide-react';
 import { BRAND } from '@brand';
 import type { ReactNode } from 'react';
 import type { Strings } from '../i18n';
 
 // Only sections that exist are listed: settings join the rail when their screen ships.
-export type View = 'inbox' | 'campaigns' | 'templates' | 'contacts' | 'agent' | 'bot' | 'numbers' | 'wallet' | 'team' | 'operator';
+export type View = 'inbox' | 'campaigns' | 'templates' | 'contacts' | 'agent' | 'bot' | 'numbers' | 'integrations' | 'wallet' | 'team' | 'operator';
 
 export function Rail({ t, view, onNavigate, show, onSignOut }: { t: Strings; view: View; onNavigate: (v: View) => void; show: Record<Exclude<View, 'inbox'>, boolean>; onSignOut?: (() => void) | undefined }) {
   const item = (v: View, icon: ReactNode, label: string) => (
@@ -20,6 +20,7 @@ export function Rail({ t, view, onNavigate, show, onSignOut }: { t: Strings; vie
       {show.agent && item('agent', <Sparkles size={20} aria-hidden />, t.agent)}
       {show.bot && item('bot', <Bot size={20} aria-hidden />, t.botNav)}
       {show.numbers && item('numbers', <Phone size={20} aria-hidden />, t.numbersNav)}
+      {show.integrations && item('integrations', <Plug size={20} aria-hidden />, t.intNav)}
       {show.wallet && item('wallet', <Wallet size={20} aria-hidden />, t.walletNav)}
       {show.team && item('team', <UsersRound size={20} aria-hidden />, t.teamNav)}
       {show.operator && item('operator', <ShieldCheck size={20} aria-hidden />, t.opNav)}

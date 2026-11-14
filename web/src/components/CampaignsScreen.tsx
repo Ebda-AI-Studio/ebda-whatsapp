@@ -34,7 +34,7 @@ export function CampaignsScreen({ t, lang, source, api, now, onNavigate }: Props
   }, [items, load]);
 
   if (mode === 'new') {
-    return <CampaignForm t={t} lang={lang} source={source} api={api} now={now} onClose={() => { setMode('list'); load(); }} onOpenTemplates={onNavigate ? () => onNavigate('templates') : undefined} />;
+    return <CampaignForm t={t} lang={lang} source={source} api={api} now={now} onClose={() => { setMode('list'); load(); }} onOpenTemplates={onNavigate && source.templatesApi ? () => onNavigate('templates') : undefined} onOpenNumbers={onNavigate && source.numbers ? () => onNavigate('numbers') : undefined} />;
   }
 
   const replace = (c: CampaignDto) => setItems((xs) => xs?.map((x) => (x.id === c.id ? c : x)) ?? null);

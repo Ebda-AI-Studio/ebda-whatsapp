@@ -6,7 +6,11 @@
   "versionDate": "2026-11-14",
   "titleAr": "ربط المساعد بسيستم الشركة",
   "titleEn": "Connect the agent to your own systems (webhook / Odoo)",
-  "screens": [],
+  "screens": [
+    "IntegrationsScreen Agent connectors",
+    "view:IntegrationsScreen",
+    "/integrations"
+  ],
   "api": [
     "GET /stores/:storeId/connectors",
     "PUT /stores/:storeId/connectors/:id",
@@ -34,7 +38,10 @@
     ]
   },
   "steps": [
-    "API only: kind webhook or odoo, https:443 only, HMAC-signed calls, secret write-only, one test per 5 s"
+    "Connect systems > Agent connectors > Add a connector",
+    "Webhook (https:443, tools as JSON) or Odoo (url, database, login, API key); secret is write-only and encrypted with AGENT_SECRETS_KEY, a GET returns hasSecret only",
+    "Save asks for an explicit confirm naming the host and the tools the agent will be able to call",
+    "Test the connection (one per 5 s); delete asks first"
   ],
   "edgeCases": [
     "SSRF rules on every call",

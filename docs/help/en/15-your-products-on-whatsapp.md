@@ -19,6 +19,7 @@ Your Ebda Store products appear inside WhatsApp as a shop: a **shop button** on 
 ## What you need before you start
 - A connected number ([guide 2](02-connect-your-own-number.md)) and your store linked.
 - A WhatsApp catalog. Press **Create my WhatsApp catalog** under **Bot** in the side rail; we connect it to your number and fill it with your products.
+- Already have a catalogue on Meta? Under **Bot**, in the catalogue section, type its ID in **Existing catalogue ID** and press **Link this catalogue**. We check with Meta that it is connected to your WhatsApp Business account, and refuse it if it is not. Do this before you create a new one.
 - The owner account for the switches. Staff can see the status.
 
 ## What happens by itself

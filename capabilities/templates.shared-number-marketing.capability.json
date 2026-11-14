@@ -9,7 +9,9 @@
   "titleEn": "Why marketing needs your own number (shared-number stores)",
   "screens": [
     "view:templates",
-    "/templates"
+    "/templates",
+    "view:CampaignForm",
+    "/campaigns"
   ],
   "api": [],
   "planGate": null,
@@ -33,7 +35,7 @@
     ]
   },
   "steps": [
-    "The Templates screen of a shared-number store explains that marketing messages and campaigns need its own number, with a button to connect one (rule WA-SHARED-NOCAMP-1)"
+    "The Templates screen and the New campaign screen of a shared-number store explain that marketing messages and campaigns need its own number, with a button to connect one (rule WA-SHARED-NOCAMP-1); the campaign form is replaced by the notice, so there is no submit"
   ],
   "edgeCases": [
     "Marketing is never sendable from the shared number, whatever a store's own copy of a template says"

@@ -3,6 +3,7 @@ import type { ConversationDto, MessageDto, OrderSummaryDto, SendMessageRequest, 
 import { ChatPane } from './components/ChatPane';
 import { ConversationList } from './components/ConversationList';
 import { OrderPane } from './components/OrderPane';
+import { IntegrationsScreen } from './components/IntegrationsScreen';
 import { Rail, type View } from './components/Rail';
 import { BRAND } from '@brand';
 import { AgentScreen } from './components/AgentScreen';
@@ -245,11 +246,12 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   return (
     <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
       {source.viewAs && <p className="view-as-banner" role="status" aria-label={t.viewAsBanner}>{t.viewAsBanner}</p>}
-      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} />
+      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, integrations: !!source.connectors && source.role === 'owner', wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
+        : view === 'integrations' && source.connectors ? <IntegrationsScreen t={t} lang={lang} source={source} />
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
         : view === 'templates' && source.templatesApi ? <TemplatesScreen t={t} lang={lang} source={source} api={source.templatesApi} onNavigate={setView} />
-        : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} onNavigate={source.templatesApi ? setView : undefined} />
+        : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} onNavigate={setView} />
         : view === 'wallet' && source.wallet ? <WalletScreen t={t} lang={lang} source={source} api={source.wallet} now={now} />
         : view === 'operator' && source.operator && source.role === 'super_admin' ? <OperatorScreen t={t} lang={lang} source={source} api={source.operator} now={now} />
         : view === 'team' && source.team ? <TeamScreen t={t} lang={lang} source={source} api={source.team} />

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, connectorDto, connectorTestResult, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
@@ -147,6 +147,13 @@ export function createApiSource(o: Opts): LiveSource {
       provision: (name) => call('/store-link/catalog/provision', provisionCatalogResponse, post(name ? { name } : {})),
       resync: () => call('/store-link/catalog/resync', catalogResyncResponse, post({})),
       setCommerce: (v) => call('/store-link/catalog/commerce', catalogCommerceRequest, { method: 'PUT', body: JSON.stringify(v) }),
+      linkExisting: async (catalogId) => { await call('/store-link/settings', botSettingsDto, { method: 'PATCH', body: JSON.stringify({ catalogId }) }); },
+    },
+    connectors: {
+      list: () => call('/connectors', z.array(connectorDto)),
+      save: (id, body) => call(`/connectors/${encodeURIComponent(id)}`, connectorDto, { method: 'PUT', body: JSON.stringify(body) }),
+      remove: async (id) => { await call(`/connectors/${encodeURIComponent(id)}`, done, { method: 'DELETE' }); },
+      test: (id) => call(`/connectors/${encodeURIComponent(id)}/test`, connectorTestResult, post({})),
     },
     async assign(id, userId) {
       await call(`/conversations/${id}/assign`, z.unknown(), { method: 'POST', body: JSON.stringify({ userId }) });
