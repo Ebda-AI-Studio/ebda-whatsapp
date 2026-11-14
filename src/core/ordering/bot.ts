@@ -445,19 +445,53 @@ function cartSummary(t: Turn): void {
   t.session.state = 'cart';
 }
 
-/** A cart sent from Meta's catalog replaces ours. Prices are Meta's, shown as an estimate: the Store re-prices the order. */
+/**
+ * A cart sent from Meta's catalogue replaces ours. Nothing in it is trusted but the ids and quantities (Ruling WA-CAT-4): every line is read from the
+ * Store just now, so the price, the stock and whether the product still exists are the Store's, never the cart's. Lines the Store no longer sells or
+ * has sold out are dropped with a clear message; a cart whose prices were stale says so. The order key comes from the cart message's own id, so one cart
+ * message can only ever become one order, however often the webhook is replayed.
+ */
 async function receiveCart(t: Turn): Promise<void> {
   const order = t.input.order!;
-  const cart: Line[] = [];
-  for (const it of order.items.slice(0, MAX_CART_LINES)) {
-    const price = parseMinor(it.price);
-    if (price === null || !it.retailerId) continue;
-    const known = t.session.data.rows[it.retailerId] ?? t.session.data.cart.find((l) => l.variantId === it.retailerId);
-    cart.push({ variantId: it.retailerId, title: known?.title ?? it.retailerId, priceMinor: price, currency: it.currency || 'EGP', quantity: Math.max(1, Math.min(MAX_LINE_QTY, it.quantity)) });
+  const mine = readSettings(t.host).catalogId;
+  const asked = new Map<string, { quantity: number; metaPriceMinor: number | null }>();
+  // A cart from another catalogue (ids could collide with ours) is not ours to read.
+  if (!(mine && order.catalogId && order.catalogId !== mine)) {
+    for (const it of order.items) {
+      if (!it.retailerId || asked.size >= MAX_CART_LINES && !asked.has(it.retailerId)) continue;
+      const have = asked.get(it.retailerId);
+      asked.set(it.retailerId, { quantity: Math.min(MAX_LINE_QTY, (have?.quantity ?? 0) + Math.max(1, Math.min(MAX_LINE_QTY, it.quantity))), metaPriceMinor: parseMinor(it.price) });
+    }
   }
+  const res = asked.size ? await t.bridge.getProducts(t.ws, [...asked.keys()]) : null;
+  if (res && !res.ok) return unavailable(t);
+  const live = new Map((res?.ok ? res.value.items : []).map((r) => [r.retailerId, r]));
+  const cart: Line[] = [];
+  const soldOut: string[] = [];
+  const unknown: string[] = [];
+  let repriced = false;
+  for (const [id, want] of asked) {
+    const row = live.get(id);
+    const known = t.session.data.rows[id] ?? t.session.data.cart.find((l) => l.variantId === id);
+    if (!row) { unknown.push(known?.title ?? loc(t, { ar: 'منتج', en: 'an item' })); continue; }
+    const name = nameOf(t, row);
+    if (row.availability !== 'in_stock') { soldOut.push(name); continue; }
+    if (want.metaPriceMinor !== null && want.metaPriceMinor !== row.priceMinor) repriced = true;
+    cart.push({ variantId: id, title: name, priceMinor: row.priceMinor, currency: row.currency, quantity: want.quantity });
+  }
+  if (soldOut.length) t.out.push({ kind: 'text', text: t.copy.t.outOfStock(soldOut, t.session.locale) });
+  if (unknown.length) t.out.push({ kind: 'text', text: t.copy.t.cards.cartUnknown(unknown, t.session.locale) });
   t.session.data.cart = cart;
-  t.session.data.orderKey = null;
-  if (cart.length) t.steps.add('cart');
+  t.session.data.selected = null;
+  t.session.data.payment = null;
+  t.session.data.orderKey = cart.length ? `cart:${t.input.wamid}` : null;
+  if (!cart.length) {
+    say(t, loc(t, t.copy.t.cards.cartAllGone));
+    t.session.state = 'idle';
+    return;
+  }
+  if (repriced) say(t, loc(t, t.copy.t.cards.cartRepriced));
+  t.steps.add('cart');
   return cartSummary(t);
 }
 
