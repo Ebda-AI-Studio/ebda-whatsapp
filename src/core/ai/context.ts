@@ -111,18 +111,48 @@ export async function loadProfile(host: LinkHost, bridge: StoreBridge | null, wa
   }
 }
 
-/** What the model may know about the person: first name, language, saved address, recent orders (names and amounts, never a phone). Masked like any text going to a model. */
+/**
+ * Text the SHOPPER typed (name, address fields, notes) is untrusted data, however it reached the Store: a link, an amount or an instruction planted there must neither
+ * steer the model nor be vouched for in the reply guard (review I1). Links, e-mail-like tokens and amounts next to a currency are removed, angle brackets and control
+ * characters dropped, whitespace collapsed, length capped. A first name is letters only (no digits at all).
+ */
+const URLISH = /\S*(?:https?:|www\.|ftp:|[\p{L}\p{N}-]\.[a-z]{2,}\b|@)\S*/giu;
+const AMOUNT = /(?:\d[\d.,]*\s*(?:egp|e\.?g\.?p|l\.?e\b|usd|kwd|sar|aed|جنيه|جنية|جنيهات|ج\.?م|جم|ريال|دينار|درهم|دولار|\$)|(?:egp|usd|\$|ج\.?م)\s*\d[\d.,]*)/giu;
+export function safeTyped(raw: string | null | undefined, max: number): string {
+  const t = (raw ?? '').replace(/[\u0000-\u001f\u007f<>\u202a-\u202e\u2066-\u2069]/g, ' ').replace(URLISH, ' ').replace(AMOUNT, ' ').replace(/\s+/g, ' ').trim();
+  return maskForModel(Array.from(t).slice(0, max).join('')).trim();
+}
+const safeName = (raw: string | null | undefined): string => safeTyped(safeTyped(raw, 80).replace(/[^\p{L}\p{M}'\u2019 -]/gu, ' '), 30);
+
+/** The fence core wraps around shopper-typed profile fields; the boundary text in `agent.ts` names it. */
+export const PROFILE_OPEN = '<customer_profile>';
+export const PROFILE_CLOSE = '</customer_profile>';
+
+/**
+ * What the model may know about the person: first name, language, saved address, recent orders (names and amounts, never a phone). The fields the shopper typed
+ * (name, address) sit inside a `<customer_profile>` fence as untrusted data; they are NEVER added to what the reply guard trusts (only order totals are, see
+ * `profilePrices`). Masked like any text going to a model.
+ */
 export function renderCustomer(c: CustomerProfile, conversationStart: boolean): string {
   const L: string[] = [`Conversation start: ${conversationStart ? 'yes (greet them by first name once, if known)' : 'no (do not greet again)'}`];
-  if (c.firstName) L.push(`First name: ${maskForModel(c.firstName)}`);
   if (c.preferredLocale) L.push(`Preferred language: ${c.preferredLocale === 'ar' ? 'Arabic' : 'English'}`);
+  const typed: string[] = [];
+  const name = safeName(c.firstName);
+  if (name) typed.push(`First name: ${name}`);
   const a = c.defaultAddress;
-  if (a) L.push(`Saved address: ${maskForModel([a.label, a.street, a.area, a.governorate, a.buildingNumber ? `building ${a.buildingNumber}` : null, a.notes].filter(Boolean).join(', '))}`);
+  if (a) {
+    const addr = [safeTyped(a.label, 30), safeTyped(a.street, 100), safeTyped(a.area, 60), safeTyped(a.governorate, 40), a.buildingNumber ? `building ${safeTyped(a.buildingNumber, 12)}` : null, safeTyped(a.notes, 80)].filter(Boolean).join(', ');
+    if (addr) typed.push(`Saved address: ${addr}`);
+  }
+  if (typed.length) L.push(`${PROFILE_OPEN}\n${typed.join('\n')}\n${PROFILE_CLOSE}`);
   for (const o of c.recentOrders.slice(0, 3)) {
-    L.push(`Past order ${o.orderNumber}: ${o.items.slice(0, 5).map((i) => `${maskForModel(i.name)} x${i.quantity}`).join(', ') || 'items not listed'}; ${o.status}; ${money(o.totalMinor, o.currency)}`);
+    L.push(`Past order ${safeTyped(o.orderNumber, 24)}: ${o.items.slice(0, 5).map((i) => `${safeTyped(i.name, 60)} x${i.quantity}`).join(', ') || 'items not listed'}; ${o.status}; ${money(o.totalMinor, o.currency)}`);
   }
   return L.join('\n');
 }
+
+/** The only part of the profile the reply guard may vouch for: the amounts of the Store's own past orders (structured, not typed by the shopper). */
+export const profilePrices = (c: CustomerProfile | null): number[] => (c ? c.recentOrders.slice(0, 3).map((o) => o.totalMinor / 100) : []);
 
 /** Store knowledge empty while a FAQ too big to inline is waiting for its index: the merchant is told (once a day) through an alert and the Agent screen warns. */
 export function faqIndexAlert(host: LinkHost, s: AgentSettings, knowledgeReady: boolean, now: number): void {
