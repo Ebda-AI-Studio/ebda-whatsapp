@@ -291,7 +291,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
       )}
       <button type="button" className="sheet-backdrop" aria-label={t.close} tabIndex={-1} onClick={() => setOrdersOpen(false)} />
       {assistantOn && assistantOpen && source.assistant && (
-        <AssistantPanel t={t} lang={lang} storeId={source.storeId ?? 'store'} api={source.assistant} onClose={closeAssistant} onUnavailable={() => { setAssistantGone(true); setAssistantOpen(false); }}
+        <AssistantPanel t={t} lang={lang} storeId={source.storeId ?? 'store'} userId={source.currentUserId} api={source.assistant} onClose={closeAssistant} onUnavailable={() => { setAssistantGone(true); setAssistantOpen(false); }}
           onNavigate={(v) => { setView(v); if (window.matchMedia?.('(max-width: 819px)').matches) closeAssistant(); }} />
       )}
       {source.kind === 'sample' && <span className="sample-badge">{t.sample}</span>}

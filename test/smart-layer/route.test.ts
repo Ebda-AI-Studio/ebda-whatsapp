@@ -163,12 +163,16 @@ describe('assistant route: conversation and feedback', () => {
     expect(theirs.items).toEqual([]);
   });
 
-  it('a thumb is written into sl_audit rails.thumb', async () => {
+  it('a thumb on the caller\'s own turn is written into sl_audit rails.thumb; an invented turn id is 404', async () => {
     const s = storeId(7021);
     const { token } = await apiFor(s);
-    const turnId = crypto.randomUUID();
+    await setMode(s, 'answer-only');
+    const { ai } = scriptedAi([{ text: 'تقدر تشحن المحفظة. [[cap:wallet.view]]' }]);
+    configureAssistant({ ai, help: helpHits([{ articleId: 'whatsapp/wallet-top-ups-and-refunds', score: 0.9 }]) });
+    const turnId = ((await (await post(s, token, '/turn', turn())).json()) as { turnId: string }).turnId;
     expect((await post(s, token, '/feedback', { turnId, thumb: 'down' })).status).toBe(200);
-    expect(await rows(s, "SELECT json_extract(json, '$.rails.thumb') AS t, json_extract(json, '$.turnId') AS turn FROM sl_audit")).toEqual([{ t: 'down', turn: turnId }]);
+    expect(await rows(s, "SELECT json_extract(json, '$.rails.thumb') AS t, json_extract(json, '$.turnId') AS turn FROM sl_audit WHERE json_extract(json, '$.releaseId') = 'feedback'")).toEqual([{ t: 'down', turn: turnId }]);
     expect((await post(s, token, '/feedback', { turnId, thumb: 'sideways' })).status).toBe(400);
+    expect((await post(s, token, '/feedback', { turnId: crypto.randomUUID(), thumb: 'up' })).status).toBe(404);
   });
 });
