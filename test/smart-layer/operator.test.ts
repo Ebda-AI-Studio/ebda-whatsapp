@@ -14,12 +14,15 @@ describe('operator assistant controls', () => {
     await apiFor(s);
     expect((await operatorCall(OP1, 'PUT', `/workspaces/${s}/assistant`, { mode: 'answer-only' })).status).toBe(200);
     expect(await workspace(s).assistantMode()).toBe('answer-only');
+    // An unset platform cap is OFF: a store flag alone never turns the assistant on.
+    expect((await chatControls(env, workspace(s))).mode).toBe('off');
+    expect((await operatorCall(OP1, 'PUT', '/assistant/flags', { global: { mode: 'answer-only' }, killedTools: [] })).status).toBe(200);
     expect((await chatControls(env, workspace(s))).mode).toBe('answer-only');
     const put = await operatorCall(OP1, 'PUT', '/assistant/flags', { global: { kill: true }, killedTools: ['wallet_view'] });
     expect(put.status).toBe(200);
     expect(await chatControls(env, workspace(s))).toMatchObject({ mode: 'off', killGlobal: true });
     expect(await (await operatorCall(OP1, 'GET', '/assistant')).json()).toMatchObject({ global: { kill: true }, killedTools: ['wallet_view'] });
-    await operatorCall(OP1, 'PUT', '/assistant/flags', { global: {}, killedTools: [] });
+    await operatorCall(OP1, 'PUT', '/assistant/flags', { global: { mode: 'answer-only' }, killedTools: [] });
     expect((await chatControls(env, workspace(s))).mode).toBe('answer-only');
   });
 
@@ -38,5 +41,15 @@ describe('operator assistant controls', () => {
     const res = await SELF.fetch(`https://x/api/v1/operator/workspaces/${s}/assistant`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'act' }) });
     expect(res.status).toBe(403);
     expect(await workspace(s).assistantMode()).toBe('off');
+  });
+
+  it('the agent-settings PUT cannot carry the assistant mode (server-owned): the key is ignored or refused and the mode stays off', async () => {
+    const s = storeId(7104);
+    const { call } = await apiFor(s);
+    for (const body of [{ assistantMode: 'act' }, { assistant: { mode: 'act' } }, { mode: 'act' }, { 'assistant.mode': 'act' }]) {
+      const res = await call('PUT', '/agent', body);
+      expect([200, 400]).toContain(res.status);
+      expect(await workspace(s).assistantMode()).toBe('off');
+    }
   });
 });

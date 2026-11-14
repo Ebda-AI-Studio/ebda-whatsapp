@@ -1,5 +1,5 @@
 import { SELF, env } from 'cloudflare:test';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { configureAssistant } from '../../src/routes/assistant';
 import type { HelpDeps } from '../../src/core/smart-layer/help-index';
 import { apiFor, apiKey, storeId, useApiKey } from '../helpers/api';
@@ -38,6 +38,8 @@ const U = { owner: '6f1d2c1e-8a8f-4a3b-9f1e-1a2b3c4d5e6f', other: '7a2e3d2f-9b9f
 const post = (store: string, token: string | null, path: string, body: unknown) => SELF.fetch(`https://x/api/v1/stores/${store}/assistant${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
 const turn = (text = 'فين رصيد المحفظة؟', conversationId = crypto.randomUUID()) => ({ conversationId, text, locale: 'ar' as const });
 const setMode = (store: string, mode: 'off' | 'answer-only') => workspace(store).setAssistantMode(mode);
+// The platform cap is explicit: an unset cap means off.
+beforeEach(async () => { await env.DB.prepare("INSERT INTO platform_flags (key, value, updated_at) VALUES ('sl.global', '{\"mode\":\"answer-only\"}', 0) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(); });
 afterEach(() => { configureAssistant({}); });
 
 describe('assistant route: access', () => {
@@ -161,6 +163,22 @@ describe('assistant route: conversation and feedback', () => {
     const theirs = (await (await get(other)).json()) as { items: unknown[] };
     expect(mine.items.length).toBe(2);
     expect(theirs.items).toEqual([]);
+  });
+
+  it('the kill switch closes history and feedback too, not only the turn', async () => {
+    const s = storeId(7022);
+    const { token } = await apiFor(s);
+    await setMode(s, 'answer-only');
+    const { ai } = scriptedAi([{ text: 'تقدر تشحن المحفظة. [[cap:wallet.view]]' }]);
+    configureAssistant({ ai, help: helpHits([{ articleId: 'whatsapp/wallet-top-ups-and-refunds', score: 0.9 }]) });
+    const conv = crypto.randomUUID();
+    const turnId = ((await (await post(s, token, '/turn', turn('ازاي أشحن المحفظة؟', conv))).json()) as { turnId: string }).turnId;
+    const get = () => SELF.fetch(`https://x/api/v1/stores/${s}/assistant/conversations/${conv}`, { headers: { authorization: `Bearer ${token}` } });
+    expect((await get()).status).toBe(200);
+    await env.DB.prepare("INSERT INTO platform_flags (key, value, updated_at) VALUES ('sl.global', '{\"kill\":true}', 0) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
+    expect((await get()).status).toBe(403);
+    expect((await post(s, token, '/feedback', { turnId, thumb: 'up' })).status).toBe(403);
+    expect(await rows(s, "SELECT 1 FROM sl_audit WHERE json_extract(json, '$.releaseId') = 'feedback'")).toEqual([]);
   });
 
   it('a thumb on the caller\'s own turn is written into sl_audit rails.thumb; an invented turn id is 404', async () => {

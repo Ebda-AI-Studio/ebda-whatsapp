@@ -77,12 +77,14 @@ describe('controls', () => {
     const ws = workspace(s);
     expect((await chatControls(env, ws)).mode).toBe('off');
     await ws.setAssistantMode('act');
+    expect((await chatControls(env, ws)).mode).toBe('off'); // the platform cap is unset: off, never act
+    await setPlatformFlag(env, 'sl.global', { mode: 'act' }, 'op');
     expect((await chatControls(env, ws)).mode).toBe('act');
     await setPlatformFlag(env, 'sl.global', { mode: 'answer-only' }, 'op');
     expect((await chatControls(env, ws)).mode).toBe('answer-only'); // the platform cap
     await setPlatformFlag(env, 'sl.global', { kill: true }, 'op');
     expect(await chatControls(env, ws)).toMatchObject({ mode: 'off', killGlobal: true });
-    await setPlatformFlag(env, 'sl.global', {}, 'op');
+    await setPlatformFlag(env, 'sl.global', { mode: 'answer-only' }, 'op');
     await setPlatformFlag(env, 'sl.product.chat', { kill: true }, 'op');
     expect(await chatControls(env, ws)).toMatchObject({ mode: 'off', killProduct: true });
     await setPlatformFlag(env, 'sl.product.chat', {}, 'op');

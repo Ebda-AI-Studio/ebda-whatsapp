@@ -5,9 +5,11 @@ import { BUDGET } from '../../foundation/smart-layer/plan/budget';
 import { checkAdapterContract } from '../../foundation/smart-layer/eval/adapter-contract';
 import { runTurn } from '../../foundation/smart-layer/loop';
 import { buildSystemPrompt, computeReleaseId } from '../../foundation/smart-layer/release';
-import type { TurnCtx } from '../../foundation/smart-layer/types';
+import type { Mode, TurnCtx } from '../../foundation/smart-layer/types';
 import { alert } from '../core/observability';
 import { chatAdapter } from '../core/smart-layer/adapter';
+import { chatControls } from '../core/smart-layer/controls';
+import type { Env } from '../env';
 import { viewOf, type StoredCap } from '../core/smart-layer/registry';
 import type { HelpCorpus, HelpDeps } from '../core/smart-layer/help-index';
 import type { AiBinding } from '../../foundation/smart-layer/provider';
@@ -37,6 +39,9 @@ export function configureAssistant(o: { ai?: AiBinding; help?: HelpDeps }): type
 /** `<user>:<client id>`: one history per (store, user, conversation). Turns of another member under the same client id are simply a different conversation. */
 const ownConversation = (userId: string, conversationId: string): string => `${userId}:${conversationId}`;
 export const ASSISTANT_CAPABILITY = 'assistant.ebda-assistant';
+
+/** The kill switch covers every assistant route, not just the turn: with the assistant off, history and feedback are closed too. */
+const assistantOff = async (c: { env: Env }, ws: { assistantMode(): Promise<Mode> }) => (await chatControls(c.env, ws)).mode === 'off';
 
 /** Assistant routes. `api` is the app these routes are mounted on: a tool calls one of ITS routes in-process with the merchant's own Authorization header (SL-CHAT-1). */
 export function assistantRoutes(api: Hono<ApiEnv>) {
@@ -79,6 +84,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     if (!id.success) return apiError(c, 400, 'invalid_request');
     const ws = await workspaceStub(c);
     if (!ws) return apiError(c, 404, 'not_found');
+    if (await assistantOff(c, ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
     const me = c.get('principal').userId;
     const turns = (await ws.smartLayer('loadTurns', [c.req.param('storeId'), ownConversation(me, id.data), 40])) as Array<{ id: string; userId: string; role: string; maskedText: string; at: number }>;
     return c.json({ items: turns.filter((t) => t.userId === me).map((t) => ({ id: t.id, role: t.role, text: t.maskedText, at: t.at })) });
@@ -89,6 +95,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     if (!body.success) return apiError(c, 400, 'invalid_request');
     const ws = await workspaceStub(c);
     if (!ws) return apiError(c, 404, 'not_found');
+    if (await assistantOff(c, ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
     const storeId = c.req.param('storeId')!;
     const userId = c.get('principal').userId;
     // A person rates a handful of answers a minute; more is a script filling the journal for 90 days.

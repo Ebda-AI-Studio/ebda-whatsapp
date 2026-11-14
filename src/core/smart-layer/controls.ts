@@ -29,7 +29,8 @@ export async function readPlatformFlags(env: Pick<Env, 'DB'>): Promise<Pick<RawC
   const p = pr === BAD ? { kill: true } : pr;
   const t = tr === BAD ? undefined : tr;
   return {
-    global: { ...(g?.kill === true ? { kill: true } : {}), ...(g?.mode && MODES.includes(g.mode) ? { mode: g.mode } : {}) },
+    // An unset (or unrecognised) platform cap is OFF, never act: the engine reads an absent cap as uncapped, so the adapter states it.
+    global: { ...(g?.kill === true ? { kill: true } : {}), mode: g?.mode && MODES.includes(g.mode) ? g.mode : 'off' },
     product: { ...(p?.kill === true ? { kill: true } : {}) },
     killedTools: Array.isArray(t) ? t.filter((x): x is string => typeof x === 'string') : [],
     ...(g?.shadow === true ? { shadow: true } : {}),
