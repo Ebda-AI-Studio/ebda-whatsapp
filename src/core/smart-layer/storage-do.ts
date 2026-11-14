@@ -94,6 +94,26 @@ export function doStorageOps(sql: Sql, tx: Tx) {
         return one<{ n: number }>(sql, 'SELECT count(*) AS n FROM sl_counters WHERE key = ?', key)!.n;
       });
     },
+    /** For feedback: does this user own an answered turn with this id, and have they already rated it? (outside the engine's storage interface) */
+    turnState(storeId: string, userId: string, turnId: string): { own: boolean; rated: boolean } {
+      const q = (feedback: boolean) => one<{ n: number }>(sql, `SELECT count(*) AS n FROM sl_audit WHERE store_id = ? AND user_id = ? AND json_extract(json, '$.turnId') = ? AND (json_extract(json, '$.releaseId') = 'feedback') = ?`, storeId, userId, turnId, feedback ? 1 : 0)!.n > 0;
+      return { own: q(false), rated: q(true) };
+    },
+    /** Contact erasure: the assistant's masked journal may still carry the person's NAME (masking removes phones, e-mails and cards, not names). */
+    eraseMentions(terms: string[]): number {
+      return tx(() => {
+        let n = 0;
+        for (const raw of terms) {
+          const t = raw.trim();
+          if (t.length < 3) continue;
+          for (const [table, col] of [['sl_turns', 'masked_text'], ['sl_audit', 'json']] as const) {
+            n += one<{ n: number }>(sql, `SELECT count(*) AS n FROM ${table} WHERE instr(lower(${col}), lower(?)) > 0`, t)!.n;
+            sql.exec(`DELETE FROM ${table} WHERE instr(lower(${col}), lower(?)) > 0`, t);
+          }
+        }
+        return n;
+      });
+    },
     eraseStore(storeId: string): void {
       tx(() => {
         for (const t of ['sl_turns', 'sl_audit', 'sl_previews', 'sl_applied', 'sl_approvals', 'sl_decisions']) sql.exec(`DELETE FROM ${t} WHERE store_id = ?`, storeId);
@@ -121,7 +141,7 @@ export function doStorageOps(sql: Sql, tx: Tx) {
 }
 export type SlOps = ReturnType<typeof doStorageOps>;
 export type SlOp = keyof SlOps;
-export const SL_OPS: readonly SlOp[] = ['appendTurn', 'loadTurns', 'appendAudit', 'loadAudits', 'putPreview', 'getPreview', 'transitionPreview', 'putApplied', 'getApplied', 'markUndone', 'unmarkUndone', 'putApproval', 'getApproval', 'closeApproval', 'claimApproval', 'recordDecision', 'loadDecisions', 'bump', 'eraseStore', 'eraseUser', 'purgeBefore'];
+export const SL_OPS: readonly SlOp[] = ['appendTurn', 'loadTurns', 'appendAudit', 'loadAudits', 'putPreview', 'getPreview', 'transitionPreview', 'putApplied', 'getApplied', 'markUndone', 'unmarkUndone', 'putApproval', 'getApproval', 'closeApproval', 'claimApproval', 'recordDecision', 'loadDecisions', 'bump', 'turnState', 'eraseMentions', 'eraseStore', 'eraseUser', 'purgeBefore'];
 
 /** Worker-side SmartLayerStorage over the DO RPC `smartLayer(op, args)`. */
 export function rpcStorage(call: (op: SlOp, args: unknown[]) => Promise<unknown>): SmartLayerStorage {
