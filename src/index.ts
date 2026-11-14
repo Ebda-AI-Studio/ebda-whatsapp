@@ -32,6 +32,7 @@ import { conversationsRoutes } from './routes/conversations';
 import { mediaRoutes } from './routes/media';
 import { realtimeRoutes } from './routes/ws';
 import { templatesRoutes } from './routes/templates';
+import { registerStarterSet } from './core/starter-templates';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
 import { sendOtp, type OtpResult } from './core/otp';
@@ -178,6 +179,7 @@ api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
+registerStarterSet(PACK.templates);
 api.route('/', templatesRoutes(PACK.templates));
 api.route('/', proofRoutes);
 api.route('/', agentRoutes);
@@ -282,7 +284,7 @@ app.post('/meta/webhook', async (c) => {
   for (const t of extractTemplateStatuses(payload)) {
     await applySharedTemplateEvent(c.env, t.wabaId, t.name, t.language, { status: t.status, reason: t.reason }); // the platform WABA's own catalog (no workspace owns it)
     for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
-      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
+      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason, t.templateId);
     }
   }
   for (const t of extractTemplateCategoryUpdates(payload)) {

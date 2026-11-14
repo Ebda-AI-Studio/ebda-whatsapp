@@ -2,7 +2,7 @@ import { ArrowRight, Check, CheckCheck, ChevronUp, Clock, FileText, Mic, Papercl
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ConversationDto, MessageDto, OrderSummaryDto, TemplateDto } from '../../../src/core/api/contract';
 import type { Lang, Strings } from '../i18n';
-import { clockTime, formatMoney, windowLeft } from '../lib/format';
+import { clockTime, formatMoney, templateTitle, windowLeft } from '../lib/format';
 import { initials } from './ConversationList';
 import { MediaView } from './MediaView';
 import type { InboxSource } from '../data/source';
@@ -107,8 +107,8 @@ export function ChatPane({ t, lang, now, conversation, source, userNames, curren
       )}
       <div className="composer" data-closed={closed}>
         {filling && (
-          <form className="popover fill" aria-label={t.templateNames[filling.tpl.name] ?? filling.tpl.name} onSubmit={(e) => { e.preventDefault(); onSendTemplate(filling.tpl, filling.params); setFilling(null); }}>
-            <b style={{ fontWeight: 500 }}>{t.templateNames[filling.tpl.name] ?? filling.tpl.name}</b>
+          <form className="popover fill" aria-label={templateTitle(t, filling.tpl)} onSubmit={(e) => { e.preventDefault(); onSendTemplate(filling.tpl, filling.params); setFilling(null); }}>
+            <b style={{ fontWeight: 500 }}>{templateTitle(t, filling.tpl)}</b>
             <span className="muted" dir="auto">{filling.tpl.bodyText}</span>
             {filling.params.map((v, i) => (
               <label key={i} className="field">
@@ -126,7 +126,7 @@ export function ChatPane({ t, lang, now, conversation, source, userNames, curren
           <div className="popover" role="menu" aria-label={t.pickTemplate}>
             {templates.filter((x) => x.status === 'APPROVED').map((tpl) => (
               <button key={`${tpl.name}:${tpl.language}`} type="button" role="menuitem" onClick={() => { setPicker(false); if (tpl.paramCount > 0) setFilling({ tpl, params: Array.from({ length: tpl.paramCount }, () => '') }); else onSendTemplate(tpl, []); }}>
-                <b style={{ fontWeight: 500 }}>{t.templateNames[tpl.name] ?? tpl.name}</b>
+                <b style={{ fontWeight: 500 }}>{templateTitle(t, tpl)}</b>
                 <span className="muted" dir="auto">{tpl.bodyText}</span>
               </button>
             ))}

@@ -1,15 +1,16 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
+  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
+import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
 import type { InboxSource } from './source';
 
 export class ApiError extends Error {
   /** `detail` = the server's machine reason for a 409 (e.g. `empty_audience`), when it sends one. */
-  constructor(public readonly code: string, public readonly status: number, public readonly detail?: string, public readonly amountMinor?: number) {
+  constructor(public readonly code: string, public readonly status: number, public readonly detail?: string, public readonly amountMinor?: number, public readonly extra?: { retryAt?: number; issues?: RuleIssue[] }) {
     super(code);
   }
 }
@@ -40,7 +41,7 @@ export function createApiSource(o: Opts): LiveSource {
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       const err = apiError.safeParse(json);
-      throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined, err.success ? err.data.amountMinor : undefined);
+      throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined, err.success ? err.data.amountMinor : undefined, err.success && (err.data.retryAt !== undefined || err.data.issues) ? { ...(err.data.retryAt !== undefined ? { retryAt: err.data.retryAt } : {}), ...(err.data.issues ? { issues: err.data.issues as RuleIssue[] } : {}) } : undefined);
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) throw new Error(`response does not match the contract: ${path}`);
@@ -85,7 +86,29 @@ export function createApiSource(o: Opts): LiveSource {
       return call(`/contacts/${encodeURIComponent(waId)}/orders`, customerOrdersResponse);
     },
     async templates() {
-      return (await call('/templates', listTemplatesResponse)).items;
+      // A store with no own number has no templates to pick from: that is an empty picker, not a failure (the Templates screen explains why).
+      try { return (await call('/templates', listTemplatesResponse)).items; } catch (e) { if (e instanceof ApiError && e.status === 404 && e.detail === 'no_active_number') return []; throw e; }
+    },
+    templatesApi: {
+      list: async () => { const r = await call('/templates', listTemplatesResponse); return { items: r.items, starterInstalled: r.starterInstalled === true }; },
+      detail: (name, lang) => call(`/templates/${encodeURIComponent(name)}/${encodeURIComponent(lang)}`, templateDto),
+      check: (d) => call('/templates/check', checkTemplateResponse, post(d)) as Promise<{ issues: RuleIssue[]; payloadHash: string }>,
+      create: (d, expectedHash) => call('/templates', createTemplateResponse, post({ ...d, expectedHash })),
+      edit: (name, lang, d, expectedHash) => call(`/templates/${encodeURIComponent(name)}/${encodeURIComponent(lang)}`, editTemplateResponse, { method: 'PUT', body: JSON.stringify({ ...d, expectedHash }) }),
+      remove: async (name, lang) => {
+        const res = await f(`${root}/templates/${encodeURIComponent(name)}/${encodeURIComponent(lang)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) {
+          const err = apiError.safeParse(await res.json().catch(() => null));
+          throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined);
+        }
+      },
+      sync: () => call('/templates/sync', z.object({ upserted: z.number(), removed: z.number() }), post({})),
+      shared: {
+        list: async () => (await call('/templates/shared', listSharedTemplatesResponse)).items,
+        requests: async () => (await call('/templates/shared-requests', listSharedRequestsResponse)).items,
+        request: (r) => call('/templates/shared-requests', sharedRequestDto, post(r)),
+      },
+      installDefaults: () => call('/templates/install-defaults', z.object({ submitted: z.array(z.string()), skipped: z.array(z.string()), failed: z.array(z.string()) }), post({})),
     },
     async recordCodOutcome(waId, orderNumber, outcome) {
       const headers = { authorization: `Bearer ${await o.getToken()}`, 'content-type': 'application/json' };
@@ -271,6 +294,7 @@ export function createApiSource(o: Opts): LiveSource {
       list: async () => (await op('/shared-templates', listTemplatesResponse)).items,
       sync: () => op('/shared-templates/sync', z.object({ upserted: z.number(), removed: z.number() }), post({})),
       submit: (input) => op('/shared-templates', z.object({ status: z.string() }).loose(), post(input)),
+      requests: async () => (await op('/shared-template-requests', z.object({ items: z.array(sharedRequestDto.extend({ workspaceId: z.string() })) }))).items,
     },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });

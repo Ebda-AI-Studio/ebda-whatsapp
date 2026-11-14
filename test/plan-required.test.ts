@@ -335,6 +335,8 @@ describe('route walk: every non-GET store route is decided (sends and number set
     'PUT /stores/:storeId/retention', 'PATCH /stores/:storeId/contacts/:waId', 'POST /stores/:storeId/contacts/merge', // data rights and housekeeping: no message leaves
     // Template management talks to Meta's template catalog, not to a customer: no message leaves.
     'POST /stores/:storeId/templates/sync', 'POST /stores/:storeId/templates', 'POST /stores/:storeId/templates/install-defaults',
+    'POST /stores/:storeId/templates/check', 'PUT /stores/:storeId/templates/:name/:language', 'DELETE /stores/:storeId/templates/:name/:language', // self-service: a check calls nobody; edit and delete act on Meta's catalog
+    'POST /stores/:storeId/templates/shared-requests', // a store on the shared number asks the platform team for a template: a row, no message
   ]);
   const mutating = (apiRoutes.routes as { method: string; path: string }[])
     .filter((r) => r.path.startsWith('/stores/:storeId/') && !['GET', 'HEAD', 'OPTIONS', 'ALL'].includes(r.method))
