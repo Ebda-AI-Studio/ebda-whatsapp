@@ -109,8 +109,9 @@ export class FakeStore implements StoreBridge {
     });
   }
 
+  /** Like the real bridge (`catalogByIds`): the ids are RETAILER ids (a variant id, or the product id of a simple product); a product id of a variant product matches nothing. */
   getProducts(storeId: string, productIds: string[]) {
-    return this.gate('getProducts', storeId, [storeId, productIds], () => ({ ok: true, value: { items: this.catalog.filter((c) => productIds.includes(c.productId)).map((c) => ({ ...c, availability: (this.stock[c.retailerId] ?? 0) > 0 ? ('in_stock' as const) : ('out_of_stock' as const) })) } }));
+    return this.gate('getProducts', storeId, [storeId, productIds], () => ({ ok: true, value: { items: this.catalog.filter((c) => productIds.includes(c.retailerId)).map((c) => ({ ...c, availability: (this.stock[c.retailerId] ?? 0) > 0 ? ('in_stock' as const) : ('out_of_stock' as const) })) } }));
   }
 
   createCheckoutLink(storeId: string, req: { items: OrderLine[]; buyer: Buyer }) {

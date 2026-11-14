@@ -34,8 +34,10 @@ import type { z } from 'zod';
 import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { getState, putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
-import { ensureCatalogReconcile, LAST_SYNC_KEY, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
+import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { provisionCatalog, type ProvisionResult } from './store-link/catalog-provision';
+import { commerceAuth, ensureCommerce, type CommerceState } from './store-link/catalog-commerce';
+import { catalogStatus } from './store-link/catalog-status';
 import { errClass, safeMessage, alert, bindAlerts } from './observability';
 import { recordClick } from './campaigns/campaigns';
 import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, cancelCampaign, createCampaign, deleteDraft, endInstance, gateFor, getCampaign, launchCampaign, listCampaigns, pauseCampaign, resumeCampaign, sendCampaign, settleWallet, sweepCampaigns, type CreateArgs } from './campaigns/campaigns';
@@ -1252,8 +1254,25 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   async getCatalogStatus(): Promise<CatalogStatusDto> {
-    const last = getState(this.host(), LAST_SYNC_KEY);
-    return { catalogId: readSettings(this.host()).catalogId, lastSyncAt: last ? Number(last) : null };
+    return catalogStatus(this.host());
+  }
+
+  /** "Resync now": a fresh full pass starts within seconds (an unfinished pass is left to finish). False = no catalogue is connected. */
+  async resyncCatalog(): Promise<{ started: boolean }> {
+    const host = this.host();
+    if (!readSettings(host).catalogId) return { started: false };
+    if (!getState(host, 'catalog.pass')) ensureCatalogReconcile(host, Date.now(), true);
+    else this.sql.exec("UPDATE scheduled_tasks SET due_at = ? WHERE kind = 'catalog_reconcile' AND due_at > ?", Date.now(), Date.now());
+    await this.arm();
+    return { started: true };
+  }
+
+  /** The shop button and cart on the business number, as the merchant wants them. Returns what Meta now has (null = no verified catalogue or number). */
+  async setCatalogCommerce(want: { catalogVisible: boolean; cartEnabled: boolean }): Promise<CommerceState | null> {
+    const host = this.host();
+    const auth = await commerceAuth(host);
+    if (!auth) return null;
+    return ensureCommerce(host, auth, { fresh: true, want });
   }
 
   private provisioningCatalog = false;

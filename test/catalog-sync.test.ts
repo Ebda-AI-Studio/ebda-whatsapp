@@ -48,9 +48,9 @@ describe('catalog sync (events)', () => {
     expect(b).toMatchObject({ item_type: 'PRODUCT_ITEM', allow_upsert: true });
     expect(b!.requests).toEqual([{
       method: 'UPDATE',
-      data: { id: 'v3', title: 'Item 3 (ع)', description: 'Item 3 description', availability: 'in stock', condition: 'new', price: '110.00 EGP', image_link: 'https://img.example/v3.jpg', link: 'https://shop.example/p/p3', brand: 'Brand' },
+      data: { id: 'v3', title: 'Item 3 (ع)', description: 'Item 3 description', availability: 'in stock', condition: 'new', price: '110.00 EGP', image_link: 'https://img.example/v3.jpg', item_group_id: 'p3', link: 'https://shop.example/p/p3', brand: 'Brand' },
     }]);
-    expect(link.fake.lastCall('getProducts')).toEqual([ws, ['p3']]);
+    expect(link.fake.lastCall('getProducts')).toEqual([ws, ['p3', 'v3']]); // retailer ids: the product's own and its variants'
     expect(await rows(ws, 'SELECT 1 FROM catalog_dirty')).toEqual([]);
     expect(await rows(ws, "SELECT 1 FROM scheduled_tasks WHERE kind = 'catalog_sync'")).toEqual([]);
   });

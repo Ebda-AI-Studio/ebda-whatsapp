@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { botFunnelQuery, codOutcomeRequest, storeLinkSettingsPatch, type OrderSummaryDto } from '../core/api/contract';
+import { botFunnelQuery, catalogCommerceRequest, codOutcomeRequest, storeLinkSettingsPatch, type OrderSummaryDto } from '../core/api/contract';
 import { buyerKey } from '../core/buyer-key';
 import { normaliseE164 } from '../core/phone';
 import type { BridgeOrderSummary } from '../core/store-bridge';
@@ -69,6 +69,29 @@ ordersRoutes.get('/stores/:storeId/store-link/settings', async (c) => {
 ordersRoutes.get('/stores/:storeId/store-link/catalog', async (c) => {
   const ws = await workspaceStub(c);
   return ws ? c.json(await ws.getCatalogStatus()) : apiError(c, 404, 'not_found');
+});
+
+/** Starts a fresh full pass of the catalogue sync (owner only). */
+ordersRoutes.post('/stores/:storeId/store-link/catalog/resync', async (c) => {
+  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const res = await ws.resyncCatalog();
+  return res.started ? c.json(res) : apiError(c, 409, 'invalid_request', 'catalog_not_set');
+});
+
+/** Turns the shop button and the cart on the number on or off (owner only). */
+ordersRoutes.put('/stores/:storeId/store-link/catalog/commerce', async (c) => {
+  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  const body = catalogCommerceRequest.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const res = await ws.setCatalogCommerce(body.data);
+  if (!res) return apiError(c, 409, 'invalid_request', 'catalog_not_set');
+  if (res.failed === 'missing_permission') return apiError(c, 403, 'forbidden', 'missing_permission');
+  if (res.failed) return c.json({ error: 'rate_limited', message: 'meta_error', retryable: true }, 503);
+  return c.json({ catalogVisible: res.catalogVisible, cartEnabled: res.cartEnabled });
 });
 
 /** Bot results: funnel counts per step and day (owner and staff read; there is no write). */

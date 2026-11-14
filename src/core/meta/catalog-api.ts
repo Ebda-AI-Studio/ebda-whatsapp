@@ -28,8 +28,8 @@ export async function itemsBatch(a: Auth, requests: CatalogRequest[]): Promise<C
   } catch (err) {
     return { ok: false, message: `network: ${(err as Error).message}`, retryable: true };
   }
-  const json = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-  if (!res.ok) return { ok: false, message: json?.error?.message ?? `http ${res.status}`, retryable: res.status >= 500 || res.status === 429 };
+  const json = (await res.json().catch(() => null)) as { error?: { code?: number; message?: string } } | null;
+  if (!res.ok) return { ok: false, message: json?.error?.message ?? `http ${res.status}`, retryable: res.status >= 500 || res.status === 429, ...(json?.error?.code !== undefined ? { code: json.error.code } : {}) };
   const parsed = batchAnswer.safeParse(json);
   const errors = parsed.success ? (parsed.data.validation_status ?? []).flatMap((v) => v.errors ?? []) : [];
   if (errors.length) return { ok: false, message: `validation: ${errors[0]?.message ?? 'rejected'}`.slice(0, 200), retryable: false };
@@ -138,3 +138,44 @@ export async function listOwnedWabas(a: Edge & { businessId: string }): Promise<
   }
   return { ok: true, value: out };
 }
+
+/** Meta's own answer for a batch (`GET /{catalog_id}/check_batch_request_status`): finished or not, and the ids it refused. */
+export type BatchStatus = { finished: boolean; errorsTotal: number; invalidIds: string[]; messages: string[] };
+export async function checkBatchStatus(a: Edge & { catalogId: string; handle: string }): Promise<CatalogApiResult<BatchStatus>> {
+  const q = `handle=${encodeURIComponent(a.handle)}&load_ids_of_invalid_requests=true`;
+  const res = await graph(a, `${a.catalogId}/check_batch_request_status?${q}`, z.object({
+    data: z.array(z.object({
+      status: z.string().optional(),
+      errors_total_count: z.number().optional(),
+      ids_of_invalid_requests: z.array(z.string()).optional(),
+      errors: z.array(z.object({ message: z.string().optional() }).loose()).optional(),
+    }).loose()),
+  }).loose());
+  if (!res.ok) return res;
+  const d = res.value.data[0];
+  if (!d) return { ok: false, message: 'unexpected answer', retryable: false };
+  return { ok: true, value: { finished: d.status === 'finished', errorsTotal: d.errors_total_count ?? 0, invalidIds: (d.ids_of_invalid_requests ?? []).slice(0, 500), messages: (d.errors ?? []).map((e) => (e.message ?? '').slice(0, 200)).slice(0, 5) } };
+}
+
+export type CommerceSettings = { catalogVisible: boolean; cartEnabled: boolean };
+const commerceAnswer = z.object({ data: z.array(z.object({ is_cart_enabled: z.boolean().optional(), is_catalog_visible: z.boolean().optional() }).loose()) }).loose();
+
+/** `GET /{phone_number_id}/whatsapp_commerce_settings`: is the catalogue button shown, is the cart on. */
+export async function getCommerceSettings(a: Edge & { phoneNumberId: string }): Promise<CatalogApiResult<CommerceSettings>> {
+  const res = await graph(a, `${a.phoneNumberId}/whatsapp_commerce_settings`, commerceAnswer);
+  if (!res.ok) return res;
+  const d = res.value.data[0];
+  return { ok: true, value: { catalogVisible: d?.is_catalog_visible ?? false, cartEnabled: d?.is_cart_enabled ?? true } };
+}
+
+/** `POST /{phone_number_id}/whatsapp_commerce_settings?is_catalog_visible=..&is_cart_enabled=..` (the settings travel as query parameters). */
+export async function setCommerceSettings(a: Edge & { phoneNumberId: string } & CommerceSettings): Promise<CatalogApiResult<true>> {
+  const q = `is_catalog_visible=${a.catalogVisible}&is_cart_enabled=${a.cartEnabled}`;
+  const res = await graph(a, `${a.phoneNumberId}/whatsapp_commerce_settings?${q}`, z.object({ success: z.boolean() }).loose(), { method: 'POST', body: {} });
+  if (!res.ok) return res;
+  return res.value.success ? { ok: true, value: true } : { ok: false, message: 'Meta did not confirm the setting', retryable: true };
+}
+
+/** Meta's "permissions error" (200), "permission denied" (10), an invalid/expired token (190): the merchant must reconnect and grant catalogue access. */
+export const META_PERMISSION_CODES: ReadonlySet<number> = new Set([10, 190, 200]);
+export const isPermissionFailure = (r: { code?: number }): boolean => r.code !== undefined && META_PERMISSION_CODES.has(r.code);
