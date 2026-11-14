@@ -33,6 +33,7 @@ import { PLATFORM_WORKSPACE, reasonSql } from '../core/audit-reason';
 import { subjectHash } from '../core/erasure';
 import { waIdParam } from './contacts';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
+import { FLAG, readPlatformFlags, setPlatformFlag } from '../core/smart-layer/controls';
 
 type E = { Bindings: Env; Variables: AuthVars };
 /** /api/v1/operator/*, mounted behind requireSuperAdmin. Errors are {error, message?}. */
@@ -434,6 +435,32 @@ operatorRoutes.get('/audit-log', async (c) => {
   const q = auditLogQuery.safeParse(c.req.query());
   if (!q.success) return bad(c, q.error.issues[0]?.message);
   return c.json({ items: await listAudit(c.env, q.data) });
+});
+
+// ---- Assistant rollout (Smart Layer): the platform switches live in D1 so they change without a deploy; a workspace's mode is its own Durable Object flag.
+const assistantMode = z.enum(['off', 'answer-only', 'suggest', 'act']);
+const assistantFlags = z.object({
+  global: z.object({ kill: z.boolean().optional(), mode: assistantMode.optional(), shadow: z.boolean().optional() }).strict().optional(),
+  product: z.object({ kill: z.boolean() }).strict().optional(),
+  killedTools: z.array(z.string().min(1).max(64)).max(100).optional(),
+}).strict();
+operatorRoutes.get('/assistant', async (c) => c.json(await readPlatformFlags(c.env)));
+operatorRoutes.put('/assistant/flags', async (c) => {
+  const b = assistantFlags.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, b.error.issues[0]?.message);
+  if (b.data.global) await setPlatformFlag(c.env, FLAG.global, b.data.global, actor(c));
+  if (b.data.product) await setPlatformFlag(c.env, FLAG.product, b.data.product, actor(c));
+  if (b.data.killedTools) await setPlatformFlag(c.env, FLAG.tools, b.data.killedTools, actor(c));
+  return c.json(await readPlatformFlags(c.env));
+});
+operatorRoutes.put('/workspaces/:workspaceId/assistant', async (c) => {
+  const b = z.object({ mode: assistantMode }).strict().safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, b.error.issues[0]?.message);
+  const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(c.req.param('workspaceId')).first();
+  if (!known) return c.json({ error: 'not_found' }, 404);
+  const ws = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(c.req.param('workspaceId')));
+  await ws.setAssistantMode(b.data.mode);
+  return c.json({ mode: b.data.mode });
 });
 
 operatorRoutes.get('/workspaces/:workspaceId/ops', async (c) => {

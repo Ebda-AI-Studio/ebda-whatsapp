@@ -33,6 +33,7 @@ import { conversationsRoutes } from './routes/conversations';
 import { mediaRoutes } from './routes/media';
 import { realtimeRoutes } from './routes/ws';
 import { templatesRoutes } from './routes/templates';
+import { assistantRoutes } from './routes/assistant';
 import { registerStarterSet } from './core/starter-templates';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
@@ -201,6 +202,7 @@ api.route('/', packageRoutes);
 api.route('/', sharedNumberRoutes);
 api.route('/', offboardingRoutes);
 api.route('/', membersRoutes);
+api.route('/', assistantRoutes(api));
 app.route('/api/v1', api);
 app.route('/internal', internalInstapayRoutes);
 /** The /api/v1 routes, exported so a test can walk them (every store route needs a scope decision in core/identity/scopes.ts). */

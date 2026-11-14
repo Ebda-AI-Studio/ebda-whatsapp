@@ -79,7 +79,7 @@ export function heartbeatHold(sql: Sql, ref: string, now: number): void {
  * another call: it is charged only if a credit is still available; otherwise nothing is posted ('refused', alerted) so the
  * balance can never go negative.
  */
-export function settleHold(sql: Sql, ref: string, now: number, workspaceId?: string): 'charged' | 'refused' | 'noop' {
+export function settleHold(sql: Sql, ref: string, now: number, workspaceId?: string, note?: string): 'charged' | 'refused' | 'noop' {
   const h = sql.exec<{ amount: number; state: string; expires_at: number }>('SELECT amount, state, expires_at FROM credit_holds WHERE ref = ?', ref).toArray()[0];
   if (!h || h.state === 'charged' || h.state === 'released') return 'noop';
   const lapsed = h.state === 'expired' || h.expires_at <= now;
@@ -88,7 +88,7 @@ export function settleHold(sql: Sql, ref: string, now: number, workspaceId?: str
     alert('ai_overdraw_refused', { ref: ref.slice(0, 40) });
     return 'refused';
   }
-  postCredit(sql, { kind: 'ai_charge', amount: -h.amount, ref, parentRef: ref, now });
+  postCredit(sql, { kind: 'ai_charge', amount: -h.amount, ref, parentRef: ref, now, ...(note ? { note } : {}) });
   sql.exec("UPDATE credit_holds SET state = 'charged', settled_at = ? WHERE ref = ?", now, ref);
   lowCreditsAlert(sql, now, workspaceId);
   return 'charged';
