@@ -142,7 +142,7 @@ export const templateIssueDto = z.object({ code: z.string(), severity: z.enum(['
 export const checkTemplateResponse = z.object({ issues: z.array(templateIssueDto), payloadHash: z.string() });
 export const createTemplateResponse = z.object({ name: z.string(), language: z.string(), status: z.string(), category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']), categoryChanged: z.boolean() });
 export const editTemplateResponse = z.object({ status: z.string() });
-export const listTemplatesResponse = z.object({ items: z.array(templateDto) });
+export const listTemplatesResponse = z.object({ items: z.array(templateDto), /** the brand's starter set is in place for the connected number (the screen installs it once when this is false and the list is empty) */ starterInstalled: z.boolean().optional() });
 
 export const noteDto = z.object({ id: z.number().int(), authorUserId: z.string(), text: z.string(), at: z.number().int() });
 export const addNoteRequest = z.object({ text: z.string().min(1).max(2000) });

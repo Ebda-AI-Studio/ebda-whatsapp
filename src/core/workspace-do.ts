@@ -1000,6 +1000,15 @@ export class WorkspaceDO extends DurableObject<Env> {
     return r.rowsWritten > 0;
   }
 
+  /** Whether the brand's starter set is fully in place for this WABA (written by the connect hook or the install-defaults retry). */
+  async starterInstalled(wabaId: string): Promise<boolean> {
+    return this.sql.exec("SELECT 1 FROM store_state WHERE key = ? AND value = 'done'", `templates.starter:${wabaId}`).toArray().length > 0;
+  }
+
+  async markStarterInstalled(wabaId: string): Promise<void> {
+    this.sql.exec("INSERT INTO store_state (key, value) VALUES (?, 'done') ON CONFLICT(key) DO UPDATE SET value = 'done'", `templates.starter:${wabaId}`);
+  }
+
   async hasTemplate(name: string, language: string): Promise<boolean> {
     return this.sql.exec('SELECT 1 FROM templates WHERE name = ? AND language = ?', name, language).toArray().length > 0;
   }

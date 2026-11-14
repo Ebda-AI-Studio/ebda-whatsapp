@@ -40,6 +40,11 @@ async function guarded(c: ApiContext, run: (workspaceId: string) => Promise<Numb
   }
 }
 
+/** The request's `waitUntil`, or nothing when there is no execution context (a test calling the app directly). */
+function deferrer(c: ApiContext): ((p: Promise<unknown>) => void) | undefined {
+  try { const ctx = c.executionCtx; return (p) => ctx.waitUntil(p); } catch { return undefined; }
+}
+
 numbersRoutes.get('/stores/:storeId/numbers', async (c) => {
   if (!(await workspaceStub(c))) return apiError(c, 404, 'not_found');
   const body: typeof listNumbersResponse._output = { items: await listNumbers(c.env, c.req.param('storeId')!), notices: owner(c) ? await openNotices(c.env, c.req.param('storeId')!) : [] };
@@ -71,7 +76,7 @@ numbersRoutes.post('/stores/:storeId/numbers/connect', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
   const body = connectNumberRequest.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return apiError(c, 400, 'invalid_request');
-  return guarded(c, (workspaceId) => connectNumber(c.env, workspaceId, body.data), true);
+  return guarded(c, (workspaceId) => connectNumber(c.env, workspaceId, body.data, deferrer(c)), true);
 });
 
 numbersRoutes.post('/stores/:storeId/numbers/:phoneNumberId/refresh', async (c) => {
@@ -84,7 +89,7 @@ numbersRoutes.post('/stores/:storeId/numbers/:phoneNumberId/register', async (c)
   if (!owner(c)) return apiError(c, 403, 'forbidden');
   const pn = c.req.param('phoneNumberId');
   if (!PN.test(pn)) return apiError(c, 400, 'invalid_request');
-  return guarded(c, (workspaceId) => resumeSetup(c.env, workspaceId, pn), true);
+  return guarded(c, (workspaceId) => resumeSetup(c.env, workspaceId, pn, deferrer(c)), true);
 });
 
 numbersRoutes.post('/stores/:storeId/numbers/:phoneNumberId/disconnect', async (c) => {

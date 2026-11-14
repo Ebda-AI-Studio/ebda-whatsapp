@@ -59,7 +59,7 @@ export function templatesRoutes(defaults: readonly TemplateSeed[]) {
   r.get('/stores/:storeId/templates', async (c) => {
     const ctx = await context(c);
     if (isResponse(ctx)) return ctx;
-    const body = { items: (await ctx.ws.listTemplates()) as unknown as TemplateDto[] } satisfies z.infer<typeof listTemplatesResponse>; // the Rpc type of Meta's loose components is too deep to infer
+    const body = { items: (await ctx.ws.listTemplates()) as unknown as TemplateDto[], starterInstalled: await ctx.ws.starterInstalled(ctx.number.wabaId) } satisfies z.infer<typeof listTemplatesResponse>; // the Rpc type of Meta's loose components is too deep to infer
     return c.json(body);
   });
 
@@ -75,6 +75,7 @@ export function templatesRoutes(defaults: readonly TemplateSeed[]) {
     const ctx = await context(c);
     if (isResponse(ctx)) return ctx;
     const res = await installDefaults(ctx, defaults.map((s) => submitTemplateRequest.parse(s)));
+    if (res.ok && res.failed.length === 0) await ctx.ws.markStarterInstalled(ctx.number.wabaId);
     return res.ok ? c.json({ submitted: res.submitted, skipped: res.skipped, failed: res.failed }) : failed(c, res);
   });
 
