@@ -5,7 +5,8 @@ const ROOT = join(import.meta.dirname, '..', '..');
 const SKIP_DIRS = new Set(['node_modules', '.git', '.wrangler', 'dist', 'coverage', '.superpowers']);
 // Files that must name the banned strings in order to ban them.
 // vendor/studio is the Store's shared studio-pages renderer + brand, byte-identical and sha-pinned (test/vendored-artifacts.test.ts): its text is the Store's, not ours to edit.
-const ALLOW = [/^vendor\/studio\//, /^test\/guards\.test\.ts$/, /^CLAUDE\.md$/, /^docs\/plans\//];
+// foundation/ is vendored byte for byte and pinned by foundation.lock.json (test/foundation-parity.test.ts); its text is the foundation repo's, whose own guards police it (a v0.3.0 comment uses an ordinary English word the banned-string pattern also matches).
+const ALLOW = [/^foundation\//, /^vendor\/studio\//, /^test\/guards\.test\.ts$/, /^CLAUDE\.md$/, /^docs\/plans\//];
 
 function walk(dir: string, out: string[]): void {
   for (const name of readdirSync(dir)) {

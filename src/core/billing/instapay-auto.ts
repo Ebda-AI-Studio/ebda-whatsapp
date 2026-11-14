@@ -1,12 +1,12 @@
 /**
- * InstaPay auto-confirm for Ebda Chat (plan 2026-11-14 C3-C5; rulings INSTAPAY-1..7 and INSTAPAY-CLEAN-1, docs/rulings/INSTAPAY-AUTO-1.md).
+ * InstaPay auto-confirm for the chat service (plan 2026-11-14 C3-C5; rulings INSTAPAY-1..7 and INSTAPAY-CLEAN-1, docs/rulings/INSTAPAY-AUTO-1.md).
  *
  * A merchant who paid a package or a top-up by InstaPay and uploaded the proof gets it confirmed in minutes IF every check passes; otherwise nothing changes
  * and the request waits for a person exactly as before. The model only READS the proof into a typed object (instapay-reader.ts); `decideInstapay` (foundation,
  * pure) decides; this file owns the storage, the activation and the revert. Money rules:
  *  - integer piastres only; the expected amount comes from the server (package price / the stored top-up amount), never from the proof;
  *  - ONE decision per request: `instapay_auto_confirmations.request_id` is UNIQUE and so is its idempotency key, a replay returns the stored row;
- *  - the platform-global duplicate index (INSTAPAY_DEDUPE_DB, shared with Ebda Store) is claimed BEFORE the decision; a claim this call made is released if the
+ *  - the platform-global duplicate index (INSTAPAY_DEDUPE_DB, shared with the Store) is claimed BEFORE the decision; a claim this call made is released if the
  *    activation fails, a claim that "needs a person" stays held, a revert BURNS it;
  *  - the request is confirmed by the same guarded UPDATE the operator path uses (CONFIRM_CLAIM_SQL) and granted through the same `grant()` (idempotent by reference);
  *  - revert ("not received", from the digest tap or the operator console): back to unpaid with a 48 h grace, the credits THAT payment granted and nobody used are
@@ -24,7 +24,7 @@ import { announceSubscription } from './subscriptions';
 import { alert } from '../observability';
 import { adjustmentThreshold } from './operator';
 import { planPurchase } from './package-orders';
-import { readProofForAutoConfirm } from './instapay-reader';
+import { proofReaderAvailable, readProofForAutoConfirm } from './instapay-reader';
 import { CONFIRM_CLAIM_SQL, NO_REF_WINDOW_MS, getRequestRow, grant, normaliseBankRef, orderMatches, type InstapayRow } from './instapay';
 import { notifyWaiting } from './instapay-notify';
 
@@ -78,8 +78,8 @@ export function instapayAutoReady(env: Env): { ready: boolean; missing: string[]
   if (!env.INSTAPAY_DEDUPE_DB) missing.push('INSTAPAY_DEDUPE_DB');
   if (!env.INSTAPAY_BRIDGE_SECRET || env.INSTAPAY_BRIDGE_SECRET.length < 16) missing.push('INSTAPAY_BRIDGE_SECRET');
   if (!/^https:\/\/\S+$/.test(env.BRAIN_BRIDGE_URL ?? '')) missing.push('BRAIN_BRIDGE_URL');
-  if (!payeeHandle(env)) missing.push('EBDA_INSTAPAY_HANDLE');
-  if (!env.AI) missing.push('AI');
+  if (!payeeHandle(env)) missing.push('INSTAPAY_PAYEE_HANDLE');
+  if (!proofReaderAvailable(env)) missing.push('AI');
   return { ready: missing.length === 0, missing };
 }
 

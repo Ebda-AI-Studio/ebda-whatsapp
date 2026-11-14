@@ -35,6 +35,7 @@ export const OFFBOARD_TABLES = {
     shared_template_requests: 'workspace_id', // the template asks of a store on the shared number: template text only, deleted with the workspace
     waba_signup_users: 'workspace_id', workspace_notices: 'workspace_id', workspace_owners: 'workspace_id', new_cap_usage: 'workspace_id', // final review: Meta-user links, owner notices, the Store owner and the campaign-cap usage go with the workspace
     audit_reasons: 'workspace_id', // operators' free-text reasons (AUDIT-RETENTION-1): deletable on purpose
+    instapay_auto_workspace: 'workspace_id', // the per-workspace auto-confirm switch: configuration, nothing to keep
     erasure_records: 'workspace_id', // the workspace's backups are erased with it, so nothing is left for a restore to bring back
   } as Record<string, string>,
   keep: {
@@ -42,6 +43,7 @@ export const OFFBOARD_TABLES = {
     package_orders: { people: ['created_by'], clear: [] },
     package_refund_plans: { people: [], clear: [] },
     instapay_requests: { people: ['created_by'], clear: ['proof_key', 'proof_mime'] },
+    instapay_auto_confirmations: { people: [], clear: [] }, // the auto-confirm decision of an InstaPay request: amounts, reference, reasons, dates; no payer data, no free text (a revert's reason is in audit_reasons)
     refund_requests: { people: ['requested_by'], clear: ['note'] },
     card_refunds: { people: [], clear: ['note'] },
     wallet_adjustments: { people: [], clear: [] }, // requested_by / approved_by are our operators

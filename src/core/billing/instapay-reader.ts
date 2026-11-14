@@ -10,7 +10,7 @@ import { INSTAPAY_EXTRACT_JSON_SCHEMA, INSTAPAY_EXTRACT_PROMPT, parseReceiptExtr
 import type { Env } from '../../env';
 
 export const READ_TIMEOUT_MS = 25_000;
-/** A vision-capable Workers AI model with JSON output (the same default Ebda Store uses for its receipts); `INSTAPAY_RECEIPT_AI_MODEL` overrides it per deployment. */
+/** A vision-capable Workers AI model with JSON output (the same default the Store uses for its receipts); `INSTAPAY_RECEIPT_AI_MODEL` overrides it per deployment. */
 export const READER_MODEL_DEFAULT = '@cf/mistralai/mistral-small-3.1-24b-instruct';
 
 function toBase64(bytes: Uint8Array): string {
@@ -35,6 +35,9 @@ export function unwrapAnswer(out: unknown): unknown {
   }
   return pick(out);
 }
+
+/** Is the vision model reachable at all (the binding exists)? Auto-confirm refuses to run without it. */
+export const proofReaderAvailable = (env: Env): boolean => !!env.AI;
 
 /** The typed extract of a proof image, or null when it cannot be read (the caller treats null as "needs a person"). */
 export async function readProofForAutoConfirm(env: Env, bytes: ArrayBuffer, mime: string): Promise<ParsedExtraction | null> {
