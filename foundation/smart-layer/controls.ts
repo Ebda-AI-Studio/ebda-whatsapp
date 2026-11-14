@@ -1,6 +1,6 @@
 /**
  * Rollout controls (plan 4 Task A12, spec 6.10). Precedence: global kill > product kill > store flag; the default is `off`. A platform
- * `global.mode` caps what any store flag can reach; `shadow` forces suggest-style behaviour (previews are built and logged as "would
+ * `global.mode` caps what any store flag can reach; `shadow` makes the layer behave like suggest mode (previews are built and logged as "would
  * apply", nothing is applied). `canExecute` is read at EXECUTION time too (a switch flipped after a preview still stops the apply).
  */
 import type { Controls, Mode, ToolSpec } from './types';

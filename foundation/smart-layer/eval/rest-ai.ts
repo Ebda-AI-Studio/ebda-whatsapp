@@ -36,7 +36,7 @@ export async function listTextModels(o: RestAiOptions): Promise<TextModel[]> {
     for (const m of rows) {
       const prop = (id: string) => m.properties?.find((p) => p.property_id === id)?.value;
       const prices = prop('price');
-      const price = (unit: string) => (Array.isArray(prices) ? (prices.find((p: any) => String(p.unit).includes(unit))?.price as number | undefined) : undefined);
+      const price = (unit: string) => (Array.isArray(prices) ? ((prices as Array<{ unit?: unknown; price?: unknown }>).find((p) => String(p.unit).includes(unit))?.price as number | undefined) : undefined);
       out.push({
         id: m.name,
         functionCalling: prop('function_calling') === true || prop('function_calling') === 'true',

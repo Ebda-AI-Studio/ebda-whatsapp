@@ -15,8 +15,8 @@ export type ReceiptExtract = {
 export type ExtractFlags = { looksEdited: boolean; suspiciousText: boolean; confidence: number };
 export type ParsedExtraction = { extract: ReceiptExtract | null; flags: ExtractFlags };
 
-export const MAX_FIELD_LENGTH = 64;
-export const MAX_AMOUNT_MINOR = 1_000_000_000;
+const MAX_FIELD_LENGTH = 64;
+const MAX_AMOUNT_MINOR = 1_000_000_000;
 
 export const INSTAPAY_EXTRACT_PROMPT = [
   'You read a screenshot of an InstaPay transfer receipt. Return ONLY one JSON object with exactly these keys:',
@@ -72,6 +72,7 @@ export function asciiLower(s: string): string {
 }
 
 /** Arabic-Indic (U+0660..) and Eastern Arabic-Indic (U+06F0..) digits to Latin; Arabic decimal/thousands separators to . and , */
+// pq-allow(unused-export): pure step pinned by its unit test and the shared extract vectors
 export function toLatinDigits(s: string): string {
   return s
     .replace(/[٠-٩]/g, (c) => String(c.charCodeAt(0) - 0x0660))
@@ -88,6 +89,7 @@ const EDGE_NOISE = /^[\s\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]+|[\s\u200E
 /** Exactly ONE well-formed amount, or null. Digit groups are never joined: no space, bidi mark or word may sit between digits.
  *  Accepted after Arabic-Indic digits are normalised and ONE currency word is stripped from either end (not both): `1200`, `1200.5`, `1200.50`,
  *  `1,200.50` (comma groups of exactly 3 AND a 1-2 digit decimal part). Everything else ("1.200", "1,200", "12 00", "1.2LE5", "1.200.50") is null. */
+// pq-allow(unused-export): pure step pinned by its unit test and the shared extract vectors
 export function parseAmountMinor(raw: unknown): number | null {
   let s: string;
   if (typeof raw === 'number') {
@@ -126,6 +128,7 @@ function cairoWallAsUtc(t: number): number {
 
 /** Africa/Cairo wall time to epoch ms. Offsets are probed per instant (Egypt observes DST), never a fixed +2.
  *  A wall time that does not exist (spring-forward gap) -> null; one that happens twice (autumn) -> the earlier instant. */
+// pq-allow(unused-export): pure Cairo wall-time step pinned by its DST unit tests
 export function cairoWallTimeToEpoch(date: string, time: string): number | null {
   const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(toLatinDigits(date).trim());
   const t = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/.exec(toLatinDigits(time).trim());

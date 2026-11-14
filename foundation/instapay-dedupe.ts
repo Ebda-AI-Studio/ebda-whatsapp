@@ -89,6 +89,7 @@ export class MemoryDuplicateIndex implements DuplicateIndex {
 }
 
 // Structural D1 types so this file imports nothing from the Workers types package.
+// pq-allow(unused-export): structural type a consumer's D1 binding satisfies (half of the D1Like contract)
 export interface D1StatementLike {
   bind(...values: unknown[]): D1StatementLike;
   run(): Promise<{ meta?: { changes?: number } }>;
@@ -155,7 +156,7 @@ export class D1DuplicateIndex implements DuplicateIndex {
 }
 
 type It = (name: string, fn: () => Promise<void> | void) => void;
-type Expect = (actual: any) => { toBe(x: any): void; toEqual(x: any): void; rejects: { toThrow(): Promise<void> } };
+type Expect = (actual: unknown) => { toBe(x: unknown): void; toEqual(x: unknown): void; rejects: { toThrow(): Promise<void> } };
 
 /** The behaviour every DuplicateIndex must have. Each product runs it against its REAL D1 binding; foundation runs it on Memory and on a real SQLite. */
 export function duplicateIndexContract(make: () => Promise<DuplicateIndex>, t: { it: It; expect: Expect }): void {

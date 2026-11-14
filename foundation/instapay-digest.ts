@@ -1,13 +1,14 @@
 // InstaPay digest text, Telegram tap codec and the product<->brain bridge signature (money path). Web Crypto only, so it runs in Workers and Node.
 export type DigestItem = { product: 'store' | 'chat'; id: string; ownerLabel: string; amountMinor: number; kind: string; confirmedAt: number };
-export type DigestButton = { text: string; data: string };
-export const MAX_DIGEST_ITEMS = 20;
+type DigestButton = { text: string; data: string };
+const MAX_DIGEST_ITEMS = 20;
 export const BRIDGE_WINDOW_MS = 5 * 60_000;
 export const MIN_BRIDGE_SECRET_LENGTH = 16;
 
 const ID_RE = /^[\w-]{1,48}$/;
 
 /** 120050 -> "EGP 1,200.50" (integer piastres in, no float) */
+// pq-allow(unused-export): pure money formatter, pinned by its unit test (EGP 1,200.50 from piastres)
 export function formatEgp(amountMinor: number): string {
   if (!Number.isSafeInteger(amountMinor) || amountMinor < 0) return 'EGP ?';
   const pounds = Math.floor(amountMinor / 100);
@@ -33,7 +34,7 @@ export function isEmptyDigest(items: DigestItem[]): boolean {
   return items.length === 0;
 }
 
-export type DigestPage = { text: string; buttons: DigestButton[][] };
+type DigestPage = { text: string; buttons: DigestButton[][] };
 
 /** EVERY item gets a tap button: pages of at most MAX_DIGEST_ITEMS (a Telegram message holds 100 buttons, but a short message stays readable).
  *  The caller sends the pages in order as one digest. 0 items -> 0 pages. */
@@ -54,6 +55,7 @@ export function formatDigestPages(items: DigestItem[], now: number): DigestPage[
 }
 
 /** The first page only (single-message callers). Use formatDigestPages to reach every payment. */
+// pq-allow(unused-export): single-message API kept for callers that send one page; covered by the digest tests
 export function formatDigest(items: DigestItem[], now: number): DigestPage {
   return formatDigestPages(items, now)[0] ?? { text: '', buttons: [] };
 }
