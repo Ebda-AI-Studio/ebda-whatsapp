@@ -116,6 +116,7 @@ type TemplateRowSql = { name: string; language: string; category: string; status
 const TEMPLATE_EDIT_DAY_MS = 86_400_000;
 const TEMPLATE_EDIT_MONTH_MS = 30 * 86_400_000;
 const TEMPLATE_EDITS_PER_MONTH = 10;
+const TEMPLATE_INFLIGHT_MS = 5 * 60_000;
 
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'plan_required' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
@@ -964,6 +965,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       let removed = 0;
       for (const t of this.sql.exec<{ id: number; name: string; language: string }>('SELECT id, name, language FROM templates').toArray()) {
         if (keep.has(`${t.name}\u0000${t.language}`)) continue;
+        // a submission still on its way to Meta (reserved, no Meta id yet) is not "deleted at Meta"
+        if (this.sql.exec("SELECT 1 FROM templates WHERE id = ? AND meta_id IS NULL AND status = 'PENDING' AND updated_at > ?", t.id, now - TEMPLATE_INFLIGHT_MS).toArray().length > 0) continue;
         this.sql.exec('DELETE FROM templates WHERE id = ?', t.id);
         removed++;
       }
@@ -975,6 +978,19 @@ export class WorkspaceDO extends DurableObject<Env> {
   async saveSubmittedTemplate(t: { name: string; language: string; category: string; status: string; components: unknown[]; metaId?: string | null; label?: string | null }): Promise<void> {
     const now = Date.now();
     this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), null, now, t.metaId ?? null, t.label ?? null, now);
+  }
+
+  /**
+   * Claims name+language BEFORE the Meta call, atomically (the DO runs this synchronously), so two taps or two staff tabs can never both submit.
+   * False = the name is taken. The caller removes the row again if Meta refuses; a row left by a crashed call is dropped by the pending sweep.
+   */
+  async reserveTemplate(t: { name: string; language: string; category: string; components: unknown[]; label: string | null }): Promise<boolean> {
+    const now = Date.now();
+    const r = this.sql.exec(
+      "INSERT INTO templates (name, language, category, status, components, rejected_reason, updated_at, meta_id, label, submitted_at) VALUES (?, ?, ?, 'PENDING', ?, NULL, ?, NULL, ?, ?) ON CONFLICT(name, language) DO NOTHING",
+      t.name, t.language, t.category, JSON.stringify(t.components), now, t.label, now,
+    );
+    return r.rowsWritten > 0;
   }
 
   async hasTemplate(name: string, language: string): Promise<boolean> {
