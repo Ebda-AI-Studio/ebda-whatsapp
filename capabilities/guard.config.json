@@ -1,20 +1,65 @@
 {
   "product": "chat",
   "mustConfirm": [
-    { "pattern": "/wallet(/|$)", "method": "POST" },
-    { "pattern": "/packages(/|$)", "method": "POST" },
-    { "pattern": "/instapay(/|$)", "method": "POST" },
-    { "pattern": "/refunds?(/|$)" },
-    { "pattern": "/campaigns/[^/]+/(resume|send)" },
-    { "pattern": "^/stores/:storeId/campaigns$", "method": "POST" },
-    { "pattern": "/templates(?:/(?!sync$)|$)", "method": "POST" },
-    { "pattern": "/conversations/[^/]+/messages$", "method": "POST" }
+    {
+      "pattern": "/wallet(/|$)",
+      "method": "POST"
+    },
+    {
+      "pattern": "/packages(/|$)",
+      "method": "POST"
+    },
+    {
+      "pattern": "/instapay(/|$)",
+      "method": "POST"
+    },
+    {
+      "pattern": "/refunds?(/|$)"
+    },
+    {
+      "pattern": "/campaigns/[^/]+/(resume|send)"
+    },
+    {
+      "pattern": "^/stores/:storeId/campaigns$",
+      "method": "POST"
+    },
+    {
+      "pattern": "/templates(?:/(?!sync$)|$)",
+      "method": "POST"
+    },
+    {
+      "pattern": "/conversations/[^/]+/messages$",
+      "method": "POST"
+    }
   ],
   "routeKinds": [
-    { "match": "^/operator(/|$)", "kind": "operator" },
-    { "match": "^/(webhooks|track|health|meta|t|kashier)(/|$)", "kind": "public" },
-    { "match": "^/stores/:storeId(/|$)", "kind": "merchant" }
+    {
+      "match": "^/operator(/|$)",
+      "kind": "operator"
+    },
+    {
+      "match": "^/(webhooks|track|health|meta|t|kashier)(/|$)",
+      "kind": "public"
+    },
+    {
+      "match": "^/stores/:storeId(/|$)",
+      "kind": "merchant"
+    }
   ],
-  "helpExemptAreas": ["system"],
-  "smartLayerPaths": ["src/core/billing/instapay-reader.ts"]
+  "helpExemptAreas": [
+    "system"
+  ],
+  "smartLayerPaths": [
+    "src/core/billing/instapay-reader.ts"
+  ],
+  "smartLayerExemptions": [
+    {
+      "path": "src/core/billing/instapay-reader.ts",
+      "function": "readProofForAutoConfirm",
+      "reason": "temporary: extraction-only (one schema-constrained read of a payment proof into a typed object), plain code decides (foundation decideInstapay), receipt text is never an instruction; Smart Layer adapters are not merged yet",
+      "expires": "2026-12-15",
+      "followUp": "register: move the receipt reader behind the Smart Layer extraction path, then delete this entry and the smartLayerPaths line",
+      "ruling": "INSTAPAY-AUTO-1.11"
+    }
+  ]
 }
