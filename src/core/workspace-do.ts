@@ -2628,7 +2628,7 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   async eraseContact(waId: string): Promise<EraseResult> {
     const found = this.ctx.storage.transactionSync(() => {
-      const contact = this.sql.exec<{ id: number; buyer_key: string | null }>('SELECT id, buyer_key FROM contacts WHERE wa_id = ?', waId).toArray()[0];
+      const contact = this.sql.exec<{ id: number; buyer_key: string | null; profile_name: string | null }>('SELECT id, buyer_key, profile_name FROM contacts WHERE wa_id = ?', waId).toArray()[0];
       if (!contact) return { found: false, keys: 0, messages: 0, statusEvents: 0 };
       forgetBuyer(this.host(), contact.buyer_key);
       const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
@@ -2664,6 +2664,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       deleteTargets(this.sql, { waId, contactId: contact.id, convId: conv?.id ?? null });
       this.sql.exec('DELETE FROM contacts_fts WHERE rowid = ?', contact.id);
+      // The assistant's masked journal may carry this person's name (a customer list it read for the merchant): those rows go with them.
+      doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f)).eraseMentions([contact.profile_name ?? '', waId]);
       return { found: true, keys, messages: msgs.length, statusEvents };
     });
     // After the delete (a turn recording a step checks the message still exists, so nothing new can land): their unrolled analytics markers go too.
