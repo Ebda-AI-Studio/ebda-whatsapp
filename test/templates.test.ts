@@ -1,9 +1,10 @@
-import { SELF } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
 import { afterEach, expect, it } from 'vitest';
 import { listTemplatesResponse } from '../src/core/api/contract';
 import { EBDA_DEFAULT_TEMPLATES } from '../src/addons/ebda/templates';
 import { componentsSchema, paramCount, renderTemplate } from '../src/core/templates';
-import { apiFor, graphStub, storeId as W, useApiKey } from './helpers/api';
+import { apiFor, graphStub, storeId as W, tokenFor, useApiKey } from './helpers/api';
+import { makeCampaign, seedContacts } from './helpers/campaigns';
 import type { stubGraph } from './helpers/graph';
 import { postWebhook } from './helpers/meta';
 import { templateStatusPayload } from './helpers/payload';
@@ -137,4 +138,105 @@ it('renderTemplate: header formats, URL button placeholders, OTP templates, para
     text: '••••••',
     components: [{ type: 'body', parameters: [{ type: 'text', text: '482913' }] }, { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: '482913' }] }],
   });
+});
+
+// ---- merchant self-service routes (plan 2, task 5) ----
+const draftBody = (over: Record<string, unknown> = {}) => ({
+  name: 'shipping_update', label: 'تحديث الشحن', language: 'ar', category: 'UTILITY', header: null,
+  body: { text: 'أهلاً {{1}}، طلبك رقم {{2}} خرج للشحن وهيوصلك خلال {{3}}.', examples: ['أحمد', '1001', 'يومين'] }, footer: null, buttons: [], ...over,
+});
+
+it('POST /templates/check returns issues and a hash, never calls Graph, and staff may use it', async () => {
+  const staff = await apiFor(W(110), 'staff');
+  graph = graphStub(() => ({ status: 200, json: {} }));
+  const res = await staff.call('POST', '/templates/check', draftBody({ body: { text: '{{1}} أهلاً', examples: ['x'] } }));
+  expect(res.status).toBe(200);
+  const j = (await res.json()) as { issues: { code: string }[]; payloadHash: string };
+  expect(j.issues.map((i) => i.code)).toContain('variable_at_edge');
+  expect(j.payloadHash).toMatch(/^[0-9a-f]{64}$/);
+  expect(graph.calls.filter((c) => c.url.includes('message_templates'))).toEqual([]);
+  expect((await staff.call('POST', '/templates/check', { nope: 1 })).status).toBe(400);
+});
+
+it('POST /templates with the draft body submits and answers 201 with the confirmed category', async () => {
+  const api = await apiFor(W(111));
+  graph = graphStub(() => ({ status: 200, json: { id: 'm-1', status: 'PENDING', category: 'MARKETING' } }));
+  const res = await api.call('POST', '/templates', draftBody());
+  expect(res.status).toBe(201);
+  expect(await res.json()).toEqual({ name: 'shipping_update', language: 'ar', status: 'PENDING', category: 'MARKETING', categoryChanged: true });
+  expect(graph.calls[0]!.body.components[0]).toMatchObject({ type: 'BODY', example: { body_text: [['أحمد', '1001', 'يومين']] } });
+  const dup = await api.call('POST', '/templates', draftBody());
+  expect(dup.status).toBe(409);
+  const bad = await api.call('POST', '/templates', draftBody({ name: 'other_one', body: { text: '{{1}} أهلاً', examples: ['x'] } }));
+  expect(bad.status).toBe(400);
+  expect(await bad.json()).toMatchObject({ error: 'invalid_request', issues: [{ code: 'variable_at_edge' }] });
+  const stale = await api.call('POST', '/templates', { ...draftBody({ name: 'third_one', body: { text: 'أهلاً {{1}}، شحنتك {{2}} وصلت اليوم.', examples: ['أحمد', '1001'] } }), expectedHash: 'a'.repeat(64) });
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({ message: 'payload_changed' });
+});
+
+it('staff may read but not create, edit or delete; no integrator write', async () => {
+  const staff = await apiFor(W(112), 'staff');
+  expect((await staff.call('GET', '/templates')).status).toBe(200);
+  expect((await staff.call('POST', '/templates', draftBody())).status).toBe(403);
+  expect((await staff.call('PUT', '/templates/shipping_update/ar', draftBody())).status).toBe(403);
+  expect((await staff.call('DELETE', '/templates/shipping_update/ar')).status).toBe(403);
+  expect((await staff.call('POST', '/templates/install-defaults')).status).toBe(403);
+});
+
+it('PUT within 24 h of the last edit is 409 with retryAt; a REJECTED one is edited', async () => {
+  const api = await apiFor(W(113));
+  await exec(W(113), "INSERT INTO templates (name, language, category, status, components, updated_at, meta_id) VALUES ('shipping_update', 'ar', 'UTILITY', 'APPROVED', '[]', 1, 'm-9')");
+  const at = Date.now() - 5_000;
+  await exec(W(113), 'INSERT INTO template_edits (name, language, at) VALUES (?, ?, ?)', 'shipping_update', 'ar', at);
+  graph = graphStub(() => ({ status: 200, json: { success: true } }));
+  const res = await api.call('PUT', '/templates/shipping_update/ar', draftBody());
+  expect(res.status).toBe(409);
+  expect(await res.json()).toEqual({ error: 'invalid_request', message: 'edit_limit', retryAt: at + 86_400_000 });
+  await exec(W(113), "UPDATE templates SET status = 'REJECTED'");
+  const ok = await api.call('PUT', '/templates/shipping_update/ar', draftBody());
+  expect(ok.status).toBe(200);
+  expect(await ok.json()).toEqual({ status: 'PENDING' });
+  expect((await api.call('PUT', '/templates/shipping_update/en', draftBody())).status).toBe(400); // url and body must agree
+});
+
+it('DELETE: in use is 409, ok is 204 and the row is gone, unknown is 404', async () => {
+  const api = await apiFor(W(114));
+  await exec(W(114), "INSERT INTO templates (name, language, category, status, components, updated_at, meta_id) VALUES ('promo', 'ar', 'MARKETING', 'APPROVED', ?, 1, 'm-5')", JSON.stringify([{ type: 'BODY', text: 'أهلاً {{1}} عرض {{2}} الليلة.' }]));
+  await seedContacts(W(114), 1);
+  await makeCampaign(W(114));
+  graph = graphStub(() => ({ status: 200, json: { success: true } }));
+  const busy = await api.call('DELETE', '/templates/promo/ar');
+  expect(busy.status).toBe(409);
+  expect(await busy.json()).toMatchObject({ message: 'in_use' });
+  await exec(W(114), "UPDATE campaigns SET status = 'completed'");
+  expect((await api.call('DELETE', '/templates/promo/ar')).status).toBe(204);
+  expect(await rows(W(114), 'SELECT 1 FROM templates')).toEqual([]);
+  expect((await api.call('DELETE', '/templates/promo/ar')).status).toBe(404);
+  expect(graph.calls.find((c) => c.method === 'DELETE')!.url).toContain('hsm_id=m-5');
+});
+
+it('GET /templates/:name/:language returns the detail with components and the edit allowance, without Meta ids', async () => {
+  const api = await apiFor(W(115));
+  await exec(W(115), "INSERT INTO templates (name, language, category, status, components, updated_at, meta_id, label) VALUES ('d', 'ar', 'UTILITY', 'REJECTED', ?, 1, 'secret-id', 'قالبي')", JSON.stringify([{ type: 'BODY', text: 'أهلاً {{1}} طلبك.' }]));
+  const res = await api.call('GET', '/templates/d/ar');
+  expect(res.status).toBe(200);
+  const j = (await res.json()) as Record<string, unknown>;
+  expect(j).toMatchObject({ name: 'd', label: 'قالبي', status: 'REJECTED', editAllowance: { allowed: true }, components: [{ type: 'BODY' }] });
+  expect(j).not.toHaveProperty('metaId');
+  expect((await api.call('GET', '/templates/zzz/ar')).status).toBe(404);
+});
+
+it('a store with no active number gets 404 no_active_number on every template route', async () => {
+  const id = W(116);
+  await env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(id, id, Date.now()).run();
+  const api = await apiFor(W(117)); // a signed-in owner of another store cannot be used: build a token for the empty one
+  void api;
+  const token = await tokenFor(id, 600);
+  const call = (method: string, path: string, body?: unknown) => SELF.fetch(`https://x/api/v1/stores/${id}${path}`, { method, headers: { authorization: `Bearer ${token}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+  for (const [m, p, b] of [['GET', '/templates'], ['POST', '/templates/sync'], ['POST', '/templates', draftBody()], ['POST', '/templates/check', draftBody()], ['DELETE', '/templates/x/ar']] as [string, string, unknown?][]) {
+    const res = await call(m, p, b);
+    expect(res.status, `${m} ${p}`).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found', message: 'no_active_number' });
+  }
 });

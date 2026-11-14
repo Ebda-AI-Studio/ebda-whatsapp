@@ -10,7 +10,8 @@ export type DraftButton =
 export type TemplateDraft = {
   name: string;
   label: string;
-  language: 'ar' | 'en';
+  /** `ar` / `en` for new templates; a template made in WhatsApp Manager can carry another Meta language code and still opens for edit. */
+  language: string;
   category: 'UTILITY' | 'MARKETING' | 'AUTHENTICATION';
   header: { text: string; example?: string } | null;
   body: { text: string; examples: string[] };
@@ -29,7 +30,7 @@ export function toMetaComponents(d: TemplateDraft): unknown[] {
     return [
       { type: 'BODY', add_security_recommendation: d.auth?.securityRecommendation ?? false },
       ...footer,
-      { type: 'BUTTONS', buttons: [{ type: 'OTP', otp_type: 'COPY_CODE', text: OTP_BUTTON_TEXT[d.language] }] },
+      { type: 'BUTTONS', buttons: [{ type: 'OTP', otp_type: 'COPY_CODE', text: OTP_BUTTON_TEXT[d.language.startsWith('ar') ? 'ar' : 'en'] }] },
     ];
   }
   const out: unknown[] = [];
@@ -58,7 +59,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 export function fromStoredComponents(c: StoredComponent[], meta: { name: string; language: string; category: string; label: string | null }): TemplateDraft {
   const find = (t: string) => c.find((x) => x.type.toUpperCase() === t);
   const category = (['UTILITY', 'MARKETING', 'AUTHENTICATION'].includes(meta.category) ? meta.category : 'UTILITY') as TemplateDraft['category'];
-  const base = { name: meta.name, label: meta.label ?? meta.name, language: (meta.language.startsWith('en') ? 'en' : 'ar') as 'ar' | 'en', category };
+  const base = { name: meta.name, label: meta.label ?? meta.name, language: meta.language, category };
   if (category === 'AUTHENTICATION') {
     const expiry = (find('FOOTER') as { code_expiration_minutes?: unknown } | undefined)?.code_expiration_minutes;
     const sec = (find('BODY') as { add_security_recommendation?: unknown } | undefined)?.add_security_recommendation;

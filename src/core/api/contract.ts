@@ -89,6 +89,9 @@ export const apiError = z.object({
     'registration_locked', 'number_conflict', 'signup_failed', 'signup_unavailable', 'unavailable', 'package_required', 'plan_feature', 'plan_required', 'vat_locked', 'yearly_queued', 'seat_limit', 'no_seat',
   ]),
   message: z.string().optional(),
+  /** templates: the rule issues behind a 400, or the moment a 409 edit_limit unlocks (epoch ms). */
+  issues: z.array(z.object({ code: z.string(), severity: z.enum(['error', 'warning']), field: z.string(), params: z.record(z.string(), z.union([z.string(), z.number()])).optional() })).optional(),
+  retryAt: z.number().int().optional(),
   /** plan_feature: which plan feature the package lacks (the client shows the upgrade CTA for it). */
   feature: z.enum(['campaigns', 'order_in_chat', 'api']).optional(),
   /** write_off_required: the wallet balance the requester has to agree to give up (piasters). */
@@ -113,6 +116,30 @@ export const templateDto = z.object({
   updatedAt: z.number().int().optional(),
   editAllowance: templateEditAllowance.optional(),
 });
+const draftButton = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('QUICK_REPLY'), text: z.string().max(200) }),
+  z.object({ type: z.literal('URL'), text: z.string().max(200), url: z.string().max(2100), example: z.string().max(2100).optional() }),
+  z.object({ type: z.literal('PHONE_NUMBER'), text: z.string().max(200), phone: z.string().max(40) }),
+  z.object({ type: z.literal('COPY_CODE'), example: z.string().max(40) }),
+]);
+/** What the Templates screen and the Smart Layer send to check / create / edit. The server re-runs Meta's rules on it; `expectedHash` is the hash of the last check. */
+export const templateDraftSchema = z.object({
+  name: z.string().min(1).max(512),
+  label: z.string().trim().min(1).max(80),
+  language: z.string().regex(/^[a-z]{2}(_[A-Z]{2})?$/),
+  category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']),
+  header: z.object({ text: z.string().max(200), example: z.string().max(200).optional() }).nullable(),
+  body: z.object({ text: z.string().max(2000), examples: z.array(z.string().max(300)).max(20) }),
+  footer: z.string().max(200).nullable(),
+  buttons: z.array(draftButton).max(20),
+  auth: z.object({ expiryMinutes: z.number().int().nullable(), securityRecommendation: z.boolean() }).optional(),
+});
+export type TemplateDraftInput = z.infer<typeof templateDraftSchema>;
+export const templateDraftRequest = templateDraftSchema.extend({ expectedHash: z.string().regex(/^[0-9a-f]{64}$/).optional() });
+export const templateIssueDto = z.object({ code: z.string(), severity: z.enum(['error', 'warning']), field: z.string(), params: z.record(z.string(), z.union([z.string(), z.number()])).optional() });
+export const checkTemplateResponse = z.object({ issues: z.array(templateIssueDto), payloadHash: z.string() });
+export const createTemplateResponse = z.object({ name: z.string(), language: z.string(), status: z.string(), category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']), categoryChanged: z.boolean() });
+export const editTemplateResponse = z.object({ status: z.string() });
 export const listTemplatesResponse = z.object({ items: z.array(templateDto) });
 
 export const noteDto = z.object({ id: z.number().int(), authorUserId: z.string(), text: z.string(), at: z.number().int() });
@@ -639,6 +666,9 @@ export const ROUTES = {
   search: 'GET /search',
   templates: 'GET|POST /templates',
   templatesSync: 'POST /templates/sync',
+  templatesCheck: 'POST /templates/check',
+  template: 'GET|PUT|DELETE /templates/:name/:language',
+  templatesInstallDefaults: 'POST /templates/install-defaults',
   media: 'GET /media/:messageId',
   upload: 'POST /media',
   events: 'GET /events',

@@ -8,7 +8,7 @@ import { payloadHash, toMetaComponents, type TemplateDraft } from './template-dr
 import { bodyTextOf, componentsSchema } from './templates';
 
 /**
- * The ONE template API: the Templates screen and the Ebda AI Smart Layer call exactly these functions. Failures are values, never throws;
+ * The ONE template API: the Templates screen and the AI Smart Layer call exactly these functions. Failures are values, never throws;
  * Meta's own text travels untouched in `message` and is turned into Arabic only by the screen, from `reason`.
  *
  * Action policy (spec section 4): checkOnly, syncTemplates and refreshPending are `free`; createTemplate, editTemplate, deleteTemplate and installDefaults
