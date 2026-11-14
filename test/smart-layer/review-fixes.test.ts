@@ -1,6 +1,6 @@
 // Independent review of PR 85 (Opus): every finding is pinned here first (red), then fixed.
 import { SELF, env } from 'cloudflare:test';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureAssistant } from '../../src/routes/assistant';
 import type { HelpDeps } from '../../src/core/smart-layer/help-index';
 import { assistantEnabled } from '../../src/core/smart-layer/controls';
@@ -23,6 +23,8 @@ const help = (): HelpDeps => ({ db: env.DB, embed: async (t) => t.map(() => [0])
 const post = (store: string, token: string, path: string, body: unknown) => SELF.fetch(`https://x/api/v1/stores/${store}/assistant${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
 const turn = (conversationId: string, text = 'ازاي أشحن المحفظة؟') => ({ conversationId, text, locale: 'ar' as const });
 const STAFF = '7a2e3d2f-9b9f-4b4c-8a2f-2b3c4d5e6f71';
+// The platform cap is explicit: an unset cap means off.
+beforeEach(async () => { await env.DB.prepare("INSERT INTO platform_flags (key, value, updated_at) VALUES ('sl.global', '{\"mode\":\"answer-only\"}', 0) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(); });
 afterEach(() => configureAssistant({}));
 
 describe('review #1: another member never gets, or plants, history through a reused conversation id', () => {
@@ -54,7 +56,7 @@ describe('review #2: a malformed kill switch fails CLOSED', () => {
       const s = storeId(key === 'sl.global' ? 9202 : 9203);
       const { token } = await apiFor(s);
       await workspace(s).setAssistantMode('answer-only');
-      await env.DB.prepare('INSERT INTO platform_flags (key, value, updated_at) VALUES (?, ?, 0)').bind(key, '{kill:true').run();
+      await env.DB.prepare('INSERT INTO platform_flags (key, value, updated_at) VALUES (?, ?, 0) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(key, '{kill:true').run();
       const a = scriptedAi();
       configureAssistant({ ai: a.ai, help: help() });
       const body = (await (await post(s, token, '/turn', turn(crypto.randomUUID()))).json()) as { status: string };
