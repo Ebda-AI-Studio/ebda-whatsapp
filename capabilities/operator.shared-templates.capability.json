@@ -1,0 +1,54 @@
+{
+  "id": "operator.shared-templates",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "قوالب الرقم المشترك",
+  "titleEn": "Shared-number template catalogue (list, sync, submit)",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/shared-templates",
+    "POST /operator/shared-templates/sync",
+    "POST /operator/shared-templates"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "platform WABA shared by all stores; add a merchant request path as a future improvement",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل قوالب الرقم المشترك؟",
+      "ليه مش لاقي قوالب الرقم المشترك عندي؟",
+      "عايز قوالب الرقم المشترك اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Shared-number template catalogue (list, sync, submit)?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: templates for shared-number stores (merchant cannot request one)"
+  ]
+}

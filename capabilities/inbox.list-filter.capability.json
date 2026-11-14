@@ -1,0 +1,51 @@
+{
+  "id": "inbox.list-filter",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "قايمة المحادثات والفلاتر",
+  "titleEn": "Conversation list with filters (all, unread, mine, unassigned)",
+  "screens": [
+    "ConversationList (view inbox)",
+    "view:ConversationList",
+    "/inbox"
+  ],
+  "api": [
+    "GET /stores/:storeId/conversations?filter=&cursor=&limit="
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "فين المحادثات الجديدة؟",
+      "ازاي اشوف اللي مستنيني بس؟",
+      "عايز اشوف المحادثات اللي مش متعينة لحد",
+      "el rasael el gedida feen?"
+    ],
+    "en": [
+      "How do I see only unread chats?",
+      "How do I see unassigned chats?"
+    ]
+  },
+  "steps": [
+    "Open Inbox",
+    "Pick All / Unread / Mine / Unassigned",
+    "Dots show cod_pending and needs_human"
+  ],
+  "edgeCases": [
+    "Mobile: rail collapses to a bottom/side nav; the orders pane opens as a sheet",
+    "Realtime lost beyond repair: app reloads the list (onReload)",
+    "Arabic/RTL: phone numbers, URLs and API keys stay LTR inside RTL text"
+  ],
+  "gaps": []
+}

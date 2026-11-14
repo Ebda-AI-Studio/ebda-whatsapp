@@ -1,0 +1,52 @@
+{
+  "id": "inbox.cod-outcome",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تأكيد أو رفض أوردر كاش عند الاستلام يدوي",
+  "titleEn": "Confirm or refuse a COD order by hand",
+  "screens": [
+    "OrderPane + 5-second undo toast",
+    "view:OrderPane",
+    "/inbox"
+  ],
+  "api": [
+    "POST /stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outcome {outcome}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/cod-confirmations",
+  "questions": {
+    "ar": [
+      "العميل مارددش على تأكيد الأوردر",
+      "ازاي اأكد الأوردر بإيدي؟",
+      "اترفض غلط ينفع ارجعه؟",
+      "a2akked el order bedi"
+    ],
+    "en": [
+      "The customer did not tap confirm, how do I confirm manually?"
+    ]
+  },
+  "steps": [
+    "Open the chat",
+    "Order panel: Confirm or Refuse",
+    "5-second undo, then the Store is told"
+  ],
+  "edgeCases": [
+    "First answer wins; the opposite later = conflict message",
+    "Order closed / not COD / already resolved = 409",
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires",
+    "No answer in 24h = recorded as no_reply"
+  ],
+  "gaps": [],
+  "assistantNote": "undo only inside the 5 s window before the Store is told"
+}

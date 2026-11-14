@@ -1,0 +1,42 @@
+{
+  "id": "agent.store-search",
+  "status": "in-pr",
+  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "بحث المساعد في المنتجات",
+  "titleEn": "Agent finds products with the Store search (Arabic, Franco, budget)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "العميل بيسأل عن منتج بالفرانكو",
+      "المساعد مش لاقي منتج موجود",
+      "fostan a7mar 3andokom?"
+    ],
+    "en": [
+      "The agent says we do not have a product we do have"
+    ]
+  },
+  "steps": [
+    "search_catalog asks the Store ranked search first (stemming, Franco, meaning, maxPrice); fallback marks empty results uncertain (\"let me check\")"
+  ],
+  "edgeCases": [
+    "Store search degraded (embed budget): empty result is uncertain",
+    "More than 500 variants: incomplete flag",
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires"
+  ],
+  "gaps": []
+}

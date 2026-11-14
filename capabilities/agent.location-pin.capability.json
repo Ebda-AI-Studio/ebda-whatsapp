@@ -1,0 +1,38 @@
+{
+  "id": "agent.location-pin",
+  "status": "planned",
+  "plan": "register row \"Chat agent: Meta polish\" (remaining two items)",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تحويل اللوكيشن لعنوان",
+  "titleEn": "Agent turns a shared location pin into an address",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "العميل بعت لوكيشن بدل العنوان",
+      "ازاي تحويل اللوكيشن لعنوان؟",
+      "فين تحويل اللوكيشن لعنوان؟"
+    ],
+    "en": [
+      "The customer sent a location pin instead of an address"
+    ]
+  },
+  "steps": [
+    "Not built"
+  ],
+  "edgeCases": [],
+  "gaps": []
+}

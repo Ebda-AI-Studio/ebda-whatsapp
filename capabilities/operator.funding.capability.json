@@ -1,0 +1,53 @@
+{
+  "id": "operator.funding",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تحديد مين بيدفع لميتا للرقم",
+  "titleEn": "Set who pays Meta for a number",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "PUT /operator/numbers/:phoneNumberId/funding"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "a merchant with unknown funding cannot send and cannot fix it themselves; could be self-service for own numbers (card on Meta is the default) with an operator reason only for platform_line",
+    "validUnderRule": false
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل تحديد مين بيدفع لميتا للرقم؟",
+      "ليه مش لاقي تحديد مين بيدفع لميتا للرقم عندي؟",
+      "عايز تحديد مين بيدفع لميتا للرقم اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Set who pays Meta for a number?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "Self-service gap: a merchant with unknown funding cannot send and cannot fix it themselves; could be self-service for own numbers (card on Meta is the default) with an operator reason only for platform_line",
+    "operator replaces: wallet.funding (merchant cannot choose card vs wallet or fix unknown funding)"
+  ]
+}

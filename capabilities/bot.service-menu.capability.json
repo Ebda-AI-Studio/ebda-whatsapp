@@ -1,0 +1,56 @@
+{
+  "id": "bot.service-menu",
+  "status": "live",
+  "area": "bot",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "قايمة الخدمات والأسئلة الجاهزة",
+  "titleEn": "Service menu (ready-made questions)",
+  "screens": [
+    "BotScreen service menu",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "GET /stores/:storeId/store-link/settings",
+    "PATCH /stores/:storeId/store-link/settings {menu}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/service-menu-hours-and-location",
+  "questions": {
+    "ar": [
+      "عايز العميل يلاقي إجابات جاهزة",
+      "ازاي اضيف سؤال للمنيو؟",
+      "المنيو مش بيظهر للعميل",
+      "a3mel menu lel bot"
+    ],
+    "en": [
+      "How do I add ready-made questions for customers?"
+    ]
+  },
+  "steps": [
+    "Settings > Bot > Service menu",
+    "Add a question: name up to 24 chars, answer up to 1024, Arabic + English",
+    "Reorder, remove (max 8), turn on, save"
+  ],
+  "edgeCases": [
+    "WhatsApp lists max 10 rows; fixed rows (order, location, person) leave 7 questions",
+    "Customer sees it on hello, \"menu\", or an unanswered message",
+    "Menu off or empty = no change",
+    "Staff sees read-only notice",
+    "Arabic/RTL: phone numbers, URLs and API keys stay LTR inside RTL text",
+    "Mobile: rail collapses to a bottom/side nav; the orders pane opens as a sheet"
+  ],
+  "gaps": [
+    "Some links say \"Settings\" but the rail has no Settings item; screen is called Bot"
+  ]
+}

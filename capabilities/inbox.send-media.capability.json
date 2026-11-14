@@ -1,0 +1,52 @@
+{
+  "id": "inbox.send-media",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إرسال صورة أو ملف",
+  "titleEn": "Send an image or file",
+  "screens": [
+    "ChatPane paperclip",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [
+    "POST /stores/:storeId/media (multipart)",
+    "POST /stores/:storeId/conversations/:id/messages {type:media,uploadId}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "ازاي ابعت صورة للعميل؟",
+      "الملف كبير ومش بيتبعت",
+      "ينفع ابعت PDF؟"
+    ],
+    "en": [
+      "How do I send a picture or a PDF?"
+    ]
+  },
+  "steps": [
+    "Press the paperclip",
+    "Pick the file",
+    "It is staged then sent"
+  ],
+  "edgeCases": [
+    "Unsupported type 415 unsupported_media",
+    "Size limits per Meta media type",
+    "24-hour window closed: free text blocked (Meta 131047), only an approved template can be sent"
+  ],
+  "gaps": [
+    "Exact size/type limits not in any help article"
+  ]
+}

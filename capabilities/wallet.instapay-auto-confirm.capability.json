@@ -1,0 +1,39 @@
+{
+  "id": "wallet.instapay-auto-confirm",
+  "status": "planned",
+  "plan": "spec section 7.4 (Chat = blocker #4; register: NOT BUILT)",
+  "area": "billing",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تأكيد انستاباي تلقائي",
+  "titleEn": "Instant InstaPay confirmation when the receipt matches",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "ليه الإيصال مستني ساعات؟",
+      "امتى يتفعل فورا؟",
+      "ازاي تأكيد انستاباي تلقائي؟"
+    ],
+    "en": [
+      "Why is my InstaPay payment not instant?"
+    ]
+  },
+  "steps": [
+    "Planned: AI reads receipt (amount, recipient, date within 48h, unseen reference/image); all match = instant activation; anything off waits for Ahmad; first-payment cap about one month; daily digest + one-tap revert with 48h grace"
+  ],
+  "edgeCases": [],
+  "gaps": [],
+  "assistantNote": "Today the assistant says: reviewed by a person within 4 business hours"
+}

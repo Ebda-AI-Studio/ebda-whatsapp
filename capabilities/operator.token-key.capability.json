@@ -1,0 +1,53 @@
+{
+  "id": "operator.token-key",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تدوير مفتاح التشفير",
+  "titleEn": "Rotate the token encryption key",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/token-key/status",
+    "POST /operator/token-key/rotate"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "platform-wide security operation",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل تدوير مفتاح التشفير؟",
+      "ليه مش لاقي تدوير مفتاح التشفير عندي؟",
+      "عايز تدوير مفتاح التشفير اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Rotate the token encryption key?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none (platform security)"
+  ]
+}

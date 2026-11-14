@@ -1,0 +1,54 @@
+{
+  "id": "operator.yearly-refund",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إلغاء الباقة السنوية واسترداد",
+  "titleEn": "Cancel a yearly package and refund unused months",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/package-orders/:orderId/refund-quote",
+    "POST /operator/package-orders/:orderId/yearly-refund"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": null,
+    "text": "merchant cannot cancel/refund a yearly plan themselves; the formula is deterministic (unused whole months x price/12, debt first) so a self-service quote and confirm is feasible, only the card refund execution needs a human",
+    "validUnderRule": false
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل إلغاء الباقة السنوية واسترداد؟",
+      "ليه مش لاقي إلغاء الباقة السنوية واسترداد عندي؟",
+      "عايز إلغاء الباقة السنوية واسترداد اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Cancel a yearly package and refund unused months?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "Self-service gap: merchant cannot cancel/refund a yearly plan themselves; the formula is deterministic (unused whole months x price/12, debt first) so a self-service quote and confirm is feasible, only the card refund execution needs a human",
+    "operator replaces: packages.yearly-switch (merchant told to write to support)"
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "id": "wallet.card-topup",
+  "status": "live",
+  "area": "billing",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "شحن المحفظة بالكارت",
+  "titleEn": "Top up the wallet by card (Kashier)",
+  "screens": [
+    "WalletScreen Top up",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "POST /stores/:storeId/wallet/topups",
+    "GET /stores/:storeId/wallet/topups/:orderId",
+    "POST /kashier/webhook (system)"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/wallet-top-ups-and-refunds",
+  "questions": {
+    "ar": [
+      "عايز اشحن المحفظة",
+      "دفعت والرصيد مزادش",
+      "الكارت بيتخصم رسوم؟",
+      "ashhan el mahfaza",
+      "topup ma7salsh"
+    ],
+    "en": [
+      "How do I top up my wallet?",
+      "I paid and the balance did not grow"
+    ]
+  },
+  "steps": [
+    "Wallet > Top up, enter EGP",
+    "See card fee added on top; wallet gets the full amount",
+    "Pay on Kashier; balance grows when Kashier confirms by webhook"
+  ],
+  "edgeCases": [
+    "Card top-ups can be off: use InstaPay",
+    "Confirmation is by webhook not return; stuck top-ups repaired by daily inquiry",
+    "Failed payment: nothing taken",
+    "Amount range shown",
+    "Deletion pending freezes top-ups",
+    "Payment page opens outside the app: mobile browser return"
+  ],
+  "gaps": [
+    "No receipt/invoice download for top-ups other than the CSV statement"
+  ],
+  "assistantNote": "moves money; the merchant pays on the Kashier page themselves"
+}

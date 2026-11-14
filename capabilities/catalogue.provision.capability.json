@@ -1,0 +1,54 @@
+{
+  "id": "catalogue.provision",
+  "status": "live",
+  "area": "catalogue",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "عمل كتالوج واتساب",
+  "titleEn": "Create my WhatsApp catalogue",
+  "screens": [
+    "BotScreen Create my WhatsApp catalog",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "POST /stores/:storeId/store-link/catalog/provision {name?}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/your-products-on-whatsapp",
+  "questions": {
+    "ar": [
+      "ازاي اعمل كتالوج؟",
+      "مفيش عندي كتالوج على ميتا",
+      "اتعمل الكتالوج ازاي؟",
+      "a3mel catalog"
+    ],
+    "en": [
+      "How do I create a WhatsApp catalogue?"
+    ]
+  },
+  "steps": [
+    "Bot > Create my WhatsApp catalog",
+    "It creates the catalogue, connects it to your number and fills it with products"
+  ],
+  "edgeCases": [
+    "missing_permission: reconnect number and approve the catalogue permission",
+    "no_business / business_mismatch: reconnect the number",
+    "catalog_already_set: never creates a second",
+    "meta_error retryable",
+    "Shared-number or older connections have no business id",
+    "Needs an active own number"
+  ],
+  "gaps": [
+    "Catalogue commerce policy/approval by Meta not surfaced"
+  ],
+  "assistantNote": "creates an object in the merchant Meta business"
+}

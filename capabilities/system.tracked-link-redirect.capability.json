@@ -1,0 +1,42 @@
+{
+  "id": "system.tracked-link-redirect",
+  "status": "live",
+  "area": "system",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "اللينكات المتتبعة وروابط الإيصالات",
+  "titleEn": "Tracked link redirect and proof URLs",
+  "screens": [],
+  "api": [
+    "GET /t/:code",
+    "GET /proof/:workspaceId/:messageId",
+    "GET /instapay-proof/:token"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "public"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "اللينك بيفتح ازاي؟",
+      "ازاي اللينكات المتتبعة وروابط الإيصالات؟",
+      "فين اللينكات المتتبعة وروابط الإيصالات؟"
+    ],
+    "en": [
+      "How do tracked links work?"
+    ]
+  },
+  "steps": [
+    "Signed codes; no referrer"
+  ],
+  "edgeCases": [
+    "Unknown code redirects safely"
+  ],
+  "gaps": []
+}

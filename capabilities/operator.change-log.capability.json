@@ -1,0 +1,52 @@
+{
+  "id": "operator.change-log",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "سجل التغييرات",
+  "titleEn": "Pricing/configuration change log",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/change-log"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "none"
+  },
+  "operatorReason": {
+    "code": null,
+    "text": "internal audit",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل سجل التغييرات؟",
+      "ليه مش لاقي سجل التغييرات عندي؟",
+      "عايز سجل التغييرات اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Pricing/configuration change log?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none"
+  ]
+}

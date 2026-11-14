@@ -1,0 +1,40 @@
+{
+  "id": "system.health",
+  "status": "live",
+  "area": "system",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "صحة الخدمة",
+  "titleEn": "Service health endpoint",
+  "screens": [],
+  "api": [
+    "GET /health"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "public"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "الخدمة واقعة؟",
+      "wa.ebda.app شغال؟",
+      "ازاي صحة الخدمة؟"
+    ],
+    "en": [
+      "Is Ebda Chat up?"
+    ]
+  },
+  "steps": [
+    "Reports commit and misconfiguration (503 on missing secret/binding)"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "No public status page for merchants"
+  ]
+}

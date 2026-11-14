@@ -1,0 +1,49 @@
+{
+  "id": "contacts.list",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "جهات الاتصال والبحث",
+  "titleEn": "Contacts list, search and filters",
+  "screens": [
+    "ContactsScreen",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
+  "api": [
+    "GET /stores/:storeId/contacts?q=&tag=&optedOut="
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/your-customers-data",
+  "questions": {
+    "ar": [
+      "فين العملاء بتوعي؟",
+      "ازاي ادور على عميل؟",
+      "مين طلب يوقف الرسايل؟",
+      "el 3omala feen"
+    ],
+    "en": [
+      "Where are my contacts?",
+      "How do I find opted-out customers?"
+    ]
+  },
+  "steps": [
+    "Open Contacts",
+    "Search by name/number, filter All / Opted out / tag"
+  ],
+  "edgeCases": [
+    "Arabic/RTL: phone numbers, URLs and API keys stay LTR inside RTL text",
+    "Consent badge: agreed / no consent / opted out"
+  ],
+  "gaps": []
+}

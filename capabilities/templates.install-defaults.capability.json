@@ -1,0 +1,44 @@
+{
+  "id": "templates.install-defaults",
+  "status": "live",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تركيب مجموعة القوالب الجاهزة",
+  "titleEn": "Install the ready-made template set",
+  "screens": [],
+  "api": [
+    "POST /stores/:storeId/templates/install-defaults"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "super_admin"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "فين القوالب الجاهزة؟",
+      "عايز اركب قوالب التأكيد والشحن",
+      "install default templates"
+    ],
+    "en": [
+      "How do I install the ready-made templates?"
+    ]
+  },
+  "steps": [
+    "API only; starter set: order_confirmation, cod_confirmation, shipping_update, otp_code, cart_recovery, shipping_tracking, shipping_status (+ handoff_alert in pr 79)"
+  ],
+  "edgeCases": [
+    "Existing names skipped; failures listed in result"
+  ],
+  "gaps": [
+    "NO caller anywhere (BLOCKER #2): no UI, no auto-install on connect"
+  ],
+  "assistantNote": "submits several templates to Meta"
+}

@@ -1,0 +1,47 @@
+{
+  "id": "campaigns.schedule",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "جدولة حملة لوقت لاحق",
+  "titleEn": "Schedule a campaign",
+  "screens": [
+    "CampaignForm timing step",
+    "view:CampaignForm",
+    "/campaigns"
+  ],
+  "api": [
+    "POST /stores/:storeId/campaigns/:id/send {scheduledAt}"
+  ],
+  "mcpTool": null,
+  "planGate": "feat_campaigns (Growth, Pro; not Starter / store-included)",
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "عايز ابعت الحملة بكرا الصبح",
+      "ازاي اجدول حملة؟",
+      "gadwel el hamla"
+    ],
+    "en": [
+      "How do I schedule a campaign?"
+    ]
+  },
+  "steps": [
+    "Choose Schedule, date and time; must be in the future and within a year"
+  ],
+  "edgeCases": [
+    "Invalid schedule: errSchedule",
+    "Times are Cairo time in the UI",
+    "Number quality may pause before it starts"
+  ],
+  "gaps": [],
+  "assistantNote": "cancel before start"
+}

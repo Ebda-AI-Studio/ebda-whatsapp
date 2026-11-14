@@ -1,0 +1,45 @@
+{
+  "id": "catalogue.resync",
+  "status": "live",
+  "area": "catalogue",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تحديث الكتالوج دلوقتي",
+  "titleEn": "Update the catalogue now",
+  "screens": [
+    "BotScreen Update the catalog now",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "POST /stores/:storeId/store-link/catalog/resync"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/your-products-on-whatsapp",
+  "questions": {
+    "ar": [
+      "غيرت سعر ومش ظاهر في واتساب",
+      "حدث الكتالوج",
+      "update el catalog"
+    ],
+    "en": [
+      "I changed a price and it is not on WhatsApp yet"
+    ]
+  },
+  "steps": [
+    "Press Update the catalog now; products also sync within minutes"
+  ],
+  "edgeCases": [
+    "catalog_not_set: 409",
+    "Products without a picture are left out"
+  ],
+  "gaps": []
+}

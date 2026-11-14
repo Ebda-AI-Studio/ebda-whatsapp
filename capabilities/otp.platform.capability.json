@@ -1,0 +1,43 @@
+{
+  "id": "otp.platform",
+  "status": "live",
+  "area": "otp",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "كود تسجيل الدخول لحساب ابدأ",
+  "titleEn": "Platform sign-in codes (Ebda accounts)",
+  "screens": [],
+  "api": [
+    "RPC PlatformOtp.sendCode(phone, code) (internal)"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مجاني الكود وصل ازاي من رقم ابدأ؟",
+      "ليه الكود جه من رقم غريب؟",
+      "ازاي كود تسجيل الدخول لحساب ابدأ؟"
+    ],
+    "en": [
+      "Why did my sign-in code come from an Ebda number?"
+    ]
+  },
+  "steps": [
+    "Sent from the platform number, never from a store number"
+  ],
+  "edgeCases": [
+    "disabled until platform number configured"
+  ],
+  "gaps": [
+    "roles unverified"
+  ],
+  "assistantNote": "platform path; the assistant must never touch it"
+}

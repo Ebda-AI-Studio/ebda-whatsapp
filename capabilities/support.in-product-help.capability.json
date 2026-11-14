@@ -1,0 +1,44 @@
+{
+  "id": "support.in-product-help",
+  "status": "planned",
+  "plan": "audit #12 + spec section 6",
+  "area": "support",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مساعدة ودعم جوه ابدأ شات",
+  "titleEn": "Help and support channel inside Ebda Chat",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "helpGap": "docs/help/README.md",
+  "questions": {
+    "ar": [
+      "أكلم مين لو فيه مشكلة؟",
+      "فين المساعدة؟",
+      "عايز اكلم الدعم",
+      "el da3m feen"
+    ],
+    "en": [
+      "Where do I get help?",
+      "How do I contact support?"
+    ]
+  },
+  "steps": [
+    "Help articles are published at help.ebda.app/whatsapp/<slug>/ (ar default, /en/); support e-mail shown in some messages; no in-app help button or ticket flow (self-service gap #12)"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "No in-product help link/widget or support form",
+    "support.md exists (docs/support.md) but not surfaced"
+  ]
+}

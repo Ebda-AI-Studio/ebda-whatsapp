@@ -1,0 +1,48 @@
+{
+  "id": "templates.sync",
+  "status": "live",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مزامنة القوالب من ميتا",
+  "titleEn": "Sync templates and review status from Meta",
+  "screens": [],
+  "api": [
+    "POST /stores/:storeId/templates/sync"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "القالب لسه Pending",
+      "ازاي اعمل sync؟",
+      "القوالب مش بتظهر"
+    ],
+    "en": [
+      "My template status did not update, how do I sync?"
+    ]
+  },
+  "steps": [
+    "API only: no caller in web or cron (no periodic sync)",
+    "Status also updates via webhook message_template_status_update"
+  ],
+  "edgeCases": [
+    "Meta unreachable or rate-limited: 503 rate_limited, retry shortly; nothing is lost",
+    "No active number connected: 409 no_active_number",
+    "No token available: 503 token_unavailable"
+  ],
+  "gaps": [
+    "NO caller (audit #2): nothing triggers sync on connect or periodically",
+    "Staff may call it (no owner check)"
+  ],
+  "assistantNote": "full replace: absent templates are deleted locally"
+}

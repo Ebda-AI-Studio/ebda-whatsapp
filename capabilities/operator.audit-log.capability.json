@@ -1,0 +1,54 @@
+{
+  "id": "operator.audit-log",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "سجل الإجراءات وتنظيفه",
+  "titleEn": "Audit log and purge",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/audit-log",
+    "POST /operator/audit-log/purge",
+    "GET /operator/view-log"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": null,
+    "text": "internal audit; a read-only merchant view is a separate gap",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل سجل الإجراءات وتنظيفه؟",
+      "ليه مش لاقي سجل الإجراءات وتنظيفه عندي؟",
+      "عايز سجل الإجراءات وتنظيفه اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Audit log and purge?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: compliance.audit-trail (merchant cannot see who changed what)"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "id": "templates.status-webhook",
+  "status": "live",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تحديث حالة القالب تلقائي من ميتا",
+  "titleEn": "Template approval, rejection and category-change updates (webhook)",
+  "screens": [],
+  "api": [
+    "POST /meta/webhook (message_template_status_update, template_category_update)"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "القالب اتقبل؟",
+      "امتى هيجيلي رد من ميتا؟",
+      "ازاي تحديث حالة القالب تلقائي من ميتا؟"
+    ],
+    "en": [
+      "When will Meta review my template?"
+    ]
+  },
+  "steps": [
+    "Meta pushes APPROVED/REJECTED/PAUSED/DISABLED with reason; stored on the template"
+  ],
+  "edgeCases": [
+    "Approval takes minutes to about a day",
+    "Reasons are stored but no merchant screen shows them"
+  ],
+  "gaps": [
+    "Status is not shown to merchants anywhere",
+    "roles unverified"
+  ],
+  "assistantNote": "system path, not an action"
+}

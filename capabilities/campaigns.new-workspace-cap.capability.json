@@ -1,0 +1,43 @@
+{
+  "id": "campaigns.new-workspace-cap",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "حد الحملات في أول 14 يوم",
+  "titleEn": "New-workspace campaign allowance (first 14 days)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "ليه مش قادر ابعت لعدد كبير؟",
+      "الحملة وقفت عند 250",
+      "leh el hamla be 250 bas"
+    ],
+    "en": [
+      "Why can I only send 250 a day in my first weeks?"
+    ]
+  },
+  "steps": [
+    "New workspaces get 250 recipients/day for 14 days, counted across the owner's workspaces and own number"
+  ],
+  "edgeCases": [
+    "No owner row = refused (fail closed)",
+    "Counted before queueing, so a failed page overcounts for 24h",
+    "Anything over waits for the next day"
+  ],
+  "gaps": [
+    "Not documented in any merchant guide; UI wording for this pause reason is generic"
+  ]
+}

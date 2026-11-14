@@ -1,0 +1,40 @@
+{
+  "id": "templates.edit-delete",
+  "status": "planned",
+  "plan": "self-service audit #17",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تعديل أو حذف قالب اتقدم",
+  "titleEn": "Edit or delete a submitted template",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "ازاي اعدل القالب بعد ما اترفض؟",
+      "امسح قالب قديم",
+      "عدل template"
+    ],
+    "en": [
+      "How do I edit a rejected template?"
+    ]
+  },
+  "steps": [
+    "Not available: resubmit under a new name"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "templates-api.ts has only list + submit"
+  ]
+}

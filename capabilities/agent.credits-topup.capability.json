@@ -1,0 +1,40 @@
+{
+  "id": "agent.credits-topup",
+  "status": "planned",
+  "plan": "self-service audit #7 (Store side) and spec 6.5b (credits)",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "شراء كريديت إضافي",
+  "titleEn": "Buy more AI credits",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "الكريديت خلصت وعايز اشتري تاني",
+      "ازاي ازود الكريديت؟",
+      "ashtery credits"
+    ],
+    "en": [
+      "How do I buy more AI credits?"
+    ]
+  },
+  "steps": [
+    "Help says you can add more but no route, screen or order type exists for a credit purchase; upgrade package or wait for the monthly grant"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "NO API, NO UI for a Chat credit top-up (wallet top-up is money, not credits)"
+  ]
+}

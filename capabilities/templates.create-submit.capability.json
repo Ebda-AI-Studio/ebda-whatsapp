@@ -1,0 +1,65 @@
+{
+  "id": "templates.create-submit",
+  "status": "planned",
+  "plan": "business/ebda/audits/2026-11-14-self-service-and-ai-assistant-audit.md #1 + spec 2026-11-14-self-service-and-ebda-assistant-design.md section 7.2 (register row: NOT BUILT)",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "عمل قالب وتقديمه لميتا",
+  "titleEn": "Create and submit a template to Meta (own WABA)",
+  "screens": [
+    "none (planned Templates screen)"
+  ],
+  "api": [
+    "POST /stores/:storeId/templates {name,language,category,components}"
+  ],
+  "mcpTool": null,
+  "planGate": "package in good standing + active number",
+  "roles": [
+    "owner",
+    "super_admin"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "عايز اعمل رسالة بلغ بيها العميل إن الأوردر اتشحن",
+      "ازاي اعمل template؟",
+      "عايز قالب للعروض",
+      "a3mel template ezay",
+      "القالب اترفض ليه؟",
+      "عايز رسالة ترحيب"
+    ],
+    "en": [
+      "How do I create a message template?",
+      "Write me a template that tells the customer their order shipped"
+    ]
+  },
+  "steps": [
+    "Today: raw API only (name [a-z0-9_], language, category MARKETING/UTILITY/AUTHENTICATION, BODY required)",
+    "Planned: Templates screen + assistant template-writer (spec section 6.7)"
+  ],
+  "edgeCases": [
+    "Meta may require example values for variables; our schema is permissive so Meta may reject (unverified)",
+    "Rejections: wrong category, vague text, prohibited content, variable formatting, promotional content in UTILITY",
+    "Meta can recategorise UTILITY to MARKETING (category-update webhook re-checks held sends)",
+    "Name reuse: rejected name needs a new name (no edit API)",
+    "Quality rating of a template can drop to low and pause it (not tracked in our DB)",
+    "Template limits per WABA (250/6000 by verification) not surfaced",
+    "Meta unreachable or rate-limited: 503 rate_limited, retry shortly; nothing is lost",
+    "No active number connected: 409 no_active_number",
+    "No active package: sends, agent and number connect answer 403 plan_required (no free plan, WA-NOFREE-1); a past_due package keeps replies/confirmations up to 7 days",
+    "On the shared platform number: marketing templates are refused, templates come from the platform catalogue, wallet pays Meta"
+  ],
+  "gaps": [
+    "NO merchant UI (BLOCKER #1 in audit)",
+    "No template edit/delete endpoint (gap #17)",
+    "No rejection reason screen",
+    "No quality-rating tracking",
+    "Help 04 doc/code mismatch"
+  ],
+  "assistantNote": "a submission to Meta on the merchant account; cannot be withdrawn, edit not supported by our API"
+}

@@ -1,0 +1,47 @@
+{
+  "id": "contacts.merge",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "دمج رقمين لنفس العميل",
+  "titleEn": "Merge two numbers of the same customer",
+  "screens": [
+    "ContactsScreen merge panel",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
+  "api": [
+    "POST /stores/:storeId/contacts/merge"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/your-customers-data",
+  "questions": {
+    "ar": [
+      "العميل غير رقمه",
+      "ازاي ادمج رقمين؟",
+      "نفس العميل برقمين"
+    ],
+    "en": [
+      "The customer changed numbers, how do I merge?"
+    ]
+  },
+  "steps": [
+    "Pick old number",
+    "Type the new number with country code",
+    "Merge the two customers"
+  ],
+  "edgeCases": [
+    "Cannot be undone",
+    "If either opted out, both are opted out"
+  ],
+  "gaps": []
+}

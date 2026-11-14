@@ -1,0 +1,52 @@
+{
+  "id": "inbox.assign-takeover",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تعيين المحادثة لحد أو استلامها من المساعد",
+  "titleEn": "Assign a chat to a person / take over from the agent",
+  "screens": [
+    "ChatPane assignee + Take over button",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [
+    "POST /stores/:storeId/conversations/:id/assign {userId|null}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "عايز استلم المحادثة من المساعد",
+      "ازاي اعين المحادثة لموظف؟",
+      "خليت المحادثة عليا",
+      "estelem el mohadsa mn el mosa3ed"
+    ],
+    "en": [
+      "How do I take over a chat from the AI agent?",
+      "How do I assign a chat to a colleague?"
+    ]
+  },
+  "steps": [
+    "Open the chat",
+    "Press Take over (assigns to you) or pick an assignee",
+    "Agent stays silent for the handoff period"
+  ],
+  "edgeCases": [
+    "Assignee must hold a seat",
+    "Assigning or replying clears needs_human and restarts the agent silence window"
+  ],
+  "gaps": [
+    "UI offers take-over to self only; assigning to another person has an API but no obvious picker (verify)"
+  ]
+}

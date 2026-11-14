@@ -1,0 +1,42 @@
+{
+  "id": "templates.quality-rating",
+  "status": "planned",
+  "plan": "none yet",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تقييم جودة القالب",
+  "titleEn": "Template quality rating and pausing",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "القالب جودته وطت",
+      "ميتا وقفت القالب",
+      "إيه معنى quality rating؟"
+    ],
+    "en": [
+      "My template quality dropped / got paused"
+    ]
+  },
+  "steps": [
+    "Meta rates each template and may pause or disable it; not tracked by Ebda Chat today"
+  ],
+  "edgeCases": [
+    "Paused template makes campaigns pause with template_unavailable once status syncs"
+  ],
+  "gaps": [
+    "No quality field, webhook handler (template quality update) or UI"
+  ]
+}
