@@ -11,7 +11,6 @@ import type { LinkHost } from '../store-link/host';
 import type { CatalogRow, StoreBridge } from '../store-bridge';
 import { storeLink } from '../store-link';
 import { normaliseText } from '../text-normalise';
-import { idsOfProduct } from '../store-link/catalog';
 import { buildCatalogCard, buildProductCards, cardableIds, catalogueOpenable, type BuiltCard } from '../store-link/product-cards';
 import { catalogCandidates } from './knowledge';
 import type { ToolCall, ToolDef } from './provider';
@@ -168,11 +167,11 @@ async function searchCatalog(ctx: ToolContext, query: string): Promise<{ results
   // The index only names candidate products; what is shown (price, stock, link) is read from the Store right now.
   const ids = await catalogCandidates(ctx.host, query);
   if (ids) {
-    // The Store's `getProducts` answers to retailer ids (a product with variants only to its variants'): the ledger names them, the product id covers a simple product.
-    const fresh = await bridge.getProducts(ctx.host.workspaceId, [...new Set(ids.flatMap((pid) => [pid, ...idsOfProduct(ctx.host, pid)]))]);
+    // The index names RETAILER ids (what the Store's `getProducts` answers to, variants included), best match first.
+    const fresh = await bridge.getProducts(ctx.host.workspaceId, ids);
     if (fresh.ok && fresh.value.items.length) {
       const rank = new Map(ids.map((id, i) => [id, i]));
-      return { results: fresh.value.items.sort((a, b) => (rank.get(a.productId) ?? 99) - (rank.get(b.productId) ?? 99)).slice(0, SEARCH_RESULTS).map(toHit) };
+      return { results: fresh.value.items.sort((a, b) => (rank.get(a.retailerId) ?? 99) - (rank.get(b.retailerId) ?? 99)).slice(0, SEARCH_RESULTS).map(toHit) };
     }
   }
   const rows: CatalogRow[] = [];
