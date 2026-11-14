@@ -35,7 +35,7 @@ describe('the agent answers', () => {
     expect(req.system).toContain('انت مساعد متجر الورد');
     expect(req.system).toContain('search_catalog');
     expect(req.messages).toEqual([{ role: 'user', content: '<customer_message>مساء الخير</customer_message>' }]);
-    expect(req.tools.map((t) => t.name)).toEqual(['search_catalog', 'order_status', 'start_order', 'handoff_to_human']);
+    expect(req.tools.map((t) => t.name)).toEqual(['search_catalog', 'show_products', 'open_catalog', 'order_status', 'start_order', 'handoff_to_human']);
     expect(req.maxTokens).toBeGreaterThan(0);
   });
 

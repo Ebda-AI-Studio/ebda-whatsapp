@@ -11,6 +11,8 @@ import type { LinkHost } from '../store-link/host';
 import type { CatalogRow, StoreBridge } from '../store-bridge';
 import { storeLink } from '../store-link';
 import { normaliseText } from '../text-normalise';
+import { idsOfProduct } from '../store-link/catalog';
+import { buildCatalogCard, buildProductCards, cardableIds, catalogueOpenable, type BuiltCard } from '../store-link/product-cards';
 import { catalogCandidates } from './knowledge';
 import type { ToolCall, ToolDef } from './provider';
 
@@ -31,6 +33,16 @@ export function toolDefs(a: ToolAvailability): ToolDef[] {
       name: 'search_catalog',
       description: 'Find products in the store by name, type or description. Returns up to 5 matches with current price, availability and link.',
       parameters: { type: 'object', properties: { query: { type: 'string', description: 'What the customer is looking for, in their words.' } }, required: ['query'] },
+    });
+    defs.push({
+      name: 'show_products',
+      description: 'Send the customer product cards (picture, price, add-to-cart) in the chat for products you found with search_catalog. Pass the `id` values from the search results (at most 10). Use it whenever the customer asks to see, compare or choose products.',
+      parameters: { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' }, description: 'The `id` of each product to show, from search_catalog.' } }, required: ['ids'] },
+    });
+    defs.push({
+      name: 'open_catalog',
+      description: 'Send the "View catalog" button that opens the store\'s whole catalogue on WhatsApp. Use it when the customer wants to browse everything or asks what you sell.',
+      parameters: { type: 'object', properties: {} },
     });
   }
   if (a.orders) {
@@ -56,9 +68,11 @@ export function toolDefs(a: ToolAvailability): ToolDef[] {
 }
 
 export type ToolOutcome = { content: string } | { handoff: true } | { startOrder: true };
-export type ToolContext = { host: LinkHost; from: string; bridge: StoreBridge | null; availability: ToolAvailability };
+/** `cards` collects the catalogue messages a turn asked for; the agent sends them after its text. */
+export type ToolContext = { host: LinkHost; from: string; bridge: StoreBridge | null; availability: ToolAvailability; locale: 'ar' | 'en'; cards: BuiltCard[] };
 
 const searchArgs = z.object({ query: z.string().trim().min(1).max(120) });
+const showArgs = z.object({ ids: z.array(z.string().trim().min(1).max(200)).min(1).max(10) });
 const statusArgs = z.object({ orderNumber: z.string().trim().regex(/^[\w-]{1,40}$/).optional() });
 const json = (v: unknown): ToolOutcome => ({ content: JSON.stringify(v).slice(0, 3000) });
 const err = (code: string): ToolOutcome => json({ error: code });
@@ -71,6 +85,20 @@ export async function runTool(ctx: ToolContext, call: ToolCall): Promise<ToolOut
         const args = searchArgs.safeParse(call.arguments);
         if (!args.success) return err('invalid_arguments');
         return json(await searchCatalog(ctx, args.data.query));
+      }
+      case 'show_products': {
+        if (!ctx.availability.catalog || !ctx.bridge) return err('unavailable');
+        const args = showArgs.safeParse(call.arguments);
+        if (!args.success) return err('invalid_arguments');
+        return json(await showProducts(ctx, args.data.ids));
+      }
+      case 'open_catalog': {
+        if (!ctx.availability.catalog) return err('unavailable');
+        const copy = storeLink().copy;
+        const open = catalogueOpenable(ctx.host);
+        if (!copy || !open) return err('catalogue_unavailable');
+        if (!ctx.cards.some((c) => c.spec.kind === 'catalog')) ctx.cards.push(buildCatalogCard(copy, ctx.locale, open.thumbnail ?? undefined));
+        return json({ opened: true });
       }
       case 'order_status': {
         if (!ctx.availability.orders || !ctx.bridge) return err('unavailable');
@@ -93,6 +121,24 @@ export async function runTool(ctx: ToolContext, call: ToolCall): Promise<ToolOut
 
 type Hit = { id: string; name: string; nameAr: string | null; price: number; currency: string; inStock: boolean; link: string };
 const toHit = (r: CatalogRow): Hit => ({ id: r.retailerId, name: r.title, nameAr: r.titleAr, price: r.priceMinor / 100, currency: r.currency, inStock: r.availability === 'in_stock', link: r.link });
+
+/**
+ * Product cards for products the catalogue really holds (checked against the sync ledger), read live from the Store just now (price and stock are
+ * never taken from the model or an index). Out-of-stock products get no card. With no connected catalogue the answer says so and carries the links,
+ * and the model writes a text reply instead.
+ */
+async function showProducts(ctx: ToolContext, ids: string[]): Promise<unknown> {
+  const res = await ctx.bridge!.getProducts(ctx.host.workspaceId, [...new Set(ids)]);
+  if (!res.ok) return { error: 'store_unavailable' };
+  const inStock = res.value.items.filter((r) => r.availability === 'in_stock');
+  if (!inStock.length) return { error: 'not_available' };
+  const copy = storeLink().copy;
+  const cardable = copy ? cardableIds(ctx.host, inStock.map((r) => r.retailerId)) : null;
+  if (!copy || !cardable) return { cards_unavailable: true, products: inStock.slice(0, SEARCH_RESULTS).map(toHit) };
+  const shown = inStock.filter((r) => cardable.ids.includes(r.retailerId));
+  ctx.cards.push(...buildProductCards(shown, cardable.catalogId, copy, ctx.locale));
+  return { cards_sent: shown.length, products: shown.map(toHit), without_card: inStock.filter((r) => !cardable.ids.includes(r.retailerId)).map(toHit) };
+}
 
 /** Words of the query: normalised, at most six. A single character (a digit: "item 3") counts only as a whole word. */
 const tokens = (q: string): string[] => [...new Set(normaliseText(q).split(' ').filter(Boolean))].slice(0, 6);
@@ -122,7 +168,8 @@ async function searchCatalog(ctx: ToolContext, query: string): Promise<{ results
   // The index only names candidate products; what is shown (price, stock, link) is read from the Store right now.
   const ids = await catalogCandidates(ctx.host, query);
   if (ids) {
-    const fresh = await bridge.getProducts(ctx.host.workspaceId, ids);
+    // The Store's `getProducts` answers to retailer ids (a product with variants only to its variants'): the ledger names them, the product id covers a simple product.
+    const fresh = await bridge.getProducts(ctx.host.workspaceId, [...new Set(ids.flatMap((pid) => [pid, ...idsOfProduct(ctx.host, pid)]))]);
     if (fresh.ok && fresh.value.items.length) {
       const rank = new Map(ids.map((id, i) => [id, i]));
       return { results: fresh.value.items.sort((a, b) => (rank.get(a.productId) ?? 99) - (rank.get(b.productId) ?? 99)).slice(0, SEARCH_RESULTS).map(toHit) };
