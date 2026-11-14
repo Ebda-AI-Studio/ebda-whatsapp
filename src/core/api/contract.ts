@@ -95,14 +95,23 @@ export const apiError = z.object({
   amountMinor: z.number().int().optional(),
 });
 
+export const templateEditAllowance = z.union([
+  z.object({ allowed: z.literal(true) }),
+  z.object({ allowed: z.literal(false), reason: z.enum(['status', 'daily', 'monthly']), retryAt: z.number().int().nullable() }),
+]);
 export const templateDto = z.object({
   name: z.string(),
   language: z.string(),
   category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']),
-  status: z.enum(['APPROVED', 'PENDING', 'REJECTED', 'PAUSED', 'DISABLED']),
+  status: z.enum(['APPROVED', 'PENDING', 'REJECTED', 'PAUSED', 'DISABLED', 'PENDING_DELETION']),
   bodyText: z.string(),
   paramCount: z.number().int().nonnegative(),
   rejectedReason: z.string().nullable(),
+  // additive (merchant template self-service): the merchant's own title, Meta's components, last change, and whether Meta still lets this one be edited
+  label: z.string().nullable().optional(),
+  components: z.array(z.record(z.string(), z.any())).optional(),
+  updatedAt: z.number().int().optional(),
+  editAllowance: templateEditAllowance.optional(),
 });
 export const listTemplatesResponse = z.object({ items: z.array(templateDto) });
 

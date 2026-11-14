@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { listTemplatesResponse } from '../core/api/contract';
+import type { listTemplatesResponse, TemplateDto } from '../core/api/contract';
 import { fetchTemplates, submitTemplate } from '../core/meta/templates-api';
 import { componentsSchema } from '../core/templates';
 import { activeNumber, apiError, bizToken, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
@@ -22,7 +22,7 @@ export function templatesRoutes(defaults: readonly TemplateSeed[]) {
   r.get('/stores/:storeId/templates', async (c) => {
     const ws = await workspaceStub(c);
     if (!ws) return apiError(c, 404, 'not_found');
-    const body: z.infer<typeof listTemplatesResponse> = { items: await ws.listTemplates() };
+    const body = { items: (await ws.listTemplates()) as unknown as TemplateDto[] } satisfies z.infer<typeof listTemplatesResponse>; // the Rpc type of Meta's loose components is too deep to infer
     return c.json(body);
   });
 

@@ -146,12 +146,12 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
   return [...byNumber.values()];
 }
 
-export type TemplateStatusEvent = { wabaId: string; name: string; language: string; status: 'APPROVED' | 'REJECTED' | 'PENDING' | 'PAUSED' | 'DISABLED'; reason: string | null };
-const TEMPLATE_STATUS: Record<string, TemplateStatusEvent['status']> = { APPROVED: 'APPROVED', REJECTED: 'REJECTED', PENDING: 'PENDING', IN_APPEAL: 'PENDING', PAUSED: 'PAUSED', DISABLED: 'DISABLED' };
+export type TemplateStatusEvent = { wabaId: string; name: string; language: string; status: 'APPROVED' | 'REJECTED' | 'PENDING' | 'PAUSED' | 'DISABLED' | 'PENDING_DELETION'; reason: string | null; templateId: string | null };
+const TEMPLATE_STATUS: Record<string, TemplateStatusEvent['status']> = { APPROVED: 'APPROVED', REJECTED: 'REJECTED', PENDING: 'PENDING', IN_APPEAL: 'PENDING', PAUSED: 'PAUSED', DISABLED: 'DISABLED', PENDING_DELETION: 'PENDING_DELETION' };
 
 const templateChangeSchema = z.object({
   field: z.literal('message_template_status_update'),
-  value: z.object({ event: z.string(), message_template_name: z.string(), message_template_language: z.string(), reason: z.string().nullish() }).loose(),
+  value: z.object({ event: z.string(), message_template_name: z.string(), message_template_language: z.string(), message_template_id: z.union([z.string(), z.number()]).optional(), reason: z.string().nullish() }).loose(),
 }).loose();
 
 /** `message_template_status_update` changes, per WABA. Events we do not model (FLAGGED, …) are skipped. */
@@ -165,7 +165,7 @@ export function extractTemplateStatuses(payload: unknown): TemplateStatusEvent[]
       const status = c.success ? TEMPLATE_STATUS[c.data.value.event] : undefined;
       if (!c.success || !status) continue;
       const reason = c.data.value.reason && c.data.value.reason !== 'NONE' ? c.data.value.reason : null;
-      out.push({ wabaId: entry.id, name: c.data.value.message_template_name, language: c.data.value.message_template_language, status, reason });
+      out.push({ wabaId: entry.id, name: c.data.value.message_template_name, language: c.data.value.message_template_language, status, reason, templateId: c.data.value.message_template_id === undefined ? null : String(c.data.value.message_template_id) });
     }
   }
   return out;

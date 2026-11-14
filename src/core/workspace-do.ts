@@ -111,6 +111,12 @@ export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; st
 export type CoexBatch = { phoneNumberId: string; echoes: CoexMessage[]; history: CoexMessage[]; contacts: SyncedContact[] };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
+const TEMPLATE_COLS = 'name, language, category, status, components, rejected_reason, updated_at, meta_id, label';
+type TemplateRowSql = { name: string; language: string; category: string; status: string; components: string; rejected_reason: string | null; updated_at: number; meta_id: string | null; label: string | null };
+const TEMPLATE_EDIT_DAY_MS = 86_400_000;
+const TEMPLATE_EDIT_MONTH_MS = 30 * 86_400_000;
+const TEMPLATE_EDITS_PER_MONTH = 10;
+
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'plan_required' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
@@ -879,30 +885,81 @@ export class WorkspaceDO extends DurableObject<Env> {
     return out;
   }
 
-  async listTemplates(): Promise<TemplateDto[]> {
+  async listTemplates(now = Date.now()): Promise<TemplateDto[]> {
     return this.sql
-      .exec<{ name: string; language: string; category: string; status: string; components: string; rejected_reason: string | null }>(
-        'SELECT name, language, category, status, components, rejected_reason FROM templates ORDER BY name, language',
-      )
+      .exec<TemplateRowSql>(`SELECT ${TEMPLATE_COLS} FROM templates ORDER BY name, language`)
       .toArray()
-      .map((t) => {
-        const comps = componentsSchema.safeParse(JSON.parse(t.components));
-        const parts = comps.success ? comps.data : [];
-        return {
-          name: t.name, language: t.language, category: t.category as TemplateDto['category'], status: t.status as TemplateDto['status'],
-          bodyText: bodyTextOf(parts), paramCount: paramCount(parts, t.category), rejectedReason: t.rejected_reason,
-        };
-      });
+      .map((t) => this.templateDto(t, now));
+  }
+
+  private templateDto(t: TemplateRowSql, now: number): TemplateDto {
+    const comps = componentsSchema.safeParse(JSON.parse(t.components));
+    const parts = comps.success ? comps.data : [];
+    return {
+      name: t.name, language: t.language, category: t.category as TemplateDto['category'], status: t.status as TemplateDto['status'],
+      bodyText: bodyTextOf(parts), paramCount: paramCount(parts, t.category), rejectedReason: t.rejected_reason,
+      label: t.label, components: parts, updatedAt: t.updated_at, editAllowance: this.editAllowanceOf(t.name, t.language, t.status, now),
+    };
+  }
+
+  /** One template with everything the detail screen and the editor need; null when we do not have it. */
+  async getTemplate(name: string, language: string, now = Date.now()): Promise<(TemplateDto & { metaId: string | null; label: string | null; components: NonNullable<TemplateDto['components']> }) | null> {
+    const t = this.sql.exec<TemplateRowSql>(`SELECT ${TEMPLATE_COLS} FROM templates WHERE name = ? AND language = ?`, name, language).toArray()[0];
+    if (!t) return null;
+    const comps = componentsSchema.safeParse(JSON.parse(t.components));
+    return { ...this.templateDto(t, now), metaId: t.meta_id, label: t.label, components: comps.success ? comps.data : [] };
+  }
+
+  private editAllowanceOf(name: string, language: string, status: string, now: number): NonNullable<TemplateDto['editAllowance']> {
+    if (status === 'REJECTED' || status === 'PAUSED') return { allowed: true };
+    if (status !== 'APPROVED') return { allowed: false, reason: 'status', retryAt: null };
+    // Meta: an APPROVED template may be edited once per 24 h and 10 times per 30 days. If both bite, the later unlock wins.
+    const last = this.sql.exec<{ at: number | null }>('SELECT max(at) AS at FROM template_edits WHERE name = ? AND language = ? AND at > ?', name, language, now - TEMPLATE_EDIT_DAY_MS).toArray()[0]?.at ?? null;
+    const month = this.sql.exec<{ at: number }>('SELECT at FROM template_edits WHERE name = ? AND language = ? AND at > ? ORDER BY at DESC LIMIT ?', name, language, now - TEMPLATE_EDIT_MONTH_MS, TEMPLATE_EDITS_PER_MONTH).toArray();
+    const daily = last === null ? null : last + TEMPLATE_EDIT_DAY_MS;
+    const monthly = month.length >= TEMPLATE_EDITS_PER_MONTH ? month[month.length - 1]!.at + TEMPLATE_EDIT_MONTH_MS : null;
+    if (daily === null && monthly === null) return { allowed: true };
+    return monthly !== null && (daily === null || monthly >= daily) ? { allowed: false, reason: 'monthly', retryAt: monthly } : { allowed: false, reason: 'daily', retryAt: daily! };
+  }
+
+  async editAllowance(name: string, language: string, now = Date.now()): Promise<NonNullable<TemplateDto['editAllowance']>> {
+    const t = this.sql.exec<{ status: string }>('SELECT status FROM templates WHERE name = ? AND language = ?', name, language).toArray()[0];
+    return this.editAllowanceOf(name, language, t?.status ?? '', now);
+  }
+
+  async recordTemplateEdit(name: string, language: string, at: number): Promise<void> {
+    this.sql.exec('INSERT INTO template_edits (name, language, at) VALUES (?, ?, ?)', name, language, at);
+  }
+
+  async removeTemplate(name: string, language: string): Promise<boolean> {
+    return this.ctx.storage.transactionSync(() => {
+      const r = this.sql.exec('DELETE FROM templates WHERE name = ? AND language = ?', name, language);
+      this.sql.exec('DELETE FROM template_edits WHERE name = ? AND language = ?', name, language);
+      return r.rowsWritten > 0;
+    });
+  }
+
+  /** Whether a campaign that has not finished, or a message still waiting to leave, uses this template (deleting it would break them). */
+  async templateInUse(name: string, language: string): Promise<'campaign' | 'queued' | null> {
+    if (this.sql.exec("SELECT 1 FROM campaigns WHERE template_name = ? AND template_language = ? AND status IN ('draft', 'scheduled', 'running', 'paused') LIMIT 1", name, language).toArray().length > 0) return 'campaign';
+    if (this.sql.exec("SELECT 1 FROM messages WHERE direction = 'out' AND template_name = ? AND template_lang = ? AND status IN ('queued', 'retry') LIMIT 1", name, language).toArray().length > 0) return 'queued';
+    return null;
+  }
+
+  /** Submitted templates Meta has not answered for `olderThanMs`: the sweep asks Meta about them (a status webhook can be lost or arrive before our save). */
+  async pendingTemplates(olderThanMs: number, now = Date.now()): Promise<{ name: string; language: string; metaId: string | null }[]> {
+    return this.sql.exec<{ name: string; language: string; meta_id: string | null }>("SELECT name, language, meta_id FROM templates WHERE status = 'PENDING' AND updated_at < ? ORDER BY updated_at LIMIT 20", now - olderThanMs)
+      .toArray().map((r) => ({ name: r.name, language: r.language, metaId: r.meta_id }));
   }
 
   /** Replaces the template set with what Meta returned (the caller fetched every page, so absence means deleted at Meta). */
-  async syncTemplates(items: { name: string; language: string; category: string; status: string; components: unknown[]; rejectedReason: string | null }[]): Promise<{ upserted: number; removed: number }> {
+  async syncTemplates(items: { name: string; language: string; category: string; status: string; components: unknown[]; rejectedReason: string | null; metaId?: string | null }[]): Promise<{ upserted: number; removed: number }> {
     return this.ctx.storage.transactionSync(() => {
       const now = Date.now();
       const keep = new Set<string>();
       for (const t of items) {
         keep.add(`${t.name}\u0000${t.language}`);
-        this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), t.rejectedReason, now);
+        this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), t.rejectedReason, now, t.metaId ?? null);
       }
       let removed = 0;
       for (const t of this.sql.exec<{ id: number; name: string; language: string }>('SELECT id, name, language FROM templates').toArray()) {
@@ -914,18 +971,20 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
   }
 
-  /** A template we just submitted to Meta. */
-  async saveSubmittedTemplate(t: { name: string; language: string; category: string; status: string; components: unknown[] }): Promise<void> {
-    this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), null, Date.now());
+  /** A template we just submitted (or re-submitted) to Meta. `category` is what META answered, never what was requested. */
+  async saveSubmittedTemplate(t: { name: string; language: string; category: string; status: string; components: unknown[]; metaId?: string | null; label?: string | null }): Promise<void> {
+    const now = Date.now();
+    this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), null, now, t.metaId ?? null, t.label ?? null, now);
   }
 
   async hasTemplate(name: string, language: string): Promise<boolean> {
     return this.sql.exec('SELECT 1 FROM templates WHERE name = ? AND language = ?', name, language).toArray().length > 0;
   }
 
-  /** Meta's template-status webhook. Unknown templates are ignored (they will arrive with the next sync). */
-  async applyTemplateStatus(name: string, language: string, status: string, reason: string | null): Promise<{ applied: boolean }> {
-    const r = this.sql.exec('UPDATE templates SET status = ?, rejected_reason = ?, updated_at = ? WHERE name = ? AND language = ?', status, reason, Date.now(), name, language);
+  /** Meta's template-status webhook (or a sweep). Unknown templates are ignored (they arrive with the next sync). Reason NONE/empty is no reason; APPROVED clears it. */
+  async applyTemplateStatus(name: string, language: string, status: string, reason: string | null, metaId: string | null = null): Promise<{ applied: boolean }> {
+    const clean = status === 'APPROVED' || !reason || reason === 'NONE' ? null : reason;
+    const r = this.sql.exec('UPDATE templates SET status = ?, rejected_reason = ?, meta_id = COALESCE(?, meta_id), updated_at = ? WHERE name = ? AND language = ?', status, clean, metaId, Date.now(), name, language);
     return { applied: r.rowsWritten > 0 };
   }
 
@@ -975,11 +1034,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     return out;
   }
 
-  private upsertTemplate(name: string, language: string, category: string, status: string, components: string, rejectedReason: string | null, now: number): void {
+  private upsertTemplate(name: string, language: string, category: string, status: string, components: string, rejectedReason: string | null, now: number, metaId: string | null = null, label: string | null = null, submittedAt: number | null = null): void {
     this.sql.exec(
-      `INSERT INTO templates (name, language, category, status, components, rejected_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(name, language) DO UPDATE SET category = excluded.category, status = excluded.status, components = excluded.components, rejected_reason = excluded.rejected_reason, updated_at = excluded.updated_at`,
-      name, language, category, status, components, rejectedReason, now,
+      `INSERT INTO templates (name, language, category, status, components, rejected_reason, updated_at, meta_id, label, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(name, language) DO UPDATE SET category = excluded.category, status = excluded.status, components = excluded.components, rejected_reason = excluded.rejected_reason, updated_at = excluded.updated_at,
+         meta_id = COALESCE(excluded.meta_id, meta_id), label = COALESCE(excluded.label, label), submitted_at = COALESCE(excluded.submitted_at, submitted_at)`,
+      name, language, category, status, components, rejectedReason, now, metaId, label, submittedAt,
     );
   }
 
