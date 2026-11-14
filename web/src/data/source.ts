@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
   ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto,
 } from '../../../src/core/api/contract';
 
@@ -139,6 +139,16 @@ export interface InboxSource {
     resync(): Promise<{ started: boolean }>;
     /** Turns the shop button and the cart on the number on or off (owner). Rejects with `detail` = missing_permission | catalog_not_set | meta_error. */
     setCommerce(v: { catalogVisible: boolean; cartEnabled: boolean }): Promise<{ catalogVisible: boolean; cartEnabled: boolean }>;
+  };
+  /**
+   * The owner switches (ordering bot, order confirmations, store-login codes over WhatsApp) and the sending-speed report. Turning confirmations or codes ON takes
+   * `preview` first, then `save` with its single-use token (`save` rejects with `detail` = confirm_required | confirm_invalid | confirm_expired). `throttle` is null when no number is connected.
+   */
+  switches?: {
+    get(): Promise<BotSwitchesDto>;
+    preview(change: Partial<BotSwitchesDto>): Promise<{ confirmToken: string }>;
+    save(change: Partial<BotSwitchesDto>, confirmToken?: string): Promise<BotSwitchesDto>;
+    throttle(): Promise<ThrottleReportDto | null>;
   };
   /** Bot results: customers per step over the last 7, 30 or 90 days (Cairo calendar days, today included). Counts only; owner and staff read. */
   botFunnel?(days: 7 | 30 | 90): Promise<BotFunnelDto>;

@@ -6,9 +6,13 @@
   "versionDate": "2026-11-14",
   "titleAr": "تشغيل أو إيقاف بوت الطلبات",
   "titleEn": "Turn the ordering bot on or off",
-  "screens": [],
+  "screens": [
+    "BotScreen Switches: ordering bot",
+    "view:BotScreen",
+    "/bot"
+  ],
   "api": [
-    "PATCH /stores/:storeId/store-link/settings {orderingBot}"
+    "PATCH /stores/:storeId/store-link/settings"
   ],
   "mcpTool": null,
   "planGate": null,
@@ -31,7 +35,8 @@
     ]
   },
   "steps": [
-    "API only (default ON)"
+    "Open Bot in Settings, then Switches",
+    "Turn Ordering bot on or off (applies at once; a note says what customers will see)"
   ],
   "edgeCases": [
     "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires"

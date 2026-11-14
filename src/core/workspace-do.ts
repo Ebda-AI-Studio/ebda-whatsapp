@@ -36,6 +36,7 @@ import type { z } from 'zod';
 import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { getState, putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
+import { CONFIRM_MAX_PENDING, CONFIRM_TTL_MS, type ConfirmOutcome } from './settings-confirm';
 import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { provisionCatalog, type ProvisionResult } from './store-link/catalog-provision';
 import { commerceAuth, ensureCommerce, type CommerceState } from './store-link/catalog-commerce';
@@ -1341,6 +1342,31 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   async getStoreLinkSettings(): Promise<StoreLinkSettings> {
     return readSettings(this.host());
+  }
+
+  /** SETTINGS-CONFIRM-1: issues a single-use token for turning customer-visible sending on. At most CONFIRM_MAX_PENDING live tokens: the oldest go first. */
+  async issueSettingsConfirm(actor: string, hash: string, now = Date.now()): Promise<{ token: string; expiresAt: number }> {
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
+    const expiresAt = now + CONFIRM_TTL_MS;
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM store_state WHERE key LIKE 'confirm.settings.%' AND CAST(json_extract(value, '$.exp') AS INTEGER) < ?", now);
+      this.sql.exec("DELETE FROM store_state WHERE key IN (SELECT key FROM store_state WHERE key LIKE 'confirm.settings.%' ORDER BY CAST(json_extract(value, '$.exp') AS INTEGER) ASC LIMIT max(0, (SELECT count(*) FROM store_state WHERE key LIKE 'confirm.settings.%') - ?))", CONFIRM_MAX_PENDING - 1);
+      this.sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?)', `confirm.settings.${token}`, JSON.stringify({ actor, hash, exp: expiresAt }));
+    });
+    return { token, expiresAt };
+  }
+
+  /** Checks and burns the token in one step (this object is single-threaded): a token is gone after ANY attempt, right or wrong. */
+  async consumeSettingsConfirm(token: string, actor: string, hash: string, now = Date.now()): Promise<ConfirmOutcome> {
+    return this.ctx.storage.transactionSync(() => {
+      const key = `confirm.settings.${token}`;
+      const raw = this.sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', key).toArray()[0]?.value;
+      if (raw === undefined) return 'invalid';
+      this.sql.exec('DELETE FROM store_state WHERE key = ?', key);
+      const row = JSON.parse(raw) as { actor: string; hash: string; exp: number };
+      if (row.exp < now) return 'expired';
+      return row.actor === actor && row.hash === hash ? 'ok' : 'mismatch';
+    });
   }
 
   /**

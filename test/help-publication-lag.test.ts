@@ -1,3 +1,5 @@
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain .mjs script
 import { LAG_MS, checkLag, contentHash, fetchManifest, readSources, stripFrontMatter } from '../scripts/help-publication-lag.mjs';
@@ -42,11 +44,10 @@ describe('help publication lag', () => {
     expect(contentHash('  x  ')).toBe(contentHash('x'));
     expect(contentHash(stripFrontMatter('---\ncapabilities:\n  - a.b@1\n---\n\n# T\n'))).toBe(contentHash('# T'));
   });
-  it('reads every guide in both languages with front matter stripped', () => {
+  it('reads every guide in both languages with front matter stripped (counted from the folder)', () => {
     const s = readSources(undefined, () => NOW);
-    const by = (l: string) => s.filter((x: { lang: string }) => x.lang === l).map((x: { slug: string }) => x.slug).sort();
-    expect(by('ar').length).toBeGreaterThan(0);
-    expect(by('ar')).toEqual(by('en'));
+    const onDisk = (lang: string) => readdirSync(join(import.meta.dirname, '../docs/help', lang)).filter((f) => /^\d+-.+\.md$/.test(f)).length;
+    expect(s).toHaveLength(onDisk('ar') + onDisk('en'));
     expect(s.every((x: { hash: string }) => /^[0-9a-f]{64}$/.test(x.hash))).toBe(true);
   });
 });

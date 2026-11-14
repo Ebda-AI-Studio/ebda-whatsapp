@@ -28,6 +28,7 @@ A list of every guide, grouped by what you need.
 - [InstaPay orders](06-instapay-orders-in-whatsapp.md)
 - [Your products on WhatsApp](15-your-products-on-whatsapp.md)
 - [Service menu, hours, location and bot results](11-service-menu-hours-and-location.md)
+- [Bot switches and sending speed](30-bot-switches-and-sending-speed.md)
 
 ## The AI agent
 - [The AI agent](07-ai-agent.md)

@@ -28,6 +28,7 @@ capabilities:
 - [طلبات InstaPay](06-instapay-orders-in-whatsapp.md)
 - [منتجاتك على واتساب](15-your-products-on-whatsapp.md)
 - [قائمة الخدمة والمواعيد والموقع ونتايج البوت](11-service-menu-hours-and-location.md)
+- [مفاتيح البوت وسرعة الإرسال](30-bot-switches-and-sending-speed.md)
 
 ## المساعد الذكي
 - [المساعد الذكي](07-ai-agent.md)
