@@ -3,11 +3,13 @@ import { isFranco, isPlainEnglish } from '../src/core/franco';
 
 describe('Franco-Arabic detection (audit D6)', () => {
   it.each([
-    '3ayez fostan a7mar', 'ezayak ya basha', 'bekam el shipping lel Giza?', 'momken a3raf el mawa3eed', 'ana 3ayza 2ahmar', 'fein el order bta3i', 'ma3lesh ta2akhart', 'keda tamam shukran', 'ya 7abibi', 'mesh 3agbany el lon',
+    '3ayez fostan a7mar', 'ezayak ya basha', 'bekam el shipping lel Giza?', 'momken a3raf el mawa3eed', 'ana 3ayza 2ahmar', 'fein el order bta3i', 'ma3lesh ta2akhart', 'keda tamam shukran', 'ya 7abibi', 'mesh 3agbany el lon', '3ayez', 'ezayak', '7aga', 'mesh 3arf', 'fo2ay el dulab', 'msh 3ayez', 'a7la 7aga', '5alas tamam',
   ])('"%s" is Franco', (t) => expect(isFranco(t)).toBe(true));
 
   it.each([
     'where is my order', 'hello', 'I want size 42 in black', 'iphone15 pro max price', 'do you ship to Alexandria?', 'ok thanks', 'I need a gift under 500', 'A1', 'what time do you open', 'can I pay with 3D secure card', 'hi, do you have the v2 model',
+    // review I3: ordinals, times, sizes, b2b and a product word are English
+    'Can you deliver by 5pm?', 'my 2nd order', 'do you have 3rd size', 'b2b pricing please', 'size 6xl available?', 'open at 7am?', 'I want the mesh bag', 'Ana here, la la land poster', 'h2o bottle 2l', 'e2e tests', 'mp3 player 8gb', 'ps5 controller 9mm', 'my 22nd order 4pcs', 'is the 3x3 mesh back in stock', 'law and order',
   ])('"%s" is English', (t) => expect(isFranco(t)).toBe(false));
 
   it('Arabic script is never Franco; digits-only and empty are neither', () => {
