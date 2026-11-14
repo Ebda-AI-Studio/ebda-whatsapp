@@ -39,7 +39,7 @@ function bypassFiles(): { path: string; src: string }[] {
 
 describe('capability registry rules (lens 192)', () => {
   it('loads every seeded capability', () => {
-    expect(entries.length).toBe(172);
+    expect(entries.length).toBe(176); // 172 seeded + templates.shared-list, templates.shared-request, templates.shared-number-marketing, operator.shared-template-requests
   });
   it('has no new registry violation and no stale baseline id', () => {
     expect(judge('registry', violations).failures).toEqual([]);
@@ -55,11 +55,52 @@ describe('capability registry rules (lens 192)', () => {
   });
 });
 
+describe('templates self-service registry entries (plan 2 task 13)', () => {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const get = (id: string) => byId.get(id)!;
+  const WRITES = ['templates.create-submit', 'templates.edit-delete', 'templates.install-defaults', 'templates.shared-request'];
+  it('every template write is confirm + irreversible and live; reads and the sync are free', () => {
+    for (const id of WRITES) expect([id, get(id).status, get(id).policy, get(id).undo.class]).toEqual([id, 'live', 'confirm', 'irreversible']);
+    for (const id of ['templates.list', 'templates.sync', 'templates.shared-list', 'templates.starter-on-connect', 'templates.shared-number-marketing']) expect([id, get(id).status, get(id).policy]).toEqual([id, 'live', 'free']);
+  });
+  it('the sync is a free read-only POST that names exactly its own route and nothing else', () => {
+    const s = get('templates.sync');
+    expect(s.api).toEqual(['POST /stores/:storeId/templates/sync']);
+    expect(s.readOnlyPost?.routes).toEqual(['POST /stores/:storeId/templates/sync']);
+    expect(s.undo.class).toBe('none');
+  });
+  it('the guard config excuses only the sync: every other templates POST still needs confirm (mutation proof)', () => {
+    const entry = (api: string[], readOnly?: string[]) => ({ ...(get('templates.sync') as object), api, ...(readOnly ? { readOnlyPost: { routes: readOnly, reason: 'x' } } : { readOnlyPost: undefined }) });
+    const run = (api: string[], readOnly?: string[]) => checkRegistry([{ name: 'templates.sync.capability.json', json: entry(api, readOnly) }], guardConfig).violations.map((v) => v.rule);
+    expect(run(['POST /stores/:storeId/templates/sync'], ['POST /stores/:storeId/templates/sync'])).toEqual([]);
+    expect(run(['POST /stores/:storeId/templates/check'], ['POST /stores/:storeId/templates/check'])).toContain('policy-must-confirm');
+    expect(run(['POST /stores/:storeId/templates'], ['POST /stores/:storeId/templates'])).toContain('policy-must-confirm');
+    expect(run(['POST /stores/:storeId/templates/sync', 'POST /stores/:storeId/templates'], ['POST /stores/:storeId/templates/sync'])).toEqual(expect.arrayContaining(['policy-free-writes', 'policy-must-confirm']));
+    expect(run(['POST /stores/:storeId/templates/sync', 'DELETE /stores/:storeId/templates/:name/:language'], ['POST /stores/:storeId/templates/sync'])).toContain('policy-free-writes');
+  });
+  it('the operator request list is forbidden to the assistant with a valid platform reason, and shared-catalogue now has one too', () => {
+    for (const id of ['operator.shared-template-requests', 'templates.shared-catalogue', 'operator.shared-templates']) {
+      expect([id, get(id).policy, get(id).operatorReason?.code, get(id).operatorReason?.validUnderRule]).toEqual([id, 'forbidden', 'platform-config', true]);
+    }
+  });
+  it('every live merchant templates entry links a guide that exists in both languages and lists it at the registry version', () => {
+    const arts = guideArticles();
+    for (const e of entries.filter((x) => x.area === 'templates' && x.status === 'live' && x.roles.includes('owner') && x.id !== 'templates.status-webhook' /* a system hook: its missing guide is baselined debt */)) {
+      expect(e.helpArticle, e.id).toBeTruthy();
+      for (const lang of ['ar', 'en'] as const) {
+        const a = arts.find((x) => x.slug === e.helpArticle && x.lang === lang);
+        expect(a?.capabilities.find((c) => c.id === e.id)?.version, `${e.id}/${lang}`).toBe(e.version);
+        expect(a?.appPath, `${e.id}/${lang}`).toBe('/templates');
+      }
+    }
+  });
+});
+
 describe('capability help guard: every live merchant-facing capability has a linked ar+en guide (sources)', () => {
   const articles = guideArticles();
-  it('reads the 15 guides in both languages', () => {
-    expect(articles.filter((a) => a.lang === 'ar')).toHaveLength(15);
-    expect(articles.filter((a) => a.lang === 'en')).toHaveLength(15);
+  it('reads the 17 guides in both languages', () => {
+    expect(articles.filter((a) => a.lang === 'ar')).toHaveLength(17);
+    expect(articles.filter((a) => a.lang === 'en')).toHaveLength(17);
   });
   it('has no new help violation and no stale baseline id (the 23 needs-help ids are the debt)', () => {
     expect(judge('help', checkHelp(entries, articles, guardConfig)).failures).toEqual([]);

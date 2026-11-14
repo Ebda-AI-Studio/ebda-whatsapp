@@ -27,7 +27,7 @@
   },
   "operatorReason": {
     "code": "platform-config",
-    "text": "platform WABA shared by all stores; add a merchant request path as a future improvement",
+    "text": "platform WABA shared by all stores; merchants ask through templates.shared-request and the team answers here",
     "validUnderRule": true
   },
   "helpArticle": null,
@@ -48,7 +48,5 @@
   "edgeCases": [
     "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
   ],
-  "gaps": [
-    "operator replaces: templates for shared-number stores (merchant cannot request one)"
-  ]
+  "gaps": []
 }

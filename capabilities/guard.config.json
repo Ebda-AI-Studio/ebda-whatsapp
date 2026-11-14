@@ -7,7 +7,7 @@
     { "pattern": "/refunds?(/|$)" },
     { "pattern": "/campaigns/[^/]+/(resume|send)" },
     { "pattern": "^/stores/:storeId/campaigns$", "method": "POST" },
-    { "pattern": "/templates(/|$)", "method": "POST" },
+    { "pattern": "/templates(?:/(?!sync$)|$)", "method": "POST" },
     { "pattern": "/conversations/[^/]+/messages$", "method": "POST" }
   ],
   "routeKinds": [

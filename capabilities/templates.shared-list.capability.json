@@ -1,0 +1,46 @@
+{
+  "status": "live",
+  "area": "templates",
+  "versionDate": "2026-11-14",
+  "mcpTool": null,
+  "id": "templates.shared-list",
+  "version": 1,
+  "titleAr": "القوالب الجاهزة على الرقم المشترك",
+  "titleEn": "Ready-made templates on the shared number",
+  "screens": [
+    "view:templates",
+    "/templates"
+  ],
+  "api": [
+    "GET /stores/:storeId/templates/shared",
+    "GET /stores/:storeId/templates/shared-requests"
+  ],
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "القوالب على الرقم المشترك فين؟",
+      "اشتغل على الرقم المشترك ومش لاقي قوالب",
+      "طلباتي للقوالب وصلت فين؟"
+    ],
+    "en": [
+      "Which templates can I use on the shared number?"
+    ]
+  },
+  "steps": [
+    "A store on the shared number sees the platform's approved service and verification-code templates and its own requests with their status"
+  ],
+  "edgeCases": [
+    "Only APPROVED utility or authentication templates are listed; never marketing",
+    "A store with its own number, or not on the shared number, gets 404"
+  ],
+  "gaps": []
+}

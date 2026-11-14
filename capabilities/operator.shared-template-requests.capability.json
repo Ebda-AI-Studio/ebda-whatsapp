@@ -1,0 +1,50 @@
+{
+  "status": "live",
+  "area": "operator",
+  "versionDate": "2026-11-14",
+  "mcpTool": null,
+  "id": "operator.shared-template-requests",
+  "version": 1,
+  "titleAr": "طلبات المتاجر على قوالب الرقم المشترك",
+  "titleEn": "Store requests for shared-number templates",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/shared-template-requests"
+  ],
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "none"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "platform WABA shared by all stores; the merchant-facing path is the request form (templates.shared-request), the team answers by submitting the template",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيرد على طلبات قوالب الرقم المشترك؟",
+      "طلبت قالب على الرقم المشترك ولسه",
+      "ليه مش شايف طلبات القوالب عندي؟"
+    ],
+    "en": [
+      "Why can I not do this myself: store requests for shared-number templates?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only: the console lists open and answered requests with the workspace id; submitting the template closes the matching request"
+  ],
+  "edgeCases": [
+    "Assistant refuses and points the merchant to the request form or a handoff to Ebda"
+  ],
+  "gaps": []
+}
