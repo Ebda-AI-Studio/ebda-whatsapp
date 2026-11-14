@@ -3,6 +3,7 @@ import type { Env } from '../env';
 import { DEFAULT_CHUNK_ROWS, exportTable, highWaterMarks } from './backup-export';
 import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, signManifest, toNdjson, verifyManifestSignature, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
+import { SL_OPS, doStorageOps, type SlOp } from './smart-layer/storage-do';
 import type { SendResult } from './meta/client';
 import type { CoexMessage, InboundMessage, StatusEvent, StatusPricing, SyncedContact } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
@@ -2707,6 +2708,13 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { vectors };
   }
 
+  /** The assistant's journal (SL-CHAT-1). One RPC for the whole SmartLayerStorage; every op runs synchronously here, so each compare-and-set is atomic. */
+  async smartLayer(op: SlOp, args: unknown[]): Promise<unknown> {
+    if (!SL_OPS.includes(op)) throw new Error('unknown smart layer op');
+    const ops = doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f));
+    return (ops[op] as (...a: unknown[]) => unknown)(...args);
+  }
+
   // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------
 
   async getRetention() {
@@ -2730,6 +2738,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (n < (opts.batch ?? RETENTION_BATCH)) break;
     }
     this.ctx.storage.transactionSync(() => purgeOldEvents(this.sql, cutoff)); // the realtime log is capped by age too, not only by count
+    this.ctx.storage.transactionSync(() => doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f)).purgeBefore(now - 90 * 86_400_000)); // the assistant's journal keeps 90 days (spec 6.9)
     if (deleted > 0) {
       const owed = await this.drainR2Deletes();
       if (owed > 0) await this.schedule('r2_drain', now + 3_600_000);

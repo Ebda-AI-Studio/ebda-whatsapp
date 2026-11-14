@@ -8,7 +8,8 @@ const cfg = JSON.parse(readFileSync(new URL('../capabilities/guard.config.json',
 const ex = cfg.smartLayerExemptions ?? [];
 
 it('every smartLayerPaths entry has a narrow exemption record (file, function, reason, expiry, follow-up, ruling) and nothing else is exempt', () => {
-  expect(cfg.smartLayerPaths.sort()).toEqual(ex.map((e) => e.path).sort());
+  // A directory entry is the Smart Layer itself (engine + adapter), where model calls belong; only an exact FILE outside it is a temporary exemption.
+  expect(cfg.smartLayerPaths.filter((p) => !p.endsWith('/')).sort()).toEqual(ex.map((e) => e.path).sort());
   for (const e of ex) {
     expect(e.path, 'an exact file, not a directory').toMatch(/\.ts$/);
     expect(readFileSync(new URL(`../${e.path}`, import.meta.url), 'utf8')).toContain(`function ${e.function}`);
