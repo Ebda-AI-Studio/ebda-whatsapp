@@ -2,6 +2,7 @@ import { ArrowRight, Pencil, Trash2 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import type { TemplateDto } from '../../../src/core/api/contract';
 import { fromStoredComponents } from '../../../src/core/template-draft';
+import { BRAND } from '@brand';
 import { ApiError } from '../data/api';
 import type { TemplatesApi } from '../data/source';
 import type { Lang, Strings } from '../i18n';
@@ -69,6 +70,7 @@ export function TemplateDetail({ t, lang, api, owner, template, onBack, onEdit, 
           <section className="tpl-reason" aria-labelledby={`${uid}-r`}>
             <h2 id={`${uid}-r`} className="vh">{t.tplColStatus}</h2>
             <p>{lang === 'ar' ? tpl.advice.ar : tpl.advice.en}</p>
+            {BRAND.helpUrl && <p><a href={BRAND.helpUrl(lang, 'template-review-and-rejections')} target="_blank" rel="noopener">{t.tplReasonHelp}</a></p>}
             {tpl.rejectedReason && <details><summary>{t.tplRawReason}</summary><code dir="ltr">{tpl.rejectedReason}</code></details>}
           </section>
         )}

@@ -34,6 +34,21 @@ describe('rejected', () => {
   });
 });
 
+describe('rejection help link', () => {
+  it('links the guide that explains each reason, in the interface language; no link without advice', async () => {
+    await open(REJECTED);
+    const link = screen.getByRole('link', { name: 'اقرا إزاي تفهم سبب الرفض' });
+    expect(link.getAttribute('href')).toBe('https://help.ebda.app/whatsapp/template-review-and-rejections/');
+    cleanup();
+    render(<TemplateDetail t={STRINGS.en} lang="en" api={fakeApi({ detail: vi.fn(async () => REJECTED) })} owner template={REJECTED} onBack={onBack} onEdit={onEdit} onDeleted={onDeleted} />);
+    await act(async () => undefined);
+    expect(screen.getByRole('link', { name: 'How to read a rejection reason' }).getAttribute('href')).toBe('https://help.ebda.app/en/whatsapp/template-review-and-rejections/');
+    cleanup();
+    await open(tpl({ status: 'APPROVED' }));
+    expect(screen.queryByRole('link', { name: /سبب الرفض/ })).toBeNull();
+  });
+});
+
 describe('approved', () => {
   it('locks the category and shows the 24 h wait text after a recent edit, with the edit button disabled', async () => {
     const retryAt = Date.UTC(2026, 10, 15, 12, 0);

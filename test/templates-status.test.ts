@@ -1,5 +1,5 @@
 import { SELF } from 'cloudflare:test';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { refreshPending, type TemplatesCtx } from '../src/core/templates-service';
 import { env } from 'cloudflare:test';
 import { graphStub, storeId as W, useApiKey, apiFor } from './helpers/api';
@@ -109,4 +109,20 @@ it('our own edit puts an APPROVED template back to PENDING (re-review) and that 
   await ctx.ws.saveSubmittedTemplate({ name: 'late', language: 'ar', category: 'UTILITY', status: 'APPROVED', components: [], metaId: 'meta-1', label: null });
   await ctx.ws.saveSubmittedTemplate({ name: 'late', language: 'ar', category: 'UTILITY', status: 'PENDING', components: [], metaId: 'meta-1', label: null });
   expect(await rows(id, 'SELECT status FROM templates')).toEqual([{ status: 'PENDING' }]);
+});
+
+it('a rejection code the advice does not know is logged ONCE as an enum-like code (to be captured into the fixture); known codes and free text are never logged', async () => {
+  const { ctx, waba } = await setup(510);
+  await ctx.ws.saveSubmittedTemplate({ name: 'late', language: 'ar', category: 'UTILITY', status: 'PENDING', components: [], metaId: null, label: null });
+  const logs: string[] = [];
+  const spy = vi.spyOn(console, 'log').mockImplementation((...a) => { logs.push(a.join(' ')); });
+  try {
+    await postWebhook(SELF, templateStatusPayload(waba, { event: 'REJECTED', name: 'late', language: 'ar', reason: 'INVALID_FORMAT' }));
+    await postWebhook(SELF, templateStatusPayload(waba, { event: 'REJECTED', name: 'late', language: 'ar', reason: 'BRAND_NEW_META_CODE' }));
+    await postWebhook(SELF, templateStatusPayload(waba, { event: 'REJECTED', name: 'late', language: 'ar', reason: 'أهلاً أحمد رقم طلبك 1001 السري' }));
+  } finally { spy.mockRestore(); }
+  const hits = logs.filter((l) => l.includes('template_reason_unmapped'));
+  expect(hits).toHaveLength(1);
+  expect(JSON.parse(hits[0]!)).toEqual({ event: 'template_reason_unmapped', code: 'BRAND_NEW_META_CODE' });
+  expect(logs.join('\n')).not.toContain('أحمد');
 });

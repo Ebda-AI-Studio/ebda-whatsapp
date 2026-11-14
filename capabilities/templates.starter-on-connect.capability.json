@@ -1,15 +1,17 @@
 {
-  "id": "templates.starter-on-connect",
-  "status": "planned",
-  "plan": "self-service audit #2; spec section 7.3",
+  "status": "live",
   "area": "templates",
-  "version": 1,
   "versionDate": "2026-11-14",
-  "titleAr": "تركيب القوالب الجاهزة تلقائي عند ربط الرقم",
-  "titleEn": "Auto-install starter templates and sync when a number is connected",
-  "screens": [],
-  "api": [],
   "mcpTool": null,
+  "id": "templates.starter-on-connect",
+  "version": 2,
+  "titleAr": "تركيب القوالب الجاهزة تلقائي عند ربط الرقم",
+  "titleEn": "Starter templates and a Meta sync when a number connects",
+  "screens": [
+    "view:templates",
+    "/templates"
+  ],
+  "api": [],
   "planGate": null,
   "roles": [
     "owner",
@@ -19,7 +21,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
   "questions": {
     "ar": [
       "ليه مفيش قوالب عندي بعد ما ربطت الرقم؟",
@@ -31,11 +33,12 @@
     ]
   },
   "steps": [
-    "Planned: on successful connect, install defaults and sync from Meta automatically"
+    "When a number connects (or a half-finished connect is resumed): Meta's templates are synced first and adopted, then only the missing starters are submitted; a marker records it is done"
   ],
-  "edgeCases": [],
-  "gaps": [
-    "Not built (register: NOT BUILT)"
+  "edgeCases": [
+    "A failure never fails the connect: an alert is logged and the Templates screen retries",
+    "The shared number's WABA never gets starters"
   ],
-  "assistantNote": "Today the assistant must say templates are not auto-installed and offer to run install-defaults (confirm)"
+  "gaps": [],
+  "assistantNote": "system hook, not callable; if starters are missing offer templates.install-defaults (confirm)"
 }

@@ -44,7 +44,10 @@
   "edgeCases": [
     "On the shared platform number: marketing templates are refused, templates come from the platform catalogue, wallet pays Meta"
   ],
-  "gaps": [
-    "Operator-only: reason valid (platform-wide config) but merchants have no way to request a shared-number utility template"
-  ]
+  "gaps": [],
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "platform WABA shared by all stores; merchants ask through templates.shared-request",
+    "validUnderRule": true
+  }
 }
