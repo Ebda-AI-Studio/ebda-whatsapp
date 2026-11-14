@@ -2,12 +2,18 @@ import { Hono } from 'hono';
 import { instapayCreate } from '../core/api/contract';
 import { MAX_PROOF_BYTES, createInstapayRequest, instapayEnabled, listForWorkspace, markRejectionsSeen, readProof, storeProof } from '../core/billing/instapay';
 import type { InstapayPayee } from '../core/billing/instapay';
+import { revertNotice } from '../core/billing/instapay-auto';
 import { brandPack } from '../brand';
 import type { Env } from '../env';
 import { apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
 
 /** The brand's InstaPay account for billing, or null when it has none (InstaPay billing is then unavailable, never half-shown). */
 export const payeeFor = (env: Env): InstapayPayee | null => brandPack(env.BRAND).instapayPayee?.(env as unknown as Record<string, string | undefined>) ?? null;
+
+/** The auto-confirm attempt runs after the response (`waitUntil`); with no execution context (a test) it is awaited inline. */
+function afterResponse(c: ApiContext): ((p: Promise<unknown>) => void) | undefined {
+  try { return c.executionCtx.waitUntil.bind(c.executionCtx); } catch { return undefined; }
+}
 
 export const instapayRoutes = new Hono<ApiEnv>();
 const owner = (c: ApiContext) => c.get('storeRole') === 'owner';
@@ -17,7 +23,7 @@ instapayRoutes.get('/stores/:storeId/wallet/instapay', async (c) => {
   if (!instapayEnabled(c.env)) return apiError(c, 404, 'not_found');
   const items = await listForWorkspace(c.env, c.req.param('storeId')!);
   await markRejectionsSeen(c.env, c.req.param('storeId')!); // opening the card is seeing the reason: the inbox notice clears
-  return c.json({ enabled: true, payee: payeeFor(c.env), items });
+  return c.json({ enabled: true, payee: payeeFor(c.env), items, revert: await revertNotice(c.env, c.req.param('storeId')!) });
 });
 
 instapayRoutes.post('/stores/:storeId/wallet/instapay', async (c) => {
@@ -66,7 +72,7 @@ instapayRoutes.put('/stores/:storeId/wallet/instapay/:requestId/proof', async (c
   if (!instapayEnabled(c.env)) return apiError(c, 404, 'not_found');
   const bytes = await readCapped(c.req.raw);
   if (bytes === 'too_large') return apiError(c, 413, 'invalid_request', 'too_large');
-  const r = await storeProof(c.env, { workspaceId: c.req.param('storeId')!, requestId: c.req.param('requestId')!, sessionId: c.get('principal').sessionId, bytes, contentType: c.req.header('content-type') ?? '' });
+  const r = await storeProof(c.env, { workspaceId: c.req.param('storeId')!, requestId: c.req.param('requestId')!, sessionId: c.get('principal').sessionId, bytes, contentType: c.req.header('content-type') ?? '' }, Date.now(), afterResponse(c));
   if (r.ok) return c.json(r.request);
   switch (r.reason) {
     case 'not_found': return apiError(c, 404, 'not_found');

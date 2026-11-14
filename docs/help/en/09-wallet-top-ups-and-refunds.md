@@ -5,6 +5,7 @@ capabilities:
   - packages.yearly-switch@1
   - wallet.card-topup@1
   - wallet.instapay@1
+  - wallet.instapay-auto-confirm@2
   - wallet.refund-request@1
   - wallet.statement@1
   - wallet.view@1
@@ -35,6 +36,12 @@ While card payment is not switched on for your account, you pay by InstaPay tran
 5. Our team reviews it **within 4 business hours** (Sunday to Thursday, 9:00 to 17:00 Cairo time). Nothing is added to your account before it is confirmed. The request shows **under review**, then **confirmed** (the package starts or the balance grows by the amount) or **rejected** with the reason (make a new request with the right receipt).
 
 *Notes:* the reference is valid for **48 hours**; after that the request expires and you start a new one. A receipt uploaded after it expired is refused. One reference is used for one payment only. Only the owner can pay.
+
+
+## Automatic confirmation of InstaPay payments
+When you upload a receipt that matches exactly (the amount due, our InstaPay address, a transfer from the last 48 hours, and a transaction number never used before), your payment can be confirmed **within minutes** with no one reviewing it. Anything that does not match waits for a person, as before.
+- The **first** automatic payment is limited to **one month** of the plan (for a top-up, one month of your current package). A bigger first payment, such as a yearly package, is reviewed by a person.
+- If our check shows the money **did not arrive**, the payment goes back to unpaid and you have **48 hours** to upload a correct receipt or pay by card before paid features pause. Credits that payment gave you and you have not used are removed; credits you already used stay used.
 
 ## Buy a package
 1. Open **Wallet** and find the **Packages** card (the owner sees it; it appears once package purchase is switched on for your account).

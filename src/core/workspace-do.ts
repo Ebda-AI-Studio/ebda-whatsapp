@@ -70,6 +70,7 @@ import { testConnector } from './connectors/registry';
 import { connectorDto, deleteConnector, listConnectors, planConnectorPut, writeConnector, type PutRefusal } from './connectors/store';
 import type { ConnectorDto, ConnectorPut } from './api/contract';
 import { Billing, type ClaimBill } from './billing/engine';
+import { unusedCreditsToRemove } from '../../foundation/instapay-state';
 import { checkMirror, drainOutbox } from './billing/mirror';
 import { buildStatement } from './billing/statement';
 import { runTrueup } from './billing/trueup';
@@ -1717,6 +1718,52 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
     await this.flushArm();
     return out;
+  }
+
+  /**
+   * InstaPay auto-confirm revert, wallet half (INSTAPAY-REVERT-1): removes the part of ONE top-up nobody spent since it arrived, never more than the available balance and
+   * never money that arrived later; consumed credits are not clawed back. Idempotent under `ref`: the first answer is stored in `store_state`, a replay returns it and posts nothing (even when the
+   * first answer was "nothing to remove").
+   */
+  async revertInstapayWallet(a: { creditedMinor: number; creditRef: string; ref: string; actor: string; note: string }, now = Date.now()): Promise<{ removedMinor: number; usedMinor: number }> {
+    const out = this.ctx.storage.transactionSync(() => {
+      const key = `instapay.revert:${a.ref}`;
+      const prior = this.sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', key).toArray()[0];
+      if (prior) return JSON.parse(prior.value) as { removedMinor: number; usedMinor: number };
+      // INSTAPAY-REVERT-1: what is removed is max(0, min(credited - spend recorded SINCE that top-up, available balance)). Money that arrived later (a card top-up after
+      // this one) is never taken: spend after the top-up is counted against it first, and the balance only caps the result. No credit row = nothing was credited.
+      const credit = this.sql.exec<{ id: number }>('SELECT id FROM wallet_ledger WHERE ref = ?', a.creditRef).toArray()[0];
+      // Only CONSUMPTION counts as spend (Meta charges and their adjustments, AI charges): never another revert's removal (`instapay-revert:` adjustments), an operator
+      // adjustment, a refund or a chargeback, which are not this money being used (review N1).
+      const spent = credit ? this.sql.exec<{ s: number }>("SELECT coalesce(-sum(amount_minor), 0) AS s FROM wallet_ledger WHERE id > ? AND amount_minor < 0 AND kind IN ('meta_charge', 'meta_adjust', 'ai_charge')", credit.id).one().s : 0;
+      const removedMinor = credit ? unusedCreditsToRemove({ granted: a.creditedMinor, consumed: Math.min(a.creditedMinor, spent), balance: Math.max(0, this.billing.available()) }) : 0;
+      if (removedMinor > 0) this.billing.post({ kind: 'adjustment', netMinor: -removedMinor, ref: a.ref, now, actor: a.actor, note: a.note });
+      const res = { removedMinor, usedMinor: Math.max(0, a.creditedMinor - removedMinor) };
+      this.sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?)', key, JSON.stringify(res));
+      return res;
+    });
+    await this.flushArm();
+    return out;
+  }
+
+  /**
+   * InstaPay auto-confirm revert, AI-credit half: the grant of ONE package period (`grant:<periodStart>:<packageId>`) loses what nobody used (consumed and already
+   * expired credits stay as they are, the balance never goes negative). Idempotent under `ref` like the wallet half.
+   */
+  async revertInstapayAiCredits(a: { periodStart: number; packageId: string; ref: string; actor: string; note: string }, now = Date.now()): Promise<{ removedCredits: number; usedCredits: number }> {
+    return this.ctx.storage.transactionSync(() => {
+      const key = `instapay.revert:${a.ref}`;
+      const prior = this.sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', key).toArray()[0];
+      if (prior) return JSON.parse(prior.value) as { removedCredits: number; usedCredits: number };
+      const granted = this.sql.exec<{ g: number }>("SELECT coalesce(sum(amount), 0) AS g FROM credit_ledger WHERE kind = 'grant' AND ref = ?", `grant:${a.periodStart}:${a.packageId}`).one().g;
+      const charged = this.sql.exec<{ u: number }>("SELECT coalesce(-sum(amount), 0) AS u FROM credit_ledger WHERE kind = 'ai_charge' AND at >= ?", a.periodStart).one().u;
+      const expired = this.sql.exec<{ e: number }>("SELECT coalesce(-sum(amount), 0) AS e FROM credit_ledger WHERE kind = 'expire' AND parent_ref = ?", `period:${a.periodStart}`).one().e;
+      const removedCredits = unusedCreditsToRemove({ granted, consumed: charged + expired, balance: creditsAvailable(this.sql, now) });
+      if (removedCredits > 0) postCredit(this.sql, { kind: 'adjustment', amount: -removedCredits, ref: a.ref, now, actor: a.actor, note: a.note });
+      const res = { removedCredits, usedCredits: Math.max(0, granted - removedCredits) };
+      this.sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?)', key, JSON.stringify(res));
+      return res;
+    });
   }
 
   /** What a send of `count` messages would cost the wallet now. A merchant-card number costs the wallet nothing (Meta bills the card). */

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import {
   agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
-  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
+  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -267,6 +267,10 @@ export function createApiSource(o: Opts): LiveSource {
       confirmInstapay: (id, bankRef, noReferenceReason) => op(`/instapay/${encodeURIComponent(id)}/confirm`, operatorInstapayDto.extend({ needsSecond: z.literal(true).optional() }), post(noReferenceReason ? { noReference: true, reason: noReferenceReason } : bankRef ? { bankRef } : {})),
       releaseInstapay: (id, reason) => op(`/instapay/${encodeURIComponent(id)}/release`, operatorInstapayDto, post({ reason })),
       rejectInstapay: (id, reason) => op(`/instapay/${encodeURIComponent(id)}/reject`, operatorInstapayDto, post({ reason })),
+      autoConfirmations: () => op('/instapay/auto', operatorAutoListDto),
+      revertAutoConfirmed: async (requestId, reason) => { await op(`/instapay/auto/${encodeURIComponent(requestId)}/revert`, done, post({ reason })); },
+      setAutoMode: async (mode, reason) => { await op('/instapay/auto/mode', done, { method: 'PUT', body: JSON.stringify({ mode, reason }) }); },
+      setWorkspaceAuto: async (workspaceId, enabled, reason) => { await op(`/instapay/auto/workspaces/${encodeURIComponent(workspaceId)}`, done, { method: 'PUT', body: JSON.stringify({ enabled, reason }) }); },
       adjustments: async () => (await op('/adjustments', items(adjustmentDto))).items,
       createAdjustment: (workspaceId, amountMinor, reason) => op(`/workspaces/${encodeURIComponent(workspaceId)}/adjustments`, adjustmentDto, post({ amountMinor, reason })),
       decideAdjustment: (id, decision) => op(`/adjustments/${encodeURIComponent(id)}/decision`, adjustmentDto, post({ decision })),

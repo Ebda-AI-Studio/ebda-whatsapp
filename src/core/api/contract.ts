@@ -2,6 +2,7 @@
  * The inbox API contract: one file shared by the Worker (validation) and the web app (typed client).
  * All routes live under /api/v1/stores/:storeId/ and require a bearer token (identity v1).
  */
+import { REASON_ORDER } from '../../../foundation/instapay-decision';
 import { z } from 'zod';
 import { hoursSchema, locationSchema, menuSchema } from '../store-link/bot-settings';
 
@@ -611,9 +612,11 @@ export const instapayPayeeDto = z.object({ handle: z.string(), name: z.string(),
 export const instapayRequestDto = z.object({
   id: z.string(), reference: z.string(), kind: z.enum(['package', 'topup']), packageId: z.string().nullable(), amountMinor: z.number().int(), currency: z.string(), state: instapayState,
   createdAt: z.number().int(), expiresAt: z.number().int(), hasProof: z.boolean(), rejectReason: z.string().nullable(), decidedAt: z.number().int().nullable(),
+  /** InstaPay auto-confirm: confirmed by the system, being checked right now, or reverted ("not received") with the end of its 48 h grace. All optional: older servers send none. */
+  autoConfirmed: z.boolean().optional(), checking: z.boolean().optional(), revertedAt: z.number().int().nullable().optional(), graceUntil: z.number().int().nullable().optional(),
 });
 /** GET /wallet/instapay: `payee` is null when the brand has no InstaPay account configured (the card is then shown as unavailable). */
-export const instapayViewDto = z.object({ enabled: z.boolean(), payee: instapayPayeeDto.nullable(), items: z.array(instapayRequestDto) });
+export const instapayViewDto = z.object({ enabled: z.boolean(), payee: instapayPayeeDto.nullable(), items: z.array(instapayRequestDto), revert: z.object({ requestId: z.string(), kind: z.enum(['package', 'topup']), graceUntil: z.number().int() }).nullable().optional() });
 export const instapayCreatedDto = instapayRequestDto.extend({ payee: instapayPayeeDto });
 export const operatorInstapayDto = instapayRequestDto.extend({
   workspaceId: z.string(), createdBy: z.string(), proofAt: z.number().int().nullable(), firstApprover: z.string().nullable(), decidedBy: z.string().nullable(), proofMime: z.string().nullable(),
@@ -810,3 +813,14 @@ export const sharedNumberRegister = z.object({
   displayPhone: z.string().trim().min(5).max(30).optional(),
   reason: z.string().trim().min(5).max(500),
 });
+
+/** InstaPay auto-confirm (operator): one decision per request, with every reason code (the console shows a label for each). */
+export const AUTO_REASON_CODES = REASON_ORDER;
+export const operatorAutoDto = z.object({
+  requestId: z.string(), workspaceId: z.string(), workspaceName: z.string().nullable(), kind: z.enum(['package', 'topup']).nullable(),
+  state: z.enum(['pending_decision', 'auto_confirmed', 'needs_human', 'reverted', 'failed']), verdict: z.string().nullable(), reasons: z.array(z.string()),
+  amountMinor: z.number().int().nullable(), expectedAmountMinor: z.number().int().nullable(), isFirstPayment: z.boolean().nullable(), confirmedAt: z.number().int().nullable(),
+  digestSentAt: z.number().int().nullable(), revertedAt: z.number().int().nullable(), graceUntil: z.number().int().nullable(), creditsRemovedMinor: z.number().int().nullable(),
+  creditsUsedMinor: z.number().int().nullable(), aiCreditsRemoved: z.number().int().nullable(), aiCreditsUsed: z.number().int().nullable(), createdAt: z.number().int(),
+});
+export const operatorAutoListDto = z.object({ mode: z.enum(['off', 'shadow', 'live']), ready: z.object({ ready: z.boolean(), missing: z.array(z.string()) }), items: z.array(operatorAutoDto) });

@@ -565,6 +565,15 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
         </>
       )}
       {msg && <p role={msg.kind === 'alert' ? 'alert' : 'status'} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
+      {view.revert && Date.now() < view.revert.graceUntil && (
+        <div role="alert" className="error-text" data-testid="ip-revert-banner">
+          <p>{t.wIpAuto.revertBanner(dateTime(view.revert.graceUntil, lang))}</p>
+          <div className="campaign-actions">
+            <button type="button" className="btn primary" onClick={() => setKind(view.revert!.kind)}>{t.wIpAuto.upload}</button>
+            <a className="btn" href="#w-topup-title">{t.wIpAuto.card}</a>
+          </div>
+        </div>
+      )}
       <h3 className="pane-sub">{t.wIpPast}</h3>
       {view.items.length === 0 ? <p className="muted">{t.wIpNone}</p> : (
         <ul className="wallet-rows" aria-label={t.wIpPast}>
@@ -573,6 +582,9 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
               <span className="wallet-row-main">
                 <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={r.state === 'confirmed' ? 'done' : r.state === 'rejected' || r.state === 'expired' ? 'failed' : 'pending'}>{t.instapayStates[r.state] ?? r.state}</span>
                 <span className="muted op-line"><bdi dir="ltr">{r.reference}</bdi> • {dateTime(r.createdAt, lang)}</span>
+                {r.checking && <span className="muted op-line">{t.wIpAuto.checking}</span>}
+                {r.autoConfirmed && !r.revertedAt && <span className="muted op-line">{t.wIpAuto.done}</span>}
+                {r.state === 'under_review' && !r.checking && <span className="muted op-line">{t.wIpAuto.waiting}</span>}
                 {r.state === 'rejected' && r.rejectReason && <span className="op-line" dir="auto">{t.wIpRejectedLine(r.rejectReason)}</span>}
               </span>
               {r.state === 'awaiting_proof' && Date.now() < r.expiresAt && <button type="button" className="btn" onClick={() => setCreated({ ...r, payee: view.payee! })}>{t.wIpOpen}</button>}

@@ -281,6 +281,21 @@ const ar = {
   opIpHeldReasons: { duplicate_image: 'نفس صورة الإيصال اتبعتت على طلب تاني', duplicate_reference: 'نفس رقم العملية البنكي مسجل على طلب تاني' } as Record<string, string>,
   opIpDupRef: 'الطلب اتوقف لأنه شبه تحويل تاني: نفس رقم العملية، أو تأكيد تاني من غير رقم لنفس المتجر ونفس المبلغ خلال 7 أيام. قارن التحويلين في تطبيق البنك.', opIpHeldRefused: 'الطلب موقوف لأنه شبه طلب تاني. فُكّ الإيقاف بعد ما تراجع التحويلين أو ارفضه.', opIpBadRef: 'رقم العملية لازم يكون حروف وأرقام من 4 لـ 40.',
   opIpTitle: 'تحويلات إنستاباي', opIpSla: 'المراجعة خلال 4 ساعات عمل (الأحد–الخميس، 9ص–5م بتوقيت القاهرة).', opIpEmpty: 'مفيش إيصالات مستنية.', opIpView: 'اعرض الإيصال', opIpConfirm: 'أكّد التحويل', opIpReject: 'ارفض التحويل',
+  opAuto: {
+    title: 'التأكيد التلقائي لإنستاباي', note: 'لما الإيصال يطابق كل الشروط الدفعة بتتأكد لوحدها. أي حاجة تانية بتستنى مراجعة من حد.', mode: 'الوضع العام',
+    modes: { off: 'مقفول', shadow: 'تجريبي (بيقرر من غير ما يفعّل)', live: 'شغّال' } as Record<string, string>, reason: 'سبب التغيير (5 حروف على الأقل)', apply: 'غيّر الوضع',
+    notReady: (m: string[]) => `التأكيد التلقائي مش جاهز، ناقص: ${m.join('، ')}`, empty: 'مفيش قرارات لسه.', notReceived: 'لم تصل', revertReason: 'سبب إن الفلوس ما وصلتش (5 حروف على الأقل)',
+    workspaceOff: 'اقفل التأكيد التلقائي للمتجر ده', workspaceOn: 'شغّل التأكيد التلقائي للمتجر ده', first: 'أول دفعة',
+    states: { pending_decision: 'بيتقرر', auto_confirmed: 'اتأكدت تلقائيًا', needs_human: 'مستنية مراجعة', reverted: 'اتلغت (لم تصل)', failed: 'فشل التفعيل' } as Record<string, string>,
+    reverted: (until: string) => `اتلغت لحد ${until}`,
+    reasons: {
+      KILL_GLOBAL: 'التأكيد التلقائي مقفول', KILL_STORE: 'التأكيد التلقائي مقفول للمتجر ده', SHADOW_MODE: 'الوضع التجريبي: القرار ما اتنفّذش', EXTRACT_INCOMPLETE: 'مقدرناش نقرأ بيانات الإيصال كاملة',
+      AMOUNT_MISMATCH: 'المبلغ مش مطابق للمطلوب بالظبط', WRONG_HANDLE: 'عنوان المستلم مش عنوان إنستاباي بتاعنا', DATE_STALE: 'التحويل أقدم من 48 ساعة', DATE_FUTURE: 'تاريخ التحويل في المستقبل',
+      DUPLICATE_REFERENCE: 'رقم العملية اتستخدم قبل كده', DUPLICATE_IMAGE: 'صورة الإيصال اتستخدمت قبل كده', FIRST_PAYMENT_OVER_CAP: 'أول دفعة أكبر من شهر واحد من الباقة',
+      ABOVE_DUAL_CONTROL_THRESHOLD: 'المبلغ أو نوع الطلب محتاج موافقة مشرف', LOOKS_EDITED: 'الإيصال شكله متعدّل', SUSPICIOUS_TEXT: 'في نص جوه الإيصال شكله بيدّي أوامر', LOW_CONFIDENCE: 'ثقة قراءة الإيصال منخفضة',
+    } as Record<string, string>,
+  },
+  wIpAuto: { checking: 'جاري التأكيد', done: 'اتأكدت تلقائيًا', waiting: 'مستنية مراجعة', revertBanner: (until: string) => `الدفع ما وصلش. ارفع إيصال صح أو ادفع بالكارت قبل ${until} عشان الخدمات المدفوعة ما تقفش.`, upload: 'ارفع إيصال', card: 'ادفع بالكارت' },
   opIpReason: 'سبب الرفض (يوصل للتاجر)', opIpSecond: 'محتاج موافقة مشرف تاني', opIpOwn: 'الطلب ده طلبك، لازم مشرف تاني يراجعه.', opIpFirstBy: (w: string) => `وافق أول: ${w}`, opIpLine: (k: string, ref: string) => `${k} • ${ref}`, opIpKinds: { package: 'باقة', topup: 'شحن رصيد' } as Record<string, string>,
   
   sharedTitle: 'الرقم المشترك', sharedIntro: 'ابعت واستقبل رسايل العملاء من رقم المنصة المشترك من غير ما توصّل رقمك.', sharedNameLabel: 'اسمك اللي العميل هيشوفه', sharedJoin: 'انضم للرقم المشترك', sharedLeave: 'سيب الرقم المشترك',
@@ -613,6 +628,21 @@ const en: typeof ar = {
   opIpHeldReasons: { duplicate_image: 'the same proof image was sent for another request', duplicate_reference: 'the same bank transaction number is on another request' } as Record<string, string>,
   opIpDupRef: 'The request was held because it looks like another transfer: the same transaction number, or a second confirmation without a number for the same store and amount within 7 days. Compare both transfers in the bank app.', opIpHeldRefused: 'The request is held because it looks like another one. Release the hold after you check both transfers, or reject it.', opIpBadRef: 'The transaction number must be 4 to 40 letters and digits.',
   opIpTitle: 'InstaPay transfers', opIpSla: 'Review within 4 business hours (Sunday to Thursday, 9:00-17:00 Cairo time).', opIpEmpty: 'No proofs waiting.', opIpView: 'View the proof', opIpConfirm: 'Confirm the transfer', opIpReject: 'Reject the transfer',
+  opAuto: {
+    title: 'InstaPay auto-confirm', note: 'When the receipt passes every check the payment confirms by itself. Anything else waits for a person.', mode: 'Global mode',
+    modes: { off: 'Off', shadow: 'Shadow (decides, does not activate)', live: 'Live' } as Record<string, string>, reason: 'Reason for the change (at least 5 characters)', apply: 'Change mode',
+    notReady: (m: string[]) => `Auto-confirm is not ready, missing: ${m.join(', ')}`, empty: 'No decisions yet.', notReceived: 'Not received', revertReason: 'Why the money did not arrive (at least 5 characters)',
+    workspaceOff: 'Switch auto-confirm off for this store', workspaceOn: 'Switch auto-confirm on for this store', first: 'First payment',
+    states: { pending_decision: 'Deciding', auto_confirmed: 'Confirmed automatically', needs_human: 'Waiting for review', reverted: 'Reverted (not received)', failed: 'Activation failed' } as Record<string, string>,
+    reverted: (until: string) => `Reverted, grace until ${until}`,
+    reasons: {
+      KILL_GLOBAL: 'Auto-confirm is off', KILL_STORE: 'Auto-confirm is off for this store', SHADOW_MODE: 'Shadow mode: the decision was not applied', EXTRACT_INCOMPLETE: 'The receipt could not be read completely',
+      AMOUNT_MISMATCH: 'The amount is not exactly the amount due', WRONG_HANDLE: 'The recipient is not our InstaPay address', DATE_STALE: 'The transfer is older than 48 hours', DATE_FUTURE: 'The transfer date is in the future',
+      DUPLICATE_REFERENCE: 'The transaction number was used before', DUPLICATE_IMAGE: 'The receipt image was used before', FIRST_PAYMENT_OVER_CAP: 'The first payment is more than one month of the plan',
+      ABOVE_DUAL_CONTROL_THRESHOLD: 'The amount or kind of request needs a second approver', LOOKS_EDITED: 'The receipt looks edited', SUSPICIOUS_TEXT: 'Text inside the receipt looks like an instruction', LOW_CONFIDENCE: 'Low confidence reading the receipt',
+    } as Record<string, string>,
+  },
+  wIpAuto: { checking: 'Checking', done: 'Confirmed automatically', waiting: 'Waiting for review', revertBanner: (until: string) => `The payment did not arrive. Upload a correct receipt or pay by card before ${until} so paid features do not pause.`, upload: 'Upload a receipt', card: 'Pay by card' },
   opIpReason: 'Reason for the rejection (the merchant sees it)', opIpSecond: 'Needs a second operator', opIpOwn: 'This is your own request: another operator must review it.', opIpFirstBy: (w: string) => `First approval: ${w}`, opIpLine: (k: string, ref: string) => `${k} • ${ref}`, opIpKinds: { package: 'Package', topup: 'Top up' } as Record<string, string>,
   
   sharedTitle: 'Shared number', sharedIntro: 'Send and receive customer messages through the shared platform number without connecting your own.', sharedNameLabel: 'The name customers see', sharedJoin: 'Join the shared number', sharedLeave: 'Leave the shared number',
