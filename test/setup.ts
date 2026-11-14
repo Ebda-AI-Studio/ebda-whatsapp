@@ -3,7 +3,10 @@ import { afterEach, beforeEach, vi } from 'vitest';
 import { clearOps, labelForUrl, track, watchStall } from './helpers/inflight';
 import { configureWriteSessionDefault } from '../src/core/identity/session';
 
+import { DEDUPE_SCHEMA_SQL } from '../foundation/instapay-dedupe';
+
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+if (env.INSTAPAY_DEDUPE_DB) await env.INSTAPAY_DEDUPE_DB.exec(DEDUPE_SCHEMA_SQL.replace(/\s*\n\s*/g, ' '));
 
 // WA-LINK-ON-1: production binds the Store (STORE_BRIDGE, STORE_EVENTS). The default test world is the link-OFF one every older test was
 // written against; a test that needs the link registers its own bridge (test/helpers/fake-store.ts) or passes its own env.

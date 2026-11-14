@@ -23,6 +23,7 @@ import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/ob
 import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
 import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
 import { operatorRoutes } from './routes/operator';
+import { internalInstapayRoutes } from './routes/internal-instapay';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { TIER_LIMITS } from './core/throttle';
@@ -53,6 +54,8 @@ import { numbersRoutes } from './routes/numbers';
 import { reconcileEntitlements } from './core/billing/subscriptions';
 import { repairPackageOrders } from './core/billing/package-orders';
 import { reconcileCardRefunds, sweepAbandonedRefunds } from './core/billing/card-refunds';
+import { instapayAutoReady, sweepAutoConfirm } from './core/billing/instapay-auto';
+import { runInstapayDigest } from './core/billing/instapay-notify';
 import { expireInstapay, overdueInstapay, purgeInstapayProofs, repairInstapay } from './core/billing/instapay';
 import { paymentProvider } from './core/billing/payments';
 import { handleProviderWebhook, reconfirmUnconfirmed, repairTopups } from './core/billing/topups';
@@ -198,6 +201,7 @@ api.route('/', sharedNumberRoutes);
 api.route('/', offboardingRoutes);
 api.route('/', membersRoutes);
 app.route('/api/v1', api);
+app.route('/internal', internalInstapayRoutes);
 /** The /api/v1 routes, exported so a test can walk them (every store route needs a scope decision in core/identity/scopes.ts). */
 export const apiRoutes = api;
 
@@ -231,7 +235,7 @@ app.get('/health', async (c) => {
   // D4: a value DERIVED from SUITE_BUYER_KEY_SECRET (16 hex of an HMAC over a fixed non-phone string, see buyer-key.ts), so scripts/verify-prod.mjs can prove it equals Ebda Store's
   // without the secret leaving either Worker. Absent when the secret is unset or shorter than MIN_PROBE_SECRET_LENGTH.
   const secret = c.env.SUITE_BUYER_KEY_SECRET;
-  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(await fxHealth(c.env)), ...(await buyerKeyProbe(secret ?? '').then((buyerKeyVector) => ({ buyerKeyVector }), () => ({}))) });
+  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, instapayAuto: instapayAutoReady(c.env), ...(await fxHealth(c.env)), ...(await buyerKeyProbe(secret ?? '').then((buyerKeyVector) => ({ buyerKeyVector }), () => ({}))) });
 });
 
 // B9: Meta's data-deletion callback and its status page (public; the signed request is the authentication).
@@ -370,6 +374,8 @@ export async function dailyBilling(env: Env): Promise<void> {
   await expireInstapay(env).catch((err) => alert('instapay_expiry_failed', { error: err instanceof Error ? err.name : 'error' }));
   await purgeInstapayProofs(env).catch((err) => alert('instapay_proof_purge_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairInstapay(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await sweepAutoConfirm(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error', what: 'auto_confirm_sweep' }));
+  await runInstapayDigest(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error', what: 'auto_confirm_digest' }));
   await overdueInstapay(env).catch((err) => alert('instapay_overdue_check_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairPackageOrders(env).catch((err) => alert('package_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await runDueOffboardings(env).catch((err) => alert('offboarding_failed', { error: err instanceof Error ? err.name : 'error' }));

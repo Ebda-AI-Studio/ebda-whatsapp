@@ -63,6 +63,14 @@ export type Env = {
   EBDA_INSTAPAY_HANDLE?: string;
   EBDA_INSTAPAY_QR_URL?: string;
   EBDA_INSTAPAY_PAYEE_NAME?: string;
+  /** InstaPay auto-confirm (plan 2026-11-14). The shared platform-global duplicate index (a D1 database BOTH Ebda Store and Ebda Chat bind): a receipt is claimable once across every merchant and product. Unbound = auto-confirm refuses to run (fail closed). */
+  INSTAPAY_DEDUPE_DB?: D1Database;
+  /** HMAC secret (at least 16 characters, a Worker secret) shared with the OS brain for this product: signs the digest/waiting notices out and verifies the signed "not received" tap in. */
+  INSTAPAY_BRIDGE_SECRET?: string;
+  /** Where the signed digest and waiting notices go: the OS brain's `POST /api/instapay/notify` (https). Unset = no notices (auto-confirm refuses to run). */
+  BRAIN_BRIDGE_URL?: string;
+  /** Overrides the vision model that reads InstaPay proofs for auto-confirm. */
+  INSTAPAY_RECEIPT_AI_MODEL?: string;
   /** 'true' sends the card-refundable part of an approved refund to the provider's refund API. Default off: every refund is a manual payout. */
   KASHIER_REFUNDS_ENABLED?: string;
   /** Hosted checkout origin; default https://checkout.kashier.io. */

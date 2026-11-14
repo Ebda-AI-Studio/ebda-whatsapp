@@ -20,6 +20,7 @@ import { listAllRequests, markRequestsDone } from '../core/shared/shared-templat
 import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type SharedTemplateFailure } from '../core/shared/shared-templates';
 import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
+import { listAutoConfirmations, revertAutoConfirmed, setAutoMode, setWorkspaceAuto, getAutoMode, instapayAutoReady } from '../core/billing/instapay-auto';
 import { confirmInstapay, listForOperator, rejectInstapay, releaseInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
 import { rotateTokenKey, rotationStatus } from '../core/enc-rotation';
@@ -287,6 +288,28 @@ operatorRoutes.post('/instapay/:id/confirm', async (c) => {
   const b = instapayConfirm.safeParse(await c.req.json().catch(() => ({})));
   if (!b.success) return bad(c, b.error.issues[0]?.message === 'no_reference_needs_reason' ? 'reason_required' : 'bank_reference_invalid');
   return decided(c, await confirmInstapay(c.env, { id: c.req.param('id'), actor: actor(c), ...(b.data.bankRef ? { bankRef: b.data.bankRef } : {}), ...(b.data.noReference ? { noReference: { reason: b.data.reason! } } : {}) }));
+});
+// ---- InstaPay auto-confirm (super admin): verdicts, "not received", and the two kill switches. Each change needs a reason and is audited. ----
+const autoReason = z.object({ reason: z.string().trim().min(5).max(300) });
+operatorRoutes.get('/instapay/auto', async (c) => c.json({ mode: await getAutoMode(c.env), ready: instapayAutoReady(c.env), items: await listAutoConfirmations(c.env, c.req.query('state') || undefined) }));
+operatorRoutes.post('/instapay/auto/:id/revert', async (c) => {
+  const b = autoReason.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'reason_required');
+  const r = await revertAutoConfirmed(c.env, { id: c.req.param('id'), actor: actor(c), reason: b.data.reason });
+  if (r.ok) return c.json(r);
+  return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason }, 409);
+});
+operatorRoutes.put('/instapay/auto/mode', async (c) => {
+  const b = z.object({ mode: z.enum(['off', 'shadow', 'live']), reason: z.string().trim().min(5).max(300) }).safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'invalid_request');
+  const r = await setAutoMode(c.env, { mode: b.data.mode, actor: actor(c), reason: b.data.reason });
+  return r.ok ? c.json({ mode: b.data.mode }) : bad(c, r.reason);
+});
+operatorRoutes.put('/instapay/auto/workspaces/:workspaceId', async (c) => {
+  const b = z.object({ enabled: z.boolean(), reason: z.string().trim().min(5).max(300) }).safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, 'invalid_request');
+  const r = await setWorkspaceAuto(c.env, { workspaceId: c.req.param('workspaceId'), enabled: b.data.enabled, actor: actor(c), reason: b.data.reason });
+  return r.ok ? c.json({ workspaceId: c.req.param('workspaceId'), enabled: b.data.enabled }) : bad(c, r.reason);
 });
 operatorRoutes.post('/instapay/:id/release', async (c) => {
   const b = instapayRelease.safeParse(await c.req.json().catch(() => null));
