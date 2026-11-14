@@ -16,5 +16,5 @@
     { "match": "^/stores/:storeId(/|$)", "kind": "merchant" }
   ],
   "helpExemptAreas": ["system"],
-  "smartLayerPaths": []
+  "smartLayerPaths": ["src/core/billing/instapay-reader.ts"]
 }
