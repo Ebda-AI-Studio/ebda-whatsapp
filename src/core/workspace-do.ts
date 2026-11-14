@@ -4,6 +4,7 @@ import { DEFAULT_CHUNK_ROWS, exportTable, highWaterMarks } from './backup-export
 import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, signManifest, toNdjson, verifyManifestSignature, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
 import { SL_OPS, doStorageOps, type SlOp } from './smart-layer/storage-do';
+import { holdCredits, releaseHold, settleHold, type HoldResult } from './ai/credits';
 import type { SendResult } from './meta/client';
 import type { CoexMessage, InboundMessage, StatusEvent, StatusPricing, SyncedContact } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
@@ -2715,6 +2716,27 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (!SL_OPS.includes(op)) throw new Error('unknown smart layer op');
     const ops = doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f));
     return (ops[op] as (...a: unknown[]) => unknown)(...args);
+  }
+
+  /** This workspace's assistant mode (the per-store rollout flag, default off). Set only by an operator (`setAssistantMode`); a merchant can never raise it. */
+  async assistantMode(): Promise<'off' | 'answer-only' | 'suggest' | 'act'> {
+    const v = this.sql.exec<{ value: string }>("SELECT value FROM agent_state WHERE key = 'assistant.mode'").toArray()[0]?.value;
+    return v === 'answer-only' || v === 'suggest' || v === 'act' ? v : 'off';
+  }
+
+  async setAssistantMode(mode: 'off' | 'answer-only' | 'suggest' | 'act'): Promise<void> {
+    this.ctx.storage.transactionSync(() => this.sql.exec("INSERT INTO agent_state (key, value) VALUES ('assistant.mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", mode));
+  }
+
+  /** Heavy assistant jobs spend AI credits: hold first (the cost was shown), settle on success, release on failure. Same ledger as the agent, note `assistant`. */
+  async assistantHold(ref: string, credits: number, now = Date.now()): Promise<HoldResult> {
+    return this.ctx.storage.transactionSync(() => holdCredits(this.sql, ref, now, credits));
+  }
+  async assistantSettle(ref: string, now = Date.now()): Promise<'charged' | 'refused' | 'noop'> {
+    return this.ctx.storage.transactionSync(() => settleHold(this.sql, ref, now, this.workspaceId, 'assistant'));
+  }
+  async assistantRelease(ref: string, now = Date.now()): Promise<void> {
+    this.ctx.storage.transactionSync(() => releaseHold(this.sql, ref, now));
   }
 
   // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------
