@@ -45,5 +45,8 @@ jobs:
           tar -xz -C "$RUNNER_TEMP/bin" -f "$RUNNER_TEMP/$TARBALL" gitleaks
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/bin/gitleaks" version
+      # Scan only the history of the commit under test (HEAD), never every ref in the checkout: on a self-hosted runner the
+      # workspace persists and holds other branches' fetched refs, and `gitleaks detect` defaults to `git log --all`, so a
+      # pushed PR branch with test vectors turned main red (2026-11-15, main d85ad4e flagged feat/sl-chat-c4's redteam.jsonl).
       - name: Run gitleaks
-        run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1
+        run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1 --log-opts="HEAD"
