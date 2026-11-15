@@ -178,3 +178,23 @@ export function expireGrantFraction(sql: Sql, a: { periodStart: number; num: num
   const r = postCredit(sql, { kind: 'expire', amount: -amount, ref: a.ref, parentRef: `period:${a.periodStart}`, now: a.now });
   return r.ok ? amount : 0;
 }
+
+/**
+ * A refunded credit pack (WA-PACK-REFUND-1): the pack's UNUSED credits expire, the spent ones stay spent. Consumption draws on the period's grant first, so what is left
+ * of the pack is the available balance beyond the grant's own unused part (uncapped), at most the refunded share `num/den` of the pack (a partial refund takes only that
+ * share) and never below zero. One ledger row under `ref` (a redelivered refund is a no-op), tagged `parent_ref = pack:<orderId>` so grant accounting never sees it.
+ * Returns what expired and what had already been used (the part an operator may still want to recover).
+ */
+export function expirePackUnused(sql: Sql, a: { credits: number; num: number; den: number; now: number; ref: string; orderId: string }): { expired: number; spent: number } {
+  const share = a.den > 0 && a.num > 0 ? Math.floor((a.credits * Math.min(a.num, a.den)) / a.den) : 0;
+  const e = sql.exec<{ period_start: number }>('SELECT period_start FROM entitlements WHERE id = 1').toArray()[0];
+  const grantLeft = e ? (() => {
+    const ps = lastGrantStart(sql, e.period_start);
+    const used = sql.exec<{ u: number }>("SELECT coalesce(-sum(amount), 0) AS u FROM credit_ledger WHERE kind = 'ai_charge' AND at >= ?", ps).one().u;
+    return Math.max(0, grantedInPeriod(sql, ps) - used - expiredInPeriod(sql, ps));
+  })() : 0;
+  const packLeft = Math.max(0, creditsAvailable(sql, a.now) - grantLeft);
+  const expired = Math.min(share, packLeft);
+  if (expired > 0) postCredit(sql, { kind: 'expire', amount: -expired, ref: a.ref, parentRef: `pack:${a.orderId}`, now: a.now, note: 'credit pack refunded' });
+  return { expired, spent: Math.max(0, a.credits - expired) };
+}

@@ -94,9 +94,18 @@ export async function creditPackPaid(env: Env, row: CreditOrderRow, transactionI
 /** A CONFIRMED webhook for a credit order (the caller already asked the provider what the signed transaction really is). Returns the resolution word. */
 export async function applyCreditWebhook(env: Env, row: CreditOrderRow, ev: ParsedWebhook, now: number): Promise<string> {
   if (ev.event === 'refund') {
-    // Taking credits back is a person's decision (some may be spent): raise it, never claw back automatically.
-    if (ev.status === 'SUCCESS') alert('credit_pack_refunded', { workspace: row.workspace_id, orderId: row.order_id });
-    return ev.status === 'SUCCESS' ? 'refund_manual' : 'ignored';
+    if (ev.status !== 'SUCCESS') return 'ignored';
+    // WA-PACK-REFUND-1: the UNUSED part of the pack expires on its own (never negative: a refund is an external fact, recorded in full); the spent part is left to an operator.
+    // Only a pack that was actually credited has anything to expire. The ref ties the expiry to this refund transaction, so a redelivery expires nothing more.
+    let expired = 0;
+    let spent = row.credits;
+    if (row.state === 'paid') {
+      const r = await stubOf(env, row.workspace_id).expireRefundedPack({ credits: row.credits, num: Math.max(0, ev.amountMinor), den: row.amount_minor, ref: `credit-pack-refund:${row.order_id}:${ev.transactionId}`, orderId: row.order_id }, now);
+      expired = r.expired;
+      spent = r.spent;
+    }
+    alert('credit_pack_refunded', { workspace: row.workspace_id, orderId: row.order_id, packCredits: row.credits, expiredCredits: expired, spentCredits: spent });
+    return 'refund_expired';
   }
   if (ev.event !== 'pay') return 'ignored';
   if (ev.status === 'FAILURE') {
