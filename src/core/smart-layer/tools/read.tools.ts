@@ -9,7 +9,8 @@ import type { HelpHit, RegistryView, ToolSpec, TurnCtx } from '../../../../found
 
 export type ApiResult = { status: number; json: unknown };
 /** `path` is relative to `/stores/:storeId` (always starts with `/`); the caller prefixes the store of the merchant's own request. */
-export type CallApi = (ctx: TurnCtx, path: string, query?: Record<string, string>) => Promise<ApiResult>;
+export type CallInit = { method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown };
+export type CallApi = (ctx: TurnCtx, path: string, query?: Record<string, string>, init?: CallInit) => Promise<ApiResult>;
 export type ToolDeps = { callApi: CallApi; helpSearch: (q: string, locale: TurnCtx['locale'], k: number) => Promise<HelpHit[]>; registry: RegistryView; assistantCapability: string };
 
 export class ToolApiError extends Error {

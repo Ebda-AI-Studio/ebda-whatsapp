@@ -6,7 +6,7 @@
  */
 import { resolveModels } from '../../../foundation/smart-layer/models';
 import type { AiBinding } from '../../../foundation/smart-layer/provider';
-import type { BindingSource, SmartLayerAdapter, TurnCtx } from '../../../foundation/smart-layer/types';
+import type { BindingSource, SmartLayerAdapter, ToolSpec, TurnCtx } from '../../../foundation/smart-layer/types';
 import { BUDGET } from '../../../foundation/smart-layer/plan/budget';
 import type { Env } from '../../env';
 import type { WorkspaceDO } from '../workspace-do';
@@ -16,7 +16,20 @@ import { helpDeps, helpFigureSources, helpSearch, type HelpCorpus, type HelpDeps
 import { chatQuota } from './quota';
 import { rpcStorage } from './storage-do';
 import type { RegistryView } from '../../../foundation/smart-layer/types';
+import explainJson from '../../../assistant/explain.generated.json';
+import { accountReadTools, accountWriteTools } from './tools/account.tools';
+import { botTools } from './tools/bot.tools';
+import { explainTools, type ExplainData } from './tools/explain.tools';
+import { campaignTools } from './tools/campaigns.tools';
+import { withKeywords } from './tools/keywords';
+import { WorkersAiProvider } from '../../../foundation/smart-layer/provider';
+import { contactTools } from './tools/contacts.tools';
+import { inboxTools } from './tools/inbox.tools';
 import { readTools, type CallApi } from './tools/read.tools';
+import type { Kit } from './tools/write';
+import { contactReadTools, inboxReadTools } from './tools/reads.tools';
+import { segmentTools } from './tools/segments.tools';
+import { templateTools } from './tools/templates.tools';
 
 export type ChatAdapterDeps = {
   env: Env;
@@ -37,7 +50,21 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
   const help = d.help ?? helpDeps(d.env);
   const storage = rpcStorage((op, args) => d.ws.smartLayer(op, args));
   const searchHelp = (q: string, locale: TurnCtx['locale'], k: number) => helpSearch(help, q, locale, k);
-  const tools = readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability });
+  const ai = d.ai ?? (d.env.AI as unknown as AiBinding | undefined) ?? { run: async () => { throw new Error('no AI binding'); } };
+  const models = resolveModels();
+  const kit: Kit = {
+    callApi: d.callApi, find: (n) => tools.find((t) => t.name === n),
+    writer: {
+      // One call on the `template` job; the merchant's text is fenced by the writer, the answer is parsed and checked by the templates service before anyone sees it.
+      complete: async (system, user) => (await new WorkersAiProvider(ai, models.template).complete({ system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 1400, model: models.template })).text ?? '',
+      cache: { get: async (key) => ((await d.ws.smartLayer('cacheGet', [key, Date.now()])) as string | null), put: async (key, json) => { await d.ws.smartLayer('cachePut', [key, key.split(':')[0], json, Date.now()]); } },
+      credits: { hold: (ref, n) => d.ws.assistantHold(ref, n), settle: (ref) => d.ws.assistantSettle(ref), release: (ref) => d.ws.assistantRelease(ref) },
+    },
+  };
+  const tools: ToolSpec[] = [
+    ...[...readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability }),
+    ...inboxTools(kit), ...contactTools(kit), ...segmentTools(kit), ...botTools(kit), ...campaignTools(kit), ...templateTools(kit), ...inboxReadTools(kit), ...contactReadTools(kit), ...accountReadTools(kit), ...accountWriteTools(kit), ...explainTools(explainJson as unknown as ExplainData)].map(withKeywords),
+  ];
   return {
     product: 'chat',
     registry: () => d.registry,
@@ -60,9 +87,9 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
     // Phase A tools take no ids from the model, so nothing needs an existence check. An id-taking tool (Phase B) must supply its own kind here: until it does, every ref fails closed.
     checkRefs: async (_ctx, refs) => ({ missing: [...refs] }),
     handoff: chatHandoff(),
-    secureScreen: (kind) => (kind === 'meta_token' ? 'numbers.connect' : kind === 'api_key' ? 'agent.provider-byok' : null),
-    ai: d.ai ?? (d.env.AI as unknown as AiBinding | undefined) ?? { run: async () => { throw new Error('no AI binding'); } },
-    models: resolveModels(),
+    secureScreen: (kind) => ({ meta_token: 'numbers.connect', api_key: 'agent.provider-byok', card: 'wallet.card-topup', jwt: 'access.integrator-tokens' } as Partial<Record<typeof kind, string>>)[kind] ?? null,
+    ai,
+    models,
     storage,
   };
 }

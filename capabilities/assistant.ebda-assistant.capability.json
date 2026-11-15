@@ -52,6 +52,6 @@
       "POST /stores/:storeId/assistant/turn",
       "POST /stores/:storeId/assistant/feedback"
     ],
-    "reason": "Phase A answers questions and reads the merchant's own data through the normal routes; no write tool is registered. The only thing written is the assistant's own masked journal row."
+    "reason": "A turn answers questions, reads the merchant's own data and builds previews; it applies nothing (the apply and undo routes are the assistant.apply-changes capability). The only thing a turn writes is the assistant's own masked journal row."
   }
 }

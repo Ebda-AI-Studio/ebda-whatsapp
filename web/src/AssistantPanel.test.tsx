@@ -31,6 +31,13 @@ describe('AssistantPanel', () => {
     await waitFor(() => expect(api.turn).toHaveBeenCalledWith({ conversationId: expect.any(String), text: t.assistantSuggest[0], locale: 'ar' }));
   });
 
+  it('a turn that prepared a change shows its preview card under the reply', async () => {
+    const previews = [{ previewId: 'p1', summary: { ar: 'تعديل تاجات منى', en: 'x' }, rows: [], policy: 'preview' as const, reasons: [], undo: 'reversible' as const }];
+    mount(fakeApi({ turn: vi.fn(async () => reply({ previews })) }));
+    await ask('حط تاج على منى');
+    expect(await screen.findByRole('button', { name: t.assistantApply })).toBeTruthy();
+  });
+
   it('renders a cap segment as a link to its screen and opens that screen', async () => {
     const go = vi.fn();
     mount(fakeApi(), { onNavigate: go });

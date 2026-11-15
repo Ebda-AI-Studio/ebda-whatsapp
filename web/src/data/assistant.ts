@@ -1,4 +1,4 @@
-import type { AssistantConversationResponse, AssistantSegment, AssistantTurnResponse } from '../../../src/core/api/contract';
+import type { AssistantActResponse, AssistantApproval, AssistantConversationResponse, AssistantPreviewCard, AssistantSegment, AssistantTurnResponse } from '../../../src/core/api/contract';
 import type { View } from '../components/Rail';
 
 /** The assistant's client contract: the live source calls the Worker, the sample source answers from a script. */
@@ -6,6 +6,12 @@ export interface AssistantApi {
   turn(body: { conversationId: string; text: string; locale: 'ar' | 'en' }): Promise<AssistantTurnResponse>;
   conversation(conversationId: string): Promise<AssistantConversationResponse['items']>;
   feedback(turnId: string, thumb: 'up' | 'down'): Promise<void>;
+  /** The merchant's press on a preview card: the only way a change happens. */
+  apply(previewId: string): Promise<AssistantActResponse>;
+  undo(appliedId: string): Promise<AssistantActResponse>;
+  /** The press on a confirm card's own button, with the one-time token that came with the turn. */
+  confirm(approvalId: string, token: string): Promise<AssistantActResponse>;
+  reject(approvalId: string): Promise<{ status: string }>;
 }
 
 const VIEWS: readonly View[] = ['inbox', 'campaigns', 'templates', 'contacts', 'agent', 'bot', 'numbers', 'wallet', 'team', 'operator'];
@@ -27,7 +33,7 @@ export function safeHref(href: string): string | null {
 
 export type ChatItem =
   | { id: string; role: 'merchant'; text: string }
-  | { id: string; role: 'assistant'; segments: AssistantSegment[]; turnId?: string; status?: AssistantTurnResponse['status'] };
+  | { id: string; role: 'assistant'; segments: AssistantSegment[]; turnId?: string; status?: AssistantTurnResponse['status']; previews?: AssistantPreviewCard[]; approvals?: AssistantApproval[] };
 
 const PREFIX = 'assistant.conversation.';
 const KEY = (storeId: string, userId: string) => `${PREFIX}${storeId}.${userId}`;

@@ -7,6 +7,8 @@
 import type { ApprovalRecord, AppliedRecord, AuditRow, DecisionRow, PreviewRecord, SmartLayerStorage, TurnRow } from '../../../foundation/smart-layer/types';
 
 type Sql = DurableObjectStorage['sql'];
+/** A generated draft is the same draft for this long. */
+export const CACHE_TTL_MS = 60 * 60_000;
 type Tx = <R>(f: () => R) => R;
 
 const changed = (sql: Sql, q: string, ...b: unknown[]): number => sql.exec(q, ...(b as never[])).rowsWritten > 0 ? 1 : 0;
@@ -99,6 +101,16 @@ export function doStorageOps(sql: Sql, tx: Tx) {
       const q = (feedback: boolean) => one<{ n: number }>(sql, `SELECT count(*) AS n FROM sl_audit WHERE store_id = ? AND user_id = ? AND json_extract(json, '$.turnId') = ? AND (json_extract(json, '$.releaseId') = 'feedback') = ?`, storeId, userId, turnId, feedback ? 1 : 0)!.n > 0;
       return { own: q(false), rated: q(true) };
     },
+    /** A generated draft kept for CACHE_TTL_MS (see `sl_cache`). */
+    cacheGet(key: string, now: number): string | null {
+      return one<{ json: string }>(sql, 'SELECT json FROM sl_cache WHERE key = ? AND at > ?', key, now - CACHE_TTL_MS)?.json ?? null;
+    },
+    cachePut(key: string, storeId: string, json: string, now: number): void {
+      tx(() => {
+        sql.exec('DELETE FROM sl_cache WHERE at <= ?', now - CACHE_TTL_MS);
+        sql.exec('INSERT OR REPLACE INTO sl_cache (key, store_id, json, at) VALUES (?, ?, ?, ?)', key, storeId, json, now);
+      });
+    },
     /** Contact erasure: the assistant's masked journal may still carry the person's NAME (masking removes phones, e-mails and cards, not names). */
     eraseMentions(terms: string[]): number {
       return tx(() => {
@@ -106,7 +118,7 @@ export function doStorageOps(sql: Sql, tx: Tx) {
         for (const raw of terms) {
           const t = raw.trim();
           if (t.length < 3) continue;
-          for (const [table, col] of [['sl_turns', 'masked_text'], ['sl_audit', 'json']] as const) {
+          for (const [table, col] of [['sl_turns', 'masked_text'], ['sl_audit', 'json'], ['sl_previews', 'json'], ['sl_applied', 'json'], ['sl_cache', 'json']] as const) {
             n += one<{ n: number }>(sql, `SELECT count(*) AS n FROM ${table} WHERE instr(lower(${col}), lower(?)) > 0`, t)!.n;
             sql.exec(`DELETE FROM ${table} WHERE instr(lower(${col}), lower(?)) > 0`, t);
           }
@@ -116,7 +128,7 @@ export function doStorageOps(sql: Sql, tx: Tx) {
     },
     eraseStore(storeId: string): void {
       tx(() => {
-        for (const t of ['sl_turns', 'sl_audit', 'sl_previews', 'sl_applied', 'sl_approvals', 'sl_decisions']) sql.exec(`DELETE FROM ${t} WHERE store_id = ?`, storeId);
+        for (const t of ['sl_turns', 'sl_audit', 'sl_previews', 'sl_applied', 'sl_approvals', 'sl_decisions', 'sl_cache']) sql.exec(`DELETE FROM ${t} WHERE store_id = ?`, storeId);
         sql.exec("DELETE FROM sl_counters WHERE key LIKE ? ESCAPE '\\'", `%${storeId.replace(/[\\%_]/g, '\\$&')}%`);
       });
     },
@@ -124,12 +136,13 @@ export function doStorageOps(sql: Sql, tx: Tx) {
       tx(() => {
         for (const t of ['sl_turns', 'sl_audit', 'sl_previews', 'sl_applied', 'sl_approvals']) sql.exec(`DELETE FROM ${t} WHERE store_id = ? AND user_id = ?`, storeId, userId);
         sql.exec('DELETE FROM sl_decisions WHERE store_id = ? AND decider = ?', storeId, userId);
+        sql.exec("DELETE FROM sl_cache WHERE store_id = ? AND key LIKE ? ESCAPE '\\'", storeId, `${storeId.replace(/[\\%_]/g, '\\$&')}:${userId.replace(/[\\%_]/g, '\\$&')}:%`);
       });
     },
     purgeBefore(cutoff: number): number {
       return tx(() => {
         let n = 0;
-        for (const [t, col] of [['sl_turns', 'at'], ['sl_audit', 'at'], ['sl_previews', 'created_at'], ['sl_applied', 'applied_at'], ['sl_approvals', 'created_at'], ['sl_decisions', 'at']] as const) {
+        for (const [t, col] of [['sl_turns', 'at'], ['sl_audit', 'at'], ['sl_previews', 'created_at'], ['sl_applied', 'applied_at'], ['sl_approvals', 'created_at'], ['sl_decisions', 'at'], ['sl_cache', 'at']] as const) {
           n += one<{ n: number }>(sql, `SELECT count(*) AS n FROM ${t} WHERE ${col} < ?`, cutoff)!.n;
           sql.exec(`DELETE FROM ${t} WHERE ${col} < ?`, cutoff);
         }
@@ -141,7 +154,7 @@ export function doStorageOps(sql: Sql, tx: Tx) {
 }
 export type SlOps = ReturnType<typeof doStorageOps>;
 export type SlOp = keyof SlOps;
-export const SL_OPS: readonly SlOp[] = ['appendTurn', 'loadTurns', 'appendAudit', 'loadAudits', 'putPreview', 'getPreview', 'transitionPreview', 'putApplied', 'getApplied', 'markUndone', 'unmarkUndone', 'putApproval', 'getApproval', 'closeApproval', 'claimApproval', 'recordDecision', 'loadDecisions', 'bump', 'turnState', 'eraseMentions', 'eraseStore', 'eraseUser', 'purgeBefore'];
+export const SL_OPS: readonly SlOp[] = ['appendTurn', 'loadTurns', 'appendAudit', 'loadAudits', 'putPreview', 'getPreview', 'transitionPreview', 'putApplied', 'getApplied', 'markUndone', 'unmarkUndone', 'putApproval', 'getApproval', 'closeApproval', 'claimApproval', 'recordDecision', 'loadDecisions', 'bump', 'turnState', 'cacheGet', 'cachePut', 'eraseMentions', 'eraseStore', 'eraseUser', 'purgeBefore'];
 
 /** Worker-side SmartLayerStorage over the DO RPC `smartLayer(op, args)`. */
 export function rpcStorage(call: (op: SlOp, args: unknown[]) => Promise<unknown>): SmartLayerStorage {

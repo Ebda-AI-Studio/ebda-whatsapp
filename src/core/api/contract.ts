@@ -212,7 +212,28 @@ export const assistantSegment = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('link'), href: z.string(), text: z.string() }),
   z.object({ kind: z.literal('cite'), articleId: z.string(), title: z.string(), url: z.string() }),
 ]);
-export const assistantTurnResponse = z.object({ status: z.enum(['answered', 'refused', 'not_covered', 'handoff', 'off', 'limited']), segments: z.array(assistantSegment), previews: z.array(z.unknown()), turnId: z.string() });
+const bilingual = z.object({ ar: z.string(), en: z.string() });
+/** A change the assistant prepared: what it would do, before and after. Nothing has happened yet; the merchant presses Apply (or, for a confirm-class change, the confirm button). */
+export const assistantPreviewCard = z.object({
+  previewId: z.string(),
+  summary: bilingual,
+  rows: z.array(z.object({ label: bilingual, before: z.unknown().optional(), after: z.unknown().optional(), source: z.enum(['merchant', 'untrusted']).optional() })),
+  policy: z.enum(['preview', 'confirm']),
+  reasons: z.array(z.string()),
+  undo: z.enum(['none', 'reversible', 'compensating', 'irreversible']),
+  costCredits: z.number().optional(),
+  approvalId: z.string().optional(),
+});
+export type AssistantPreviewCard = z.infer<typeof assistantPreviewCard>;
+/** The one-time token of a confirm card, for the merchant's browser to send back with its own button press. It exists only in this response: never stored, never in a prompt. */
+export const assistantApproval = z.object({ approvalId: z.string(), previewId: z.string(), token: z.string() });
+export type AssistantApproval = z.infer<typeof assistantApproval>;
+export const assistantTurnResponse = z.object({ status: z.enum(['answered', 'refused', 'not_covered', 'handoff', 'off', 'limited']), segments: z.array(assistantSegment), previews: z.array(assistantPreviewCard), approvals: z.array(assistantApproval).optional(), turnId: z.string() });
+/** The engine's answer to Apply or Undo: a status word, plus the undo handle after an apply and a fresh card when what it read had changed. */
+export const assistantActResponse = z.object({ status: z.string(), appliedId: z.string().optional(), undoUntil: z.number().optional(), card: assistantPreviewCard.optional(), approvals: z.array(assistantApproval).optional() });
+export const assistantConfirmRequest = z.object({ token: z.string().min(20).max(100) }).strict();
+export const assistantRejectRequest = z.object({ reason: z.string().trim().max(200).optional() }).strict();
+export type AssistantActResponse = z.infer<typeof assistantActResponse>;
 export type AssistantSegment = z.infer<typeof assistantSegment>;
 export type AssistantTurnResponse = z.infer<typeof assistantTurnResponse>;
 export const assistantConversationResponse = z.object({ items: z.array(z.object({ id: z.string(), role: z.enum(['merchant', 'assistant']), text: z.string(), at: z.number() })) });

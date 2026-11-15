@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AssistantSegment } from '../../../src/core/api/contract';
 import { conversationIdFor, forgetConversation, safeHref, viewForPath, type AssistantApi, type ChatItem } from '../data/assistant';
 import type { Lang, Strings } from '../i18n';
+import { ConfirmCard } from './ConfirmCard';
+import { PreviewCard } from './PreviewCard';
 import type { View } from './Rail';
 
 const MAX = 2000;
@@ -85,7 +87,7 @@ export function AssistantPanel({ t, lang, storeId, userId, api, onNavigate, onCl
     try {
       const r = await api.turn({ conversationId: conv.current, text: clean, locale: lang });
       if (r.status === 'off') { setOff(true); onUnavailable(); return; }
-      setItems((cur) => [...cur, { id: r.turnId, role: 'assistant', segments: r.segments, turnId: r.turnId, status: r.status }]);
+      setItems((cur) => [...cur, { id: r.turnId, role: 'assistant', segments: r.segments, turnId: r.turnId, status: r.status, previews: r.previews, approvals: r.approvals }]);
     } catch {
       setFailed(clean);
     } finally {
@@ -126,6 +128,10 @@ export function AssistantPanel({ t, lang, storeId, userId, api, onNavigate, onCl
             <div key={m.id} className="as-msg as-bot" data-status={m.status}>
               <span className="vh">{t.assistantTitle}: </span>
               <p className="as-body"><Segments t={t} segments={m.segments} onNavigate={onNavigate} /></p>
+              {m.previews?.map((c) => {
+                const ap = c.approvalId ? m.approvals?.find((a) => a.approvalId === c.approvalId) : undefined;
+                return c.policy === 'confirm' && ap ? <ConfirmCard key={c.previewId} t={t} lang={lang} card={c} approval={ap} api={api} /> : <PreviewCard key={c.previewId} t={t} lang={lang} card={c} api={api} />;
+              })}
               {m.turnId && m.status === 'answered' && (
                 <div className="as-rate" role="group" aria-label={t.assistantRateGroup}>
                   {rated[m.turnId]
