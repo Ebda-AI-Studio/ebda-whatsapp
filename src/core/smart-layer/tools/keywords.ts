@@ -34,7 +34,7 @@ export const KEYWORDS: Readonly<Record<string, string>> = {
   campaign_delete_draft: 'امسح احذف مسودة حملة',
   send_text: 'ابعت ارسل رسالة نص للعميل كلم رد',
   send_template: 'ابعت ارسل قالب template للعميل رسالة',
-  template_write: 'اكتب اكتبلي قالب template رسالة جاهزة صياغة مسودة ميتا الأوردر اتشحن خصم عرض',
+  template_write: 'اكتب اكتبلي قالب template رسالة رسائل جاهزة صياغة مسودة ميتا العميل الأوردر الطلب اتشحن وصل جاهز الاستلام تأكيد كود تحقق عرض خصم العيد سلة تذكير تذكر استرجاع تقييم رجع الدفع write draft message templates customer order shipped delivered refund reminder offer promotion discount cart verification code confirm cash delivery pickup stock review payment resala qaleb template ektb akteb 3ayez order shahan wasal kod tahakok khasm 3ard el3id salla tazkeer esterga3 taqyeem raga3 daf3',
   template_fix: 'صلّح اصلح قالب template اترفض رفض ميتا مرفوض',
   template_submit: 'قالب template قدّم ابعت لميتا مراجعة اعتماد جديد',
   template_edit: 'قالب template عدّل غيّر صلّح ميتا مراجعة',
