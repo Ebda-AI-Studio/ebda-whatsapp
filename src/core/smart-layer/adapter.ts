@@ -18,6 +18,7 @@ import { rpcStorage } from './storage-do';
 import type { RegistryView } from '../../../foundation/smart-layer/types';
 import { botTools } from './tools/bot.tools';
 import { campaignTools } from './tools/campaigns.tools';
+import { withKeywords } from './tools/keywords';
 import { contactTools } from './tools/contacts.tools';
 import { inboxTools } from './tools/inbox.tools';
 import { readTools, type CallApi } from './tools/read.tools';
@@ -47,7 +48,7 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
   const kit: Kit = { callApi: d.callApi, find: (n) => tools.find((t) => t.name === n) };
   const tools: ToolSpec[] = [
     ...readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability }),
-    ...inboxTools(kit), ...contactTools(kit), ...segmentTools(kit), ...botTools(kit), ...campaignTools(kit), ...templateTools(kit),
+    ...[...inboxTools(kit), ...contactTools(kit), ...segmentTools(kit), ...botTools(kit), ...campaignTools(kit), ...templateTools(kit)].map(withKeywords),
   ];
   return {
     product: 'chat',
@@ -71,7 +72,7 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
     // Phase A tools take no ids from the model, so nothing needs an existence check. An id-taking tool (Phase B) must supply its own kind here: until it does, every ref fails closed.
     checkRefs: async (_ctx, refs) => ({ missing: [...refs] }),
     handoff: chatHandoff(),
-    secureScreen: (kind) => (kind === 'meta_token' ? 'numbers.connect' : kind === 'api_key' ? 'agent.provider-byok' : null),
+    secureScreen: (kind) => ({ meta_token: 'numbers.connect', api_key: 'agent.provider-byok', card: 'wallet.card-topup', jwt: 'access.integrator-tokens' } as Partial<Record<typeof kind, string>>)[kind] ?? null,
     ai: d.ai ?? (d.env.AI as unknown as AiBinding | undefined) ?? { run: async () => { throw new Error('no AI binding'); } },
     models: resolveModels(),
     storage,
