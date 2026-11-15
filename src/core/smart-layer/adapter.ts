@@ -1,0 +1,68 @@
+/**
+ * The Chat adapter for the Smart Layer engine (plan 4 Task A20). It holds no model logic: it wires the engine to this product's bindings
+ * (Workers AI, Vectorize, the workspace Durable Object journal, D1 switches, the credits ledger) and to its own routes (every tool is an in-process
+ * call of an existing route with the merchant's own session, SL-CHAT-1). Everything that calls Workers AI lives under `src/core/smart-layer/`
+ * (the `smart-layer-bypass` guard allowlist).
+ */
+import { resolveModels } from '../../../foundation/smart-layer/models';
+import type { AiBinding } from '../../../foundation/smart-layer/provider';
+import type { BindingSource, SmartLayerAdapter, TurnCtx } from '../../../foundation/smart-layer/types';
+import { BUDGET } from '../../../foundation/smart-layer/plan/budget';
+import type { Env } from '../../env';
+import type { WorkspaceDO } from '../workspace-do';
+import { chatControls } from './controls';
+import { chatHandoff } from './handoff';
+import { helpDeps, helpFigureSources, helpSearch, type HelpCorpus, type HelpDeps } from './help-index';
+import { chatQuota } from './quota';
+import { rpcStorage } from './storage-do';
+import type { RegistryView } from '../../../foundation/smart-layer/types';
+import { readTools, type CallApi } from './tools/read.tools';
+
+export type ChatAdapterDeps = {
+  env: Env;
+  ws: DurableObjectStub<WorkspaceDO>;
+  callApi: CallApi;
+  /** The capability registry and the help corpus the product bundled (see assistant/*.generated.json), and the id of the assistant's own capability. */
+  registry: RegistryView;
+  corpus: HelpCorpus;
+  assistantCapability: string;
+  /** Overrides for tests (a scripted model needs none of them). */
+  help?: HelpDeps;
+  ai?: AiBinding;
+};
+
+const egp = (minor: number): string => String(Math.round(minor) / 100);
+
+export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
+  const help = d.help ?? helpDeps(d.env);
+  const storage = rpcStorage((op, args) => d.ws.smartLayer(op, args));
+  const searchHelp = (q: string, locale: TurnCtx['locale'], k: number) => helpSearch(help, q, locale, k);
+  const tools = readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability });
+  return {
+    product: 'chat',
+    registry: () => d.registry,
+    tools: () => tools,
+    helpSearch: searchHelp,
+    async bindingSources(): Promise<BindingSource[]> {
+      // Typed sources for the binding-claim rail: the packages the Plans screen sells, the free cap, the 24-hour window, and the figures the help guides state.
+      const pk = await d.env.DB.prepare('SELECT id, name, price_minor, ai_credits FROM packages WHERE active = 1').all<{ id: string; name: string; price_minor: number; ai_credits: number }>();
+      return [
+        ...pk.results.map((p): BindingSource => ({ kind: 'plan', key: p.id, text: { ar: p.name, en: p.name }, values: [p.name, egp(p.price_minor), String(p.ai_credits)] })),
+        { kind: 'limit', key: 'assistant-free-turns', text: { ar: 'رسايل المساعد المجانية في اليوم', en: 'Free assistant messages per day' }, values: [String(BUDGET.freeTurnsPerStorePerDay)] },
+        { kind: 'limit', key: 'reply-window', text: { ar: 'نافذة الرد 24 ساعة', en: '24-hour reply window' }, values: ['24'] },
+        ...helpFigureSources(d.corpus),
+      ];
+    },
+    // Chat shows no merchant-owned web pages: only the platform's own hosts are linkable.
+    merchantDomains: async () => [],
+    controls: () => chatControls(d.env, d.ws),
+    quota: chatQuota(storage, d.ws),
+    // Phase A tools take no ids from the model, so nothing needs an existence check. An id-taking tool (Phase B) must supply its own kind here: until it does, every ref fails closed.
+    checkRefs: async (_ctx, refs) => ({ missing: [...refs] }),
+    handoff: chatHandoff(),
+    secureScreen: (kind) => (kind === 'meta_token' ? 'numbers.connect' : kind === 'api_key' ? 'agent.provider-byok' : null),
+    ai: d.ai ?? (d.env.AI as unknown as AiBinding | undefined) ?? { run: async () => { throw new Error('no AI binding'); } },
+    models: resolveModels(),
+    storage,
+  };
+}

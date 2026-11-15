@@ -51,7 +51,7 @@ import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importStat
 import type { DigestDto, AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
 import { funnelOnce } from './funnel';
 import { digestCounts, digestEnabled, setDigestEnabled } from './digest';
-import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
+import { holdCredits, lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, releaseHold, revokeGrantExcess, settleHold, upgradeGrant, type CreditKind, type HoldResult, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { abandonVoiceTurn } from './ai/agent';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
@@ -2715,6 +2715,27 @@ export class WorkspaceDO extends DurableObject<Env> {
     if (!SL_OPS.includes(op)) throw new Error('unknown smart layer op');
     const ops = doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f));
     return (ops[op] as (...a: unknown[]) => unknown)(...args);
+  }
+
+  /** This workspace's assistant mode (the per-store rollout flag, default off). Set only by an operator (`setAssistantMode`); a merchant can never raise it. */
+  async assistantMode(): Promise<'off' | 'answer-only' | 'suggest' | 'act'> {
+    const v = this.sql.exec<{ value: string }>("SELECT value FROM agent_state WHERE key = 'assistant.mode'").toArray()[0]?.value;
+    return v === 'answer-only' || v === 'suggest' || v === 'act' ? v : 'off';
+  }
+
+  async setAssistantMode(mode: 'off' | 'answer-only' | 'suggest' | 'act'): Promise<void> {
+    this.ctx.storage.transactionSync(() => this.sql.exec("INSERT INTO agent_state (key, value) VALUES ('assistant.mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", mode));
+  }
+
+  /** Heavy assistant jobs spend AI credits: hold first (the cost was shown), settle on success, release on failure. Same ledger as the agent, note `assistant`. */
+  async assistantHold(ref: string, credits: number, now = Date.now()): Promise<HoldResult> {
+    return this.ctx.storage.transactionSync(() => holdCredits(this.sql, ref, now, credits));
+  }
+  async assistantSettle(ref: string, now = Date.now()): Promise<'charged' | 'refused' | 'noop'> {
+    return this.ctx.storage.transactionSync(() => settleHold(this.sql, ref, now, this.workspaceId, 'assistant'));
+  }
+  async assistantRelease(ref: string, now = Date.now()): Promise<void> {
+    this.ctx.storage.transactionSync(() => releaseHold(this.sql, ref, now));
   }
 
   // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------

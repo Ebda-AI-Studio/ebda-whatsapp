@@ -1,0 +1,51 @@
+{
+  "id": "operator.assistant-controls",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "التحكم في مساعد ابدأ شات (تشغيل وإيقاف)",
+  "titleEn": "Assistant controls (rollout mode and kill switches)",
+  "screens": [],
+  "api": [
+    "GET /operator/assistant",
+    "PUT /operator/assistant/flags",
+    "PUT /operator/workspaces/:workspaceId/assistant"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "rollout stages and the emergency stop of the assistant; the merchant never sees or sets them",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "ليه المساعد مش ظاهر عندي؟",
+      "مين بيفتح المساعد على متجري؟",
+      "ازاي أفتح المساعد لمتجر معين؟"
+    ],
+    "en": [
+      "Why can I not turn the assistant on myself?",
+      "Who enables the assistant for my store?",
+      "How is the assistant rolled out?"
+    ]
+  },
+  "steps": [
+    "Operator API: set the platform kill switches and a store's assistant mode"
+  ],
+  "edgeCases": [
+    "A merchant can never raise the mode above the platform cap"
+  ],
+  "gaps": [
+    "No operator screen yet: set through the API"
+  ]
+}

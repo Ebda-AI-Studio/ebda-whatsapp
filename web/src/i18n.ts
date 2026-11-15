@@ -385,6 +385,15 @@ const ar = {
   tplSharedStatuses: { open: 'مستني الفريق', done: 'اتعمل', declined: 'اتّرفض' } as Record<string, string>,
   tplSharedType: 'نوع القالب', tplSharedLoading: 'بنجيب القوالب الجاهزة…',
   opSharedRequestsTitle: 'طلبات المتاجر على الرقم المشترك', opSharedRequestsEmpty: 'مفيش طلبات من المتاجر دلوقتي.', opSharedReqStore: 'المتجر', opSharedReqText: 'النص المطلوب', opSharedReqHelp: 'متاجر على الرقم المشترك طلبت قوالب خدمة. لما تبعت القالب من الفورم اللي فوق بنفس الاسم واللغة، الطلب بيتقفل لوحده.',
+  assistantNav: 'المساعد', assistantTitle: 'المساعد', assistantClose: 'اقفل المساعد', assistantNew: 'محادثة جديدة', assistantLog: 'محادثة المساعد',
+  assistantEmptyTitle: 'اسألني أي حاجة عن شغلك على واتساب',
+  assistantIntro: 'أقولك ازاي تعمل الحاجة وأوريك فين الشاشة. أنا بجاوب بس، ومبغيّرش حاجة في حسابك.',
+  assistantSuggest: ['ازاي أبعت قالب لعميل؟', 'فين رصيد المحفظة؟', 'ليه الرد على عميل بقى مقفول؟'],
+  assistantPlaceholder: 'اكتب سؤالك هنا', assistantSend: 'ابعت', assistantHint: 'Enter للإرسال، Shift + Enter لسطر جديد', assistantTooLong: 'الرسالة طويلة (أكتر من 2000 حرف). اختصرها.',
+  assistantThinking: 'بدوّر على الإجابة…', assistantError: 'مقدرتش أرد دلوقتي. جرّب تاني بعد لحظة.',
+  assistantOff: 'المساعد مش شغال على متجرك دلوقتي. لما يتفتح هيظهر لوحده.',
+  assistantShowMe: 'وريني فين', assistantSource: 'المصدر', assistantYou: 'إنت',
+  assistantRateGroup: 'قيّم الرد', assistantThumbUp: 'الرد ده مفيد', assistantThumbDown: 'الرد ده مش مفيد', assistantThanks: 'شكرًا، وصلنا رأيك.',
 };
 
 const en: typeof ar = {
@@ -753,6 +762,15 @@ const en: typeof ar = {
   tplSharedStatuses: { open: 'Waiting for the team', done: 'Done', declined: 'Declined' },
   tplSharedType: 'Template type', tplSharedLoading: 'Loading the ready-made templates…',
   opSharedRequestsTitle: 'Store requests on the shared number', opSharedRequestsEmpty: 'No store requests right now.', opSharedReqStore: 'Store', opSharedReqText: 'Requested text', opSharedReqHelp: 'Stores on the shared number asked for service templates. When you submit the template with the same name and language from the form above, the request closes by itself.',
+  assistantNav: 'Assistant', assistantTitle: 'Assistant', assistantClose: 'Close the assistant', assistantNew: 'New chat', assistantLog: 'Assistant conversation',
+  assistantEmptyTitle: 'Ask me anything about your WhatsApp work',
+  assistantIntro: 'I tell you how to do something and show you the screen. I only answer; I never change anything in your account.',
+  assistantSuggest: ['How do I send a template to a customer?', 'Where is my wallet balance?', 'Why is the reply window closed for a customer?'],
+  assistantPlaceholder: 'Type your question here', assistantSend: 'Send', assistantHint: 'Enter to send, Shift + Enter for a new line', assistantTooLong: 'The message is too long (over 2000 characters). Please shorten it.',
+  assistantThinking: 'Looking for the answer…', assistantError: 'I could not answer just now. Please try again in a moment.',
+  assistantOff: 'The assistant is not turned on for your store right now. It appears by itself when it is.',
+  assistantShowMe: 'Show me where', assistantSource: 'Source', assistantYou: 'You',
+  assistantRateGroup: 'Rate the answer', assistantThumbUp: 'This answer helped', assistantThumbDown: 'This answer did not help', assistantThanks: 'Thank you, we got your feedback.',
 };
 
 export const STRINGS = { ar, en };
