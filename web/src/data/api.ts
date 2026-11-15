@@ -2,7 +2,7 @@ import { z } from 'zod';
 import {
   agentSettingsDto, apiError, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
-  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
+  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -257,6 +257,15 @@ export function createApiSource(o: Opts): LiveSource {
       },
       refundRequests: async () => (await call('/wallet/refund-requests', items(refundRequestDto))).items,
       requestRefund: (amountMinor, note) => call('/wallet/refund-requests', refundRequestDto, post({ amountMinor, ...(note.trim() ? { note: note.trim() } : {}) })),
+      previewNumberFunding: (pn) => call(`/numbers/${encodeURIComponent(pn)}/funding/preview`, numberFundingPreviewDto, post({ funding: 'merchant_card' })),
+      confirmNumberFunding: async (pn, c) => { await call(`/numbers/${encodeURIComponent(pn)}/funding`, done, { method: 'PUT', body: JSON.stringify({ funding: 'merchant_card', confirmId: c.confirmId, token: c.token }) }); },
+      yearlyRefund: () => call('/wallet/yearly-refund', yearlyRefundViewDto),
+      previewYearlyRefund: () => call('/wallet/yearly-refund/preview', yearlyRefundPreviewDto, post({})),
+      requestYearlyRefund: (c) => call('/wallet/yearly-refund/requests', yearlyRefundRequestDto, post({ confirmId: c.confirmId, token: c.token })),
+      creditPacks: () => call('/wallet/credit-packs', creditPacksDto),
+      previewCreditPack: (packId) => call('/wallet/credit-packs/preview', creditPackPreviewDto, post({ packId })),
+      buyCreditPack: (packId, c) => call('/wallet/credit-packs/orders', creditOrderDto, post({ packId, confirmId: c.confirmId, token: c.token })),
+      creditOrderState: (orderId) => call(`/wallet/credit-packs/orders/${encodeURIComponent(orderId)}`, creditOrderDto),
     },
     operator: {
       opsStatus: (workspaceId) => op(`/workspaces/${encodeURIComponent(workspaceId)}/ops`, opsStatusDto),
@@ -303,6 +312,7 @@ export function createApiSource(o: Opts): LiveSource {
       yearlyRefundQuote: (orderId) => op(`/package-orders/${encodeURIComponent(orderId)}/refund-quote`, z.object({
         orderId: z.string(), packageId: z.string(), periodMonths: z.number(), monthlyMinor: z.number(), unusedMonths: z.number(), grossMinor: z.number(), debtMinor: z.number(), debtSettledMinor: z.number(), refundMinor: z.number(),
       }).loose()),
+      yearlyRefundRequests: async () => (await op('/yearly-refund-requests', items(yearlyRefundRequestDto.extend({ workspaceId: z.string() })))).items,
       yearlyRefundExecute: (orderId, reason) => op(`/package-orders/${encodeURIComponent(orderId)}/yearly-refund`, z.object({
         orderId: z.string(), shortenedMonths: z.number(), debtSettledMinor: z.number(), cashRefundMinor: z.number(), noMoneyOut: z.boolean(), periodEnd: z.number(),
       }), post({ reason })),

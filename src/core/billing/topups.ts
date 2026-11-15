@@ -18,6 +18,7 @@ import { alert } from '../observability';
 import { funnel } from '../funnel';
 import { frozenForOffboarding, refuseIfOffboarded } from '../ops/offboarded';
 import { drainKeyset, type PassOpts } from './drain';
+import { applyCreditWebhook, findCreditOrder } from './credit-packs';
 
 export const MIN_TOPUP_MINOR = 1000;
 export const MAX_TOPUP_MINOR = 5_000_000;
@@ -176,11 +177,12 @@ export async function handleProviderWebhook(env: Env, raw: string, signature: st
   if (!signed) return { status: 401, body: 'unauthorized' };
   const row = await env.DB.prepare(`SELECT ${TOPUP_COLS} FROM topups WHERE order_id = ?`).bind(signed.orderId).first<TopupRow>();
   const pkg = row ? null : await findPackageOrder(env, signed.orderId);
-  if (!row && !pkg) {
+  const credit = row || pkg ? null : await findCreditOrder(env, signed.orderId);
+  if (!row && !pkg && !credit) {
     alert('topup_unknown_order');
     return { status: 200, body: 'ok' };
   }
-  if (row && !topupsEnabled(env)) return { status: 404, body: 'not found' };
+  if ((row || credit) && !topupsEnabled(env)) return { status: 404, body: 'not found' };
   if (signed.status === 'PENDING') return { status: 200, body: 'ok' }; // nothing to apply yet; the final status arrives as its own delivery
   let ev: ParsedWebhook;
   try {
@@ -193,13 +195,13 @@ export async function handleProviderWebhook(env: Env, raw: string, signature: st
   }
   let resolution: string;
   try {
-    resolution = pkg ? await applyPackageWebhook(env, pkg, ev, now) : await applyTopupWebhook(env, row!, ev, now);
+    resolution = pkg ? await applyPackageWebhook(env, pkg, ev, now) : credit ? await applyCreditWebhook(env, credit, ev, now) : await applyTopupWebhook(env, row!, ev, now);
   } catch (err) {
     if (err instanceof RefundContention) {
       alert('package_refund_contention', { eventKey: signed.eventKey });
       await recordUnconfirmed(env, signed, raw, signature, 'refund_contention', now).catch(() => undefined);
     } else {
-      alert(pkg ? 'package_webhook_failed' : 'topup_webhook_failed', { error: err instanceof Error ? err.name : 'error' });
+      alert(pkg ? 'package_webhook_failed' : credit ? 'credit_pack_webhook_failed' : 'topup_webhook_failed', { error: err instanceof Error ? err.name : 'error' });
     }
     return { status: 500, body: 'retry' };
   }

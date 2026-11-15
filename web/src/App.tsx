@@ -119,6 +119,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     const plan = walletDto.plan;
     if (plan && plan.packageId !== 'store-included' && (plan.status === 'active' || plan.status === 'trialing') && plan.periodEnd > now() && plan.periodEnd - now() <= 7 * 86_400_000) lines.push(t.wBannerRenew(dateTime(plan.periodEnd, lang)));
     if (walletDto.instapayNotice) lines.push(t.ipRejectedBanner(walletDto.instapayNotice.reason));
+    if (walletDto.aiCredits.low) lines.push(t.wBannerCreditsLow); // the banner link opens the wallet, where the credits card sits
     if (walletDto.lowBalance || walletDto.debtMinor > 0) {
       const money: string[] = [];
       if (walletDto.debtMinor > 0) money.push(t.wBannerDebt(formatMoney(walletDto.debtMinor, 'EGP', lang)));

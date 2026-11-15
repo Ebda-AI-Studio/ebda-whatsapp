@@ -123,6 +123,32 @@ export function createSampleWallet(): WalletApi {
       refunds.push(r);
       return { ...r };
     },
+    async previewNumberFunding(phoneNumberId) {
+      const f = wallet.funding.find((x) => x.phoneNumberId === phoneNumberId);
+      if (!f) throw new ApiError('not_found', 404);
+      if (f.funding === 'platform_line') throw new ApiError('invalid_request', 409, 'operator_funded');
+      return { phoneNumberId, current: f.funding, funding: 'merchant_card', confirm: { confirmId: crypto.randomUUID(), token: 'a'.repeat(64), expiresAt: Date.now() + 15 * 60_000 } };
+    },
+    async confirmNumberFunding(phoneNumberId) {
+      const f = wallet.funding.find((x) => x.phoneNumberId === phoneNumberId);
+      if (!f) throw new ApiError('not_found', 404);
+      f.funding = 'merchant_card';
+    },
+    async yearlyRefund() { return { quote: null, reason: 'not_yearly', request: null }; },
+    async previewYearlyRefund() { throw new ApiError('invalid_request', 409, 'not_yearly'); },
+    async requestYearlyRefund() { throw new ApiError('invalid_request', 409, 'not_yearly'); },
+    creditPacks: async () => ({ enabled: true, items: [{ id: 'credits-100', credits: 100, priceMinor: 23000 }, { id: 'credits-500', credits: 500, priceMinor: 115000 }, { id: 'credits-1000', credits: 1000, priceMinor: 230000 }] }),
+    async previewCreditPack(packId) {
+      const pack = [{ id: 'credits-100', credits: 100, priceMinor: 23000 }, { id: 'credits-500', credits: 500, priceMinor: 115000 }, { id: 'credits-1000', credits: 1000, priceMinor: 230000 }].find((p) => p.id === packId);
+      if (!pack) throw new ApiError('not_found', 404);
+      return { pack, confirm: { confirmId: crypto.randomUUID(), token: 'b'.repeat(64), expiresAt: Date.now() + 15 * 60_000 } };
+    },
+    async buyCreditPack(packId) {
+      const id = nextId++;
+      const credits = Number(packId.replace('credits-', '')) || 100;
+      return { orderId: `cp_${id}`, state: 'pending', credits, amountMinor: credits * 230, checkoutUrl: `https://pay.example.test/checkout/cp_${id}` };
+    },
+    creditOrderState: async (orderId) => ({ orderId, state: 'pending', credits: 0, amountMinor: 0 }),
     offboarding: async () => ({ ...off }),
     async requestOffboarding(opts) {
       if (wallet.balanceMinor > 0 && !opts.acceptWriteOff) throw new ApiError('invalid_request', 409, 'wallet_balance_remains');
@@ -296,6 +322,7 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       if (!/^yearly-/.test(orderId)) throw new ApiError('not_found', 404);
       return { orderId, packageId: 'growth-yearly', periodMonths: 12, monthlyMinor: 111750, unusedMonths: 11, grossMinor: 1229250, debtMinor: 100000, debtSettledMinor: 100000, refundMinor: 1129250 };
     },
+    yearlyRefundRequests: async () => [],
     async yearlyRefundExecute(orderId, reason) {
       if (!/^yearly-/.test(orderId)) throw new ApiError('not_found', 404);
       record('yearly_refund', null, null, { orderId, shortenedMonths: 11 }, reason);
