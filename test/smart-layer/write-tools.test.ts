@@ -1,7 +1,8 @@
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { configureAssistant } from '../../src/routes/assistant';
-import { apiFor, storeId, useApiKey } from '../helpers/api';
+import { apiFor, apiKey, storeId, useApiKey } from '../helpers/api';
+import { mint } from '../helpers/issuer';
 import { rows, seedNumber, workspace } from '../helpers/workspace';
 
 useApiKey();
@@ -166,5 +167,31 @@ describe('wave 1 preview tools: preview, apply, undo through the merchant\'s own
     expect(g.previews).toHaveLength(1);
     const sg = await t.ask('اعمل شريحة العملاء الـ vip', { name: 'segment_upsert', args: { name: 'VIP', criteria: { tags: { any: ['vip'] } } } });
     expect(sg.previews[0]!.rows.some((r) => r.after === '0')).toBe(true);
+  });
+});
+
+describe('an operator session never drives the assistant or the agent settings (review class: support "act as" sessions)', () => {
+  const OWNER = '6f1d2c1e-8a8f-4a3b-9f1e-1a2b3c4d5e6f';
+  const operator = (store: string) => mint(apiKey(), { sub: OWNER, pa: 'super_admin', stores: [{ id: store, role: 'owner' }] });
+  const call = (store: string, token: string, method: string, path: string, body?: unknown) => SELF.fetch(`https://x/api/v1/stores/${store}${path}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+
+  it('a super admin who is also a member is refused on turn, apply, undo, feedback and the agent PUT; nothing changes; the same person without the operator claim is not', async () => {
+    const t = await setup(7390);
+    const out = await t.ask('عايز اعمل تاج vip للعميل منى السيد', { name: 'conversation_tag_set', args: { customer: 'منى السيد', tags: ['vip'] } });
+    const pid = out.previews[0]!.previewId;
+    const op = await operator(t.s);
+    for (const [method, path, body] of [
+      ['POST', '/assistant/turn', { conversationId: crypto.randomUUID(), text: 'ازاي اشحن المحفظة', locale: 'ar' }],
+      ['POST', `/assistant/previews/${pid}/apply`, {}],
+      ['POST', `/assistant/applied/${crypto.randomUUID()}/undo`, {}],
+      ['POST', '/assistant/feedback', { turnId: crypto.randomUUID(), thumb: 'up' }],
+      ['PUT', '/agent', { allowRefund: true }],
+    ] as const) {
+      const r = await call(t.s, op, method, path, body);
+      expect([r.status, ((await r.json()) as { message?: string }).message], `${method} ${path}`).toEqual([403, 'operator_session']);
+    }
+    expect(await tagsOf(t.get)).toEqual([]);
+    expect(((await t.get('/agent')) as { allowRefund: boolean }).allowRefund).toBe(false);
+    expect((await t.apply(pid)).status).toBe(200); // the merchant's own session still works
   });
 });
