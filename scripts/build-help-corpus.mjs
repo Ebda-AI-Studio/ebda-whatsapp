@@ -2,7 +2,7 @@
 // Builds the two bundled assets of the assistant (the Worker cannot read the file system):
 //   assistant/registry.generated.json   the capability registry as the engine's RegistryCap list (via the engine's own toRegistryView)
 //   assistant/help-corpus.generated.json  docs/help/{ar,en}/NN-<slug>.md as heading-aware chunks + a content hash (skip-if-unchanged index)
-//   assistant/explain.generated.json      per live, non-forbidden BEHAVIOUR capability (no merchant route of its own): title (ar/en), steps, edge cases, guide: what the explain tools answer from; the registry view keeps none of it
+//   assistant/explain.generated.json      per live, non-forbidden BEHAVIOUR capability (no merchant route of its own, or reads only): title (ar/en), steps, edge cases, guide: what the explain tools answer from; the registry view keeps none of it
 // `node scripts/build-help-corpus.mjs` writes them; `--check` exits 1 when they are stale (test/smart-layer/assets.test.ts runs the same builder).
 import { build } from 'esbuild';
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
@@ -41,7 +41,7 @@ export async function buildAssets() {
     hash: await corpusHash(docs),
     docs: docs.map((d) => ({ articleId: d.articleId, locale: d.locale, title: d.title, url: d.url, appPath: d.appPath, capabilityIds: d.capabilityIds, chunks: chunkHelp(d) })),
   };
-  const explain = Object.fromEntries(entries.filter((e) => e.status === 'live' && e.policy !== 'forbidden' && e.api.every((a) => !a.includes('/stores/:storeId'))).map((e) => [e.id, { titleAr: e.titleAr, titleEn: e.titleEn, steps: e.steps, edgeCases: e.edgeCases, helpArticle: e.helpArticle }]));
+  const explain = Object.fromEntries(entries.filter((e) => e.status === 'live' && e.policy !== 'forbidden' && e.api.every((a) => !a.includes('/stores/:storeId') || a.startsWith('GET '))).map((e) => [e.id, { titleAr: e.titleAr, titleEn: e.titleEn, steps: e.steps, edgeCases: e.edgeCases, helpArticle: e.helpArticle }]));
   return { registry: JSON.stringify(registry) + '\n', corpus: JSON.stringify(corpus) + '\n', explain: JSON.stringify(explain) + '\n' };
 }
 

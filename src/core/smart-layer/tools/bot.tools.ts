@@ -20,9 +20,9 @@ const faqArgs = z.object({ text: z.string().trim().min(1).max(20_000), mode: z.e
 const digestArgs = toggleArgs;
 const seatArgs = z.object({ member: z.string().trim().min(1).max(100).describe("the team member's display name") }).strict();
 
-function switchTool(name: string, capabilityId: string, key: 'orderingBot' | 'orderConfirmations', labels: { ar: string; en: string }, description: string, o: { policy: 'preview' | 'confirm'; messagesCustomers?: boolean }, kit: Kit): ToolSpec {
+function switchTool(name: string, capabilityId: string, key: 'orderingBot' | 'orderConfirmations' | 'otpViaWhatsApp', labels: { ar: string; en: string }, description: string, o: { policy: 'preview' | 'confirm'; messagesCustomers?: boolean; money?: boolean }, kit: Kit): ToolSpec {
   return writeTool({
-    name, capabilityId, description, args: toggleArgs, policy: o.policy, undo: 'reversible', ...(o.messagesCustomers ? { messagesCustomers: true } : {}),
+    name, capabilityId, description, args: toggleArgs, policy: o.policy, undo: 'reversible', ...(o.messagesCustomers ? { messagesCustomers: true } : {}), ...(o.money ? { money: true } : {}),
     read: async (api) => ({ on: (await settings(api))[key] }),
     plan: (a, s) => {
       if (s.on === a.enabled) throw new ToolInputError('no_change');
@@ -35,7 +35,7 @@ function switchTool(name: string, capabilityId: string, key: 'orderingBot' | 'or
     },
     // Turning ON a switch that messages customers takes the route's own two steps (SETTINGS-CONFIRM-1): the merchant's press in the assistant IS that confirmation.
     send: async (call, plan, a) => {
-      if (key === 'orderConfirmations' && a.enabled) {
+      if (key !== 'orderingBot' && a.enabled) {
         const t = (await call({ method: 'POST', path: '/store-link/settings/preview', body: plan.request.body })) as { confirmToken: string };
         return call({ ...plan.request, body: { ...(plan.request.body as object), confirmToken: t.confirmToken } });
       }
@@ -60,6 +60,7 @@ export function botTools(kit: Kit): ToolSpec[] {
     setting('bot_hours_set', 'bot.hours-away', 'hours', hoursArgs, 'مواعيد العمل ورسالة الغياب', 'business hours and the away message', 'Replace the business hours and the away message. Send the whole new setting.'),
     setting('bot_location_set', 'bot.location', 'location', locationArgs, 'موقع المحل', 'the shop location', 'Set (or remove, with null) the shop location the bot sends.'),
     switchTool('bot_ordering_toggle', 'bot.ordering-toggle', 'orderingBot', { ar: 'بوت الطلبات', en: 'the ordering bot' }, 'Turn the ordering bot on or off.', { policy: 'preview' }, kit),
+    switchTool('otp_toggle', 'otp.toggle', 'otpViaWhatsApp', { ar: 'كود الدخول لمتجرك بالواتساب', en: 'store sign-in codes over WhatsApp' }, 'Turn on or off sending the store sign-in codes over WhatsApp. Each code costs money and goes to a customer, so turning it on needs the merchant to confirm.', { policy: 'confirm', messagesCustomers: true, money: true }, kit),
     switchTool('bot_order_confirmations_toggle', 'bot.order-confirmations-toggle', 'orderConfirmations', { ar: 'رسائل تأكيد الطلبات للعملاء', en: 'order confirmation messages to customers' }, 'Turn the order confirmation messages (sent to customers) on or off. Turning them on messages customers, so the merchant confirms it.', { policy: 'confirm', messagesCustomers: true }, kit),
 
     writeTool({
@@ -152,9 +153,24 @@ export function botTools(kit: Kit): ToolSpec[] {
         return { userId: m.userId, name: m.displayName, seat: m.seat, seats: r.seats ?? null };
       },
       fingerprint: (s) => ({ seat: s.seat, seats: s.seats }),
-      plan: (_a, s) => {
+      plan: (a, s) => {
         if (s.seat === 'seated') throw new ToolInputError('no_change');
-        return { summary: { ar: `إعطاء مقعد لـ ${s.name}`, en: `Give ${s.name} a seat` }, rows: [row('المقعد', 'Seat', 'بدون / none', 'مقعد / seat'), ...(s.seats ? [row('المقاعد المستخدمة', 'Seats used', `${s.seats.used}/${s.seats.limit}`, `${s.seats.used + 1}/${s.seats.limit}`)] : [])], request: { method: 'PUT', path: `/members/${s.userId}/seat` } };
+        return { summary: { ar: `إعطاء مقعد لـ ${s.name}`, en: `Give ${s.name} a seat` }, rows: [row('المقعد', 'Seat', 'بدون / none', 'مقعد / seat'), ...(s.seats ? [row('المقاعد المستخدمة', 'Seats used', `${s.seats.used}/${s.seats.limit}`, `${s.seats.used + 1}/${s.seats.limit}`)] : [])], request: { method: 'PUT', path: `/members/${s.userId}/seat` }, restore: { tool: 'seat_remove', args: { member: a.member } } };
+      },
+    }, kit),
+    writeTool({
+      name: 'seat_remove', capabilityId: 'team.seat-remove', policy: 'confirm', undo: 'reversible',
+      description: 'Take a staff member\'s seat away (they can no longer use the inbox) and free it for someone else. Give their display name. The merchant confirms with the button; the seat can be given back.',
+      args: seatArgs,
+      read: async (api, _c, a) => {
+        const r = (await api.get('/members')) as { items?: Array<{ userId: string; displayName: string; role: string; seat: string }> };
+        const m = pickByName((r.items ?? []).filter((x) => x.role === 'staff'), (x) => x.displayName, a.member);
+        return { userId: m.userId, name: m.displayName, seat: m.seat };
+      },
+      fingerprint: (s) => ({ seat: s.seat }),
+      plan: (a, s) => {
+        if (s.seat === 'none') throw new ToolInputError('no_change');
+        return { summary: { ar: `سحب المقعد من ${s.name}`, en: `Take ${s.name}'s seat away` }, rows: [row('المقعد', 'Seat', 'مقعد / seat', 'بدون / none')], request: { method: 'DELETE', path: `/members/${s.userId}/seat` }, restore: { tool: 'seat_assign', args: { member: a.member } } };
       },
     }, kit),
   ];

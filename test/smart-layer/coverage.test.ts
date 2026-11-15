@@ -61,7 +61,7 @@ describe('deep-link-only entries are decisions, not escapes', () => {
     }
     for (const id of Object.keys(OWNED_ELSEWHERE)) expect(REGISTRY.caps.has(id), id).toBe(true);
   });
-  it('the secret-only entries are exactly the credential, token, key, OAuth and card capabilities', () => {
-    expect(Object.entries(DEEP_LINK_ONLY).filter(([, v]) => 'secret' in v).map(([k]) => k).sort()).toEqual(['access.integrator-tokens', 'access.signin', 'agent.provider-byok', 'numbers.connect', 'wallet.card-topup']);
+  it('the secret-only entries are exactly the credential, token, key, connector header, OAuth and card capabilities', () => {
+    expect(Object.entries(DEEP_LINK_ONLY).filter(([, v]) => 'secret' in v).map(([k]) => k).sort()).toEqual(['access.integrator-tokens', 'access.signin', 'agent.connectors', 'agent.provider-byok', 'numbers.connect', 'wallet.card-topup']);
   });
 });

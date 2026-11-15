@@ -17,6 +17,7 @@ import { chatQuota } from './quota';
 import { rpcStorage } from './storage-do';
 import type { RegistryView } from '../../../foundation/smart-layer/types';
 import explainJson from '../../../assistant/explain.generated.json';
+import { accountReadTools, accountWriteTools } from './tools/account.tools';
 import { botTools } from './tools/bot.tools';
 import { explainTools, type ExplainData } from './tools/explain.tools';
 import { campaignTools } from './tools/campaigns.tools';
@@ -62,7 +63,7 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
   };
   const tools: ToolSpec[] = [
     ...[...readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability }),
-    ...inboxTools(kit), ...contactTools(kit), ...segmentTools(kit), ...botTools(kit), ...campaignTools(kit), ...templateTools(kit), ...inboxReadTools(kit), ...contactReadTools(kit), ...explainTools(explainJson as unknown as ExplainData)].map(withKeywords),
+    ...inboxTools(kit), ...contactTools(kit), ...segmentTools(kit), ...botTools(kit), ...campaignTools(kit), ...templateTools(kit), ...inboxReadTools(kit), ...contactReadTools(kit), ...accountReadTools(kit), ...accountWriteTools(kit), ...explainTools(explainJson as unknown as ExplainData)].map(withKeywords),
   ];
   return {
     product: 'chat',

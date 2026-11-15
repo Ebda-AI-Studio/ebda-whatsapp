@@ -15,6 +15,11 @@ export const EXPLAIN_IDS: readonly string[] = [
   // inbox, contacts, campaigns (E6)
   'inbox.coexistence-echo', 'inbox.failed-retry', 'inbox.handoff-needs-human', 'inbox.quick-replies', 'inbox.voice-note-transcript',
   'contacts.opt-in-keyword', 'contacts.opt-out',
+  // access, numbers, orders, catalogue, billing behaviours (E7)
+  'access.language', 'access.sign-out', 'agent.voice-notes', 'catalogue.google-feeds-clash', 'compliance.privacy-terms', 'inbox.realtime', 'notifications.alerts',
+  'numbers.coexistence', 'numbers.display-name', 'numbers.history-contacts-sync', 'numbers.meta-payment-method', 'numbers.meta-verification',
+  'orders.cart-to-order', 'orders.cod-confirmation', 'orders.instapay-in-chat', 'orders.tracking',
+  'templates.shared-number-marketing', 'templates.starter-on-connect', 'wallet.instapay-auto-confirm', 'catalogue.product-cards',
   'campaigns.auto-pause', 'campaigns.consent-gating', 'campaigns.content-guard', 'campaigns.freq-cap-131049', 'campaigns.new-workspace-cap', 'campaigns.tracked-links',
 ];
 

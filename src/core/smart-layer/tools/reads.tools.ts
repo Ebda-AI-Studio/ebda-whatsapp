@@ -12,8 +12,8 @@ import { ToolInputError, clip, findContact, findConversation, readerFor, schemaO
 const name = z.string().trim().min(1).max(100).describe("the customer's name as the merchant wrote it");
 const none = z.object({}).strict();
 
-type Def<A> = { name: string; capabilityId: string; description: string; args: z.ZodType<A>; resultTrust: 'typed-source' | 'store-data' | 'untrusted'; run(ctx: TurnCtx, a: A, kit: Kit): Promise<unknown> };
-function read<A>(kit: Kit, d: Def<A>): ToolSpec {
+export type Def<A> = { name: string; capabilityId: string; description: string; args: z.ZodType<A>; resultTrust: 'typed-source' | 'store-data' | 'untrusted'; run(ctx: TurnCtx, a: A, kit: Kit): Promise<unknown> };
+export function read<A>(kit: Kit, d: Def<A>): ToolSpec {
   return { name: d.name, capabilityId: d.capabilityId, description: d.description, args: d.args, jsonSchema: schemaOf(d.args), policy: 'free', undo: 'none', resultTrust: d.resultTrust, read: async (ctx: TurnCtx, a: A) => compact(await d.run(ctx, a, kit)) } as unknown as ToolSpec;
 }
 
