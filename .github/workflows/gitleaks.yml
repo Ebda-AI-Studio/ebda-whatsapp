@@ -19,7 +19,7 @@ jobs:
     # Never run code from a fork's PR on a self-hosted runner.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # ubuntu-latest became 26.04 (2026-11); Playwright 1.60 unsupported — Ruling CI-HOSTED-2
-    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
