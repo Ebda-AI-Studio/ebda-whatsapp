@@ -8,7 +8,7 @@ import { campaignParam, segmentCriteria, type CampaignCreate } from '../../api/c
 import type { ToolSpec } from '../../../../foundation/smart-layer/types';
 import { ToolInputError, pickByName, row, writeTool, type L, type Reader, type Kit } from './write';
 
-type Camp = { id: string; name: string; status: string; category: string; template: { name: string; language: string }; params: unknown[]; audience: { segmentId: number | null; criteria: unknown }; scheduledAt: number | null; estimate?: { audience: number; perMessageMinor: number; totalMinor: number } };
+type Camp = { id: string; name: string; status: string; category: string; template: { name: string; language: string }; params: unknown[]; audience: { segmentId: number | null; criteria: unknown }; scheduledAt: number | null; estimate?: { audience: number; perMessageMinor: number; totalMinor: number }; cardPays?: boolean };
 const egp = (minor: number) => String(Math.round(minor) / 100);
 const fmt = (ms: number, lang: 'ar' | 'en') => new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { timeZone: 'Africa/Cairo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ms));
 const j = (v: unknown) => JSON.stringify(v);
@@ -33,14 +33,28 @@ async function find(api: Reader, wanted: string): Promise<Camp> {
 /** The campaign again with its pre-send estimate (the list answer may carry none). */
 async function detail(api: Reader, wanted: string): Promise<Camp> {
   const c = await find(api, wanted);
-  return (await api.get(`/campaigns/${c.id}`)) as Camp;
+  const full = (await api.get(`/campaigns/${c.id}`)) as Camp & { totals?: { pending: number } };
+  // A campaign that already started has no pre-send estimate: price what is still to go with the wallet's own estimate (only a priced one counts).
+  if (!full.estimate && full.totals && full.totals.pending > 0) {
+    const e = (await api.get('/wallet/estimate', { category: c.category.toLowerCase(), count: String(full.totals.pending) }).catch(() => null)) as { priced: boolean; perMessageMinor: number; totalMinor: number } | null;
+    if (e?.priced) full.estimate = { audience: full.totals.pending, perMessageMinor: e.perMessageMinor, totalMinor: e.totalMinor };
+  }
+  // Whether Meta bills the merchant's card for every connected number: then a wallet estimate of 0 is the truth, not a missing price.
+  const w = (await api.get('/wallet').catch(() => null)) as { funding?: Array<{ funding: string }> } | null;
+  return { ...full, cardPays: !!w?.funding?.length && w.funding.every((f) => f.funding === 'merchant_card') };
+}
+/** A money confirm needs a price the merchant can read: no estimate (or a zero one while the wallet pays) means the price is unknown, and an unknown price is never confirmed. */
+function needCost(c: Camp): void {
+  if (c.cardPays) return; // Meta bills the merchant's own card: there is no wallet price, and the card says exactly that
+  if (!c.estimate) throw new ToolInputError('unavailable');
+  if (c.estimate.totalMinor <= 0) throw new ToolInputError('unavailable');
 }
 const fingerprint = (c: Camp) => ({ id: c.id, status: c.status, scheduledAt: c.scheduledAt, est: c.estimate ?? null, params: c.params, template: c.template });
 const costRows = (c: Camp): ReturnType<typeof row>[] => [
   row('القالب', 'Template', undefined, `${c.template.name} (${c.template.language})`),
   row('البيانات اللي هتتبعت', 'Parameters', undefined, c.params.length ? j(c.params) : '-'),
   row('هيوصل لكام واحد', 'People it reaches', undefined, c.estimate ? String(c.estimate.audience) : '?'),
-  row('التكلفة المتوقعة من المحفظة (جنيه)', 'Expected wallet cost (EGP)', undefined, c.estimate && c.estimate.totalMinor > 0 ? egp(c.estimate.totalMinor) : '?'),
+  row('التكلفة المتوقعة (جنيه)', 'Expected cost (EGP)', undefined, c.estimate && c.estimate.totalMinor > 0 ? egp(c.estimate.totalMinor) : c.cardPays ? 'ميتا بتحاسبك على كارتك / Meta bills your card' : '?'),
 ];
 
 function stateTool(opts: { tool: string; capability: string; policy: 'preview' | 'confirm'; undo: 'reversible' | 'compensating' | 'irreversible'; from: string[]; verb: L; to: string; path: (id: string) => string; description: string; money?: boolean; messages?: boolean; restoreTool?: string; deletes?: boolean; method?: 'POST' | 'DELETE' }, kit: Kit): ToolSpec {
@@ -51,6 +65,7 @@ function stateTool(opts: { tool: string; capability: string; policy: 'preview' |
     fingerprint,
     plan: (a, c) => {
       if (!opts.from.includes(c.status)) throw new ToolInputError('no_change');
+      if (opts.money) needCost(c);
       return {
         summary: { ar: `${opts.verb.ar} حملة "${c.name}"`, en: `${opts.verb.en} the campaign "${c.name}"` },
         rows: [row('الحالة', 'Status', c.status, opts.to), ...costRows(c)],
@@ -103,6 +118,7 @@ export function campaignTools(kit: Kit): ToolSpec[] {
       fingerprint,
       plan: (a, c) => {
         if (c.status !== 'draft') throw new ToolInputError('no_change');
+        needCost(c);
         const at = Date.parse(a.at);
         if (!Number.isFinite(at) || at <= Date.now() + 60_000 || at > Date.now() + 365 * 86_400_000) throw new ToolInputError('unavailable');
         return {

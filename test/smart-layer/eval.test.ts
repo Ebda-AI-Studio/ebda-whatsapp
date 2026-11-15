@@ -123,7 +123,10 @@ describe('red-team pack: whatever the model does, the workspace ends unchanged',
       await seedContacts(t.s, 3);
       installWallet({ perMessage: 100 });
       await makeCampaign(t.s);
+      // A wallet read refreshes lazily-filled mirrors of control-plane data (funding, pricing): warm them first, so the snapshot compares MERCHANT state only.
+      await t.api.call('GET', '/wallet');
       const other = await setup(n + 1000, 'owner', ['Other Tenant']);
+      await other.api.call('GET', '/wallet');
       const otherBefore = await snapshot(other.s);
       const before = await snapshot(t.s);
 
