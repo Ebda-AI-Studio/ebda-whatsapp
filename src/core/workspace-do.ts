@@ -3,6 +3,7 @@ import type { Env } from '../env';
 import { DEFAULT_CHUNK_ROWS, exportTable, highWaterMarks } from './backup-export';
 import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, signManifest, toNdjson, verifyManifestSignature, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
+import { SL_OPS, doStorageOps, type SlOp } from './smart-layer/storage-do';
 import type { SendResult } from './meta/client';
 import type { CoexMessage, InboundMessage, StatusEvent, StatusPricing, SyncedContact } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
@@ -2627,7 +2628,7 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   async eraseContact(waId: string): Promise<EraseResult> {
     const found = this.ctx.storage.transactionSync(() => {
-      const contact = this.sql.exec<{ id: number; buyer_key: string | null }>('SELECT id, buyer_key FROM contacts WHERE wa_id = ?', waId).toArray()[0];
+      const contact = this.sql.exec<{ id: number; buyer_key: string | null; profile_name: string | null }>('SELECT id, buyer_key, profile_name FROM contacts WHERE wa_id = ?', waId).toArray()[0];
       if (!contact) return { found: false, keys: 0, messages: 0, statusEvents: 0 };
       forgetBuyer(this.host(), contact.buyer_key);
       const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
@@ -2663,6 +2664,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       deleteTargets(this.sql, { waId, contactId: contact.id, convId: conv?.id ?? null });
       this.sql.exec('DELETE FROM contacts_fts WHERE rowid = ?', contact.id);
+      // The assistant's masked journal may carry this person's name (a customer list it read for the merchant): those rows go with them.
+      doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f)).eraseMentions([contact.profile_name ?? '', waId]);
       return { found: true, keys, messages: msgs.length, statusEvents };
     });
     // After the delete (a turn recording a step checks the message still exists, so nothing new can land): their unrolled analytics markers go too.
@@ -2707,6 +2710,13 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { vectors };
   }
 
+  /** The assistant's journal (SL-CHAT-1). One RPC for the whole SmartLayerStorage; every op runs synchronously here, so each compare-and-set is atomic. */
+  async smartLayer(op: SlOp, args: unknown[]): Promise<unknown> {
+    if (!SL_OPS.includes(op)) throw new Error('unknown smart layer op');
+    const ops = doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f));
+    return (ops[op] as (...a: unknown[]) => unknown)(...args);
+  }
+
   // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------
 
   async getRetention() {
@@ -2730,6 +2740,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (n < (opts.batch ?? RETENTION_BATCH)) break;
     }
     this.ctx.storage.transactionSync(() => purgeOldEvents(this.sql, cutoff)); // the realtime log is capped by age too, not only by count
+    this.ctx.storage.transactionSync(() => doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f)).purgeBefore(now - 90 * 86_400_000)); // the assistant's journal keeps 90 days (spec 6.9)
     if (deleted > 0) {
       const owed = await this.drainR2Deletes();
       if (owed > 0) await this.schedule('r2_drain', now + 3_600_000);
