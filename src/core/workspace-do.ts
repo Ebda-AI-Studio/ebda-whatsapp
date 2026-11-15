@@ -1026,6 +1026,11 @@ export class WorkspaceDO extends DurableObject<Env> {
     return this.sql.exec("SELECT 1 FROM store_state WHERE key = ? AND value = 'done'", `templates.starter:${wabaId}`).toArray().length > 0;
   }
 
+  /** Where this store's customers shop (from `store.linked`), or null until the Store has said. The COD v2 template's fixed URL base. */
+  async storeOrigin(): Promise<string | null> {
+    return this.sql.exec<{ value: string }>("SELECT value FROM store_state WHERE key = 'storefront_origin'").toArray()[0]?.value ?? null;
+  }
+
   async markStarterInstalled(wabaId: string): Promise<void> {
     this.sql.exec("INSERT INTO store_state (key, value) VALUES (?, 'done') ON CONFLICT(key) DO UPDATE SET value = 'done'", `templates.starter:${wabaId}`);
   }

@@ -2,7 +2,7 @@
   "id": "orders.cod-confirmation",
   "status": "live",
   "area": "orders",
-  "version": 2,
+  "version": 3,
   "versionDate": "2026-11-15",
   "titleAr": "رسالة تأكيد الأوردر كاش",
   "titleEn": "COD confirmation template with Confirm/Refuse buttons",
@@ -32,7 +32,8 @@
   },
   "steps": [
     "Store creates COD order; Chat sends template with Confirm/Refuse; result sent to the Store; no answer in 24h = no_reply",
-    "When cod_confirmation_v2 is APPROVED for the workspace, its URL base matches the order link and the Store sent store name, address, item count and order link, the richer v2 template is sent instead; otherwise the plain template"
+    "When cod_confirmation_v2 is APPROVED for the workspace, its URL base matches the order link and the Store sent store name, address, item count and order link, the richer v2 template is sent instead; otherwise the plain template",
+    "cod_confirmation_v2 is submitted per store on store.linked (with storefrontOrigin) and when a number connects; a REJECTED one is replaced from the Templates screen (POST /templates/cod-v2/resubmit)"
   ],
   "edgeCases": [
     "Template must be approved and number connected",

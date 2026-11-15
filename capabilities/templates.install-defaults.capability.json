@@ -12,7 +12,8 @@
     "/templates"
   ],
   "api": [
-    "POST /stores/:storeId/templates/install-defaults"
+    "POST /stores/:storeId/templates/install-defaults",
+    "POST /stores/:storeId/templates/cod-v2/resubmit"
   ],
   "planGate": null,
   "roles": [

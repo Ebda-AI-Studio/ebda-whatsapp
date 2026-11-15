@@ -4,11 +4,12 @@ import type { TemplateSeed } from '../../routes/templates';
  * The richer COD confirmation (v2): store name header, address, item count, total and a button to the order page, plus the
  * same two quick replies as v1 (same titles, so reply matching in store-copy.ts is unchanged). A Meta URL button has a FIXED
  * base and every store has its own storefront domain, so this is a builder, not a starter entry: it is submitted per workspace
- * with that store's origin. The sender only uses it when its approved URL base matches the order link the Store sent.
+ * with that store's origin (cod-v2.ts, on `store.linked` and from the Templates screen). The button opens the Store's guest-safe
+ * order summary (`/o/<signed token>`). The sender only uses it when its approved URL base matches the order link the Store sent.
  */
 export const COD_V2_NAME = 'cod_confirmation_v2';
 export function codConfirmationV2Seed(storefrontOrigin: string): TemplateSeed {
-  const base = `${storefrontOrigin.replace(/\/+$/, '')}/account/orders/`;
+  const base = `${storefrontOrigin.replace(/\/+$/, '')}/o/`;
   return {
     name: COD_V2_NAME,
     language: 'ar',
@@ -23,7 +24,7 @@ export function codConfirmationV2Seed(storefrontOrigin: string): TemplateSeed {
       {
         type: 'BUTTONS',
         buttons: [
-          { type: 'URL', text: 'تفاصيل الطلب', url: `${base}{{1}}`, example: [`${base}0b6f0c1e-1111-4222-8333-444455556666`] },
+          { type: 'URL', text: 'تفاصيل الطلب', url: `${base}{{1}}`, example: [`${base}11111111-1111-4111-8111-111111111111.33333333-3333-4333-8333-333333333333.1795000000.abc`] },
           { type: 'QUICK_REPLY', text: 'أيوه، أكّد الطلب' },
           { type: 'QUICK_REPLY', text: 'إلغاء الطلب' },
         ],

@@ -13,7 +13,7 @@ const cod = (ws: string, extra: Record<string, unknown> = {}, id?: string) =>
 const tags = (ws: string) => rows<{ tag: string }>(ws, 'SELECT tag FROM conversation_tags');
 
 const ORIGIN = 'https://souq.ebda.app';
-const V2 = { storeName: 'سوق النور', shippingAddressLine: '9 شارع النصر، المعادي، القاهرة', itemCount: 3, orderUrlSuffix: 'account/orders/o1', storefrontOrigin: ORIGIN };
+const V2 = { storeName: 'سوق النور', shippingAddressLine: '9 شارع النصر، المعادي، القاهرة', itemCount: 3, orderUrlSuffix: 'o/tok123', storefrontOrigin: ORIGIN };
 const approveV2 = (ws: string, origin = ORIGIN) => {
   const t = codConfirmationV2Seed(origin);
   return exec(ws, "INSERT OR REPLACE INTO templates (name, language, category, status, components, updated_at) VALUES (?, ?, ?, 'APPROVED', ?, 1)", t.name, t.language, t.category, JSON.stringify(t.components));
@@ -30,7 +30,7 @@ describe('COD confirmation v2 (header, address, items, order link)', () => {
     expect(job!.template!.components).toEqual([
       { type: 'header', parameters: [{ type: 'text', text: 'سوق النور' }] },
       { type: 'body', parameters: ['عميلنا العزيز', '1001', V2.shippingAddressLine, '3', '750.50'].map((text) => ({ type: 'text', text })) },
-      { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'o1' }] },
+      { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'tok123' }] },
       { type: 'button', sub_type: 'quick_reply', index: '1', parameters: [{ type: 'payload', payload: 'cod:y:o1' }] },
       { type: 'button', sub_type: 'quick_reply', index: '2', parameters: [{ type: 'payload', payload: 'cod:n:o1' }] },
     ]);

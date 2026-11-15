@@ -155,6 +155,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       if (!acceptVersion(host, 'store:link', at(event.occurredAt))) return { status: 'stale' };
       putState(host, 'linked', event.type === 'store.linked' ? '1' : '0');
       if (event.type === 'store.linked') {
+        if (event.data.storefrontOrigin) putState(host, 'storefront_origin', event.data.storefrontOrigin);
         funnelOnce(host, 'linked');
         schedulePendingPushes(host, now);
         ensureCatalogReconcile(host, now);

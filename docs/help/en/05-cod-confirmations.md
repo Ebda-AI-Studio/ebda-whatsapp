@@ -3,7 +3,7 @@ capabilities:
   - bot.order-confirmations-toggle@2
   - inbox.cod-outcome@1
   - inbox.customer-orders-pane@1
-  - orders.cod-confirmation@1
+  - orders.cod-confirmation@3
 ---
 
 # Cash-on-delivery (COD) confirmations
@@ -20,7 +20,7 @@ The goal is fewer orders refused at the door. As soon as a COD order is created 
 The order itself (status, price, stock) belongs to Ebda Store. Ebda Chat only reports the outcome.
 
 ## The richer message (optional)
-If your store also has the **cod_confirmation_v2** template approved, the customer gets a fuller message: your store name as the title, the delivery address, the number of items, the order total (it includes any amount already paid) and a **Order details** button that opens their order page, next to the Confirm and Cancel buttons. The order page asks the customer to sign in, so the link alone shows nothing to anyone else. If that template is not approved yet, or the order is missing any detail, we send the plain message above; nothing breaks. Meta reviews the new template like any other ([Templates](04-templates-and-the-24-hour-window.md)); the link in it points at your store's own address, so it is submitted once per store.
+If your store also has the **cod_confirmation_v2** template approved, the customer gets a fuller message: your store name as the title, the delivery address, the number of items, the order total (it includes any amount already paid) and a **Order details** button that opens their order page, next to the Confirm and Cancel buttons. The button opens a read-only summary of the order (status, items, total and the delivery area, never a phone, email or street); the link is personal to that order and stops working after 14 days. If that template is not approved yet, or the order is missing any detail, we send the plain message above; nothing breaks. Meta reviews the new template like any other ([Templates](04-templates-and-the-24-hour-window.md)); the link in it points at your store's own address, so it is submitted once per store. It is submitted for you when your store is linked; its status shows in **Templates**, and if Meta rejects it you can resubmit it from its page.
 
 ## What you need before you start
 - Your store linked to Ebda Chat.
