@@ -12,6 +12,7 @@ import type { ToolSpec, TurnCtx } from '../../../../foundation/smart-layer/types
 import { ToolApiError } from './read.tools';
 import { sha256Hex } from '../../../../foundation/smart-layer/release';
 import { fromStoredComponents } from '../../template-draft';
+import { CACHE_TTL_MS } from '../storage-do';
 import { TEMPLATE_WRITE_CREDITS, writeTemplate, type Written } from '../template-writer/writer';
 import { ToolInputError, row, schemaOf, writeTool, type Kit, type Reader } from './write';
 
@@ -41,29 +42,42 @@ const fixArgs = z.object({
   hint: z.string().trim().max(500).optional().describe('what the merchant wants changed besides the rejection reason, if anything'),
   variation: z.number().int().min(1).max(9).optional(),
 }).strict();
-type Generated = { w: Written; fresh: boolean };
+type Generated = { w: Written; hold: string; fresh: boolean };
 
 /**
- * One draft, once: the generated draft is kept for an hour under (workspace, person, request) so the preview and the re-preview that runs on the press are the SAME
- * draft; AI credits are held before the model is called, settled when the draft passes Meta's rules and released when it does not (nothing is charged for a failure).
+ * One draft, once, and paid for only on a yes (review of #102). The finished draft is kept for an hour under (workspace, person, request); the 2 AI credits are HELD
+ * before the model is called (a deterministic ref, so two identical requests at the same moment share ONE hold), SETTLED by `settle` when the merchant presses confirm,
+ * and given back when they reject (the reject route releases `payload.hold`) or simply let the hold lapse. A re-preview reuses the draft and refreshes the same hold, so
+ * a cache that expired before the press regenerates under a hold it already owns; a draft that already settled never lets the same ref be reused as "free" (the next
+ * attempt takes the next ref).
  */
 async function generate(kit: Kit, api: Reader, ctx: TurnCtx, what: string, ask: string, prior?: Parameters<typeof writeTemplate>[2]): Promise<Generated> {
   const w = kit.writer;
   if (!w) throw new ToolInputError('unavailable');
   const key = `${ctx.storeId}:${ctx.userId}:tw:${(await sha256Hex(what)).slice(0, 32)}`;
   const hit = await w.cache.get(key);
-  if (hit) return { w: JSON.parse(hit) as Written, fresh: false };
-  const ref = `sl:tw:${key.slice(-32)}:${ctx.now}`;
-  if ((await w.credits.hold(ref, TEMPLATE_WRITE_CREDITS)) === 'insufficient') throw new ToolInputError('unavailable');
+  if (hit) {
+    const cached = JSON.parse(hit) as Written & { hold: string };
+    // The press may come minutes later: refresh the hold (a lapsed one is re-taken if the credits are still there, otherwise the press is refused, never given free).
+    if ((await w.credits.hold(cached.hold, TEMPLATE_WRITE_CREDITS)) === 'insufficient') throw new ToolInputError('unavailable');
+    return { w: cached, hold: cached.hold, fresh: false };
+  }
+  const base = `sl:tw:${key.slice(-32)}:${Math.floor(ctx.now / CACHE_TTL_MS)}`;
+  let hold = '';
+  for (let n = 0; n < 5 && !hold; n++) {
+    const r = await w.credits.hold(`${base}:${n}`, TEMPLATE_WRITE_CREDITS);
+    if (r === 'insufficient') throw new ToolInputError('unavailable');
+    if (r === 'held') hold = `${base}:${n}`; // 'already_charged' = that draft was paid for: this is a new one, take the next ref
+  }
+  if (!hold) throw new ToolInputError('unavailable');
   try {
     const names = ((await api.get('/templates')) as { items?: Array<{ name: string; language: string }> }).items ?? [];
     const out = await writeTemplate({ complete: w.complete, check: (d) => ask_(api, d), taken: (lang) => new Set(names.filter((n) => n.language === lang).map((n) => n.name)) }, ask, prior);
     if (blocking(out).length) throw new ToolInputError('invalid');
-    await w.cache.put(key, JSON.stringify(out));
-    await w.credits.settle(ref);
-    return { w: out, fresh: true };
+    await w.cache.put(key, JSON.stringify({ ...out, hold }));
+    return { w: out, hold, fresh: true };
   } catch (e) {
-    await w.credits.release(ref).catch(() => undefined);
+    await w.credits.release(hold).catch(() => undefined); // nothing is charged for a draft that could not be made
     throw e;
   }
 }
@@ -124,10 +138,11 @@ export function templateTools(kit: Kit): ToolSpec[] {
       args: writeArgs,
       async read(api, ctx, a) { return generate(kit, api, ctx, `write|${a.request}|${a.variation ?? 1}`, a.request); },
       fingerprint: (g) => ({ h: g.w.payloadHash, w: g.w.issues }),
+      settle: async (g) => { await kit.writer?.credits.settle(g.hold); },
       plan: (_a, g, ctx) => ({
         summary: { ar: `قالب جاهز للتقديم لـ Meta: "${g.w.draft.label}"`, en: `A template ready to submit to Meta: "${g.w.draft.label}"` },
         rows: draftRows(g.w.draft, g.w, ctx.locale),
-        cost: TEMPLATE_WRITE_CREDITS,
+        cost: TEMPLATE_WRITE_CREDITS, hold: g.hold,
         request: { method: 'POST', path: '/templates', body: { ...g.w.draft, expectedHash: g.w.payloadHash } },
       }),
     }, kit),
@@ -142,10 +157,11 @@ export function templateTools(kit: Kit): ToolSpec[] {
         return generate(kit, api, ctx, `fix|${a.name}|${a.language}|${a.hint ?? ''}|${a.variation ?? 1}|${t.rejectedReason ?? ''}`, a.hint ?? 'Fix the template so Meta accepts it.', prior);
       },
       fingerprint: (g) => ({ h: g.w.payloadHash, w: g.w.issues }),
+      settle: async (g) => { await kit.writer?.credits.settle(g.hold); },
       plan: (a, g, ctx) => ({
         summary: { ar: `نسخة مصلّحة من القالب "${g.w.draft.label}" لإعادة تقديمها`, en: `A corrected version of "${g.w.draft.label}" to send to Meta again` },
         rows: draftRows(g.w.draft, g.w, ctx.locale),
-        cost: TEMPLATE_WRITE_CREDITS,
+        cost: TEMPLATE_WRITE_CREDITS, hold: g.hold,
         request: { method: 'PUT', path: `/templates/${encodeURIComponent(a.name)}/${encodeURIComponent(a.language)}`, body: { ...g.w.draft, expectedHash: g.w.payloadHash } },
       }),
     }, kit),
