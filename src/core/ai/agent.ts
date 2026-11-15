@@ -390,13 +390,16 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     let inputTokens = 0;
     let outputTokens = 0;
     let audioMs = 0;
+    let speechRan = false; // the speech model completed a call (text, silence or noise): billed, so its credit is charged
     const startedAt = Date.now();
-    const turnPoint = (outcome: string) => markAiTurn(host.env, host.workspaceId, { outcome, inputTokens, outputTokens, rounds: answered, ms: Date.now() - startedAt, credits: real.byoKey || answered === 0 ? 0 : AI_TURN_CREDITS, costEgpMicros: answered === 0 && audioMs === 0 ? 0 : recordTurnCost(host, { inputTokens, outputTokens, audioMs }, real.byoKey, Date.now()) });
+    const turnPoint = (outcome: string) => markAiTurn(host.env, host.workspaceId, { outcome, inputTokens, outputTokens, rounds: answered, ms: Date.now() - startedAt, credits: real.byoKey || (answered === 0 && !speechRan) ? 0 : AI_TURN_CREDITS, costEgpMicros: answered === 0 && audioMs === 0 ? 0 : recordTurnCost(host, { inputTokens, outputTokens, audioMs }, real.byoKey, Date.now()) });
     // Hold times use the real clock: a turn can outlast the moment it started. Each round tells the hold the turn is still alive.
     const provider: LlmProvider = { byoKey: real.byoKey, complete: async (r) => { if (!real.byoKey) heartbeatHold(host.sql, holdRef, Date.now()); const out = await real.complete(r); answered++; inputTokens += out.usage?.inputTokens ?? 0; outputTokens += out.usage?.outputTokens ?? 0; return out; } };
+    // WA-OWNER-FREE-1: a transcription that ran was billed by the speech model, so the hold is CHARGED (one credit) when the speech model completed a call even if no answer followed (silence,
+    // noise, a spoken hand-over request). Only a hold with no model work at all (declined, or a call that threw and gave its slot back) is released for free.
     const finishHold = () => {
       if (real.byoKey) return;
-      host.storage.transactionSync(() => (answered > 0 ? settleHold(host.sql, holdRef, Date.now(), host.workspaceId) : releaseHold(host.sql, holdRef, Date.now())));
+      host.storage.transactionSync(() => (answered > 0 || speechRan ? settleHold(host.sql, holdRef, Date.now(), host.workspaceId) : releaseHold(host.sql, holdRef, Date.now())));
     };
     // A voice note is heard first (once), then it is a text turn like any other: the transcript is the message's text. The hold above is given back on every exit.
     let heard: BotInput = input;
@@ -412,12 +415,14 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
       // The speech model may have been billed on every path below: the audio cost is recorded even when no answer follows.
       if (v.kind === 'gone') {
         audioMs = v.audioMs ?? 0;
+        speechRan = audioMs > 0;
         finishHold();
         if (audioMs) turnPoint('voice_gone');
         return;
       }
       if (v.kind !== 'text') {
         audioMs = v.kind === 'failed' ? (v.audioMs ?? 0) : 0;
+        speechRan = v.kind === 'failed' && audioMs > 0 && !v.threw;
         finishHold();
         if (audioMs) turnPoint('voice_failed');
         const outcome = v.kind === 'declined' ? 'voice_declined' : 'voice_failed';
@@ -431,6 +436,7 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
         return;
       }
       audioMs = v.audioMs;
+      speechRan = true;
       heard = { ...input, type: 'text', text: v.text.slice(0, 1024) };
       heardLocale = localeFor(settings, v.text);
       if (isHumanRequest(v.text)) {
