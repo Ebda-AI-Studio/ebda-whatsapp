@@ -23,6 +23,8 @@ Every `WhatsAppBridge` method takes `storeId` first and returns `{ ok: true, val
 
 Two additions the contract's "minimum" lacks, used when present and looked up (`listCustomerOrders`) when not: `order.cod_confirmation_requested` should carry `orderNumber`, `totalMinor`, `currency`; `shipment.updated` may carry `phoneE164`, `orderNumber`, `locale`.
 
+Contract v1.6 (additive, optional) adds to the COD request `storeName`, `shippingAddressLine` (PII, never logged), `itemCount`, `orderUrlSuffix` (`account/orders/<uuid>`, the sign-in-gated customer order page) and `storefrontOrigin`. With all of them present AND an APPROVED `cod_confirmation_v2` whose fixed URL base the order link sits under, the COD message is the richer v2 (store-name header, address, items, total, order-page button; quick replies at button index 1 and 2). Otherwise the plain `cod_confirmation` goes out. v2 is submitted per workspace with that store's origin (`codConfirmationV2Seed` in `src/addons/ebda/templates.ts`) because a Meta URL button's base is fixed.
+
 ## Events in (`ebda-wa-events`)
 Schemas: `src/core/api/store-events.ts` (envelope `{id, type, v:1, storeId, occurredAt, data}`; the file is pinned by sha256 in `test/guards.test.ts`, the Store repo must carry a byte-identical copy). The consumer (`src/core/store-events.ts`) acks malformed/unknown/future-version bodies, retries unregistered workspaces and thrown errors. The workspace (`applyStoreEvent`) dedupes on the envelope id (`processed_events`, 14 days), drops an older version of an entity (`entity_versions`), and writes state + message row + the `send_release` task + the dedupe marker in ONE transaction.
 

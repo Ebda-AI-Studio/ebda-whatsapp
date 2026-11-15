@@ -19,6 +19,9 @@ The goal is fewer orders refused at the door. As soon as a COD order is created 
 
 The order itself (status, price, stock) belongs to Ebda Store. Ebda Chat only reports the outcome.
 
+## The richer message (optional)
+If your store also has the **cod_confirmation_v2** template approved, the customer gets a fuller message: your store name as the title, the delivery address, the number of items, the order total (it includes any amount already paid) and a **Order details** button that opens their order page, next to the Confirm and Cancel buttons. The order page asks the customer to sign in, so the link alone shows nothing to anyone else. If that template is not approved yet, or the order is missing any detail, we send the plain message above; nothing breaks. Meta reviews the new template like any other ([Templates](04-templates-and-the-24-hour-window.md)); the link in it points at your store's own address, so it is submitted once per store.
+
 ## What you need before you start
 - Your store linked to Ebda Chat.
 - A connected number ([your own](02-connect-your-own-number.md) or [the shared number](03-use-the-shared-number.md)).
@@ -40,4 +43,4 @@ You can open the conversation and record **Confirm** or **Refuse** yourself from
 - **The result did not reach Ebda Store:** we retry automatically.
 
 ---
-Last checked: 2026-11-14. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.
+Last checked: 2026-11-15. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.

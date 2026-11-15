@@ -1,5 +1,37 @@
 import type { TemplateSeed } from '../../routes/templates';
 
+/**
+ * The richer COD confirmation (v2): store name header, address, item count, total and a button to the order page, plus the
+ * same two quick replies as v1 (same titles, so reply matching in store-copy.ts is unchanged). A Meta URL button has a FIXED
+ * base and every store has its own storefront domain, so this is a builder, not a starter entry: it is submitted per workspace
+ * with that store's origin. The sender only uses it when its approved URL base matches the order link the Store sent.
+ */
+export const COD_V2_NAME = 'cod_confirmation_v2';
+export function codConfirmationV2Seed(storefrontOrigin: string): TemplateSeed {
+  const base = `${storefrontOrigin.replace(/\/+$/, '')}/account/orders/`;
+  return {
+    name: COD_V2_NAME,
+    language: 'ar',
+    category: 'UTILITY',
+    components: [
+      { type: 'HEADER', format: 'TEXT', text: '{{1}}', example: { header_text: ['متجر النور'] } },
+      {
+        type: 'BODY',
+        text: 'أهلاً {{1}} 👋\nطلبك رقم {{2}} محتاج تأكيدك قبل ما يتشحن.\n\nعنوان التوصيل: {{3}}\nعدد القطع: {{4}}\nإجمالي الطلب: {{5}} جنيه (شامل أي مبلغ اتدفع قبل كده).\n\nراجع تفاصيل الطلب وبعدين اضغط تأكيد أو إلغاء.',
+        example: { body_text: [['أحمد', '1001', '9 شارع النصر، المعادي، القاهرة', '3', '750']] },
+      },
+      {
+        type: 'BUTTONS',
+        buttons: [
+          { type: 'URL', text: 'تفاصيل الطلب', url: `${base}{{1}}`, example: [`${base}0b6f0c1e-1111-4222-8333-444455556666`] },
+          { type: 'QUICK_REPLY', text: 'أيوه، أكّد الطلب' },
+          { type: 'QUICK_REPLY', text: 'إلغاء الطلب' },
+        ],
+      },
+    ],
+  };
+}
+
 /** Ebda Chat's starter templates (Egyptian Arabic). Submitted to Meta on request; Meta approves them, we never assume it. */
 export const EBDA_DEFAULT_TEMPLATES: readonly TemplateSeed[] = [
   {
