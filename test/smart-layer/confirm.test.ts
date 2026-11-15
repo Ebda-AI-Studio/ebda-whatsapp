@@ -4,7 +4,8 @@ import { configureAssistant } from '../../src/routes/assistant';
 import { apiKey, useApiKey } from '../helpers/api';
 import { mint } from '../helpers/issuer';
 import { installWallet, makeCampaign, resetWallet, seedContacts, seedTemplate } from '../helpers/campaigns';
-import { rows } from '../helpers/workspace';
+import { exec, rows } from '../helpers/workspace';
+import { sha256Hex } from '../../foundation/smart-layer/release';
 import { scriptedAi, setup } from './harness';
 
 useApiKey();
@@ -17,6 +18,7 @@ const outbound = async (t: Awaited<ReturnType<typeof setup>>) => {
   const conv = (await t.get('/conversations') as { items: Array<{ id: number }> }).items[0]!.id;
   return ((await t.get(`/conversations/${conv}/messages`)) as { items: Array<{ direction: string; text: string | null }> }).items.filter((m) => m.direction === 'out');
 };
+const status = async (r: Response) => ((await r.json()) as { status: string }).status;
 const decisions = (s: string) => rows(s, 'SELECT decision FROM sl_decisions ORDER BY seq');
 
 describe('confirm class: only the merchant\'s own button press sends', () => {
@@ -207,5 +209,94 @@ describe('wave 2 tools', () => {
     expect(out.previews[0]!.rows.some((r) => r.after === 'أهلا منى عرض 50%')).toBe(true);
     const wrongCount = await t.ask('ابعت قالب لمنى السيد', { name: 'send_template', args: { customer: 'منى السيد', template: { name: 'promo', language: 'ar' }, params: ['منى'] } });
     expect(wrongCount.previews).toEqual([]);
+  });
+
+});
+
+describe('review fixes (#99): who a message really goes to, what it costs, and sending once', () => {
+  const last3 = (waId: string) => waId.slice(-3);
+  const waOf = async (t: Awaited<ReturnType<typeof setup>>, name: string) => ((await t.get('/contacts')) as { items: Array<{ waId: string; name: string }> }).items.find((c) => c.name === name)!.waId;
+
+  it('the card names the MATCHED contact and the last 3 digits of their number, never the words the model typed', async () => {
+    const t = await setup(7420, 'owner', ['أحمد علي']);
+    const out = await t.ask('ابعت لأحمد رسالة', { name: 'send_text', args: { customer: 'أحمد', text: 'طلبك اتشحن' } });
+    const card = out.previews[0]!;
+    const who = JSON.stringify((card as unknown as { summary: unknown; rows: unknown }));
+    expect(who).toContain('أحمد علي');
+    expect(who).toContain(last3(await waOf(t, 'أحمد علي')));
+    expect((card as unknown as { summary: { ar: string } }).summary.ar).not.toMatch(/لـ أحمد$/); // the model's words alone are never the label
+  });
+
+  it('more than one plausible match (even with an exact one among them): no card, nothing sent', async () => {
+    const t = await setup(7421, 'owner', ['أحمد', 'أحمد علي']);
+    const out = await t.ask('ابعت لأحمد رسالة', { name: 'send_text', args: { customer: 'أحمد', text: 'طلبك اتشحن' } });
+    expect(out.previews).toEqual([]);
+    expect(await outbound(t)).toEqual([]);
+  });
+
+  it('the matched identity is part of the stale check: if the match changes between card and press, the press re-previews and sends nothing', async () => {
+    const t = await setup(7422, 'owner', ['أحمد علي']);
+    const out = await t.ask('ابعت لأحمد علي رسالة', { name: 'send_text', args: { customer: 'أحمد علي', text: 'طلبك اتشحن' } });
+    const ap = out.approvals![0]!;
+    await t.api.call('PATCH', `/contacts/${await waOf(t, 'أحمد علي')}`, { name: 'أحمد علي الكبير' });
+    const res = (await (await t.confirm(ap.approvalId, ap.token)).json()) as { status: string };
+    expect(['stale', 'failed']).toContain(res.status);
+    expect(await outbound(t)).toEqual([]);
+  });
+
+  it('a contact who opted out is never messaged by the assistant (text or template)', async () => {
+    const t = await setup(7423, 'owner', ['منى السيد']);
+    await seedTemplate(t.s);
+    await exec(t.s, "UPDATE contacts SET opted_out_at = 1000 WHERE profile_name = 'منى السيد'");
+    expect((await t.ask('ابعت لمنى رسالة', { name: 'send_text', args: { customer: 'منى السيد', text: 'اهلا' } })).previews).toEqual([]);
+    expect((await t.ask('ابعت قالب لمنى', { name: 'send_template', args: { customer: 'منى السيد', template: { name: 'promo', language: 'ar' }, params: ['منى', '50%'] } })).previews).toEqual([]);
+    expect(await outbound(t)).toEqual([]);
+  });
+
+  it('no confirm card without a cost: send now, schedule and resume are refused until the estimate exists; with a wallet they build the card', async () => {
+    const t = await setup(7424, 'owner', ['منى']);
+    await seedTemplate(t.s);
+    await seedContacts(t.s, 3);
+    const camp = await makeCampaign(t.s);
+    await env.DB.prepare("INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, 'platform_line', 0)").bind(`pn-${t.s}`).run();
+    await t.ws.refreshPricing();
+    const at = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    const send = { name: 'campaign_send_now', args: { campaign: 'Eid sale' } };
+    const sched = { name: 'campaign_schedule', args: { campaign: 'Eid sale', at } };
+    resetWallet();
+    expect((await t.ask('ابعت حملة Eid sale دلوقتي', send)).previews).toEqual([]);
+    expect((await t.ask('جدول حملة Eid sale', sched)).previews).toEqual([]);
+    await exec(t.s, "UPDATE campaigns SET status = 'paused' WHERE id = ?", camp.id);
+    expect((await t.ask('كمّل حملة Eid sale', { name: 'campaign_resume', args: { campaign: 'Eid sale' } })).previews).toEqual([]);
+    installWallet({ perMessage: 150 });
+    await exec(t.s, "UPDATE campaigns SET status = 'draft' WHERE id = ?", camp.id);
+    expect((await t.ask('ابعت حملة Eid sale دلوقتي', send)).previews).toHaveLength(1);
+    expect((await t.ask('جدول حملة Eid sale', sched)).previews).toHaveLength(1);
+    // a number Meta bills to the merchant's own card has a zero wallet estimate that is the truth: the card says so instead of a price
+    resetWallet();
+    await env.DB.prepare("INSERT OR REPLACE INTO number_funding (phone_number_id, funding, updated_at) VALUES (?, 'merchant_card', 0)").bind(`pn-${t.s}`).run();
+    await t.ws.refreshPricing();
+    const card = await t.ask('ابعت حملة Eid sale دلوقتي', send);
+    expect(JSON.stringify(card.previews[0]?.rows)).toContain('Meta bills your card');
+    await exec(t.s, "UPDATE campaigns SET status = 'paused' WHERE id = ?", camp.id);
+    expect((await t.ask('كمّل حملة Eid sale', { name: 'campaign_resume', args: { campaign: 'Eid sale' } })).previews).toHaveLength(1); // card-billed: the card says so
+  });
+
+  it('the send key belongs to the PREVIEW: a crashed apply that is retried on a fresh approval of the same preview cannot send twice', async () => {
+    const t = await setup(7425);
+    const out = await t.ask('ابعت لمنى السيد رسالة', sendText());
+    const ap = out.approvals![0]!;
+    expect(await status(await t.confirm(ap.approvalId, ap.token))).toBe('applied');
+    expect(await outbound(t)).toHaveLength(1);
+    // simulate the crash: the preview is open again and the engine issued a new approval for the same preview
+    const previewId = out.previews[0]!.previewId;
+    const pv = (await t.ws.smartLayer('getPreview', [t.s, previewId])) as { payloadHash: string };
+    await t.ws.smartLayer('transitionPreview', [t.s, previewId, 'applied', 'open']);
+    await t.ws.smartLayer('putApproval', [{ id: crypto.randomUUID(), storeId: t.s, userId: '6f1d2c1e-8a8f-4a3b-9f1e-1a2b3c4d5e6f', previewId, tokenHash: await sha256Hex('retry-token-retry-token-retry'), payloadHash: pv.payloadHash, expiresAt: Date.now() + 600_000, status: 'pending', createdAt: Date.now() }]);
+    const retry = (await t.ws.smartLayer('loadDecisions', [t.s, 'none'])) as unknown[];
+    void retry;
+    const rows2 = (await rows(t.s, "SELECT id FROM sl_approvals WHERE status = 'pending'")) as Array<{ id: string }>;
+    expect(await status(await t.confirm(rows2[0]!.id, 'retry-token-retry-token-retry'))).toBe('applied');
+    expect(await outbound(t)).toHaveLength(1);
   });
 });

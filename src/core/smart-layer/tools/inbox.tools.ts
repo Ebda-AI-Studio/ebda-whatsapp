@@ -1,7 +1,7 @@
 /** Inbox write tools (wave 1): tag, note and assign a conversation. The conversation is found from the customer's name in the merchant's own inbox. */
 import { z } from 'zod';
-import type { ToolSpec } from '../../../../foundation/smart-layer/types';
-import { ToolInputError, clip, findConversation, row, writeTool, type Kit } from './write';
+import type { ToolSpec, TurnCtx } from '../../../../foundation/smart-layer/types';
+import { ToolInputError, clip, findConversation, matchedLabel, row, stableUuid, writeTool, type Kit } from './write';
 
 const tag = z.string().trim().min(1).max(32);
 const who = { customer: z.string().trim().min(1).max(100).describe("the customer's name as the merchant wrote it"), conversation: z.number().int().positive().optional() };
@@ -13,10 +13,10 @@ const assignArgs = z.object({ ...who, to: z.union([z.literal('me'), z.literal('n
 
 const sendTextArgs = z.object({ ...who, text: z.string().trim().min(1).max(4096).describe('the exact message to send to the customer') }).strict();
 const sendTemplateArgs = z.object({ ...who, template: z.object({ name: z.string().min(1).max(512), language: z.string().min(2).max(10) }), params: z.array(z.string().max(1000)).max(20).default([]) }).strict();
-type Win = { id: number; open: boolean; windowOpenUntil: number | null };
-/** A send goes out once: the idempotency key is made at press time, not at preview time, so the previewed payload stays comparable. */
-const withClientId = (call: (r: { method: 'POST'; path: string; body: unknown }) => Promise<unknown>, plan: { request: { path: string; body?: unknown } }) =>
-  call({ method: 'POST', path: plan.request.path, body: { ...(plan.request.body as object), clientId: crypto.randomUUID() } });
+type Win = { id: number; open: boolean; name: string | null; last3: string | null; optedOut: boolean };
+/** A send goes out once: the idempotency key is derived from the preview (see `stableUuid`), so a retry of the same preview cannot send twice; the previewed payload stays comparable. */
+const withClientId = async (call: (r: { method: 'POST'; path: string; body: unknown }) => Promise<unknown>, plan: { request: { path: string; body?: unknown } }, ctx: TurnCtx) =>
+  call({ method: 'POST', path: plan.request.path, body: { ...(plan.request.body as object), clientId: await stableUuid(ctx, { method: 'POST', path: plan.request.path }) } });
 
 export function inboxTools(kit: Kit): ToolSpec[] {
   return [
@@ -24,39 +24,48 @@ export function inboxTools(kit: Kit): ToolSpec[] {
       name: 'send_text', capabilityId: 'inbox.send-text', policy: 'confirm', undo: 'irreversible', messagesCustomers: true,
       description: "Send a text message to a customer in their conversation. It goes to a real person and cannot be taken back, so the merchant confirms with the button; the card shows the exact text. Only works while the 24-hour reply window is open (otherwise use send_template).",
       args: sendTextArgs,
-      read: async (api, ctx, a): Promise<Win> => { const c = await findConversation(api, a.customer, a.conversation); const until = (c as { windowOpenUntil?: number | null }).windowOpenUntil ?? null; return { id: c.id, open: until !== null && until > ctx.now, windowOpenUntil: until }; },
-      // The window closing by a minute is not a reason to re-preview; open/closed is.
-      fingerprint: (s) => ({ id: s.id, open: s.open }),
+      read: async (api, ctx, a): Promise<Win> => {
+        const c = await findConversation(api, a.customer, undefined, { strict: true });
+        const until = c.windowOpenUntil ?? null;
+        const m = matchedLabel(c);
+        return { id: c.id, open: until !== null && until > ctx.now, name: m.name, last3: m.last3, optedOut: c.contact.optedOut === true };
+      },
+      // The window closing by a minute is not a reason to re-preview; open/closed is. WHO it goes to is: a different match is a different card.
+      fingerprint: (s) => ({ id: s.id, open: s.open, name: s.name, last3: s.last3, optedOut: s.optedOut }),
       plan: (a, s) => {
-        if (!s.open) throw new ToolInputError('unavailable');
+        if (!s.open || s.optedOut) throw new ToolInputError('unavailable'); // a customer who opted out is never messaged by the assistant
+        const who = `${s.name ?? '؟'}${s.last3 ? ` (…${s.last3})` : ''}`;
         return {
-          summary: { ar: `إرسال رسالة لـ ${a.customer}`, en: `Send a message to ${a.customer}` },
-          rows: [row('الرسالة (هتتبعت زي ما هي)', 'Message (sent exactly as written)', undefined, a.text, 'merchant')],
+          summary: { ar: `إرسال رسالة لـ ${who}`, en: `Send a message to ${who}` },
+          rows: [row('المستلم', 'Recipient', undefined, who), row('الرسالة (هتتبعت زي ما هي)', 'Message (sent exactly as written)', undefined, a.text, 'merchant')],
           request: { method: 'POST', path: `/conversations/${s.id}/messages`, body: { type: 'text', text: a.text } },
         };
       },
-      send: async (call, plan) => withClientId(call as never, plan),
+      send: async (call, plan, _a, ctx) => withClientId(call as never, plan, ctx),
     }, kit),
     writeTool({
       name: 'send_template', capabilityId: 'inbox.send-template', policy: 'confirm', undo: 'irreversible', messagesCustomers: true,
       description: "Send an approved WhatsApp template to a customer (works when the 24-hour window is closed too). It goes to a real person and cannot be taken back, so the merchant confirms; the card shows the template text.",
       args: sendTemplateArgs,
       read: async (api, _c, a) => {
-        const c = await findConversation(api, a.customer, a.conversation);
+        const c = await findConversation(api, a.customer, undefined, { strict: true });
+        const m = matchedLabel(c);
         const t = ((await api.get('/templates')) as { items?: Array<{ name: string; language: string; status: string; bodyText: string; paramCount: number }> }).items?.find((x) => x.name === a.template.name && x.language === a.template.language);
         if (!t || t.status !== 'APPROVED') throw new ToolInputError('unavailable');
-        return { id: c.id, body: t.bodyText, paramCount: t.paramCount };
+        return { id: c.id, body: t.bodyText, paramCount: t.paramCount, name: m.name, last3: m.last3, optedOut: c.contact.optedOut === true };
       },
+      fingerprint: (s) => ({ id: s.id, body: s.body, name: s.name, last3: s.last3, optedOut: s.optedOut }),
       plan: (a, s) => {
-        if (a.params.length !== s.paramCount) throw new ToolInputError('unavailable');
+        if (a.params.length !== s.paramCount || s.optedOut) throw new ToolInputError('unavailable'); // a customer who opted out is never messaged by the assistant
+        const who = `${s.name ?? '؟'}${s.last3 ? ` (…${s.last3})` : ''}`;
         const text = s.body.replace(/\{\{(\d+)\}\}/g, (_m, n: string) => a.params[Number(n) - 1] ?? '');
         return {
-          summary: { ar: `إرسال قالب لـ ${a.customer}`, en: `Send a template to ${a.customer}` },
-          rows: [row('القالب', 'Template', undefined, `${a.template.name} (${a.template.language})`), row('النص اللي هيوصل', 'The text that will arrive', undefined, text, 'merchant')],
+          summary: { ar: `إرسال قالب لـ ${who}`, en: `Send a template to ${who}` },
+          rows: [row('المستلم', 'Recipient', undefined, who), row('القالب', 'Template', undefined, `${a.template.name} (${a.template.language})`), row('النص اللي هيوصل', 'The text that will arrive', undefined, text, 'merchant')],
           request: { method: 'POST', path: `/conversations/${s.id}/messages`, body: { type: 'template', name: a.template.name, language: a.template.language, params: a.params } },
         };
       },
-      send: async (call, plan) => withClientId(call as never, plan),
+      send: async (call, plan, _a, ctx) => withClientId(call as never, plan, ctx),
     }, kit),
     writeTool({
       name: 'conversation_tag_set', capabilityId: 'inbox.conversation-tags', policy: 'preview', undo: 'reversible',
