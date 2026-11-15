@@ -58,7 +58,7 @@ export interface WriteDef<A, S> {
   /** What makes the state different from another for the etag (default: all of it). Keep identifying data (phone numbers) out of it. */
   fingerprint?(s: S): unknown;
   /** Extra send step (e.g. the settings confirm token the route itself requires before it will turn a switch on). */
-  send?(call: (r: Req) => Promise<unknown>, plan: Plan, a: A): Promise<unknown>;
+  send?(call: (r: Req) => Promise<unknown>, plan: Plan, a: A, ctx: TurnCtx): Promise<unknown>;
 }
 
 const ok = async (p: Promise<{ status: number; json: unknown }>): Promise<unknown> => {
@@ -102,7 +102,7 @@ export function writeTool<A, S>(def: WriteDef<A, S>, kit: Kit): ToolSpec {
       const { plan } = await load(ctx, a);
       const call = sender(ctx);
       try {
-        await (def.send ? def.send(call, plan, a) : call(plan.request));
+        await (def.send ? def.send(call, plan, a, ctx) : call(plan.request));
       } catch (e) {
         // The route's own authorization said no (role, plan, seat): the engine records it as the product's refusal, not a failure.
         if (e instanceof ToolApiError && (e.status === 401 || e.status === 403)) throw new ToolForbidden();
@@ -145,10 +145,24 @@ export function pickByName<T>(items: readonly T[], nameOf: (t: T) => string | nu
   throw new ToolInputError(items.length === 0 || !o.single ? 'not_found' : 'ambiguous');
 }
 
-export type ConvItem = { id: number; contact: { name: string | null }; tags: string[]; assigneeUserId: string | null };
-export async function findConversation(api: Reader, customer: string, conversation?: number): Promise<ConvItem> {
+export type ConvItem = { id: number; contact: { name: string | null; waId?: string; optedOut?: boolean }; tags: string[]; assigneeUserId: string | null; unread?: number; windowOpenUntil?: number | null };
+/** Who a conversation really is, for a card: the MATCHED contact's name and the last 3 digits of the number, never the words the model typed. */
+export const matchedLabel = (c: ConvItem): { name: string | null; last3: string | null; text: string } => {
+  const last3 = c.contact.waId ? c.contact.waId.slice(-3) : null;
+  return { name: c.contact.name, last3, text: `${c.contact.name ?? '؟'}${last3 ? ` (…${last3})` : ''}` };
+};
+/**
+ * `strict` is for anything that reaches a customer or cannot be undone: exactly ONE conversation may match what was typed, however exact one of several looks. More than
+ * one plausible person is the merchant's to pick, so the tool refuses (the merchant is asked for the full name) rather than choose.
+ */
+export async function findConversation(api: Reader, customer: string, conversation?: number, o: { strict?: boolean } = {}): Promise<ConvItem> {
   const r = (await api.get('/conversations', { q: customer, limit: '10' })) as { items?: ConvItem[] };
   const items = r.items ?? [];
+  if (o.strict) {
+    if (items.length === 0) throw new ToolInputError('not_found');
+    if (items.length > 1) throw new ToolInputError('ambiguous');
+    return items[0]!;
+  }
   if (conversation !== undefined) {
     const hit = items.find((c) => c.id === conversation);
     if (!hit) throw new ToolInputError('not_found');
@@ -165,3 +179,12 @@ export async function findContact(api: Reader, customer: string): Promise<Contac
 
 export const row = (ar: string, en: string, before?: unknown, after?: unknown, source?: PreviewRow['source']): PreviewRow => ({ label: { ar, en }, ...(before !== undefined ? { before } : {}), ...(after !== undefined ? { after } : {}), ...(source ? { source } : {}) });
 export const clip = (s: string, n = 400): string => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+/**
+ * An idempotency key that belongs to the PREVIEW, not to the press: the apply routes carry the preview id in `ctx.conversationId`, so a crashed apply that is retried
+ * (on a fresh approval of the same preview) derives the same key and the route answers with the message it already queued instead of sending a second one.
+ */
+export async function stableUuid(ctx: Pick<TurnCtx, 'storeId' | 'conversationId'>, req: Pick<Req, 'method' | 'path'>): Promise<string> {
+  const h = await sha256Hex(`${ctx.storeId}|${ctx.conversationId}|${req.method} ${req.path}`);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${'89ab'[Number.parseInt(h[16]!, 16) % 4]}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}

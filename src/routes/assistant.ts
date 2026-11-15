@@ -106,7 +106,8 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
   r.post('/stores/:storeId/assistant/previews/:previewId/apply', async (c) => {
     const id = z.string().uuid().safeParse(c.req.param('previewId'));
     if (!id.success) return apiError(c, 400, 'invalid_request');
-    const s = await session(c, crypto.randomUUID(), 'ar');
+    // The context's conversation id is the PREVIEW's id: a tool derives its send key from it (see `stableUuid`), so a retried apply of the same preview cannot send twice.
+    const s = await session(c, id.data, 'ar');
     if (!s) return apiError(c, 404, 'not_found');
     if (await assistantOff(c, s.ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
     if (await limited(c, s.ws, 'applyrate')) return apiError(c, 429, 'rate_limited');
@@ -117,7 +118,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
   r.post('/stores/:storeId/assistant/applied/:appliedId/undo', async (c) => {
     const id = z.string().uuid().safeParse(c.req.param('appliedId'));
     if (!id.success) return apiError(c, 400, 'invalid_request');
-    const s = await session(c, crypto.randomUUID(), 'ar');
+    const s = await session(c, id.data, 'ar');
     if (!s) return apiError(c, 404, 'not_found');
     if (await assistantOff(c, s.ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
     if (await limited(c, s.ws, 'undorate')) return apiError(c, 429, 'rate_limited');
@@ -133,12 +134,15 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     const id = z.string().uuid().safeParse(c.req.param('approvalId'));
     const body = assistantConfirmRequest.safeParse(await c.req.json().catch(() => null));
     if (!id.success || !body.success) return apiError(c, 400, 'invalid_request');
-    const s = await session(c, crypto.randomUUID(), 'ar');
+    const s = await session(c, id.data, 'ar');
     if (!s) return apiError(c, 404, 'not_found');
     if (await assistantOff(c, s.ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
     if (await limited(c, s.ws, 'confirmrate')) return apiError(c, 429, 'rate_limited');
+    // The send key belongs to the PREVIEW (it survives a crashed apply that is retried on a fresh approval of the same preview).
+    const rec = await s.adapter.storage.getApproval(s.ctx.storeId, id.data);
+    const ctx = rec ? { ...s.ctx, conversationId: ownConversation(s.ctx.userId, rec.previewId) } : s.ctx;
     const approvals: ApprovalToken[] = [];
-    const out = await confirmApproval(s.adapter, s.ctx, id.data, body.data.token, { onApprovalToken: (t) => approvals.push(t) });
+    const out = await confirmApproval(s.adapter, ctx, id.data, body.data.token, { onApprovalToken: (t) => approvals.push(t) });
     c.header('cache-control', 'no-store');
     return outcome(c, out, approvals);
   });
