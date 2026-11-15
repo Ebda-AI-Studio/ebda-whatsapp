@@ -16,6 +16,7 @@ import { countryOf } from './country';
 import { ensureTrueupTask } from './trueup';
 import { DEFAULT_SETTINGS, fundingOf, normaliseCategory, priceAt, pricingReady, settingsAt, type Funding } from './pricing';
 import { alert } from '../observability';
+import { isSuspended, setSuspendedFlag } from '../numbers/health';
 
 type Sql = DurableObjectStorage['sql'];
 
@@ -30,6 +31,9 @@ export const AUTH_HOLD_TTL_MS = 2 * DAY;
 export const PENDING_RATE_MAX_MS = 7 * DAY;
 export const PARENT_HOLD_TTL_MS = 60 * DAY;
 export const LOW_BALANCE_MINOR = 2000;
+/** WA-DEBT-1: debt past this many times the overdraft limit suspends sends (tag `wallet_debt`); a top-up back inside the limit lifts it. */
+export const DEBT_SUSPEND_FACTOR = 2;
+export const DEBT_SUSPEND_REASON = 'wallet_debt';
 /** The wallet is "low" when it covers fewer than this many days of the last week's average Meta spend (never less than LOW_BALANCE_MINOR, the floor for a quiet wallet). */
 export const LOW_RUNWAY_DAYS = 3;
 const DRAIN_DELAY_MS = 1000;
@@ -118,7 +122,44 @@ export class Billing {
     addTask(this.sql, 'ledger_drain', a.now + DRAIN_DELAY_MS);
     this.touch();
     this.lowBalanceAlert(a.now, balance);
+    this.debtGuard(a.now, balance);
     return { ok: true, balance, amountMinor: amount };
+  }
+
+  /**
+   * WA-DEBT-1. Charge-at-delivery, Meta adjustments and chargebacks are external money facts that are always recorded in full, so debt can pass the
+   * overdraft limit. Past DEBT_SUSPEND_FACTOR x the limit the workspace's own suspension flag is set (sends stop at once), tagged `wallet_debt`, and a
+   * task mirrors it to D1 (where the Worker checks). Back inside the limit the flag is lifted, but ONLY while its reason is still ours: an operator
+   * suspension (any other reason) is never set over, never lifted here. Synchronous: runs inside the posting transaction.
+   */
+  private debtGuard(now: number, balance: number): void {
+    const limit = this.creditLimit(now);
+    const mine = this.suspensionReason() === DEBT_SUSPEND_REASON;
+    if (balance < -DEBT_SUSPEND_FACTOR * limit) {
+      if (isSuspended(this.sql)) return; // already suspended (by us, or an operator whose reason stays)
+      setSuspendedFlag(this.sql, true, DEBT_SUSPEND_REASON);
+      addTask(this.sql, 'wallet_debt_sync', now);
+      alert('wallet_debt_suspended', { workspace: this.workspaceId, debtMinor: -balance, limitMinor: limit });
+    } else if (mine && balance >= -limit) {
+      setSuspendedFlag(this.sql, false, DEBT_SUSPEND_REASON);
+      addTask(this.sql, 'wallet_debt_sync', now);
+    }
+  }
+
+  private suspensionReason(): string | null {
+    return this.sql.exec<{ value: string }>("SELECT value FROM store_state WHERE key = 'ops.suspended'").toArray()[0]?.value ?? null;
+  }
+
+  /**
+   * The D1 half of WA-DEBT-1, state-based and idempotent (the task may run twice or late): suspended by us -> set suspended_at/reason only where nothing
+   * suspends it yet; no longer suspended and D1 still carries OUR reason -> clear it. An operator's row is never touched.
+   */
+  async syncDebtSuspension(db: D1Database, now: number): Promise<void> {
+    if (this.suspensionReason() === DEBT_SUSPEND_REASON) {
+      await db.prepare('UPDATE workspaces SET suspended_at = ?, suspended_reason = ? WHERE id = ? AND suspended_at IS NULL').bind(now, DEBT_SUSPEND_REASON, this.workspaceId).run();
+    } else if (!isSuspended(this.sql)) {
+      await db.prepare('UPDATE workspaces SET suspended_at = NULL, suspended_reason = NULL WHERE id = ? AND suspended_reason = ?').bind(this.workspaceId, DEBT_SUSPEND_REASON).run();
+    }
   }
 
   /** Once per day while the available balance is under the threshold: a log alert the alert bridge turns into a notice. */

@@ -216,6 +216,14 @@ describe('item 11: a workspace suspended for abuse keeps its evidence', () => {
     expect(await runOffboarding(env, ws, Date.now() + 2000)).toBe('done');
   });
 
+  it('a wallet_debt suspension (WA-DEBT-1) is a money block, not abuse evidence: it does not hold the deletion', async () => {
+    const ws = W(42);
+    await open(ws);
+    await env.DB.prepare("UPDATE workspaces SET suspended_at = 1, suspended_reason = 'wallet_debt' WHERE id = ?").bind(ws).run();
+    await op(ws, OP1, 'POST', '', { reason: REASON, immediate: true });
+    expect(await runOffboarding(env, ws, Date.now() + 1000)).toBe('done');
+  });
+
   it('a suspension that the deletion itself made (reason offboarding) does not hold a resumed run', async () => {
     const ws = W(41);
     await open(ws);

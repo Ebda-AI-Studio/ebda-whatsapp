@@ -2499,6 +2499,9 @@ export class WorkspaceDO extends DurableObject<Env> {
         return sweepCampaigns(this.host(), now);
       case 'wallet_sweep':
         return this.ctx.storage.transactionSync(() => this.billing.sweep(now)) ?? undefined;
+      case 'wallet_debt_sync':
+        await this.billing.syncDebtSuspension(this.env.DB, now);
+        return undefined;
       case 'ledger_drain': {
         const r = await drainOutbox(this.env, this.sql, this.workspaceId, now);
         return r.remaining > 0 ? now + 5_000 : undefined;
