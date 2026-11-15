@@ -2,8 +2,7 @@
 import { z } from 'zod';
 import { hoursSchema, locationSchema, menuSchema, type HoursSettings, type LocationSettings, type MenuSettings } from '../../store-link/bot-settings';
 import type { ToolSpec } from '../../../../foundation/smart-layer/types';
-import type { CallApi } from './read.tools';
-import { ToolInputError, clip, pickByName, row, writeTool, type Reader } from './write';
+import { ToolInputError, clip, pickByName, row, writeTool, type Reader, type Kit } from './write';
 
 type Settings = { orderConfirmations: boolean; orderingBot: boolean; otpViaWhatsApp: boolean; catalogId: string | null; menu: MenuSettings; hours: HoursSettings; location: LocationSettings };
 const settings = async (api: Reader) => (await api.get('/store-link/settings')) as Settings;
@@ -21,7 +20,7 @@ const faqArgs = z.object({ text: z.string().trim().min(1).max(20_000), mode: z.e
 const digestArgs = toggleArgs;
 const seatArgs = z.object({ member: z.string().trim().min(1).max(100).describe("the team member's display name") }).strict();
 
-function switchTool(name: string, capabilityId: string, key: 'orderingBot' | 'orderConfirmations', labels: { ar: string; en: string }, description: string, o: { policy: 'preview' | 'confirm'; messagesCustomers?: boolean }, callApi: CallApi): ToolSpec {
+function switchTool(name: string, capabilityId: string, key: 'orderingBot' | 'orderConfirmations', labels: { ar: string; en: string }, description: string, o: { policy: 'preview' | 'confirm'; messagesCustomers?: boolean }, kit: Kit): ToolSpec {
   return writeTool({
     name, capabilityId, description, args: toggleArgs, policy: o.policy, undo: 'reversible', ...(o.messagesCustomers ? { messagesCustomers: true } : {}),
     read: async (api) => ({ on: (await settings(api))[key] }),
@@ -42,10 +41,10 @@ function switchTool(name: string, capabilityId: string, key: 'orderingBot' | 'or
       }
       return call(plan.request);
     },
-  }, callApi);
+  }, kit);
 }
 
-export function botTools(callApi: CallApi): ToolSpec[] {
+export function botTools(kit: Kit): ToolSpec[] {
   const setting = <K extends 'menu' | 'hours' | 'location', A extends z.ZodType>(name: string, capabilityId: string, key: K, args: A, titleAr: string, titleEn: string, description: string): ToolSpec =>
     writeTool<Record<K, unknown>, Settings[K]>({
       name, capabilityId, description, args: args as never, policy: 'preview', undo: 'reversible',
@@ -55,13 +54,13 @@ export function botTools(callApi: CallApi): ToolSpec[] {
         if (JSON.stringify(next) === JSON.stringify(s)) throw new ToolInputError('no_change');
         return { summary: { ar: `تعديل ${titleAr}`, en: `Change ${titleEn}` }, rows: [row(titleAr, titleEn, j(s), j(next), 'merchant')], request: { method: 'PATCH', path: '/store-link/settings', body: { [key]: next } }, restore: { [key]: s } };
       },
-    }, callApi);
+    }, kit);
   return [
     setting('bot_menu_set', 'bot.service-menu', 'menu', menuArgs, 'قائمة الخدمات', 'the service menu', 'Replace the bot\'s service menu (the list a customer sees). Send the whole new menu.'),
     setting('bot_hours_set', 'bot.hours-away', 'hours', hoursArgs, 'مواعيد العمل ورسالة الغياب', 'business hours and the away message', 'Replace the business hours and the away message. Send the whole new setting.'),
     setting('bot_location_set', 'bot.location', 'location', locationArgs, 'موقع المحل', 'the shop location', 'Set (or remove, with null) the shop location the bot sends.'),
-    switchTool('bot_ordering_toggle', 'bot.ordering-toggle', 'orderingBot', { ar: 'بوت الطلبات', en: 'the ordering bot' }, 'Turn the ordering bot on or off.', { policy: 'preview' }, callApi),
-    switchTool('bot_order_confirmations_toggle', 'bot.order-confirmations-toggle', 'orderConfirmations', { ar: 'رسائل تأكيد الطلبات للعملاء', en: 'order confirmation messages to customers' }, 'Turn the order confirmation messages (sent to customers) on or off. Turning them on messages customers, so the merchant confirms it.', { policy: 'confirm', messagesCustomers: true }, callApi),
+    switchTool('bot_ordering_toggle', 'bot.ordering-toggle', 'orderingBot', { ar: 'بوت الطلبات', en: 'the ordering bot' }, 'Turn the ordering bot on or off.', { policy: 'preview' }, kit),
+    switchTool('bot_order_confirmations_toggle', 'bot.order-confirmations-toggle', 'orderConfirmations', { ar: 'رسائل تأكيد الطلبات للعملاء', en: 'order confirmation messages to customers' }, 'Turn the order confirmation messages (sent to customers) on or off. Turning them on messages customers, so the merchant confirms it.', { policy: 'confirm', messagesCustomers: true }, kit),
 
     writeTool({
       name: 'catalogue_resync', capabilityId: 'catalogue.resync', policy: 'preview', undo: 'irreversible',
@@ -72,7 +71,7 @@ export function botTools(callApi: CallApi): ToolSpec[] {
         if (!s.catalogId) throw new ToolInputError('unavailable');
         return { summary: { ar: 'إعادة مزامنة كتالوج واتساب كله', en: 'Re-sync the whole WhatsApp catalogue' }, rows: [row('حالة المزامنة', 'Sync', s.syncing ? 'شغالة / running' : 'واقفة / idle', 'بداية مزامنة كاملة / full pass')], request: { method: 'POST', path: '/store-link/catalog/resync' } };
       },
-    }, callApi),
+    }, kit),
     writeTool({
       name: 'catalogue_toggles_set', capabilityId: 'catalogue.commerce-toggles', policy: 'preview', undo: 'reversible',
       description: 'Show or hide the shop button and the cart on the WhatsApp number.',
@@ -87,7 +86,7 @@ export function botTools(callApi: CallApi): ToolSpec[] {
           ...(s.commerce ? { restore: { catalogVisible: s.commerce.catalogVisible, cartEnabled: s.commerce.cartEnabled } } : {}),
         };
       },
-    }, callApi),
+    }, kit),
     writeTool({
       name: 'catalogue_link_existing', capabilityId: 'catalogue.link-existing', policy: 'preview', undo: 'reversible',
       description: 'Connect an existing Meta catalogue (by its number) to the store link. Only a catalogue connected to this workspace\'s WhatsApp account is accepted by the route.',
@@ -97,7 +96,7 @@ export function botTools(callApi: CallApi): ToolSpec[] {
         if (s.catalog === a.catalog) throw new ToolInputError('no_change');
         return { summary: { ar: 'ربط كتالوج موجود', en: 'Connect an existing catalogue' }, rows: [row('رقم الكتالوج', 'Catalogue number', s.catalog ?? '-', a.catalog)], request: { method: 'PATCH', path: '/store-link/settings', body: { catalogId: a.catalog } }, ...(s.catalog ? { restore: { catalog: s.catalog } } : {}) };
       },
-    }, callApi),
+    }, kit),
 
     writeTool({
       name: 'agent_persona_set', capabilityId: 'agent.persona-language', policy: 'preview', undo: 'reversible',
@@ -114,7 +113,7 @@ export function botTools(callApi: CallApi): ToolSpec[] {
           restore: { persona: s.persona, language: s.language },
         };
       },
-    }, callApi),
+    }, kit),
     writeTool({
       name: 'agent_faq_update', capabilityId: 'agent.faq', policy: 'preview', undo: 'reversible',
       description: 'Add to (default) or replace the AI agent\'s FAQ / knowledge text. Only because the merchant asked. The preview shows the end result.',
@@ -131,7 +130,7 @@ export function botTools(callApi: CallApi): ToolSpec[] {
           ...(s.faq.trim() ? { restore: { text: s.faq, mode: 'replace' } } : {}),
         };
       },
-    }, callApi),
+    }, kit),
 
     writeTool({
       name: 'digest_settings_set', capabilityId: 'digest.weekly', policy: 'preview', undo: 'reversible',
@@ -142,7 +141,7 @@ export function botTools(callApi: CallApi): ToolSpec[] {
         if (s.on === a.enabled) throw new ToolInputError('no_change');
         return { summary: { ar: `${a.enabled ? 'تشغيل' : 'إيقاف'} الملخص الأسبوعي`, en: `${a.enabled ? 'Turn on' : 'Turn off'} the weekly summary` }, rows: [row('الملخص الأسبوعي', 'Weekly summary', onOff(s.on), onOff(a.enabled))], request: { method: 'PUT', path: '/digest', body: { enabled: a.enabled } }, restore: { enabled: s.on } };
       },
-    }, callApi),
+    }, kit),
     writeTool({
       name: 'seat_assign', capabilityId: 'team.seat-assign', policy: 'preview', undo: 'reversible',
       description: 'Give a staff member a seat (so they can use the inbox). Give their display name. Seats are limited by the package.',
@@ -157,6 +156,6 @@ export function botTools(callApi: CallApi): ToolSpec[] {
         if (s.seat === 'seated') throw new ToolInputError('no_change');
         return { summary: { ar: `إعطاء مقعد لـ ${s.name}`, en: `Give ${s.name} a seat` }, rows: [row('المقعد', 'Seat', 'بدون / none', 'مقعد / seat'), ...(s.seats ? [row('المقاعد المستخدمة', 'Seats used', `${s.seats.used}/${s.seats.limit}`, `${s.seats.used + 1}/${s.seats.limit}`)] : [])], request: { method: 'PUT', path: `/members/${s.userId}/seat` } };
       },
-    }, callApi),
+    }, kit),
   ];
 }

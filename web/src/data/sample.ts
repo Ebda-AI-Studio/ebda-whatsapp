@@ -390,6 +390,8 @@ function createSampleAssistant(): AssistantApi {
     feedback: async () => undefined,
     apply: async () => ({ status: 'applied', appliedId: crypto.randomUUID(), undoUntil: Date.now() + 86_400_000 }),
     undo: async () => ({ status: 'undone' }),
+    confirm: async () => ({ status: 'applied', appliedId: crypto.randomUUID() }),
+    reject: async () => ({ status: 'rejected' }),
   };
 }
 

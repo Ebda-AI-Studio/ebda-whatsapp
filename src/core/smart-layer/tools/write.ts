@@ -37,6 +37,8 @@ export type Plan = {
   affected?: number;
   changesPrice?: boolean;
   touchesCheckout?: boolean;
+  /** The request body carries a phone number or similar: keep it out of the stored draft (apply re-plans from the arguments anyway). */
+  hideBody?: boolean;
 };
 
 export interface WriteDef<A, S> {
@@ -73,7 +75,11 @@ export function schemaOf(args: z.ZodType): Record<string, unknown> {
 
 const hash = (v: unknown): Promise<string> => sha256Hex(canonicalJson(v ?? null));
 
-export function writeTool<A, S>(def: WriteDef<A, S>, callApi: CallApi): ToolSpec {
+/** What a tool factory is given: the route caller and a lookup of the sibling tools (an undo that lands on another tool must compare against THAT tool's view of the state). */
+export type Kit = { callApi: CallApi; find(name: string): ToolSpec | undefined };
+
+export function writeTool<A, S>(def: WriteDef<A, S>, kit: Kit): ToolSpec {
+  const callApi = kit.callApi;
   const reader = (ctx: TurnCtx): Reader => ({ get: (path, query) => ok(callApi(ctx, path, query)), ask: (path, body) => ok(callApi(ctx, path, undefined, { method: 'POST', body })) });
   const sender = (ctx: TurnCtx) => (r: Req) => ok(callApi(ctx, r.path, undefined, { method: r.method, ...(r.body !== undefined ? { body: r.body } : {}) }));
   const load = async (ctx: TurnCtx, a: A) => {
@@ -88,7 +94,7 @@ export function writeTool<A, S>(def: WriteDef<A, S>, callApi: CallApi): ToolSpec
       const { s, plan } = await load(ctx, a);
       return {
         summary: plan.summary, rows: plan.rows, affectedCount: plan.affected ?? 1, etag: await hash(def.fingerprint ? def.fingerprint(s) : s),
-        payload: { op: def.name, body: plan.request.body ?? null, restore: plan.restore ?? null },
+        payload: { op: def.name, body: plan.hideBody ? null : plan.request.body ?? null, restore: plan.restore ?? null },
         ...(plan.changesPrice ? { changesPrice: true } : {}), ...(plan.touchesCheckout ? { touchesCheckout: true } : {}),
       };
     },
@@ -101,6 +107,14 @@ export function writeTool<A, S>(def: WriteDef<A, S>, callApi: CallApi): ToolSpec
         // The route's own authorization said no (role, plan, seat): the engine records it as the product's refusal, not a failure.
         if (e instanceof ToolApiError && (e.status === 401 || e.status === 403)) throw new ToolForbidden();
         throw e;
+      }
+      // What undo will compare against is the state as the INVERSE tool reads it: another tool's view when the undo is a different action (a created segment is undone by a delete).
+      const r = plan.restore as { tool?: string; args?: unknown } | null | undefined;
+      const inv = r && typeof r === 'object' && 'tool' in r && r.tool && r.tool !== def.name ? kit.find(r.tool) : undefined;
+      if (inv?.preview) {
+        const parsed = inv.args.safeParse(r!.args);
+        const d = parsed.success ? await inv.preview(ctx, parsed.data).catch(() => null) : null;
+        return { ok: true, etagAfter: d ? d.etag : '' };
       }
       const after = await def.read(reader(ctx), ctx, a).catch(() => null);
       return { ok: true, etagAfter: await hash(after === null ? null : def.fingerprint ? def.fingerprint(after) : after) };
@@ -119,13 +133,16 @@ export function writeTool<A, S>(def: WriteDef<A, S>, callApi: CallApi): ToolSpec
 
 const same = (a: string, b: string): boolean => foldArabic(a.trim()).toLowerCase() === foldArabic(b.trim()).toLowerCase();
 
-/** The one item whose name is `wanted`: an exact (folded) match wins; a single candidate is taken; anything else is not a guess. */
-export function pickByName<T>(items: readonly T[], nameOf: (t: T) => string | null | undefined, wanted: string): T {
+/**
+ * The one item whose name is `wanted`: an exact (folded) match wins; anything else is not a guess. `single` (search answers only: the route already filtered by what the
+ * merchant typed) also takes a lone candidate; a FULL list never does, so an invented name never lands on the only item that exists.
+ */
+export function pickByName<T>(items: readonly T[], nameOf: (t: T) => string | null | undefined, wanted: string, o: { single?: boolean } = {}): T {
   const exact = items.filter((t) => { const n = nameOf(t); return n != null && same(n, wanted); });
   if (exact.length === 1) return exact[0]!;
   if (exact.length > 1) throw new ToolInputError('ambiguous');
-  if (items.length === 1) return items[0]!;
-  throw new ToolInputError(items.length === 0 ? 'not_found' : 'ambiguous');
+  if (o.single && items.length === 1) return items[0]!;
+  throw new ToolInputError(items.length === 0 || !o.single ? 'not_found' : 'ambiguous');
 }
 
 export type ConvItem = { id: number; contact: { name: string | null }; tags: string[]; assigneeUserId: string | null };
@@ -137,13 +154,13 @@ export async function findConversation(api: Reader, customer: string, conversati
     if (!hit) throw new ToolInputError('not_found');
     return hit;
   }
-  return pickByName(items, (c) => c.contact.name, customer);
+  return pickByName(items, (c) => c.contact.name, customer, { single: true });
 }
 
 export type ContactItem = { waId: string; name: string | null; tags?: string[]; optedOut: boolean };
 export async function findContact(api: Reader, customer: string): Promise<ContactItem> {
   const r = (await api.get('/contacts', { q: customer, limit: '10' })) as { items?: ContactItem[] };
-  return pickByName(r.items ?? [], (c) => c.name, customer);
+  return pickByName(r.items ?? [], (c) => c.name, customer, { single: true });
 }
 
 export const row = (ar: string, en: string, before?: unknown, after?: unknown, source?: PreviewRow['source']): PreviewRow => ({ label: { ar, en }, ...(before !== undefined ? { before } : {}), ...(after !== undefined ? { after } : {}), ...(source ? { source } : {}) });

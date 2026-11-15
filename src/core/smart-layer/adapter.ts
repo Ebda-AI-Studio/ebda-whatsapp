@@ -6,7 +6,7 @@
  */
 import { resolveModels } from '../../../foundation/smart-layer/models';
 import type { AiBinding } from '../../../foundation/smart-layer/provider';
-import type { BindingSource, SmartLayerAdapter, TurnCtx } from '../../../foundation/smart-layer/types';
+import type { BindingSource, SmartLayerAdapter, ToolSpec, TurnCtx } from '../../../foundation/smart-layer/types';
 import { BUDGET } from '../../../foundation/smart-layer/plan/budget';
 import type { Env } from '../../env';
 import type { WorkspaceDO } from '../workspace-do';
@@ -17,10 +17,13 @@ import { chatQuota } from './quota';
 import { rpcStorage } from './storage-do';
 import type { RegistryView } from '../../../foundation/smart-layer/types';
 import { botTools } from './tools/bot.tools';
+import { campaignTools } from './tools/campaigns.tools';
 import { contactTools } from './tools/contacts.tools';
 import { inboxTools } from './tools/inbox.tools';
 import { readTools, type CallApi } from './tools/read.tools';
+import type { Kit } from './tools/write';
 import { segmentTools } from './tools/segments.tools';
+import { templateTools } from './tools/templates.tools';
 
 export type ChatAdapterDeps = {
   env: Env;
@@ -41,9 +44,10 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
   const help = d.help ?? helpDeps(d.env);
   const storage = rpcStorage((op, args) => d.ws.smartLayer(op, args));
   const searchHelp = (q: string, locale: TurnCtx['locale'], k: number) => helpSearch(help, q, locale, k);
-  const tools = [
+  const kit: Kit = { callApi: d.callApi, find: (n) => tools.find((t) => t.name === n) };
+  const tools: ToolSpec[] = [
     ...readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability }),
-    ...inboxTools(d.callApi), ...contactTools(d.callApi), ...segmentTools(d.callApi), ...botTools(d.callApi),
+    ...inboxTools(kit), ...contactTools(kit), ...segmentTools(kit), ...botTools(kit), ...campaignTools(kit), ...templateTools(kit),
   ];
   return {
     product: 'chat',

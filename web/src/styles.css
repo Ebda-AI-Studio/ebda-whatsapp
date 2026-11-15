@@ -621,6 +621,8 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
 .as-from-customer { font-size: 12px; color: var(--gold-ink); }
 .as-warn, .as-cost, .as-note-inline { margin: 0; font-size: 13px; color: var(--ink-2); }
 .as-warn { display: flex; align-items: center; gap: 6px; }
+.as-confirm { border-width: 2px; }
+.as-yes { min-inline-size: 140px; }
 .as-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .as-actions .btn { min-block-size: 44px; }
 .as-done { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }

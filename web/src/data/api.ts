@@ -188,6 +188,8 @@ export function createApiSource(o: Opts): LiveSource {
       conversation: async (id) => (await call(`/assistant/conversations/${encodeURIComponent(id)}`, assistantConversationResponse)).items,
       apply: (previewId) => call(`/assistant/previews/${encodeURIComponent(previewId)}/apply`, assistantActResponse, post({})),
       undo: (appliedId) => call(`/assistant/applied/${encodeURIComponent(appliedId)}/undo`, assistantActResponse, post({})),
+      confirm: (approvalId, token) => call(`/assistant/approvals/${encodeURIComponent(approvalId)}/confirm`, assistantActResponse, post({ token })),
+      reject: async (approvalId) => call(`/assistant/approvals/${encodeURIComponent(approvalId)}/reject`, z.object({ status: z.string() }), post({})),
       feedback: async (turnId, thumb) => { await call('/assistant/feedback', z.object({ ok: z.boolean() }).loose(), post({ turnId, thumb })); },
     },
     team: {

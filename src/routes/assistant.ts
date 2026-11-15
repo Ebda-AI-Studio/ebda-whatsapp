@@ -5,6 +5,8 @@ import { BUDGET } from '../../foundation/smart-layer/plan/budget';
 import { checkAdapterContract } from '../../foundation/smart-layer/eval/adapter-contract';
 import { runTurn } from '../../foundation/smart-layer/loop';
 import { applyPreview, undoApplied } from '../../foundation/smart-layer/exec/journal';
+import { confirmApproval, rejectApproval, type ApprovalToken } from '../../foundation/smart-layer/exec/approval';
+import { assistantConfirmRequest, assistantRejectRequest } from '../core/api/contract';
 import { buildSystemPrompt, computeReleaseId } from '../../foundation/smart-layer/release';
 import type { Mode, TurnCtx } from '../../foundation/smart-layer/types';
 import { alert } from '../core/observability';
@@ -49,10 +51,10 @@ const limited = async (c: ApiContext, ws: { smartLayer(op: 'bump', args: unknown
   ((await ws.smartLayer('bump', [`${kind}:${c.req.param('storeId')}:${c.get('principal').userId}`, 60_000, Date.now()])) as number) > 30;
 
 /** The engine's answer as the panel reads it: 200 with a status word, except the two answers that are real HTTP errors. */
-function outcome(c: ApiContext, out: { status: string }) {
+function outcome(c: ApiContext, out: { status: string }, approvals: ApprovalToken[]) {
   if (out.status === 'not_found') return apiError(c, 404, 'not_found');
   if (out.status === 'forbidden') return apiError(c, 403, 'forbidden');
-  return c.json(out);
+  return c.json(approvals.length ? { ...out, approvals } : out);
 }
 
 /** Assistant routes. `api` is the app these routes are mounted on: a tool calls one of ITS routes in-process with the merchant's own Authorization header (SL-CHAT-1). */
@@ -93,8 +95,11 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
       indexKicked = true;
       c.executionCtx.waitUntil(ensureHelpIndex(helpDeps(c.env), CORPUS).catch((e) => { indexKicked = false; alert('assistant_help_index_failed', { error: e instanceof Error ? e.name : 'unknown' }); }));
     }
-    const res = await runTurn(s.adapter, s.ctx, { text: body.data.text });
-    return c.json({ status: res.status, segments: res.segments, previews: res.previews, turnId: res.turnId });
+    // The confirm token leaves the engine through this callback only: into THIS response for the merchant's own button, nowhere else.
+    const approvals: ApprovalToken[] = [];
+    const res = await runTurn(s.adapter, s.ctx, { text: body.data.text }, { onApprovalToken: (t) => approvals.push(t) });
+    c.header('cache-control', 'no-store');
+    return c.json({ status: res.status, segments: res.segments, previews: res.previews, ...(approvals.length ? { approvals } : {}), turnId: res.turnId });
   });
 
   // The merchant presses Apply on a preview card: the only way a change happens. Its own route, never reachable from a tool or from chat text.
@@ -106,7 +111,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     if (await assistantOff(c, s.ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
     if (await limited(c, s.ws, 'applyrate')) return apiError(c, 429, 'rate_limited');
     const out = await applyPreview(s.adapter, s.ctx, id.data);
-    return outcome(c, out);
+    return outcome(c, out, []);
   });
 
   r.post('/stores/:storeId/assistant/applied/:appliedId/undo', async (c) => {
@@ -116,8 +121,39 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     if (!s) return apiError(c, 404, 'not_found');
     if (await assistantOff(c, s.ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
     if (await limited(c, s.ws, 'undorate')) return apiError(c, 429, 'rate_limited');
-    const out = await undoApplied(s.adapter, s.ctx, id.data);
-    return outcome(c, out);
+    const approvals: ApprovalToken[] = [];
+    const out = await undoApplied(s.adapter, s.ctx, id.data, { onApprovalToken: (t) => approvals.push(t) });
+    c.header('cache-control', 'no-store');
+    return outcome(c, out, approvals);
+  });
+
+  // The merchant presses the confirm button on a confirm-class card: the only way money, deletion, customer messaging, bulk or price changes happen. The token is the
+  // server-issued, single-use one from the turn response, bound to the exact previewed payload; chat text can never carry it, so a typed "yes" applies nothing.
+  r.post('/stores/:storeId/assistant/approvals/:approvalId/confirm', async (c) => {
+    const id = z.string().uuid().safeParse(c.req.param('approvalId'));
+    const body = assistantConfirmRequest.safeParse(await c.req.json().catch(() => null));
+    if (!id.success || !body.success) return apiError(c, 400, 'invalid_request');
+    const s = await session(c, crypto.randomUUID(), 'ar');
+    if (!s) return apiError(c, 404, 'not_found');
+    if (await assistantOff(c, s.ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
+    if (await limited(c, s.ws, 'confirmrate')) return apiError(c, 429, 'rate_limited');
+    const approvals: ApprovalToken[] = [];
+    const out = await confirmApproval(s.adapter, s.ctx, id.data, body.data.token, { onApprovalToken: (t) => approvals.push(t) });
+    c.header('cache-control', 'no-store');
+    return outcome(c, out, approvals);
+  });
+
+  r.post('/stores/:storeId/assistant/approvals/:approvalId/reject', async (c) => {
+    const id = z.string().uuid().safeParse(c.req.param('approvalId'));
+    const body = assistantRejectRequest.safeParse(await c.req.json().catch(() => ({})));
+    if (!id.success || !body.success) return apiError(c, 400, 'invalid_request');
+    const s = await session(c, crypto.randomUUID(), 'ar');
+    if (!s) return apiError(c, 404, 'not_found');
+    if (await assistantOff(c, s.ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
+    const out = await rejectApproval(s.adapter, s.ctx, id.data, body.data.reason);
+    if (out.status === 'missing') return apiError(c, 404, 'not_found');
+    if (out.status === 'forbidden') return apiError(c, 403, 'forbidden');
+    return c.json(out);
   });
 
   // Only the caller's own turns: a conversation id is chosen by the client, so it never opens another member's chat.

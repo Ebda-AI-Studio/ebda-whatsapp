@@ -225,9 +225,14 @@ export const assistantPreviewCard = z.object({
   approvalId: z.string().optional(),
 });
 export type AssistantPreviewCard = z.infer<typeof assistantPreviewCard>;
-export const assistantTurnResponse = z.object({ status: z.enum(['answered', 'refused', 'not_covered', 'handoff', 'off', 'limited']), segments: z.array(assistantSegment), previews: z.array(assistantPreviewCard), turnId: z.string() });
+/** The one-time token of a confirm card, for the merchant's browser to send back with its own button press. It exists only in this response: never stored, never in a prompt. */
+export const assistantApproval = z.object({ approvalId: z.string(), previewId: z.string(), token: z.string() });
+export type AssistantApproval = z.infer<typeof assistantApproval>;
+export const assistantTurnResponse = z.object({ status: z.enum(['answered', 'refused', 'not_covered', 'handoff', 'off', 'limited']), segments: z.array(assistantSegment), previews: z.array(assistantPreviewCard), approvals: z.array(assistantApproval).optional(), turnId: z.string() });
 /** The engine's answer to Apply or Undo: a status word, plus the undo handle after an apply and a fresh card when what it read had changed. */
-export const assistantActResponse = z.object({ status: z.string(), appliedId: z.string().optional(), undoUntil: z.number().optional(), card: assistantPreviewCard.optional() });
+export const assistantActResponse = z.object({ status: z.string(), appliedId: z.string().optional(), undoUntil: z.number().optional(), card: assistantPreviewCard.optional(), approvals: z.array(assistantApproval).optional() });
+export const assistantConfirmRequest = z.object({ token: z.string().min(20).max(100) }).strict();
+export const assistantRejectRequest = z.object({ reason: z.string().trim().max(200).optional() }).strict();
 export type AssistantActResponse = z.infer<typeof assistantActResponse>;
 export type AssistantSegment = z.infer<typeof assistantSegment>;
 export type AssistantTurnResponse = z.infer<typeof assistantTurnResponse>;

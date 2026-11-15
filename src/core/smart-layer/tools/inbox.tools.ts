@@ -1,8 +1,7 @@
 /** Inbox write tools (wave 1): tag, note and assign a conversation. The conversation is found from the customer's name in the merchant's own inbox. */
 import { z } from 'zod';
 import type { ToolSpec } from '../../../../foundation/smart-layer/types';
-import type { CallApi } from './read.tools';
-import { clip, findConversation, row, writeTool } from './write';
+import { ToolInputError, clip, findConversation, row, writeTool, type Kit } from './write';
 
 const tag = z.string().trim().min(1).max(32);
 const who = { customer: z.string().trim().min(1).max(100).describe("the customer's name as the merchant wrote it"), conversation: z.number().int().positive().optional() };
@@ -12,8 +11,53 @@ const tagsArgs = z.object({ ...who, tags: z.array(tag).max(10).describe('the ful
 const noteArgs = z.object({ ...who, text: z.string().trim().min(1).max(2000) }).strict();
 const assignArgs = z.object({ ...who, to: z.union([z.literal('me'), z.literal('nobody'), uid]).describe("'me', 'nobody', or a team member's user id") }).strict();
 
-export function inboxTools(callApi: CallApi): ToolSpec[] {
+const sendTextArgs = z.object({ ...who, text: z.string().trim().min(1).max(4096).describe('the exact message to send to the customer') }).strict();
+const sendTemplateArgs = z.object({ ...who, template: z.object({ name: z.string().min(1).max(512), language: z.string().min(2).max(10) }), params: z.array(z.string().max(1000)).max(20).default([]) }).strict();
+type Win = { id: number; open: boolean; windowOpenUntil: number | null };
+/** A send goes out once: the idempotency key is made at press time, not at preview time, so the previewed payload stays comparable. */
+const withClientId = (call: (r: { method: 'POST'; path: string; body: unknown }) => Promise<unknown>, plan: { request: { path: string; body?: unknown } }) =>
+  call({ method: 'POST', path: plan.request.path, body: { ...(plan.request.body as object), clientId: crypto.randomUUID() } });
+
+export function inboxTools(kit: Kit): ToolSpec[] {
   return [
+    writeTool({
+      name: 'send_text', capabilityId: 'inbox.send-text', policy: 'confirm', undo: 'irreversible', messagesCustomers: true,
+      description: "Send a text message to a customer in their conversation. It goes to a real person and cannot be taken back, so the merchant confirms with the button; the card shows the exact text. Only works while the 24-hour reply window is open (otherwise use send_template).",
+      args: sendTextArgs,
+      read: async (api, ctx, a): Promise<Win> => { const c = await findConversation(api, a.customer, a.conversation); const until = (c as { windowOpenUntil?: number | null }).windowOpenUntil ?? null; return { id: c.id, open: until !== null && until > ctx.now, windowOpenUntil: until }; },
+      // The window closing by a minute is not a reason to re-preview; open/closed is.
+      fingerprint: (s) => ({ id: s.id, open: s.open }),
+      plan: (a, s) => {
+        if (!s.open) throw new ToolInputError('unavailable');
+        return {
+          summary: { ar: `إرسال رسالة لـ ${a.customer}`, en: `Send a message to ${a.customer}` },
+          rows: [row('الرسالة (هتتبعت زي ما هي)', 'Message (sent exactly as written)', undefined, a.text, 'merchant')],
+          request: { method: 'POST', path: `/conversations/${s.id}/messages`, body: { type: 'text', text: a.text } },
+        };
+      },
+      send: async (call, plan) => withClientId(call as never, plan),
+    }, kit),
+    writeTool({
+      name: 'send_template', capabilityId: 'inbox.send-template', policy: 'confirm', undo: 'irreversible', messagesCustomers: true,
+      description: "Send an approved WhatsApp template to a customer (works when the 24-hour window is closed too). It goes to a real person and cannot be taken back, so the merchant confirms; the card shows the template text.",
+      args: sendTemplateArgs,
+      read: async (api, _c, a) => {
+        const c = await findConversation(api, a.customer, a.conversation);
+        const t = ((await api.get('/templates')) as { items?: Array<{ name: string; language: string; status: string; bodyText: string; paramCount: number }> }).items?.find((x) => x.name === a.template.name && x.language === a.template.language);
+        if (!t || t.status !== 'APPROVED') throw new ToolInputError('unavailable');
+        return { id: c.id, body: t.bodyText, paramCount: t.paramCount };
+      },
+      plan: (a, s) => {
+        if (a.params.length !== s.paramCount) throw new ToolInputError('unavailable');
+        const text = s.body.replace(/\{\{(\d+)\}\}/g, (_m, n: string) => a.params[Number(n) - 1] ?? '');
+        return {
+          summary: { ar: `إرسال قالب لـ ${a.customer}`, en: `Send a template to ${a.customer}` },
+          rows: [row('القالب', 'Template', undefined, `${a.template.name} (${a.template.language})`), row('النص اللي هيوصل', 'The text that will arrive', undefined, text, 'merchant')],
+          request: { method: 'POST', path: `/conversations/${s.id}/messages`, body: { type: 'template', name: a.template.name, language: a.template.language, params: a.params } },
+        };
+      },
+      send: async (call, plan) => withClientId(call as never, plan),
+    }, kit),
     writeTool({
       name: 'conversation_tag_set', capabilityId: 'inbox.conversation-tags', policy: 'preview', undo: 'reversible',
       description: "Set the tags on a customer's conversation (replaces the list). Give the customer's name. Shows a preview first; nothing changes until the merchant applies it.",
@@ -25,7 +69,7 @@ export function inboxTools(callApi: CallApi): ToolSpec[] {
         request: { method: 'PUT', path: `/conversations/${s.id}/tags`, body: { tags: a.tags } },
         restore: { customer: a.customer, conversation: s.id, tags: s.tags },
       }),
-    }, callApi),
+    }, kit),
     writeTool({
       name: 'conversation_note_add', capabilityId: 'inbox.notes', policy: 'preview', undo: 'irreversible',
       description: 'Add an internal note (never sent to the customer) to a customer conversation. A note cannot be deleted afterwards, so the merchant confirms it.',
@@ -40,7 +84,7 @@ export function inboxTools(callApi: CallApi): ToolSpec[] {
         rows: [row('الملاحظة (للفريق فقط، العميل مش هيشوفها)', 'Note (team only, the customer never sees it)', undefined, clip(a.text), 'merchant')],
         request: { method: 'POST', path: `/conversations/${s.id}/notes`, body: { text: a.text } },
       }),
-    }, callApi),
+    }, kit),
     writeTool({
       name: 'conversation_assign', capabilityId: 'inbox.assign-takeover', policy: 'preview', undo: 'reversible',
       description: "Assign a customer's conversation to a team member, to the merchant ('me'), or to nobody. Give the customer's name.",
@@ -56,6 +100,6 @@ export function inboxTools(callApi: CallApi): ToolSpec[] {
           restore: { customer: a.customer, conversation: s.id, to: s.assignee === null ? 'nobody' : s.assignee === ctx.userId ? 'me' : s.assignee },
         };
       },
-    }, callApi),
+    }, kit),
   ];
 }

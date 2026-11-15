@@ -1,0 +1,211 @@
+import { env } from 'cloudflare:test';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { configureAssistant } from '../../src/routes/assistant';
+import { apiKey, useApiKey } from '../helpers/api';
+import { mint } from '../helpers/issuer';
+import { installWallet, makeCampaign, resetWallet, seedContacts, seedTemplate } from '../helpers/campaigns';
+import { rows } from '../helpers/workspace';
+import { scriptedAi, setup } from './harness';
+
+useApiKey();
+beforeEach(async () => { await env.DB.prepare("INSERT INTO platform_flags (key, value, updated_at) VALUES ('sl.global', '{\"mode\":\"act\"}', 0) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(); });
+afterEach(() => { configureAssistant({}); resetWallet(); });
+
+const TEXT = 'أهلا يا منى، طلبك اتشحن النهارده';
+const sendText = (text = TEXT) => ({ name: 'send_text', args: { customer: 'منى السيد', text } });
+const outbound = async (t: Awaited<ReturnType<typeof setup>>) => {
+  const conv = (await t.get('/conversations') as { items: Array<{ id: number }> }).items[0]!.id;
+  return ((await t.get(`/conversations/${conv}/messages`)) as { items: Array<{ direction: string; text: string | null }> }).items.filter((m) => m.direction === 'out');
+};
+const decisions = (s: string) => rows(s, 'SELECT decision FROM sl_decisions ORDER BY seq');
+
+describe('confirm class: only the merchant\'s own button press sends', () => {
+  it('send_text: the turn sends nothing and returns a confirm card; the token appears only in approvals, never in the card, a stored row or a model request', async () => {
+    const t = await setup(7401);
+    const ai = scriptedAi([{ call: sendText() }, { text: 'المعاينة جاهزة.' }]);
+    const out = await t.ask('ابعت لمنى السيد رسالة', undefined, ai);
+    expect(out.previews[0]).toMatchObject({ policy: 'confirm', undo: 'irreversible' });
+    expect(out.previews[0]!.reasons).toEqual(expect.arrayContaining(['customer_message', 'irreversible']));
+    expect(out.previews[0]!.rows.some((r) => r.after === TEXT)).toBe(true);
+    const ap = out.approvals![0]!;
+    expect(ap.approvalId).toBe(out.previews[0]!.approvalId);
+    expect(JSON.stringify(out.previews)).not.toContain(ap.token);
+    expect(await outbound(t)).toEqual([]);
+    for (const table of ['sl_turns', 'sl_audit', 'sl_previews', 'sl_approvals', 'sl_decisions']) expect(JSON.stringify(await rows(t.s, `SELECT * FROM ${table}`)), table).not.toContain(ap.token);
+    expect(ai.seen.join('')).not.toContain(ap.token);
+    const res = (await (await t.confirm(ap.approvalId, ap.token)).json()) as { status: string };
+    expect(res.status).toBe('applied');
+    expect((await outbound(t)).map((m) => m.text)).toEqual([TEXT]);
+    expect(await decisions(t.s)).toEqual([{ decision: 'confirmed' }]);
+  });
+
+  it('a typed "yes" applies nothing: the approval stays pending and nothing is sent', async () => {
+    const t = await setup(7402);
+    const out = await t.ask('ابعت لمنى السيد رسالة', sendText());
+    await t.ask('أيوه نفّذ', undefined, scriptedAi([{ text: 'تمام.' }]));
+    expect(await outbound(t)).toEqual([]);
+    expect(await rows(t.s, "SELECT status FROM sl_approvals WHERE id = '" + out.approvals![0]!.approvalId + "'")).toEqual([{ status: 'pending' }]);
+  });
+
+  it('two parallel confirms send once', async () => {
+    const t = await setup(7403);
+    const ap = (await t.ask('ابعت لمنى السيد رسالة', sendText())).approvals![0]!;
+    const [a, b] = await Promise.all([t.confirm(ap.approvalId, ap.token), t.confirm(ap.approvalId, ap.token)]);
+    const statuses = (await Promise.all([a, b].map(async (r) => ((await r.json()) as { status: string }).status))).sort();
+    expect(statuses).toEqual(['applied', 'used']);
+    expect(await outbound(t)).toHaveLength(1);
+  });
+
+  it('a token for one card cannot confirm another card (the payload hash binds it), and one character of difference is a different card', async () => {
+    const t = await setup(7404);
+    const a = (await t.ask('ابعت لمنى السيد رسالة', sendText(TEXT))).approvals![0]!;
+    const bOut = await t.ask('ابعت لمنى السيد رسالة', sendText(`${TEXT}!`));
+    const b = bOut.approvals![0]!;
+    const hashes = await rows(t.s, 'SELECT json_extract(json, \'$.payloadHash\') AS h FROM sl_previews ORDER BY created_at, id');
+    expect(new Set(hashes.map((x) => x.h)).size).toBe(2);
+    const wrong = (await (await t.confirm(b.approvalId, a.token)).json()) as { status: string };
+    expect(wrong.status).toBe('mismatch');
+    expect(await outbound(t)).toEqual([]);
+  });
+
+  it('a role change between the card and the press: refused by the route, nothing happens, the decision is logged rejected:permission', async () => {
+    const t = await setup(7405);
+    const out = await t.ask('امسح العميل منى السيد', { name: 'contact_erase', args: { customer: 'منى السيد' } });
+    expect(out.previews[0]).toMatchObject({ policy: 'confirm' });
+    expect(out.previews[0]!.reasons).toContain('delete');
+    const ap = out.approvals![0]!;
+    const owner = '6f1d2c1e-8a8f-4a3b-9f1e-1a2b3c4d5e6f';
+    const demoted = await mint(apiKey(), { sub: owner, stores: [{ id: t.s, role: 'staff' }] });
+    const res = await t.confirm(ap.approvalId, ap.token, demoted);
+    expect(res.status).toBe(403);
+    expect(((await t.get('/contacts')) as { items: unknown[] }).items).toHaveLength(1);
+    expect(await decisions(t.s)).toEqual([{ decision: 'rejected:permission' }]);
+  });
+
+  it('reject records the decision and the token is then dead', async () => {
+    const t = await setup(7406);
+    const ap = (await t.ask('ابعت لمنى السيد رسالة', sendText())).approvals![0]!;
+    expect(((await (await t.reject(ap.approvalId)).json()) as { status: string }).status).toBe('rejected');
+    expect(((await (await t.confirm(ap.approvalId, ap.token)).json()) as { status: string }).status).toBe('used');
+    expect(await outbound(t)).toEqual([]);
+    expect(await decisions(t.s)).toEqual([{ decision: 'rejected' }]);
+  });
+
+  it('another member cannot press someone else\'s card', async () => {
+    const t = await setup(7407);
+    const ap = (await t.ask('ابعت لمنى السيد رسالة', sendText())).approvals![0]!;
+    const other = await mint(apiKey(), { sub: '7a2e3d2f-9b9f-4b4c-8a2f-2b3c4d5e6f70', stores: [{ id: t.s, role: 'owner' }] });
+    expect((await t.confirm(ap.approvalId, ap.token, other)).status).toBe(403);
+    expect(await outbound(t)).toEqual([]);
+  });
+
+  it('the confirm routes are closed by the kill switch and by a missing token', async () => {
+    const t = await setup(7408);
+    const ap = (await t.ask('ابعت لمنى السيد رسالة', sendText())).approvals![0]!;
+    expect((await t.confirm(ap.approvalId, 'short')).status).toBe(400);
+    await env.DB.prepare("INSERT INTO platform_flags (key, value, updated_at) VALUES ('sl.global', '{\"kill\":true}', 0) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
+    expect((await t.confirm(ap.approvalId, ap.token)).status).toBe(403);
+    expect(await outbound(t)).toEqual([]);
+  });
+});
+
+describe('wave 2 tools', () => {
+  it('campaign_send_now: the card shows the audience, the template and the wallet estimate the product computes, and only the press sends', async () => {
+    const t = await setup(7410, 'owner', ['منى']);
+    await seedTemplate(t.s);
+    await seedContacts(t.s, 3);
+    installWallet({ perMessage: 150 });
+    const camp = await makeCampaign(t.s, { criteria: { everyone: true } });
+    expect(camp.status).toBe('draft');
+    const out = await t.ask('ابعت حملة Eid sale دلوقتي', { name: 'campaign_send_now', args: { campaign: 'Eid sale' } });
+    const card = out.previews[0]!;
+    expect(card.policy).toBe('confirm');
+    expect(card.reasons).toEqual(expect.arrayContaining(['money', 'customer_message', 'irreversible']));
+    expect(JSON.stringify(card.rows)).toContain('promo');
+    expect(card.rows.some((r) => typeof r.after === 'string' && /^\d+(\.\d+)?$/.test(r.after) && r.after !== '1')).toBe(true);
+    expect(((await t.get(`/campaigns/${camp.id}`)) as { status: string }).status).toBe('draft');
+    const res = (await (await t.confirm(out.approvals![0]!.approvalId, out.approvals![0]!.token)).json()) as { status: string };
+    expect(res.status).toBe('applied');
+    expect(((await t.get(`/campaigns/${camp.id}`)) as { status: string }).status).not.toBe('draft');
+  });
+
+  it('campaign_delete_draft is a delete confirm; an unknown campaign builds no card', async () => {
+    const t = await setup(7411, 'owner', ['منى']);
+    await seedTemplate(t.s);
+    await seedContacts(t.s, 2);
+    await makeCampaign(t.s);
+    expect((await t.ask('امسح حملة مش موجودة', { name: 'campaign_delete_draft', args: { campaign: 'nope' } })).previews).toEqual([]);
+    const out = await t.ask('امسح مسودة Eid sale', { name: 'campaign_delete_draft', args: { campaign: 'Eid sale' } });
+    expect(out.previews[0]!.reasons).toContain('delete');
+    await t.confirm(out.approvals![0]!.approvalId, out.approvals![0]!.token);
+    expect(((await t.get('/campaigns')) as { items: unknown[] }).items).toEqual([]);
+  });
+
+  it('segment: create is preview class and its undo (delete) needs a confirm card; delete then Undo restores the segment', async () => {
+    const t = await setup(7412);
+    const made = await t.ask('اعمل شريحة VIP', { name: 'segment_upsert', args: { name: 'VIP', criteria: { everyone: true } } });
+    const applied = (await (await t.apply(made.previews[0]!.previewId)).json()) as { appliedId: string };
+    const undo = (await (await t.undo(applied.appliedId)).json()) as { status: string; approvals?: Array<{ approvalId: string; token: string }> };
+    expect(undo.status).toBe('needs_confirm');
+    expect(((await t.get('/segments')) as { items: unknown[] }).items).toHaveLength(1);
+    expect(((await (await t.confirm(undo.approvals![0]!.approvalId, undo.approvals![0]!.token)).json()) as { status: string }).status).toBe('applied');
+    expect(((await t.get('/segments')) as { items: unknown[] }).items).toEqual([]);
+    // delete (confirm) then Undo: the segment comes back through segment_upsert, a preview-class restore
+    const again = await t.ask('اعمل شريحة VIP', { name: 'segment_upsert', args: { name: 'VIP', criteria: { everyone: true } } });
+    await t.apply(again.previews[0]!.previewId);
+    const del = await t.ask('امسح شريحة VIP', { name: 'segment_delete', args: { segment: 'VIP' } });
+    const done = (await (await t.confirm(del.approvals![0]!.approvalId, del.approvals![0]!.token)).json()) as { status: string; appliedId: string };
+    expect(done.status).toBe('applied');
+    expect(((await t.get('/segments')) as { items: unknown[] }).items).toEqual([]);
+    expect(((await (await t.undo(done.appliedId)).json()) as { status: string }).status).toBe('undone');
+    expect(((await t.get('/segments')) as { items: Array<{ name: string }> }).items.map((s) => s.name)).toEqual(['VIP']);
+  });
+
+  it('contact_erase and contact_merge keep phone numbers out of the stored draft', async () => {
+    const t = await setup(7413, 'owner', ['منى السيد', 'سارة علي']);
+    const m = await t.ask('ادمج سارة علي في منى السيد', { name: 'contact_merge', args: { from: 'سارة علي', into: 'منى السيد' } });
+    expect(m.previews[0]!.reasons).toContain('delete');
+    expect(JSON.stringify(await rows(t.s, 'SELECT json FROM sl_previews'))).not.toMatch(/2010123456/);
+    await t.confirm(m.approvals![0]!.approvalId, m.approvals![0]!.token);
+    expect(((await t.get('/contacts')) as { items: unknown[] }).items).toHaveLength(1);
+  });
+
+  it('templates_install_defaults is confirm and irreversible; send_template needs an approved template', async () => {
+    const t = await setup(7414);
+    const d = await t.ask('نزّل قوالب البداية', { name: 'templates_install_defaults', args: {} });
+    expect(d.previews[0]).toMatchObject({ policy: 'confirm', undo: 'irreversible' });
+    const none = await t.ask('ابعت قالب لمنى السيد', { name: 'send_template', args: { customer: 'منى السيد', template: { name: 'missing', language: 'ar' }, params: [] } });
+    expect(none.previews).toEqual([]);
+  });
+
+  it('campaign_schedule: confirm class, a past time builds no card, the press schedules it, and Undo is a cancel that needs its own confirm', async () => {
+    const t = await setup(7415, 'owner', ['منى']);
+    await seedTemplate(t.s);
+    await seedContacts(t.s, 3);
+    installWallet({ perMessage: 100 });
+    const camp = await makeCampaign(t.s);
+    const past = await t.ask('جدول الحملة', { name: 'campaign_schedule', args: { campaign: 'Eid sale', at: '2020-01-01T10:00:00+02:00' } });
+    expect(past.previews).toEqual([]);
+    const at = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    const out = await t.ask('جدول حملة Eid sale بعد 3 ايام', { name: 'campaign_schedule', args: { campaign: 'Eid sale', at } });
+    expect(out.previews[0]).toMatchObject({ policy: 'confirm' });
+    const done = (await (await t.confirm(out.approvals![0]!.approvalId, out.approvals![0]!.token)).json()) as { status: string; appliedId: string };
+    expect(done.status).toBe('applied');
+    expect(((await t.get(`/campaigns/${camp.id}`)) as { status: string }).status).toBe('scheduled');
+    const undo = (await (await t.undo(done.appliedId)).json()) as { status: string; approvals?: Array<{ approvalId: string; token: string }> };
+    expect(undo.status).toBe('needs_confirm');
+    expect(((await t.get(`/campaigns/${camp.id}`)) as { status: string }).status).toBe('scheduled');
+    await t.confirm(undo.approvals![0]!.approvalId, undo.approvals![0]!.token);
+    expect(((await t.get(`/campaigns/${camp.id}`)) as { status: string }).status).toBe('cancelled');
+  });
+
+  it('send_template: the card shows the text that will arrive, with the parameters filled in', async () => {
+    const t = await setup(7416);
+    await seedTemplate(t.s);
+    const out = await t.ask('ابعت قالب لمنى السيد', { name: 'send_template', args: { customer: 'منى السيد', template: { name: 'promo', language: 'ar' }, params: ['منى', '50%'] } });
+    expect(out.previews[0]).toMatchObject({ policy: 'confirm' });
+    expect(out.previews[0]!.rows.some((r) => r.after === 'أهلا منى عرض 50%')).toBe(true);
+    const wrongCount = await t.ask('ابعت قالب لمنى السيد', { name: 'send_template', args: { customer: 'منى السيد', template: { name: 'promo', language: 'ar' }, params: ['منى'] } });
+    expect(wrongCount.previews).toEqual([]);
+  });
+});

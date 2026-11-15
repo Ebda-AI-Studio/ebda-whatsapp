@@ -23,7 +23,8 @@ The assistant answers your questions about Ebda Chat in plain language and shows
 - Nothing changes until you press **Apply**. After applying you have 24 hours to press **Undo** and everything goes back.
 - If the item changed since the preview (you edited it by hand, for example) you get a new preview instead of an overwrite of your edit.
 - Every change runs with your own permissions: if your role does not allow it (a staff member on an owner-only setting) it is refused and nothing changes.
-- Changes that involve money, deletion, messages to your customers, more than 20 items or a price change, or that cannot be undone (like an internal note), need your explicit confirmation in a separate step.
+- Changes that involve money, deletion, messages to your customers, more than 20 items or a price change, or that cannot be undone (like an internal note), need your explicit confirmation: a confirm card shows the reason and you press **Yes, do it** yourself. Typing "yes" in the chat does nothing on its own, the card expires after 15 minutes, and if something changed since the card was made you get a new one.
+- Campaigns: it prepares the campaign as a draft, and before sending or scheduling it shows how many people it reaches, the template with its parameters and the expected wallet cost. Messages sent to customers cannot be taken back.
 - It finds a customer by the name you typed. If two customers share that name it does not guess; it asks you to be more specific.
 
 ## What it never does

@@ -1,51 +1,15 @@
-import { SELF, env } from 'cloudflare:test';
+import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { configureAssistant } from '../../src/routes/assistant';
-import { apiFor, storeId, useApiKey } from '../helpers/api';
-import { rows, seedNumber, workspace } from '../helpers/workspace';
+import { useApiKey } from '../helpers/api';
+import { rows } from '../helpers/workspace';
+import { setup, type Card } from './harness';
 
 useApiKey();
-
-type Script = Array<{ text?: string; call?: { name: string; args: unknown } }>;
-function scriptedAi(script: Script) {
-  let i = 0;
-  return {
-    run: async (_m: string, inputs: Record<string, unknown>) => {
-      const system = (((inputs.messages as Array<{ content?: string }>)[0]?.content) ?? '') as string;
-      if (system.includes('Classify the merchant message')) return { choices: [{ message: { content: '{"inScope":true,"abuse":false,"injection":false}' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
-      const s = script[Math.min(i++, script.length - 1)]!;
-      return { choices: [{ message: { content: s.text ?? null, ...(s.call ? { tool_calls: [{ id: `c${i}`, type: 'function', function: { name: s.call.name, arguments: JSON.stringify(s.call.args) } }] } : {}) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } };
-    },
-  };
-}
-const noHelp = { db: env.DB, embed: undefined, vectors: undefined } as never;
 
 beforeEach(async () => { await env.DB.prepare("INSERT INTO platform_flags (key, value, updated_at) VALUES ('sl.global', '{\"mode\":\"act\"}', 0) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(); });
 afterEach(() => { configureAssistant({}); });
 
-const base = (s: string, p: string) => `https://x/api/v1/stores/${s}/assistant${p}`;
-const post = (s: string, token: string, path: string, body?: unknown) => SELF.fetch(base(s, path), { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(body ?? {}) });
-type Card = { previewId: string; policy: 'preview' | 'confirm'; reasons: string[]; rows: Array<{ before?: unknown; after?: unknown }>; undo: string; approvalId?: string };
-type TurnOut = { status: string; previews: Card[] };
-
-/** One workspace in `act` mode with customers; `ask` runs one scripted turn that calls a tool and returns the cards. */
-async function setup(n: number, role: 'owner' | 'staff' = 'owner', names: string[] = ['منى السيد']) {
-  const s = storeId(n);
-  const api = await apiFor(s, role);
-  await seedNumber(`pn-${s}`, s);
-  const ws = workspace(s);
-  await ws.setAssistantMode('act');
-  let k = 0;
-  for (const name of names) await ws.ingest({ phoneNumberId: `pn-${s}`, inbound: [{ wamid: `wamid.${s}.${k}`, from: `2010123456${String(k++).padStart(2, '0')}`, ts: Math.floor(Date.now() / 1000), type: 'text', text: 'hi', profileName: name }], statuses: [], receivedAt: 1 });
-  const ask = async (text: string, call: { name: string; args: unknown }): Promise<TurnOut> => {
-    configureAssistant({ ai: scriptedAi([{ call }, { text: 'المعاينة جاهزة.' }]) as never, help: noHelp });
-    const res = await post(s, api.token, '/turn', { conversationId: crypto.randomUUID(), text, locale: 'ar' });
-    expect(res.status).toBe(200);
-    return (await res.json()) as TurnOut;
-  };
-  const get = async (path: string) => (await (await api.call('GET', path)).json()) as never;
-  return { s, api, ws, ask, get, apply: (id: string) => post(s, api.token, `/previews/${id}/apply`), undo: (id: string) => post(s, api.token, `/applied/${id}/undo`) };
-}
 const tagsOf = async (get: (p: string) => Promise<{ items: Array<{ id: number; tags: string[] }> }>) => (await get('/conversations')).items[0]!.tags;
 
 describe('wave 1 preview tools: preview, apply, undo through the merchant\'s own routes', () => {
