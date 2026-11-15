@@ -5,7 +5,10 @@ import registryJson from '../../assistant/registry.generated.json';
 import { applyBaseline, baselineGrowth, guardOutcome, violationId } from '../../foundation/ratchet';
 import { chatAdapter } from '../../src/core/smart-layer/adapter';
 import { toViolations, uncovered } from '../../src/core/smart-layer/coverage';
-import { DEEP_LINK_ONLY, OWNED_ELSEWHERE } from '../../src/core/smart-layer/deep-link-only';
+import { DEEP_LINK_ONLY, ownedElsewhere } from '../../src/core/smart-layer/deep-link-only';
+import { ASSISTANT_CAPABILITY } from '../../src/routes/assistant';
+
+const OWNED_ELSEWHERE = ownedElsewhere(ASSISTANT_CAPABILITY);
 import type { HelpCorpus } from '../../src/core/smart-layer/help-index';
 import { viewOf, type StoredCap } from '../../src/core/smart-layer/registry';
 import baselineJson from '../../capabilities/baselines/assistant-tools.json';

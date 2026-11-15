@@ -16,9 +16,9 @@ export const DEEP_LINK_ONLY: Readonly<Record<string, { secret: string } | { scre
   'contacts.export': { screen: 'a data export is a file download' },
 };
 
-/** Capabilities another part of the system owns (the assistant\'s own machinery): the coverage guard does not ask for a tool of their own. */
-export const OWNED_ELSEWHERE: Readonly<Record<string, string>> = {
-  'assistant.ebda-assistant': 'the assistant itself: its tools are help_search and show_me_where',
-  'assistant.apply-changes': 'the engine\'s apply, confirm and undo routes: the press is the merchant\'s, never a tool',
+/** Capabilities another part of the system owns (the assistant's own machinery): the coverage guard does not ask for a tool of their own. The assistant's own id is passed in (core never spells the brand). */
+export const ownedElsewhere = (assistantCapability: string): Readonly<Record<string, string>> => ({
+  [assistantCapability]: 'the assistant itself: its tools are help_search and show_me_where',
+  'assistant.apply-changes': "the engine's apply, confirm and undo routes: the press is the merchant's, never a tool",
   'help.corpus-parity': 'help_search reads the same corpus',
-};
+});
