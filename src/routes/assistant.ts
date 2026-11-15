@@ -46,6 +46,14 @@ export const ASSISTANT_CAPABILITY = 'assistant.ebda-assistant';
 /** The kill switch covers every assistant route, not just the turn: with the assistant off, history and feedback are closed too. */
 const assistantOff = async (c: { env: Env }, ws: { assistantMode(): Promise<Mode> }) => (await chatControls(c.env, ws)).mode === 'off';
 
+/**
+ * A platform operator's session (a super admin, including one who is also a member of the workspace) never drives the assistant: it builds no previews, applies, confirms or
+ * undoes nothing on a merchant's behalf. Chat's identity carries no way to tell a support "act as" session from the person's own, so every super-admin session is refused here;
+ * an operator's writes have the /operator routes (a stated reason, audited). A non-member operator never reaches these POSTs at all (`operator_route_required`, identity middleware).
+ */
+export const operatorSession = (c: ApiContext): boolean => c.get('storeRole') === 'super_admin';
+const operatorRefused = (c: ApiContext) => apiError(c, 403, 'forbidden', 'operator_session');
+
 /** A person presses a handful of buttons a minute; more is a script. */
 const limited = async (c: ApiContext, ws: { smartLayer(op: 'bump', args: unknown[]): Promise<unknown> }, kind: string): Promise<boolean> =>
   ((await ws.smartLayer('bump', [`${kind}:${c.req.param('storeId')}:${c.get('principal').userId}`, 60_000, Date.now()])) as number) > 30;
@@ -87,6 +95,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
   };
 
   r.post('/stores/:storeId/assistant/turn', async (c) => {
+    if (operatorSession(c)) return operatorRefused(c);
     const body = turnBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return apiError(c, 400, 'invalid_request');
     const s = await session(c, body.data.conversationId, body.data.locale);
@@ -104,6 +113,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
 
   // The merchant presses Apply on a preview card: the only way a change happens. Its own route, never reachable from a tool or from chat text.
   r.post('/stores/:storeId/assistant/previews/:previewId/apply', async (c) => {
+    if (operatorSession(c)) return operatorRefused(c);
     const id = z.string().uuid().safeParse(c.req.param('previewId'));
     if (!id.success) return apiError(c, 400, 'invalid_request');
     // The context's conversation id is the PREVIEW's id: a tool derives its send key from it (see `stableUuid`), so a retried apply of the same preview cannot send twice.
@@ -116,6 +126,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
   });
 
   r.post('/stores/:storeId/assistant/applied/:appliedId/undo', async (c) => {
+    if (operatorSession(c)) return operatorRefused(c);
     const id = z.string().uuid().safeParse(c.req.param('appliedId'));
     if (!id.success) return apiError(c, 400, 'invalid_request');
     const s = await session(c, id.data, 'ar');
@@ -131,6 +142,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
   // The merchant presses the confirm button on a confirm-class card: the only way money, deletion, customer messaging, bulk or price changes happen. The token is the
   // server-issued, single-use one from the turn response, bound to the exact previewed payload; chat text can never carry it, so a typed "yes" applies nothing.
   r.post('/stores/:storeId/assistant/approvals/:approvalId/confirm', async (c) => {
+    if (operatorSession(c)) return operatorRefused(c);
     const id = z.string().uuid().safeParse(c.req.param('approvalId'));
     const body = assistantConfirmRequest.safeParse(await c.req.json().catch(() => null));
     if (!id.success || !body.success) return apiError(c, 400, 'invalid_request');
@@ -148,6 +160,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
   });
 
   r.post('/stores/:storeId/assistant/approvals/:approvalId/reject', async (c) => {
+    if (operatorSession(c)) return operatorRefused(c);
     const id = z.string().uuid().safeParse(c.req.param('approvalId'));
     const body = assistantRejectRequest.safeParse(await c.req.json().catch(() => ({})));
     if (!id.success || !body.success) return apiError(c, 400, 'invalid_request');
@@ -173,6 +186,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
   });
 
   r.post('/stores/:storeId/assistant/feedback', async (c) => {
+    if (operatorSession(c)) return operatorRefused(c);
     const body = feedbackBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return apiError(c, 400, 'invalid_request');
     const ws = await workspaceStub(c);
