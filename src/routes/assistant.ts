@@ -155,6 +155,13 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     if (!s) return apiError(c, 404, 'not_found');
     if (await assistantOff(c, s.ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
     const out = await rejectApproval(s.adapter, s.ctx, id.data, body.data.reason);
+    if (out.status === 'rejected') {
+      // A "no" gives back whatever the preview held for the merchant (the template writer's AI credits): nothing is charged for a draft they declined. Idempotent.
+      const rec = await s.adapter.storage.getApproval(s.ctx.storeId, id.data);
+      const pv = rec ? await s.adapter.storage.getPreview(s.ctx.storeId, rec.previewId) : null;
+      const hold = (pv?.draft.payload as { hold?: unknown } | null)?.hold;
+      if (typeof hold === 'string') await s.ws.assistantRelease(hold).catch(() => undefined);
+    }
     if (out.status === 'missing') return apiError(c, 404, 'not_found');
     if (out.status === 'forbidden') return apiError(c, 403, 'forbidden');
     return c.json(out);

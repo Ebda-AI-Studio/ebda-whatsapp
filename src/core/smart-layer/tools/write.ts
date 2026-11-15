@@ -37,8 +37,10 @@ export type Plan = {
   affected?: number;
   changesPrice?: boolean;
   touchesCheckout?: boolean;
-  /** AI credits this change costs (shown on the card; the tool itself holds and settles them). */
+  /** AI credits this change costs (shown on the card). The tool HOLDS them when it prepares the preview; `settle` charges them only on the merchant's press. */
   cost?: number;
+  /** The credit hold behind this preview. It travels in the stored draft so the reject route can give it back. */
+  hold?: string;
   /** The request body carries a phone number or similar: keep it out of the stored draft (apply re-plans from the arguments anyway). */
   hideBody?: boolean;
 };
@@ -61,6 +63,8 @@ export interface WriteDef<A, S> {
   fingerprint?(s: S): unknown;
   /** Extra send step (e.g. the settings confirm token the route itself requires before it will turn a switch on). */
   send?(call: (r: Req) => Promise<unknown>, plan: Plan, a: A, ctx: TurnCtx): Promise<unknown>;
+  /** After the change went through: settle what the merchant agreed to pay. Idempotent calls only; a failure here never undoes the change. */
+  settle?(s: S, ctx: TurnCtx): Promise<void>;
 }
 
 const ok = async (p: Promise<{ status: number; json: unknown }>): Promise<unknown> => {
@@ -105,12 +109,12 @@ export function writeTool<A, S>(def: WriteDef<A, S>, kit: Kit): ToolSpec {
       const { s, plan } = await load(ctx, a);
       return {
         summary: plan.summary, rows: plan.rows, affectedCount: plan.affected ?? 1, etag: await hash(def.fingerprint ? def.fingerprint(s) : s),
-        payload: { op: def.name, body: plan.hideBody ? null : plan.request.body ?? null, restore: plan.restore ?? null },
+        payload: { op: def.name, body: plan.hideBody ? null : plan.request.body ?? null, restore: plan.restore ?? null, ...(plan.hold ? { hold: plan.hold } : {}) },
         ...(plan.changesPrice ? { changesPrice: true } : {}), ...(plan.touchesCheckout ? { touchesCheckout: true } : {}), ...(plan.cost !== undefined ? { costCredits: plan.cost } : {}),
       };
     },
     async apply(ctx, a) {
-      const { plan } = await load(ctx, a);
+      const { s: state, plan } = await load(ctx, a);
       const call = sender(ctx);
       try {
         await (def.send ? def.send(call, plan, a, ctx) : call(plan.request));
@@ -119,6 +123,7 @@ export function writeTool<A, S>(def: WriteDef<A, S>, kit: Kit): ToolSpec {
         if (e instanceof ToolApiError && (e.status === 401 || e.status === 403)) throw new ToolForbidden();
         throw e;
       }
+      await def.settle?.(state, ctx).catch(() => undefined); // the change is made: charging for it must not turn it into a failure (settle is idempotent, a retry finds it done)
       // What undo will compare against is the state as the INVERSE tool reads it: another tool's view when the undo is a different action (a created segment is undone by a delete).
       const r = plan.restore as { tool?: string; args?: unknown } | null | undefined;
       const inv = r && typeof r === 'object' && 'tool' in r && r.tool && r.tool !== def.name ? kit.find(r.tool) : undefined;
