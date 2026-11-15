@@ -1,14 +1,19 @@
 {
   "id": "assistant.ebda-assistant",
-  "status": "planned",
-  "plan": "spec 2026-11-14-self-service-and-ebda-assistant-design.md",
+  "status": "live",
   "area": "assistant",
   "version": 1,
   "versionDate": "2026-11-14",
-  "titleAr": "مساعد ابدأ للمحادثة والمهام",
-  "titleEn": "Ebda assistant (how-do-I answers and doing tasks)",
-  "screens": [],
-  "api": [],
+  "titleAr": "مساعد ابدأ شات للمحادثة والمهام",
+  "titleEn": "Ebda Chat assistant (how-do-I answers and doing tasks)",
+  "screens": [
+    "AssistantPanel (side panel on every screen, Ctrl/Cmd+J)"
+  ],
+  "api": [
+    "POST /stores/:storeId/assistant/turn",
+    "GET /stores/:storeId/assistant/conversations/:conversationId",
+    "POST /stores/:storeId/assistant/feedback"
+  ],
   "mcpTool": null,
   "planGate": null,
   "roles": [
@@ -19,7 +24,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/ebda-assistant",
   "questions": {
     "ar": [
       "اسأل المساعد ازاي اعمل حاجة",
@@ -32,8 +37,21 @@
     ]
   },
   "steps": [
-    "Planned: shared engine in ebda-foundation; Chat adapter with this catalogue as its tools + help corpus; free/preview/confirm/forbidden policies; template writer first big skill"
+    "Open the assistant panel (button or Ctrl/Cmd+J), ask how to do something, follow the \"show me where\" link",
+    "The assistant answers only from the help guides and from your own data it reads through the normal screens; it never asks for passwords or keys",
+    "Off by default per store; an operator turns it on (answer-only) and can switch it off at once"
   ],
-  "edgeCases": [],
-  "gaps": []
+  "edgeCases": [
+    "Mode off: the panel is hidden and the route answers status off",
+    "Over 150 turns per store per day: the reply says the limit was reached",
+    "The help index has no confirmed answer: it says so and offers the support team"
+  ],
+  "gaps": [],
+  "readOnlyPost": {
+    "routes": [
+      "POST /stores/:storeId/assistant/turn",
+      "POST /stores/:storeId/assistant/feedback"
+    ],
+    "reason": "Phase A answers questions and reads the merchant's own data through the normal routes; no write tool is registered. The only thing written is the assistant's own masked journal row."
+  }
 }

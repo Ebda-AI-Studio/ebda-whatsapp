@@ -201,9 +201,22 @@ export const meResponse = z.object({
   userId: z.string(),
   storeId: z.string(),
   role: z.enum(['owner', 'staff', 'super_admin']),
-  capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional() }),
+  capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional(), assistant: z.boolean().optional() }),
 });
 export type MeResponse = z.infer<typeof meResponse>;
+
+/** The assistant (Smart Layer). A reply is a list of segments the UI renders as text, links and nothing else: never HTML, never an image. */
+export const assistantSegment = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('text'), text: z.string() }),
+  z.object({ kind: z.literal('cap'), capabilityId: z.string(), label: z.string(), appPath: z.string() }),
+  z.object({ kind: z.literal('link'), href: z.string(), text: z.string() }),
+  z.object({ kind: z.literal('cite'), articleId: z.string(), title: z.string(), url: z.string() }),
+]);
+export const assistantTurnResponse = z.object({ status: z.enum(['answered', 'refused', 'not_covered', 'handoff', 'off', 'limited']), segments: z.array(assistantSegment), previews: z.array(z.unknown()), turnId: z.string() });
+export type AssistantSegment = z.infer<typeof assistantSegment>;
+export type AssistantTurnResponse = z.infer<typeof assistantTurnResponse>;
+export const assistantConversationResponse = z.object({ items: z.array(z.object({ id: z.string(), role: z.enum(['merchant', 'assistant']), text: z.string(), at: z.number() })) });
+export type AssistantConversationResponse = z.infer<typeof assistantConversationResponse>;
 
 /** Store-link settings (owner only to change). */
 export const storeLinkSettingsResponse = z.object({

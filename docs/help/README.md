@@ -57,3 +57,4 @@ capabilities:
 | 16 | write-and-submit-a-template | Create a template on the Templates page: type, variables with examples, header/footer/buttons, Meta's limits, the irreversible confirm, shared-number request |
 | 17 | template-review-and-rejections | Statuses, reading a rejection in plain words, edit and resubmit (24 h / 10 per 30 days), delete (30-day name rule), recategorisation |
 | 15 | your-products-on-whatsapp | Your Ebda Store products as a shop in WhatsApp: the shop button, product cards from the AI agent, carts that become orders, what is left out and why, one source only (WA-CAT-1..5) |
+| 18 | ebda-assistant | The side-panel assistant: how to open it, where answers come from, what it never does, privacy and limits |
