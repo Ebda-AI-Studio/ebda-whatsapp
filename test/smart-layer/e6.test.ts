@@ -110,6 +110,16 @@ describe('E6 write tools', () => {
     expect((await t.ask('علّم محادثة منى السيد مقروءة', { name: 'inbox_mark_read', args: { customer: 'منى السيد' } })).previews).toEqual([]);
   });
 
+  it('inbox_mark_read follows the matched-contact rule: more than one plausible match builds no card; the card names the matched contact and the last 3 digits (review of #99)', async () => {
+    const two = await setup(7710, 'owner', ['أحمد', 'أحمد علي']);
+    expect((await two.ask('علّم محادثة أحمد مقروءة', { name: 'inbox_mark_read', args: { customer: 'أحمد' } })).previews).toEqual([]);
+    const one = await setup(7711, 'owner', ['أحمد علي']);
+    const card = (await one.ask('علّم محادثة أحمد مقروءة', { name: 'inbox_mark_read', args: { customer: 'أحمد' } })).previews[0]!;
+    const waId = ((await one.get('/contacts')) as { items: Array<{ waId: string }> }).items[0]!.waId;
+    expect(JSON.stringify(card)).toContain('أحمد علي');
+    expect(JSON.stringify(card)).toContain(waId.slice(-3));
+  });
+
   it('contacts_retention_set: a deleting confirm card that says what goes; the press changes the period; staff are refused by the route', async () => {
     const t = await setup(7708);
     const out = await t.ask('خلّي مدة حفظ الرسايل 60 يوم', { name: 'contacts_retention_set', args: { days: 60 } });
