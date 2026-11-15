@@ -16,7 +16,9 @@ import { helpDeps, helpFigureSources, helpSearch, type HelpCorpus, type HelpDeps
 import { chatQuota } from './quota';
 import { rpcStorage } from './storage-do';
 import type { RegistryView } from '../../../foundation/smart-layer/types';
+import explainJson from '../../../assistant/explain.generated.json';
 import { botTools } from './tools/bot.tools';
+import { explainTools, type ExplainData } from './tools/explain.tools';
 import { campaignTools } from './tools/campaigns.tools';
 import { withKeywords } from './tools/keywords';
 import { WorkersAiProvider } from '../../../foundation/smart-layer/provider';
@@ -24,6 +26,7 @@ import { contactTools } from './tools/contacts.tools';
 import { inboxTools } from './tools/inbox.tools';
 import { readTools, type CallApi } from './tools/read.tools';
 import type { Kit } from './tools/write';
+import { contactReadTools, inboxReadTools } from './tools/reads.tools';
 import { segmentTools } from './tools/segments.tools';
 import { templateTools } from './tools/templates.tools';
 
@@ -58,8 +61,8 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
     },
   };
   const tools: ToolSpec[] = [
-    ...readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability }),
-    ...[...inboxTools(kit), ...contactTools(kit), ...segmentTools(kit), ...botTools(kit), ...campaignTools(kit), ...templateTools(kit)].map(withKeywords),
+    ...[...readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability }),
+    ...inboxTools(kit), ...contactTools(kit), ...segmentTools(kit), ...botTools(kit), ...campaignTools(kit), ...templateTools(kit), ...inboxReadTools(kit), ...contactReadTools(kit), ...explainTools(explainJson as unknown as ExplainData)].map(withKeywords),
   ];
   return {
     product: 'chat',

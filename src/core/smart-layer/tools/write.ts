@@ -89,9 +89,12 @@ export type Kit = {
   };
 };
 
+/** The merchant's own routes as a reader: GET answers and POSTs that only answer a question. A non-2xx is a `ToolApiError` carrying the route's status. */
+export const readerFor = (callApi: CallApi, ctx: TurnCtx): Reader => ({ get: (path, query) => ok(callApi(ctx, path, query)), ask: (path, body) => ok(callApi(ctx, path, undefined, { method: 'POST', body })) });
+
 export function writeTool<A, S>(def: WriteDef<A, S>, kit: Kit): ToolSpec {
   const callApi = kit.callApi;
-  const reader = (ctx: TurnCtx): Reader => ({ get: (path, query) => ok(callApi(ctx, path, query)), ask: (path, body) => ok(callApi(ctx, path, undefined, { method: 'POST', body })) });
+  const reader = (ctx: TurnCtx): Reader => readerFor(callApi, ctx);
   const sender = (ctx: TurnCtx) => (r: Req) => ok(callApi(ctx, r.path, undefined, { method: r.method, ...(r.body !== undefined ? { body: r.body } : {}) }));
   const load = async (ctx: TurnCtx, a: A) => {
     const s = await def.read(reader(ctx), ctx, a);

@@ -1,7 +1,7 @@
 /** Inbox write tools (wave 1): tag, note and assign a conversation. The conversation is found from the customer's name in the merchant's own inbox. */
 import { z } from 'zod';
 import type { ToolSpec } from '../../../../foundation/smart-layer/types';
-import { ToolInputError, clip, findConversation, row, writeTool, type Kit } from './write';
+import { ToolInputError, clip, findContact, findConversation, row, writeTool, type Kit } from './write';
 
 const tag = z.string().trim().min(1).max(32);
 const who = { customer: z.string().trim().min(1).max(100).describe("the customer's name as the merchant wrote it"), conversation: z.number().int().positive().optional() };
@@ -18,8 +18,40 @@ type Win = { id: number; open: boolean; windowOpenUntil: number | null };
 const withClientId = (call: (r: { method: 'POST'; path: string; body: unknown }) => Promise<unknown>, plan: { request: { path: string; body?: unknown } }) =>
   call({ method: 'POST', path: plan.request.path, body: { ...(plan.request.body as object), clientId: crypto.randomUUID() } });
 
+const codArgs = z.object({ customer: who.customer, orderNumber: z.string().regex(/^[\w-]{1,40}$/).describe('the order number'), outcome: z.enum(['confirmed', 'refused']).describe('did the customer confirm the cash-on-delivery order, or refuse it') }).strict();
+const markArgs = z.object({ ...who }).strict();
+
 export function inboxTools(kit: Kit): ToolSpec[] {
   return [
+    writeTool({
+      name: 'inbox_cod_outcome', capabilityId: 'inbox.cod-outcome', policy: 'confirm', undo: 'irreversible',
+      description: "Record that a customer confirmed or refused a cash-on-delivery order, and tell the store. Once recorded it cannot be changed, so the merchant confirms with the button. Give the customer's name and the order number.",
+      args: codArgs,
+      read: async (api, _c, a) => {
+        const c = await findContact(api, a.customer);
+        const orders = ((await api.get(`/contacts/${c.waId}/orders`)) as { items?: Array<{ orderNumber: string; paymentMethod: string; status: string; totalMinor: number; currency: string }> }).items ?? [];
+        const o = orders.find((x) => x.orderNumber === a.orderNumber);
+        if (!o || o.paymentMethod !== 'cod' || o.status !== 'pending_confirmation') throw new ToolInputError('unavailable');
+        return { waId: c.waId, name: c.name, order: o.orderNumber, total: `${Math.round(o.totalMinor) / 100} ${o.currency}` };
+      },
+      fingerprint: (s) => ({ order: s.order, total: s.total }),
+      plan: (a, s) => ({
+        summary: { ar: `تسجيل إن ${s.name ?? a.customer} ${a.outcome === 'confirmed' ? 'أكّد' : 'رفض'} الأوردر ${s.order}`, en: `Record that ${s.name ?? a.customer} ${a.outcome} order ${s.order}` },
+        rows: [row('الأوردر', 'Order', undefined, `${s.order} (${s.total})`), row('النتيجة', 'Outcome', 'مستني التأكيد / awaiting confirmation', a.outcome === 'confirmed' ? 'اتأكد / confirmed' : 'اترفض / refused')],
+        request: { method: 'POST', path: `/contacts/${s.waId}/orders/${s.order}/cod-outcome`, body: { outcome: a.outcome } }, hideBody: false,
+      }),
+      send: async (call, plan) => call({ method: 'POST', path: plan.request.path, body: { ...(plan.request.body as object), idempotencyKey: crypto.randomUUID() } }),
+    }, kit),
+    writeTool({
+      name: 'inbox_mark_read', capabilityId: 'inbox.mark-read', policy: 'preview', undo: 'irreversible',
+      description: "Mark a customer's conversation as read (clears its unread count). It cannot be marked unread again, so the merchant confirms. Give the customer's name.",
+      args: markArgs,
+      read: async (api, _c, a) => { const c = await findConversation(api, a.customer, a.conversation) as { id: number; unread?: number }; return { id: c.id, unread: c.unread ?? 0 }; },
+      plan: (a, s) => {
+        if (s.unread === 0) throw new ToolInputError('no_change');
+        return { summary: { ar: `تعليم محادثة ${a.customer} كمقروءة`, en: `Mark ${a.customer}'s conversation as read` }, rows: [row('الرسايل الجديدة', 'Unread messages', String(s.unread), '0')], request: { method: 'POST', path: `/conversations/${s.id}/read` } };
+      },
+    }, kit),
     writeTool({
       name: 'send_text', capabilityId: 'inbox.send-text', policy: 'confirm', undo: 'irreversible', messagesCustomers: true,
       description: "Send a text message to a customer in their conversation. It goes to a real person and cannot be taken back, so the merchant confirms with the button; the card shows the exact text. Only works while the 24-hour reply window is open (otherwise use send_template).",

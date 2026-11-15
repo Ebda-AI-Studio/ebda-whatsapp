@@ -10,8 +10,25 @@ const renameArgs = z.object({ customer, name: z.string().trim().min(1).max(100).
 const eraseArgs = z.object({ customer }).strict();
 const mergeArgs = z.object({ from: customer.describe('the customer to fold away (their number is retired)'), into: customer.describe('the customer who stays') }).strict();
 
+const retentionArgs = z.object({ days: z.number().int().min(30).max(3650).nullable().describe('keep messages this many days (30 to 3650), or null for the standard period') }).strict();
+
 export function contactTools(kit: Kit): ToolSpec[] {
   return [
+    writeTool({
+      name: 'contacts_retention_set', capabilityId: 'contacts.retention', policy: 'confirm', undo: 'irreversible', deletes: true,
+      description: 'Change how long customer messages are kept. Messages older than the new period are deleted by the daily purge and cannot be recovered, so the merchant confirms with the button.',
+      args: retentionArgs,
+      read: async (api) => (await api.get('/retention')) as { days: number | null; effectiveDays: number; defaultDays: number },
+      plan: (a, s) => {
+        const next = a.days ?? s.defaultDays;
+        if (next === s.effectiveDays) throw new ToolInputError('no_change');
+        return {
+          summary: { ar: `تغيير مدة حفظ الرسايل لـ ${next} يوم`, en: `Keep messages for ${next} days` },
+          rows: [row('مدة الحفظ (يوم)', 'Keep for (days)', String(s.effectiveDays), String(next)), ...(next < s.effectiveDays ? [row('اللي هيتمسح', 'What is deleted', undefined, `كل رسالة أقدم من ${next} يوم بتتمسح نهائيًا / every message older than ${next} days is deleted for good`)] : [])],
+          request: { method: 'PUT', path: '/retention', body: { days: a.days } },
+        };
+      },
+    }, kit),
     writeTool({
       name: 'contact_erase', capabilityId: 'contacts.erase', policy: 'confirm', undo: 'irreversible', deletes: true,
       description: "Erase a customer and everything stored about them (messages, notes, tags, consent). It cannot be undone, so the merchant confirms with the button. Give the customer's name.",
