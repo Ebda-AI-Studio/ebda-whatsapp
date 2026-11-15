@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { BUDGET } from '../../foundation/smart-layer/plan/budget';
 import { checkAdapterContract } from '../../foundation/smart-layer/eval/adapter-contract';
 import { runTurn } from '../../foundation/smart-layer/loop';
+import { applyPreview, undoApplied } from '../../foundation/smart-layer/exec/journal';
 import { buildSystemPrompt, computeReleaseId } from '../../foundation/smart-layer/release';
 import type { Mode, TurnCtx } from '../../foundation/smart-layer/types';
 import { alert } from '../core/observability';
@@ -17,7 +18,7 @@ import registryJson from '../../assistant/registry.generated.json';
 import corpusJson from '../../assistant/help-corpus.generated.json';
 import { ensureHelpIndex, helpDeps } from '../core/smart-layer/help-index';
 import type { CallApi } from '../core/smart-layer/tools/read.tools';
-import { apiError, workspaceStub, type ApiEnv } from './shared';
+import { apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
 
 const turnBody = z.object({ conversationId: z.string().uuid(), text: z.string().min(1).max(BUDGET.inputChars), locale: z.enum(['ar', 'en']) });
 const feedbackBody = z.object({ turnId: z.string().uuid(), thumb: z.enum(['up', 'down']) });
@@ -43,21 +44,31 @@ export const ASSISTANT_CAPABILITY = 'assistant.ebda-assistant';
 /** The kill switch covers every assistant route, not just the turn: with the assistant off, history and feedback are closed too. */
 const assistantOff = async (c: { env: Env }, ws: { assistantMode(): Promise<Mode> }) => (await chatControls(c.env, ws)).mode === 'off';
 
+/** A person presses a handful of buttons a minute; more is a script. */
+const limited = async (c: ApiContext, ws: { smartLayer(op: 'bump', args: unknown[]): Promise<unknown> }, kind: string): Promise<boolean> =>
+  ((await ws.smartLayer('bump', [`${kind}:${c.req.param('storeId')}:${c.get('principal').userId}`, 60_000, Date.now()])) as number) > 30;
+
+/** The engine's answer as the panel reads it: 200 with a status word, except the two answers that are real HTTP errors. */
+function outcome(c: ApiContext, out: { status: string }) {
+  if (out.status === 'not_found') return apiError(c, 404, 'not_found');
+  if (out.status === 'forbidden') return apiError(c, 403, 'forbidden');
+  return c.json(out);
+}
+
 /** Assistant routes. `api` is the app these routes are mounted on: a tool calls one of ITS routes in-process with the merchant's own Authorization header (SL-CHAT-1). */
 export function assistantRoutes(api: Hono<ApiEnv>) {
   const r = new HonoApp<ApiEnv>();
 
-  r.post('/stores/:storeId/assistant/turn', async (c) => {
-    const body = turnBody.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) return apiError(c, 400, 'invalid_request');
+  /** The adapter and the engine context of THIS request: the store is the route's own, the person is the session's, the tools call `api` with the caller's own header (SL-CHAT-1). */
+  const session = async (c: ApiContext, conversationId: string, locale: 'ar' | 'en') => {
     const ws = await workspaceStub(c);
-    if (!ws) return apiError(c, 404, 'not_found');
+    if (!ws) return null;
     const storeId = c.req.param('storeId')!;
     const auth = c.req.header('authorization') ?? '';
     // Always the route's own store: the model never chooses it. A path or query value the model wrote is only ever an encoded value.
-    const callApi: CallApi = async (ctx, path, query) => {
+    const callApi: CallApi = async (ctx, path, query, init) => {
       const qs = query ? `?${new URLSearchParams(query).toString()}` : '';
-      const res = await api.request(`/stores/${ctx.storeId}${path}${qs}`, { method: 'GET', headers: { authorization: auth } }, c.env, c.executionCtx);
+      const res = await api.request(`/stores/${ctx.storeId}${path}${qs}`, { method: init?.method ?? 'GET', headers: { authorization: auth, ...(init?.body !== undefined ? { 'content-type': 'application/json' } : {}) }, ...(init?.body !== undefined ? { body: JSON.stringify(init.body) } : {}) }, c.env, c.executionCtx);
       return { status: res.status, json: await res.json().catch(() => null) };
     };
     const adapter = chatAdapter({ env: c.env, ws, callApi, registry: REGISTRY, corpus: CORPUS, assistantCapability: ASSISTANT_CAPABILITY, ...(override.ai ? { ai: override.ai } : {}), ...(override.help ? { help: override.help } : {}) });
@@ -66,16 +77,47 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
       if (problems.length) throw new Error(`assistant adapter contract: ${problems.join('; ')}`);
       contractChecked = true;
     }
+    release ??= computeReleaseId({ systemPrompt: buildSystemPrompt('ar'), tools: adapter.tools(), models: adapter.models, budget: BUDGET });
+    // The history key carries the CALLER: the engine loads turns by conversation id alone, so a client-chosen id can never open (or plant text in) another member's history.
+    const userId = c.get('principal').userId;
+    const ctx: TurnCtx = { product: 'chat', storeId, userId, role: c.get('storeRole'), locale, now: Date.now(), conversationId: ownConversation(userId, conversationId), releaseId: await release };
+    return { ws, adapter, ctx };
+  };
+
+  r.post('/stores/:storeId/assistant/turn', async (c) => {
+    const body = turnBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return apiError(c, 400, 'invalid_request');
+    const s = await session(c, body.data.conversationId, body.data.locale);
+    if (!s) return apiError(c, 404, 'not_found');
     if (!indexKicked && !override.help) {
       indexKicked = true;
       c.executionCtx.waitUntil(ensureHelpIndex(helpDeps(c.env), CORPUS).catch((e) => { indexKicked = false; alert('assistant_help_index_failed', { error: e instanceof Error ? e.name : 'unknown' }); }));
     }
-    release ??= computeReleaseId({ systemPrompt: buildSystemPrompt('ar'), tools: adapter.tools(), models: adapter.models, budget: BUDGET });
-    // The history key carries the CALLER: the engine loads turns by conversation id alone, so a client-chosen id can never open (or plant text in) another member's history.
-    const userId = c.get('principal').userId;
-    const ctx: TurnCtx = { product: 'chat', storeId, userId, role: c.get('storeRole'), locale: body.data.locale, now: Date.now(), conversationId: ownConversation(userId, body.data.conversationId), releaseId: await release };
-    const res = await runTurn(adapter, ctx, { text: body.data.text });
+    const res = await runTurn(s.adapter, s.ctx, { text: body.data.text });
     return c.json({ status: res.status, segments: res.segments, previews: res.previews, turnId: res.turnId });
+  });
+
+  // The merchant presses Apply on a preview card: the only way a change happens. Its own route, never reachable from a tool or from chat text.
+  r.post('/stores/:storeId/assistant/previews/:previewId/apply', async (c) => {
+    const id = z.string().uuid().safeParse(c.req.param('previewId'));
+    if (!id.success) return apiError(c, 400, 'invalid_request');
+    const s = await session(c, crypto.randomUUID(), 'ar');
+    if (!s) return apiError(c, 404, 'not_found');
+    if (await assistantOff(c, s.ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
+    if (await limited(c, s.ws, 'applyrate')) return apiError(c, 429, 'rate_limited');
+    const out = await applyPreview(s.adapter, s.ctx, id.data);
+    return outcome(c, out);
+  });
+
+  r.post('/stores/:storeId/assistant/applied/:appliedId/undo', async (c) => {
+    const id = z.string().uuid().safeParse(c.req.param('appliedId'));
+    if (!id.success) return apiError(c, 400, 'invalid_request');
+    const s = await session(c, crypto.randomUUID(), 'ar');
+    if (!s) return apiError(c, 404, 'not_found');
+    if (await assistantOff(c, s.ws)) return apiError(c, 403, 'forbidden', 'assistant_off');
+    if (await limited(c, s.ws, 'undorate')) return apiError(c, 429, 'rate_limited');
+    const out = await undoApplied(s.adapter, s.ctx, id.data);
+    return outcome(c, out);
   });
 
   // Only the caller's own turns: a conversation id is chosen by the client, so it never opens another member's chat.

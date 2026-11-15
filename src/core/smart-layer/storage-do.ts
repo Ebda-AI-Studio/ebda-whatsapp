@@ -106,7 +106,7 @@ export function doStorageOps(sql: Sql, tx: Tx) {
         for (const raw of terms) {
           const t = raw.trim();
           if (t.length < 3) continue;
-          for (const [table, col] of [['sl_turns', 'masked_text'], ['sl_audit', 'json']] as const) {
+          for (const [table, col] of [['sl_turns', 'masked_text'], ['sl_audit', 'json'], ['sl_previews', 'json'], ['sl_applied', 'json']] as const) {
             n += one<{ n: number }>(sql, `SELECT count(*) AS n FROM ${table} WHERE instr(lower(${col}), lower(?)) > 0`, t)!.n;
             sql.exec(`DELETE FROM ${table} WHERE instr(lower(${col}), lower(?)) > 0`, t);
           }

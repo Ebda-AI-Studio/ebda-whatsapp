@@ -15,10 +15,13 @@ describe('review (#84): erasing a contact removes the assistant rows that mentio
     await call('appendTurn', [t('b', 'رصيد المحفظة 100 جنيه')]);
     await call('appendAudit', [{ id: 'x1', storeId: s, userId: 'u', turnId: 'a', at: Date.now(), releaseId: 'r', maskedPrompt: 'دور على منى السيد', maskedOutput: '', rails: {}, toolsOffered: [], toolCalls: [], outcome: 'answered', inputTokens: 0, outputTokens: 0, model: 'm' }]);
     await call('appendAudit', [{ id: 'x2', storeId: s, userId: 'u', turnId: 'b', at: Date.now(), releaseId: 'r', maskedPrompt: 'رصيدي', maskedOutput: '', rails: {}, toolsOffered: [], toolCalls: [], outcome: 'answered', inputTokens: 0, outputTokens: 0, model: 'm' }]);
+    await call('putPreview', [{ id: 'pv1', storeId: s, userId: 'u', turnId: 'a', tool: 'contact_rename', args: { customer: 'منى السيد', name: 'x' }, draft: { summary: { ar: 'تغيير اسم منى السيد', en: 'r' }, rows: [], affectedCount: 1, etag: 'e', payload: {} }, policy: 'preview', reasons: [], undo: 'reversible', payloadHash: 'h', createdAt: Date.now(), releaseId: 'r', status: 'open' }]);
+    await call('putPreview', [{ id: 'pv2', storeId: s, userId: 'u', turnId: 'b', tool: 'digest_settings_set', args: { enabled: false }, draft: { summary: { ar: 'ملخص', en: 'r' }, rows: [], affectedCount: 1, etag: 'e', payload: {} }, policy: 'preview', reasons: [], undo: 'reversible', payloadHash: 'h', createdAt: Date.now(), releaseId: 'r', status: 'open' }]);
     const found = await rows(s, "SELECT count(*) AS n FROM contacts WHERE wa_id = '201012345678'");
     expect(found).toEqual([{ n: 1 }]);
     expect((await ws.eraseContact('201012345678')).completedAt).toBeGreaterThan(0);
     expect(await rows(s, 'SELECT id FROM sl_turns ORDER BY id')).toEqual([{ id: 'b' }]);
     expect(await rows(s, 'SELECT id FROM sl_audit ORDER BY id')).toEqual([{ id: 'x2' }]);
+    expect(await rows(s, 'SELECT id FROM sl_previews ORDER BY id')).toEqual([{ id: 'pv2' }]); // the preview that names the person goes too
   });
 });

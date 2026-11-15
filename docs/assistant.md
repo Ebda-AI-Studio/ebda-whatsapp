@@ -1,6 +1,6 @@
-# The Chat assistant (Smart Layer, phase A: read-only "how do I")
+# The Chat assistant (Smart Layer: "how do I" answers, preview-then-apply changes)
 
-What it is: a side panel in the inbox app that answers "how do I ..." in Egyptian Arabic, English or Franco, grounded in `docs/help`, and shows the screen. It reads the merchant's own data through the normal routes with the merchant's own session (SL-CHAT-1). It changes nothing: no write tool is registered in this phase (`checkAdapterContract` fails the boot and the tests if one appears with a weaker policy than its capability).
+What it is: a side panel in the inbox app that answers "how do I ..." in Egyptian Arabic, English or Franco, grounded in `docs/help`, and shows the screen. It reads the merchant's own data through the normal routes with the merchant's own session (SL-CHAT-1). A change is never made inside a turn: a write tool builds a PREVIEW card; the merchant presses Apply (`POST .../assistant/previews/:previewId/apply`) and may Undo for 24 h (`POST .../assistant/applied/:appliedId/undo`). Both are person-only routes with their own rate limit, need mode `act` and honour the kill switches at press time. `checkAdapterContract` fails the boot and the tests if a tool is weaker than its capability.
 
 ## Code map
 - `foundation/smart-layer/` vendored engine (never edit here). `src/core/smart-layer/` the adapter: `adapter.ts` (wiring), `tools/read.tools.ts` (free tools), `storage-do.ts` (journal in the WorkspaceDO, `sl_*` tables, the engine's storage contract runs against it in `test/smart-layer/storage-contract.test.ts`), `controls.ts`, `quota.ts`, `help-index.ts`, `handoff.ts`.
@@ -15,3 +15,11 @@ Per workspace: `PUT /api/v1/operator/workspaces/:id/assistant {"mode":"off|answe
 
 ## Known limits of this phase
 Help grounding needs Vectorize and Workers AI bound; unbound, answers say "not covered" and offer support. The help index is built lazily on the first turn after a deploy (background) and again whenever the corpus hash changes.
+
+## Write tools (wave 1, `tools/write.ts`)
+A write tool is data (`WriteDef`): `read` the current state through the merchant's own routes, a pure `plan`, and the restore arguments. The etag is the hash of the state read, so a state changed by hand re-previews at apply and blocks undo. The model never names a store, a path or a phone number: a customer or segment is found by the NAME the merchant typed, in the merchant's own lists (no match or several matches builds no preview); the draft payload carries the request body, never the path, and contact erasure also removes previews/applied rows that name the person. Wave 1: conversation tags/notes/assign, contact tags/rename, segment create/change, bot menu/hours/location/ordering/order confirmations, catalogue resync/toggles/link, agent persona/FAQ, weekly digest, seat assign. Where the registry says confirm or irreversible (notes, resync, order confirmations) the card is confirm class and has no Apply until the confirm step ships. Not yet: quick replies (the capability has no API or storage), deletions and customer messaging (wave 2).
+
+## Rulings (wave 1)
+- Ruling CHAT-SL-B8-1 - tools find a customer, conversation or segment by the NAME the merchant typed, never by an id or phone number the model writes. The model sees no phone numbers (masked) and, after reading untrusted customer text, is offered no write tool in that turn, so the tool resolves the name itself against the merchant's own lists and refuses a missing or ambiguous match. Cost if wrong: two customers with the same name need the merchant to be more specific.
+- Ruling CHAT-SL-B8-2 - `quick_reply_upsert` is not built: `inbox.quick-replies` has no API or storage (four fixed texts in the UI), so there is nothing for a tool to call. It ships with the capability; the coverage guard (E0) lists it. Cost if wrong: "add a quick reply" answers with a how-to until then.
+- Ruling CHAT-SL-B8-3 - `assistant.apply-changes` is its own capability (policy preview, undo reversible) for the apply/undo routes, so `assistant.ebda-assistant` stays a read-only free capability. Cost if wrong: one more registry entry.

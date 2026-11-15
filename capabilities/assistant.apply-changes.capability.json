@@ -1,0 +1,50 @@
+{
+  "id": "assistant.apply-changes",
+  "status": "live",
+  "area": "assistant",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تطبيق التغييرات اللي جهّزها المساعد والرجوع فيها",
+  "titleEn": "Apply a change the assistant prepared, and undo it",
+  "screens": [
+    "AssistantPanel preview card (Apply, Undo)"
+  ],
+  "api": [
+    "POST /stores/:storeId/assistant/previews/:previewId/apply",
+    "POST /stores/:storeId/assistant/applied/:appliedId/undo"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ebda-assistant",
+  "questions": {
+    "ar": [
+      "ازاي أطبّق التغيير اللي المساعد جهّزه؟",
+      "عايز ارجّع تغيير المساعد",
+      "المساعد غيّر حاجة غلط"
+    ],
+    "en": [
+      "How do I apply the change the assistant prepared?",
+      "Undo what the assistant changed"
+    ]
+  },
+  "steps": [
+    "The assistant prepares a change and shows a preview card with the before and after; nothing has changed yet",
+    "Press Apply to make the change with your own permissions; press Undo within 24 hours to put it back",
+    "If the item changed since the preview, Apply shows a new preview instead of overwriting; a confirm-class change needs its own confirmation step"
+  ],
+  "edgeCases": [
+    "Mode below act: the card is shown but Apply is refused",
+    "Two presses on one card apply once",
+    "Your role does not allow the change: refused, nothing changes",
+    "Undo after you edited the item by hand: shows what undo would do, writes nothing"
+  ],
+  "gaps": []
+}

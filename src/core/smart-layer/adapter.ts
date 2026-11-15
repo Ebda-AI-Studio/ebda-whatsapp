@@ -16,7 +16,11 @@ import { helpDeps, helpFigureSources, helpSearch, type HelpCorpus, type HelpDeps
 import { chatQuota } from './quota';
 import { rpcStorage } from './storage-do';
 import type { RegistryView } from '../../../foundation/smart-layer/types';
+import { botTools } from './tools/bot.tools';
+import { contactTools } from './tools/contacts.tools';
+import { inboxTools } from './tools/inbox.tools';
 import { readTools, type CallApi } from './tools/read.tools';
+import { segmentTools } from './tools/segments.tools';
 
 export type ChatAdapterDeps = {
   env: Env;
@@ -37,7 +41,10 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
   const help = d.help ?? helpDeps(d.env);
   const storage = rpcStorage((op, args) => d.ws.smartLayer(op, args));
   const searchHelp = (q: string, locale: TurnCtx['locale'], k: number) => helpSearch(help, q, locale, k);
-  const tools = readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability });
+  const tools = [
+    ...readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability }),
+    ...inboxTools(d.callApi), ...contactTools(d.callApi), ...segmentTools(d.callApi), ...botTools(d.callApi),
+  ];
   return {
     product: 'chat',
     registry: () => d.registry,

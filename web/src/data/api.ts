@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  agentSettingsDto, apiError, assistantActResponse, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
 } from '../../../src/core/api/contract';
@@ -186,6 +186,8 @@ export function createApiSource(o: Opts): LiveSource {
     assistant: {
       turn: (body) => call('/assistant/turn', assistantTurnResponse, post(body)),
       conversation: async (id) => (await call(`/assistant/conversations/${encodeURIComponent(id)}`, assistantConversationResponse)).items,
+      apply: (previewId) => call(`/assistant/previews/${encodeURIComponent(previewId)}/apply`, assistantActResponse, post({})),
+      undo: (appliedId) => call(`/assistant/applied/${encodeURIComponent(appliedId)}/undo`, assistantActResponse, post({})),
       feedback: async (turnId, thumb) => { await call('/assistant/feedback', z.object({ ok: z.boolean() }).loose(), post({ turnId, thumb })); },
     },
     team: {

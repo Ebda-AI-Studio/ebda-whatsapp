@@ -58,6 +58,8 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/assistant/turn`]: 'person_only', // the assistant acts on the merchant's own session: never an integration token
   [`GET ${S}/assistant/conversations/:conversationId`]: 'person_only',
   [`POST ${S}/assistant/feedback`]: 'person_only',
+  [`POST ${S}/assistant/previews/:previewId/apply`]: 'person_only', // the merchant's own press on a preview card: never an integration token
+  [`POST ${S}/assistant/applied/:appliedId/undo`]: 'person_only',
 
   [`GET ${S}/digest`]: 'person_only', // the merchant's own usage summary
   [`PUT ${S}/digest`]: 'person_only',

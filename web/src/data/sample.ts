@@ -388,6 +388,8 @@ function createSampleAssistant(): AssistantApi {
     }),
     conversation: async () => [],
     feedback: async () => undefined,
+    apply: async () => ({ status: 'applied', appliedId: crypto.randomUUID(), undoUntil: Date.now() + 86_400_000 }),
+    undo: async () => ({ status: 'undone' }),
   };
 }
 
