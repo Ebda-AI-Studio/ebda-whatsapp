@@ -4,7 +4,6 @@ import { DEFAULT_CHUNK_ROWS, exportTable, highWaterMarks } from './backup-export
 import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, signManifest, toNdjson, verifyManifestSignature, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
 import { SL_OPS, doStorageOps, type SlOp } from './smart-layer/storage-do';
-import { holdCredits, releaseHold, settleHold, type HoldResult } from './ai/credits';
 import type { SendResult } from './meta/client';
 import type { CoexMessage, InboundMessage, StatusEvent, StatusPricing, SyncedContact } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
@@ -52,7 +51,7 @@ import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importStat
 import type { DigestDto, AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
 import { funnelOnce } from './funnel';
 import { digestCounts, digestEnabled, setDigestEnabled } from './digest';
-import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
+import { holdCredits, lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, releaseHold, revokeGrantExcess, settleHold, upgradeGrant, type CreditKind, type HoldResult, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { abandonVoiceTurn } from './ai/agent';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
