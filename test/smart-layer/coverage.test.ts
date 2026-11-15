@@ -11,7 +11,7 @@ import { ASSISTANT_CAPABILITY } from '../../src/routes/assistant';
 const OWNED_ELSEWHERE = ownedElsewhere(ASSISTANT_CAPABILITY);
 import type { HelpCorpus } from '../../src/core/smart-layer/help-index';
 import { viewOf, type StoredCap } from '../../src/core/smart-layer/registry';
-import baselineJson from '../../capabilities/baselines/assistant-tools.json';
+import baselineJson from './coverage-baseline.json';
 import { noHelp } from './harness';
 
 const REGISTRY = viewOf(registryJson as unknown as StoredCap[]);
