@@ -8,10 +8,11 @@ import { buildAssets } from '../../scripts/build-help-corpus.mjs';
 const ROOT = join(import.meta.dirname, '..', '..');
 
 describe('assistant assets', () => {
-  it('registry.generated.json and help-corpus.generated.json are current (run node scripts/build-help-corpus.mjs)', async () => {
-    const { registry, corpus } = (await buildAssets()) as { registry: string; corpus: string };
+  it('registry, help-corpus and explain .generated.json are current (run node scripts/build-help-corpus.mjs)', async () => {
+    const { registry, corpus, explain } = (await buildAssets()) as { registry: string; corpus: string; explain: string };
     expect(readFileSync(join(ROOT, 'assistant/registry.generated.json'), 'utf8') === registry).toBe(true);
     expect(readFileSync(join(ROOT, 'assistant/help-corpus.generated.json'), 'utf8') === corpus).toBe(true);
+    expect(readFileSync(join(ROOT, 'assistant/explain.generated.json'), 'utf8') === explain).toBe(true);
   });
   it('every help chunk fits the engine limit and every guide has an Arabic and an English twin', async () => {
     const { corpus } = (await buildAssets()) as { corpus: string };

@@ -26,8 +26,13 @@ describe('adapter contract', () => {
   it('the tool list agrees with the capability registry (no weaker policy, every capability live, no forbidden tool)', () => {
     expect(checkAdapterContract(adapterFor(W(1)))).toEqual([]);
   });
-  it('Phase A registers only free tools', () => {
-    expect(adapterFor(W(2)).tools().filter((t) => t.policy !== 'free')).toEqual([]);
+  it('every non-free tool can build a preview and apply it, declares an undo class, and is never `free` for a write', () => {
+    for (const t of adapterFor(W(2)).tools().filter((x) => x.policy !== 'free')) {
+      expect(typeof t.preview, t.name).toBe('function');
+      expect(typeof t.apply, t.name).toBe('function');
+      expect(['reversible', 'compensating', 'irreversible'], t.name).toContain(t.undo);
+      expect(t.read, t.name).toBeUndefined();
+    }
   });
   it('no tool lets the model name a store, a workspace, a path or a url (store scoping cannot be argued with)', () => {
     for (const t of adapterFor(W(3)).tools()) {

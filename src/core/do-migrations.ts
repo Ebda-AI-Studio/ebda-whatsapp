@@ -596,6 +596,15 @@ export const DO_MIGRATIONS: readonly string[] = [
      at INTEGER NOT NULL
    );
    CREATE INDEX sl_counters_key ON sl_counters (key, at);`,
+  // v44 (Smart Layer template writer): a generated draft is kept for an hour under a key made from the workspace, the person and the request, so the preview the merchant
+  // sees and the re-preview that runs when they press confirm are the SAME draft (a second model call would write different words and the press would never match).
+  `CREATE TABLE sl_cache (
+     key TEXT PRIMARY KEY,
+     store_id TEXT NOT NULL,
+     json TEXT NOT NULL,
+     at INTEGER NOT NULL
+   );
+   CREATE INDEX sl_cache_at ON sl_cache (at);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
