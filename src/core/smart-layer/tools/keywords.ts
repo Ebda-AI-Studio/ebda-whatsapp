@@ -34,6 +34,9 @@ export const KEYWORDS: Readonly<Record<string, string>> = {
   campaign_delete_draft: 'امسح احذف مسودة حملة',
   send_text: 'ابعت ارسل رسالة نص للعميل كلم رد',
   send_template: 'ابعت ارسل قالب template للعميل رسالة',
+  template_submit: 'قالب template قدّم ابعت لميتا مراجعة اعتماد جديد',
+  template_edit: 'قالب template عدّل غيّر صلّح ميتا مراجعة',
+  template_delete: 'قالب template امسح احذف',
   templates_install_defaults: 'قوالب البداية نزّل ثبّت القوالب الجاهزة ميتا',
 };
 export const withKeywords = <T extends { name: string; description: string }>(t: T): T => (KEYWORDS[t.name] ? { ...t, description: `${t.description} [${KEYWORDS[t.name]}]` } : t);

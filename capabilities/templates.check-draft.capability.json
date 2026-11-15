@@ -1,0 +1,55 @@
+{
+  "status": "live",
+  "area": "templates",
+  "versionDate": "2026-11-14",
+  "mcpTool": null,
+  "id": "templates.check-draft",
+  "version": 1,
+  "titleAr": "فحص قالب قبل التقديم لـ ميتا",
+  "titleEn": "Check a template draft against Meta's rules",
+  "screens": [
+    "view:templates",
+    "/templates"
+  ],
+  "api": [
+    "POST /stores/:storeId/templates/check"
+  ],
+  "readOnlyPost": {
+    "routes": [
+      "POST /stores/:storeId/templates/check"
+    ],
+    "reason": "Runs Meta's rules over a draft on our side and returns the problems and the draft's hash; no Meta call, nothing is stored and nothing is sent to a customer."
+  },
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none",
+    "note": "nothing is changed"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "القالب بتاعي هيتقبل؟",
+      "ازاي أعرف القالب فيه غلط قبل ما أبعته؟",
+      "فحص القالب"
+    ],
+    "en": [
+      "Will Meta accept my template?",
+      "Check my template before I submit it"
+    ]
+  },
+  "steps": [
+    "Write the template, press Check: every problem is listed in plain words, with the exact field",
+    "Errors block the submission; warnings (for example a repeated text) are shown but do not"
+  ],
+  "edgeCases": [
+    "Own number not connected: 404 no_active_number",
+    "A staff member can check; only the owner can submit"
+  ],
+  "gaps": [],
+  "assistantNote": "free: runs Meta's rules locally, sends nothing"
+}

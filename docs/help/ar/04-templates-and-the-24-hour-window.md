@@ -1,6 +1,7 @@
 ---
 capabilities:
   - inbox.send-template@1
+  - templates.check-draft@1
   - inbox.send-text@1
   - inbox.window-status@1
   - templates.install-defaults@2

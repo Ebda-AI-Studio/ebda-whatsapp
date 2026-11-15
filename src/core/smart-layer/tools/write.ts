@@ -22,7 +22,7 @@ export type Reader = { get(path: string, query?: Record<string, string>): Promis
 
 /** A request the model's words cannot be turned into a change from: no match, several matches, or nothing to change. The engine shows the model a generic failure. */
 export class ToolInputError extends Error {
-  constructor(readonly code: 'not_found' | 'ambiguous' | 'no_change' | 'unavailable') {
+  constructor(readonly code: 'not_found' | 'ambiguous' | 'no_change' | 'unavailable' | 'invalid') {
     super(code);
     this.name = 'ToolInputError';
   }
