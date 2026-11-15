@@ -54,6 +54,10 @@ export type OrderingCopy = {
     chooseAddress: Localised;
     addressesButton: Localised;
     newAddressRow: Localised;
+    /** Optional (Ruling CHAT-AGENT-3): a returning customer with a default address is asked "same address as last time?" with two buttons instead of the list. Without it the list is always shown. */
+    sameAddress?: (summary: string, locale: Locale) => string;
+    sameAddressYes?: Localised;
+    sameAddressNo?: Localised;
     askAddress: Localised;
     outOfStock: (names: string[], locale: Locale) => string;
     codPlaced: (orderNumber: string, total: string | null, locale: Locale) => string;

@@ -605,6 +605,8 @@ export const DO_MIGRATIONS: readonly string[] = [
      at INTEGER NOT NULL
    );
    CREATE INDEX sl_cache_at ON sl_cache (at);`,
+  // v45 (Chat agent, review I2): when the owner was told about this handoff. Lives on the row (erased by wa_id with the contact), not as a phone-keyed agent_state key.
+  `ALTER TABLE agent_handoffs ADD COLUMN notified_at INTEGER;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

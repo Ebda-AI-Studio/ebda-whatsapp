@@ -16,12 +16,12 @@ beforeEach(() => { clearTokenCaches(); registerStarterSet(EBDA_DEFAULT_TEMPLATES
 afterEach(() => { graph?.restore(); vi.restoreAllMocks(); });
 
 const NAMES = EBDA_DEFAULT_TEMPLATES.map((t) => t.name);
-const atMeta = (name: string, status = 'APPROVED') => ({ id: `id-${name}`, name, language: 'ar', category: 'UTILITY', status, components: [{ type: 'BODY', text: 'أهلاً {{1}} طلبك.' }] });
+const atMeta = (name: string, status = 'APPROVED', language = 'ar') => ({ id: `id-${name}`, name, language, category: 'UTILITY', status, components: [{ type: 'BODY', text: 'أهلاً {{1}} طلبك.' }] });
 /** A Meta that lists `have` and accepts every submission. */
 const metaWith = (have: string[] = [], over?: (c: GraphCall) => GraphReply | undefined) => (c: GraphCall): GraphReply => {
   const o = over?.(c);
   if (o) return o;
-  if (c.url.includes('/message_templates') && c.method === 'GET') return { status: 200, json: { data: have.map((n) => atMeta(n)) } };
+  if (c.url.includes('/message_templates') && c.method === 'GET') return { status: 200, json: { data: [...new Set(have)].flatMap((n) => EBDA_DEFAULT_TEMPLATES.filter((t) => t.name === n).map((t) => atMeta(n, 'APPROVED', t.language))) } };
   if (c.url.includes('/message_templates') && c.method === 'POST') return { status: 200, json: { id: `new-${c.body.name}`, status: 'PENDING', category: c.body.category } };
   return { status: 404, json: { error: { message: 'unstubbed' } } };
 };

@@ -9,7 +9,8 @@
  * docs.google.com, script.google.com ...): a bare mention of such a host vouches only for its root. A connector's endpoint host is NEVER trusted for a
  * customer-facing link (Ruling WA-GUARD-LINK-1). (2) prices: the `price` / `total` / `amount` ... fields of the Store's JSON (not stock counts or ids) and
  * amounts the merchant wrote next to a currency. (3) promises: ONLY the policy flags in the agent settings, default off; the FAQ's wording decides nothing,
- * because "no refunds" says the word (Ruling WA-GUARD-PROMISE-1). Never trusted: anything the customer typed, and anything a connector returns (it can echo
+ * because "no refunds" says the word (Ruling WA-GUARD-PROMISE-1). One narrow exception (Ruling CHAT-AGENT-2, revised): the Store's DECLARED policies (`Trusted.declared`) let a reply state the free-shipping
+ * threshold together with its declared amount, and the return window together with its declared days (or "no returns" for a store that declared none); money-back wording is never covered. Never trusted: anything the customer typed, and anything a connector returns (it can echo
  * what a customer typed at any point of the conversation). A link that only exists after normalisation (invisible characters, an encoded dot, full-width
  * forms) is refused. Known cost: a reply that restates a sum the model computed itself (2 x 110) is refused too; totals come from the ordering flow. A
  * sentence whose period has no space after it ("تمام.شكرا") reads as a host and is refused too: a person answers it.
@@ -19,6 +20,8 @@ import { normaliseText } from '../text-normalise';
 import { wordPrices } from './number-words';
 
 export type GuardVerdict = { ok: true } | { ok: false; reason: 'url' | 'price' | 'promise' | 'leak' };
+
+export type Declared = { freeOver: Set<number>; returnDays: number | null };
 
 /** What the merchant allows the agent to promise (agent settings; default all off). */
 export type PromisePolicy = { refund: boolean; discount: boolean; freeDelivery: boolean; exchange: boolean; guarantee: boolean };
@@ -69,6 +72,9 @@ export class Trusted {
   /** The Store's own link / url fields as full links (scheme, host, path), matched with `covers()` like the merchant's own links (WA-GUARD-LINK-1). */
   readonly storeLinks: Link[] = [];
   policy: PromisePolicy = { ...NO_PROMISES };
+  /** What the merchant DECLARED in the Store (Ruling CHAT-AGENT-2): lets a reply state the free-shipping threshold or the return window itself, never a money-back promise. */
+  declared: Declared = { freeOver: new Set(), returnDays: null };
+  setDeclared(d: { freeOver: Iterable<number>; returnDays: number | null }): void { this.declared = { freeOver: new Set(d.freeOver), returnDays: d.returnDays }; }
   /** Free text the merchant wrote (persona, FAQ, knowledge): the links and the currency-attached amounts in it are vouched for. Promises are NOT (see `policy`). */
   addText(...t: string[]): void { this.text.push(...t); }
   setPolicy(p: PromisePolicy): void { this.policy = { ...p }; }
@@ -99,6 +105,25 @@ const PROMISES: Record<keyof PromisePolicy, RegExp> = {
   guarantee: /guarantee|warranty|ضمان|مضمون|كفاله/u,
 };
 
+/** Free SHIPPING / delivery only (not a free gift, not "free of charge"). */
+const FREE_SHIPPING = /free (?:shipping|delivery)|شحن مجاني|توصيل مجاني|شحن ببلاش/gu;
+/** The money-back part of the refund promise: never allowed by a declared return window. */
+const MONEY_BACK = /\brefund|money back|reimburs|استرداد|ارجاع (?:الفلوس|المبلغ|فلوس)|(?:هرجع|هرد|هنرجع|هنرد|ارجع|رجع)(?:لك|لكم|ك|لك)? (?:الفلوس|فلوس|المبلغ)|رجوع الفلوس|استرجاع (?:الفلوس|المبلغ|فلوس)/u;
+const NO_RETURNS = /مفيش|مش بنقبل|مش بنستقبل|لا يوجد|لا نقبل|لا نستقبل|\bno returns?\b|not accept|n't accept|do not (?:allow|accept)/u;
+
+/** A free-shipping statement is allowed when it carries a threshold the merchant declared (the amount is what makes it checkable). */
+function declaredFreeShipping(said: string, reply: string, d: Declared): boolean {
+  if (PROMISES.freeDelivery.test(said.replace(FREE_SHIPPING, ' '))) return false; // something else free (a gift) is mentioned too
+  return pricesIn(reply).some((p) => d.freeOver.has(p));
+}
+/** A return statement is allowed when it carries the declared window (or, for a store with no returns, says so); a money-back phrase never is. */
+function declaredReturns(said: string, reply: string, d: Declared): boolean {
+  if (d.returnDays === null || MONEY_BACK.test(said)) return false;
+  if (d.returnDays === 0) return NO_RETURNS.test(said);
+  const days = new RegExp(`(?<![\\d.])${d.returnDays}(?![\\d.])\\s*(?:يوم|ايام|أيام|day)`, 'u');
+  return days.test(asciiDigits(reply).toLowerCase());
+}
+
 /** True when `reply` repeats a run of `LEAK_WORDS` consecutive words of `secret` (the rules): the model was talked into reciting its instructions. */
 const LEAK_WORDS = 8;
 function leaks(reply: string, secret: string): boolean {
@@ -123,6 +148,11 @@ export function guardReply(reply: string, trustedIn: Trusted | string[], protect
   for (const p of pricesIn(reply)) if (!known.has(p)) return { ok: false, reason: 'price' };
   // 3. promises: only a policy flag the merchant switched on allows one; their texts decide nothing
   const said = normaliseText(reply);
-  for (const [cls, re] of Object.entries(PROMISES) as [keyof PromisePolicy, RegExp][]) if (re.test(said) && !trusted.policy[cls]) return { ok: false, reason: 'promise' };
+  for (const [cls, re] of Object.entries(PROMISES) as [keyof PromisePolicy, RegExp][]) {
+    if (!re.test(said) || trusted.policy[cls]) continue;
+    if (cls === 'freeDelivery' && declaredFreeShipping(said, reply, trusted.declared)) continue;
+    if (cls === 'refund' && declaredReturns(said, reply, trusted.declared)) continue;
+    return { ok: false, reason: 'promise' };
+  }
   return { ok: true };
 }
