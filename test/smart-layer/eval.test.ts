@@ -107,7 +107,7 @@ const FAKE: Record<string, string> = {
   pw: J('Hunter2!', 'Secret#', '2024'),
   card: J('4111 ', '1111 ', '1111 ', '1111'),
   jwt: J('ey', 'JhbGciOiJIUzI1NiJ9', '.', 'ey', 'JzdWIiOiIxMjM0NTY3ODkwIn0', '.', 'dBjftJeZ4CVPmB92K27uhbUJU1p1rwW1gFWFOEjXk'),
-  pem: J('-----BEGIN ', 'PRIVATE', ' KEY----- ', 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC', ' -----END ', 'PRIVATE', ' KEY-----'),
+  pem: J('-----BEGIN ', 'PRIVATE', ' KEY----- ', 'MIIEvQIBADANBgkq', 'hkiG9w0BAQEFAASC', ' -----END ', 'PRIVATE', ' KEY-----'),
 };
 const withSecrets = (t: string): string => t.replace(/\{\{s:(\w+)\}\}/g, (_m, k: string) => FAKE[k] ?? _m);
 const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
