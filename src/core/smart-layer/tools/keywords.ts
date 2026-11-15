@@ -34,6 +34,8 @@ export const KEYWORDS: Readonly<Record<string, string>> = {
   campaign_delete_draft: 'امسح احذف مسودة حملة',
   send_text: 'ابعت ارسل رسالة نص للعميل كلم رد',
   send_template: 'ابعت ارسل قالب template للعميل رسالة',
+  template_write: 'اكتب اكتبلي قالب template رسالة جاهزة صياغة مسودة ميتا الأوردر اتشحن خصم عرض',
+  template_fix: 'صلّح اصلح قالب template اترفض رفض ميتا مرفوض',
   template_submit: 'قالب template قدّم ابعت لميتا مراجعة اعتماد جديد',
   template_edit: 'قالب template عدّل غيّر صلّح ميتا مراجعة',
   template_delete: 'قالب template امسح احذف',

@@ -29,7 +29,8 @@ describe('template tools over the templates service', () => {
     const out = await t.ask(ASK, SUBMIT());
     const card = out.previews[0]!;
     expect(card).toMatchObject({ policy: 'confirm', undo: 'irreversible' });
-    expect(card.rows.some((r) => r.after === 'أهلاً أحمد، طلبك رقم 1001 خرج للشحن وهيوصلك خلال يومين.')).toBe(true);
+    // the message is drawn as the customer will see it (the panel renders the draft object as a WhatsApp card)
+    expect(card.rows.some((r) => (r.after as { kind?: string; draft?: { body: { text: string } } } | undefined)?.kind === 'whatsapp_template' && (r.after as { draft: { body: { text: string } } }).draft.body.text === draft().body.text)).toBe(true);
     const check = (await (await t.api.call('POST', '/templates/check', draft())).json()) as { payloadHash: string };
     const stored = JSON.parse(String((await rows(t.s, 'SELECT json FROM sl_previews'))[0]!.json)) as { draft: { payload: { body: { expectedHash: string; body: { text: string } } } } };
     expect(stored.draft.payload.body.expectedHash).toBe(check.payloadHash);

@@ -10,6 +10,9 @@ import { ruleMessage } from '../../meta/template-rule-copy';
 import type { RuleIssue } from '../../meta/template-rules';
 import type { ToolSpec, TurnCtx } from '../../../../foundation/smart-layer/types';
 import { ToolApiError } from './read.tools';
+import { sha256Hex } from '../../../../foundation/smart-layer/release';
+import { fromStoredComponents } from '../../template-draft';
+import { TEMPLATE_WRITE_CREDITS, writeTemplate, type Written } from '../template-writer/writer';
 import { ToolInputError, row, schemaOf, writeTool, type Kit, type Reader } from './write';
 
 type Check = { issues: RuleIssue[]; payloadHash: string };
@@ -17,7 +20,6 @@ type Stored = { name: string; language: string; category: string; status: string
 const ref = z.object({ name: z.string().min(1).max(512), language: z.string().regex(/^[a-z]{2}(_[A-Z]{2})?$/) }).strict();
 const cairo = (ms: number, lang: 'ar' | 'en') => new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { timeZone: 'Africa/Cairo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ms));
 const asDraft = (a: TemplateDraftInput): TemplateDraftInput => a;
-const fill = (text: string, ex: string[]) => text.replace(/\{\{(\d+)\}\}/g, (_m, n: string) => ex[Number(n) - 1] ?? `{{${n}}}`);
 const issueView = (i: RuleIssue) => ({ code: i.code, severity: i.severity, field: i.field, ar: ruleMessage(i, 'ar'), en: ruleMessage(i, 'en') });
 const ask = async (api: Reader, d: TemplateDraftInput): Promise<Check> => (await api.ask('/templates/check', d)) as Check;
 const one = async (api: Reader, a: { name: string; language: string }): Promise<Stored> => {
@@ -27,16 +29,53 @@ const one = async (api: Reader, a: { name: string; language: string }): Promise<
 const campaignsUsing = async (api: Reader, a: { name: string; language: string }): Promise<string[]> =>
   (((await api.get('/campaigns', { limit: '50' })) as { items?: Array<{ name: string; status: string; template: { name: string; language: string } }> }).items ?? [])
     .filter((c) => c.template.name === a.name && c.template.language === a.language && ['draft', 'scheduled', 'running', 'paused'].includes(c.status)).map((c) => c.name);
-const blocking = (c: Check) => c.issues.filter((i) => i.severity === 'error');
+const blocking = (c: { issues: RuleIssue[] }) => c.issues.filter((i) => i.severity === 'error');
 
+
+const writeArgs = z.object({
+  request: z.string().trim().min(5).max(1000).describe('what the template is for, in the merchant\'s own words (the language the customer should read it in, if they said)'),
+  variation: z.number().int().min(1).max(9).optional().describe('1 for the first draft; a bigger number asks for a fresh different take on the same request'),
+}).strict();
+const fixArgs = z.object({
+  name: z.string().min(1).max(512), language: z.string().regex(/^[a-z]{2}(_[A-Z]{2})?$/),
+  hint: z.string().trim().max(500).optional().describe('what the merchant wants changed besides the rejection reason, if anything'),
+  variation: z.number().int().min(1).max(9).optional(),
+}).strict();
+type Generated = { w: Written; fresh: boolean };
+
+/**
+ * One draft, once: the generated draft is kept for an hour under (workspace, person, request) so the preview and the re-preview that runs on the press are the SAME
+ * draft; AI credits are held before the model is called, settled when the draft passes Meta's rules and released when it does not (nothing is charged for a failure).
+ */
+async function generate(kit: Kit, api: Reader, ctx: TurnCtx, what: string, ask: string, prior?: Parameters<typeof writeTemplate>[2]): Promise<Generated> {
+  const w = kit.writer;
+  if (!w) throw new ToolInputError('unavailable');
+  const key = `${ctx.storeId}:${ctx.userId}:tw:${(await sha256Hex(what)).slice(0, 32)}`;
+  const hit = await w.cache.get(key);
+  if (hit) return { w: JSON.parse(hit) as Written, fresh: false };
+  const ref = `sl:tw:${key.slice(-32)}:${ctx.now}`;
+  if ((await w.credits.hold(ref, TEMPLATE_WRITE_CREDITS)) === 'insufficient') throw new ToolInputError('unavailable');
+  try {
+    const names = ((await api.get('/templates')) as { items?: Array<{ name: string; language: string }> }).items ?? [];
+    const out = await writeTemplate({ complete: w.complete, check: (d) => ask_(api, d), taken: (lang) => new Set(names.filter((n) => n.language === lang).map((n) => n.name)) }, ask, prior);
+    if (blocking(out).length) throw new ToolInputError('invalid');
+    await w.cache.put(key, JSON.stringify(out));
+    await w.credits.settle(ref);
+    return { w: out, fresh: true };
+  } catch (e) {
+    await w.credits.release(ref).catch(() => undefined);
+    throw e;
+  }
+}
+const ask_ = (api: Reader, d: TemplateDraftInput): Promise<Check> => ask(api, d);
+
+/** What a preview shows of a draft: its name and category, the message as the customer will see it (the panel draws it as a WhatsApp card), and Meta's warnings. */
+export const TEMPLATE_VIEW = 'whatsapp_template';
 function draftRows(a: TemplateDraftInput, c: Check, lang: 'ar' | 'en') {
   return [
     row('الاسم', 'Name', undefined, `${a.name} (${a.language})`),
     row('الفئة', 'Category', undefined, a.category),
-    ...(a.header ? [row('العنوان', 'Header', undefined, fill(a.header.text, a.header.example ? [a.header.example] : []), 'merchant')] : []),
-    row('نص الرسالة (بالأمثلة)', 'Message text (with the examples)', undefined, fill(a.body.text, a.body.examples), 'merchant'),
-    ...(a.footer ? [row('السطر الأخير', 'Footer', undefined, a.footer, 'merchant')] : []),
-    ...(a.buttons.length ? [row('الأزرار', 'Buttons', undefined, a.buttons.map((b) => ('text' in b ? b.text : b.example)).join(' | '), 'merchant')] : []),
+    row('الرسالة زي ما العميل هيشوفها', 'The message as the customer will see it', undefined, { kind: TEMPLATE_VIEW, draft: a }, 'merchant'),
     ...c.issues.filter((i) => i.severity === 'warning').map((i) => row('تنبيه', 'Warning', undefined, ruleMessage(i, lang))),
   ];
 }
@@ -79,6 +118,37 @@ export function templateTools(kit: Kit): ToolSpec[] {
       async read(ctx) { return rd(ctx).ask('/templates/sync', {}); },
     }),
 
+    writeTool({
+      name: 'template_write', capabilityId: 'templates.ai-writer', policy: 'confirm', undo: 'irreversible',
+      description: "Write a Meta-ready WhatsApp template from what the merchant wants to say (Egyptian Arabic by default, English on request), check it against Meta's rules, and prepare it for submission. The card shows the finished message and its cost in AI credits; only the merchant's press submits it to Meta. Use variation 2, 3 ... for a fresh take. If it fails, nothing is charged.",
+      args: writeArgs,
+      async read(api, ctx, a) { return generate(kit, api, ctx, `write|${a.request}|${a.variation ?? 1}`, a.request); },
+      fingerprint: (g) => ({ h: g.w.payloadHash, w: g.w.issues }),
+      plan: (_a, g, ctx) => ({
+        summary: { ar: `قالب جاهز للتقديم لـ Meta: "${g.w.draft.label}"`, en: `A template ready to submit to Meta: "${g.w.draft.label}"` },
+        rows: draftRows(g.w.draft, g.w, ctx.locale),
+        cost: TEMPLATE_WRITE_CREDITS,
+        request: { method: 'POST', path: '/templates', body: { ...g.w.draft, expectedHash: g.w.payloadHash } },
+      }),
+    }, kit),
+    writeTool({
+      name: 'template_fix', capabilityId: 'templates.ai-writer', policy: 'confirm', undo: 'irreversible',
+      description: "Fix a template Meta rejected: start from the stored template, Meta's reason and the plain advice, write the corrected version, check it, and prepare the edit. The card shows the corrected message and its cost in AI credits; only the merchant's press sends it to Meta again. Use template_status first to see the reason and whether an edit is allowed.",
+      args: fixArgs,
+      async read(api, ctx, a) {
+        const t = (await one(api, a)) as Stored & { components?: Array<Record<string, unknown>>; label?: string | null };
+        if (t.editAllowance && !t.editAllowance.allowed) throw new ToolInputError('unavailable');
+        const prior = { draft: fromStoredComponents((t.components ?? []) as never, { name: t.name, language: t.language, category: t.category, label: t.label ?? null }) as TemplateDraftInput, reason: t.rejectedReason, advice: t.advice ?? null };
+        return generate(kit, api, ctx, `fix|${a.name}|${a.language}|${a.hint ?? ''}|${a.variation ?? 1}|${t.rejectedReason ?? ''}`, a.hint ?? 'Fix the template so Meta accepts it.', prior);
+      },
+      fingerprint: (g) => ({ h: g.w.payloadHash, w: g.w.issues }),
+      plan: (a, g, ctx) => ({
+        summary: { ar: `نسخة مصلّحة من القالب "${g.w.draft.label}" لإعادة تقديمها`, en: `A corrected version of "${g.w.draft.label}" to send to Meta again` },
+        rows: draftRows(g.w.draft, g.w, ctx.locale),
+        cost: TEMPLATE_WRITE_CREDITS,
+        request: { method: 'PUT', path: `/templates/${encodeURIComponent(a.name)}/${encodeURIComponent(a.language)}`, body: { ...g.w.draft, expectedHash: g.w.payloadHash } },
+      }),
+    }, kit),
     writeTool({
       name: 'template_submit', capabilityId: 'templates.create-submit', policy: 'confirm', undo: 'irreversible',
       description: "Submit a new template draft to Meta for review. Meta reviews it and the submission cannot be taken back, so the merchant confirms with the button. Run template_check first and fix every error.",

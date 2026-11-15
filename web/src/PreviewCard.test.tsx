@@ -69,4 +69,12 @@ describe('PreviewCard', () => {
     const r = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } });
     expect(r.violations).toEqual([]);
   });
+
+  it('a template draft in a row is drawn as the WhatsApp card the customer will see, not as JSON', () => {
+    const draft = { name: 'order_shipped', label: 'x', language: 'ar', category: 'UTILITY' as const, header: null, body: { text: 'أهلاً {{1}} طلبك خرج للشحن.', examples: ['منى'] }, footer: null, buttons: [] };
+    mount(card({ rows: [{ label: { ar: 'الرسالة', en: 'Message' }, after: { kind: 'whatsapp_template', draft } }], costCredits: 2 }), api());
+    expect(screen.getByTestId('tpl-bubble').textContent).toContain('أهلاً منى طلبك خرج للشحن.');
+    expect(screen.getByText(t.assistantCardCost(2))).toBeTruthy();
+    expect(document.body.textContent).not.toContain('whatsapp_template');
+  });
 });

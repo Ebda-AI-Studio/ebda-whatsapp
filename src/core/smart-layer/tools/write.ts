@@ -37,6 +37,8 @@ export type Plan = {
   affected?: number;
   changesPrice?: boolean;
   touchesCheckout?: boolean;
+  /** AI credits this change costs (shown on the card; the tool itself holds and settles them). */
+  cost?: number;
   /** The request body carries a phone number or similar: keep it out of the stored draft (apply re-plans from the arguments anyway). */
   hideBody?: boolean;
 };
@@ -76,7 +78,16 @@ export function schemaOf(args: z.ZodType): Record<string, unknown> {
 const hash = (v: unknown): Promise<string> => sha256Hex(canonicalJson(v ?? null));
 
 /** What a tool factory is given: the route caller and a lookup of the sibling tools (an undo that lands on another tool must compare against THAT tool's view of the state). */
-export type Kit = { callApi: CallApi; find(name: string): ToolSpec | undefined };
+export type Kit = {
+  callApi: CallApi;
+  find(name: string): ToolSpec | undefined;
+  /** The heavy jobs' own plumbing (the template writer): one model call on the `template` job, a short-lived draft cache, and AI credits held before the call. */
+  writer?: {
+    complete(system: string, user: string): Promise<string>;
+    cache: { get(key: string): Promise<string | null>; put(key: string, json: string): Promise<void> };
+    credits: { hold(ref: string, credits: number): Promise<'held' | 'already_charged' | 'insufficient'>; settle(ref: string): Promise<unknown>; release(ref: string): Promise<void> };
+  };
+};
 
 export function writeTool<A, S>(def: WriteDef<A, S>, kit: Kit): ToolSpec {
   const callApi = kit.callApi;
@@ -95,7 +106,7 @@ export function writeTool<A, S>(def: WriteDef<A, S>, kit: Kit): ToolSpec {
       return {
         summary: plan.summary, rows: plan.rows, affectedCount: plan.affected ?? 1, etag: await hash(def.fingerprint ? def.fingerprint(s) : s),
         payload: { op: def.name, body: plan.hideBody ? null : plan.request.body ?? null, restore: plan.restore ?? null },
-        ...(plan.changesPrice ? { changesPrice: true } : {}), ...(plan.touchesCheckout ? { touchesCheckout: true } : {}),
+        ...(plan.changesPrice ? { changesPrice: true } : {}), ...(plan.touchesCheckout ? { touchesCheckout: true } : {}), ...(plan.cost !== undefined ? { costCredits: plan.cost } : {}),
       };
     },
     async apply(ctx, a) {
