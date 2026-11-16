@@ -1,9 +1,12 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
-import { suspendWorkspace } from '../src/core/ops/kill-switch';
+import { suspendWorkspace, unsuspendWorkspace } from '../src/core/ops/kill-switch';
+import { abuseSuspended } from '../src/core/ops/offboarding';
+import { makeCampaign, seedContacts, seedTemplate } from './helpers/campaigns';
+import { deliver, iso, storeEvent } from './helpers/store-link';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import { chat, fund, jobOf, ledger, nowS, pricing, queueTemplate, sendOut, setupBilling, status, wamidOf } from './helpers/billing';
-import { workspace } from './helpers/workspace';
+import { exec, own, rows, workspace } from './helpers/workspace';
 
 useApiKey();
 // WA-DEBT-1 (#113): debt past 2x the overdraft limit suspends the workspace (tag wallet_debt); the adjustment itself is always recorded in full.
@@ -58,14 +61,71 @@ describe('WA-DEBT-1 wallet debt past twice the overdraft limit', () => {
     expect(await d1(ws)).toEqual({ suspended_at: null, suspended_reason: null });
   });
 
-  it('never lifts an operator suspension, and never overwrites one with ours', async () => {
+  it('an operator suspension over a debt suspension is audited, replaces the D1 reason and counts as abuse; paying the debt does not lift it', async () => {
     const ws = W(1303);
     await debtor(ws);
-    await suspendWorkspace(env, { actor: 'op', workspaceId: ws, reason: 'abuse report' });
     await workspace(ws).postWallet({ kind: 'meta_adjust', netMinor: -150, ref: 'adj:debt-4', actor: 'meta', note: 'big' });
-    await fund(ws, 1000);
+    await workspace(ws).runDueTasks();
+    expect(await d1(ws)).toMatchObject({ suspended_reason: 'wallet_debt' });
+    expect(await abuseSuspended(env, ws)).toBe(false); // a debt suspension is a money block, not abuse evidence
+    await suspendWorkspace(env, { actor: 'op', workspaceId: ws, reason: 'abuse report' });
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM operator_actions WHERE workspace_id = ? AND action = 'suspend'").bind(ws).first<{ n: number }>())!.n).toBe(1);
+    expect(await d1(ws)).toEqual({ suspended_at: expect.any(Number), suspended_reason: 'abuse report' });
+    expect(await abuseSuspended(env, ws)).toBe(true);
+    await fund(ws, 1000); // debt paid: only the debt flag clears
     await workspace(ws).runDueTasks();
     expect(await workspace(ws).suspended()).toBe(true);
     expect(await d1(ws)).toEqual({ suspended_at: expect.any(Number), suspended_reason: 'abuse report' });
+    await unsuspendWorkspace(env, { actor: 'op', workspaceId: ws, reason: 'resolved with the owner' });
+    expect(await workspace(ws).suspended()).toBe(false);
+    expect(await d1(ws)).toEqual({ suspended_at: null, suspended_reason: null });
+  });
+
+  it('debt + Store hold: each reason clears on its own, in the workspace and in D1', async () => {
+    const ws = W(1304);
+    await debtor(ws);
+    await workspace(ws).postWallet({ kind: 'meta_adjust', netMinor: -150, ref: 'adj:debt-5', actor: 'meta', note: 'big' });
+    await workspace(ws).runDueTasks();
+    await deliver([storeEvent(ws, 'store.suspended', { reason: 'unpaid', at: iso(Date.now()) })]);
+    expect(await d1(ws)).toMatchObject({ suspended_reason: 'store_suspended' }); // the Store tag outranks the debt tag
+    await fund(ws, 1000); // the debt is paid while the Store hold is on
+    await workspace(ws).runDueTasks();
+    expect(await workspace(ws).suspended()).toBe(true);
+    expect(await d1(ws)).toEqual({ suspended_at: expect.any(Number), suspended_reason: 'store_suspended' });
+    await deliver([storeEvent(ws, 'store.reactivated', { at: iso(Date.now() + 1000) })]);
+    expect(await workspace(ws).suspended()).toBe(false); // the Store reactivated and nothing else holds: fully unlocked, no stale wallet_debt
+    expect(await d1(ws)).toEqual({ suspended_at: null, suspended_reason: null });
+  });
+
+  it('a Store reactivation while the debt is still on stays suspended with reason wallet_debt; paying the debt alone then unlocks', async () => {
+    const ws = W(1305);
+    await debtor(ws);
+    await deliver([storeEvent(ws, 'store.suspended', { reason: 'unpaid', at: iso(Date.now()) })]);
+    await workspace(ws).postWallet({ kind: 'meta_adjust', netMinor: -150, ref: 'adj:debt-6', actor: 'meta', note: 'big' }); // the debt trips DURING the hold
+    await workspace(ws).runDueTasks();
+    await deliver([storeEvent(ws, 'store.reactivated', { at: iso(Date.now() + 1000) })]);
+    expect(await workspace(ws).suspended()).toBe(true);
+    expect(await d1(ws)).toEqual({ suspended_at: expect.any(Number), suspended_reason: 'wallet_debt' });
+    await fund(ws, 1000);
+    await workspace(ws).runDueTasks();
+    expect(await workspace(ws).suspended()).toBe(false);
+    expect(await d1(ws)).toEqual({ suspended_at: null, suspended_reason: null });
+  });
+
+  it('a debt suspension PAUSES running campaigns (wallet_empty) and fails no audience row; a top-up resumes nothing', async () => {
+    const ws = W(1306);
+    await debtor(ws);
+    await own(ws);
+    await seedTemplate(ws);
+    await seedContacts(ws, 2);
+    const c = await makeCampaign(ws);
+    await exec(ws, "UPDATE campaigns SET status = 'running', attempt = 1 WHERE id = ?", c.id);
+    await workspace(ws).postWallet({ kind: 'meta_adjust', netMinor: -150, ref: 'adj:debt-7', actor: 'meta', note: 'big' });
+    await workspace(ws).runDueTasks();
+    expect(await rows(ws, 'SELECT status, pause_reason FROM campaigns WHERE id = ?', c.id)).toEqual([{ status: 'paused', pause_reason: 'wallet_empty' }]);
+    expect(await rows(ws, "SELECT count(*) AS n FROM messages WHERE status = 'failed'")).toEqual([{ n: 0 }]);
+    await fund(ws, 1000);
+    await workspace(ws).runDueTasks();
+    expect((await rows<{ status: string }>(ws, 'SELECT status FROM campaigns WHERE id = ?', c.id))[0]!.status).toBe('paused');
   });
 });

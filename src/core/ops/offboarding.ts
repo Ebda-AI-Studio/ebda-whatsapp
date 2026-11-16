@@ -136,8 +136,8 @@ export async function releaseAbuseHold(env: Env, a: { workspaceId: string; actor
 }
 export async function abuseSuspended(env: Env, ws: string): Promise<boolean> {
   const w = await env.DB.prepare('SELECT suspended_at, suspended_reason FROM workspaces WHERE id = ?').bind(ws).first<{ suspended_at: number | null; suspended_reason: string | null }>();
-  // A Store hold (STORE-STANDING-1: the Store store is suspended or deleted) is not an abuse suspension either: it never holds an erasure.
-  return !!w && w.suspended_at !== null && w.suspended_reason !== 'offboarding' && w.suspended_reason !== 'store_suspended' && w.suspended_reason !== 'store_deleted';
+  // A Store hold (STORE-STANDING-1: the Store store is suspended or deleted) is not an abuse suspension either: it never holds an erasure; nor does a wallet debt hold (WA-DEBT-1, a money block). D1's reason is derived with the operator's reason first, so any other reason is an operator suspension.
+  return !!w && w.suspended_at !== null && w.suspended_reason !== 'offboarding' && w.suspended_reason !== 'store_suspended' && w.suspended_reason !== 'store_deleted' && w.suspended_reason !== 'wallet_debt';
 }
 
 export async function getOffboarding(env: Env, ws: string): Promise<OffboardingStatus | null> {

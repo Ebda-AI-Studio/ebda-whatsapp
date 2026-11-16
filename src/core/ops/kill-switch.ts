@@ -1,4 +1,5 @@
 import type { Env } from '../../env';
+import { syncSuspendedMirror } from './suspension-mirror';
 import { isEvicted, leaveShared } from '../shared/shared-number';
 import { LAST_REASON_ID, REASON_PLACEHOLDER, reasonSql, reasonStmt } from '../audit-reason';
 
@@ -29,17 +30,18 @@ const note = (action: Action | 'suspend_partial', ws: string, actor: string, ext
 export async function suspendWorkspace(env: Env, a: { actor: string; workspaceId: string; reason: string }, now = Date.now()): Promise<Result<{ paused: number }>> {
   const ws = await env.DB.prepare('SELECT suspended_at, suspended_reason FROM workspaces WHERE id = ?').bind(a.workspaceId).first<{ suspended_at: number | null; suspended_reason: string | null }>();
   if (!ws) return { ok: false, reason: 'not_found' };
-  // Idempotent: a retry after a partial failure (D1 written, workspace copy not) finishes the job without a second audit row or a moved timestamp.
-  // A Store hold in D1 (STORE-STANDING-1) is replaced by the operator's reason, so the operator's suspension outlives the Store's reactivation
-  // and counts as an abuse suspension for offboarding.
-  if (ws.suspended_at === null || ws.suspended_reason === 'store_suspended' || ws.suspended_reason === 'store_deleted') {
+  // The audit row and the operator's reason are written whenever the OPERATOR flag is not already on in the workspace (a wallet debt or Store hold in D1 does not make
+  // this a retry). A retry after a partial failure (D1 written with this reason, workspace copy not) finishes the job without a second audit row or a moved timestamp.
+  const before = await (async () => stub(env, a.workspaceId).suspensionState())().catch(() => null); // an unreachable workspace copy: the D1 half is still written first (the Worker blocks at once)
+  if (before?.operator == null && !(ws.suspended_at !== null && ws.suspended_reason === a.reason)) {
     await env.DB.batch([
-      env.DB.prepare('UPDATE workspaces SET suspended_at = ?, suspended_reason = ? WHERE id = ?').bind(now, a.reason, a.workspaceId),
+      env.DB.prepare('UPDATE workspaces SET suspended_at = coalesce(suspended_at, ?), suspended_reason = ? WHERE id = ?').bind(now, a.reason, a.workspaceId),
       ...audit(env, { ...a, action: 'suspend', now }),
     ]);
   }
   try {
     const { paused } = await stub(env, a.workspaceId).setSuspended(true, a.reason, now);
+    await syncSuspendedMirror(env.DB, a.workspaceId, await stub(env, a.workspaceId).suspensionState(), now);
     note('suspend', a.workspaceId, a.actor, { paused });
     return { ok: true, value: { paused } };
   } catch {
@@ -52,11 +54,8 @@ export async function unsuspendWorkspace(env: Env, a: { actor: string; workspace
   if (!(await known(env, a.workspaceId))) return { ok: false, reason: 'not_found' };
   await env.DB.batch(audit(env, { ...a, action: 'unsuspend', now }));
   await stub(env, a.workspaceId).setSuspended(false, a.reason, now);
-  // STORE-STANDING-1: the operator lifts only the operator suspension. A Store hold (the Store store is suspended or deleted) stays, in the
-  // workspace and in D1, until the Store reactivates the store.
-  const held = await stub(env, a.workspaceId).storeHold();
-  if (held) await env.DB.prepare('UPDATE workspaces SET suspended_at = coalesce(suspended_at, ?), suspended_reason = ? WHERE id = ?').bind(now, held === 'store_deleted' ? 'store_deleted' : 'store_suspended', a.workspaceId).run();
-  else await env.DB.prepare('UPDATE workspaces SET suspended_at = NULL, suspended_reason = NULL WHERE id = ?').bind(a.workspaceId).run();
+  // The operator lifts only the operator flag: a Store hold or a wallet debt hold keeps the workspace suspended (in the workspace and in D1) until it clears itself.
+  await syncSuspendedMirror(env.DB, a.workspaceId, await stub(env, a.workspaceId).suspensionState(), now);
   note('unsuspend', a.workspaceId, a.actor);
   return { ok: true, value: {} };
 }
