@@ -18,7 +18,7 @@ import { exportContact, mergeContacts, renameContact } from './contact-data';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptOutMessage, matchOptIn } from './consent';
-import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, storeHold, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
 import { writeSessionState } from './identity/session';
 import { DAILY_KINDS, addTask, dailyHour, retryDelayMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
@@ -761,7 +761,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** running | scheduled -> paused for one reason, on one number (or every number when null). The merchant resumes them; nothing here ever does. */
-  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused', now = Date.now()): Promise<number> {
+  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused' | 'store_suspended', now = Date.now()): Promise<number> {
     const ids = this.sql
       .exec<{ id: string }>(`SELECT id FROM campaigns WHERE status IN ('running', 'scheduled') ${phoneNumberId === null ? '' : 'AND phone_number_id = ?'}`, ...(phoneNumberId === null ? [] : [phoneNumberId]))
       .toArray();
@@ -781,6 +781,11 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   async suspended(): Promise<boolean> {
     return isSuspended(this.sql);
+  }
+
+  /** The Store hold's reason (STORE-STANDING-1), or null: the operator unsuspend keeps D1 in step with it. */
+  async storeHold(): Promise<string | null> {
+    return storeHold(this.sql);
   }
 
   async throttleReport(phoneNumberId: string, now = Date.now()): Promise<ThrottleReport> {
@@ -1272,7 +1277,11 @@ export class WorkspaceDO extends DurableObject<Env> {
   async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null; shared?: boolean }): Promise<StoreEventOutcome> {
     await this.ensurePricing();
     if (opts.phoneNumberId) await this.repullIfUnknown(opts.phoneNumberId, Date.now());
-    return applyStoreEvent(this.host(), event, opts);
+    const result = await applyStoreEvent(this.host(), event, opts);
+    // STORE-STANDING-1: a Store suspension or deletion also pauses every running / scheduled campaign (nothing resumes them on reactivation:
+    // the merchant resumes, as after an operator suspension). The hold flag itself already stops every send at its claim.
+    if (result.status === 'applied' && (event.type === 'store.suspended' || event.type === 'store.deleted')) await this.pauseCampaignsOn(null, 'store_suspended');
+    return result;
   }
 
   /**

@@ -233,7 +233,7 @@ export async function pauseCampaign(host: LinkHost, id: string, reason: PauseRea
   if (c.status !== 'running' && c.status !== 'scheduled') return { ok: false, reason: 'bad_state' };
   host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = ?, updated_at = ? WHERE id = ?", reason, now, id);
   // The merchant's own pause, a quality pause and an operator pause all hold what is already queued; the money reasons let reserved pages go out.
-  if (reason === 'manual' || reason === 'quality_flagged' || reason === 'operator_paused') parkUnsent(host, id, now);
+  if (reason === 'manual' || reason === 'quality_flagged' || reason === 'operator_paused' || reason === 'store_suspended') parkUnsent(host, id, now);
   return { ok: true, campaign: await view(host, read(host, id)!, false), launch: false };
 }
 
