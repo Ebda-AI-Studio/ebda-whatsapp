@@ -112,4 +112,53 @@ describe('WA-PACK-REFUND-1 credit pack refund', () => {
     expect(await inDo(ws, creditBalance)).toBe(0);
     expect((await ledgerRows(ws)).filter((r) => r.kind === 'expire')).toHaveLength(1);
   });
+
+  // WA-PACK-REFUND-1 follow-up: a PAID order whose recorded refund never got its expiry (the step failed after the order was marked paid) is picked up by the repair job.
+  it('the repair job expires the unused share of a paid order whose recorded refund has no expiry, once; a second run adds nothing', async () => {
+    const ws = W(20);
+    const row = await buyPack(ws, 20);
+    await spend(ws, 30);
+    await env.DB.prepare('INSERT INTO credit_order_refunds (refund_ref, order_id, workspace_id, amount_minor, at) VALUES (?, ?, ?, ?, ?)').bind(`${row.order_id}:RF-20`, row.order_id, ws, row.amount_minor, Date.now()).run(); // recorded, expiry never applied
+    expect(await inDo(ws, creditBalance)).toBe(70);
+    expect((await repairCreditOrders(env, null, Date.now())).refundsExpired).toBe(1);
+    expect(await inDo(ws, creditBalance)).toBe(0);
+    expect((await repairCreditOrders(env, null, Date.now())).refundsExpired).toBe(0);
+    expect((await ledgerRows(ws)).filter((r) => r.kind === 'expire')).toEqual([{ kind: 'expire', amount: -70 }]);
+  });
+
+  it('an order whose refund already has its expiry is untouched by the repair job (even when nothing was left to expire)', async () => {
+    const ws = W(21);
+    const row = await buyPack(ws, 21);
+    await spend(ws, 100);
+    await applyCreditWebhook(env, row, refund(row, 'RF-21'), Date.now()); // fully spent: nothing expires, but the refund is applied
+    const before = await ledgerRows(ws);
+    expect((await repairCreditOrders(env, null, Date.now())).refundsExpired).toBe(0);
+    expect(await ledgerRows(ws)).toEqual(before);
+  });
+
+  // Security review of the repair job: no backfill exists for `applied_at`, so the job must itself dedupe by the refund's ref (the workspace is the source of truth).
+  it('a historical refund whose expiry already exists is not expired again when applied_at is missing (no backfill)', async () => {
+    const ws = W(22);
+    const row = await buyPack(ws, 22);
+    await spend(ws, 30);
+    await applyCreditWebhook(env, row, refund(row, 'RF-22'), Date.now()); // expires 70
+    await env.DB.prepare('UPDATE credit_order_refunds SET applied_at = NULL WHERE order_id = ?').bind(row.order_id).run(); // as if migration 0037 never stamped it
+    await workspace(ws).postAiCredits({ kind: 'purchase', amount: 50, ref: 'later-purchase-22' }); // credits that a second expiry would wrongly take
+    expect((await repairCreditOrders(env, null, Date.now())).refundsExpired).toBe(0);
+    expect(await inDo(ws, creditBalance)).toBe(50);
+    expect((await ledgerRows(ws)).filter((r) => r.kind === 'expire')).toHaveLength(1);
+    expect(await env.DB.prepare('SELECT applied_at IS NOT NULL AS done FROM credit_order_refunds WHERE order_id = ?').bind(row.order_id).first()).toEqual({ done: 1 }); // stamped by the check
+  });
+
+  it('a refund that expired nothing (pack fully spent) is a no-op on a re-run, even after the balance grew', async () => {
+    const ws = W(23);
+    const row = await buyPack(ws, 23);
+    await spend(ws, 100);
+    await applyCreditWebhook(env, row, refund(row, 'RF-23'), Date.now()); // nothing unused: expires 0
+    await env.DB.prepare('UPDATE credit_order_refunds SET applied_at = NULL WHERE order_id = ?').bind(row.order_id).run();
+    await workspace(ws).postAiCredits({ kind: 'purchase', amount: 50, ref: 'later-purchase-23' });
+    await repairCreditOrders(env, null, Date.now());
+    expect(await inDo(ws, creditBalance)).toBe(50);
+    expect((await ledgerRows(ws)).filter((r) => r.kind === 'expire')).toHaveLength(0);
+  });
 });
