@@ -83,7 +83,7 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
     // Chat shows no merchant-owned web pages: only the platform's own hosts are linkable.
     merchantDomains: async () => [],
     controls: () => chatControls(d.env, d.ws),
-    quota: chatQuota(storage, d.ws),
+    quota: chatQuota(storage, d.ws, d.env),
     // Phase A tools take no ids from the model, so nothing needs an existence check. An id-taking tool (Phase B) must supply its own kind here: until it does, every ref fails closed.
     checkRefs: async (_ctx, refs) => ({ missing: [...refs] }),
     handoff: chatHandoff(),
