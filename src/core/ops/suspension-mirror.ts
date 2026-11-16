@@ -1,5 +1,9 @@
 import type { SuspensionState } from '../numbers/health';
 
+/** The operator suspend refuses these as a free-text reason (case-insensitive, trimmed): each names a DERIVED hold or an internal tag the mirror, offboarding or the console reads by value. */
+export const RESERVED_SUSPEND_REASONS = ['wallet_debt', 'store_suspended', 'store_deleted', 'offboarding', 'operator'] as const;
+export const isReservedSuspendReason = (reason: string): boolean => (RESERVED_SUSPEND_REASONS as readonly string[]).includes(reason.trim().toLowerCase());
+
 /** The only D1 reasons the mirror owns (it may set, replace and clear these). Any other reason (an operator's, `offboarding`) is written and cleared only by its own explicit path. */
 const OWNED = "('store_suspended', 'store_deleted', 'wallet_debt')";
 

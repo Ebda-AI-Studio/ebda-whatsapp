@@ -23,6 +23,7 @@ import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { backfillDedupeHistory, listAutoConfirmations, revertAutoConfirmed, setAutoMode, setWorkspaceAuto, getAutoMode, instapayAutoReady } from '../core/billing/instapay-auto';
 import { confirmInstapay, listForOperator, rejectInstapay, releaseInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
+import { isReservedSuspendReason } from '../core/ops/suspension-mirror';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
 import { rotateTokenKey, rotationStatus } from '../core/enc-rotation';
 import { eraseContactFlow } from '../core/contact-erase';
@@ -338,10 +339,12 @@ operatorRoutes.post('/instapay/:id/reject', async (c) => {
 });
 
 // ---- W2-OPS: the kill switch. Every action needs a reason (5+ characters), is audited append-only with the actor, and fails closed on a revoked session (the guard above).
-const killSwitch = (run: (env: Env, a: { actor: string; workspaceId: string; reason: string }) => Promise<Result<object>>) =>
+const killSwitch = (run: (env: Env, a: { actor: string; workspaceId: string; reason: string }) => Promise<Result<object>>, opts: { rejectReserved?: boolean } = {}) =>
   async (c: import('hono').Context<E>) => {
     const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
     if (!b.success) return bad(c, 'reason_required');
+    // A suspension reason is free text, but a value that names a derived hold would be treated as one by the mirror (cleared or overwritten): refused here, nothing written.
+    if (opts.rejectReserved && isReservedSuspendReason(b.data.reason)) return bad(c, 'reserved_reason');
     const r = await run(c.env, { actor: actor(c), workspaceId: c.req.param('workspaceId')!, reason: b.data.reason });
     if (r.ok) return c.json(r.value);
     // The D1 half of a suspension is already active; only the workspace's own copy is pending. Saying so, and that the same call finishes it.
@@ -467,7 +470,7 @@ operatorRoutes.get('/workspaces/:workspaceId/ops', async (c) => {
   const st = await opsStatus(c.env, c.req.param('workspaceId'));
   return st ? c.json(st) : c.json({ error: 'not_found' }, 404);
 });
-operatorRoutes.post('/workspaces/:workspaceId/suspend', killSwitch(suspendWorkspace));
+operatorRoutes.post('/workspaces/:workspaceId/suspend', killSwitch(suspendWorkspace, { rejectReserved: true }));
 operatorRoutes.post('/workspaces/:workspaceId/unsuspend', killSwitch(unsuspendWorkspace));
 operatorRoutes.post('/workspaces/:workspaceId/campaigns/pause', killSwitch(pauseAllCampaigns));
 operatorRoutes.post('/workspaces/:workspaceId/shared-number/evict', killSwitch(evictFromSharedNumber));
