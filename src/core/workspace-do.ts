@@ -51,7 +51,7 @@ import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importStat
 import type { DigestDto, AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
 import { funnelOnce } from './funnel';
 import { digestCounts, digestEnabled, setDigestEnabled } from './digest';
-import { holdCredits, lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, releaseHold, revokeGrantExcess, settleHold, upgradeGrant, type CreditKind, type HoldResult, type Posted } from './ai/credits';
+import { holdCredits, lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, expirePackUnused, grantCredits, lastGrantStart, postCredit, releaseHold, revokeGrantExcess, settleHold, upgradeGrant, type CreditKind, type HoldResult, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { abandonVoiceTurn } from './ai/agent';
 import { dropProfile } from './ai/context';
@@ -1698,6 +1698,10 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** A partial refund of a package: `num/den` of the period's unused granted credits expire under `ref` (idempotent). */
   async expireAiCreditsFraction(a: { periodStart: number; num: number; den: number; ref: string }, now = Date.now()): Promise<{ expired: number }> {
     return { expired: this.ctx.storage.transactionSync(() => expireGrantFraction(this.sql, { ...a, now })) };
+  }
+  /** WA-PACK-REFUND-1: expires the unused part of a refunded credit pack (see expirePackUnused). Idempotent under `ref`. */
+  async expireRefundedPack(a: { credits: number; num: number; den: number; ref: string; orderId: string }, now = Date.now()): Promise<{ expired: number; spent: number }> {
+    return this.ctx.storage.transactionSync(() => expirePackUnused(this.sql, { ...a, now }));
   }
   /** A purchase, refund or operator adjustment: the ref makes it idempotent; an operator adjustment needs an actor and a reason. */
   async postAiCredits(a: { kind: Extract<CreditKind, 'purchase' | 'refund' | 'adjustment'>; amount: number; ref: string; actor?: string; note?: string }, now = Date.now()): Promise<Posted | { ok: false; reason: 'actor_and_note_required' }> {
