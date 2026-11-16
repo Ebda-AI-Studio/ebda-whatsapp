@@ -49,6 +49,7 @@ export const OFFBOARD_TABLES = {
     card_refunds: { people: [], clear: ['note'] },
     wallet_adjustments: { people: [], clear: [] }, // requested_by / approved_by are our operators
     shared_number_usage: { people: [], clear: [] },
+    credit_order_refunds: { people: [], clear: [] }, // a provider refund of a credit pack: ids and an amount (WA-PACK-REFUND-1); a record of money, kept like credit_orders
     credit_orders: { people: ['created_by'], clear: [] }, // a card purchase of AI credits: amount, credits, provider transaction id; a record of money, kept like topups
     yearly_refund_requests: { people: ['requested_by'], clear: [] }, // a merchant's request to cancel a yearly package and refund unused months: figures only (executed_by is our operator)
   } as Record<string, { people: string[]; clear: string[] }>,
