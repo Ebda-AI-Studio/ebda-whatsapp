@@ -135,9 +135,10 @@ export async function releaseAbuseHold(env: Env, a: { workspaceId: string; actor
   await env.DB.batch(logRows(env, a.workspaceId, a.actor, 'abuse_hold_released', now, a.reason));
   return { ok: true };
 }
-async function abuseSuspended(env: Env, ws: string): Promise<boolean> {
+export async function abuseSuspended(env: Env, ws: string): Promise<boolean> {
   const w = await env.DB.prepare('SELECT suspended_at, suspended_reason FROM workspaces WHERE id = ?').bind(ws).first<{ suspended_at: number | null; suspended_reason: string | null }>();
-  return !!w && w.suspended_at !== null && w.suspended_reason !== 'offboarding';
+  // A Store hold (STORE-STANDING-1: the Store store is suspended or deleted) is not an abuse suspension either: it never holds an erasure.
+  return !!w && w.suspended_at !== null && w.suspended_reason !== 'offboarding' && w.suspended_reason !== 'store_suspended' && w.suspended_reason !== 'store_deleted';
 }
 
 export async function getOffboarding(env: Env, ws: string): Promise<OffboardingStatus | null> {

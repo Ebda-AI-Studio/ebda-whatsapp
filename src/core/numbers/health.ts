@@ -126,9 +126,24 @@ export function blockMember(sql: SqlStorage, pn: string, until: number): void {
 }
 
 const SUSPENDED_KEY = 'ops.suspended';
-/** The workspace's own copy of the operator suspension (the Worker checks D1 first; the Durable Object checks this for the sends that never pass the Worker). */
+/** The Store's hold (STORE-STANDING-1): present while the linked Store store is suspended or deleted; value = `store_suspended:<reason>` / `store_deleted`. */
+const STORE_HOLD_KEY = 'store.hold';
+/**
+ * May this workspace spend? False while the operator suspended it OR its Store store is suspended / deleted. Read on every send claim, every
+ * inbound turn (bot, menu, AI agent) and the front desk, from the workspace's own SQLite: the authoritative copy, written in the same
+ * transaction that applies the event, so there is no cache and no staleness window inside the workspace (NEVER-stale class). The two flags
+ * are separate so an operator unsuspend never lifts a Store hold and a Store reactivation never lifts an operator suspension.
+ */
 export function isSuspended(sql: SqlStorage): boolean {
-  return sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', SUSPENDED_KEY).toArray().length > 0;
+  return sql.exec<{ key: string }>('SELECT key FROM store_state WHERE key IN (?, ?)', SUSPENDED_KEY, STORE_HOLD_KEY).toArray().length > 0;
+}
+/** The Store hold's reason, or null when the Store store is live. */
+export function storeHold(sql: SqlStorage): string | null {
+  return sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', STORE_HOLD_KEY).toArray()[0]?.value ?? null;
+}
+export function setStoreHoldFlag(sql: SqlStorage, held: boolean, reason: string): void {
+  if (held) sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', STORE_HOLD_KEY, reason.slice(0, 200));
+  else sql.exec('DELETE FROM store_state WHERE key = ?', STORE_HOLD_KEY);
 }
 export function setSuspendedFlag(sql: SqlStorage, suspended: boolean, reason: string): void {
   if (suspended) sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', SUSPENDED_KEY, reason.slice(0, 200));

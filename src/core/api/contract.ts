@@ -476,7 +476,7 @@ export const campaignParam = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('link_code') }),
 ]);
 export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled']);
-export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable', 'quality_flagged', 'operator_paused']);
+export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable', 'quality_flagged', 'operator_paused', 'store_suspended']);
 /** W2-OPS: every kill-switch action carries a reason (kept in the append-only audit). */
 export const operatorKillSwitch = z.object({ reason: z.string().trim().min(5).max(300) });
 /** W2-OFFBOARD: an owner asks to delete the workspace (explicit confirmation; a wallet balance has to be given up explicitly). Strict: an owner cannot skip the cooling-off. */
