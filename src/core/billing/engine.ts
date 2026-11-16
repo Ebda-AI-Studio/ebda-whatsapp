@@ -138,11 +138,15 @@ export class Billing {
 
   // ---- estimates ----------------------------------------------------------------------------------------------------
 
-  /** Category of a send in the rate card's terms: a template's own category, everything else is a service message. */
+  /**
+   * Category of a send in the rate card's terms: a template's own category, everything else is a service message. A template this workspace has no
+   * category for (unknown or empty) is priced as MARKETING, the dearest, until Meta confirms its category (WA-CATEGORY-1): the cheap guess let a marketing
+   * template ride the utility overdraft.
+   */
   jobCategory(job: Pick<SendJob, 'kind' | 'template'>): string {
     if ((job.kind ?? 'text') !== 'template' || !job.template) return 'service';
     const c = this.sql.exec<{ category: string }>('SELECT category FROM templates WHERE name = ? AND language = ?', job.template.name, job.template.language).toArray()[0]?.category;
-    return normaliseCategory(c ?? 'UTILITY');
+    return normaliseCategory(c?.trim() ? c : 'MARKETING');
   }
 
   /** Estimated price of one message to `to` (any phone form; only the market is kept). 0 when the rate card has nothing: alerted, never guessed. */
