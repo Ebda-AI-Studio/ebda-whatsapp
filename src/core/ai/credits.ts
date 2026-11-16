@@ -185,7 +185,14 @@ export function expireGrantFraction(sql: Sql, a: { periodStart: number; num: num
  * share) and never below zero. One ledger row under `ref` (a redelivered refund is a no-op), tagged `parent_ref = pack:<orderId>` so grant accounting never sees it.
  * Returns what expired and what had already been used (the part an operator may still want to recover).
  */
-export function expirePackUnused(sql: Sql, a: { credits: number; num: number; den: number; now: number; ref: string; orderId: string }): { expired: number; spent: number } {
+export function expirePackUnused(sql: Sql, a: { credits: number; num: number; den: number; now: number; ref: string; orderId: string }): { expired: number; spent: number; duplicate?: true } {
+  // Idempotent by the refund's ref even when it expired NOTHING: the answer is stored under the ref (a zero expiry has no ledger row), and a ledger row under the ref (an expiry written
+  // before the marker existed) counts too. A re-run (the repair job, a redelivery) returns the stored answer and never looks at the balance again, so credits bought later are safe.
+  const marker = `pack.refund:${a.ref}`;
+  const seen = sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', marker).toArray()[0];
+  if (seen) return { ...(JSON.parse(seen.value) as { expired: number; spent: number }), duplicate: true };
+  const prior = sql.exec<{ amount: number }>('SELECT amount FROM credit_ledger WHERE ref = ?', a.ref).toArray()[0];
+  if (prior) return { expired: -prior.amount, spent: Math.max(0, a.credits + prior.amount), duplicate: true };
   const share = a.den > 0 && a.num > 0 ? Math.floor((a.credits * Math.min(a.num, a.den)) / a.den) : 0;
   const e = sql.exec<{ period_start: number }>('SELECT period_start FROM entitlements WHERE id = 1').toArray()[0];
   const grantLeft = e ? (() => {
@@ -196,5 +203,7 @@ export function expirePackUnused(sql: Sql, a: { credits: number; num: number; de
   const packLeft = Math.max(0, creditsAvailable(sql, a.now) - grantLeft);
   const expired = Math.min(share, packLeft);
   if (expired > 0) postCredit(sql, { kind: 'expire', amount: -expired, ref: a.ref, parentRef: `pack:${a.orderId}`, now: a.now, note: 'credit pack refunded' });
-  return { expired, spent: Math.max(0, a.credits - expired) };
+  const out = { expired, spent: Math.max(0, a.credits - expired) };
+  sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING', marker, JSON.stringify(out));
+  return out;
 }

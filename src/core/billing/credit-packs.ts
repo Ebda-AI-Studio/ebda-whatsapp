@@ -168,7 +168,7 @@ export async function repairRefundExpiries(env: Env, now = Date.now(), opts: Pas
     handle: async (r) => {
       const out = await stubOf(env, r.workspace_id).expireRefundedPack({ credits: r.credits, num: r.amount_minor, den: r.order_amount, ref: `credit-pack-refund:${r.refund_ref}`, orderId: r.order_id }, now);
       await markRefundApplied(env, r.refund_ref, now);
-      if (out.expired > 0) expired++;
+      if (out.expired > 0 && !out.duplicate) expired++;
     },
   });
   return expired;

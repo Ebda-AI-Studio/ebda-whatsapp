@@ -1700,7 +1700,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { expired: this.ctx.storage.transactionSync(() => expireGrantFraction(this.sql, { ...a, now })) };
   }
   /** WA-PACK-REFUND-1: expires the unused part of a refunded credit pack (see expirePackUnused). Idempotent under `ref`. */
-  async expireRefundedPack(a: { credits: number; num: number; den: number; ref: string; orderId: string }, now = Date.now()): Promise<{ expired: number; spent: number }> {
+  async expireRefundedPack(a: { credits: number; num: number; den: number; ref: string; orderId: string }, now = Date.now()): Promise<{ expired: number; spent: number; duplicate?: true }> {
     return this.ctx.storage.transactionSync(() => expirePackUnused(this.sql, { ...a, now }));
   }
   /** A purchase, refund or operator adjustment: the ref makes it idempotent; an operator adjustment needs an actor and a reason. */
