@@ -88,23 +88,39 @@ export async function creditPackPaid(env: Env, row: CreditOrderRow, transactionI
   const r = await stubOf(env, row.workspace_id).postAiCredits({ kind: 'purchase', amount: row.credits, ref: `credit-pack:${transactionId}`, note: `credit pack ${row.order_id}` }, now);
   if (!r.ok && r.reason !== 'duplicate') throw new Error(`credit pack refused: ${r.reason}`);
   await env.DB.prepare("UPDATE credit_orders SET state = 'paid', paid_at = coalesce(paid_at, ?) WHERE order_id = ? AND state IN ('pending', 'expired', 'failed')").bind(now, row.order_id).run();
+  // A refund recorded BEFORE this credit (the refund beat the payment webhook or the repair job) is applied now: credited, then immediately expired under the refund's own ref
+  // (the same ref the refund path uses, so whichever side runs second finds it done). The state is set to paid first, so a refund arriving from here on expires by itself.
+  await expireRecordedRefunds(env, row, now);
   return r.ok ? 'credited' : 'duplicate';
+}
+
+/** Every refund recorded for the order is expired against the workspace (idempotent under each refund's ref). Returns what expired. */
+async function expireRecordedRefunds(env: Env, row: CreditOrderRow, now: number): Promise<number> {
+  const refunds = await env.DB.prepare('SELECT refund_ref, amount_minor FROM credit_order_refunds WHERE order_id = ? ORDER BY at, refund_ref').bind(row.order_id).all<{ refund_ref: string; amount_minor: number }>();
+  let expired = 0;
+  for (const f of refunds.results) {
+    const r = await stubOf(env, row.workspace_id).expireRefundedPack({ credits: row.credits, num: f.amount_minor, den: row.amount_minor, ref: `credit-pack-refund:${f.refund_ref}`, orderId: row.order_id }, now);
+    expired += r.expired;
+  }
+  return expired;
 }
 
 /** A CONFIRMED webhook for a credit order (the caller already asked the provider what the signed transaction really is). Returns the resolution word. */
 export async function applyCreditWebhook(env: Env, row: CreditOrderRow, ev: ParsedWebhook, now: number): Promise<string> {
   if (ev.event === 'refund') {
     if (ev.status !== 'SUCCESS') return 'ignored';
-    // WA-PACK-REFUND-1: the UNUSED part of the pack expires on its own (never negative: a refund is an external fact, recorded in full); the spent part is left to an operator.
-    // Only a pack that was actually credited has anything to expire. The ref ties the expiry to this refund transaction, so a redelivery expires nothing more.
-    let expired = 0;
-    let spent = row.credits;
-    if (row.state === 'paid') {
-      const r = await stubOf(env, row.workspace_id).expireRefundedPack({ credits: row.credits, num: Math.max(0, ev.amountMinor), den: row.amount_minor, ref: `credit-pack-refund:${row.order_id}:${ev.transactionId}`, orderId: row.order_id }, now);
-      expired = r.expired;
-      spent = r.spent;
+    // WA-PACK-REFUND-1: the refund is recorded FIRST as one row (a redelivery is the same row), whether or not the pack was credited yet, so crediting later (payment webhook or the
+    // repair job) applies it and a refund that beats the payment is never lost. The refund is always recorded in full; what it takes from the balance is capped at the unused part.
+    const refundRef = `${row.order_id}:${ev.transactionId}`;
+    await env.DB.prepare('INSERT INTO credit_order_refunds (refund_ref, order_id, workspace_id, amount_minor, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (refund_ref) DO NOTHING').bind(refundRef, row.order_id, row.workspace_id, Math.max(1, ev.amountMinor), now).run();
+    // Re-read the order: the pay path may have credited it since this event was loaded. Only a credited pack has anything to expire; a pending one is expired by the credit itself.
+    const cur = (await findCreditOrder(env, row.order_id)) ?? row;
+    if (cur.state !== 'paid') {
+      alert('credit_pack_refunded', { workspace: row.workspace_id, orderId: row.order_id, packCredits: row.credits, expiredCredits: 0, spentCredits: 0, notCredited: true });
+      return 'refund_recorded';
     }
-    alert('credit_pack_refunded', { workspace: row.workspace_id, orderId: row.order_id, packCredits: row.credits, expiredCredits: expired, spentCredits: spent });
+    const r = await stubOf(env, row.workspace_id).expireRefundedPack({ credits: row.credits, num: Math.max(0, ev.amountMinor), den: row.amount_minor, ref: `credit-pack-refund:${refundRef}`, orderId: row.order_id }, now);
+    alert('credit_pack_refunded', { workspace: row.workspace_id, orderId: row.order_id, packCredits: row.credits, expiredCredits: r.expired, spentCredits: r.spent });
     return 'refund_expired';
   }
   if (ev.event !== 'pay') return 'ignored';

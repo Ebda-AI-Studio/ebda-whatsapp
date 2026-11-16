@@ -1,7 +1,7 @@
 # credit_pack_refunded (P1)
 **Severity:** P1 look today
 ## What it means
-Fires in src/core/billing/credit-packs.ts (applyCreditWebhook) when the card provider confirms a refund or chargeback of a payment for AI credits. Fields: `workspace`, `orderId`, `packCredits`, `expiredCredits`, `spentCredits`. The unused part of the pack was already expired automatically (WA-PACK-REFUND-1); only the part that was already spent (`spentCredits`) is left for a person.
+Fires in src/core/billing/credit-packs.ts (applyCreditWebhook) when the card provider confirms a refund or chargeback of a payment for AI credits. Fields: `workspace`, `orderId`, `packCredits`, `expiredCredits`, `spentCredits`, and `notCredited: true` when the refund arrived before the pack was credited (nothing was spent; the refund is recorded and the later credit expires itself). The unused part of the pack was already expired automatically (WA-PACK-REFUND-1); only the part that was already spent (`spentCredits`) is left for a person.
 ## Impact
 The merchant got money back. The unused credits are gone; the credits they already used stay used, so the business carries that cost unless it decides otherwise.
 ## Check first
