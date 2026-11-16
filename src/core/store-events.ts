@@ -59,9 +59,13 @@ export async function consumeStoreEvents(batch: MessageBatch<unknown>, env: Env)
       // Own number, else the shared platform number for a member (transactional events carry their order ref there).
       const number = await senderNumberFor(env, event.storeId);
       const result = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(event.storeId)).applyStoreEvent(event, { phoneNumberId: number?.phoneNumberId ?? null, shared: number?.shared ?? false });
-      // The Worker's copy of the hold (D1 `workspaces.suspended_*`, what the API middleware reads) follows the workspace's decision, so an
-      // out-of-order event the workspace dropped as stale never moves it. Awaited: a failure retries the event (the workspace dedupes it).
-      if (result.status === 'applied' && STANDING.has(event.type)) await mirrorStoreHold(env, event.storeId, event.type === 'store.reactivated' ? null : event.type === 'store.deleted' ? 'store_deleted' : 'store_suspended', Date.now());
+      // The Worker's copy of the hold (D1 `workspaces.suspended_*`, what the API middleware reads) is written from the workspace's CURRENT hold, not
+      // from the event, on EVERY delivery (applied, duplicate or stale): a retry after a failed D1 save finds the event already recorded in the
+      // workspace (`duplicate`) and still re-attempts the save, and a stale event re-asserts the newer state. Awaited: a failure retries the event.
+      if (STANDING.has(event.type)) {
+        const held = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(event.storeId)).storeHold();
+        await mirrorStoreHold(env, event.storeId, held === null ? null : held === 'store_deleted' ? 'store_deleted' : 'store_suspended', Date.now());
+      }
       console.log(JSON.stringify({ audit: 'store_event', type: event.type, storeId: event.storeId, status: result.status, ...(result.detail ? { detail: result.detail } : {}) }));
       if (result.status === 'retry') msg.retry({ delaySeconds: retryDelay(msg.attempts) });
       else msg.ack();

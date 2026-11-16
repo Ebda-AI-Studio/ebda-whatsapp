@@ -104,6 +104,18 @@ describe('store.suspended / store.reactivated (STORE-STANDING-1)', () => {
   });
 });
 
+describe('D1 copy of the hold (STORE-STANDING-1)', () => {
+  it('a retry after a failed D1 save re-attempts it (the workspace already recorded the event: duplicate)', async () => {
+    const ws = W(1176);
+    await setupBilling(ws);
+    const e = suspended(ws);
+    await deliver([e]);
+    await env.DB.prepare('UPDATE workspaces SET suspended_at = NULL, suspended_reason = NULL WHERE id = ?').bind(ws).run(); // the D1 save that failed
+    await deliver([e], 2); // the queue's retry of the same envelope
+    expect(await d1(ws)).toEqual({ on_: 1, reason: 'store_suspended' });
+  });
+});
+
 describe('Store hold vs offboarding (STORE-STANDING-1)', () => {
   it('a Store hold is not an abuse suspension, but an operator suspension on top of it is, and outlives the reactivation in D1', async () => {
     const ws = W(1175);
