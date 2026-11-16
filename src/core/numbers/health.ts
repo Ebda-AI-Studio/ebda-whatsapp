@@ -128,6 +128,8 @@ export function blockMember(sql: SqlStorage, pn: string, until: number): void {
 const SUSPENDED_KEY = 'ops.suspended';
 /** The Store's hold (STORE-STANDING-1): present while the linked Store store is suspended or deleted; value = `store_suspended:<reason>` / `store_deleted`. */
 const STORE_HOLD_KEY = 'store.hold';
+/** The wallet debt hold (WA-DEBT-1): present while the wallet debt is past twice the overdraft limit. Its OWN flag, so a top-up lifts only this one. */
+const DEBT_HOLD_KEY = 'billing.debt_hold';
 /**
  * May this workspace spend? False while the operator suspended it OR its Store store is suspended / deleted. Read on every send claim, every
  * inbound turn (bot, menu, AI agent) and the front desk, from the workspace's own SQLite: the authoritative copy, written in the same
@@ -135,7 +137,20 @@ const STORE_HOLD_KEY = 'store.hold';
  * are separate so an operator unsuspend never lifts a Store hold and a Store reactivation never lifts an operator suspension.
  */
 export function isSuspended(sql: SqlStorage): boolean {
-  return sql.exec<{ key: string }>('SELECT key FROM store_state WHERE key IN (?, ?)', SUSPENDED_KEY, STORE_HOLD_KEY).toArray().length > 0;
+  return sql.exec<{ key: string }>('SELECT key FROM store_state WHERE key IN (?, ?, ?)', SUSPENDED_KEY, STORE_HOLD_KEY, DEBT_HOLD_KEY).toArray().length > 0;
+}
+export const debtHold = (sql: SqlStorage): boolean => sql.exec('SELECT 1 FROM store_state WHERE key = ?', DEBT_HOLD_KEY).toArray().length > 0;
+export function setDebtHoldFlag(sql: SqlStorage, held: boolean): void {
+  if (held) sql.exec("INSERT INTO store_state (key, value) VALUES (?, 'wallet_debt') ON CONFLICT(key) DO UPDATE SET value = excluded.value", DEBT_HOLD_KEY);
+  else sql.exec('DELETE FROM store_state WHERE key = ?', DEBT_HOLD_KEY);
+}
+/** The operator's suspension reason, or null (the `ops.suspended` flag; its value is the reason). */
+export const operatorSuspension = (sql: SqlStorage): string | null => sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', SUSPENDED_KEY).toArray()[0]?.value ?? null;
+/** Every reason this workspace may not spend, each its own flag (operator reason, Store tag, wallet debt). D1 `suspended_*` is DERIVED from this by `syncSuspendedMirror`. */
+export type SuspensionState = { operator: string | null; store: 'store_suspended' | 'store_deleted' | null; debt: boolean };
+export function suspensionState(sql: SqlStorage): SuspensionState {
+  const hold = storeHold(sql);
+  return { operator: operatorSuspension(sql), store: hold === null ? null : hold === 'store_deleted' ? 'store_deleted' : 'store_suspended', debt: debtHold(sql) };
 }
 /** The Store hold's reason, or null when the Store store is live. */
 export function storeHold(sql: SqlStorage): string | null {

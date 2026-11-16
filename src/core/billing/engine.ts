@@ -16,6 +16,7 @@ import { countryOf } from './country';
 import { ensureTrueupTask } from './trueup';
 import { DEFAULT_SETTINGS, fundingOf, normaliseCategory, priceAt, pricingReady, settingsAt, type Funding } from './pricing';
 import { alert } from '../observability';
+import { debtHold, setDebtHoldFlag } from '../numbers/health';
 
 type Sql = DurableObjectStorage['sql'];
 
@@ -30,6 +31,8 @@ export const AUTH_HOLD_TTL_MS = 2 * DAY;
 export const PENDING_RATE_MAX_MS = 7 * DAY;
 export const PARENT_HOLD_TTL_MS = 60 * DAY;
 export const LOW_BALANCE_MINOR = 2000;
+/** WA-DEBT-1: debt past this many times the overdraft limit suspends sends (tag `wallet_debt`); a top-up back inside the limit lifts it. */
+export const DEBT_SUSPEND_FACTOR = 2;
 /** The wallet is "low" when it covers fewer than this many days of the last week's average Meta spend (never less than LOW_BALANCE_MINOR, the floor for a quiet wallet). */
 export const LOW_RUNWAY_DAYS = 3;
 const DRAIN_DELAY_MS = 1000;
@@ -118,7 +121,27 @@ export class Billing {
     addTask(this.sql, 'ledger_drain', a.now + DRAIN_DELAY_MS);
     this.touch();
     this.lowBalanceAlert(a.now, balance);
+    this.debtGuard(a.now, balance);
     return { ok: true, balance, amountMinor: amount };
+  }
+
+  /**
+   * WA-DEBT-1. Charge-at-delivery, Meta adjustments and chargebacks are external money facts that are always recorded in full, so debt can pass the
+   * overdraft limit. Past DEBT_SUSPEND_FACTOR x the limit the workspace's OWN debt flag (`billing.debt_hold`, independent of the operator's and the Store's flags) is set
+   * and sends stop at once; the `wallet_debt_sync` task pauses running campaigns (`wallet_empty`) and derives the D1 copy. Back inside the limit only THIS flag is
+   * cleared (an operator or Store suspension keeps the workspace suspended on its own). Synchronous: runs inside the posting transaction.
+   */
+  private debtGuard(now: number, balance: number): void {
+    const limit = this.creditLimit(now);
+    const held = debtHold(this.sql);
+    if (!held && balance < -DEBT_SUSPEND_FACTOR * limit) {
+      setDebtHoldFlag(this.sql, true);
+      addTask(this.sql, 'wallet_debt_sync', now);
+      alert('wallet_debt_suspended', { workspace: this.workspaceId, debtMinor: -balance, limitMinor: limit });
+    } else if (held && balance >= -limit) {
+      setDebtHoldFlag(this.sql, false);
+      addTask(this.sql, 'wallet_debt_sync', now);
+    }
   }
 
   /** Once per day while the available balance is under the threshold: a log alert the alert bridge turns into a notice. */

@@ -137,8 +137,8 @@ export async function releaseAbuseHold(env: Env, a: { workspaceId: string; actor
 }
 export async function abuseSuspended(env: Env, ws: string): Promise<boolean> {
   const w = await env.DB.prepare('SELECT suspended_at, suspended_reason FROM workspaces WHERE id = ?').bind(ws).first<{ suspended_at: number | null; suspended_reason: string | null }>();
-  // A Store hold (STORE-STANDING-1: the Store store is suspended or deleted) is not an abuse suspension either: it never holds an erasure.
-  return !!w && w.suspended_at !== null && w.suspended_reason !== 'offboarding' && w.suspended_reason !== 'store_suspended' && w.suspended_reason !== 'store_deleted';
+  // A Store hold (STORE-STANDING-1: the Store store is suspended or deleted) is not an abuse suspension either: it never holds an erasure; nor does a wallet debt hold (WA-DEBT-1, a money block). D1's reason is derived with the operator's reason first, so any other reason is an operator suspension.
+  return !!w && w.suspended_at !== null && w.suspended_reason !== 'offboarding' && w.suspended_reason !== 'store_suspended' && w.suspended_reason !== 'store_deleted' && w.suspended_reason !== 'wallet_debt';
 }
 
 export async function getOffboarding(env: Env, ws: string): Promise<OffboardingStatus | null> {
@@ -312,6 +312,14 @@ class Unfinished extends Error {}
 async function runStep(env: Env, ws: string, step: Step, pseudo: string, now: number): Promise<string | undefined> {
   switch (step) {
     case 'suspend': {
+      // WA-DEBT-1: the erasure of DATA is never blocked by a debt, but the DEBT survives it. A negative wallet is recorded ONCE in the append-only offboarding log (`debt_preserved`,
+      // the amount) next to the full ledger copy in D1 `ledger_mirror` (kept), with a P1 alert. It is never written off here: a write-off exists only for a positive balance the
+      // owner gives up (`write_off_accepted`, explicit approval), and nothing on the way out pays or refunds against a debt.
+      const debt = -Math.min(0, (await stub(env, ws).walletView(now)).balanceMinor);
+      if (debt > 0 && !(await env.DB.prepare("SELECT 1 FROM offboarding_log WHERE workspace_id = ? AND action = 'debt_preserved' LIMIT 1").bind(ws).first())) {
+        await env.DB.batch(logRows(env, ws, 'system', 'debt_preserved', now, null, `debt_minor=${debt}`));
+        alert('offboarding_debt_outstanding', { workspace: ws, debtMinor: debt });
+      }
       await env.DB.prepare("UPDATE workspaces SET suspended_at = coalesce(suspended_at, ?), suspended_reason = coalesce(suspended_reason, 'offboarding') WHERE id = ?").bind(now, ws).run();
       await stub(env, ws).setSuspended(true, 'offboarding', now);
       return;
