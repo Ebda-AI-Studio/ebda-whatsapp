@@ -1,7 +1,7 @@
 # credit_pack_repair_failed (P1)
 **Severity:** P1 look today
 ## What it means
-Fires in src/core/billing/credit-packs.ts (repairCreditOrders) during the daily pass when asking the provider about a pending credit order threw. Field: `error` (an error class name).
+Fires in src/core/billing/credit-packs.ts (repairCreditOrders) during the daily pass when asking the provider about a pending credit order threw, or when the refund-expiry repair (`repairRefundExpiries`, a recorded refund of a paid order whose expiry had not reached the workspace) failed. Field: `error` (an error class name).
 ## Impact
 A merchant may have paid for credits whose webhook never arrived and whose repair also failed, so the credits are not added yet.
 ## Check first

@@ -94,12 +94,17 @@ export async function creditPackPaid(env: Env, row: CreditOrderRow, transactionI
   return r.ok ? 'credited' : 'duplicate';
 }
 
+/** The refund's expiry reached the workspace (idempotent). Until then the daily repair job re-applies it. */
+const markRefundApplied = (env: Env, refundRef: string, now: number) =>
+  env.DB.prepare('UPDATE credit_order_refunds SET applied_at = ? WHERE refund_ref = ? AND applied_at IS NULL').bind(now, refundRef).run();
+
 /** Every refund recorded for the order is expired against the workspace (idempotent under each refund's ref). Returns what expired. */
 async function expireRecordedRefunds(env: Env, row: CreditOrderRow, now: number): Promise<number> {
   const refunds = await env.DB.prepare('SELECT refund_ref, amount_minor FROM credit_order_refunds WHERE order_id = ? ORDER BY at, refund_ref').bind(row.order_id).all<{ refund_ref: string; amount_minor: number }>();
   let expired = 0;
   for (const f of refunds.results) {
     const r = await stubOf(env, row.workspace_id).expireRefundedPack({ credits: row.credits, num: f.amount_minor, den: row.amount_minor, ref: `credit-pack-refund:${f.refund_ref}`, orderId: row.order_id }, now);
+    await markRefundApplied(env, f.refund_ref, now);
     expired += r.expired;
   }
   return expired;
@@ -120,6 +125,7 @@ export async function applyCreditWebhook(env: Env, row: CreditOrderRow, ev: Pars
       return 'refund_recorded';
     }
     const r = await stubOf(env, row.workspace_id).expireRefundedPack({ credits: row.credits, num: Math.max(0, ev.amountMinor), den: row.amount_minor, ref: `credit-pack-refund:${refundRef}`, orderId: row.order_id }, now);
+    await markRefundApplied(env, refundRef, now);
     alert('credit_pack_refunded', { workspace: row.workspace_id, orderId: row.order_id, packCredits: row.credits, expiredCredits: r.expired, spentCredits: r.spent });
     return 'refund_expired';
   }
@@ -143,8 +149,34 @@ export async function applyCreditWebhook(env: Env, row: CreditOrderRow, ev: Pars
 }
 
 /** Daily: ask the provider about credit orders still pending after REPAIR_AFTER_MS (a lost webhook); credit what was paid, close what failed or is a week old. */
-export async function repairCreditOrders(env: Env, provider: PaymentProvider | null = paymentProvider(env), now = Date.now(), opts: PassOpts = {}): Promise<{ checked: number; credited: number }> {
-  if (!topupsEnabled(env) || !provider) return { checked: 0, credited: 0 };
+/**
+ * Daily: a refund recorded for a PAID order whose expiry never reached the workspace (the step failed after the order was marked paid; the provider may never resend its webhook) is applied now.
+ * Idempotent: the expiry is keyed by the refund's own ref, so a refund already applied (or one with nothing left to expire) is skipped by `applied_at` and a re-run expires nothing twice.
+ * A refund of a pack still unpaid is left alone: crediting applies it.
+ */
+export async function repairRefundExpiries(env: Env, now = Date.now(), opts: PassOpts = {}): Promise<number> {
+  const size = opts.page ?? 200;
+  type R = { refund_ref: string; order_id: string; workspace_id: string; amount_minor: number; credits: number; order_amount: number };
+  let expired = 0;
+  await drainKeyset<R, string>({
+    name: 'repair_credit_refund_expiry', pageSize: size, ...(opts.maxBatches ? { maxBatches: opts.maxBatches } : {}),
+    page: async (after) => (await env.DB.prepare(
+      `SELECT f.refund_ref, f.order_id, f.workspace_id, f.amount_minor, o.credits, o.amount_minor AS order_amount FROM credit_order_refunds f JOIN credit_orders o ON o.order_id = f.order_id
+        WHERE f.applied_at IS NULL AND o.state = 'paid' ${after ? 'AND f.refund_ref > ?1' : ''} ORDER BY f.refund_ref LIMIT ${size}`,
+    ).bind(...(after ? [after] : [])).all<R>()).results,
+    cursorOf: (r) => r.refund_ref,
+    handle: async (r) => {
+      const out = await stubOf(env, r.workspace_id).expireRefundedPack({ credits: r.credits, num: r.amount_minor, den: r.order_amount, ref: `credit-pack-refund:${r.refund_ref}`, orderId: r.order_id }, now);
+      await markRefundApplied(env, r.refund_ref, now);
+      if (out.expired > 0) expired++;
+    },
+  });
+  return expired;
+}
+
+export async function repairCreditOrders(env: Env, provider: PaymentProvider | null = paymentProvider(env), now = Date.now(), opts: PassOpts = {}): Promise<{ checked: number; credited: number; refundsExpired: number }> {
+  const refundsExpired = await repairRefundExpiries(env, now, opts).catch((err) => { alert('credit_pack_repair_failed', { error: err instanceof Error ? err.name : 'error' }); return 0; });
+  if (!topupsEnabled(env) || !provider) return { checked: 0, credited: 0, refundsExpired };
   const size = opts.page ?? 200;
   let credited = 0;
   const { handled } = await drainKeyset<CreditOrderRow, [number, string]>({
@@ -169,5 +201,5 @@ export async function repairCreditOrders(env: Env, provider: PaymentProvider | n
       }
     },
   });
-  return { checked: handled, credited };
+  return { checked: handled, credited, refundsExpired };
 }
