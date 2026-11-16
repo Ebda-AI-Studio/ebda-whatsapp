@@ -99,7 +99,7 @@ export type VoiceResult =
   | { kind: 'text'; text: string; audioMs: number }
   | { kind: 'declined'; why: 'too_long' | 'too_big' | 'daily_cap' }
   /** `audioMs` is set when the speech model was (or may have been) called, so the caller bills the audio on this path too. */
-  | { kind: 'failed'; audioMs?: number }
+  | { kind: 'failed'; audioMs?: number; /** The call threw or timed out and its slot was given back: the merchant is not charged a credit for it (VOICE-SLOT-1). */ threw?: true }
   | { kind: 'gone'; audioMs?: number };
 
 const dailyCap = (env: Pick<Env, 'VOICE_DAILY_CAP'>): number => {
@@ -169,7 +169,7 @@ export async function transcribeVoiceNote(host: LinkHost, input: BotInput, langu
     // Ruling VOICE-SLOT-1 - a call that threw or timed out gives its slot back; an empty transcript (silence, noise) keeps it, because the model ran. Abuse by
     // noise is bounded per customer instead: voice_failed counts as one of the customer's AI turns per day. Cost if wrong: a flaky model call that was billed anyway is not counted against the daily cap.
     refundDailySlot(host, input.messageId);
-    return fail({ kind: 'failed', audioMs }); // the model may have been billed: the caller records the audio cost
+    return fail({ kind: 'failed', audioMs, threw: true }); // the model may have been billed: the caller records the audio cost, but no credit is charged (slot given back)
   }
   if (!text) return fail({ kind: 'failed', audioMs }); // silence or noise: nothing to answer, but the model ran and is billed
   host.sql.exec('DELETE FROM store_state WHERE key = ?', slotKey(input.messageId));

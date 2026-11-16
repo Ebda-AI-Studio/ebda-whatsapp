@@ -110,6 +110,19 @@ describe('store.plan_changed -> store-included package', () => {
     expect(await sub(ws)).toMatchObject({ status: 'active', version: 1 });
   });
 
+  it('C12 / wa#117: three plan_changed with ascending effectiveAt inside ONE Store period (same periodEnd) give ONE grant of the store-included credits', async () => {
+    const ws = W(40);
+    await storeWorkspace(ws);
+    const t = Date.now();
+    const end = iso(t + 31 * DAY);
+    await deliver([plan(ws, true, t, { periodEnd: end })]);
+    await deliver([plan(ws, true, t + DAY, { periodEnd: end, status: 'past_due', pastDueSince: iso(t + DAY) })]); // a failed charge...
+    await deliver([plan(ws, true, t + 2 * DAY, { periodEnd: end, status: 'active' })]); // ...then a paid retry, same Store period
+    const grants = await rows<{ amount: number }>(ws, "SELECT amount FROM credit_ledger WHERE kind = 'grant'");
+    expect(grants).toEqual([{ amount: 100 }]);
+    expect(await rows(ws, "SELECT count(*) AS n FROM credit_ledger WHERE kind = 'expire'")).toEqual([{ n: 0 }]);
+  });
+
   it('a replayed event id writes once', async () => {
     const ws = W(6);
     await storeWorkspace(ws);
