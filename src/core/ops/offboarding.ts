@@ -311,6 +311,14 @@ class Unfinished extends Error {}
 async function runStep(env: Env, ws: string, step: Step, pseudo: string, now: number): Promise<string | undefined> {
   switch (step) {
     case 'suspend': {
+      // WA-DEBT-1: the erasure of DATA is never blocked by a debt, but the DEBT survives it. A negative wallet is recorded ONCE in the append-only offboarding log (`debt_preserved`,
+      // the amount) next to the full ledger copy in D1 `ledger_mirror` (kept), with a P1 alert. It is never written off here: a write-off exists only for a positive balance the
+      // owner gives up (`write_off_accepted`, explicit approval), and nothing on the way out pays or refunds against a debt.
+      const debt = -Math.min(0, (await stub(env, ws).walletView(now)).balanceMinor);
+      if (debt > 0 && !(await env.DB.prepare("SELECT 1 FROM offboarding_log WHERE workspace_id = ? AND action = 'debt_preserved' LIMIT 1").bind(ws).first())) {
+        await env.DB.batch(logRows(env, ws, 'system', 'debt_preserved', now, null, `debt_minor=${debt}`));
+        alert('offboarding_debt_outstanding', { workspace: ws, debtMinor: debt });
+      }
       await env.DB.prepare("UPDATE workspaces SET suspended_at = coalesce(suspended_at, ?), suspended_reason = coalesce(suspended_reason, 'offboarding') WHERE id = ?").bind(now, ws).run();
       await stub(env, ws).setSuspended(true, 'offboarding', now);
       return;

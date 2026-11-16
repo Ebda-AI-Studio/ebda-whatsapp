@@ -55,7 +55,7 @@ export async function unsuspendWorkspace(env: Env, a: { actor: string; workspace
   await env.DB.batch(audit(env, { ...a, action: 'unsuspend', now }));
   await stub(env, a.workspaceId).setSuspended(false, a.reason, now);
   // The operator lifts only the operator flag: a Store hold or a wallet debt hold keeps the workspace suspended (in the workspace and in D1) until it clears itself.
-  await syncSuspendedMirror(env.DB, a.workspaceId, await stub(env, a.workspaceId).suspensionState(), now);
+  await syncSuspendedMirror(env.DB, a.workspaceId, await stub(env, a.workspaceId).suspensionState(), now, { operatorLift: true }); // the operator's explicit lift: replaces the operator's reason
   note('unsuspend', a.workspaceId, a.actor);
   return { ok: true, value: {} };
 }

@@ -96,7 +96,7 @@ const P1_ALERTS = new Set([
   'shared_sweep_failed', 'shared_template_refresh_failed', 'shared_trueup_not_published', 'fx_fetch_failed', 'fx_rate_rejected', 'fx_large_move_accepted', 'fx_rate_stale', 'pricing_pull_failed', 'pricing_copy_missing', 'queued_period_roll_failed',
   'store_plan_fallback_failed', 'r2_deletes_still_owed', 'scheduled_task_invalid', 'otp_failed', 'import_start_failed', 'import_workflow_failed', 'refund_id_conflict', 'refund_held',
   'refund_held_debited', 'refund_unmatched_no_credit', 'refund_excess_for_review', 'refund_reversal_blocked', 'package_refund_contention', 'package_refund_unmatched', 'package_chargeback',
-  'funding_unknown', 'rate_unavailable', 'billing_unpriced_model', 'rate_missing_no_estimate', 'bot_turn_abandoned', 'media_fetch_abandoned', 'agent_model_failed', 'voice_transcribe_failed', 'wallet_wait_expired', 'wallet_debt_suspended',
+  'funding_unknown', 'rate_unavailable', 'billing_unpriced_model', 'rate_missing_no_estimate', 'bot_turn_abandoned', 'media_fetch_abandoned', 'agent_model_failed', 'voice_transcribe_failed', 'wallet_wait_expired', 'wallet_debt_suspended', 'offboarding_debt_outstanding',
   'topup_webhook_failed', 'package_webhook_failed', 'cod_outcome_push_failed', 'inquiry_multiple_success', 'topup_unknown_order', 'topup_refunded_by_provider', 'signup_not_configured',
   'business_id_unverified', 'refund_refused', 'refund_id_conflict',
   // AI credit packs (self-service A9): money in, so the same classes as the top-up alerts.

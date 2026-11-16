@@ -128,4 +128,31 @@ describe('WA-DEBT-1 wallet debt past twice the overdraft limit', () => {
     await workspace(ws).runDueTasks();
     expect((await rows<{ status: string }>(ws, 'SELECT status FROM campaigns WHERE id = ?', c.id))[0]!.status).toBe('paused');
   });
+
+  // Security review: the mirror may only clear/overwrite reasons it OWNS (store_*, wallet_debt).
+  it('an operator suspension that exists in D1 only (its workspace half missing) is never lifted or replaced by paying the debt', async () => {
+    const ws = W(1307);
+    await debtor(ws);
+    await env.DB.prepare("UPDATE workspaces SET suspended_at = 1, suspended_reason = 'abuse report' WHERE id = ?").bind(ws).run(); // kill-switch `partial`: D1 written, workspace flag not
+    await workspace(ws).postWallet({ kind: 'meta_adjust', netMinor: -150, ref: 'adj:debt-8', actor: 'meta', note: 'big' });
+    await workspace(ws).runDueTasks();
+    expect(await d1(ws)).toEqual({ suspended_at: 1, suspended_reason: 'abuse report' }); // the debt tag does not overwrite it
+    await fund(ws, 1000);
+    await workspace(ws).runDueTasks();
+    expect(await workspace(ws).suspended()).toBe(false); // the workspace's own debt flag is gone...
+    expect(await d1(ws)).toEqual({ suspended_at: 1, suspended_reason: 'abuse report' }); // ...and D1 still holds the operator's suspension
+  });
+
+  it("offboarding's D1-only 'offboarding' reason is unchanged by a Store reactivation or a debt payment", async () => {
+    const ws = W(1308);
+    await debtor(ws);
+    await env.DB.prepare("UPDATE workspaces SET suspended_at = 1, suspended_reason = 'offboarding' WHERE id = ?").bind(ws).run();
+    await deliver([storeEvent(ws, 'store.suspended', { reason: 'unpaid', at: iso(Date.now()) })]);
+    await deliver([storeEvent(ws, 'store.reactivated', { at: iso(Date.now() + 1000) })]);
+    expect(await d1(ws)).toEqual({ suspended_at: 1, suspended_reason: 'offboarding' });
+    await workspace(ws).postWallet({ kind: 'meta_adjust', netMinor: -150, ref: 'adj:debt-9', actor: 'meta', note: 'big' });
+    await fund(ws, 1000);
+    await workspace(ws).runDueTasks();
+    expect(await d1(ws)).toEqual({ suspended_at: 1, suspended_reason: 'offboarding' });
+  });
 });
