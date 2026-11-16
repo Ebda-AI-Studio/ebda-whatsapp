@@ -3,6 +3,7 @@ import { parseStoreEvent } from './api/store-events';
 import { recordWorkspaceOwner } from './campaigns/new-cap';
 import { applyStorePlan } from './billing/store-plan';
 import { errClass, alert } from './observability';
+import { syncSuspendedMirror } from './ops/suspension-mirror';
 import { senderNumberFor } from './shared/shared-number';
 
 const MAX_RETRY_DELAY_S = 300;
@@ -10,19 +11,12 @@ const MAX_RETRY_DELAY_S = 300;
 const STANDING: ReadonlySet<string> = new Set(['store.suspended', 'store.reactivated', 'store.deleted']);
 
 /**
- * Writes the Store hold into D1 next to the operator's suspension, reusing `suspended_at` with a tagged `suspended_reason` (as offboarding does):
- * a hold never overwrites another reason, and a release clears only a `store_*` reason. When the operator suspension is still on in the
- * workspace (its own flag), the release leaves D1 suspended with reason `operator`.
+ * The Worker's copy of the hold (D1 `workspaces.suspended_*`), DERIVED from the workspace's flags by the one shared helper (`syncSuspendedMirror`): a Store release clears
+ * only the Store tag, and the operator's suspension or a wallet debt hold that is still on keeps D1 suspended with its own reason. `reason` is the hold the caller read;
+ * the helper reads the full state itself.
  */
-export async function mirrorStoreHold(env: Env, workspaceId: string, reason: 'store_suspended' | 'store_deleted' | null, now: number): Promise<void> {
-  if (reason) {
-    await env.DB.prepare("UPDATE workspaces SET suspended_at = coalesce(suspended_at, ?), suspended_reason = CASE WHEN suspended_reason IS NULL OR suspended_reason IN ('store_suspended', 'store_deleted') THEN ? ELSE suspended_reason END WHERE id = ?").bind(now, reason, workspaceId).run();
-    return;
-  }
-  await env.DB.prepare("UPDATE workspaces SET suspended_at = NULL, suspended_reason = NULL WHERE id = ? AND suspended_reason IN ('store_suspended', 'store_deleted')").bind(workspaceId).run();
-  if (await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId)).suspended()) {
-    await env.DB.prepare("UPDATE workspaces SET suspended_at = coalesce(suspended_at, ?), suspended_reason = coalesce(suspended_reason, 'operator') WHERE id = ?").bind(now, workspaceId).run();
-  }
+export async function mirrorStoreHold(env: Env, workspaceId: string, _reason: 'store_suspended' | 'store_deleted' | null, now: number): Promise<void> {
+  await syncSuspendedMirror(env.DB, workspaceId, await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId)).suspensionState(), now);
 }
 const retryDelay = (attempts: number) => Math.min(MAX_RETRY_DELAY_S, 5 * 2 ** Math.max(0, attempts - 1));
 

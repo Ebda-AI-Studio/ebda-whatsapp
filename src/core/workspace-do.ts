@@ -18,7 +18,8 @@ import { exportContact, mergeContacts, renameContact } from './contact-data';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptOutMessage, matchOptIn } from './consent';
-import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, storeHold, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, debtHold, storeHold, suspensionState, type SuspensionState, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { syncSuspendedMirror } from './ops/suspension-mirror';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
 import { writeSessionState } from './identity/session';
 import { DAILY_KINDS, addTask, dailyHour, retryDelayMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
@@ -761,13 +762,13 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** running | scheduled -> paused for one reason, on one number (or every number when null). The merchant resumes them; nothing here ever does. */
-  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused' | 'store_suspended', now = Date.now()): Promise<number> {
+  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused' | 'store_suspended' | 'wallet_empty', now = Date.now(), park = false): Promise<number> {
     const ids = this.sql
       .exec<{ id: string }>(`SELECT id FROM campaigns WHERE status IN ('running', 'scheduled') ${phoneNumberId === null ? '' : 'AND phone_number_id = ?'}`, ...(phoneNumberId === null ? [] : [phoneNumberId]))
       .toArray();
     let n = 0;
     for (const { id } of ids) {
-      const r = await pauseCampaign(this.host(), id, reason, now);
+      const r = await pauseCampaign(this.host(), id, reason, now, park);
       if (r.ok) { n++; await endInstance(this.host(), id, this.campaignAttempt(id)); }
     }
     return n;
@@ -777,6 +778,11 @@ export class WorkspaceDO extends DurableObject<Env> {
   async setSuspended(suspended: boolean, reason: string, now = Date.now()): Promise<{ paused: number }> {
     setSuspendedFlag(this.sql, suspended, reason);
     return { paused: suspended ? await this.pauseCampaignsOn(null, 'operator_paused', now) : 0 };
+  }
+
+  /** Every reason this workspace may not spend (operator, Store, wallet debt): what D1's `suspended_*` is derived from (`syncSuspendedMirror`). */
+  async suspensionState(): Promise<SuspensionState> {
+    return suspensionState(this.sql);
   }
 
   async suspended(): Promise<boolean> {
@@ -2499,6 +2505,11 @@ export class WorkspaceDO extends DurableObject<Env> {
         return sweepCampaigns(this.host(), now);
       case 'wallet_sweep':
         return this.ctx.storage.transactionSync(() => this.billing.sweep(now)) ?? undefined;
+      case 'wallet_debt_sync':
+        // WA-DEBT-1: a debt hold pauses running / scheduled campaigns (reason wallet_empty, queued pages parked, nothing resumes them) and D1 is derived from the flags.
+        if (debtHold(this.sql)) await this.pauseCampaignsOn(null, 'wallet_empty', now, true);
+        await syncSuspendedMirror(this.env.DB, this.workspaceId, suspensionState(this.sql), now);
+        return undefined;
       case 'ledger_drain': {
         const r = await drainOutbox(this.env, this.sql, this.workspaceId, now);
         return r.remaining > 0 ? now + 5_000 : undefined;
