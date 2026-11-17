@@ -19,6 +19,7 @@ import { isE164 } from '../phone';
 import type { SendJob } from '../send-queue';
 import { MAX_RETAILER_ID, type Address, type Buyer, type CatalogRow, type ChatPaymentMethod, type OrderLine, type StoreBridge, type StoreProfile } from '../store-bridge';
 import { bridgeFor, storeLink } from '../store-link';
+import { dropProfile, loadProfile } from '../ai/context';
 import type { LinkHost } from '../store-link/host';
 import { upsertOrder } from '../store-link/order-store';
 import { recordOrderAfterErase } from '../store-link/orders';
@@ -543,6 +544,15 @@ async function askAddress(t: Turn): Promise<void> {
     t.session.state = 'awaiting_address';
     return;
   }
+  // A returning customer with a default address: one question, two buttons ("same address as last time?"); anything else (or no profile) shows the list.
+  const { sameAddress, sameAddressYes, sameAddressNo } = t.copy.t;
+  const def = sameAddress && sameAddressYes && sameAddressNo ? (await loadProfile(t.host, t.bridge, t.input.from, t.now))?.defaultAddress : null;
+  const same = def ? saved.find((a) => a.id === def.id) : undefined;
+  if (same && sameAddress && sameAddressYes && sameAddressNo) {
+    t.out.push({ kind: 'buttons', body: sameAddress(`${same.street}, ${same.area}`, t.session.locale), buttons: [{ id: `addr:${same.id}`, title: loc(t, sameAddressYes) }, { id: 'addr:new', title: loc(t, sameAddressNo) }] });
+    t.session.state = 'choosing_address';
+    return;
+  }
   const rows = saved.map((a) => ({ id: `addr:${a.id}`, title: a.label ?? `${a.area}`, description: `${a.street}, ${a.area}` }));
   rows.push({ id: 'addr:new', title: loc(t, t.copy.t.newAddressRow), description: '' });
   t.out.push({ kind: 'list', body: loc(t, t.copy.t.chooseAddress), button: loc(t, t.copy.t.addressesButton), rows: rows.map((r) => (r.description ? r : { id: r.id, title: r.title })) });
@@ -566,7 +576,10 @@ async function placeWithText(t: Turn, text: string): Promise<void> {
   if (buyer) {
     alive(t);
     const saved = await t.bridge.saveCustomerAddress(t.ws, buyer.buyerKey, { area, street });
-    if (saved.ok) return placeOrder(t, { addressId: saved.value.address.id });
+    if (saved.ok) {
+      dropProfile(t.host, t.input.from); // the cached customer profile (default address) is stale now
+      return placeOrder(t, { addressId: saved.value.address.id });
+    }
   }
   return placeOrder(t, { address: { area, street } });
 }
@@ -609,6 +622,7 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
   }
   const total = o.totalMinor ?? subtotal(d.cart);
   const currency = o.currency ?? d.cart[0]!.currency;
+  dropProfile(t.host, t.input.from); // a new order changes the customer's recent orders and default address
   upsertOrder(t.host, { orderId: o.orderId, orderNumber: o.orderNumber, waId: t.input.from, buyerKey: buyer.buyerKey, paymentMethod: method, status: 'created', totalMinor: total, currency, locale: t.session.locale }, t.now);
   t.steps.add('order');
   const L = t.session.locale;

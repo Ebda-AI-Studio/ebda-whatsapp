@@ -201,9 +201,43 @@ export const meResponse = z.object({
   userId: z.string(),
   storeId: z.string(),
   role: z.enum(['owner', 'staff', 'super_admin']),
-  capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional() }),
+  capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional(), assistant: z.boolean().optional() }),
 });
 export type MeResponse = z.infer<typeof meResponse>;
+
+/** The assistant (Smart Layer). A reply is a list of segments the UI renders as text, links and nothing else: never HTML, never an image. */
+export const assistantSegment = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('text'), text: z.string() }),
+  z.object({ kind: z.literal('cap'), capabilityId: z.string(), label: z.string(), appPath: z.string() }),
+  z.object({ kind: z.literal('link'), href: z.string(), text: z.string() }),
+  z.object({ kind: z.literal('cite'), articleId: z.string(), title: z.string(), url: z.string() }),
+]);
+const bilingual = z.object({ ar: z.string(), en: z.string() });
+/** A change the assistant prepared: what it would do, before and after. Nothing has happened yet; the merchant presses Apply (or, for a confirm-class change, the confirm button). */
+export const assistantPreviewCard = z.object({
+  previewId: z.string(),
+  summary: bilingual,
+  rows: z.array(z.object({ label: bilingual, before: z.unknown().optional(), after: z.unknown().optional(), source: z.enum(['merchant', 'untrusted']).optional() })),
+  policy: z.enum(['preview', 'confirm']),
+  reasons: z.array(z.string()),
+  undo: z.enum(['none', 'reversible', 'compensating', 'irreversible']),
+  costCredits: z.number().optional(),
+  approvalId: z.string().optional(),
+});
+export type AssistantPreviewCard = z.infer<typeof assistantPreviewCard>;
+/** The one-time token of a confirm card, for the merchant's browser to send back with its own button press. It exists only in this response: never stored, never in a prompt. */
+export const assistantApproval = z.object({ approvalId: z.string(), previewId: z.string(), token: z.string() });
+export type AssistantApproval = z.infer<typeof assistantApproval>;
+export const assistantTurnResponse = z.object({ status: z.enum(['answered', 'refused', 'not_covered', 'handoff', 'off', 'limited']), segments: z.array(assistantSegment), previews: z.array(assistantPreviewCard), approvals: z.array(assistantApproval).optional(), turnId: z.string() });
+/** The engine's answer to Apply or Undo: a status word, plus the undo handle after an apply and a fresh card when what it read had changed. */
+export const assistantActResponse = z.object({ status: z.string(), appliedId: z.string().optional(), undoUntil: z.number().optional(), card: assistantPreviewCard.optional(), approvals: z.array(assistantApproval).optional() });
+export const assistantConfirmRequest = z.object({ token: z.string().min(20).max(100) }).strict();
+export const assistantRejectRequest = z.object({ reason: z.string().trim().max(200).optional() }).strict();
+export type AssistantActResponse = z.infer<typeof assistantActResponse>;
+export type AssistantSegment = z.infer<typeof assistantSegment>;
+export type AssistantTurnResponse = z.infer<typeof assistantTurnResponse>;
+export const assistantConversationResponse = z.object({ items: z.array(z.object({ id: z.string(), role: z.enum(['merchant', 'assistant']), text: z.string(), at: z.number() })) });
+export type AssistantConversationResponse = z.infer<typeof assistantConversationResponse>;
 
 /** Store-link settings (owner only to change). */
 export const storeLinkSettingsResponse = z.object({
@@ -268,6 +302,10 @@ export const agentSettingsFields = z.object({
   language: z.enum(['ar', 'en', 'auto']),
   handoffMinutes: z.number().int().min(5).max(1440),
   faqText: z.string().max(20_000),
+  /** How the agent sounds (Ruling CHAT-AGENT-2): three presets in Egyptian Arabic and English. The merchant's own persona text still comes first. */
+  tone: z.enum(['warm', 'professional', 'playful']),
+  /** Where the owner is told a customer needs a person (E.164, WhatsApp), or null = no WhatsApp alert (the inbox badge and the digest still show it). */
+  notifyPhone: z.string().regex(/^\+[1-9]\d{7,14}$/).nullable(),
   provider: z.enum(['workers-ai', 'openai-compatible']),
   /** Only for `openai-compatible`; the platform chooses the Workers AI model. */
   model: z.string().min(1).max(100).regex(/^[\w./:@+-]+$/).nullable(),
@@ -440,7 +478,7 @@ export const campaignParam = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('link_code') }),
 ]);
 export const campaignStatus = z.enum(['draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled']);
-export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable', 'quality_flagged', 'operator_paused']);
+export const campaignPauseReason = z.enum(['manual', 'wallet_empty', 'template_unavailable', 'internal_error', 'plan_blocked', 'funding_unknown', 'rate_unavailable', 'quality_flagged', 'operator_paused', 'store_suspended']);
 /** W2-OPS: every kill-switch action carries a reason (kept in the append-only audit). */
 export const operatorKillSwitch = z.object({ reason: z.string().trim().min(5).max(300) });
 /** W2-OFFBOARD: an owner asks to delete the workspace (explicit confirmation; a wallet balance has to be given up explicitly). Strict: an owner cannot skip the cooling-off. */
@@ -613,6 +651,28 @@ export const packageDto = z.object({
   maxMembers: z.number().int().min(1), features: z.array(z.enum(PACKAGE_FEATURE_KEYS)), periodMonths: z.number().int().positive(),
 });
 export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired', 'refunded']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
+// ---- Merchant money surfaces (self-service A9 Chat half, A21, A22). Every money action is two calls: a preview that issues a single-use confirmation, then the action with it. ----
+export const confirmToken = z.object({ confirmId: z.string().uuid(), token: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
+export const confirmIssuedDto = z.object({ confirmId: z.string().uuid(), token: z.string(), expiresAt: z.number().int() });
+/** `platform_line` parses on purpose: the route answers it with a plain 403, so a merchant is told the platform line is the operator's, not "invalid request". */
+export const numberFundingChoice = z.object({ funding: z.enum(['merchant_card', 'platform_line']) }).strict();
+export const numberFundingConfirm = numberFundingChoice.extend(confirmToken.shape).strict();
+export const numberFundingPreviewDto = z.object({ phoneNumberId: z.string(), current: z.enum(['merchant_card', 'platform_line', 'unknown']), funding: z.literal('merchant_card'), confirm: confirmIssuedDto });
+export const yearlyRefundQuoteDto = z.object({
+  orderId: z.string(), packageId: z.string(), periodMonths: z.number().int(), monthlyMinor: z.number().int(), unusedMonths: z.number().int(), grossMinor: z.number().int(),
+  debtMinor: z.number().int(), debtSettledMinor: z.number().int(), refundMinor: z.number().int(),
+});
+export const yearlyRefundRequestDto = z.object({ id: z.string(), orderId: z.string(), state: z.enum(['pending', 'executed']), unusedMonths: z.number().int(), debtSettledMinor: z.number().int(), refundMinor: z.number().int(), createdAt: z.number().int() });
+export const yearlyRefundViewDto = z.object({
+  quote: yearlyRefundQuoteDto.nullable(), reason: z.enum(['no_running_package', 'not_yearly', 'not_paid', 'queued_periods', 'order_queued']).nullable(), request: yearlyRefundRequestDto.nullable(),
+});
+export const yearlyRefundPreviewDto = z.object({ quote: yearlyRefundQuoteDto, confirm: confirmIssuedDto });
+export const creditPackDto = z.object({ id: z.string(), credits: z.number().int().positive(), priceMinor: z.number().int().positive() });
+export const creditPacksDto = z.object({ items: z.array(creditPackDto), enabled: z.boolean() });
+export const creditPackPick = z.object({ packId: z.string().min(1).max(32) }).strict();
+export const creditPackBuy = creditPackPick.extend(confirmToken.shape).strict();
+export const creditPackPreviewDto = z.object({ pack: creditPackDto, confirm: confirmIssuedDto });
+export const creditOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired']), credits: z.number().int(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
 // ---- InstaPay billing (INSTAPAY_BILLING_ENABLED). Additive. The amount is the server's: a package's price, or a top-up within the card top-up bounds. ----
 export const instapayState = z.enum(['awaiting_proof', 'under_review', 'confirmed', 'rejected', 'expired']);
 export const instapayCreate = z.discriminatedUnion('kind', [

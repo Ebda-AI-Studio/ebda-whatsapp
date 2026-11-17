@@ -33,6 +33,8 @@ import { conversationsRoutes } from './routes/conversations';
 import { mediaRoutes } from './routes/media';
 import { realtimeRoutes } from './routes/ws';
 import { templatesRoutes } from './routes/templates';
+import { assistantRoutes } from './routes/assistant';
+import { assistantEnabled } from './core/smart-layer/controls';
 import { registerStarterSet } from './core/starter-templates';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
@@ -59,6 +61,7 @@ import { runInstapayDigest } from './core/billing/instapay-notify';
 import { expireInstapay, overdueInstapay, purgeInstapayProofs, repairInstapay } from './core/billing/instapay';
 import { paymentProvider } from './core/billing/payments';
 import { handleProviderWebhook, reconfirmUnconfirmed, repairTopups } from './core/billing/topups';
+import { repairCreditOrders } from './core/billing/credit-packs';
 import { packageRoutes } from './routes/packages';
 import { walletRoutes } from './routes/wallet';
 import { instapayProofRoutes, instapayRoutes } from './routes/instapay';
@@ -165,9 +168,9 @@ api.use('/operator/*', requireSuperAdmin(getVerifier));
 api.use('*', auditWrites()); // every state-changing call: who, what, which ids (src/core/audit.ts)
 api.use('*', apiContentTypes()); // after auth: 401/403 first, then 415 for a body type the route class does not take
 api.route('/operator', operatorRoutes);
-api.get('/stores/:storeId/me', (c) => {
+api.get('/stores/:storeId/me', async (c) => {
   const p = c.get('principal');
-  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env) } });
+  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env), assistant: await assistantEnabled(c.env, c.req.param('storeId')!) } });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   // The member's own right to erase (STORE-ROUTES-OWNER-1): the owner, or a super admin who is a MEMBER of the store (requireStoreAccess already refused a non-member's write; that operator uses the operator route, which needs a stated reason).
@@ -200,6 +203,7 @@ api.route('/', packageRoutes);
 api.route('/', sharedNumberRoutes);
 api.route('/', offboardingRoutes);
 api.route('/', membersRoutes);
+api.route('/', assistantRoutes(api));
 app.route('/api/v1', api);
 app.route('/internal', internalInstapayRoutes);
 /** The /api/v1 routes, exported so a test can walk them (every store route needs a scope decision in core/identity/scopes.ts). */
@@ -368,6 +372,7 @@ export async function dailyBilling(env: Env): Promise<void> {
   await checkFxStale(env).catch((err) => alert('fx_fetch_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileEntitlements(env).catch((err) => alert('entitlement_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairTopups(env).catch((err) => alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await repairCreditOrders(env).catch((err) => alert('credit_pack_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconfirmUnconfirmed(env).catch((err) => alert('webhook_reconfirm_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileCardRefunds(env, paymentProvider(env)).catch((err) => alert('card_refund_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await sweepAbandonedRefunds(env).catch((err) => alert('refund_abandon_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));

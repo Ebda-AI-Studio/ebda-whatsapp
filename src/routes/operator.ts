@@ -15,6 +15,7 @@ import {
 import { backfillFx, getFxBufferPin, setFxBufferPin } from '../core/billing/fx-daily';
 import { STORE_INCLUDED, setSubscription } from '../core/billing/subscriptions';
 import { executeYearlyRefund, packageRefundQuote } from '../core/billing/package-orders';
+import { listPendingRequests, markRequestExecuted } from '../core/billing/yearly-refund-request';
 import { currentSharedNumber, registerPlatformNumber, sharedEnabled } from '../core/shared/shared-number';
 import { listAllRequests, markRequestsDone } from '../core/shared/shared-template-requests';
 import { listSharedTemplates, submitSharedTemplate, syncSharedTemplates, type SharedTemplateFailure } from '../core/shared/shared-templates';
@@ -22,6 +23,7 @@ import { submitTemplateRequest } from './templates';
 import { abandonRefundRequest, linkDashboardRefund, markCardRefundFailed, matchHeldRefund } from '../core/billing/card-refunds';
 import { backfillDedupeHistory, listAutoConfirmations, revertAutoConfirmed, setAutoMode, setWorkspaceAuto, getAutoMode, instapayAutoReady } from '../core/billing/instapay-auto';
 import { confirmInstapay, listForOperator, rejectInstapay, releaseInstapay, signProofLink, type DecideResult } from '../core/billing/instapay';
+import { isReservedSuspendReason } from '../core/ops/suspension-mirror';
 import { evictFromSharedNumber, opsStatus, pauseAllCampaigns, readmitToSharedNumber, restoreIntegrations, revokeIntegrations, suspendWorkspace, unsuspendWorkspace, type Result } from '../core/ops/kill-switch';
 import { rotateTokenKey, rotationStatus } from '../core/enc-rotation';
 import { eraseContactFlow } from '../core/contact-erase';
@@ -32,6 +34,7 @@ import { PLATFORM_WORKSPACE, reasonSql } from '../core/audit-reason';
 import { subjectHash } from '../core/erasure';
 import { waIdParam } from './contacts';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
+import { FLAG, readPlatformFlags, setPlatformFlag } from '../core/smart-layer/controls';
 
 type E = { Bindings: Env; Variables: AuthVars };
 /** /api/v1/operator/*, mounted behind requireSuperAdmin. Errors are {error, message?}. */
@@ -258,10 +261,14 @@ operatorRoutes.post('/package-orders/:orderId/yearly-refund', async (c) => {
   if (!body.success) return bad(c, 'reason_required');
   const r = await executeYearlyRefund(c.env, c.req.param('orderId'), { actor: actor(c), reason: body.data.reason });
   if (!r.ok) return r.reason === 'not_found' ? c.json({ error: 'not_found' }, 404) : c.json({ error: 'invalid_request', message: r.reason, ...('amountMinor' in r ? { amountMinor: r.amountMinor } : {}) }, 409);
+  await markRequestExecuted(c.env, r.orderId, actor(c)); // a merchant's open request for this period is done (idempotent)
   console.log(JSON.stringify({ audit: 'operator_yearly_refund', orderId: r.orderId, shortenedMonths: r.shortenedMonths, debtSettledMinor: r.debtSettledMinor, cashRefundMinor: r.cashRefundMinor, actor: actor(c) }));
   const { ok: _ok, ...out } = r;
   return c.json(out);
 });
+
+// Merchants' yearly-refund requests waiting for a person (self-service A22): the console lists them, then runs the yearly refund above for the order.
+operatorRoutes.get('/yearly-refund-requests', async (c) => c.json({ items: await listPendingRequests(c.env) }));
 
 operatorRoutes.get('/change-log', async (c) => {
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? 50) || 50));
@@ -332,10 +339,12 @@ operatorRoutes.post('/instapay/:id/reject', async (c) => {
 });
 
 // ---- W2-OPS: the kill switch. Every action needs a reason (5+ characters), is audited append-only with the actor, and fails closed on a revoked session (the guard above).
-const killSwitch = (run: (env: Env, a: { actor: string; workspaceId: string; reason: string }) => Promise<Result<object>>) =>
+const killSwitch = (run: (env: Env, a: { actor: string; workspaceId: string; reason: string }) => Promise<Result<object>>, opts: { rejectReserved?: boolean } = {}) =>
   async (c: import('hono').Context<E>) => {
     const b = operatorKillSwitch.safeParse(await c.req.json().catch(() => null));
     if (!b.success) return bad(c, 'reason_required');
+    // A suspension reason is free text, but a value that names a derived hold would be treated as one by the mirror (cleared or overwritten): refused here, nothing written.
+    if (opts.rejectReserved && isReservedSuspendReason(b.data.reason)) return bad(c, 'reserved_reason');
     const r = await run(c.env, { actor: actor(c), workspaceId: c.req.param('workspaceId')!, reason: b.data.reason });
     if (r.ok) return c.json(r.value);
     // The D1 half of a suspension is already active; only the workspace's own copy is pending. Saying so, and that the same call finishes it.
@@ -431,11 +440,37 @@ operatorRoutes.get('/audit-log', async (c) => {
   return c.json({ items: await listAudit(c.env, q.data) });
 });
 
+// ---- Assistant rollout (Smart Layer): the platform switches live in D1 so they change without a deploy; a workspace's mode is its own Durable Object flag.
+const assistantMode = z.enum(['off', 'answer-only', 'suggest', 'act']);
+const assistantFlags = z.object({
+  global: z.object({ kill: z.boolean().optional(), mode: assistantMode.optional(), shadow: z.boolean().optional() }).strict().optional(),
+  product: z.object({ kill: z.boolean() }).strict().optional(),
+  killedTools: z.array(z.string().min(1).max(64)).max(100).optional(),
+}).strict();
+operatorRoutes.get('/assistant', async (c) => c.json(await readPlatformFlags(c.env)));
+operatorRoutes.put('/assistant/flags', async (c) => {
+  const b = assistantFlags.safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, b.error.issues[0]?.message);
+  if (b.data.global) await setPlatformFlag(c.env, FLAG.global, b.data.global, actor(c));
+  if (b.data.product) await setPlatformFlag(c.env, FLAG.product, b.data.product, actor(c));
+  if (b.data.killedTools) await setPlatformFlag(c.env, FLAG.tools, b.data.killedTools, actor(c));
+  return c.json(await readPlatformFlags(c.env));
+});
+operatorRoutes.put('/workspaces/:workspaceId/assistant', async (c) => {
+  const b = z.object({ mode: assistantMode }).strict().safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, b.error.issues[0]?.message);
+  const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(c.req.param('workspaceId')).first();
+  if (!known) return c.json({ error: 'not_found' }, 404);
+  const ws = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(c.req.param('workspaceId')));
+  await ws.setAssistantMode(b.data.mode);
+  return c.json({ mode: b.data.mode });
+});
+
 operatorRoutes.get('/workspaces/:workspaceId/ops', async (c) => {
   const st = await opsStatus(c.env, c.req.param('workspaceId'));
   return st ? c.json(st) : c.json({ error: 'not_found' }, 404);
 });
-operatorRoutes.post('/workspaces/:workspaceId/suspend', killSwitch(suspendWorkspace));
+operatorRoutes.post('/workspaces/:workspaceId/suspend', killSwitch(suspendWorkspace, { rejectReserved: true }));
 operatorRoutes.post('/workspaces/:workspaceId/unsuspend', killSwitch(unsuspendWorkspace));
 operatorRoutes.post('/workspaces/:workspaceId/campaigns/pause', killSwitch(pauseAllCampaigns));
 operatorRoutes.post('/workspaces/:workspaceId/shared-number/evict', killSwitch(evictFromSharedNumber));

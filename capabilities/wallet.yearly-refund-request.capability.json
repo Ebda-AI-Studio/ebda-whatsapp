@@ -1,0 +1,60 @@
+{
+  "id": "wallet.yearly-refund-request",
+  "status": "live",
+  "plan": "self-service A22 (money-surfaces)",
+  "area": "billing",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "طلب إلغاء الباقة السنوية واسترداد الشهور اللي ما بدأتش",
+  "titleEn": "Request cancellation of a yearly package and a refund of the months not started",
+  "screens": [
+    "WalletScreen Cancel the yearly package",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "GET /stores/:storeId/wallet/yearly-refund",
+    "POST /stores/:storeId/wallet/yearly-refund/preview",
+    "POST /stores/:storeId/wallet/yearly-refund/requests"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "super_admin"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/wallet-top-ups-and-refunds",
+  "questions": {
+    "ar": [
+      "عايز الغي الباقة السنوية واسترد فلوسي",
+      "هرجع كام لو الغيت الباقة السنوية؟",
+      "الباقة السنوية الغاءها ازاي؟",
+      "alghy el baqa el sanaweya"
+    ],
+    "en": [
+      "How do I cancel my yearly package and get a refund?",
+      "How much would I get back?"
+    ]
+  },
+  "steps": [
+    "Wallet > Cancel the yearly package shows the figures: months not started, their value, wallet debt settled first, refund to your card",
+    "The figures come from the same function the operator uses, so they are what the operator would execute",
+    "Request cancellation and refund > Yes, send the request: a request is filed (single-use token bound to those figures)",
+    "Our team runs the cancellation (operator.yearly-refund) and sends any card refund by hand; no money moves when you confirm"
+  ],
+  "edgeCases": [
+    "The month you are in is never refunded; a refund in the last month is nothing, so no request can be made",
+    "Wallet debt is settled first out of the refund; if it covers everything no money goes back",
+    "One request at a time per store; a double click is one request",
+    "If the figures move between preview and confirm (a month began, debt changed) the request is refused and you preview again",
+    "A renewal queued behind the package: cancellation is not offered here (queued_periods)",
+    "Owner only; staff and other stores get nothing"
+  ],
+  "gaps": [
+    "The card refund itself is sent by a person; no SLA is shown"
+  ]
+}

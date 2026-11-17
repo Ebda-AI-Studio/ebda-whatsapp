@@ -2,7 +2,7 @@
   "id": "operator.yearly-refund",
   "status": "live",
   "area": "operator",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "إلغاء الباقة السنوية واسترداد",
   "titleEn": "Cancel a yearly package and refund unused months",
@@ -13,7 +13,8 @@
   ],
   "api": [
     "GET /operator/package-orders/:orderId/refund-quote",
-    "POST /operator/package-orders/:orderId/yearly-refund"
+    "POST /operator/package-orders/:orderId/yearly-refund",
+    "GET /operator/yearly-refund-requests"
   ],
   "mcpTool": null,
   "planGate": null,
@@ -25,9 +26,9 @@
     "class": "irreversible"
   },
   "operatorReason": {
-    "code": null,
-    "text": "merchant cannot cancel/refund a yearly plan themselves; the formula is deterministic (unused whole months x price/12, debt first) so a self-service quote and confirm is feasible, only the card refund execution needs a human",
-    "validUnderRule": false
+    "code": "money-dispute",
+    "text": "this is the money-out half: a person executes the cancellation and sends any card refund by hand through the provider's dashboard; the merchant sees the same quote and files the request themselves (wallet.yearly-refund-request)",
+    "validUnderRule": true
   },
   "helpArticle": null,
   "questions": {
@@ -42,13 +43,11 @@
     ]
   },
   "steps": [
-    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason",
+    "Merchant requests waiting for a person are listed (GET /operator/yearly-refund-requests); running the refund closes the request"
   ],
   "edgeCases": [
     "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
   ],
-  "gaps": [
-    "Self-service gap: merchant cannot cancel/refund a yearly plan themselves; the formula is deterministic (unused whole months x price/12, debt first) so a self-service quote and confirm is feasible, only the card refund execution needs a human",
-    "operator replaces: packages.yearly-switch (merchant told to write to support)"
-  ]
+  "gaps": []
 }

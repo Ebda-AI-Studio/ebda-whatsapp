@@ -1,40 +1,61 @@
 {
   "id": "agent.credits-topup",
-  "status": "planned",
-  "plan": "self-service audit #7 (Store side) and spec 6.5b (credits)",
+  "status": "live",
+  "plan": "self-service A9 Chat half (money-surfaces) and spec 6.5b (credits)",
   "area": "agent",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "شراء كريديت إضافي",
   "titleEn": "Buy more AI credits",
-  "screens": [],
-  "api": [],
+  "screens": [
+    "WalletScreen Buy AI credits",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "GET /stores/:storeId/wallet/credit-packs",
+    "POST /stores/:storeId/wallet/credit-packs/preview",
+    "POST /stores/:storeId/wallet/credit-packs/orders",
+    "GET /stores/:storeId/wallet/credit-packs/orders/:orderId"
+  ],
   "mcpTool": null,
   "planGate": null,
   "roles": [
     "owner",
-    "staff"
+    "super_admin"
   ],
   "policy": "confirm",
   "undo": {
-    "class": "none"
+    "class": "irreversible"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/wallet-top-ups-and-refunds",
   "questions": {
     "ar": [
       "الكريديت خلصت وعايز اشتري تاني",
       "ازاي ازود الكريديت؟",
-      "ashtery credits"
+      "ashtery credits",
+      "اشتري رصيد ذكاء اصطناعي"
     ],
     "en": [
-      "How do I buy more AI credits?"
+      "How do I buy more AI credits?",
+      "My AI credits ran out"
     ]
   },
   "steps": [
-    "Help says you can add more but no route, screen or order type exists for a credit purchase; upgrade package or wait for the monthly grant"
+    "The low-credit warning (inbox banner and Wallet) links to Wallet > Buy AI credits",
+    "Pick a pack: you see the credits and the price in EGP, then Yes, pay (single-use token bound to the pack and price)",
+    "Pay on the card page; the credits are added when the provider confirms the payment (the card provider's webhook, a system route), once per payment, never when you return to the page",
+    "Purchased credits stay with you and do not expire at the end of the month"
   ],
-  "edgeCases": [],
-  "gaps": [
-    "NO API, NO UI for a Chat credit top-up (wallet top-up is money, not credits)"
-  ]
+  "edgeCases": [
+    "Price: the dearest per-credit rate among the monthly packages, times the pack size (Ruling CREDIT-PACK-PRICE-1)",
+    "A double click or a replayed webhook is one order and one credit",
+    "If the price moved between preview and pay the order is refused and you preview again",
+    "A failed payment adds nothing; a lost webhook is repaired by the daily inquiry",
+    "A refund of the payment raises a P1 for a person: credits are not taken back automatically",
+    "Card checkout off or no card provider: the card says so",
+    "Owner only; staff see the warning but not the card"
+  ],
+  "gaps": [],
+  "assistantNote": "moves money; the merchant pays on the card page themselves"
 }

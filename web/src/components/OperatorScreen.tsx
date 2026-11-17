@@ -458,6 +458,8 @@ function YearlyPlanCard({ t, lang, api, run, fail }: Pick<PanelProps, 't' | 'lan
   const [orderId, setOrderId] = useState('');
   const [reason, setReason] = useState('');
   const [quote, setQuote] = useState<YearlyRefundQuoteView | null>(null);
+  const [waiting, setWaiting] = useState<Awaited<ReturnType<typeof api.yearlyRefundRequests>>>([]);
+  useEffect(() => { void api.yearlyRefundRequests().then(setWaiting, () => setWaiting([])); }, [api]);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
   const show = async (e: FormEvent) => {
     e.preventDefault();
@@ -472,12 +474,24 @@ function YearlyPlanCard({ t, lang, api, run, fail }: Pick<PanelProps, 't' | 'lan
     await run(async () => {
       const done = await api.yearlyRefundExecute(quote.orderId, reason.trim());
       setQuote(null);
+      void api.yearlyRefundRequests().then(setWaiting, () => undefined);
       return done.noMoneyOut ? `${t.opYrDone(num(done.shortenedMonths, lang), money(done.debtSettledMinor), money(0))} ${t.opYrNoMoney}` : t.opYrDone(num(done.shortenedMonths, lang), money(done.debtSettledMinor), money(done.cashRefundMinor));
     });
   };
   return (
     <Card id="op-yearly" title={t.opYrTitle}>
       <p className="muted">{t.opYrHelp}</p>
+      <h3 className="pane-sub">{t.opYrWaiting}</h3>
+      {waiting.length === 0 ? <p className="muted">{t.opYrWaitingEmpty}</p> : (
+        <ul className="wallet-rows op-rows">
+          {waiting.map((w) => (
+            <li key={w.id}>
+              <span className="wallet-row-main"><bdi dir="ltr">{w.workspaceId}</bdi> <span className="muted">{t.opYrWaitingLine(num(w.unusedMonths, lang), money(w.refundMinor))}</span></span>
+              <button type="button" className="btn ghost" onClick={() => setOrderId(w.orderId)}>{t.opYrUse}</button>
+            </li>
+          ))}
+        </ul>
+      )}
       <form className="wallet-form op-inline" onSubmit={(e) => void show(e)}>
         <label className="field"><span>{t.opYrOrder}</span><input dir="ltr" value={orderId} onChange={(e) => setOrderId(e.target.value)} /></label>
         <button type="submit" className="btn">{t.opYrShow}</button>

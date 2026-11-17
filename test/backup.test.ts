@@ -1,5 +1,5 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { BACKUP_TABLES, nextLocalHour } from '../src/core/backup';
 import { exec, rows, workspace } from './helpers/workspace';
 
@@ -53,18 +53,39 @@ it('ingest arms a daily alarm once', async () => {
   expect(second).toBe(first);
 });
 
-it('alarm exports and re-arms about 24 h later', async () => {
-  await seed('ws-b6', 2);
-  const before = await runInDurableObject(workspace('ws-b6'), (_i, s) => s.storage.getAlarm());
-  await exec('ws-b6', 'UPDATE scheduled_tasks SET due_at = 1'); // the alarm fires when the task is due; make it due now
-  expect(await runDurableObjectAlarm(workspace('ws-b6'))).toBe(true);
-  const listed = await env.BACKUPS.list({ prefix: 'backups/ws-b6/' });
-  expect(listed.objects.some((o) => o.key.endsWith('/manifest.json'))).toBe(true);
-  const after = await runInDurableObject(workspace('ws-b6'), (_i, s) => s.storage.getAlarm());
-  expect(after!).toBeGreaterThan(Date.now());
-  expect(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(after!)).toBe('02:00');
-  expect(before).not.toBeNull();
-});
+// The DO has ONE alarm = the earliest of the daily tasks (backup 02:00 Cairo, retention purge 05:00 Cairo). Pin "now" so the
+// answer never depends on when CI runs: between 02:00 and 05:00 Cairo the purge is the earlier task, and that is correct.
+const cairo = (ms: number) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(ms);
+const taskDue = (ws: string, kind: string) => rows<{ due_at: number }>(ws, 'SELECT due_at FROM scheduled_tasks WHERE kind = ?', kind).then((r) => r[0]!.due_at);
+
+// Winter time in Cairo (UTC+2). The instants are far in the future so an alarm armed under the fake clock is not already overdue on the real one.
+for (const c of [
+  { name: 'between 02:00 and 05:00 Cairo (purge alarm is first)', now: Date.UTC(2030, 0, 15, 1, 30), alarm: 'purge' },
+  { name: 'just after the 02:00 alarm fired', now: Date.UTC(2030, 0, 15, 0, 0, 30), alarm: 'purge' },
+  { name: 'after 05:00 Cairo (backup alarm is first)', now: Date.UTC(2030, 0, 15, 4, 0), alarm: 'backup' },
+] as const) {
+  it(`alarm exports and re-arms the backup about 24 h later: ${c.name}`, async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(c.now);
+      const ws = `ws-b6-${c.now}`;
+      await seed(ws, 2);
+      await exec(ws, "UPDATE scheduled_tasks SET due_at = 1 WHERE kind = 'backup'"); // the alarm fires when the task is due; make it due now
+      const purgeBefore = await taskDue(ws, 'retention_purge');
+      expect(await runDurableObjectAlarm(workspace(ws))).toBe(true);
+      expect((await env.BACKUPS.list({ prefix: `backups/${ws}/` })).objects.some((o) => o.key.endsWith('/manifest.json'))).toBe(true);
+      const backupNext = await taskDue(ws, 'backup');
+      expect(cairo(backupNext)).toBe('02:00');
+      expect(backupNext).toBe(Date.UTC(2030, 0, 16, 0, 0)); // the NEXT 02:00 Cairo (00:00 UTC), whichever task armed the alarm
+      expect(cairo(purgeBefore)).toBe('05:00');
+      const alarm = await runInDurableObject(workspace(ws), (_i, s) => s.storage.getAlarm());
+      expect(alarm).toBe(Math.min(backupNext, await taskDue(ws, 'retention_purge')));
+      expect(cairo(alarm!)).toBe(c.alarm === 'purge' ? '05:00' : '02:00');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+}
 
 it('snapshot is consistent while ingest runs', async () => {
   await seed('ws-b7', 20);

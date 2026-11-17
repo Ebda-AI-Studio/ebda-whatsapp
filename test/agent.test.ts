@@ -71,7 +71,7 @@ describe('tools', () => {
     expect(tool).toMatchObject({ role: 'tool', name: 'search_catalog' });
     const parsed = JSON.parse((tool as { content: string }).content) as { results: { id: string; inStock: boolean; price: number }[] };
     expect(parsed.results[0]).toMatchObject({ id: 'v3', inStock: false, price: 110 });
-    expect(link.fake.count('listCatalog')).toBeGreaterThan(0);
+    expect(link.fake.count('searchProducts')).toBe(1);
   });
 
   it('order_status asks the Store with the customer key derived from the chat, never from the model', async () => {
@@ -238,7 +238,7 @@ describe('rules shared with the ordering bot', () => {
     await exec(ws, "INSERT INTO agent_state (key, value) VALUES ('latency_ewma_ms', '9000')");
     model([{ text: 'الرد' }]);
     const times: number[] = [];
-    const g = stubGraph((c) => (times.push(Date.now()), { status: 200, json: { messages: [{ id: `wamid.o${times.length}` }] } }));
+    const g = stubGraph((c) => (c.body?.status !== 'read' && times.push(Date.now()), { status: 200, json: { messages: [{ id: `wamid.o${times.length}` }] } })); // the read + typing call is not a message
     await say(ws, pn, text('hi'), g);
     expect(times.length).toBe(2);
     expect(times[1]! - times[0]!).toBeGreaterThanOrEqual(140);
