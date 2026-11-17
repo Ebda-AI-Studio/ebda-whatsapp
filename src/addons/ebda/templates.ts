@@ -45,6 +45,19 @@ export const EBDA_DEFAULT_TEMPLATES: readonly TemplateSeed[] = [
     category: 'UTILITY',
     components: [{ type: 'BODY', text: 'أهلاً {{1}}، طلبك رقم {{2}} {{3}}. تابع شحنتك من هنا: {{4}}', example: { body_text: [['أحمد', '1001', 'خرج للشحن', 'https://shop.example/track/abc']] } }],
   },
+  // Tells the OWNER that a customer needs a person (Ruling CHAT-AGENT-4). Sent only when the owner's own 24 h window is closed.
+  {
+    name: 'handoff_alert',
+    language: 'ar',
+    category: 'UTILITY',
+    components: [{ type: 'BODY', text: 'تنبيه من المساعد 🔔 العميل {{1}} محتاج حد من الفريق يرد عليه. التفاصيل: {{2}}', example: { body_text: [['منى', 'عايز اكلم حد']] } }],
+  },
+  {
+    name: 'handoff_alert',
+    language: 'en',
+    category: 'UTILITY',
+    components: [{ type: 'BODY', text: 'Assistant alert 🔔 customer {{1}} needs a team member to reply. Details: {{2}}', example: { body_text: [['Mona', 'I want to speak to someone']] } }],
+  },
   {
     name: 'shipping_status',
     language: 'ar',

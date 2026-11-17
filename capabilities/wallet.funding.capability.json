@@ -2,45 +2,54 @@
   "id": "wallet.funding",
   "status": "live",
   "area": "billing",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
-  "titleAr": "مين بيدفع لميتا",
-  "titleEn": "Who pays WhatsApp (card on Meta vs wallet)",
+  "titleAr": "مين بيدفع لميتا على الرقم بتاعي",
+  "titleEn": "Who pays Meta for my own number (card on Meta)",
   "screens": [
     "WalletScreen Who pays WhatsApp?",
     "view:WalletScreen",
     "/wallet"
   ],
-  "api": [],
+  "api": [
+    "POST /stores/:storeId/numbers/:phoneNumberId/funding/preview",
+    "PUT /stores/:storeId/numbers/:phoneNumberId/funding"
+  ],
   "mcpTool": null,
   "planGate": null,
   "roles": [
     "owner",
-    "staff"
+    "super_admin"
   ],
-  "policy": "free",
+  "policy": "confirm",
   "undo": {
-    "class": "none"
+    "class": "irreversible"
   },
   "helpArticle": "whatsapp/meta-fees-explained",
   "questions": {
     "ar": [
-      "مين بيدفع تكلفة الرسايل؟",
-      "ليه الرصيد مش بيتخصم؟",
-      "الرقم بتاعي بيتحاسب منين؟",
-      "meen byedfa3 lel rasael"
+      "الرقم بتاعي مش بيبعت ومكتوب مين بيدفع لسه ما اتحددش",
+      "ازاي اخلي ميتا تخصم من الكارت؟",
+      "مين بيدفع لميتا على الرقم؟",
+      "meen byedfa3 le meta"
     ],
     "en": [
-      "Who pays Meta for my messages?"
+      "Who pays Meta for my own number?",
+      "My number says the payer is not set, how do I fix it?"
     ]
   },
   "steps": [
-    "Own number: Meta bills your card; shared number: the wallet; unknown: sending not ready until set"
+    "Wallet > Who pays WhatsApp: an own number whose payer is not set shows Let Meta bill my card",
+    "Preview says Meta will bill the card on your Meta account and the wallet will not pay; Yes, confirm writes it once (single-use token bound to the number)",
+    "Only the card is offered to a merchant: the platform line (the shared number) is refused with a plain 403 and stays the operator's",
+    "A number the operator put on the platform line is not taken back by the merchant (409 operator_funded)"
   ],
   "edgeCases": [
-    "Funding set by an operator (see operator.funding)"
+    "Own numbers only: the shared number and another store's number answer 404",
+    "Staff cannot confirm (owner only)",
+    "A confirmation is single-use, expires after 15 minutes and is bound to the number; an edited or replayed one is refused",
+    "Making Meta bill the card needs a card on your Meta account (see numbers.meta-payment-method)",
+    "Super admin keeps the operator route (operator.funding) for the platform line"
   ],
-  "gaps": [
-    "Unknown funding blocks sending with no self-service way to choose"
-  ]
+  "gaps": []
 }

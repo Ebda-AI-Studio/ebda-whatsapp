@@ -303,7 +303,7 @@ describe('syncTemplates / installDefaults / refreshPending', () => {
     const c = await ctx(424);
     await seedTemplate(c.workspaceId, { name: 'order_confirmation', category: 'UTILITY', status: 'APPROVED', components: '[]' });
     graph = graphStub(() => ok({ id: '9', status: 'PENDING' }));
-    expect(await installDefaults(c, EBDA_DEFAULT_TEMPLATES)).toEqual({ ok: true, submitted: ['cod_confirmation', 'shipping_update', 'otp_code', 'cart_recovery', 'shipping_tracking', 'shipping_status'], skipped: ['order_confirmation'], failed: [] });
+    expect(await installDefaults(c, EBDA_DEFAULT_TEMPLATES)).toEqual({ ok: true, submitted: ['cod_confirmation', 'shipping_update', 'otp_code', 'cart_recovery', 'shipping_tracking', 'handoff_alert', 'handoff_alert', 'shipping_status'], skipped: ['order_confirmation'], failed: [] });
   });
   it('installDefaults reports a bad pack entry in failed and still installs the good ones (never throws)', async () => {
     const c = await ctx(437);

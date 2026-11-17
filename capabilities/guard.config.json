@@ -24,7 +24,7 @@
       "method": "POST"
     },
     {
-      "pattern": "/templates(?:/(?!sync$)|$)",
+      "pattern": "/templates(?:/(?!(?:sync|check)$)|$)",
       "method": "POST"
     },
     {
@@ -50,6 +50,8 @@
     "system"
   ],
   "smartLayerPaths": [
+    "foundation/smart-layer/",
+    "src/core/smart-layer/",
     "src/core/billing/instapay-reader.ts"
   ],
   "smartLayerExemptions": [

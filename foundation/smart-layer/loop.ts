@@ -25,7 +25,7 @@ import { allowLinks } from './rails/links';
 import { maskForModel } from './rails/mask';
 import { registerScore } from './rails/register';
 import { scopeCheck, type Classify, type ScopeVerdict } from './rails/scope';
-import { detectSecrets } from './rails/secrets';
+import { detectSecrets, type SecretKind } from './rails/secrets';
 import { renderReply } from './rails/ui-truth';
 import { buildSystemPrompt } from './release';
 import type { HandoffPacket, Locale, PreviewCard, Segment, SmartLayerAdapter, ToolSpec, TurnCtx, TurnResult, TurnStatus } from './types';
@@ -125,7 +125,14 @@ export async function runTurn(a: SmartLayerAdapter, ctx: TurnCtx, input: TurnInp
     }
     return { status, segments, previews, usage, turnId };
   };
-  const early = (status: TurnStatus, m: L) => finalize(status, one(m, ctx.locale));
+  // Every reply path after a pasted secret (refusal, handoff, not_covered too) tells the merchant where to enter it; the model path adds it itself.
+  let secretKinds: SecretKind[] = [];
+  const secretNote = (): Segment[] => {
+    if (!secretKinds.length) return [];
+    const ids = [...new Set(secretKinds.map((k) => a.secureScreen?.(k)).filter((x): x is string => !!x))];
+    return renderReply(`\n\n${MSG.secrets[ctx.locale]} ${ids.map((id) => `[[cap:${id}]]`).join(' ')}`.trimEnd(), a.registry(), ctx.locale, []).segments;
+  };
+  const early = (status: TurnStatus, m: L) => finalize(status, [...one(m, ctx.locale), ...secretNote()]);
 
   // 1 controls
   stage('controls');
@@ -149,6 +156,7 @@ export async function runTurn(a: SmartLayerAdapter, ctx: TurnCtx, input: TurnInp
   stage('secrets');
   const sec = detectSecrets(input.text);
   rails.secretsFound = sec.found.length;
+  secretKinds = sec.found;
   stage('mask');
   const masked = maskForModel(sec.text);
 
@@ -207,7 +215,7 @@ export async function runTurn(a: SmartLayerAdapter, ctx: TurnCtx, input: TurnInp
   toolsOffered = offered.map((t) => t.name);
   const relevant = offered.filter((t) => !ALWAYS.has(t.name)).length;
   if (grounding === 'not_covered' && relevant === 0) {
-    const streak = (() => { let n = 0; for (let i = history.length - 1; i >= 0 && history[i]!.role === 'assistant'; i -= 2) { if (history[i]!.maskedText === NOT_COVERED_REPLY[ctx.locale]) n++; else break; } return n; })();
+    const streak = (() => { let n = 0; for (let i = history.length - 1; i >= 0 && history[i]!.role === 'assistant'; i -= 2) { if (history[i]!.maskedText.startsWith(NOT_COVERED_REPLY[ctx.locale])) n++; else break; } return n; })();
     if (streak + 1 >= 2) return handoff('low_confidence');
     return early('not_covered', NOT_COVERED_REPLY);
   }

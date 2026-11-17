@@ -320,6 +320,7 @@ describe('route walk: every non-GET store route is decided (sends and number set
   // Decided: cannot send a WhatsApp message or set a number up, or are gated by the campaigns feature (plan_feature, see package-feature-gates-campaigns-ordering).
   const NOT_SENDING = new Set([
     'PUT /stores/:storeId/members/:userId/seat', 'DELETE /stores/:storeId/members/:userId/seat', // WA-SEATS-1: the owner's seat choices; no message, no spend
+    'POST /stores/:storeId/assistant/turn', 'POST /stores/:storeId/assistant/feedback', 'POST /stores/:storeId/assistant/previews/:previewId/apply', 'POST /stores/:storeId/assistant/applied/:appliedId/undo', 'POST /stores/:storeId/assistant/approvals/:approvalId/confirm', 'POST /stores/:storeId/assistant/approvals/:approvalId/reject', // apply/undo run the merchant's own routes with their own plan gates, so a package check here would double-gate; the assistant answers and reads in phase A (it sends nothing and spends only the free cap); it must work for a workspace that is still choosing a package
     'PUT /stores/:storeId/agent', 'DELETE /stores/:storeId/contacts/:waId', 'DELETE /stores/:storeId/campaigns/:campaignId',
     'POST /stores/:storeId/campaigns', 'POST /stores/:storeId/campaigns/:campaignId/send', 'POST /stores/:storeId/campaigns/:campaignId/resume',
     'POST /stores/:storeId/campaigns/:campaignId/pause', 'POST /stores/:storeId/campaigns/:campaignId/cancel',
@@ -336,6 +337,10 @@ describe('route walk: every non-GET store route is decided (sends and number set
     // Template management talks to Meta's template catalog, not to a customer: no message leaves.
     'POST /stores/:storeId/templates/sync', 'POST /stores/:storeId/templates', 'POST /stores/:storeId/templates/install-defaults',
     'POST /stores/:storeId/templates/check', 'PUT /stores/:storeId/templates/:name/:language', 'DELETE /stores/:storeId/templates/:name/:language', // self-service: a check calls nobody; edit and delete act on Meta's catalog
+    // Money surfaces (self-service A9, A21, A22): previews and confirmed actions on funding, a yearly-refund request and AI credit packs; no WhatsApp message leaves (a lapsed merchant may still buy credits or ask to cancel).
+    'POST /stores/:storeId/numbers/:phoneNumberId/funding/preview', 'PUT /stores/:storeId/numbers/:phoneNumberId/funding',
+    'POST /stores/:storeId/wallet/yearly-refund/preview', 'POST /stores/:storeId/wallet/yearly-refund/requests',
+    'POST /stores/:storeId/wallet/credit-packs/preview', 'POST /stores/:storeId/wallet/credit-packs/orders',
     'POST /stores/:storeId/templates/shared-requests', // a store on the shared number asks the platform team for a template: a row, no message
   ]);
   const mutating = (apiRoutes.routes as { method: string; path: string }[])

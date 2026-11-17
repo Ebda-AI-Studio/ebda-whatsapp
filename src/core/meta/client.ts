@@ -35,6 +35,24 @@ async function postMessage(opts: Base, payload: Record<string, unknown>): Promis
   return { ok: false, code, retryable: isRetryable(code, res.status), message: json?.error?.message ?? `http ${res.status}` };
 }
 
+/**
+ * Marks an inbound message read and shows the typing indicator (Cloud API, verified 2026-11-14 on developers.facebook.com/docs/whatsapp/cloud-api/typing-indicators):
+ * POST /{phone-number-id}/messages { messaging_product, status: 'read', message_id: <inbound wamid>, typing_indicator: { type: 'text' } }. The indicator ends when we
+ * send our reply or after 25 s. Best effort by design: false on any failure, never throws, never retried (a missed indicator costs nothing).
+ */
+export async function markReadTyping(opts: { token: string; graphVersion: string; phoneNumberId: string; wamid: string }): Promise<boolean> {
+  try {
+    const res = await fetchWithTimeout(graphUrl(opts.graphVersion, `${opts.phoneNumberId}/messages`), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${opts.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', status: 'read', message_id: opts.wamid, typing_indicator: { type: 'text' } }),
+    }, { label: 'meta.typing', timeoutMs: 5_000 });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export function sendText(opts: Base & { text: string }): Promise<SendResult> {
   return postMessage(opts, { type: 'text', text: { body: opts.text } });
 }
