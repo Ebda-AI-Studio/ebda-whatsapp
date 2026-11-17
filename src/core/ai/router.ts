@@ -2,6 +2,7 @@
  * One decision per inbound message, taken inside the customer's turn lock: the ordering bot when the customer is mid-order
  * (or tapped one of its buttons, or sent a cart or a payment picture), otherwise the AI agent when it is switched on. Never both.
  */
+import { isPlainEnglish } from '../franco';
 import type { LinkHost } from '../store-link/host';
 import { orderingActive, orderingEngaged, runBotTurnLocked, serialisedTurn, turnGone, type BotInput } from '../ordering/bot';
 import { recordFunnel } from '../bot-funnel';
@@ -29,7 +30,7 @@ export async function runTurn(host: LinkHost, input: BotInput, now: number): Pro
     if (!agentOn && !orderingOn) return;
     if (agentOn && input.type === 'text' && input.text && !turnGone(host, input) && isHumanRequest(input.text)) {
       const lang = readAgentSettings(host.sql).language;
-      return handoff(host, input, 'asked', lang === 'en' || (lang === 'auto' && /[A-Za-z]/.test(input.text) && !/[؀-ۿ]/.test(input.text)) ? 'en' : 'ar', now);
+      return handoff(host, input, 'asked', lang === 'en' || (lang === 'auto' && isPlainEnglish(input.text)) ? 'en' : 'ar', now);
     }
     if (!ORDERING_TYPES.has(input.type)) return agentOn ? runAgentTurn(host, input, now) : undefined;
     if (orderingOn && (!agentOn || orderingEngaged(host, input, now))) return runBotTurnLocked(host, input, now);

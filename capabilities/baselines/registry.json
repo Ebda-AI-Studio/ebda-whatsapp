@@ -7,7 +7,6 @@
     "operator-reason|operator.pricing-overrides",
     "operator-reason|operator.subscription-set",
     "operator-reason|operator.workspace-wallet",
-    "operator-reason|operator.yearly-refund",
     "policy-free-writes|agent.provider-byok",
     "policy-free-writes|inbox.mark-read",
     "policy-free-writes|numbers.connect",

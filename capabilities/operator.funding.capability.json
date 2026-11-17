@@ -2,10 +2,10 @@
   "id": "operator.funding",
   "status": "live",
   "area": "operator",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "تحديد مين بيدفع لميتا للرقم",
-  "titleEn": "Set who pays Meta for a number",
+  "titleEn": "Set who pays Meta for a number (platform line)",
   "screens": [
     "OperatorScreen (operator console)",
     "view:OperatorScreen",
@@ -25,8 +25,8 @@
   },
   "operatorReason": {
     "code": "platform-config",
-    "text": "a merchant with unknown funding cannot send and cannot fix it themselves; could be self-service for own numbers (card on Meta is the default) with an operator reason only for platform_line",
-    "validUnderRule": false
+    "text": "the platform line (the shared number) is the platform's own billing decision and moves the platform's money; a merchant sets their OWN number's payer themselves (wallet.funding)",
+    "validUnderRule": true
   },
   "helpArticle": null,
   "questions": {
@@ -41,13 +41,11 @@
     ]
   },
   "steps": [
-    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason",
+    "Needed for the platform line, and to move a number off it; a merchant sets their own number to the card themselves"
   ],
   "edgeCases": [
     "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
   ],
-  "gaps": [
-    "Self-service gap: a merchant with unknown funding cannot send and cannot fix it themselves; could be self-service for own numbers (card on Meta is the default) with an operator reason only for platform_line",
-    "operator replaces: wallet.funding (merchant cannot choose card vs wallet or fix unknown funding)"
-  ]
+  "gaps": []
 }

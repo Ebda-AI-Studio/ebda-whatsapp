@@ -20,12 +20,12 @@ export async function agentWorkspace(ws: string, settings: Record<string, unknow
 
 export type Sent = { kind: string; text: string | null; body: Record<string, any> };
 export function sentOf(g: Graph, from = 0): Sent[] {
-  return g.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/messages')).slice(from).map((c) => {
+  return g.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/messages') && (c.body as { status?: string } | null)?.status !== 'read').slice(from).map((c) => {
     const b = c.body as Record<string, any>;
     return { kind: b.type === 'interactive' ? (b.interactive.type === 'list' ? 'list' : 'buttons') : b.type, text: b.type === 'text' ? b.text.body : null, body: b };
   });
 }
-export const sendCount = (g: Graph) => g.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/messages')).length;
+export const sendCount = (g: Graph) => g.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/messages') && (c.body as { status?: string } | null)?.status !== 'read').length;
 
 /** One inbound message through the real webhook, then the workspace's due tasks; returns what was sent in reply. */
 export async function say(ws: string, pn: string, message: Record<string, unknown>, g: Graph): Promise<Sent[]> {
