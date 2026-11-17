@@ -72,7 +72,7 @@ export async function recommendProducts(ctx: ToolContext, a: RecommendArgs, deps
   let sent = false;
   try {
     const out = await recommendOnce(ctx, a, deps, win, now);
-    sent = ctx.recommended === true;
+    sent = Boolean((ctx as ToolContext).recommended); // set by recommendOnce once cards went out (TS narrows the early return above)
     return out;
   } finally {
     if (!sent) ctx.host.sql.exec('DELETE FROM agent_state WHERE key = ?', keyOf(ctx.messageId));
