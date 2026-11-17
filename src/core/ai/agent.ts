@@ -24,7 +24,7 @@ import { AI_TURN_CREDITS, heartbeatHold, holdCredits, releaseHold, settleHold } 
 import { funnelOnce } from '../funnel';
 import { markAiTurn } from '../timing';
 import { recordTurnCost } from './cost';
-import { EMPTY_RETRY_NOTE, LANGUAGE_RETRY_NOTE, isArabicScriptReply, isFlaggedModel, readAgentModelFlag, whatsappFormat, type AgentModelId } from './model-flag';
+import { EMPTY_RETRY_NOTE, LANGUAGE_RETRY_NOTE, isArabicScriptReply, isFlaggedModel, looksEnglishAsk, readAgentModelFlag, whatsappFormat, type AgentModelId } from './model-flag';
 import { LlmError, type ChatTurn, type LlmProvider, type LlmResponse } from './provider';
 import { getAgentState, promisePolicyOf, providerFor, putAgentState, readAgentSettings, type AgentSettings } from './settings';
 import { MAX_CALLS_PER_ROUND, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_ROUNDS, runTool, toolDefs, type ToolContext } from './tools';
@@ -330,7 +330,7 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
       // An empty answer with no cards (any model; typically the last call, made with tools off after the tool rounds): one nudge to answer from the tool results.
       if (!(res.text ?? '').trim() && !ctx.cards.length) res = await correct(res, null, EMPTY_RETRY_NOTE); // truly empty only: a leaked structure or a thinking-only block is handled as before
       // Flagged model, language `auto`, a plain-English customer and an Arabic-script reply: the corrective call asks for English.
-      if (flagged && settings.language === 'auto' && locale === 'en') {
+      if (flagged && settings.language === 'auto' && locale === 'en' && looksEnglishAsk(input.text)) {
         const first = cleanReply(res.text);
         if (first && isArabicScriptReply(first)) res = await correct(res, first, LANGUAGE_RETRY_NOTE);
       }

@@ -4,7 +4,7 @@ import { EBDA_AGENT_COPY } from '../src/addons/ebda/agent-copy';
 import { BOUNDARY, MAX_MODEL_CALLS_PER_CREDIT } from '../src/core/ai/agent';
 import { DEFAULT_WORKERS_AI_MODEL } from '../src/core/ai/config';
 import { modelPrices } from '../src/core/ai/cost';
-import { GPT_OSS_MODEL, LANGUAGE_RETRY_NOTE, isArabicScriptReply, readAgentModelFlag, whatsappFormat } from '../src/core/ai/model-flag';
+import { GPT_OSS_MODEL, LANGUAGE_RETRY_NOTE, isArabicScriptReply, looksEnglishAsk, readAgentModelFlag, whatsappFormat } from '../src/core/ai/model-flag';
 import { configureSessionCheck } from '../src/core/identity/session';
 import { Trusted, guardReply } from '../src/core/ai/reply-guard';
 import { findUrls, linkParts } from '../src/core/url-extract';
@@ -116,9 +116,15 @@ describe('default unchanged', () => {
     expect(strict).toContain('within your budget');
     expect(strict).toContain('Wrong: "Here are gifts under 600 EGP"');
     expect(strict).toContain('ONE short sentence with no amount and no link');
+    expect(strict).toContain('Franco-Arabic');
+    expect(strict).toContain('is ARABIC: answer it in Arabic script');
+    expect(strict).toContain('A request for a discount');
+    expect(strict).toContain('Western digits (0-9)');
     expect(strict).toContain('A complaint is handed to a person at once with handoff_to_human');
     const plain = EBDA_AGENT_COPY.systemPrompt(a);
     expect(plain).not.toContain('CUSTOMER wrote');
+    expect(plain).not.toContain('Franco-Arabic (Arabic typed');
+    expect(plain).not.toContain('Western digits');
     expect(plain).not.toContain('A complaint is handed');
   });
 
@@ -244,6 +250,23 @@ describe('reply language (flagged path, language auto)', () => {
     const out = await say(ws, pn, text('where is my order?'), stubGraph());
     expect(m.callCount).toBeLessThanOrEqual(MAX_MODEL_CALLS_PER_CREDIT);
     expect(out.length).toBe(1);
+  });
+
+  it('a Latin-script ask the Franco heuristic misses is NOT treated as English: the Arabic reply stands, no correction (it was being rewritten into English)', async () => {
+    const ws = W(9);
+    const pn = await agentWs(ws, { language: 'auto' });
+    await flip(GPT_OSS_MODEL);
+    for (const ask of ['fe shanta gel bony?', 'el COD mota7?', 'ektebly code python']) {
+      const m = model([{ text: ar }, { text: en }]);
+      const out = await say(ws, pn, text(ask), stubGraph());
+      expect(m.callCount, ask).toBe(1);
+      expect(out.map((x) => x.text), ask).toEqual([ar]);
+    }
+  });
+
+  it('looksEnglishAsk: Latin only, not Franco, with a common English word', () => {
+    for (const t of ['do you have roses?', 'I need a gift under 600 EGP', 'any gift ideas for my dad around 350?', 'hello', 'Hi there', 'birthday present for a friend, nothing over 250 please']) expect(looksEnglishAsk(t), t).toBe(true);
+    for (const t of ['fe shanta gel bony?', 'el COD mota7?', 'ektebly code python', '3ayez fostan a7mar', 'عندكم ورد؟', '', null, 'bekam el shanta', 'hodoom']) expect(looksEnglishAsk(t as string), String(t)).toBe(false);
   });
 
   it('isArabicScriptReply: majority script decides; a quoted Arabic name in English does not count', () => {
