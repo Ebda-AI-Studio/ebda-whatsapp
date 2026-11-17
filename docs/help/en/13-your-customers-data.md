@@ -25,6 +25,6 @@ Pick the customer, type the name, **Save the name**. The name you set stays: Wha
 When one person writes from a new number, pick the old one, type the new number and choose **Merge the two customers** (store owner only). Messages, notes and tags move to the new number and the old one disappears from the list. **It cannot be undone.** If either number asked to stop messages, both are stopped.
 
 ## Erase a customer
-When a customer asks you to delete their data, pick them, read the warning, type the last 4 digits of their number and choose **Erase customer permanently** (store owner only). Their messages and data are removed from this workspace. **It cannot be undone.** Money and order records stay as they are. Ebda AI Studio staff are not needed; they only act on a written request that came to them directly.
+When a customer asks you to delete their data, pick them, read the warning, type their full phone number (Arabic or Latin digits) and choose **Erase customer permanently** (store owner only). Their messages and data are removed from this workspace. **It cannot be undone.** Money and order records stay as they are. Ebda AI Studio staff are not needed; they only act on a written request that came to them directly.
 
 Last checked: 2026-10-27.

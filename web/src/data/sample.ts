@@ -345,7 +345,7 @@ export function createSampleSource(): InboxSource {
       },
       async eraseContact(waId) {
         const i = contacts.findIndex((x) => x.waId === waId);
-        if (i < 0) throw new ApiError('not_found', 404);
+        if (i < 0) throw new ApiError('contact not found', 404);
         contacts.splice(i, 1);
       },
       async mergeContacts(fromWaId, intoWaId) {

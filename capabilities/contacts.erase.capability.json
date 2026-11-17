@@ -37,7 +37,7 @@
     ]
   },
   "steps": [
-    "Pick the customer on Contacts, read the warning, type the last 4 digits of their number, press Erase customer permanently",
+    "Pick the customer on Contacts, read the warning, type their full phone number (Arabic or Latin digits), press Erase customer permanently",
     "Owner route erases the contact; running import for that customer is stopped and its file deleted"
   ],
   "edgeCases": [
