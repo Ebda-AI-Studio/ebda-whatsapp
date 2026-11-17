@@ -23,9 +23,9 @@
   "roles": [
     "owner"
   ],
-  "policy": "confirm",
+  "policy": "preview",
   "undo": {
-    "class": "irreversible"
+    "class": "reversible"
   },
   "helpArticle": "whatsapp/campaigns-and-opt-out",
   "questions": {
