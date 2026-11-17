@@ -105,6 +105,12 @@ export interface InboxSource {
   currentUserId: string;
   /** The store this session is for (the upgrade card builds the Store billing link from it). */
   storeId?: string;
+  /** GET /me: this store has NO Chat workspace (Chat was never switched on for it). The app shows its own "not enabled" state and never loads lists (they would all 404). */
+  workspaceMissing?: boolean;
+  /** GET /me: the stores this person can open that have a Chat workspace (for the store picker). Undefined = the server did not say (no picker). */
+  stores?: { id: string; name: string; role: 'owner' | 'staff' }[];
+  /** Opens Chat on another store (a full reload on that store). Absent in sample data. */
+  switchStore?(storeId: string): void;
   /** The signed-in user's role in this store (GET /me); `staff` hides spending actions. */
   role: Role;
   /** Display names of staff for assignee labels. */
