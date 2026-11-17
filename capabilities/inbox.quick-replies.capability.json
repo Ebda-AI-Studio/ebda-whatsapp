@@ -1,0 +1,45 @@
+{
+  "id": "inbox.quick-replies",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "الردود السريعة",
+  "titleEn": "Quick replies",
+  "screens": [
+    "ChatPane quick replies (hard-coded 4 texts, quickReplyTexts)",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/notes-tags-and-quick-replies",
+  "questions": {
+    "ar": [
+      "ازاي اضيف رد سريع بتاعي؟",
+      "عايز ردود جاهزة",
+      "ينفع اعدل الردود السريعة؟"
+    ],
+    "en": [
+      "Can I add my own quick replies?"
+    ]
+  },
+  "steps": [
+    "Four fixed replies appear above the composer; tap to fill the box"
+  ],
+  "edgeCases": [
+    "Arabic/RTL: phone numbers, URLs and API keys stay LTR inside RTL text"
+  ],
+  "gaps": [
+    "Not merchant-editable: no UI, no API, no storage"
+  ]
+}

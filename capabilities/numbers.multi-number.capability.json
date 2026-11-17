@@ -1,0 +1,40 @@
+{
+  "id": "numbers.multi-number",
+  "status": "planned",
+  "plan": "none yet (future)",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "أكتر من رقم في نفس الحساب",
+  "titleEn": "Several numbers in one workspace",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "ينفع اربط أكتر من رقم؟",
+      "عندي فرعين وكل واحد رقم",
+      "multi number"
+    ],
+    "en": [
+      "Can I connect more than one number?"
+    ]
+  },
+  "steps": [
+    "The data model lists numbers, but sends, campaigns, catalog and templates use ONE active number (activeNumber helper)"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "No per-number routing UI or number picker"
+  ]
+}

@@ -5,10 +5,13 @@ import type { WalletDto } from '../data/billing';
 import { ApiError } from '../data/api';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
-import { formatMoney } from '../lib/format';
+import { formatMoney, templateTitle } from '../lib/format';
 import { LoadError } from './LoadError';
 
-type Props = { t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number; onClose: () => void };
+type Props = {
+  t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number; onClose: () => void;
+  /** goes to the Templates screen (the empty state points there) */
+  onOpenTemplates?: (() => void) | undefined };
 type AudienceMode = 'segment' | 'tags' | 'everyone';
 type ParamDraft = { kind: 'text' | 'name' | 'link'; value: string };
 
@@ -26,7 +29,7 @@ function previewText(body: string, params: ParamDraft[], lang: Lang): string {
   });
 }
 
-export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
+export function CampaignForm({ t, lang, source, api, now, onClose, onOpenTemplates }: Props) {
   const [name, setName] = useState('');
   const [mode, setMode] = useState<AudienceMode>('segment');
   const [segments, setSegments] = useState<SegmentDto[]>([]);
@@ -51,7 +54,8 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
   // Campaigns are marketing: only approved marketing templates (utility messages go out per order, not as broadcasts).
   const loadTemplates = useCallback(() => {
     setTemplatesFailed(false);
-    void source.templates().then((all) => setTemplates(all.filter((x) => x.status === 'APPROVED' && x.category === 'MARKETING')), () => setTemplatesFailed(true));
+    // Paused and pending marketing templates stay in the list, greyed with the reason, so a merchant sees why one cannot be picked instead of it vanishing.
+    void source.templates().then((all) => setTemplates(all.filter((x) => x.category === 'MARKETING' && ['APPROVED', 'PAUSED', 'PENDING'].includes(x.status))), () => setTemplatesFailed(true));
   }, [source]);
   useEffect(loadTemplates, [loadTemplates]);
 
@@ -70,10 +74,11 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
     return () => { stale = true; clearTimeout(id); };
   }, [api, criteria]);
 
-  const template = templates.find((x) => `${x.name}|${x.language}` === tplKey) ?? null;
+  const usable = templates.filter((x) => x.status === 'APPROVED');
+  const template = usable.find((x) => `${x.name}|${x.language}` === tplKey) ?? null;
   const pickTemplate = (key: string) => {
     setTplKey(key);
-    const tpl = templates.find((x) => `${x.name}|${x.language}` === key);
+    const tpl = usable.find((x) => `${x.name}|${x.language}` === key);
     setParams(Array.from({ length: tpl?.paramCount ?? 0 }, () => ({ kind: 'text', value: '' })));
   };
   const setParam = (i: number, p: Partial<ParamDraft>) => setParams((ps) => ps.map((x, j) => (j === i ? { ...x, ...p } : x)));
@@ -190,12 +195,17 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
         <fieldset className="step">
           <legend>{t.stepMessage}</legend>
           {templatesFailed ? <LoadError t={t} onRetry={loadTemplates} />
-            : templates.length === 0 ? <p className="muted">{t.noTemplates}</p> : (
+            : usable.length === 0 ? (
+              <>
+                <p className="muted">{t.noTemplates}</p>
+                {onOpenTemplates && <button type="button" className="btn" onClick={onOpenTemplates}>{t.tplCampaignGoTemplates}</button>}
+              </>
+            ) : (
             <label className="field">
               <span>{t.pickApproved}</span>
               <select value={tplKey} onChange={(e) => pickTemplate(e.target.value)}>
                 <option value="" disabled>—</option>
-                {templates.map((x) => <option key={`${x.name}|${x.language}`} value={`${x.name}|${x.language}`}>{t.templateNames[x.name] ?? x.name}</option>)}
+                {templates.map((x) => <option key={`${x.name}|${x.language}`} value={`${x.name}|${x.language}`} disabled={x.status !== 'APPROVED'}>{x.status === 'APPROVED' ? templateTitle(t, x) : t.tplUnavailableOption(templateTitle(t, x), t.tplStatuses[x.status] ?? x.status)}</option>)}
               </select>
             </label>
           )}

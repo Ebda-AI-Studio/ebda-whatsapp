@@ -1,0 +1,52 @@
+{
+  "id": "wallet.statement",
+  "status": "live",
+  "area": "billing",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "كشف الحساب الشهري",
+  "titleEn": "Monthly statement and CSV",
+  "screens": [
+    "WalletScreen Statement",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "GET /stores/:storeId/wallet/statement?month=",
+    "GET /stores/:storeId/wallet/estimate?category=&count="
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/wallet-top-ups-and-refunds",
+  "questions": {
+    "ar": [
+      "عايز كشف حساب الشهر",
+      "ازاي احمل CSV؟",
+      "اتخصم مني ليه؟",
+      "kashf 7esab"
+    ],
+    "en": [
+      "How do I download my statement?",
+      "Why was I charged?"
+    ]
+  },
+  "steps": [
+    "Wallet > Statement; pick month; totals by kind and category; Download CSV"
+  ],
+  "edgeCases": [
+    "Long statements truncated on screen: download CSV",
+    "Card-billed messages shown for information",
+    "Entries priced at delivery time (rate version in effect)",
+    "Staff gets 403 on statement"
+  ],
+  "gaps": [
+    "No VAT invoice (platform not VAT-registered: VAT 0)"
+  ]
+}

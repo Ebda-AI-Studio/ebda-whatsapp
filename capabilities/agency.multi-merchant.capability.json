@@ -1,0 +1,40 @@
+{
+  "id": "agency.multi-merchant",
+  "status": "planned",
+  "plan": "future",
+  "area": "access",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "وكالة بتدير أكتر من تاجر",
+  "titleEn": "Agency managing many merchants",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "عندي كذا عميل عايز ادير حساباتهم",
+      "ينفع حساب واحد لكذا متجر؟",
+      "ازاي وكالة بتدير أكتر من تاجر؟"
+    ],
+    "en": [
+      "I am an agency running several merchants"
+    ]
+  },
+  "steps": [
+    "One workspace per Store id; no cross-store switcher or agency role"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "No agency role, store switcher or consolidated billing"
+  ]
+}

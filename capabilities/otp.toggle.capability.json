@@ -1,0 +1,56 @@
+{
+  "id": "otp.toggle",
+  "status": "live",
+  "area": "otp",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إرسال كود التحقق على واتساب",
+  "titleEn": "Send store-login one-time codes over WhatsApp",
+  "screens": [
+    "BotScreen Switches: store-login codes",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "POST /stores/:storeId/store-link/settings/preview",
+    "PATCH /stores/:storeId/store-link/settings",
+    "RPC WhatsAppOtp.sendOtp(storeId, phone, code) (internal)"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/verification-codes-on-whatsapp",
+  "questions": {
+    "ar": [
+      "ينفع كود التحقق يوصل على واتساب؟",
+      "عملائي مش بيوصلهم الكود على الايميل",
+      "otp 3ala whatsapp"
+    ],
+    "en": [
+      "Can verification codes go over WhatsApp?"
+    ]
+  },
+  "steps": [
+    "Open Bot in Settings, then Switches",
+    "Turn Send store-login codes over WhatsApp on: confirm, because each code costs money",
+    "Needs your own number and an approved otp_code template; email stays the main channel"
+  ],
+  "edgeCases": [
+    "Egypt (+20) only by default",
+    "Limits: 5 codes per phone per 10 min, 30 per workspace per window",
+    "Code never logged; stored masked",
+    "Platform sign-in codes use a separate platform number (WA-OTP-SENDER-1), not the merchant number",
+    "Failures: invalid, country_not_allowed, not_found, disabled, no_number, template_unavailable, rate_limited, send_failed, wallet_empty, unavailable",
+    "Turning ON needs a single-use confirm token from the preview step; every toggle writes an audit row (store_link.toggle)"
+  ],
+  "gaps": [
+    "No per-merchant policy editing (country, rate)"
+  ],
+  "assistantNote": "each code costs money"
+}

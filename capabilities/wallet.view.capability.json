@@ -1,0 +1,49 @@
+{
+  "id": "wallet.view",
+  "status": "live",
+  "area": "billing",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "رصيد المحفظة",
+  "titleEn": "Wallet balance, held amount, debt, overdraft",
+  "screens": [
+    "WalletScreen",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "GET /stores/:storeId/wallet"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/wallet-top-ups-and-refunds",
+  "questions": {
+    "ar": [
+      "رصيدي كام؟",
+      "يعني إيه رصيد محجوز؟",
+      "عليا دين ليه؟",
+      "ra2eedi kam"
+    ],
+    "en": [
+      "What is my balance?",
+      "What does held mean?"
+    ]
+  },
+  "steps": [
+    "Wallet > Your balance: available, held for messages on their way, debt"
+  ],
+  "edgeCases": [
+    "Overdraft 50 EGP for service messages; marketing stops at zero",
+    "Debt is paid first by the next top-up",
+    "Frozen during a deletion request"
+  ],
+  "gaps": []
+}

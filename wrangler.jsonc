@@ -25,7 +25,7 @@
   // os/ops/ebda-logs.mjs and watched by its prod-watch workflow. The job must also list "ebda-wa" in its ScriptName filter
   // (ebda-store scripts/ops/cf-logs-setup.sh). URLs and console lines land there: never log a phone number or a message body.
   "logpush": true,
-  // One daily pass (Phase 7): re-send subscriptions, repair lost top-up webhooks. No cron shorter than a day.
+  // One daily pass (Phase 7): re-send subscriptions, repair lost top-up webhooks, pull the daily USD->EGP rate (WA-FX-DAILY-1). No cron shorter than a day.
   "triggers": { "crons": ["17 1 * * *"] },
   "vars": {
     "META_GRAPH_VERSION": "v25.0",
@@ -38,6 +38,8 @@
     // Workers AI price of the default model @cf/meta/llama-3.3-70b-instruct-fp8-fast, USD per million tokens; verified 2026-10-27 against https://developers.cloudflare.com/workers-ai/platform/pricing/
     "AI_PRICE_INPUT_USD_PER_M": "0.293",
     "AI_PRICE_OUTPUT_USD_PER_M": "2.253",
+    // Voice-note speech-to-text @cf/openai/whisper-large-v3-turbo, USD per audio minute; verified 2026-11-12 against https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/ (46.63 neurons/min). Var VOICE_DAILY_CAP (default 60) = voice notes one store may have transcribed per UTC day.
+    "AI_STT_PRICE_USD_PER_MIN": "0.000513",
     "SUPPORT_EMAIL": "ahlan@ebda.app",
     // This Worker's public origin: tracked campaign links and Store proof links are built on it.
     "PUBLIC_BASE_URL": "https://wa.ebda.app",

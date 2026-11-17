@@ -3,6 +3,7 @@ import type { Env } from '../env';
 import { DEFAULT_CHUNK_ROWS, exportTable, highWaterMarks } from './backup-export';
 import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, signManifest, toNdjson, verifyManifestSignature, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
+import { SL_OPS, doStorageOps, type SlOp } from './smart-layer/storage-do';
 import type { SendResult } from './meta/client';
 import type { CoexMessage, InboundMessage, StatusEvent, StatusPricing, SyncedContact } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
@@ -15,26 +16,33 @@ import { dropErased } from './erasure';
 import { deleteTargets } from './erasure-targets';
 import { exportContact, mergeContacts, renameContact } from './contact-data';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
-import { graphTokenFor } from './numbers/token';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptOutMessage, matchOptIn } from './consent';
-import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, debtHold, storeHold, suspensionState, type SuspensionState, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { syncSuspendedMirror } from './ops/suspension-mirror';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
-import { DAILY_KINDS, addTask, dailyHour, backoffMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
+import { writeSessionState } from './identity/session';
+import { DAILY_KINDS, addTask, dailyHour, retryDelayMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
 import { normaliseText, phoneDigits } from './text-normalise';
 import { conversationDto, type ConversationRow } from './dto';
 import type { ConversationDto, NoteDto } from './api/contract';
 import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './throttle';
 import { bodyTextOf, componentsSchema, paramCount, renderTemplate } from './templates';
+import { isEnumLikeReason, knownReason, rejectionAdvice } from './template-advice';
+import { refreshPendingWith } from './templates-service';
+import { graphTokenFor } from './numbers/token';
 import type { TemplateDto } from './api/contract';
 import type { StoreEvent } from './api/store-events';
 import type { z } from 'zod';
 import type { LinkHost, OutboundRow } from './store-link/host';
 import { applyStoreEvent, type StoreEventOutcome } from './store-link/events';
 import { getState, putState, readSettings, writeSettings, type StoreLinkSettings } from './store-link/settings';
-import { ensureCatalogReconcile, LAST_SYNC_KEY, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
+import { CONFIRM_MAX_PENDING, CONFIRM_TTL_MS, type ConfirmOutcome } from './settings-confirm';
+import { ensureCatalogReconcile, runCatalogReconcile, runCatalogSync } from './store-link/catalog';
 import { provisionCatalog, type ProvisionResult } from './store-link/catalog-provision';
+import { commerceAuth, ensureCommerce, type CommerceState } from './store-link/catalog-commerce';
+import { catalogStatus } from './store-link/catalog-status';
 import { errClass, safeMessage, alert, bindAlerts } from './observability';
 import { recordClick } from './campaigns/campaigns';
 import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, cancelCampaign, createCampaign, deleteDraft, endInstance, gateFor, getCampaign, launchCampaign, listCampaigns, pauseCampaign, resumeCampaign, sendCampaign, settleWallet, sweepCampaigns, type CreateArgs } from './campaigns/campaigns';
@@ -44,8 +52,11 @@ import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importStat
 import type { DigestDto, AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
 import { funnelOnce } from './funnel';
 import { digestCounts, digestEnabled, setDigestEnabled } from './digest';
-import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
+import { holdCredits, lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, expirePackUnused, grantCredits, lastGrantStart, postCredit, releaseHold, revokeGrantExcess, settleHold, upgradeGrant, type CreditKind, type HoldResult, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
+import { abandonVoiceTurn } from './ai/agent';
+import { dropProfile } from './ai/context';
+import { DIGEST_HOUR_LOCAL, ensureDigestTask, prepareOwnerNotice, runHandoffDigest } from './ai/handoff-notify';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
 import { OTP_RATE_WINDOW_MS } from './otp-policy';
@@ -64,6 +75,7 @@ import { testConnector } from './connectors/registry';
 import { connectorDto, deleteConnector, listConnectors, planConnectorPut, writeConnector, type PutRefusal } from './connectors/store';
 import type { ConnectorDto, ConnectorPut } from './api/contract';
 import { Billing, type ClaimBill } from './billing/engine';
+import { unusedCreditsToRemove } from '../../foundation/instapay-state';
 import { checkMirror, drainOutbox } from './billing/mirror';
 import { buildStatement } from './billing/statement';
 import { runTrueup } from './billing/trueup';
@@ -88,11 +100,16 @@ export const INLINE_BODY_BYTES = 1024;
 export const WS_EXP_HEADER = 'x-socket-token-exp';
 export const WS_ROLE_HEADER = 'x-socket-role';
 export const WS_USER_HEADER = 'x-socket-user';
+export const WS_SESSION_HEADER = 'x-socket-session';
+/** WA-6: a socket never outlives this, whatever the token's own expiry (the client reconnects through the full guard). */
+export const WS_MAX_LIFETIME_S = 600;
+/** WA-6: how often open sockets are re-checked against the live membership and the session. */
+export const WS_SWEEP_MS = 60_000;
 /** Close code for a socket whose access token has expired: the client refreshes its token and reconnects. */
 export const WS_CLOSE_TOKEN_EXPIRED = 4401;
 /** Close code for a staff socket whose seat is gone (removed, left the team, or beyond the package's limit): it receives nothing more (WA-SEATS-1). */
 export const WS_CLOSE_NO_SEAT = 4403;
-type SocketAttachment = { exp: number; role: string; userId?: string };
+type SocketAttachment = { exp: number; role: string; userId?: string; sessionId?: string };
 export const BOT_TURN_MAX_ATTEMPTS = 6;
 export const STALE_CLAIM_MS = 2 * 60 * 1000;
 /** failed sits between sent and delivered: it beats a late 'sent', but never undoes a delivery. */
@@ -102,6 +119,14 @@ export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; st
 export type CoexBatch = { phoneNumberId: string; echoes: CoexMessage[]; history: CoexMessage[]; contacts: SyncedContact[] };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
+const TEMPLATE_COLS = 'name, language, category, status, components, rejected_reason, updated_at, meta_id, label';
+type TemplateRowSql = { name: string; language: string; category: string; status: string; components: string; rejected_reason: string | null; updated_at: number; meta_id: string | null; label: string | null };
+const TEMPLATE_EDIT_DAY_MS = 86_400_000;
+const TEMPLATE_EDIT_MONTH_MS = 30 * 86_400_000;
+const TEMPLATE_EDITS_PER_MONTH = 10;
+const TEMPLATE_INFLIGHT_MS = 5 * 60_000;
+const TEMPLATE_PENDING_AFTER_MS = 60 * 60_000;
+
 export type OutboundRefusal = 'window_closed' | 'opted_out' | 'plan_blocked' | 'plan_required' | 'wallet_empty' | 'funding_unknown' | 'rate_unavailable' | 'template_not_approved' | 'unsupported_media' | 'invalid_request' | 'not_found';
 export type QueueOutboundResult = { ok: true; message: MessageDto; job: SendJob | null } | { ok: false; reason: OutboundRefusal; message?: string };
 /** What a scheduled task may carry. Stored as JSON and re-validated when it runs. */
@@ -737,13 +762,13 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** running | scheduled -> paused for one reason, on one number (or every number when null). The merchant resumes them; nothing here ever does. */
-  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused', now = Date.now()): Promise<number> {
+  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused' | 'store_suspended' | 'wallet_empty', now = Date.now(), park = false): Promise<number> {
     const ids = this.sql
       .exec<{ id: string }>(`SELECT id FROM campaigns WHERE status IN ('running', 'scheduled') ${phoneNumberId === null ? '' : 'AND phone_number_id = ?'}`, ...(phoneNumberId === null ? [] : [phoneNumberId]))
       .toArray();
     let n = 0;
     for (const { id } of ids) {
-      const r = await pauseCampaign(this.host(), id, reason, now);
+      const r = await pauseCampaign(this.host(), id, reason, now, park);
       if (r.ok) { n++; await endInstance(this.host(), id, this.campaignAttempt(id)); }
     }
     return n;
@@ -755,8 +780,18 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { paused: suspended ? await this.pauseCampaignsOn(null, 'operator_paused', now) : 0 };
   }
 
+  /** Every reason this workspace may not spend (operator, Store, wallet debt): what D1's `suspended_*` is derived from (`syncSuspendedMirror`). */
+  async suspensionState(): Promise<SuspensionState> {
+    return suspensionState(this.sql);
+  }
+
   async suspended(): Promise<boolean> {
     return isSuspended(this.sql);
+  }
+
+  /** The Store hold's reason (STORE-STANDING-1), or null: the operator unsuspend keeps D1 in step with it. */
+  async storeHold(): Promise<string | null> {
+    return storeHold(this.sql);
   }
 
   async throttleReport(phoneNumberId: string, now = Date.now()): Promise<ThrottleReport> {
@@ -870,34 +905,104 @@ export class WorkspaceDO extends DurableObject<Env> {
     return out;
   }
 
-  async listTemplates(): Promise<TemplateDto[]> {
+  async listTemplates(now = Date.now()): Promise<TemplateDto[]> {
     return this.sql
-      .exec<{ name: string; language: string; category: string; status: string; components: string; rejected_reason: string | null }>(
-        'SELECT name, language, category, status, components, rejected_reason FROM templates ORDER BY name, language',
-      )
+      .exec<TemplateRowSql>(`SELECT ${TEMPLATE_COLS} FROM templates ORDER BY name, language`)
       .toArray()
-      .map((t) => {
-        const comps = componentsSchema.safeParse(JSON.parse(t.components));
-        const parts = comps.success ? comps.data : [];
-        return {
-          name: t.name, language: t.language, category: t.category as TemplateDto['category'], status: t.status as TemplateDto['status'],
-          bodyText: bodyTextOf(parts), paramCount: paramCount(parts, t.category), rejectedReason: t.rejected_reason,
-        };
-      });
+      .map((t) => this.templateDto(t, now));
+  }
+
+  private templateDto(t: TemplateRowSql, now: number): TemplateDto {
+    const comps = componentsSchema.safeParse(JSON.parse(t.components));
+    const parts = comps.success ? comps.data : [];
+    return {
+      name: t.name, language: t.language, category: t.category as TemplateDto['category'], status: t.status as TemplateDto['status'],
+      bodyText: bodyTextOf(parts), paramCount: paramCount(parts, t.category), rejectedReason: t.rejected_reason,
+      label: t.label, components: parts, updatedAt: t.updated_at, editAllowance: this.editAllowanceOf(t.name, t.language, t.status, now),
+      ...(rejectionAdvice(t.rejected_reason, t.status) ? { advice: rejectionAdvice(t.rejected_reason, t.status)! } : {}),
+    };
+  }
+
+  /** One template with everything the detail screen and the editor need; null when we do not have it. */
+  async getTemplate(name: string, language: string, now = Date.now()): Promise<(TemplateDto & { metaId: string | null; label: string | null; submittedAt: number | null; components: NonNullable<TemplateDto['components']> }) | null> {
+    const t = this.sql.exec<TemplateRowSql>(`SELECT ${TEMPLATE_COLS}, submitted_at FROM templates WHERE name = ? AND language = ?`, name, language).toArray()[0];
+    if (!t) return null;
+    const comps = componentsSchema.safeParse(JSON.parse(t.components));
+    return { ...this.templateDto(t, now), metaId: t.meta_id, label: t.label, submittedAt: (t as TemplateRowSql & { submitted_at: number | null }).submitted_at, components: comps.success ? comps.data : [] };
+  }
+
+  private editAllowanceOf(name: string, language: string, status: string, now: number): NonNullable<TemplateDto['editAllowance']> {
+    if (status === 'REJECTED' || status === 'PAUSED') return { allowed: true };
+    if (status !== 'APPROVED') return { allowed: false, reason: 'status', retryAt: null };
+    // Meta: an APPROVED template may be edited once per 24 h and 10 times per 30 days. If both bite, the later unlock wins.
+    const last = this.sql.exec<{ at: number | null }>('SELECT max(at) AS at FROM template_edits WHERE name = ? AND language = ? AND at > ?', name, language, now - TEMPLATE_EDIT_DAY_MS).toArray()[0]?.at ?? null;
+    const month = this.sql.exec<{ at: number }>('SELECT at FROM template_edits WHERE name = ? AND language = ? AND at > ? ORDER BY at DESC LIMIT ?', name, language, now - TEMPLATE_EDIT_MONTH_MS, TEMPLATE_EDITS_PER_MONTH).toArray();
+    const daily = last === null ? null : last + TEMPLATE_EDIT_DAY_MS;
+    const monthly = month.length >= TEMPLATE_EDITS_PER_MONTH ? month[month.length - 1]!.at + TEMPLATE_EDIT_MONTH_MS : null;
+    if (daily === null && monthly === null) return { allowed: true };
+    return monthly !== null && (daily === null || monthly >= daily) ? { allowed: false, reason: 'monthly', retryAt: monthly } : { allowed: false, reason: 'daily', retryAt: daily! };
+  }
+
+  async editAllowance(name: string, language: string, now = Date.now()): Promise<NonNullable<TemplateDto['editAllowance']>> {
+    const t = this.sql.exec<{ status: string }>('SELECT status FROM templates WHERE name = ? AND language = ?', name, language).toArray()[0];
+    return this.editAllowanceOf(name, language, t?.status ?? '', now);
+  }
+
+  /**
+   * One edit of a template in flight at a time (the DO runs this synchronously, so two callers can never both win). A claim older than two
+   * minutes is dead (the call that took it was cut off) and is taken over. False = another edit is running.
+   */
+  async claimTemplateEdit(name: string, language: string, now = Date.now()): Promise<boolean> {
+    const r = this.sql.exec(
+      "INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE CAST(store_state.value AS INTEGER) < ?",
+      `templates.editing:${name}:${language}`, String(now), now - 120_000,
+    );
+    return r.rowsWritten > 0;
+  }
+
+  async releaseTemplateEdit(name: string, language: string): Promise<void> {
+    this.sql.exec('DELETE FROM store_state WHERE key = ?', `templates.editing:${name}:${language}`);
+  }
+
+  async recordTemplateEdit(name: string, language: string, at: number): Promise<void> {
+    this.sql.exec('INSERT INTO template_edits (name, language, at) VALUES (?, ?, ?)', name, language, at);
+  }
+
+  async removeTemplate(name: string, language: string): Promise<boolean> {
+    return this.ctx.storage.transactionSync(() => {
+      const r = this.sql.exec('DELETE FROM templates WHERE name = ? AND language = ?', name, language);
+      this.sql.exec('DELETE FROM template_edits WHERE name = ? AND language = ?', name, language);
+      return r.rowsWritten > 0;
+    });
+  }
+
+  /** Whether a campaign that has not finished, or a message still waiting to leave, uses this template (deleting it would break them). */
+  async templateInUse(name: string, language: string): Promise<'campaign' | 'queued' | null> {
+    if (this.sql.exec("SELECT 1 FROM campaigns WHERE template_name = ? AND template_language = ? AND status IN ('draft', 'scheduled', 'running', 'paused') LIMIT 1", name, language).toArray().length > 0) return 'campaign';
+    if (this.sql.exec("SELECT 1 FROM messages WHERE direction = 'out' AND template_name = ? AND template_lang = ? AND status IN ('queued', 'retry') LIMIT 1", name, language).toArray().length > 0) return 'queued';
+    return null;
+  }
+
+  /** Submitted templates Meta has not answered for `olderThanMs`: the sweep asks Meta about them (a status webhook can be lost or arrive before our save). */
+  async pendingTemplates(olderThanMs: number, now = Date.now()): Promise<{ name: string; language: string; metaId: string | null }[]> {
+    return this.sql.exec<{ name: string; language: string; meta_id: string | null }>("SELECT name, language, meta_id FROM templates WHERE status = 'PENDING' AND updated_at < ? ORDER BY updated_at LIMIT 20", now - olderThanMs)
+      .toArray().map((r) => ({ name: r.name, language: r.language, metaId: r.meta_id }));
   }
 
   /** Replaces the template set with what Meta returned (the caller fetched every page, so absence means deleted at Meta). */
-  async syncTemplates(items: { name: string; language: string; category: string; status: string; components: unknown[]; rejectedReason: string | null }[]): Promise<{ upserted: number; removed: number }> {
+  async syncTemplates(items: { name: string; language: string; category: string; status: string; components: unknown[]; rejectedReason: string | null; metaId?: string | null }[]): Promise<{ upserted: number; removed: number }> {
     return this.ctx.storage.transactionSync(() => {
       const now = Date.now();
       const keep = new Set<string>();
       for (const t of items) {
         keep.add(`${t.name}\u0000${t.language}`);
-        this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), t.rejectedReason, now);
+        this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), t.rejectedReason, now, t.metaId ?? null);
       }
       let removed = 0;
       for (const t of this.sql.exec<{ id: number; name: string; language: string }>('SELECT id, name, language FROM templates').toArray()) {
         if (keep.has(`${t.name}\u0000${t.language}`)) continue;
+        // a submission still on its way to Meta (reserved, no Meta id yet) is not "deleted at Meta"
+        if (this.sql.exec("SELECT 1 FROM templates WHERE id = ? AND meta_id IS NULL AND status = 'PENDING' AND updated_at > ?", t.id, now - TEMPLATE_INFLIGHT_MS).toArray().length > 0) continue;
         this.sql.exec('DELETE FROM templates WHERE id = ?', t.id);
         removed++;
       }
@@ -905,18 +1010,50 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
   }
 
-  /** A template we just submitted to Meta. */
-  async saveSubmittedTemplate(t: { name: string; language: string; category: string; status: string; components: unknown[] }): Promise<void> {
-    this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), null, Date.now());
+  /** A template we just submitted (or re-submitted) to Meta. `category` is what META answered, never what was requested. */
+  async saveSubmittedTemplate(t: { name: string; language: string; category: string; status: string; components: unknown[]; metaId?: string | null; label?: string | null }): Promise<void> {
+    const now = Date.now();
+    this.upsertTemplate(t.name, t.language, t.category, t.status, JSON.stringify(t.components), null, now, t.metaId ?? null, t.label ?? null, now);
+    // Meta's answer normally arrives by webhook within minutes; if it is lost (or beat this save) the sweep asks Meta once the row is an hour old.
+    if (t.status === 'PENDING') await this.schedule('template_refresh', now + TEMPLATE_PENDING_AFTER_MS);
+  }
+
+  /**
+   * Claims name+language BEFORE the Meta call, atomically (the DO runs this synchronously), so two taps or two staff tabs can never both submit.
+   * False = the name is taken. The caller removes the row again if Meta refuses; a row left by a crashed call is dropped by the pending sweep.
+   */
+  async reserveTemplate(t: { name: string; language: string; category: string; components: unknown[]; label: string | null }): Promise<boolean> {
+    const now = Date.now();
+    const r = this.sql.exec(
+      "INSERT INTO templates (name, language, category, status, components, rejected_reason, updated_at, meta_id, label, submitted_at) VALUES (?, ?, ?, 'PENDING', ?, NULL, ?, NULL, ?, ?) ON CONFLICT(name, language) DO NOTHING",
+      t.name, t.language, t.category, JSON.stringify(t.components), now, t.label, now,
+    );
+    if (r.rowsWritten > 0) await this.schedule('template_refresh', now + TEMPLATE_PENDING_AFTER_MS);
+    return r.rowsWritten > 0;
+  }
+
+  /** Whether the brand's starter set is fully in place for this WABA (written by the connect hook or the install-defaults retry). */
+  async starterInstalled(wabaId: string): Promise<boolean> {
+    return this.sql.exec("SELECT 1 FROM store_state WHERE key = ? AND value = 'done'", `templates.starter:${wabaId}`).toArray().length > 0;
+  }
+
+  async markStarterInstalled(wabaId: string): Promise<void> {
+    this.sql.exec("INSERT INTO store_state (key, value) VALUES (?, 'done') ON CONFLICT(key) DO UPDATE SET value = 'done'", `templates.starter:${wabaId}`);
   }
 
   async hasTemplate(name: string, language: string): Promise<boolean> {
     return this.sql.exec('SELECT 1 FROM templates WHERE name = ? AND language = ?', name, language).toArray().length > 0;
   }
 
-  /** Meta's template-status webhook. Unknown templates are ignored (they will arrive with the next sync). */
-  async applyTemplateStatus(name: string, language: string, status: string, reason: string | null): Promise<{ applied: boolean }> {
-    const r = this.sql.exec('UPDATE templates SET status = ?, rejected_reason = ?, updated_at = ? WHERE name = ? AND language = ?', status, reason, Date.now(), name, language);
+  /** Meta's template-status webhook (or a sweep). Unknown templates are ignored (they arrive with the next sync). Reason NONE/empty is no reason; APPROVED clears it. */
+  async applyTemplateStatus(name: string, language: string, status: string, reason: string | null, metaId: string | null = null): Promise<{ applied: boolean }> {
+    // Meta redelivers and does not keep order: a PENDING that arrives after a decision is a replay, never a step backwards. (Our own re-review after an
+    // edit is written by saveSubmittedTemplate, not by a webhook, so it is unaffected; an appeal that is really decided arrives as APPROVED / REJECTED.)
+    if (status === 'PENDING' && this.sql.exec("SELECT 1 FROM templates WHERE name = ? AND language = ? AND status <> 'PENDING'", name, language).toArray().length > 0) return { applied: false };
+    const clean = status === 'APPROVED' || !reason || reason === 'NONE' ? null : reason;
+    // The real set of rejection codes is not in Meta's docs: an unfamiliar enum is logged (code only, never free text) so it can be added to the advice and the fixture.
+    if (clean && status === 'REJECTED' && !knownReason(clean) && isEnumLikeReason(clean)) console.log(JSON.stringify({ event: 'template_reason_unmapped', code: clean }));
+    const r = this.sql.exec('UPDATE templates SET status = ?, rejected_reason = ?, meta_id = COALESCE(?, meta_id), updated_at = ? WHERE name = ? AND language = ?', status, clean, metaId, Date.now(), name, language);
     return { applied: r.rowsWritten > 0 };
   }
 
@@ -966,11 +1103,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     return out;
   }
 
-  private upsertTemplate(name: string, language: string, category: string, status: string, components: string, rejectedReason: string | null, now: number): void {
+  private upsertTemplate(name: string, language: string, category: string, status: string, components: string, rejectedReason: string | null, now: number, metaId: string | null = null, label: string | null = null, submittedAt: number | null = null): void {
     this.sql.exec(
-      `INSERT INTO templates (name, language, category, status, components, rejected_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(name, language) DO UPDATE SET category = excluded.category, status = excluded.status, components = excluded.components, rejected_reason = excluded.rejected_reason, updated_at = excluded.updated_at`,
-      name, language, category, status, components, rejectedReason, now,
+      `INSERT INTO templates (name, language, category, status, components, rejected_reason, updated_at, meta_id, label, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(name, language) DO UPDATE SET category = excluded.category, status = excluded.status, components = excluded.components, rejected_reason = excluded.rejected_reason, updated_at = excluded.updated_at,
+         meta_id = COALESCE(excluded.meta_id, meta_id), label = COALESCE(excluded.label, label), submitted_at = COALESCE(excluded.submitted_at, submitted_at)`,
+      name, language, category, status, components, rejectedReason, now, metaId, label, submittedAt,
     );
   }
 
@@ -1088,6 +1226,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       ensureConversation: (waId, now, profileName) => this.ensureConversation(waId, now, profileName),
       insertOutbound: (conversationId, row, now) => this.insertOutbound(conversationId, row, now),
       emitConversationUpdated: (id) => this.emitConversationUpdated(id),
+      recordVoice: (id, transcript) => this.recordVoice(id, transcript),
       arm: () => this.arm(),
       eraseContact: (waId) => this.eraseContact(waId),
       deliver: (job) => this.deliverNow(job),
@@ -1144,7 +1283,11 @@ export class WorkspaceDO extends DurableObject<Env> {
   async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null; shared?: boolean }): Promise<StoreEventOutcome> {
     await this.ensurePricing();
     if (opts.phoneNumberId) await this.repullIfUnknown(opts.phoneNumberId, Date.now());
-    return applyStoreEvent(this.host(), event, opts);
+    const result = await applyStoreEvent(this.host(), event, opts);
+    // STORE-STANDING-1: a Store suspension or deletion also pauses every running / scheduled campaign (nothing resumes them on reactivation:
+    // the merchant resumes, as after an operator suspension). The hold flag itself already stops every send at its claim.
+    if (result.status === 'applied' && (event.type === 'store.suspended' || event.type === 'store.deleted')) await this.pauseCampaignsOn(null, 'store_suspended');
+    return result;
   }
 
   /**
@@ -1219,6 +1362,31 @@ export class WorkspaceDO extends DurableObject<Env> {
     return readSettings(this.host());
   }
 
+  /** SETTINGS-CONFIRM-1: issues a single-use token for turning customer-visible sending on. At most CONFIRM_MAX_PENDING live tokens: the oldest go first. */
+  async issueSettingsConfirm(actor: string, hash: string, now = Date.now()): Promise<{ token: string; expiresAt: number }> {
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
+    const expiresAt = now + CONFIRM_TTL_MS;
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM store_state WHERE key LIKE 'confirm.settings.%' AND CAST(json_extract(value, '$.exp') AS INTEGER) < ?", now);
+      this.sql.exec("DELETE FROM store_state WHERE key IN (SELECT key FROM store_state WHERE key LIKE 'confirm.settings.%' ORDER BY CAST(json_extract(value, '$.exp') AS INTEGER) ASC LIMIT max(0, (SELECT count(*) FROM store_state WHERE key LIKE 'confirm.settings.%') - ?))", CONFIRM_MAX_PENDING - 1);
+      this.sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?)', `confirm.settings.${token}`, JSON.stringify({ actor, hash, exp: expiresAt }));
+    });
+    return { token, expiresAt };
+  }
+
+  /** Checks and burns the token in one step (this object is single-threaded): a token is gone after ANY attempt, right or wrong. */
+  async consumeSettingsConfirm(token: string, actor: string, hash: string, now = Date.now()): Promise<ConfirmOutcome> {
+    return this.ctx.storage.transactionSync(() => {
+      const key = `confirm.settings.${token}`;
+      const raw = this.sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', key).toArray()[0]?.value;
+      if (raw === undefined) return 'invalid';
+      this.sql.exec('DELETE FROM store_state WHERE key = ?', key);
+      const row = JSON.parse(raw) as { actor: string; hash: string; exp: number };
+      if (row.exp < now) return 'expired';
+      return row.actor === actor && row.hash === hash ? 'ok' : 'mismatch';
+    });
+  }
+
   /**
    * Saves settings. A catalog id is a capability on the platform token, so changing it needs the WABA it was verified
    * against (`catalogWabaId`, checked by the caller against Meta); without it the change is refused.
@@ -1244,8 +1412,25 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   async getCatalogStatus(): Promise<CatalogStatusDto> {
-    const last = getState(this.host(), LAST_SYNC_KEY);
-    return { catalogId: readSettings(this.host()).catalogId, lastSyncAt: last ? Number(last) : null };
+    return catalogStatus(this.host());
+  }
+
+  /** "Resync now": a fresh full pass starts within seconds (an unfinished pass is left to finish). False = no catalogue is connected. */
+  async resyncCatalog(): Promise<{ started: boolean }> {
+    const host = this.host();
+    if (!readSettings(host).catalogId) return { started: false };
+    if (!getState(host, 'catalog.pass')) ensureCatalogReconcile(host, Date.now(), true);
+    else this.sql.exec("UPDATE scheduled_tasks SET due_at = ? WHERE kind = 'catalog_reconcile' AND due_at > ?", Date.now(), Date.now());
+    await this.arm();
+    return { started: true };
+  }
+
+  /** The shop button and cart on the business number, as the merchant wants them. Returns what Meta now has (null = no verified catalogue or number). */
+  async setCatalogCommerce(want: { catalogVisible: boolean; cartEnabled: boolean }): Promise<CommerceState | null> {
+    const host = this.host();
+    const auth = await commerceAuth(host);
+    if (!auth) return null;
+    return ensureCommerce(host, auth, { fresh: true, want });
   }
 
   private provisioningCatalog = false;
@@ -1458,6 +1643,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       writeAgentSettings(this.sql, plan.settings, plan.secret);
       if (faqChanged) stageFaq(this.host(), chunks, Date.now());
       if (plan.settings.enabled && !before.enabled) scheduleCatalogEmbed(this.host(), Date.now(), 0);
+      if (plan.settings.notifyPhone) ensureDigestTask(this.host(), Date.now());
     });
     await this.arm();
     return { ok: true, settings: this.agentDto() };
@@ -1519,6 +1705,10 @@ export class WorkspaceDO extends DurableObject<Env> {
   async expireAiCreditsFraction(a: { periodStart: number; num: number; den: number; ref: string }, now = Date.now()): Promise<{ expired: number }> {
     return { expired: this.ctx.storage.transactionSync(() => expireGrantFraction(this.sql, { ...a, now })) };
   }
+  /** WA-PACK-REFUND-1: expires the unused part of a refunded credit pack (see expirePackUnused). Idempotent under `ref`. */
+  async expireRefundedPack(a: { credits: number; num: number; den: number; ref: string; orderId: string }, now = Date.now()): Promise<{ expired: number; spent: number; duplicate?: true }> {
+    return this.ctx.storage.transactionSync(() => expirePackUnused(this.sql, { ...a, now }));
+  }
   /** A purchase, refund or operator adjustment: the ref makes it idempotent; an operator adjustment needs an actor and a reason. */
   async postAiCredits(a: { kind: Extract<CreditKind, 'purchase' | 'refund' | 'adjustment'>; amount: number; ref: string; actor?: string; note?: string }, now = Date.now()): Promise<Posted | { ok: false; reason: 'actor_and_note_required' }> {
     if (a.kind === 'adjustment' && (!a.actor || !a.note)) return { ok: false, reason: 'actor_and_note_required' };
@@ -1577,6 +1767,52 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
     await this.flushArm();
     return out;
+  }
+
+  /**
+   * InstaPay auto-confirm revert, wallet half (INSTAPAY-REVERT-1): removes the part of ONE top-up nobody spent since it arrived, never more than the available balance and
+   * never money that arrived later; consumed credits are not clawed back. Idempotent under `ref`: the first answer is stored in `store_state`, a replay returns it and posts nothing (even when the
+   * first answer was "nothing to remove").
+   */
+  async revertInstapayWallet(a: { creditedMinor: number; creditRef: string; ref: string; actor: string; note: string }, now = Date.now()): Promise<{ removedMinor: number; usedMinor: number }> {
+    const out = this.ctx.storage.transactionSync(() => {
+      const key = `instapay.revert:${a.ref}`;
+      const prior = this.sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', key).toArray()[0];
+      if (prior) return JSON.parse(prior.value) as { removedMinor: number; usedMinor: number };
+      // INSTAPAY-REVERT-1: what is removed is max(0, min(credited - spend recorded SINCE that top-up, available balance)). Money that arrived later (a card top-up after
+      // this one) is never taken: spend after the top-up is counted against it first, and the balance only caps the result. No credit row = nothing was credited.
+      const credit = this.sql.exec<{ id: number }>('SELECT id FROM wallet_ledger WHERE ref = ?', a.creditRef).toArray()[0];
+      // Only CONSUMPTION counts as spend (Meta charges and their adjustments, AI charges): never another revert's removal (`instapay-revert:` adjustments), an operator
+      // adjustment, a refund or a chargeback, which are not this money being used (review N1).
+      const spent = credit ? this.sql.exec<{ s: number }>("SELECT coalesce(-sum(amount_minor), 0) AS s FROM wallet_ledger WHERE id > ? AND amount_minor < 0 AND kind IN ('meta_charge', 'meta_adjust', 'ai_charge')", credit.id).one().s : 0;
+      const removedMinor = credit ? unusedCreditsToRemove({ granted: a.creditedMinor, consumed: Math.min(a.creditedMinor, spent), balance: Math.max(0, this.billing.available()) }) : 0;
+      if (removedMinor > 0) this.billing.post({ kind: 'adjustment', netMinor: -removedMinor, ref: a.ref, now, actor: a.actor, note: a.note });
+      const res = { removedMinor, usedMinor: Math.max(0, a.creditedMinor - removedMinor) };
+      this.sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?)', key, JSON.stringify(res));
+      return res;
+    });
+    await this.flushArm();
+    return out;
+  }
+
+  /**
+   * InstaPay auto-confirm revert, AI-credit half: the grant of ONE package period (`grant:<periodStart>:<packageId>`) loses what nobody used (consumed and already
+   * expired credits stay as they are, the balance never goes negative). Idempotent under `ref` like the wallet half.
+   */
+  async revertInstapayAiCredits(a: { periodStart: number; packageId: string; ref: string; actor: string; note: string }, now = Date.now()): Promise<{ removedCredits: number; usedCredits: number }> {
+    return this.ctx.storage.transactionSync(() => {
+      const key = `instapay.revert:${a.ref}`;
+      const prior = this.sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', key).toArray()[0];
+      if (prior) return JSON.parse(prior.value) as { removedCredits: number; usedCredits: number };
+      const granted = this.sql.exec<{ g: number }>("SELECT coalesce(sum(amount), 0) AS g FROM credit_ledger WHERE kind = 'grant' AND ref = ?", `grant:${a.periodStart}:${a.packageId}`).one().g;
+      const charged = this.sql.exec<{ u: number }>("SELECT coalesce(-sum(amount), 0) AS u FROM credit_ledger WHERE kind = 'ai_charge' AND at >= ?", a.periodStart).one().u;
+      const expired = this.sql.exec<{ e: number }>("SELECT coalesce(-sum(amount), 0) AS e FROM credit_ledger WHERE kind = 'expire' AND parent_ref = ?", `period:${a.periodStart}`).one().e;
+      const removedCredits = unusedCreditsToRemove({ granted, consumed: charged + expired, balance: creditsAvailable(this.sql, now) });
+      if (removedCredits > 0) postCredit(this.sql, { kind: 'adjustment', amount: -removedCredits, ref: a.ref, now, actor: a.actor, note: a.note });
+      const res = { removedCredits, usedCredits: Math.max(0, granted - removedCredits) };
+      this.sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?)', key, JSON.stringify(res));
+      return res;
+    });
   }
 
   /** What a send of `count` messages would cost the wallet now. A merchant-card number costs the wallet nothing (Meta bills the card). */
@@ -1713,7 +1949,8 @@ export class WorkspaceDO extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
     // Survives hibernation: the token's expiry (epoch s) and the caller's role, so a long-lived socket is re-authorised on every push.
     const exp = Number(request.headers.get(WS_EXP_HEADER));
-    server.serializeAttachment({ exp: Number.isFinite(exp) && exp > 0 ? exp : 0, role: request.headers.get(WS_ROLE_HEADER) ?? 'unknown', userId: request.headers.get(WS_USER_HEADER) ?? '' } satisfies SocketAttachment);
+    server.serializeAttachment({ exp: Number.isFinite(exp) && exp > 0 ? exp : 0, role: request.headers.get(WS_ROLE_HEADER) ?? 'unknown', userId: request.headers.get(WS_USER_HEADER) ?? '', sessionId: request.headers.get(WS_SESSION_HEADER) ?? '' } satisfies SocketAttachment);
+    await this.schedule('ws_sweep', Date.now() + WS_SWEEP_MS);
     return new Response(null, { status: 101, webSocket: client, headers: { 'sec-websocket-protocol': 'inbox.v1' } });
   }
 
@@ -1760,6 +1997,27 @@ export class WorkspaceDO extends DurableObject<Env> {
     });
   }
 
+  /**
+   * WA-6: an open socket is re-authorised on a timer, not only at a push: past its (capped) expiry it closes 4401; a person whose Store membership is gone, or whose session
+   * is revoked, closes 4403; a changed role is re-read and applied (downgrade). A check that cannot be answered (Store or accounts down) leaves the socket for the next sweep: the lifetime cap bounds that window.
+   */
+  private async sweepSockets(nowS: number): Promise<void> {
+    const bridge = bridgeFor(this.env);
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as SocketAttachment | null;
+      const close = (code: number, why: string) => { try { ws.close(code, why); } catch { /* already closed */ } };
+      if (!att || att.exp <= nowS) { close(WS_CLOSE_TOKEN_EXPIRED, 'token expired'); continue; }
+      if (att.sessionId && (await writeSessionState(this.env, att.sessionId)) === 'revoked') { close(WS_CLOSE_NO_SEAT, 'session revoked'); continue; }
+      if (bridge && att.userId && (att.role === 'owner' || att.role === 'staff')) {
+        const live = await bridge.memberRole(this.workspaceId, att.userId);
+        if (live.ok && live.value.role === null) close(WS_CLOSE_NO_SEAT, 'not a member');
+        // A role that changed since the socket opened (owner demoted to staff, or the reverse) is rewritten now, so the next push applies the LIVE role: a demoted owner
+        // is then subject to the staff seat check (closeUnseatedSockets) instead of keeping owner reach for the rest of the socket's life.
+        else if (live.ok && live.value.role !== null && live.value.role !== att.role) ws.serializeAttachment({ ...att, role: live.value.role } satisfies SocketAttachment);
+      }
+    }
+  }
+
   private broadcast(): void {
     const pending = this.sql.exec<{ seq: number; payload: string }>('SELECT seq, payload FROM events WHERE seq > ? ORDER BY seq', this.lastBroadcast).toArray();
     if (!pending.length) return;
@@ -1803,6 +2061,20 @@ export class WorkspaceDO extends DurableObject<Env> {
   private emitMessageCreated(messageId: number): void {
     const row = this.sql.exec<MessageRow & { conversation_id: number }>(`SELECT ${MESSAGE_COLUMNS}, m.conversation_id FROM messages m WHERE m.id = ?`, messageId).toArray()[0];
     if (row) this.recordEvent({ type: 'message.created', conversationId: row.conversation_id, message: messageDto(row, this.workspaceId) });
+  }
+
+  /** Voice note outcome (see LinkHost.recordVoice). The transcript is stored like typed text: body, preview, search index. */
+  private recordVoice(messageId: number, transcript: string | null): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      const cur = this.sql.exec<{ voice_state: string | null }>('SELECT voice_state FROM messages WHERE id = ?', messageId).toArray()[0];
+      if (!cur) return false; // erased meanwhile
+      if (cur.voice_state) return true; // first write wins (a retried task never rewrites it)
+      const preview = transcript ? previewOf(transcript) : null;
+      this.sql.exec('UPDATE messages SET voice_state = ?, body = ?, preview = ?, updated_at = ? WHERE id = ?', transcript ? 'ok' : 'failed', transcript, preview, Date.now(), messageId);
+      this.indexMessage(messageId, preview);
+      this.emitMessageCreated(messageId);
+      return true;
+    });
   }
 
   private emitMessageStatus(messageId: number): void {
@@ -2116,7 +2388,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         } catch (err) {
           failed++;
           const attempts = t.attempts + 1;
-          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', attempts, now + backoffMs(attempts), safeMessage(err), t.id, t.kind);
+          this.sql.exec('UPDATE scheduled_tasks SET attempts = ?, due_at = ?, last_error = ?, lease_until = NULL WHERE id = ? AND kind = ? AND lease_until IS NOT NULL', attempts, now + retryDelayMs(err, attempts), safeMessage(err), t.id, t.kind);
           alert(`${t.kind}_failed`, { workspace: this.workspaceId, attempts, error: errClass(err) });
         }
       }
@@ -2137,6 +2409,26 @@ export class WorkspaceDO extends DurableObject<Env> {
       case 'retention_purge': {
         const r = await this.retentionPurge(now);
         return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, dailyHour('retention_purge'), BACKUP_TIME_ZONE);
+      }
+      case 'handoff_digest': {
+        const pn = (await this.env.DB.prepare("SELECT phone_number_id FROM phone_numbers WHERE workspace_id = ? AND status = 'active' ORDER BY phone_number_id LIMIT 1").bind(this.workspaceId).first<{ phone_number_id: string }>())?.phone_number_id ?? null;
+        await prepareOwnerNotice(this.host());
+        runHandoffDigest(this.host(), pn, now);
+        return readAgentSettings(this.sql).notifyPhone ? nextLocalHour(now + 3_600_000, DIGEST_HOUR_LOCAL, BACKUP_TIME_ZONE) : undefined; // asked for only while an owner number is set
+      }
+      case 'template_refresh': {
+        // No polling while nothing is waiting: the task is armed by a submission and ends when no template is PENDING any more.
+        const number = await this.env.DB.prepare("SELECT waba_id FROM phone_numbers WHERE workspace_id = ? AND status = 'active' ORDER BY rowid LIMIT 1").bind(this.workspaceId).first<{ waba_id: string }>();
+        if (number && (await this.pendingTemplates(0, now)).length > 0) {
+          const a = { token: await graphTokenFor(this.env, { wabaId: number.waba_id }), graphVersion: this.env.META_GRAPH_VERSION, wabaId: number.waba_id };
+          const r = await refreshPendingWith(this, a, TEMPLATE_PENDING_AFTER_MS, now);
+          if (!r.ok) throw new Error(`template refresh: ${r.message}`); // a Graph failure retries on the task backoff ladder
+        }
+        return this.sql.exec("SELECT 1 FROM templates WHERE status = 'PENDING' LIMIT 1").toArray().length > 0 ? now + TEMPLATE_PENDING_AFTER_MS : undefined;
+      }
+      case 'ws_sweep': {
+        await this.sweepSockets(now / 1000);
+        return this.ctx.getWebSockets().length ? now + WS_SWEEP_MS : undefined;
       }
       case 'r2_drain': {
         const stillOwed = await this.drainR2Deletes();
@@ -2200,6 +2492,8 @@ export class WorkspaceDO extends DurableObject<Env> {
           // Give up quietly after a few tries: the customer can simply write again.
           if (attempts + 1 < BOT_TURN_MAX_ATTEMPTS) throw err;
           alert('bot_turn_abandoned', { workspace: this.workspaceId, attempts: attempts + 1, error: errClass(err) });
+          // A voice note whose file never arrived is never dropped silently: the inbox says so and the customer is asked to type.
+          if (input.data.type === 'audio') await abandonVoiceTurn(this.host(), input.data, now).catch(() => undefined);
         }
         return undefined;
       }
@@ -2215,6 +2509,11 @@ export class WorkspaceDO extends DurableObject<Env> {
         return sweepCampaigns(this.host(), now);
       case 'wallet_sweep':
         return this.ctx.storage.transactionSync(() => this.billing.sweep(now)) ?? undefined;
+      case 'wallet_debt_sync':
+        // WA-DEBT-1: a debt hold pauses running / scheduled campaigns (reason wallet_empty, queued pages parked, nothing resumes them) and D1 is derived from the flags.
+        if (debtHold(this.sql)) await this.pauseCampaignsOn(null, 'wallet_empty', now, true);
+        await syncSuspendedMirror(this.env.DB, this.workspaceId, suspensionState(this.sql), now);
+        return undefined;
       case 'ledger_drain': {
         const r = await drainOutbox(this.env, this.sql, this.workspaceId, now);
         return r.remaining > 0 ? now + 5_000 : undefined;
@@ -2362,9 +2661,10 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   async eraseContact(waId: string): Promise<EraseResult> {
     const found = this.ctx.storage.transactionSync(() => {
-      const contact = this.sql.exec<{ id: number; buyer_key: string | null }>('SELECT id, buyer_key FROM contacts WHERE wa_id = ?', waId).toArray()[0];
+      const contact = this.sql.exec<{ id: number; buyer_key: string | null; profile_name: string | null }>('SELECT id, buyer_key, profile_name FROM contacts WHERE wa_id = ?', waId).toArray()[0];
       if (!contact) return { found: false, keys: 0, messages: 0, statusEvents: 0 };
       forgetBuyer(this.host(), contact.buyer_key);
+      dropProfile(this.host(), waId); // the agent's in-memory copy of the customer's Store profile (name, address) goes with the contact
       const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
       const msgs = conv
         ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null; media_r2_key: string | null; idempotency_key: string | null; direction: string }>('SELECT wamid, body_r2_key, media_r2_key, idempotency_key, direction FROM messages WHERE conversation_id = ?', conv.id).toArray()
@@ -2398,6 +2698,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       deleteTargets(this.sql, { waId, contactId: contact.id, convId: conv?.id ?? null });
       this.sql.exec('DELETE FROM contacts_fts WHERE rowid = ?', contact.id);
+      // The assistant's masked journal may carry this person's name (a customer list it read for the merchant): those rows go with them.
+      doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f)).eraseMentions([contact.profile_name ?? '', waId]);
       return { found: true, keys, messages: msgs.length, statusEvents };
     });
     // After the delete (a turn recording a step checks the message still exists, so nothing new can land): their unrolled analytics markers go too.
@@ -2442,6 +2744,34 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { vectors };
   }
 
+  /** The assistant's journal (SL-CHAT-1). One RPC for the whole SmartLayerStorage; every op runs synchronously here, so each compare-and-set is atomic. */
+  async smartLayer(op: SlOp, args: unknown[]): Promise<unknown> {
+    if (!SL_OPS.includes(op)) throw new Error('unknown smart layer op');
+    const ops = doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f));
+    return (ops[op] as (...a: unknown[]) => unknown)(...args);
+  }
+
+  /** This workspace's assistant mode (the per-store rollout flag, default off). Set only by an operator (`setAssistantMode`); a merchant can never raise it. */
+  async assistantMode(): Promise<'off' | 'answer-only' | 'suggest' | 'act'> {
+    const v = this.sql.exec<{ value: string }>("SELECT value FROM agent_state WHERE key = 'assistant.mode'").toArray()[0]?.value;
+    return v === 'answer-only' || v === 'suggest' || v === 'act' ? v : 'off';
+  }
+
+  async setAssistantMode(mode: 'off' | 'answer-only' | 'suggest' | 'act'): Promise<void> {
+    this.ctx.storage.transactionSync(() => this.sql.exec("INSERT INTO agent_state (key, value) VALUES ('assistant.mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", mode));
+  }
+
+  /** Heavy assistant jobs spend AI credits: hold first (the cost was shown), settle on success, release on failure. Same ledger as the agent, note `assistant`. */
+  async assistantHold(ref: string, credits: number, now = Date.now()): Promise<HoldResult> {
+    return this.ctx.storage.transactionSync(() => holdCredits(this.sql, ref, now, credits));
+  }
+  async assistantSettle(ref: string, now = Date.now()): Promise<'charged' | 'refused' | 'noop'> {
+    return this.ctx.storage.transactionSync(() => settleHold(this.sql, ref, now, this.workspaceId, 'assistant'));
+  }
+  async assistantRelease(ref: string, now = Date.now()): Promise<void> {
+    this.ctx.storage.transactionSync(() => releaseHold(this.sql, ref, now));
+  }
+
   // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------
 
   async getRetention() {
@@ -2465,6 +2795,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (n < (opts.batch ?? RETENTION_BATCH)) break;
     }
     this.ctx.storage.transactionSync(() => purgeOldEvents(this.sql, cutoff)); // the realtime log is capped by age too, not only by count
+    this.ctx.storage.transactionSync(() => doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f)).purgeBefore(now - 90 * 86_400_000)); // the assistant's journal keeps 90 days (spec 6.9)
     if (deleted > 0) {
       const owed = await this.drainR2Deletes();
       if (owed > 0) await this.schedule('r2_drain', now + 3_600_000);

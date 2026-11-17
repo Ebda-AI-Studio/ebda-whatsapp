@@ -35,7 +35,7 @@ describe('the agent answers', () => {
     expect(req.system).toContain('انت مساعد متجر الورد');
     expect(req.system).toContain('search_catalog');
     expect(req.messages).toEqual([{ role: 'user', content: '<customer_message>مساء الخير</customer_message>' }]);
-    expect(req.tools.map((t) => t.name)).toEqual(['search_catalog', 'order_status', 'start_order', 'handoff_to_human']);
+    expect(req.tools.map((t) => t.name)).toEqual(['search_catalog', 'show_products', 'open_catalog', 'order_status', 'start_order', 'handoff_to_human']);
     expect(req.maxTokens).toBeGreaterThan(0);
   });
 
@@ -71,7 +71,7 @@ describe('tools', () => {
     expect(tool).toMatchObject({ role: 'tool', name: 'search_catalog' });
     const parsed = JSON.parse((tool as { content: string }).content) as { results: { id: string; inStock: boolean; price: number }[] };
     expect(parsed.results[0]).toMatchObject({ id: 'v3', inStock: false, price: 110 });
-    expect(link.fake.count('listCatalog')).toBeGreaterThan(0);
+    expect(link.fake.count('searchProducts')).toBe(1);
   });
 
   it('order_status asks the Store with the customer key derived from the chat, never from the model', async () => {
@@ -252,7 +252,7 @@ describe('rules shared with the ordering bot', () => {
     await exec(ws, "INSERT INTO agent_state (key, value) VALUES ('latency_ewma_ms', '9000')");
     model([{ text: 'الرد' }]);
     const times: number[] = [];
-    const g = stubGraph((c) => (times.push(Date.now()), { status: 200, json: { messages: [{ id: `wamid.o${times.length}` }] } }));
+    const g = stubGraph((c) => (c.body?.status !== 'read' && times.push(Date.now()), { status: 200, json: { messages: [{ id: `wamid.o${times.length}` }] } })); // the read + typing call is not a message
     await say(ws, pn, text('hi'), g);
     expect(times.length).toBe(2);
     expect(times[1]! - times[0]!).toBeGreaterThanOrEqual(140);
@@ -352,11 +352,11 @@ describe('failures end in a handoff, never silence', () => {
     expect((await rows(ws, 'SELECT reason FROM agent_handoffs'))[0]).toEqual({ reason: 'misconfigured' });
   });
 
-  it('voice notes and files get one short "text only" note', async () => {
+  it('videos and files get one short "text only" note (a voice note is transcribed instead: test/voice-note.test.ts)', async () => {
     const ws = W(42);
     const pn = await agentWs(ws);
     const m = model([]);
-    const out = await say(ws, pn, audio(), stubGraph());
+    const out = await say(ws, pn, { ...audio(), type: 'video', video: { id: 'media-a', mime_type: 'video/mp4' } }, stubGraph());
     expect(out.map((s) => s.text)).toEqual([EBDA_AGENT_COPY.t.textOnly.ar]);
     expect(m.callCount).toBe(0);
   });

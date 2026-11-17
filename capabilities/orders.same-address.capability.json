@@ -1,0 +1,41 @@
+{
+  "id": "orders.same-address",
+  "status": "in-pr",
+  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "area": "orders",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "نفس العنوان بتاع المرة اللي فاتت",
+  "titleEn": "Reuse the last saved address",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "العميل مش لازم يكتب العنوان تاني؟",
+      "ازاي نفس العنوان بتاع المرة اللي فاتت؟",
+      "فين نفس العنوان بتاع المرة اللي فاتت؟"
+    ],
+    "en": [
+      "Does a returning customer have to retype the address?"
+    ]
+  },
+  "steps": [
+    "Ordering flow asks \"same address as last time?\" with two buttons"
+  ],
+  "edgeCases": [
+    "Cache of profile 15 min; dropped on address save/order/erasure",
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires"
+  ],
+  "gaps": []
+}

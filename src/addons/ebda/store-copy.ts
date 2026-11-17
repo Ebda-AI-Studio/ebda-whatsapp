@@ -73,6 +73,9 @@ export const EBDA_ORDERING_COPY: OrderingCopy = {
     chooseAddress: L('التوصيل على أنهي عنوان؟', 'Which address should we deliver to?'),
     addressesButton: L('العناوين', 'Addresses'),
     newAddressRow: L('+ عنوان جديد', '+ New address'),
+    sameAddress: (summary, locale) => (locale === 'ar' ? `نفس العنوان بتاع المرة اللي فاتت؟\n${summary}` : `Same address as last time?\n${summary}`),
+    sameAddressYes: L('أيوه، نفس العنوان', 'Yes, same address'),
+    sameAddressNo: L('عنوان تاني', 'A new address'),
     askAddress: L('ابعتلي عنوان التوصيل: المنطقة الأول، وبعدين الشارع والعمارة. مثلاً: المعادي، شارع 9 عمارة 4.', 'Send your delivery address: the area first, then the street and building. For example: Maadi, Street 9 building 4.'),
     outOfStock: (names, locale) => (locale === 'ar'
       ? `للأسف ${names.join('، ')} خلصوا من المخزون، وشيلتهم من السلة. شوف باقي الطلب.`
@@ -97,6 +100,21 @@ export const EBDA_ORDERING_COPY: OrderingCopy = {
     orderLine: (n, status, locale) => (locale === 'ar' ? `• رقم ${n}: ${status}` : `• Order ${n}: ${status}`),
     noOrders: L('مفيش طلبات سابقة على رقمك.', 'There are no earlier orders on your number.'),
     orderStatusNames: STATUS_NAMES,
+    cards: {
+      single: (title, price, locale) => (locale === 'ar' ? `${title}\nالسعر: ${price}\nاضغط على المنتج وضيفه للسلة، وبعدين ابعتلي السلة وأنا أكمّل معاك الطلب.` : `${title}\nPrice: ${price}\nTap the product, add it to your cart, then send me the cart and I will finish the order with you.`),
+      listHeader: L('اخترنالك دول', 'Picked for you'),
+      listBody: L('دي المنتجات اللي ليها علاقة بسؤالك. اختار اللي يعجبك وضيفه للسلة، وبعدين ابعتلي السلة وأنا أكمّل الطلب معاك.', 'These are the products that match your question. Pick what you like, add it to your cart, then send me the cart and I will finish the order with you.'),
+      listSection: L('المنتجات', 'Products'),
+      moreSection: L('منتجات تانية', 'More products'),
+      catalogBody: L('دي كل منتجاتنا. افتح الكتالوج، ضيف اللي عايزه للسلة وابعتهالي، وأنا أكمّل الطلب معاك هنا.', 'Here is everything we sell. Open the catalogue, add what you want to your cart and send it to me, and I will finish the order with you here.'),
+      catalogFooter: L('الأسعار والمخزون لحظي', 'Live prices and stock'),
+      cartUnknown: (names, locale) => (locale === 'ar'
+        ? `للأسف ${names.join('، ')} مبقاش متاح عندنا، وشيلته من السلة. شوف باقي الطلب.`
+        : `Sorry, ${names.join(', ')} is no longer available, so I took it out of your cart. Have a look at the rest.`),
+      cartRepriced: L('الأسعار اتحدثت حسب أسعار المتجر دلوقتي، والإجمالي تحت هو الصح.', 'Prices were updated to the store\'s current prices, so the total below is the right one.'),
+      cartOtherCatalogue: L('السلة دي جاية من كتالوج تاني مش بتاعنا، فمقدرتش أقرأها. افتح الكتالوج بتاعنا وضيف منه.', 'This cart came from a different catalogue than ours, so I could not read it. Open our catalogue and add from there.'),
+      cartAllGone: L('للأسف المنتجات اللي في السلة مبقتش متاحة. افتح الكتالوج واختار من الجديد.', 'Sorry, the products in your cart are no longer available. Open the catalogue and pick again.'),
+    },
   },
 };
 

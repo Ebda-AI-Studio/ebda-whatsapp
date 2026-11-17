@@ -1,0 +1,42 @@
+{
+  "id": "orders.cart-to-order",
+  "status": "live",
+  "area": "orders",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "العميل يبعت سلة وتتحول لأوردر",
+  "titleEn": "Customer sends a cart that becomes an order",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/your-products-on-whatsapp",
+  "questions": {
+    "ar": [
+      "العميل بعت سلة ايه اللي بيحصل؟",
+      "الأوردر بيتسجل فين؟",
+      "el sala betetaHawwel talab"
+    ],
+    "en": [
+      "What happens when a customer sends a cart?"
+    ]
+  },
+  "steps": [
+    "Lines are re-read from the Store (price, stock); sold-out items reported; order created in Ebda Store; payment choice COD / InstaPay / link / card"
+  ],
+  "edgeCases": [
+    "Price/stock changed: customer told",
+    "24-hour window closed: free text blocked (Meta 131047), only an approved template can be sent",
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires",
+    "Order state belongs to Ebda Store"
+  ],
+  "gaps": []
+}

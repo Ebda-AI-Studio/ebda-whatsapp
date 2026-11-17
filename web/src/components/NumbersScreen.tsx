@@ -10,6 +10,7 @@ import { useFocusOn } from '../lib/useFocusOn';
 import { useLoad } from '../lib/useLoad';
 import { dateTime } from './CampaignsScreen';
 import { LoadError } from './LoadError';
+import { EmptyState } from './EmptyState';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: NumbersApi };
 type Note = { kind: 'status' | 'alert'; text: string } | null;
@@ -121,7 +122,7 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
           {note && <p ref={noteRef} tabIndex={-1} role={note.kind} className={note.kind === 'alert' ? 'error-text' : 'muted'}>{note.text}</p>}
           {loadFailed ? <LoadError t={t} onRetry={load} />
             : items === null ? <div className="placeholder">…</div>
-            : items.length === 0 ? <p className="empty-note">{t.numbersEmpty}</p>
+            : items.length === 0 ? <EmptyState icon={<Phone size={22} />} title={t.numbersEmptyTitle} body={t.numbersEmpty} />
             : items.map((n) => <NumberCard key={n.phoneNumberId} n={n} focus={n.phoneNumberId === addedId} t={t} lang={lang} owner={owner} api={api} onChange={replace} onError={(e) => setNote(explain(e))} />)}
         </section>
         {owner && <SharedCard t={t} api={api} />}

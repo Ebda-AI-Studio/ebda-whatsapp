@@ -1,0 +1,52 @@
+{
+  "id": "operator.number-disconnect",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "فصل رقم تاجر",
+  "titleEn": "Disconnect a merchant number",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "POST /operator/workspaces/:workspaceId/numbers/:phoneNumberId/disconnect"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "abuse",
+    "text": "abuse / critical incident",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل فصل رقم تاجر؟",
+      "ليه مش لاقي فصل رقم تاجر عندي؟",
+      "عايز فصل رقم تاجر اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Disconnect a merchant number?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: numbers.disconnect (owner can)"
+  ]
+}

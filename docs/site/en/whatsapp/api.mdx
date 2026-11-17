@@ -63,7 +63,7 @@ The token lives **10 minutes** and there is no refresh token. Ask for a new one 
 |---|---|
 | `conversations:read` | Read conversations, messages, media, search, throttle and the event feed (poll `GET /events?after=`) |
 | `messages:send` | Send messages and upload media for them |
-| `templates:read` | List templates |
+| `templates:read` | List and read templates, and check a draft |
 | `contacts:read` | Read contacts and a contact's orders |
 | `contacts:write` | Change a contact's tags |
 | `campaigns:read` | Read campaigns and saved segments (including the audience preview) |
@@ -71,7 +71,7 @@ The token lives **10 minutes** and there is no refresh token. Ask for a new one 
 A scope you did not hold answers `403 forbidden`.
 
 #### Routes that always refuse a server token
-These answer `403 forbidden` to every server token, whatever its scopes: the live WebSocket (a server follows the inbox by polling `/events`, so a revoked client is never left connected); connecting, registering and disconnecting numbers and the numbers list; the wallet, top-ups, InstaPay payments, statements and refunds; packages and package checkout; joining or leaving the shared number; staff changes (assigning conversations, internal notes, marking read, conversation tags); deleting a contact's data; bot and agent settings and store-link settings; connectors; creating, changing or sending campaigns and segments; template submission, sync and defaults; imports; and the operator console. A route that is not in the scope table is `403` too.
+These answer `403 forbidden` to every server token, whatever its scopes: the live WebSocket (a server follows the inbox by polling `/events`, so a revoked client is never left connected); connecting, registering and disconnecting numbers and the numbers list; the wallet, top-ups, InstaPay payments, statements and refunds; packages and package checkout; joining or leaving the shared number; staff changes (assigning conversations, internal notes, marking read, conversation tags); deleting a contact's data; bot and agent settings and store-link settings; connectors; creating, changing or sending campaigns and segments; template submission, editing, deleting, sync and defaults; imports; and the operator console. A route that is not in the scope table is `403` too.
 
 #### Revocation
 The owner can revoke a client at any time. A revoked client gets `401 invalid_client` when asking for a token, and a token it already holds is refused with `401 unauthorized` within about 30 seconds (the service remembers a good answer that long). Rotating a secret keeps the old secret working for a window the owner chooses (up to 7 days), and tokens already issued stay valid until they expire. If the sign-in service cannot be reached to check a client, the API answers `503 rate_limited` with `message: "session_check_unavailable"` instead of letting the request through.
@@ -175,12 +175,22 @@ To send media, first upload the file with `POST /media` (multipart form data, fi
 
 ## Templates
 
+Templates live on the store's **own** WhatsApp account; a store with no connected number gets `404` with `message: "no_active_number"` on all of these.
+
 | Method and path | Purpose |
 |---|---|
-| `GET /templates` | List templates: `{ items: [{ name, language, category, status, bodyText, paramCount, rejectedReason }] }`. `category` is `MARKETING`, `UTILITY` or `AUTHENTICATION`. `status` is `APPROVED`, `PENDING`, `REJECTED`, `PAUSED` or `DISABLED` |
+| `GET /templates` | List templates: `{ items: [{ name, language, category, status, bodyText, paramCount, rejectedReason, label, components, updatedAt, editAllowance, advice }], starterInstalled }`. `category` is `MARKETING`, `UTILITY` or `AUTHENTICATION`. `status` is `APPROVED`, `PENDING`, `REJECTED`, `PAUSED`, `DISABLED` or `PENDING_DELETION`. `editAllowance` is `{ allowed: true }` or `{ allowed: false, reason: "status" \| "daily" \| "monthly", retryAt }`. `advice` is `{ ar, en, kind }` for a rejected, paused or disabled template |
+| `GET /templates/{name}/{language}` | One template with its components and edit allowance |
+| `POST /templates/check` | Check a draft against Meta's rules without calling Meta: `{ issues: [{ code, severity, field, params }], payloadHash }` |
 | `POST /templates/sync` | Pull the current templates and their review status from Meta |
-| `POST /templates` | Submit a new template for review. **Owner only** |
+| `POST /templates` | Submit a draft for review: `201 { name, language, status, category, categoryChanged }`. **Owner only**. Takes the draft shape below and a required `expectedHash` |
+| `PUT /templates/{name}/{language}` | Edit and resubmit: `{ status }`. **Owner only** |
+| `DELETE /templates/{name}/{language}` | Delete one language of a template: `204`. **Owner only** |
 | `POST /templates/install-defaults` | Submit the ready-made template set. **Owner only** |
+
+A draft is `{ name, label, language, category, header, body: { text, examples }, footer, buttons, auth }`: `header` is `{ text, example? }` or `null`; `buttons` are `QUICK_REPLY { text }`, `URL { text, url, example? }`, `PHONE_NUMBER { text, phone }` or `COPY_CODE { example }`; `auth` is `{ expiryMinutes, securityRecommendation }` for `AUTHENTICATION`. `expectedHash` is **required** on `POST` and `PUT`: send the `payloadHash` that `check` returned for exactly this draft. Without it you get `400` with `message: "hash_required"` and nothing reaches Meta; if the draft is not the one that was checked you get `409 payload_changed`.
+
+Errors on the write routes: `400` with `message: "invalid_template"` and `issues` (a rule failed, nothing was sent to Meta) or with Meta's own message (Meta refused); `409` with `message` = `exists` (same name and language), `payload_changed`, `not_editable` (including a locked category), `not_deletable` (a disabled template), `in_use` (a campaign or queued message still uses it) `edit_in_progress` (another edit of the same template is running) or `edit_limit` with `retryAt` (Meta allows one edit of an approved template per 24 hours and ten per 30 days); `503` when Meta or the WhatsApp connection is unavailable.
 
 Only `APPROVED` templates can be sent.
 

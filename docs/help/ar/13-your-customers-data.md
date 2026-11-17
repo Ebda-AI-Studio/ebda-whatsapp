@@ -1,3 +1,13 @@
+---
+capabilities:
+  - contacts.erase@1
+  - contacts.export@1
+  - contacts.list@1
+  - contacts.merge@1
+  - contacts.rename@1
+  - contacts.retention@1
+---
+
 # بيانات عملائك: مدة الاحتفاظ، تنزيل، تعديل الاسم، دمج الأرقام
 
 كل ده من شاشة **العملاء**.

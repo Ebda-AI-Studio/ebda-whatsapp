@@ -17,8 +17,9 @@ import { buyerKey } from '../buyer-key';
 import type { InboundOrder, InboundReply } from '../meta/webhook-schema';
 import { isE164 } from '../phone';
 import type { SendJob } from '../send-queue';
-import type { Address, Buyer, CatalogRow, ChatPaymentMethod, OrderLine, StoreBridge, StoreProfile } from '../store-bridge';
+import { MAX_RETAILER_ID, type Address, type Buyer, type CatalogRow, type ChatPaymentMethod, type OrderLine, type StoreBridge, type StoreProfile } from '../store-bridge';
 import { bridgeFor, storeLink } from '../store-link';
+import { dropProfile, loadProfile } from '../ai/context';
 import type { LinkHost } from '../store-link/host';
 import { upsertOrder } from '../store-link/order-store';
 import { recordOrderAfterErase } from '../store-link/orders';
@@ -445,19 +446,56 @@ function cartSummary(t: Turn): void {
   t.session.state = 'cart';
 }
 
-/** A cart sent from Meta's catalog replaces ours. Prices are Meta's, shown as an estimate: the Store re-prices the order. */
+/**
+ * A cart sent from Meta's catalogue replaces ours. Nothing in it is trusted but the ids and quantities (Ruling WA-CAT-4): every line is read from the
+ * Store just now, so the price, the stock and whether the product still exists are the Store's, never the cart's. Lines the Store no longer sells or
+ * has sold out are dropped with a clear message; a cart whose prices were stale says so. The order key comes from the cart message's own id, so one cart
+ * message can only ever become one order, however often the webhook is replayed.
+ */
 async function receiveCart(t: Turn): Promise<void> {
   const order = t.input.order!;
-  const cart: Line[] = [];
-  for (const it of order.items.slice(0, MAX_CART_LINES)) {
-    const price = parseMinor(it.price);
-    if (price === null || !it.retailerId) continue;
-    const known = t.session.data.rows[it.retailerId] ?? t.session.data.cart.find((l) => l.variantId === it.retailerId);
-    cart.push({ variantId: it.retailerId, title: known?.title ?? it.retailerId, priceMinor: price, currency: it.currency || 'EGP', quantity: Math.max(1, Math.min(MAX_LINE_QTY, it.quantity)) });
+  const mine = readSettings(t.host).catalogId;
+  const asked = new Map<string, { quantity: number; metaPriceMinor: number | null }>();
+  // A cart from another catalogue (ids could collide with ours) is not ours to read.
+  const foreign = Boolean(mine && order.catalogId && order.catalogId !== mine);
+  if (!foreign) {
+    for (const it of order.items) {
+      if (!it.retailerId || asked.size >= MAX_CART_LINES && !asked.has(it.retailerId)) continue;
+      const have = asked.get(it.retailerId);
+      asked.set(it.retailerId, { quantity: Math.min(MAX_LINE_QTY, (have?.quantity ?? 0) + Math.max(1, Math.min(MAX_LINE_QTY, it.quantity))), metaPriceMinor: parseMinor(it.price) });
+    }
   }
+  // The Store refuses a whole call for one id over 64 characters: such a line cannot be ours, so it is dropped here (reported as unknown below), never allowed to fail the cart.
+  const askable = [...asked.keys()].filter((id) => id.length <= MAX_RETAILER_ID);
+  const res = askable.length ? await t.bridge.getProducts(t.ws, askable) : null;
+  if (res && !res.ok) return unavailable(t);
+  const live = new Map((res?.ok ? res.value.items : []).map((r) => [r.retailerId, r]));
+  const cart: Line[] = [];
+  const soldOut: string[] = [];
+  const unknown: string[] = [];
+  let repriced = false;
+  for (const [id, want] of asked) {
+    const row = live.get(id);
+    const known = t.session.data.rows[id] ?? t.session.data.cart.find((l) => l.variantId === id);
+    if (!row) { unknown.push(known?.title ?? loc(t, { ar: 'منتج', en: 'an item' })); continue; }
+    const name = nameOf(t, row);
+    if (row.availability !== 'in_stock') { soldOut.push(name); continue; }
+    if (want.metaPriceMinor !== null && want.metaPriceMinor !== row.priceMinor) repriced = true;
+    cart.push({ variantId: id, title: name, priceMinor: row.priceMinor, currency: row.currency, quantity: want.quantity });
+  }
+  if (soldOut.length) t.out.push({ kind: 'text', text: t.copy.t.outOfStock(soldOut, t.session.locale) });
+  if (unknown.length) t.out.push({ kind: 'text', text: t.copy.t.cards.cartUnknown(unknown, t.session.locale) });
   t.session.data.cart = cart;
-  t.session.data.orderKey = null;
-  if (cart.length) t.steps.add('cart');
+  t.session.data.selected = null;
+  t.session.data.payment = null;
+  t.session.data.orderKey = cart.length ? `cart:${t.input.wamid}` : null;
+  if (!cart.length) {
+    say(t, loc(t, foreign ? t.copy.t.cards.cartOtherCatalogue : t.copy.t.cards.cartAllGone));
+    t.session.state = 'idle';
+    return;
+  }
+  if (repriced) say(t, loc(t, t.copy.t.cards.cartRepriced));
+  t.steps.add('cart');
   return cartSummary(t);
 }
 
@@ -506,6 +544,15 @@ async function askAddress(t: Turn): Promise<void> {
     t.session.state = 'awaiting_address';
     return;
   }
+  // A returning customer with a default address: one question, two buttons ("same address as last time?"); anything else (or no profile) shows the list.
+  const { sameAddress, sameAddressYes, sameAddressNo } = t.copy.t;
+  const def = sameAddress && sameAddressYes && sameAddressNo ? (await loadProfile(t.host, t.bridge, t.input.from, t.now))?.defaultAddress : null;
+  const same = def ? saved.find((a) => a.id === def.id) : undefined;
+  if (same && sameAddress && sameAddressYes && sameAddressNo) {
+    t.out.push({ kind: 'buttons', body: sameAddress(`${same.street}, ${same.area}`, t.session.locale), buttons: [{ id: `addr:${same.id}`, title: loc(t, sameAddressYes) }, { id: 'addr:new', title: loc(t, sameAddressNo) }] });
+    t.session.state = 'choosing_address';
+    return;
+  }
   const rows = saved.map((a) => ({ id: `addr:${a.id}`, title: a.label ?? `${a.area}`, description: `${a.street}, ${a.area}` }));
   rows.push({ id: 'addr:new', title: loc(t, t.copy.t.newAddressRow), description: '' });
   t.out.push({ kind: 'list', body: loc(t, t.copy.t.chooseAddress), button: loc(t, t.copy.t.addressesButton), rows: rows.map((r) => (r.description ? r : { id: r.id, title: r.title })) });
@@ -529,7 +576,10 @@ async function placeWithText(t: Turn, text: string): Promise<void> {
   if (buyer) {
     alive(t);
     const saved = await t.bridge.saveCustomerAddress(t.ws, buyer.buyerKey, { area, street }, buyer.phoneE164);
-    if (saved.ok) return placeOrder(t, { addressId: saved.value.address.id });
+    if (saved.ok) {
+      dropProfile(t.host, t.input.from); // the cached customer profile (default address) is stale now
+      return placeOrder(t, { addressId: saved.value.address.id });
+    }
   }
   return placeOrder(t, { address: { area, street } });
 }
@@ -553,6 +603,8 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
       t.out.push({ kind: 'text', text: t.copy.t.outOfStock(names.length ? names : [...gone], t.session.locale) });
       return cartSummary(t);
     }
+    // The same key with different lines: this attempt can never succeed, so the next one starts a fresh order key.
+    if (res.code === 'IDEMPOTENCY_CONFLICT') d.orderKey = null;
     if (res.reason === 'payment_method_disabled') {
       t.session.state = 'choosing_payment';
       return askPayment(t);
@@ -570,6 +622,7 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
   }
   const total = o.totalMinor ?? subtotal(d.cart);
   const currency = o.currency ?? d.cart[0]!.currency;
+  dropProfile(t.host, t.input.from); // a new order changes the customer's recent orders and default address
   upsertOrder(t.host, { orderId: o.orderId, orderNumber: o.orderNumber, waId: t.input.from, buyerKey: buyer.buyerKey, paymentMethod: method, status: 'created', totalMinor: total, currency, locale: t.session.locale }, t.now);
   t.steps.add('order');
   const L = t.session.locale;

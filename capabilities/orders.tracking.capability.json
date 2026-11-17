@@ -1,0 +1,40 @@
+{
+  "id": "orders.tracking",
+  "status": "live",
+  "area": "orders",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تتبع الأوردر للعميل",
+  "titleEn": "Order status and tracking for the customer",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "العميل بيسأل أوردره فين",
+      "الشحنة وصلت؟",
+      "el order feen"
+    ],
+    "en": [
+      "The customer asks where the order is"
+    ]
+  },
+  "steps": [
+    "Agent tool order_status / listCustomerOrders; shipping_update / shipping_tracking templates"
+  ],
+  "edgeCases": [
+    "Courier name and ETA not in the answer yet (pr 79 follow-up)",
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires"
+  ],
+  "gaps": []
+}

@@ -14,7 +14,7 @@ export const sendJobSchema = z.object({
   phoneNumberId: z.string().min(1),
   to: z.string().min(1),
   /** Absent = text (the Phase 1 reply jobs). */
-  kind: z.enum(['text', 'template', 'interactive', 'media', 'list', 'image_link', 'location']).optional(),
+  kind: z.enum(['text', 'template', 'interactive', 'media', 'list', 'image_link', 'location', 'product', 'product_list', 'catalog']).optional(),
   text: z.string().min(1).max(4096).optional(),
   template: z.object({ name: z.string().min(1), language: z.string().min(2), components: z.array(templateComponentSchema) }).optional(),
   interactive: z.object({ body: z.string().min(1).max(1024), buttons: z.array(z.object({ id: z.string().min(1), title: z.string().min(1) })).min(1).max(3) }).optional(),
@@ -26,6 +26,15 @@ export const sendJobSchema = z.object({
   }).optional(),
   location: z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180), name: z.string().max(100).optional(), address: z.string().max(300).optional() }).optional(),
   imageLink: z.object({ link: z.string().regex(/^https:\/\/[^\s]+$/).max(2000), caption: z.string().max(1024).optional() }).optional(),
+  product: z.object({ catalogId: z.string().regex(/^\d{5,25}$/), retailerId: z.string().min(1).max(200), body: z.string().max(1024).optional(), footer: z.string().max(60).optional() }).optional(),
+  productList: z.object({
+    catalogId: z.string().regex(/^\d{5,25}$/),
+    header: z.string().min(1).max(60),
+    body: z.string().min(1).max(1024),
+    footer: z.string().max(60).optional(),
+    sections: z.array(z.object({ title: z.string().min(1).max(24), retailerIds: z.array(z.string().min(1).max(200)).min(1) })).min(1).max(10),
+  }).refine((l) => l.sections.reduce((n, sec) => n + sec.retailerIds.length, 0) <= 30, 'a multi-product message holds at most 30 products').optional(),
+  catalog: z.object({ body: z.string().min(1).max(1024), footer: z.string().max(60).optional(), thumbnailRetailerId: z.string().min(1).max(200).optional() }).optional(),
   media: z.object({ kind: mediaKind, mediaId: z.string().min(1), caption: z.string().max(1024).optional(), filename: z.string().max(255).optional() }).optional(),
   idempotencyKey: z.string().min(1),
   /** The order this message is about (kept on the shared number's route; never shown to the customer). */
@@ -36,13 +45,13 @@ export const sendJobSchema = z.object({
   deferrals: z.number().int().nonnegative().optional(),
 }).superRefine((j, ctx) => {
   const kind = j.kind ?? 'text';
-  const have = { text: j.text, template: j.template, interactive: j.interactive, media: j.media, list: j.list, image_link: j.imageLink, location: j.location }[kind];
+  const have = { text: j.text, template: j.template, interactive: j.interactive, media: j.media, list: j.list, image_link: j.imageLink, location: j.location, product: j.product, product_list: j.productList, catalog: j.catalog }[kind];
   if (have === undefined) ctx.addIssue({ code: 'custom', message: `${kind} job is missing its ${kind} payload` });
 });
 export type SendJob = z.input<typeof sendJobSchema>;
 export const jobKind = (j: Pick<SendJob, 'kind'>) => j.kind ?? 'text';
 
-import { sendImageLink, sendInteractive, sendList, sendLocation, sendMedia, sendTemplate, sendText, type SendResult } from './meta/client';
+import { sendCatalogMessage, sendImageLink, sendInteractive, sendProduct, sendProductList, sendList, sendLocation, sendMedia, sendTemplate, sendText, type SendResult } from './meta/client';
 import type { Env } from '../env';
 import { mark } from './timing';
 import { workspaceForPhoneNumber } from './routing';
@@ -87,6 +96,9 @@ export async function sendToMeta(env: Env, job: z.output<typeof sendJobSchema>):
       case 'list': return sendList({ ...base, ...job.list! });
       case 'image_link': return sendImageLink({ ...base, ...job.imageLink! });
       case 'location': return sendLocation({ ...base, ...job.location! });
+      case 'product': return sendProduct({ ...base, ...job.product! });
+      case 'product_list': return sendProductList({ ...base, ...job.productList! });
+      case 'catalog': return sendCatalogMessage({ ...base, ...job.catalog! });
       default: return sendText({ ...base, text: job.text! });
     }
   })();

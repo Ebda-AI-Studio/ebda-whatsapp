@@ -1,0 +1,51 @@
+{
+  "id": "inbox.handoff-needs-human",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "علامة \"محتاج حد من الفريق\"",
+  "titleEn": "Needs-your-team flag (handoff from the agent or bot)",
+  "screens": [
+    "ConversationList chip + ChatPane banner",
+    "view:ConversationList",
+    "/inbox",
+    "view:ChatPane"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "إيه معنى \"محتاج حد من الفريق\"؟",
+      "العميل طلب يكلم حد",
+      "المساعد سكت ليه؟",
+      "el 3amil 3ayez ye7ki ma3 insan"
+    ],
+    "en": [
+      "What does \"needs your team\" mean?",
+      "Why did the agent go silent?"
+    ]
+  },
+  "steps": [
+    "Triggered by customer asking, agent unsure, no credits, service-menu \"Talk to a person\"",
+    "Take over, or reply; silence lasts the handoff period (default 120 min)"
+  ],
+  "edgeCases": [
+    "AI credits run out: the agent stops and hands the chat to staff",
+    "No owner alert exists on main (pr 79 adds notifyPhone)",
+    "Reasons stored as codes: asked, model, no_credits, misconfigured, provider_error, bad_output, no_answer, staff"
+  ],
+  "gaps": [
+    "On main the owner is NOT notified (only the inbox badge)"
+  ]
+}

@@ -1,3 +1,8 @@
+---
+capabilities:
+  - numbers.meta-verification@1
+---
+
 # توثيق نشاطك التجاري على Meta
 
 توثيق النشاط (Business Verification) هو خطوة بتثبت لـ Meta إن شركتك حقيقية. من غيره رقمك هيشتغل، بس بحدود ضيقة.

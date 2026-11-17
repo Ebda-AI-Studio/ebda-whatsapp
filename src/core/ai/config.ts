@@ -4,12 +4,13 @@
  */
 import type { Env } from '../../env';
 import type { Locale, Localised } from '../ordering/copy';
+import { workersAiTranscriber, type Transcriber } from './transcribe';
 import { OpenAiCompatibleProvider, WorkersAiProvider, type LlmProvider } from './provider';
 
 /** Words of the agent, supplied by the product addon. */
 export type AgentCopy = {
   /** The system prompt: persona, language rule, how to use the tools, the knowledge base chunks. The core appends only the instruction boundary (`BOUNDARY` in agent.ts). */
-  systemPrompt: (a: { persona: string; language: 'ar' | 'en' | 'auto'; storeName: string | null; knowledge: string[]; tools: string[] }) => string;
+  systemPrompt: (a: { persona: string; language: 'ar' | 'en' | 'auto'; tone?: 'warm' | 'professional' | 'playful'; storeName: string | null; knowledge: string[]; tools: string[]; /** The merchant's declared store facts (policies) as lines, or a notice that they could not be loaded; null = no Store linked. */ facts?: string | null; /** What the Store knows about this customer, or null. */ customer?: string | null; /** The merchant's FAQ when it is small enough to read whole (else the knowledge chunks carry it). */ faq?: string | null }) => string;
   /** Used when the merchant wrote no persona. */
   defaultPersona: Localised;
   /** Matched against the normalised message (`normaliseText`): any hit sends the customer to a person without calling the model. */
@@ -19,8 +20,12 @@ export type AgentCopy = {
     ack: Localised;
     /** Told to the customer when the conversation goes to a person (asked for, the model could not help, no credits, misconfigured). */
     handoffAck: Localised;
-    /** Voice notes, pictures, files: the agent reads text only. */
+    /** Pictures and files: the agent reads text only (a voice note is transcribed, see the two below). */
     textOnly: Localised;
+    /** A voice note that is too long or over the store's daily limit: ask for text. */
+    voiceDeclined: Localised;
+    /** A voice note that could not be heard (unclear, failed): ask the customer to type. */
+    voiceFailed: Localised;
   };
 };
 
@@ -38,6 +43,8 @@ export type AgentConfig = {
   vectors: (env: Env) => VectorStore | null;
   embedder: (env: Env) => Embedder | null;
   copy: AgentCopy | null;
+  /** Speech-to-text for voice notes (Workers AI in production), or null when none is bound: every voice note then fails closed. Tests return a stub. */
+  transcriber: (env: Env) => Transcriber | null;
   /** The model for a workspace, or null when none can be built (no AI binding, no key). Tests return a scripted fake. */
   provider: (env: Env, ws: { settings: { provider: 'workers-ai' | 'openai-compatible'; model: string | null; baseUrl: string | null }; apiKey: string | null }) => LlmProvider | null;
   /** Base64 of the 32-byte key that encrypts merchants' own model keys. */
@@ -84,6 +91,7 @@ let current: AgentConfig = {
     }
     return env.AI ? new WorkersAiProvider(env.AI, current.defaultModel(env)) : null;
   },
+  transcriber: (env) => workersAiTranscriber(env),
   secretsKey: (env) => env.AGENT_SECRETS_KEY,
   allowedHosts: (env) => (env.AGENT_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim()).filter(Boolean),
   slowMs: 2000,

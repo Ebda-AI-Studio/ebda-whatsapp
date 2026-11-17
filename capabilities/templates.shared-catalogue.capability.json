@@ -1,0 +1,53 @@
+{
+  "id": "templates.shared-catalogue",
+  "status": "live",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "قوالب الرقم المشترك",
+  "titleEn": "Shared-number templates (platform catalogue)",
+  "screens": [
+    "OperatorScreen shared tab (SharedTemplatesPanel)",
+    "view:OperatorScreen",
+    "/operator",
+    "view:SharedTemplatesPanel"
+  ],
+  "api": [
+    "GET /operator/shared-templates",
+    "POST /operator/shared-templates/sync",
+    "POST /operator/shared-templates"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/use-the-shared-number",
+  "questions": {
+    "ar": [
+      "القوالب على الرقم المشترك مين بيعملها؟",
+      "ينفع اعمل حملة على الرقم المشترك؟",
+      "ليه مفيش marketing على الرقم المشترك"
+    ],
+    "en": [
+      "Who manages templates on the shared number?",
+      "Can I run campaigns on the shared number?"
+    ]
+  },
+  "steps": [
+    "Platform WABA templates only; marketing refused (WA-SHARED-NOCAMP-1)"
+  ],
+  "edgeCases": [
+    "On the shared platform number: marketing templates are refused, templates come from the platform catalogue, wallet pays Meta"
+  ],
+  "gaps": [],
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "platform WABA shared by all stores; merchants ask through templates.shared-request",
+    "validUnderRule": true
+  }
+}

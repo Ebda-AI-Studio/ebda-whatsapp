@@ -1,0 +1,47 @@
+{
+  "id": "packages.yearly-switch",
+  "status": "live",
+  "area": "billing",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "ترقية الباقة السنوية",
+  "titleEn": "Upgrade or switch a yearly package",
+  "screens": [
+    "WalletScreen Packages",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "POST /stores/:storeId/packages/:id/checkout"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/wallet-top-ups-and-refunds",
+  "questions": {
+    "ar": [
+      "عندي باقة سنوية وعايز ارقي",
+      "ينفع انزل باقة؟",
+      "upgrade el yearly"
+    ],
+    "en": [
+      "I have a yearly plan and want to upgrade"
+    ]
+  },
+  "steps": [
+    "Move up: pay only the difference for remaining months, starts at once, same end date; lower/monthly starts after current ends, no refund"
+  ],
+  "edgeCases": [
+    "Queued period already paid: contact support (cannot change)",
+    "Refund of a yearly plan is operator-only"
+  ],
+  "gaps": [
+    "Yearly refund/cancel only by operator (see operator.yearly-refund)"
+  ]
+}

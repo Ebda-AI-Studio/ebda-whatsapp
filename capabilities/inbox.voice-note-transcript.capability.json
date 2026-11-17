@@ -1,0 +1,51 @@
+{
+  "id": "inbox.voice-note-transcript",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "الفويس نوت وتفريغها نصي",
+  "titleEn": "Voice notes: transcript shown under the audio",
+  "screens": [
+    "ChatPane (voiceTranscript / voiceNotTranscribed)",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "العميل بعت فويس ومش فاهم",
+      "الفويس بيظهر نصه؟",
+      "ليه كتب \"لم يتم تفريغ الفويس\"؟",
+      "el voice note byetfaragh?"
+    ],
+    "en": [
+      "A customer sent a voice note, can I read it?",
+      "Why does it say not transcribed?"
+    ]
+  },
+  "steps": [
+    "Inbound audio is transcribed once with speech-to-text",
+    "Text appears under the voice note; the agent answers it like typed text"
+  ],
+  "edgeCases": [
+    "Over 2 minutes or 5 MB or daily cap (60): customer asked to type",
+    "Transcription failed: marked not transcribed, listen manually",
+    "Egyptian/code-switch prompt only after pr 79 (marked there)",
+    "AI binding absent: fails closed"
+  ],
+  "gaps": [
+    "Register line still says voice notes NOT built (stale); main has transcribe.ts"
+  ]
+}

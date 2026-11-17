@@ -1,0 +1,48 @@
+{
+  "id": "templates.ai-writer",
+  "status": "live",
+  "area": "templates",
+  "version": 1,
+  "versionDate": "2026-11-15",
+  "titleAr": "المساعد بيكتب القوالب ويصلح الرفض",
+  "titleEn": "Assistant writes Meta-ready templates and fixes rejections",
+  "screens": [
+    "AssistantPanel preview card (template)"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible",
+    "note": "the template is submitted to Meta for review when the merchant confirms"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "اكتبلي رسالة للعميل",
+      "ليه القالب اترفض وازاي اصلحه؟",
+      "عايز template بالعربي المصري"
+    ],
+    "en": [
+      "Write a template for me",
+      "Why was it rejected and how do I fix it?"
+    ]
+  },
+  "steps": [
+    "Tell the assistant what the message is for; it writes the template in Egyptian Arabic (or English on request), checks it against Meta's rules and shows it as the customer will see it, with its cost in AI credits",
+    "Press \"Yes, do it\" to submit it to Meta, or ask for changes or a fresh take (each fresh draft costs credits; a failed one costs nothing)",
+    "If Meta rejects a template, ask the assistant to fix it: it starts from Meta's reason and shows the corrected version before anything is sent"
+  ],
+  "edgeCases": [
+    "Not enough AI credits: nothing is written and nothing is charged",
+    "The draft cannot be made to pass Meta's rules after two tries: the credits are released and nothing is shown to submit",
+    "Only the owner can submit; a staff member can ask for a draft but the submit is refused by the product",
+    "A template with the same name already exists: the draft gets a new name (_v2, _v3)"
+  ],
+  "gaps": [],
+  "assistantNote": "confirm: the assistant writes, the merchant presses; submission to Meta is irreversible"
+}

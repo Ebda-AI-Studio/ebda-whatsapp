@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
-import { botFunnelQuery, codOutcomeRequest, storeLinkSettingsPatch, type OrderSummaryDto } from '../core/api/contract';
+import { botFunnelQuery, catalogCommerceRequest, codOutcomeRequest, confirmTokenField, storeLinkSettingsPatch, type OrderSummaryDto } from '../core/api/contract';
+import { recordAudit } from '../core/audit';
+import { needsConfirm, payloadHash, SWITCH_KEYS } from '../core/settings-confirm';
 import { buyerKey } from '../core/buyer-key';
 import { normaliseE164 } from '../core/phone';
 import type { BridgeOrderSummary } from '../core/store-bridge';
@@ -71,6 +73,29 @@ ordersRoutes.get('/stores/:storeId/store-link/catalog', async (c) => {
   return ws ? c.json(await ws.getCatalogStatus()) : apiError(c, 404, 'not_found');
 });
 
+/** Starts a fresh full pass of the catalogue sync (owner only). */
+ordersRoutes.post('/stores/:storeId/store-link/catalog/resync', async (c) => {
+  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const res = await ws.resyncCatalog();
+  return res.started ? c.json(res) : apiError(c, 409, 'invalid_request', 'catalog_not_set');
+});
+
+/** Turns the shop button and the cart on the number on or off (owner only). */
+ordersRoutes.put('/stores/:storeId/store-link/catalog/commerce', async (c) => {
+  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  const body = catalogCommerceRequest.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const res = await ws.setCatalogCommerce(body.data);
+  if (!res) return apiError(c, 409, 'invalid_request', 'catalog_not_set');
+  if (res.failed === 'missing_permission') return apiError(c, 403, 'forbidden', 'missing_permission');
+  if (res.failed) return c.json({ error: 'rate_limited', message: 'meta_error', retryable: true }, 503);
+  return c.json({ catalogVisible: res.catalogVisible, cartEnabled: res.cartEnabled });
+});
+
 /** Bot results: funnel counts per step and day (owner and staff read; there is no write). */
 ordersRoutes.get('/stores/:storeId/bot/funnel', async (c) => {
   const q = botFunnelQuery.safeParse({ from: c.req.query('from'), to: c.req.query('to') });
@@ -79,12 +104,37 @@ ordersRoutes.get('/stores/:storeId/bot/funnel', async (c) => {
   return ws ? c.json(await ws.getBotFunnel(q.data.from, q.data.to)) : apiError(c, 404, 'not_found');
 });
 
-ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
+/**
+ * Step one of turning ON a switch that messages customers or costs money per use (A32, A33): owner only (super admin keeps the override, an operator
+ * helping a merchant), same body the PATCH will carry. SETTINGS-CONFIRM-1 in core/settings-confirm.ts.
+ */
+ordersRoutes.post('/stores/:storeId/store-link/settings/preview', async (c) => {
   if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
   const patch = storeLinkSettingsPatch.safeParse(await c.req.json().catch(() => null));
-  if (!patch.success) return apiError(c, 400, 'invalid_request');
+  if (!patch.success || !needsConfirm(patch.data)) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
+  const { token, expiresAt } = await ws.issueSettingsConfirm(c.get('principal').userId, await payloadHash(patch.data));
+  return c.json({ confirmToken: token, expiresAt });
+});
+
+// Owner only; a super admin keeps the override (operator helping a merchant). Staff are refused. The owner switches are audited by name (A31-A33).
+ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
+  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  const raw = await c.req.json().catch(() => null);
+  const patch = storeLinkSettingsPatch.safeParse(raw);
+  const tokenField = confirmTokenField.safeParse(raw);
+  if (!patch.success || !tokenField.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const actor = c.get('principal').userId;
+  const confirmed = needsConfirm(patch.data);
+  if (confirmed) {
+    if (!tokenField.data.confirmToken) return apiError(c, 409, 'invalid_request', 'confirm_required');
+    const outcome = await ws.consumeSettingsConfirm(tokenField.data.confirmToken, actor, await payloadHash(patch.data));
+    if (outcome !== 'ok') return apiError(c, 409, 'invalid_request', outcome === 'expired' ? 'confirm_expired' : 'confirm_invalid');
+  }
+  const before = await ws.getStoreLinkSettings();
   let catalogWabaId: string | undefined;
   if (patch.data.catalogId) {
     // The platform token can write to any catalog it can see: only accept one that is connected to THIS workspace's WABA.
@@ -96,7 +146,13 @@ ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
     catalogWabaId = number.wabaId;
   }
   const res = await ws.setStoreLinkSettings(patch.data, catalogWabaId ? { catalogWabaId } : {});
-  return res.ok ? c.json(res.settings) : apiError(c, 400, 'invalid_request', 'catalog_not_linked');
+  if (!res.ok) return apiError(c, 400, 'invalid_request', 'catalog_not_linked');
+  for (const k of SWITCH_KEYS) {
+    const v = patch.data[k];
+    if (v === undefined) continue;
+    await recordAudit(c.env, { workspaceId: c.req.param('storeId')!, actor, role: c.get('storeRole') === 'owner' ? 'owner' : 'operator', action: 'store_link.toggle', targetType: 'setting', targetId: k, detail: { value: v, changed: before[k] !== v, confirmed } });
+  }
+  return c.json(res.settings);
 });
 
 /** Creates a Meta catalog for a merchant who has none and connects it to their WhatsApp Business Account (owner only). */

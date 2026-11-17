@@ -2,9 +2,9 @@
  * Deferred work for one workspace. A DO has a single alarm, so every delayed thing (nightly backup, owed R2 deletes,
  * throttled sends, later campaign steps) is a row in scheduled_tasks and the alarm is always armed for the earliest one.
  */
-export type TaskKind = 'backup' | 'r2_drain' | 'send_release' | 'campaign_step' | 'media_fetch' | 'catalog_sync' | 'catalog_reconcile' | 'cod_no_reply' | 'cod_outcome_push' | 'opt_out_push' | 'bot_turn' | 'erased_order_notify' | 'kb_index' | 'catalog_embed' | 'subscription_expire' | 'wallet_wait' | 'wallet_sweep' | 'ledger_drain' | 'shared_number_trueup' | 'funnel_rollup' | 'instapay_overdue' | 'credit_month' | 'retention_purge';
+export type TaskKind = 'backup' | 'r2_drain' | 'send_release' | 'campaign_step' | 'media_fetch' | 'catalog_sync' | 'catalog_reconcile' | 'cod_no_reply' | 'cod_outcome_push' | 'opt_out_push' | 'bot_turn' | 'erased_order_notify' | 'kb_index' | 'catalog_embed' | 'subscription_expire' | 'wallet_wait' | 'wallet_sweep' | 'ledger_drain' | 'shared_number_trueup' | 'funnel_rollup' | 'instapay_overdue' | 'credit_month' | 'retention_purge' | 'ws_sweep' | 'template_refresh' | 'handoff_digest' | 'wallet_debt_sync';
 /** One pending row at most: scheduling again keeps the earlier due time. */
-const SINGLETONS: ReadonlySet<TaskKind> = new Set(['backup', 'r2_drain', 'catalog_sync', 'catalog_reconcile', 'kb_index', 'catalog_embed', 'campaign_step', 'wallet_sweep', 'ledger_drain', 'funnel_rollup', 'credit_month', 'retention_purge']);
+const SINGLETONS: ReadonlySet<TaskKind> = new Set(['backup', 'r2_drain', 'catalog_sync', 'catalog_reconcile', 'kb_index', 'catalog_embed', 'campaign_step', 'wallet_sweep', 'ledger_drain', 'funnel_rollup', 'credit_month', 'retention_purge', 'ws_sweep', 'template_refresh', 'handoff_digest', 'wallet_debt_sync']);
 export const DAILY_KINDS = ['backup', 'r2_drain', 'retention_purge'] as const;
 /** Cairo hour each daily task runs. The retention purge deletes history, so it must not run while the nightly backup (02:00) is reading it. */
 export const RETENTION_HOUR_LOCAL = 5;
@@ -14,6 +14,12 @@ export type DueTask = { id: number; kind: TaskKind; due_at: number; payload: str
 
 /** 30 s, 1 min, 2 min … capped at 1 h. `attempts` counts failures including the one just recorded. */
 export const backoffMs = (attempts: number): number => Math.min(30_000 * 2 ** Math.min(attempts - 1, 20), 3_600_000);
+
+/** A failure whose cause is known to clear fast: the FIRST retry waits `ms` instead of the 30 s backoff step (later retries keep the normal ladder). */
+export class QuickRetryError extends Error {
+  constructor(message: string, readonly ms: number) { super(message); }
+}
+export const retryDelayMs = (err: unknown, attempts: number): number => (err instanceof QuickRetryError && attempts === 1 ? err.ms : backoffMs(attempts));
 
 export function addTask(sql: SqlStorage, kind: TaskKind, dueAt: number, payload?: unknown): void {
   const body = payload === undefined ? null : JSON.stringify(payload);

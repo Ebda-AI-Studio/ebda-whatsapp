@@ -1,0 +1,53 @@
+{
+  "id": "operator.pricing-settings",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إعدادات التسعير العامة",
+  "titleEn": "Platform pricing settings (margin, overdraft, FX buffer, VAT)",
+  "screens": [
+    "OperatorScreen (Pricing)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/pricing-settings",
+    "POST /operator/pricing-settings"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "platform-wide config",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل إعدادات التسعير العامة؟",
+      "ليه مش لاقي إعدادات التسعير العامة عندي؟",
+      "عايز إعدادات التسعير العامة اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Platform pricing settings (margin, overdraft, FX buffer, VAT)?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none (platform-wide configuration)"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "id": "team.invite-roles",
+  "status": "planned",
+  "plan": "future: custom roles (e.g. agent-only, marketing-only)",
+  "area": "team",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "دعوة موظفين وتغيير الصلاحيات",
+  "titleEn": "Invite people / change roles",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "ازاي ادعو موظف؟",
+      "عايز اغير صلاحية حد",
+      "agent managing multiple merchants"
+    ],
+    "en": [
+      "How do I invite a teammate or change roles?"
+    ]
+  },
+  "steps": [
+    "Invites and roles are managed in Ebda Store (accounts); Chat only assigns seats; only owner and staff roles exist"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "No custom roles; no in-Chat invite"
+  ]
+}

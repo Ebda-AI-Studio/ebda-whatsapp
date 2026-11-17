@@ -125,6 +125,28 @@ describe('browsing', () => {
 });
 
 describe('cart and checkout paths', () => {
+  it('an IDEMPOTENCY_CONFLICT refusal resets the order key, so the next attempt is a fresh order with a different key (Store #617)', async () => {
+    const { ws, pn } = await setup(98);
+    const g = stubGraph();
+    await toCheckout(ws, pn, g);
+    await say(ws, pn, tapBtn('pay:cod'), g);
+    const keys: string[] = [];
+    const real = link.fake.createOrderFromChat.bind(link.fake);
+    const spy = vi.spyOn(link.fake, 'createOrderFromChat').mockImplementation(async (s, req) => {
+      keys.push(req.idempotencyKey);
+      if (keys.length === 1) return { ok: false, reason: 'invalid', code: 'IDEMPOTENCY_CONFLICT', message: 'key reused with different lines' };
+      return real(s, req);
+    });
+    const failed = await say(ws, pn, text('المعادي، شارع 9 عمارة 4'), g);
+    expect(failed[0]!.body.text.body).toContain('معرفناش نكمّل الطلب'); // the buyer is told, nothing loops
+    expect(JSON.parse((await sessionOf(ws)).data).orderKey).toBeNull(); // the conflicting key is dropped
+    const done = await say(ws, pn, text('المعادي، شارع 9 عمارة 4'), g);
+    spy.mockRestore();
+    expect(done[0]!.body.text.body).toMatch(/طلبك رقم/);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]); // a fresh order key, not the conflicting one
+  });
+
   it('COD: pick, quantity by button, checkout, payment, typed address, order, confirmation; nothing is terminal', async () => {
     const { ws, pn } = await setup(10);
     const g = stubGraph();
@@ -257,8 +279,10 @@ describe('cart and checkout paths', () => {
     const { ws, pn } = await setup(17);
     const g = stubGraph();
     const cart = await say(ws, pn, catalogOrder(wamid(), [{ id: 'v1', qty: 2, price: 100 }, { id: 'v5', qty: 1, price: 120.5 }]), g);
-    expect(cart[0]!.body.interactive.body.text).toContain('2 × v1');
-    expect(cart[0]!.body.interactive.body.text).toContain('320.50 جنيه'); // 2 x 100.00 + 120.50, integer piasters
+    const summary = cart.at(-1)!;
+    expect(summary.body.interactive.body.text).toContain('2 × Item 1 (ع)'); // the Store's name for the id, not the id
+    expect(summary.body.interactive.body.text).toContain('320 جنيه'); // the Store's live prices (100.00 x2 + 120.00), not Meta's 120.50
+    expect(cart.some((m) => JSON.stringify(m.body).includes('الأسعار اتحدثت'))).toBe(true); // and the customer is told they differ
     await say(ws, pn, tapBtn('cart:checkout'), g);
     await say(ws, pn, tapBtn('pay:cod'), g);
     await say(ws, pn, text('المعادي، شارع 9'), g);

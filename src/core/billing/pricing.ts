@@ -112,11 +112,11 @@ export const copyCursor = (sql: Sql) => ({
   overrides: sql.exec<{ m: number | null }>('SELECT max(src_id) AS m FROM pricing_overrides').one().m ?? 0,
 });
 
-/** Reads what is new in D1 since the copy's cursors, plus this workspace's number funding. */
+/** Reads what is new in D1 since the copy's cursors, plus this workspace's number funding. Backfilled FX rows are history for the buffer, never prices: the copy never receives them. */
 export async function pullPricing(env: Env, workspaceId: string, cur: ReturnType<typeof copyCursor>): Promise<PricingSnapshot> {
   const [rates, fx, settings, overrides, funding] = await env.DB.batch([
     env.DB.prepare('SELECT id, ver, effective_from, country, category, usd_micros FROM rate_cards WHERE id > ? ORDER BY id').bind(cur.rates),
-    env.DB.prepare('SELECT id, ver, effective_from, egp_per_usd_micros, buffer_bps FROM fx_rates WHERE id > ? ORDER BY id').bind(cur.fx),
+    env.DB.prepare("SELECT id, ver, effective_from, egp_per_usd_micros, buffer_bps FROM fx_rates WHERE id > ? AND source IS NOT 'backfill' AND buffer_mode IS NOT 'backfill' ORDER BY id").bind(cur.fx),
     env.DB.prepare('SELECT id, ver, effective_from, margin_bps, credit_limit_minor, fx_buffer_bps, vat_bps FROM pricing_settings WHERE id > ? ORDER BY id').bind(cur.settings),
     env.DB.prepare('SELECT id, ver, effective_from, margin_bps FROM workspace_pricing_overrides WHERE workspace_id = ? AND id > ? ORDER BY id').bind(workspaceId, cur.overrides),
     // Own numbers plus the shared platform number while the workspace is an active member; a number without a funding row stays unknown.

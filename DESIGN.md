@@ -22,41 +22,41 @@ colors:
   bad-brick: "#9a3328"
 typography:
   body:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
-    fontSize: "15px"
-    fontWeight: 400
-    lineHeight: 1.55
-    fontFeature: "tnum"
-  title:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
-    fontSize: "18px"
-    fontWeight: 500
-    lineHeight: 1.55
-  total:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
-    fontSize: "17px"
-    fontWeight: 600
-    lineHeight: 1.55
-  label:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
-    fontSize: "13px"
-    fontWeight: 400
-    lineHeight: 1.55
-  caption:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
-    fontSize: "12px"
-    fontWeight: 400
-    lineHeight: 1.55
-  strip:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
     fontSize: "14px"
     fontWeight: 400
-    lineHeight: 1.55
+    lineHeight: 1.7
+    fontFeature: "tnum"
+  title:
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
+    fontSize: "18px"
+    fontWeight: 500
+    lineHeight: 1.7
+  total:
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
+    fontSize: "18px"
+    fontWeight: 600
+    lineHeight: 1.7
+  label:
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.7
+  caption:
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
+    fontSize: "12px"
+    fontWeight: 400
+    lineHeight: 1.7
+  strip:
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.7
   pane-heading:
-    fontFamily: "Readex Pro Variable, system-ui, sans-serif"
+    fontFamily: "IBM Plex Sans Arabic, system-ui, sans-serif"
     fontSize: "16px"
     fontWeight: 500
-    lineHeight: 1.55
+    lineHeight: 1.7
 rounded:
   focus: "6px"
   sm: "8px"
@@ -143,7 +143,7 @@ components:
 
 A shop counter where the customer is talking and their order slip lies open beside you. The screen is a warm cream working ground, white panes divided by warm hairlines, and a night rail at the inline-start edge carrying the gold doorway mark. Everything is quiet so that one thing can be loud: brass-gold marks the single thing that needs doing now (confirm the order, the unread count, the unseen COD dot).
 
-It is Arabic-first and right-to-left: layout uses logical properties, mirrors directional motion, and customer text sets its own direction (`unicode-bidi: plaintext`). Readex Pro carries Arabic and Latin in one voice with tabular numerals so prices, times and counts align. Density is operator-grade: 44px targets, 10-14px radii, no decoration that does not carry status.
+It is Arabic-first and right-to-left: layout uses logical properties, mirrors directional motion, and customer text sets its own direction (`unicode-bidi: plaintext`). IBM Plex Sans Arabic carries Arabic and Latin in one voice with tabular numerals so prices, times and counts align. Density is operator-grade: 44px targets, 10-14px radii, no decoration that does not carry status.
 
 The signature is the brass rail of order stops (placed, confirmed, shipped, delivered) that fills gold as the order advances: the one piece of drawn structure on the screen.
 
@@ -183,7 +183,7 @@ A warm-neutral field with one metallic accent and three muted status inks.
 
 ## Typography
 
-**Display/Body/Label Font:** Readex Pro Variable (self-hosted via @fontsource-variable, system-ui fallback)
+**Display/Body/Label Font:** IBM Plex Sans Arabic (self-hosted via @fontsource, system-ui fallback)
 
 **Character:** one humanist Arabic-Latin family at weights 400/500/600; hierarchy comes from size and weight, never from a second face. Tabular numerals are on globally.
 

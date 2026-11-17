@@ -1,0 +1,54 @@
+{
+  "status": "live",
+  "area": "templates",
+  "versionDate": "2026-11-14",
+  "mcpTool": null,
+  "id": "templates.edit-delete",
+  "version": 2,
+  "titleAr": "تعديل أو مسح قالب",
+  "titleEn": "Edit and resubmit, or delete, a template",
+  "screens": [
+    "view:templates",
+    "/templates"
+  ],
+  "api": [
+    "PUT /stores/:storeId/templates/:name/:language",
+    "DELETE /stores/:storeId/templates/:name/:language"
+  ],
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible",
+    "note": "an edit is re-reviewed by Meta and a delete frees the name only after 30 days"
+  },
+  "helpArticle": "whatsapp/template-review-and-rejections",
+  "questions": {
+    "ar": [
+      "ازاي اعدل القالب بعد ما اترفض؟",
+      "امسح قالب قديم",
+      "عدل template",
+      "القالب اترفض اعمل ايه؟"
+    ],
+    "en": [
+      "How do I edit a rejected template?",
+      "How do I delete a template?"
+    ]
+  },
+  "steps": [
+    "Open the template, Edit and resubmit (a rejected one keeps its name; the category is editable only before approval)",
+    "Delete asks for confirmation; every campaign using it must finish first; an approved name cannot be reused for 30 days"
+  ],
+  "edgeCases": [
+    "An approved template can be edited once per 24 hours and 10 times per 30 days: blocked locally with the time it unlocks",
+    "A pending template cannot be edited",
+    "Two edits at once: the second gets edit_in_progress",
+    "Deleting a template a campaign or queued message still uses is refused (in_use)",
+    "A disabled template cannot be deleted",
+    "Deleting removes one language only, never every language of the name"
+  ],
+  "gaps": [],
+  "assistantNote": "edit resubmits to Meta; delete cannot be undone; both need the owner's confirmation"
+}

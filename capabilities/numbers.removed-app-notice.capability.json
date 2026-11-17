@@ -1,0 +1,44 @@
+{
+  "id": "numbers.removed-app-notice",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تنبيه: اللي ربط الرقم شال التطبيق",
+  "titleEn": "Notice: the person who connected the number removed the app",
+  "screens": [
+    "NumbersScreen notice + Keep numbers connected",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [
+    "POST /stores/:storeId/numbers/notices/:id/dismiss"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/alerts-and-notices",
+  "questions": {
+    "ar": [
+      "ظهرلي تنبيه إن حد شال التطبيق",
+      "ينفع اسيب الأرقام متوصلة؟",
+      "ازاي تنبيه: اللي ربط الرقم شال التطبيق؟"
+    ],
+    "en": [
+      "I see a notice that someone removed the app"
+    ]
+  },
+  "steps": [
+    "Keep numbers connected (dismiss) or disconnect the number"
+  ],
+  "edgeCases": [
+    "Nothing was disconnected automatically"
+  ],
+  "gaps": []
+}

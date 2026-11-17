@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain .mjs script, no types
-import { runChecks } from '../scripts/verify-prod.mjs';
+import { runChecks, runUntilRolledOut } from '../scripts/verify-prod.mjs';
 
 const SECRET = 'app-secret-test';
 const TOKEN = 'verify-token-test';
@@ -130,5 +130,31 @@ describe('verify-prod', () => {
   it('without --brand the brand checks are skipped, never passed', async () => {
     const r = await runChecks({ base: 'https://wa.test', fetchImpl: fakeDeploy() });
     expect(find(r, 'web build brand')).toMatchObject({ ok: null });
+  });
+});
+
+describe('the commit check waits for the rollout (run 43031631377), and only for that', () => {
+  const stale = [{ name: 'health commit', ok: false, detail: 'running c7f7cbc, expected 95f66e6' }, { name: 'health', ok: true, detail: '' }];
+  const fresh = [{ name: 'health commit', ok: true, detail: '' }, { name: 'health', ok: true, detail: '' }];
+  const clock = () => { let t = 0; return { now: () => t, sleep: async (ms: number) => { t += ms; } }; };
+
+  it('retries a stale commit until the new one answers, then passes', async () => {
+    const c = clock(); let n = 0;
+    const out = await runUntilRolledOut(async () => (++n < 4 ? stale : fresh), { windowMs: 180_000, intervalMs: 5_000, ...c });
+    expect(n).toBe(4);
+    expect(out).toBe(fresh);
+  });
+  it('fails with the stale answer once the window ends (a deploy that never goes live is not hidden)', async () => {
+    const c = clock(); let n = 0;
+    const out = await runUntilRolledOut(async () => { n++; return stale; }, { windowMs: 20_000, intervalMs: 5_000, ...c });
+    expect(out).toBe(stale);
+    expect(n).toBeGreaterThan(1);
+    expect(n).toBeLessThanOrEqual(5);
+  });
+  it('does not retry any other failure (headers, webhook: real defects)', async () => {
+    const c = clock(); let n = 0;
+    const bad = [{ name: 'health commit', ok: true, detail: '' }, { name: 'api security headers', ok: false, detail: 'missing' }];
+    expect(await runUntilRolledOut(async () => { n++; return bad; }, { ...c })).toBe(bad);
+    expect(n).toBe(1);
   });
 });

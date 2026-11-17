@@ -1,0 +1,41 @@
+{
+  "id": "catalogue.product-cards",
+  "status": "live",
+  "area": "catalogue",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "كروت المنتجات في الشات",
+  "titleEn": "Product cards in chat (agent)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/your-products-on-whatsapp",
+  "questions": {
+    "ar": [
+      "العميل يشوف المنتجات في الشات",
+      "الكروت مش بتظهر",
+      "el montagat betezher ezay fel chat"
+    ],
+    "en": [
+      "How do customers see product cards in chat?"
+    ]
+  },
+  "steps": [
+    "Agent sends single or multi-product messages from the catalogue, in-stock only; falls back to text with links"
+  ],
+  "edgeCases": [
+    "Not connected / item not in catalogue: text fallback",
+    "Agent must be on",
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires"
+  ],
+  "gaps": []
+}

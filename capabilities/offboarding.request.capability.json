@@ -1,0 +1,60 @@
+{
+  "id": "offboarding.request",
+  "status": "live",
+  "area": "compliance",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مسح حساب الواتساب بتاعي",
+  "titleEn": "Delete the workspace (14-day wait)",
+  "screens": [
+    "WalletScreen last card (off-title)",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "GET /stores/:storeId/offboarding",
+    "POST /stores/:storeId/offboarding",
+    "DELETE /stores/:storeId/offboarding"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/delete-your-workspace",
+  "questions": {
+    "ar": [
+      "عايز امسح الحساب",
+      "هيحصل إيه لرصيدي؟",
+      "ينفع الغي المسح؟",
+      "emsa7 el 7esab"
+    ],
+    "en": [
+      "How do I delete my Ebda Chat account?",
+      "Can I cancel?"
+    ]
+  },
+  "steps": [
+    "Wallet > Delete this store's WhatsApp account",
+    "Tick giving up balance if any",
+    "Confirm; 14 days; cancel any time before"
+  ],
+  "edgeCases": [
+    "Open refund/payment in flight delays deletion",
+    "Balance grew during wait: re-approval needed",
+    "Top-ups and purchases frozen while pending",
+    "Operator-started deletion can only be cancelled by operator",
+    "Payment/refund records kept without the store name",
+    "Does not cancel anything at Meta",
+    "Running state cannot be cancelled"
+  ],
+  "gaps": [
+    "Placed at the bottom of the Wallet screen, hard to find; no dedicated Settings/Account area"
+  ],
+  "assistantNote": "cancel during the 14 days; after that irreversible"
+}

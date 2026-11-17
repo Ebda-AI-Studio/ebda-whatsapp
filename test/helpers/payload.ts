@@ -86,8 +86,8 @@ export const listReply = (wamid: string, replyId: string, title: string, from = 
 /** A tap on a template quick-reply: Meta sends type "button". */
 export const templateButton = (wamid: string, text: string, payload?: string, from = '201001234567') =>
   ({ id: wamid, from, type: 'button', button: { text, ...(payload ? { payload } : {}) } });
-export const catalogOrder = (wamid: string, items: { id: string; qty: number; price: number }[], from = '201001234567') =>
-  ({ id: wamid, from, type: 'order', order: { catalog_id: '123456', text: '', product_items: items.map((i) => ({ product_retailer_id: i.id, quantity: i.qty, item_price: i.price, currency: 'EGP' })) } });
+export const catalogOrder = (wamid: string, items: { id: string; qty: number; price: number }[], from = '201001234567', catalogId = '123456') =>
+  ({ id: wamid, from, type: 'order', order: { catalog_id: catalogId, text: '', product_items: items.map((i) => ({ product_retailer_id: i.id, quantity: i.qty, item_price: i.price, currency: 'EGP' })) } });
 
 export function templateCategoryPayload(wabaId: string, u: { name: string; language: string; previous: string; next: string }): string {
   return JSON.stringify({

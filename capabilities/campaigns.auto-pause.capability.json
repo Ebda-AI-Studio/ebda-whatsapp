@@ -1,0 +1,45 @@
+{
+  "id": "campaigns.auto-pause",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "ليه الحملة وقفت لوحدها",
+  "titleEn": "Automatic campaign pauses and their causes",
+  "screens": [
+    "CampaignsScreen pause reason",
+    "view:CampaignsScreen",
+    "/campaigns"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "الحملة وقفت لوحدها ليه؟",
+      "إيه معنى \"الرصيد خلص\"؟",
+      "الحملة وقفت بسبب جودة الرقم"
+    ],
+    "en": [
+      "Why did my campaign pause by itself?"
+    ]
+  },
+  "steps": [
+    "Reasons: wallet_empty (top up), template_unavailable (replace), plan_blocked (renew), internal_error (our team), manual, number quality"
+  ],
+  "edgeCases": [
+    "Number quality drops to YELLOW/RED or WhatsApp restricts the account: campaigns auto-pause, no new templates until recovered; campaigns never restart by themselves",
+    "Wallet empty on shared number; own number is billed by Meta",
+    "past_due package pauses marketing"
+  ],
+  "gaps": []
+}

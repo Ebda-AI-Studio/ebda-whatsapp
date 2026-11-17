@@ -1,3 +1,9 @@
+---
+capabilities:
+  - numbers.shared-join@1
+  - templates.shared-catalogue@1
+---
+
 # استخدام الرقم المشترك
 
 الرقم المشترك هو رقم واتساب واحد بيشغّله فريق Ebda AI Studio، وبتستخدمه من غير ما تعمل توثيق أو ربط. مناسب لو عايز تبدأ بسرعة.

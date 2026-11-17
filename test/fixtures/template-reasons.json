@@ -1,0 +1,11 @@
+{
+  "_note": "Reason codes seen on Meta's rejected_reason / template status webhook. Meta's docs do not list the full set; extend this file with values captured from real Meta responses (Task 14 live check).",
+  "reasons": [
+    { "code": "INVALID_FORMAT", "kind": "format" },
+    { "code": "ABUSIVE_CONTENT", "kind": "policy" },
+    { "code": "SCAM", "kind": "policy" },
+    { "code": "TAG_CONTENT_MISMATCH", "kind": "category" },
+    { "code": "INCORRECT_CATEGORY", "kind": "category" },
+    { "code": "NONE", "kind": "unknown" }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "id": "inbox.mark-read",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تعليم المحادثة كمقروءة",
+  "titleEn": "Mark conversation read",
+  "screens": [],
+  "api": [
+    "POST /stores/:storeId/conversations/:id/read"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/find-your-conversations",
+  "questions": {
+    "ar": [
+      "ازاي اشيل علامة غير مقروء؟",
+      "ازاي تعليم المحادثة كمقروءة؟",
+      "فين تعليم المحادثة كمقروءة؟"
+    ],
+    "en": [
+      "How do I mark a chat as read?"
+    ]
+  },
+  "steps": [
+    "Opening a chat marks it read"
+  ],
+  "edgeCases": [],
+  "gaps": []
+}

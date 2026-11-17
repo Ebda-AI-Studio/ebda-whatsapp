@@ -1,0 +1,43 @@
+{
+  "id": "catalogue.link-existing",
+  "status": "live",
+  "area": "catalogue",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "ربط كتالوج موجود",
+  "titleEn": "Link an existing Meta catalogue to the workspace",
+  "screens": [],
+  "api": [
+    "PATCH /stores/:storeId/store-link/settings {catalogId}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/your-products-on-whatsapp",
+  "questions": {
+    "ar": [
+      "عندي كتالوج على ميتا بالفعل",
+      "اربط كتالوجي القديم",
+      "ازاي ربط كتالوج موجود؟"
+    ],
+    "en": [
+      "I already have a Meta catalogue"
+    ]
+  },
+  "steps": [
+    "API only: id must belong to this workspace WABA (catalog_not_linked otherwise)"
+  ],
+  "edgeCases": [
+    "Never connect a Google feed to the same catalogue (duplicates)"
+  ],
+  "gaps": [
+    "NO UI to paste/link an existing catalogue id",
+    "Help says \"you do not need the button\" without a how-to"
+  ]
+}

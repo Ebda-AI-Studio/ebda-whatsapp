@@ -1,0 +1,56 @@
+{
+  "id": "access.signin",
+  "status": "live",
+  "area": "access",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تسجيل الدخول بحساب ابدأ ستوديو",
+  "titleEn": "Sign in with the Ebda AI Studio account",
+  "screens": [
+    "web SignInGate (route /, callback /auth/callback)",
+    "view:SignInGate"
+  ],
+  "api": [
+    "GET /auth/callback",
+    "GET /stores/:storeId/me"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff",
+    "super_admin"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/sign-in-language-and-sign-out",
+  "questions": {
+    "ar": [
+      "ازاي ادخل على ابدأ شات؟",
+      "مش عارف اسجل دخول",
+      "ليه بيقولي تسجيل الدخول فشل؟",
+      "ezay a3mel login 3ala ebda chat"
+    ],
+    "en": [
+      "How do I sign in to Ebda Chat?",
+      "Sign-in failed, what now?"
+    ]
+  },
+  "steps": [
+    "Open wa.ebda.app",
+    "Press Sign in",
+    "Use the same Ebda AI Studio account as Ebda Store",
+    "You land in the inbox for your store"
+  ],
+  "edgeCases": [
+    "Sign-in error codes: denied, state, nonce, token, discovery, missing_id_token, claims (SignInError screen lists a reason)",
+    "Accounts service unreachable: gate shows retry",
+    "Session revoked: writes answer 403 session_revoked, sign in again",
+    "Arabic/RTL: phone numbers, URLs and API keys stay LTR inside RTL text",
+    "Mobile: rail collapses to a bottom/side nav; the orders pane opens as a sheet"
+  ],
+  "gaps": [],
+  "assistantNote": "Assistant can explain only; it never handles credentials"
+}

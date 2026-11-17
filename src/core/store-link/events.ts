@@ -14,6 +14,7 @@ import { acceptVersion, locale, orderRow, rememberBuyerKey, schedulePendingPushe
 import { applyConsentChanged, forgetBuyer, recordCheckoutConsent, recordWithdrawal } from './consent';
 import { alert } from '../observability';
 import { funnelOnce } from '../funnel';
+import { setStoreHoldFlag } from '../numbers/health';
 
 export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
 
@@ -134,6 +135,13 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
         schedulePendingPushes(host, now);
         ensureCatalogReconcile(host, now);
       }
+      return { status: 'applied' };
+    case 'store.suspended':
+    case 'store.reactivated':
+    case 'store.deleted':
+      // STORE-STANDING-1: never gated by link state (an unlinked store that stops paying must still stop spending). Older than the last applied = dropped.
+      if (!acceptVersion(host, 'store:standing', at(event.data.at))) return { status: 'stale' };
+      setStoreHoldFlag(host.sql, event.type !== 'store.reactivated', event.type === 'store.suspended' ? `store_suspended:${event.data.reason}` : 'store_deleted');
       return { status: 'applied' };
     case 'customer.erased':
       // Data protection is never gated by link state. Only what is keyed by the customer is dropped here; the contact is

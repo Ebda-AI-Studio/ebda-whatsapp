@@ -1,0 +1,54 @@
+{
+  "id": "operator.contact-export-erase",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تصدير أو مسح عميل بطلب كتابي",
+  "titleEn": "Export or erase a contact on a written request",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/workspaces/:workspaceId/contacts/:waId/export",
+    "DELETE /operator/workspaces/:workspaceId/contacts/:waId"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": null,
+    "text": "merchant is the data controller; owner DELETE route exists but no screen, so the operator path is the only practical one (audit #10)",
+    "validUnderRule": false
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل تصدير أو مسح عميل بطلب كتابي؟",
+      "ليه مش لاقي تصدير أو مسح عميل بطلب كتابي عندي؟",
+      "عايز تصدير أو مسح عميل بطلب كتابي اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Export or erase a contact on a written request?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "Self-service gap: merchant is the data controller; owner DELETE route exists but no screen, so the operator path is the only practical one (audit #10)",
+    "operator replaces: contacts.export / contacts.erase (merchant routes exist but erase has no UI)"
+  ]
+}
