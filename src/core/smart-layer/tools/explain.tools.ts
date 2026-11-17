@@ -16,7 +16,7 @@ export const EXPLAIN_IDS: readonly string[] = [
   'inbox.coexistence-echo', 'inbox.failed-retry', 'inbox.handoff-needs-human', 'inbox.quick-replies', 'inbox.voice-note-transcript',
   'contacts.opt-in-keyword', 'contacts.opt-out',
   // access, numbers, orders, catalogue, billing behaviours (E7)
-  'access.language', 'access.sign-out', 'agent.voice-notes', 'catalogue.google-feeds-clash', 'compliance.privacy-terms', 'inbox.realtime', 'notifications.alerts',
+  'access.language', 'access.sign-out', 'agent.voice-notes', 'agent.inbound-media', 'catalogue.google-feeds-clash', 'compliance.privacy-terms', 'inbox.realtime', 'notifications.alerts',
   'numbers.coexistence', 'numbers.display-name', 'numbers.history-contacts-sync', 'numbers.meta-payment-method', 'numbers.meta-verification',
   'orders.cart-to-order', 'orders.cod-confirmation', 'orders.instapay-in-chat', 'orders.tracking',
   'templates.shared-number-marketing', 'templates.starter-on-connect', 'wallet.instapay-auto-confirm', 'catalogue.product-cards',

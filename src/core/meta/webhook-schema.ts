@@ -3,7 +3,8 @@ import { z } from 'zod';
 export const MESSAGE_TYPES = ['text', 'interactive', 'image', 'audio', 'video', 'document', 'sticker', 'location', 'order'] as const;
 export type MessageType = (typeof MESSAGE_TYPES)[number] | 'unsupported';
 
-export type InboundMedia = { id: string; mime: string; filename?: string };
+/** `voice`: Meta's flag on an audio message (true = recorded voice note, false = an audio file); absent = treated as a voice note. */
+export type InboundMedia = { id: string; mime: string; filename?: string; voice?: boolean };
 /** A tap on a button, a list row or a template quick-reply. `id` is what we set when we sent it (a template button without a payload echoes its title). */
 export type InboundReply = { kind: 'button' | 'list'; id: string; title: string };
 /** A cart sent from Meta's catalog. Prices stay the decimal strings Meta sent (no float arithmetic on money). */
@@ -21,7 +22,7 @@ const orderSchema = z.object({
   text: z.string().optional(),
   product_items: z.array(z.object({ product_retailer_id: z.string().min(1), quantity: z.union([z.number(), z.string()]), item_price: z.union([z.number(), z.string()]), currency: z.string() }).loose()).default([]),
 }).loose();
-const mediaBodySchema = z.object({ id: z.string().min(1), mime_type: z.string().optional(), caption: z.string().optional(), filename: z.string().optional() }).loose();
+const mediaBodySchema = z.object({ id: z.string().min(1), mime_type: z.string().optional(), caption: z.string().optional(), filename: z.string().optional(), voice: z.boolean().optional() }).loose();
 /** Meta's `pricing` object on a status: whether the message is billable, under which model and category. Absent fields stay null. */
 export type StatusPricing = { billable: boolean | null; pricingModel: string | null; category: string | null; type: string | null };
 export type StatusEvent = { wamid: string; status: 'sent' | 'delivered' | 'read' | 'failed'; ts: number; errorCode?: number; pricing?: StatusPricing };
@@ -122,7 +123,7 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
           ...(m.text ? { text: m.text.body } : {}),
           ...(reply ? { text: reply.title, reply } : {}),
           ...(order ? { order, text: `🛒 ${order.items.reduce((n, i) => n + i.quantity, 0)}` } : {}),
-          ...(media?.success ? { media: { id: media.data.id, mime: media.data.mime_type ?? 'application/octet-stream', ...(media.data.filename ? { filename: media.data.filename } : {}) }, ...(media.data.caption ? { caption: media.data.caption } : {}) } : {}),
+          ...(media?.success ? { media: { id: media.data.id, mime: media.data.mime_type ?? 'application/octet-stream', ...(media.data.filename ? { filename: media.data.filename } : {}), ...(media.data.voice !== undefined ? { voice: media.data.voice } : {}) }, ...(media.data.caption ? { caption: media.data.caption } : {}) } : {}),
           ...(names.get(m.from) ? { profileName: names.get(m.from) } : {}),
         });
       }

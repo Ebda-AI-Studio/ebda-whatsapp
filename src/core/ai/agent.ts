@@ -79,6 +79,17 @@ const spokeRecently = (host: LinkHost, waId: string, now: number): boolean =>
     waId, now - 12 * 3_600_000,
   ).one().n > 0;
 
+/** One note per customer per this long (10 minutes). */
+export const MEDIA_NOTE_GAP_MS = 10 * 60_000;
+/** Did the agent already send its media/sticker note to this customer within the gap? Read from the stored replies, so erasure and retention cover it. */
+function mediaNoteSent(host: LinkHost, waId: string, now: number): boolean {
+  return host.sql.exec<{ n: number }>(
+    `SELECT count(*) AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
+     WHERE ct.wa_id = ? AND m.direction = 'out' AND m.idempotency_key LIKE 'agent:%:medianote' AND m.created_at > ?`,
+    waId, now - MEDIA_NOTE_GAP_MS,
+  ).one().n > 0;
+}
+
 const windowOpen = (host: LinkHost, waId: string, now: number): boolean => {
   const r = host.sql.exec<{ last_inbound_at: number | null }>('SELECT last_inbound_at FROM contacts WHERE wa_id = ?', waId).toArray()[0];
   return !!r?.last_inbound_at && r.last_inbound_at * 1000 + WINDOW_MS > now;
@@ -88,7 +99,7 @@ const windowOpen = (host: LinkHost, waId: string, now: number): boolean => {
 function turnsUsed(host: LinkHost, waId: string, now: number): number {
   return host.sql.exec<{ n: number }>(
     `SELECT count(*) AS n FROM agent_turns t JOIN messages m ON m.id = t.message_id JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
-     WHERE ct.wa_id = ? AND t.at > ? AND t.outcome NOT IN ('text_only', 'handoff:turn_cap', 'voice_declined')`,
+     WHERE ct.wa_id = ? AND t.at > ? AND t.outcome NOT IN ('text_only', 'media_note', 'media_quiet', 'handoff:turn_cap', 'voice_declined')`,
     waId, now - 86_400_000,
   ).one().n;
 }
@@ -354,7 +365,16 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
   }
   if (turnGone(host, input)) return;
   if (!windowOpen(host, input.from, now)) return; // AI replies (the text-only note included) only inside the 24 h window
-  const isVoice = input.type === 'audio';
+  // Pictures, files, videos, audio files and stickers: one short note, no model, no credit, no reading of the media (it is stored in the inbox as usual). Once per
+  // MEDIA_NOTE_GAP_MS per customer, so a burst of photos is answered once and a sticker cannot start a loop.
+  const mediaKind = input.type === 'sticker' ? 'sticker' : ['image', 'document', 'video'].includes(input.type) || (input.type === 'audio' && input.nonVoice) ? 'media' : null;
+  if (mediaKind) {
+    const quiet = mediaNoteSent(host, input.from, now);
+    const sent = !quiet && await sayNow(host, input, 'medianote', (mediaKind === 'sticker' ? copy.t.stickerNote : copy.t.mediaNote)[locale], now);
+    if (quiet || sent) host.storage.transactionSync(() => recordTurn(host, input, quiet ? 'media_quiet' : 'media_note', now));
+    return;
+  }
+  const isVoice = input.type === 'audio' && !input.nonVoice;
   if (!isVoice && (input.type !== 'text' || !input.text)) {
     if (await sayNow(host, input, 'textonly', copy.t.textOnly[locale], now)) host.storage.transactionSync(() => recordTurn(host, input, 'text_only', now));
     return;

@@ -14,7 +14,7 @@ import { featureAllowed } from '../billing/entitlements';
 import { z } from 'zod';
 import { recordFunnel, type FunnelStep } from '../bot-funnel';
 import { buyerKey } from '../buyer-key';
-import type { InboundOrder, InboundReply } from '../meta/webhook-schema';
+import type { InboundMedia, InboundOrder, InboundReply } from '../meta/webhook-schema';
 import { isE164 } from '../phone';
 import type { SendJob } from '../send-queue';
 import { MAX_RETAILER_ID, type Address, type Buyer, type CatalogRow, type ChatPaymentMethod, type OrderLine, type StoreBridge, type StoreProfile } from '../store-bridge';
@@ -49,13 +49,15 @@ export const botInputSchema = z.object({
   type: z.string(),
   text: z.string().nullable(),
   reply: z.object({ kind: z.enum(['button', 'list']), id: z.string(), title: z.string() }).nullable(),
+  /** An audio message Meta says is NOT a voice note (an audio file): the agent does not transcribe it. */
+  nonVoice: z.boolean().optional(),
   order: z.object({ catalogId: z.string().optional(), note: z.string().optional(), items: z.array(z.object({ retailerId: z.string(), quantity: z.number().int(), price: z.string(), currency: z.string() })) }).nullable(),
 });
 export type BotInput = z.infer<typeof botInputSchema>;
 
 /** The slice of an inbound message the bot needs, as stored on its scheduled task. */
-export function botInputFrom(m: { wamid: string; from: string; type: string; text?: string; reply?: InboundReply; order?: InboundOrder; profileName?: string }, messageId: number, phoneNumberId: string): BotInput {
-  return { messageId, wamid: m.wamid, from: m.from, phoneNumberId, profileName: m.profileName ?? null, type: m.type, text: m.text ? m.text.slice(0, 1024) : null, reply: m.reply ?? null, order: m.order ?? null };
+export function botInputFrom(m: { wamid: string; from: string; type: string; text?: string; reply?: InboundReply; order?: InboundOrder; media?: InboundMedia; profileName?: string }, messageId: number, phoneNumberId: string): BotInput {
+  return { messageId, wamid: m.wamid, from: m.from, phoneNumberId, profileName: m.profileName ?? null, type: m.type, text: m.text ? m.text.slice(0, 1024) : null, reply: m.reply ?? null, order: m.order ?? null, ...(m.type === 'audio' && m.media?.voice === false ? { nonVoice: true } : {}) };
 }
 
 type Line = { variantId: string; title: string; priceMinor: number; currency: string; quantity: number };
@@ -663,6 +665,12 @@ async function paymentUrl(t: Turn, o: { orderId: string; paymentUrl: string | nu
  * A picture while an InstaPay order waits for its transfer: forwarded to the Store once (the order stays
  * pending_payment until the Store itself confirms the money). Pictures at any other time are ignored.
  */
+/** Would `receiveImage` act on a picture from this customer? Yes while they hold an InstaPay order that is not cancelled/refunded/returned (the proof step); then the bot owns the picture. */
+export function proofExpected(host: Pick<LinkHost, 'sql'>, from: string): boolean {
+  const order = host.sql.exec<{ status: string | null }>("SELECT status FROM store_orders WHERE wa_id = ? AND payment_method = 'instapay' ORDER BY updated_at DESC LIMIT 1", from).toArray()[0];
+  return !!order && !['cancelled', 'refunded', 'returned'].includes(order.status ?? '');
+}
+
 async function receiveImage(t: Turn): Promise<void> {
   const { host, input: i } = t;
   const order = host.sql.exec<{ order_id: string; order_number: string | null; status: string | null; proof_wamid: string | null; proof_deadline_at: number | null }>(

@@ -4,6 +4,7 @@ capabilities:
   - agent.credits-view@2
   - agent.enable@2
   - agent.faq@1
+  - agent.inbound-media@1
   - agent.notify-phone@1
   - agent.persona-language@1
   - agent.promises@1
@@ -53,6 +54,9 @@ Only the store owner can change these settings. Your AI credit balance shows at 
 - The agent replies **only inside the 24-hour window**. Outside it you need a template ([guide 4](04-templates-and-the-24-hour-window.md)).
 - Every reply uses AI credits. When credits run out the agent stops and hands the conversation to staff.
 - The agent does not change prices or add discounts. Orders, prices and stock come from Ebda Store.
+
+## Pictures, files and stickers
+The agent reads text and voice notes only. When a customer sends a picture, document, video, audio file or sticker, the agent answers once with a short note asking them to write what they need, or to say they want a person (and then hands over). It does not call the AI model or use a credit, and the file stays in your inbox. It never repeats the note for the same customer within 10 minutes. A payment screenshot for an InstaPay order is still handled by the ordering flow.
 
 ## Voice notes
 When a customer sends a **voice note**, the agent listens to it, and the text appears under the voice note in your inbox (marked "Voice note transcript"). It then answers like it would a typed message. Voice notes longer than 2 minutes, or beyond your store's daily limit, get a polite request to type instead. If a voice note could not be understood, the inbox shows **Voice note (not transcribed)**: listen to it and reply yourself.

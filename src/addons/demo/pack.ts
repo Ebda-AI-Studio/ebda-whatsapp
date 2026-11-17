@@ -28,6 +28,8 @@ const agentCopy: AgentCopy = {
     handoffAck: { ar: 'تمام، بحولك لأحد من الفريق، وبيرد عليك بأقرب وقت 🙏', en: 'Sure, I am passing you to a member of the team. They will reply shortly 🙏' },
     voiceDeclined: { ar: 'الرسالة الصوتية طويلة. ممكن تكتب سؤالك؟', en: 'That voice note is too long. Could you type your question?' },
     voiceFailed: { ar: 'لم أتمكن من سماع الرسالة الصوتية. ممكن تكتب سؤالك؟', en: 'I could not make out that voice note. Could you type your question?' },
+    mediaNote: { ar: 'وصلني الملف. اكتب طلبك بالكلام أو قل «عايز أكلم حد».', en: 'I got your file. Tell me in words what you need, or say "I want a person".' },
+    stickerNote: { ar: 'ستيكر جميل 😄 أقدر أساعدك؟', en: 'Nice sticker 😄 how can I help?' },
     textOnly: { ar: 'أقرأ الرسائل المكتوبة فقط. ممكن تكتب سؤالك؟', en: 'I can only read written messages. Could you type your question?' },
   },
 };

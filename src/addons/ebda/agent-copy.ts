@@ -62,6 +62,8 @@ export const EBDA_AGENT_COPY: AgentCopy = {
     handoffAck: { ar: 'تمام، هحوّلك لحد من فريقنا يكمّل معاك. هيرد عليك في أقرب وقت 🙏', en: 'Sure, I am handing you over to a member of our team. They will reply as soon as possible 🙏' },
     voiceDeclined: { ar: 'الرسالة الصوتية طويلة شوية عليا. ممكن تكتبلي سؤالك؟ 🙏', en: 'That voice note is a bit too long for me. Could you type your question? 🙏' },
     voiceFailed: { ar: 'معرفتش أسمع الرسالة الصوتية كويس. ممكن تكتبلي سؤالك؟ 🙏', en: 'I could not make out that voice note. Could you type your question? 🙏' },
+    mediaNote: { ar: 'وصلتني الصورة أو الملف 🙏 بس أنا بقرا الكلام بس. اكتبلي محتاج إيه بالكلام، أو قولّي «عايز أكلم حد» وأوصّلك بحد من الفريق.', en: 'I got your picture or file 🙏 but I can only read written messages. Tell me in words what you need, or say "I want a person" and I will connect you with the team.' },
+    stickerNote: { ar: 'ستيكر جميل 😄 أقدر أساعدك في إيه؟', en: 'Nice sticker 😄 how can I help?' },
     textOnly: { ar: 'أنا بقرا الرسائل المكتوبة بس. ممكن تكتبلي سؤالك؟', en: 'I can only read written messages. Could you type your question?' },
   },
 };
