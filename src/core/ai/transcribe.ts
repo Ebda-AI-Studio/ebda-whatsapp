@@ -29,14 +29,17 @@ export const VOICE_TIMEOUT = { ms: 45_000 };
 /** The media task has not stored the audio yet: the first retry comes quickly (the download normally finishes in a second or two). */
 export const MEDIA_WAIT_RETRY_MS = 5_000;
 
-export type Transcriber = (audio: Uint8Array, opts: { language?: 'ar' | 'en' }) => Promise<string>;
+/** Context for the speech model (Workers AI `initial_prompt`, verified 2026-11-14 on the model page): Egyptian dialect with English product words mixed in. A fixed phrase, never store or customer data. */
+export const EGYPTIAN_STT_PROMPT = 'كلام بالعامية المصرية، وفيه كلمات إنجليزي زي dress و size و order. مثال: ازيك، عايز أطلب dress أحمر مقاس medium، والشحن بكام للقاهرة؟';
+
+export type Transcriber = (audio: Uint8Array, opts: { language?: 'ar' | 'en'; prompt?: string }) => Promise<string>;
 
 /** Workers AI whisper through the AI binding; null when the binding is absent (then every voice note fails closed). */
 export function workersAiTranscriber(env: Pick<Env, 'AI'>): Transcriber | null {
   const ai = env.AI;
   if (!ai) return null;
   return async (audio, opts) => {
-    const out = (await ai.run(STT_MODEL, { audio: toBase64(audio), ...(opts.language ? { language: opts.language } : {}) })) as { text?: unknown };
+    const out = (await ai.run(STT_MODEL, { audio: toBase64(audio), ...(opts.language ? { language: opts.language } : {}), ...(opts.prompt ? { initial_prompt: opts.prompt } : {}) })) as { text?: unknown };
     if (typeof out?.text !== 'string') throw new Error('transcription answer malformed');
     return out.text;
   };
@@ -96,7 +99,7 @@ export type VoiceResult =
   | { kind: 'text'; text: string; audioMs: number }
   | { kind: 'declined'; why: 'too_long' | 'too_big' | 'daily_cap' }
   /** `audioMs` is set when the speech model was (or may have been) called, so the caller bills the audio on this path too. */
-  | { kind: 'failed'; audioMs?: number }
+  | { kind: 'failed'; audioMs?: number; /** The call threw or timed out and its slot was given back: the merchant is not charged a credit for it (VOICE-SLOT-1). */ threw?: true }
   | { kind: 'gone'; audioMs?: number };
 
 const dailyCap = (env: Pick<Env, 'VOICE_DAILY_CAP'>): number => {
@@ -160,13 +163,13 @@ export async function transcribeVoiceNote(host: LinkHost, input: BotInput, langu
   if (!takeDailySlot(host, input.messageId, Date.now())) return fail({ kind: 'declined', why: 'daily_cap' });
   let text: string;
   try {
-    text = fitTranscript(await withTimeout(transcriber(bytes, language === 'auto' ? {} : { language }), VOICE_TIMEOUT.ms));
+    text = fitTranscript(await withTimeout(transcriber(bytes, { ...(language === 'auto' ? {} : { language }), prompt: EGYPTIAN_STT_PROMPT }), VOICE_TIMEOUT.ms));
   } catch (err) {
     alert('voice_transcribe_failed', { workspace: host.workspaceId, error: errClass(err) });
     // Ruling VOICE-SLOT-1 - a call that threw or timed out gives its slot back; an empty transcript (silence, noise) keeps it, because the model ran. Abuse by
     // noise is bounded per customer instead: voice_failed counts as one of the customer's AI turns per day. Cost if wrong: a flaky model call that was billed anyway is not counted against the daily cap.
     refundDailySlot(host, input.messageId);
-    return fail({ kind: 'failed', audioMs }); // the model may have been billed: the caller records the audio cost
+    return fail({ kind: 'failed', audioMs, threw: true }); // the model may have been billed: the caller records the audio cost, but no credit is charged (slot given back)
   }
   if (!text) return fail({ kind: 'failed', audioMs }); // silence or noise: nothing to answer, but the model ran and is billed
   host.sql.exec('DELETE FROM store_state WHERE key = ?', slotKey(input.messageId));

@@ -24,7 +24,7 @@
       "method": "POST"
     },
     {
-      "pattern": "/templates(?:/(?!sync$)|$)",
+      "pattern": "/templates(?:/(?!(?:sync|check)$)|$)",
       "method": "POST"
     },
     {

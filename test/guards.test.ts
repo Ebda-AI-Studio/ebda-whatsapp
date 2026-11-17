@@ -20,7 +20,7 @@ it('pins the Store event contract file: change it only together with the Store r
   const { readFileSync } = await import('node:fs');
   const { createHash } = await import('node:crypto');
   const file = readFileSync(new URL('../src/core/api/store-events.ts', import.meta.url));
-  expect(createHash('sha256').update(file).digest('hex')).toBe('3c24ed64267e9d051bce1b1959a7d0c2dd2f28cec1bab03d8a47147b375fc4af'); // contract v1.5 = Store apps/api/src/contracts/wa-v1.ts (Store #285)
+  expect(createHash('sha256').update(file).digest('hex')).toBe('abf04536b60312801a34aa759ae9ed138030af46a00345ccc2cc10ebd863ecac'); // contract v1.6 = Store apps/api/src/contracts/wa-v1.ts (Store #839, STORE-STANDING-1)
 });
 
 it('shared web code names no brand: names, marks, hosts and colours come from web/brands/<brand>', () => {
@@ -90,7 +90,7 @@ it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / IN
   const sets = { P0: setOf('P0_ALERTS'), P1: setOf('P1_ALERTS'), INFO: setOf('INFO_ALERTS') };
   expect(sets.P0.size).toBeGreaterThan(5);
   expect(sets.P1.size).toBeGreaterThan(40);
-  expect(sets.INFO.size).toBe(29); // + instapay_auto_error (InstaPay auto-confirm: the request waits for a person); 20 + starter_templates_failed (template self-service: the screen retries) + catalog_items_rejected (WhatsApp catalogue) + P1b: seats_over_limit + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
+  expect(sets.INFO.size).toBe(38); // + assistant_handoff, assistant_help_index_failed, assistant_status_failed (Smart Layer assistant) + 6 for the Chat agent context (agent_policies_unavailable, agent_profile_unavailable, agent_faq_not_indexed, handoff_owner_unreachable, handoff_owner_notice_failed, handoff_digest_failed) + instapay_auto_error (InstaPay auto-confirm: the request waits for a person); 20 + starter_templates_failed (template self-service: the screen retries) + catalog_items_rejected (WhatsApp catalogue) + P1b: seats_over_limit + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
   const used = new Set<string>();
   for (const hit of findMatches(/\balert\(/, 'src')) {
     const [file, line] = hit.split(':') as [string, string];

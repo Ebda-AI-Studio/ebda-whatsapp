@@ -30,8 +30,8 @@ export function toolDefs(a: ToolAvailability): ToolDef[] {
   if (a.catalog) {
     defs.push({
       name: 'search_catalog',
-      description: 'Find products in the store by name, type or description. Returns up to 5 matches with current price, availability and link.',
-      parameters: { type: 'object', properties: { query: { type: 'string', description: 'What the customer is looking for, in their words.' } }, required: ['query'] },
+      description: 'Find products in the store by meaning, name, type or description (the store\'s own search: it understands Arabic dialect, Franco-Arabic and typos, but write the query in Arabic or English). Returns up to 5 matches with current price, availability and link. Pass maxPrice when the customer named a budget.',
+      parameters: { type: 'object', properties: { query: { type: 'string', description: 'What the customer is looking for, as a short phrase (translate Franco-Arabic such as "fostan a7mar" to Arabic or English first).' }, maxPrice: { type: 'number', description: 'The customer\'s budget ceiling in the store currency (500 means 500 EGP). Only when the customer stated one.' } }, required: ['query'] },
     });
     defs.push({
       name: 'show_products',
@@ -70,7 +70,7 @@ export type ToolOutcome = { content: string } | { handoff: true } | { startOrder
 /** `cards` collects the catalogue messages a turn asked for; the agent sends them after its text. */
 export type ToolContext = { host: LinkHost; from: string; bridge: StoreBridge | null; availability: ToolAvailability; locale: 'ar' | 'en'; cards: BuiltCard[]; /** Rows shown by show_products this turn: one product message is built from all of them (WA-CAT-5). */ shown?: CatalogRow[] };
 
-const searchArgs = z.object({ query: z.string().trim().min(1).max(120) });
+const searchArgs = z.object({ query: z.string().trim().min(1).max(120), maxPrice: z.number().positive().max(1_000_000).optional() });
 const showArgs = z.object({ ids: z.array(z.string().trim().min(1).max(200)).min(1).max(10) });
 const statusArgs = z.object({ orderNumber: z.string().trim().regex(/^[\w-]{1,40}$/).optional() });
 const json = (v: unknown): ToolOutcome => ({ content: JSON.stringify(v).slice(0, 3000) });
@@ -83,7 +83,7 @@ export async function runTool(ctx: ToolContext, call: ToolCall): Promise<ToolOut
         if (!ctx.availability.catalog || !ctx.bridge) return err('unavailable');
         const args = searchArgs.safeParse(call.arguments);
         if (!args.success) return err('invalid_arguments');
-        return json(await searchCatalog(ctx, args.data.query));
+        return json(await searchCatalog(ctx, args.data.query, args.data.maxPrice));
       }
       case 'show_products': {
         if (!ctx.availability.catalog || !ctx.bridge) return err('unavailable');
@@ -164,19 +164,31 @@ export function rankRows(rows: CatalogRow[], query: string): CatalogRow[] {
 }
 
 /**
- * Search without an index: read the Store's catalog (up to 500 variants) and rank by matching words. The semantic index (when
- * Vectorize exists) only finds candidates; the rows returned here are always read from the Store just now.
+ * Catalogue search. The Store's own ranked search answers first (stemming, Franco/dialect search terms, meaning leg; Store ruling CHAT-AGENT-1): an empty
+ * answer from it is a real "the store does not have that" unless it says `degraded` (its meaning leg was skipped: Store ruling CHAT-AGENT-6), which is `uncertain` like the fallback. Only when it cannot answer (Store unavailable) does this fall back to the agent's own index and then
+ * the plain word match over the catalogue; that path is weaker (no stemming, at most 500 variants read), so an empty result there is marked `uncertain`
+ * (and `incomplete` when the catalogue was larger than what was read): the prompt tells the model to say it will check, never "we don't have it" (audit D2).
+ * Prices, stock and links are always the Store's, read just now.
  */
-async function searchCatalog(ctx: ToolContext, query: string): Promise<{ results: Hit[] } | { error: string }> {
+async function searchCatalog(ctx: ToolContext, query: string, maxPrice?: number): Promise<{ results: Hit[]; uncertain?: true; incomplete?: true } | { error: string }> {
   const bridge = ctx.bridge!;
-  // The index only names candidate products; what is shown (price, stock, link) is read from the Store right now.
+  const ceiling = maxPrice === undefined ? undefined : Math.round(maxPrice * 100);
+  const within = (r: CatalogRow) => ceiling === undefined || r.priceMinor <= ceiling;
+  // An opaque per-shopper id for the Store's query-embed rate limit: the hashed buyer key, never the phone.
+  const secret = storeLink().buyerSecret(ctx.host.env);
+  const searcher = secret && isE164(`+${ctx.from}`) ? await buyerKey(secret, `+${ctx.from}`) : undefined;
+  const found = await bridge.searchProducts(ctx.host.workspaceId, query, { limit: SEARCH_RESULTS, ...(ceiling !== undefined ? { maxPriceMinor: ceiling } : {}), ...(searcher ? { searcher } : {}) });
+  // A real negative only when the Store ran every leg: an empty answer with `degraded` (meaning leg skipped) falls through to the weaker path, whose empty result is `uncertain`.
+  if (found.ok && (found.value.items.length > 0 || !found.value.degraded)) return { results: found.value.items.slice(0, SEARCH_RESULTS).map(toHit) };
+  // Fallback. The index only names candidate products; what is shown (price, stock, link) is read from the Store right now.
   const ids = await catalogCandidates(ctx.host, query);
   if (ids) {
     // The index names RETAILER ids (what the Store's `getProducts` answers to, variants included), best match first.
     const fresh = await bridge.getProducts(ctx.host.workspaceId, ids);
     if (fresh.ok && fresh.value.items.length) {
       const rank = new Map(ids.map((id, i) => [id, i]));
-      return { results: fresh.value.items.sort((a, b) => (rank.get(a.retailerId) ?? 99) - (rank.get(b.retailerId) ?? 99)).slice(0, SEARCH_RESULTS).map(toHit) };
+      const ranked = fresh.value.items.filter(within).sort((a, b) => (rank.get(a.retailerId) ?? 99) - (rank.get(b.retailerId) ?? 99)).slice(0, SEARCH_RESULTS);
+      if (ranked.length) return { results: ranked.map(toHit) };
     }
   }
   const rows: CatalogRow[] = [];
@@ -188,7 +200,9 @@ async function searchCatalog(ctx: ToolContext, query: string): Promise<{ results
     cursor = res.value.nextCursor;
     if (!cursor) break;
   }
-  return { results: rankRows(rows, query).slice(0, SEARCH_RESULTS).map(toHit) };
+  const results = rankRows(rows.filter(within), query).slice(0, SEARCH_RESULTS).map(toHit);
+  if (results.length) return { results };
+  return { results: [], uncertain: true, ...(cursor ? { incomplete: true as const } : {}) };
 }
 
 async function orderStatus(ctx: ToolContext, orderNumber: string | undefined): Promise<unknown> {

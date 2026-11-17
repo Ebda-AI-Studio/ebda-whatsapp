@@ -6,6 +6,7 @@ import { OrderPane } from './components/OrderPane';
 import { Rail, type View } from './components/Rail';
 import { BRAND } from '@brand';
 import { AgentScreen } from './components/AgentScreen';
+import { AssistantPanel } from './components/AssistantPanel';
 import { BotScreen } from './components/BotScreen';
 import { CampaignsScreen, dateTime } from './components/CampaignsScreen';
 import { ContactsScreen } from './components/ContactsScreen';
@@ -25,6 +26,18 @@ type Props = { source: InboxSource; now?: () => number; initialLang?: Lang };
 
 export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const [lang, setLang] = useState<Lang>(initialLang);
+  // The assistant: offered only while the server says it is on for this store; a first turn that answers "off" withdraws it for the session.
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantGone, setAssistantGone] = useState(false);
+  const assistantOn = !!source.assistant && source.capabilities.assistant === true && !assistantGone;
+  const toggleAssistant = useCallback(() => setAssistantOpen((o) => !o), []);
+  const closeAssistant = useCallback(() => { setAssistantOpen(false); document.getElementById('assistant-launcher')?.focus(); }, []);
+  useEffect(() => {
+    if (!assistantOn) return;
+    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'j') { e.preventDefault(); setAssistantOpen((o) => !o); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [assistantOn]);
   const [view, setView] = useState<View>('inbox');
   const t = STRINGS[lang];
   const [filter, setFilter] = useState<ConversationFilter>('all');
@@ -246,7 +259,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   return (
     <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
       {source.viewAs && <p className="view-as-banner" role="status" aria-label={t.viewAsBanner}>{t.viewAsBanner}</p>}
-      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} />
+      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
         : view === 'templates' && source.templatesApi ? <TemplatesScreen t={t} lang={lang} source={source} api={source.templatesApi} onNavigate={setView} />
@@ -278,6 +291,10 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
         </div>
       )}
       <button type="button" className="sheet-backdrop" aria-label={t.close} tabIndex={-1} onClick={() => setOrdersOpen(false)} />
+      {assistantOn && assistantOpen && source.assistant && (
+        <AssistantPanel t={t} lang={lang} storeId={source.storeId ?? 'store'} userId={source.currentUserId} api={source.assistant} onClose={closeAssistant} onUnavailable={() => { setAssistantGone(true); setAssistantOpen(false); }}
+          onNavigate={(v) => { setView(v); if (window.matchMedia?.('(max-width: 819px)').matches) closeAssistant(); }} />
+      )}
       {source.kind === 'sample' && <span className="sample-badge">{t.sample}</span>}
     </div>
   );

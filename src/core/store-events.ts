@@ -3,9 +3,21 @@ import { parseStoreEvent } from './api/store-events';
 import { recordWorkspaceOwner } from './campaigns/new-cap';
 import { applyStorePlan } from './billing/store-plan';
 import { errClass, alert } from './observability';
+import { syncSuspendedMirror } from './ops/suspension-mirror';
 import { senderNumberFor } from './shared/shared-number';
 
 const MAX_RETRY_DELAY_S = 300;
+/** STORE-STANDING-1: the Store's standing events (suspend / reactivate / delete). */
+const STANDING: ReadonlySet<string> = new Set(['store.suspended', 'store.reactivated', 'store.deleted']);
+
+/**
+ * The Worker's copy of the hold (D1 `workspaces.suspended_*`), DERIVED from the workspace's flags by the one shared helper (`syncSuspendedMirror`): a Store release clears
+ * only the Store tag, and the operator's suspension or a wallet debt hold that is still on keeps D1 suspended with its own reason. `reason` is the hold the caller read;
+ * the helper reads the full state itself.
+ */
+export async function mirrorStoreHold(env: Env, workspaceId: string, _reason: 'store_suspended' | 'store_deleted' | null, now: number): Promise<void> {
+  await syncSuspendedMirror(env.DB, workspaceId, await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(workspaceId)).suspensionState(), now);
+}
 const retryDelay = (attempts: number) => Math.min(MAX_RETRY_DELAY_S, 5 * 2 ** Math.max(0, attempts - 1));
 
 /**
@@ -26,6 +38,10 @@ export async function consumeStoreEvents(batch: MessageBatch<unknown>, env: Env)
       // The workspace id is the store id. A workspace that is not registered (yet) is retried: the
       // store may emit `store.linked` moments before onboarding registers it; the DLQ catches the ones that never appear.
       const known = await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(event.storeId).first();
+      if (!known && STANDING.has(event.type)) {
+        msg.ack(); // nothing here can spend for a store it never registered (and a deleted store never registers): no retry, no DLQ
+        continue;
+      }
       if (!known) {
         console.warn(JSON.stringify({ warn: 'store_event_unknown_workspace', type: event.type, storeId: event.storeId }));
         msg.retry({ delaySeconds: retryDelay(msg.attempts) });
@@ -37,6 +53,13 @@ export async function consumeStoreEvents(batch: MessageBatch<unknown>, env: Env)
       // Own number, else the shared platform number for a member (transactional events carry their order ref there).
       const number = await senderNumberFor(env, event.storeId);
       const result = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(event.storeId)).applyStoreEvent(event, { phoneNumberId: number?.phoneNumberId ?? null, shared: number?.shared ?? false });
+      // The Worker's copy of the hold (D1 `workspaces.suspended_*`, what the API middleware reads) is written from the workspace's CURRENT hold, not
+      // from the event, on EVERY delivery (applied, duplicate or stale): a retry after a failed D1 save finds the event already recorded in the
+      // workspace (`duplicate`) and still re-attempts the save, and a stale event re-asserts the newer state. Awaited: a failure retries the event.
+      if (STANDING.has(event.type)) {
+        const held = await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(event.storeId)).storeHold();
+        await mirrorStoreHold(env, event.storeId, held === null ? null : held === 'store_deleted' ? 'store_deleted' : 'store_suspended', Date.now());
+      }
       console.log(JSON.stringify({ audit: 'store_event', type: event.type, storeId: event.storeId, status: result.status, ...(result.detail ? { detail: result.detail } : {}) }));
       if (result.status === 'retry') msg.retry({ delaySeconds: retryDelay(msg.attempts) });
       else msg.ack();

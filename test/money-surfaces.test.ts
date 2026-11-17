@@ -409,7 +409,7 @@ describe('A9 Chat: AI credit packs', () => {
     expect(await repairCreditOrders(env, fake)).toMatchObject({ credited: 0 });
     expect((await workspace(ws).aiCredits()).balance).toBe(before + 100);
   });
-  it('a refund of the payment never silently takes credits back: it raises a P1 for a person', async () => {
+  it('a refund of the payment expires the unused credits (WA-PACK-REFUND-1) and still raises the P1 for a person', async () => {
     const ws = W(31);
     await seedNumber('pn-c31', ws);
     const a = await apiFor(ws);
@@ -420,7 +420,7 @@ describe('A9 Chat: AI credit packs', () => {
     const spy = vi.spyOn(console, 'error');
     await hook(order.orderId, 'TX-C31-R', amount, 'refund');
     expect(spy.mock.calls.some((c) => String(c[0]).includes('credit_pack_refunded'))).toBe(true);
-    expect((await workspace(ws).aiCredits()).balance).toBeGreaterThanOrEqual(100);
+    expect((await workspace(ws).aiCredits()).balance).toBe(0); // the whole pack was unused: all of it expires, nothing goes negative
   });
 });
 

@@ -1,0 +1,56 @@
+{
+  "id": "assistant.apply-changes",
+  "status": "live",
+  "area": "assistant",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تطبيق التغييرات اللي جهّزها المساعد وتأكيدها والرجوع فيها",
+  "titleEn": "Apply, confirm or undo a change the assistant prepared",
+  "screens": [
+    "AssistantPanel preview card (Apply, Undo) and confirm card"
+  ],
+  "api": [
+    "POST /stores/:storeId/assistant/previews/:previewId/apply",
+    "POST /stores/:storeId/assistant/applied/:appliedId/undo",
+    "POST /stores/:storeId/assistant/approvals/:approvalId/confirm",
+    "POST /stores/:storeId/assistant/approvals/:approvalId/reject"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ebda-assistant",
+  "questions": {
+    "ar": [
+      "ازاي أطبّق التغيير اللي المساعد جهّزه؟",
+      "عايز ارجّع تغيير المساعد",
+      "المساعد غيّر حاجة غلط"
+    ],
+    "en": [
+      "How do I apply the change the assistant prepared?",
+      "Undo what the assistant changed"
+    ]
+  },
+  "steps": [
+    "The assistant prepares a change and shows a preview card with the before and after; nothing has changed yet",
+    "Press Apply to make the change with your own permissions; press Undo within 24 hours to put it back",
+    "If the item changed since the preview, Apply shows a new preview instead of overwriting",
+    "A change that involves money, deletion, messages to your customers, more than 20 items or a price change shows a confirm card: only your press on its button makes it happen (typing yes does not); the card expires after 15 minutes"
+  ],
+  "edgeCases": [
+    "Mode below act: the card is shown but Apply is refused",
+    "Two presses on one card apply once",
+    "Your role does not allow the change: refused, nothing changes",
+    "Undo after you edited the item by hand: shows what undo would do, writes nothing",
+    "Two presses or two tabs on one confirm card apply once",
+    "Your role changed since the card was made: the press is refused and nothing changes",
+    "The item changed since the card was made: a new card with a new confirmation replaces it"
+  ],
+  "gaps": []
+}
