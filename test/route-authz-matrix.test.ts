@@ -115,7 +115,7 @@ describe('ROUTE-AUTZ-1: the role of every store route', () => {
     expect(bad).toEqual([]);
   }, 120_000);
 
-  it('a member of ANOTHER store (owner, staff, super admin) is refused on every route: 403, never a read or write of this store', async () => {
+  it('a member of ANOTHER store (owner, staff) is refused on every route: 403, never a read or write of this store', async () => {
     await apiFor(W(2));
     const bad: string[] = [];
     for (const [label, token] of [['owner', await tokenOf([{ id: W(3), role: 'owner' }])], ['staff', await tokenOf([{ id: W(3), role: 'staff' }])]] as const) {
@@ -158,7 +158,7 @@ describe('ROUTE-AUTZ-1: the role of every store route', () => {
     expect(bad).toEqual([]);
   }, 180_000);
 
-  it('operator routes: every /operator route is 401 without a token and 403 for an owner, a staff member and a super-admin-less member of any store', async () => {
+  it('operator routes: every /operator route is 401 without a token and 403 for an owner, a staff member and not a super admin', async () => {
     const ws = W(7);
     await apiFor(ws);
     const ops = [...new Set(apiRoutes.routes.filter((r) => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(r.method) && r.path.startsWith('/operator/')).map((r) => `${r.method} ${r.path}`))];
