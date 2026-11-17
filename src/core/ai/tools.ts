@@ -205,6 +205,20 @@ async function searchCatalog(ctx: ToolContext, query: string, maxPrice?: number)
   return { results: [], uncertain: true, ...(cursor ? { incomplete: true as const } : {}) };
 }
 
+/**
+ * What the Store tells about a shipment: its status code, that code in the customer's words (the same phrases the shipping notifications use; null for a code with
+ * no phrase) and the tracking link. The bridge's shipment has NO courier name, tracking number or delivery estimate (docs/store-link.md, Store-side ask): the result
+ * says so, and the prompt forbids guessing one.
+ */
+type Shipment = { status: string; trackingUrl: string | null };
+function shipmentOf(ctx: ToolContext, s: Shipment | null): unknown {
+  if (!s) return null;
+  return { status: s.status, statusText: storeLink().copy?.shipmentPhrase(s.status, ctx.locale) ?? null, trackingUrl: s.trackingUrl, courier: null, estimatedDelivery: null };
+}
+
+/** At most this many shipped orders get their shipment read in one listing (one Store read each, in parallel). */
+const LISTING_SHIPMENTS = 3;
+
 async function orderStatus(ctx: ToolContext, orderNumber: string | undefined): Promise<unknown> {
   const secret = storeLink().buyerSecret(ctx.host.env);
   const e164 = `+${ctx.from}`;
@@ -214,9 +228,19 @@ async function orderStatus(ctx: ToolContext, orderNumber: string | undefined): P
   if (orderNumber) {
     const res = await bridge.getOrderStatus(ctx.host.workspaceId, orderNumber, key);
     if (!res.ok) return { error: res.reason === 'not_found' ? 'order_not_found' : 'store_unavailable' };
-    return { orderNumber: res.value.orderNumber, status: res.value.status, paymentMethod: res.value.paymentMethod, shipment: res.value.shipment };
+    return { orderNumber: res.value.orderNumber, status: res.value.status, paymentMethod: res.value.paymentMethod, shipment: shipmentOf(ctx, res.value.shipment) };
   }
   const res = await bridge.listCustomerOrders(ctx.host.workspaceId, key, 3);
   if (!res.ok) return { error: res.reason === 'not_found' || res.reason === 'not_linked' ? 'no_orders' : 'store_unavailable' };
-  return { orders: res.value.items.map((o) => ({ orderNumber: o.orderNumber, status: o.status, paymentMethod: o.paymentMethod, total: o.totalMinor / 100, currency: o.currency, items: o.itemsCount })) };
+  // "فين أوردري؟" with no number: a shipped order carries its shipment already, so the model needs no second round (a failed read just leaves the shipment out).
+  const shipments = await Promise.all(res.value.items.map(async (o, i) => {
+    if (o.status !== 'shipped' || i >= LISTING_SHIPMENTS) return null;
+    try {
+      const r = await bridge.getOrderStatus(ctx.host.workspaceId, o.orderNumber, key);
+      return r.ok ? r.value.shipment : null;
+    } catch {
+      return null; // the listing is still the answer
+    }
+  }));
+  return { orders: res.value.items.map((o, i) => ({ orderNumber: o.orderNumber, status: o.status, paymentMethod: o.paymentMethod, total: o.totalMinor / 100, currency: o.currency, items: o.itemsCount, ...(shipments[i] ? { shipment: shipmentOf(ctx, shipments[i]!) } : {}) })) };
 }
