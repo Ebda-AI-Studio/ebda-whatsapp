@@ -20,7 +20,7 @@ it('pins the Store event contract file: change it only together with the Store r
   const { readFileSync } = await import('node:fs');
   const { createHash } = await import('node:crypto');
   const file = readFileSync(new URL('../src/core/api/store-events.ts', import.meta.url));
-  expect(createHash('sha256').update(file).digest('hex')).toBe('abf04536b60312801a34aa759ae9ed138030af46a00345ccc2cc10ebd863ecac'); // contract v1.6 = Store apps/api/src/contracts/wa-v1.ts (Store #839, STORE-STANDING-1)
+  expect(createHash('sha256').update(file).digest('hex')).toBe('4fbfb22194b16b5d0becaff7e201251dc0d11ed754b2c626ae01b5f9bee9ee3d'); // contract v1.6 = Store apps/api/src/contracts/wa-v1.ts (Store #839 STORE-STANDING-1 + Store #811 COD v2 fields; Store #811 must carry these exact bytes)
 });
 
 it('shared web code names no brand: names, marks, hosts and colours come from web/brands/<brand>', () => {

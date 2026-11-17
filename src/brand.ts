@@ -26,6 +26,8 @@ export type BrandPack = {
   autoReply: string;
   optInKeywords: readonly string[];
   templates: readonly TemplateSeed[];
+  /** A template whose Meta URL-button base is the store's own address, so it cannot be a starter entry: submitted per workspace once the Store has said where it shops. */
+  perStoreTemplate?: { name: string; language: string; build(origin: string): TemplateSeed };
   agentCopy: AgentCopy;
   /** Words of the shared platform number (Phase 8.2). */
   sharedNumber: SharedNumberCopy;

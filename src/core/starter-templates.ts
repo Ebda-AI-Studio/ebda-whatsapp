@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { ensureCodV2 } from './cod-v2';
 import { alert } from './observability';
 import { installDefaults, syncTemplates, type TemplateSeedInput, type TemplatesCtx } from './templates-service';
 
@@ -35,6 +36,7 @@ export async function installStarterOnConnect(env: Env, n: { workspaceId: string
     if (!out.ok) return failedStarter(n.workspaceId, out.reason);
     if (out.failed.length > 0) return failedStarter(n.workspaceId, 'some_failed');
     await ws.markStarterInstalled(n.wabaId);
+    await ensureCodV2(env, n.workspaceId); // the Store may have linked before this number connected (never throws)
     return 'done';
   } catch (err) {
     return failedStarter(n.workspaceId, err instanceof Error ? err.name : 'error');
