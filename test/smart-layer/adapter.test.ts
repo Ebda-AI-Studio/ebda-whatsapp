@@ -106,10 +106,10 @@ describe('controls', () => {
 describe('quota: free cap and heavy credits', () => {
   it('the 151st turn in a day is refused; another store is unaffected', async () => {
     const st = rpcStorage((op, args) => workspace(W(11)).smartLayer(op, args));
-    const q = chatQuota(st, workspace(W(11)));
+    const q = chatQuota(st, workspace(W(11)), env);
     for (let i = 0; i < 150; i++) await q.assertTurn(ctx(W(11), { now: 1_800_000_000_000 + i }));
     await expect(q.assertTurn(ctx(W(11), { now: 1_800_000_001_000 }))).rejects.toThrow('free_cap');
-    await expect(chatQuota(rpcStorage((op, args) => workspace(W(12)).smartLayer(op, args)), workspace(W(12))).assertTurn(ctx(W(12)))).resolves.toBeUndefined();
+    await expect(chatQuota(rpcStorage((op, args) => workspace(W(12)).smartLayer(op, args)), workspace(W(12)), env).assertTurn(ctx(W(12)))).resolves.toBeUndefined();
   });
   it('a heavy job holds credits first, settles them on success (note assistant), and a hold that never settles frees itself', async () => {
     const s = W(13);
@@ -117,7 +117,7 @@ describe('quota: free cap and heavy credits', () => {
     const now = 1_800_000_000_000;
     await runInDurableObject(ws, (_i, state) => { grantCredits(state.storage.sql, { periodStart: now, packageId: 'p', credits: 10, now }); });
     const st = rpcStorage((op, args) => ws.smartLayer(op, args));
-    const q = chatQuota(st, ws);
+    const q = chatQuota(st, ws, env);
     const c1 = ctx(s, { conversationId: 'heavy1', now });
     await q.assertTurn(c1, 4);
     const avail = (at: number) => runInDurableObject(ws, (_i, state) => creditsAvailable(state.storage.sql, at));

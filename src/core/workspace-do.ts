@@ -18,7 +18,8 @@ import { exportContact, mergeContacts, renameContact } from './contact-data';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptOutMessage, matchOptIn } from './consent';
-import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, debtHold, storeHold, suspensionState, type SuspensionState, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { syncSuspendedMirror } from './ops/suspension-mirror';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
 import { writeSessionState } from './identity/session';
 import { DAILY_KINDS, addTask, dailyHour, retryDelayMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
@@ -51,7 +52,7 @@ import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importStat
 import type { DigestDto, AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
 import { funnelOnce } from './funnel';
 import { digestCounts, digestEnabled, setDigestEnabled } from './digest';
-import { holdCredits, lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, releaseHold, revokeGrantExcess, settleHold, upgradeGrant, type CreditKind, type HoldResult, type Posted } from './ai/credits';
+import { holdCredits, lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, expirePackUnused, grantCredits, lastGrantStart, postCredit, releaseHold, revokeGrantExcess, settleHold, upgradeGrant, type CreditKind, type HoldResult, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { abandonVoiceTurn } from './ai/agent';
 import { dropProfile } from './ai/context';
@@ -761,13 +762,13 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** running | scheduled -> paused for one reason, on one number (or every number when null). The merchant resumes them; nothing here ever does. */
-  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused', now = Date.now()): Promise<number> {
+  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused' | 'store_suspended' | 'wallet_empty', now = Date.now(), park = false): Promise<number> {
     const ids = this.sql
       .exec<{ id: string }>(`SELECT id FROM campaigns WHERE status IN ('running', 'scheduled') ${phoneNumberId === null ? '' : 'AND phone_number_id = ?'}`, ...(phoneNumberId === null ? [] : [phoneNumberId]))
       .toArray();
     let n = 0;
     for (const { id } of ids) {
-      const r = await pauseCampaign(this.host(), id, reason, now);
+      const r = await pauseCampaign(this.host(), id, reason, now, park);
       if (r.ok) { n++; await endInstance(this.host(), id, this.campaignAttempt(id)); }
     }
     return n;
@@ -779,8 +780,18 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { paused: suspended ? await this.pauseCampaignsOn(null, 'operator_paused', now) : 0 };
   }
 
+  /** Every reason this workspace may not spend (operator, Store, wallet debt): what D1's `suspended_*` is derived from (`syncSuspendedMirror`). */
+  async suspensionState(): Promise<SuspensionState> {
+    return suspensionState(this.sql);
+  }
+
   async suspended(): Promise<boolean> {
     return isSuspended(this.sql);
+  }
+
+  /** The Store hold's reason (STORE-STANDING-1), or null: the operator unsuspend keeps D1 in step with it. */
+  async storeHold(): Promise<string | null> {
+    return storeHold(this.sql);
   }
 
   async throttleReport(phoneNumberId: string, now = Date.now()): Promise<ThrottleReport> {
@@ -1277,7 +1288,11 @@ export class WorkspaceDO extends DurableObject<Env> {
   async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null; shared?: boolean }): Promise<StoreEventOutcome> {
     await this.ensurePricing();
     if (opts.phoneNumberId) await this.repullIfUnknown(opts.phoneNumberId, Date.now());
-    return applyStoreEvent(this.host(), event, opts);
+    const result = await applyStoreEvent(this.host(), event, opts);
+    // STORE-STANDING-1: a Store suspension or deletion also pauses every running / scheduled campaign (nothing resumes them on reactivation:
+    // the merchant resumes, as after an operator suspension). The hold flag itself already stops every send at its claim.
+    if (result.status === 'applied' && (event.type === 'store.suspended' || event.type === 'store.deleted')) await this.pauseCampaignsOn(null, 'store_suspended');
+    return result;
   }
 
   /**
@@ -1694,6 +1709,10 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** A partial refund of a package: `num/den` of the period's unused granted credits expire under `ref` (idempotent). */
   async expireAiCreditsFraction(a: { periodStart: number; num: number; den: number; ref: string }, now = Date.now()): Promise<{ expired: number }> {
     return { expired: this.ctx.storage.transactionSync(() => expireGrantFraction(this.sql, { ...a, now })) };
+  }
+  /** WA-PACK-REFUND-1: expires the unused part of a refunded credit pack (see expirePackUnused). Idempotent under `ref`. */
+  async expireRefundedPack(a: { credits: number; num: number; den: number; ref: string; orderId: string }, now = Date.now()): Promise<{ expired: number; spent: number; duplicate?: true }> {
+    return this.ctx.storage.transactionSync(() => expirePackUnused(this.sql, { ...a, now }));
   }
   /** A purchase, refund or operator adjustment: the ref makes it idempotent; an operator adjustment needs an actor and a reason. */
   async postAiCredits(a: { kind: Extract<CreditKind, 'purchase' | 'refund' | 'adjustment'>; amount: number; ref: string; actor?: string; note?: string }, now = Date.now()): Promise<Posted | { ok: false; reason: 'actor_and_note_required' }> {
@@ -2495,6 +2514,11 @@ export class WorkspaceDO extends DurableObject<Env> {
         return sweepCampaigns(this.host(), now);
       case 'wallet_sweep':
         return this.ctx.storage.transactionSync(() => this.billing.sweep(now)) ?? undefined;
+      case 'wallet_debt_sync':
+        // WA-DEBT-1: a debt hold pauses running / scheduled campaigns (reason wallet_empty, queued pages parked, nothing resumes them) and D1 is derived from the flags.
+        if (debtHold(this.sql)) await this.pauseCampaignsOn(null, 'wallet_empty', now, true);
+        await syncSuspendedMirror(this.env.DB, this.workspaceId, suspensionState(this.sql), now);
+        return undefined;
       case 'ledger_drain': {
         const r = await drainOutbox(this.env, this.sql, this.workspaceId, now);
         return r.remaining > 0 ? now + 5_000 : undefined;

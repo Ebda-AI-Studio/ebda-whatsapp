@@ -33,6 +33,13 @@ export async function applyStorePlan(env: Env, event: PlanEvent, now = Date.now(
   const rawSince = event.data.pastDueSince;
   const since = status === 'past_due' && rawSince ? Date.parse(rawSince) : NaN;
   const pastDueSince = Number.isFinite(since) && since > 0 && since <= now ? since : undefined;
+  // C12 / wa#117: the grant is keyed on the STORE billing period, not on the event. A store-included row that already covers the same Store period
+  // (same `periodEnd`) keeps its period start, so a past_due -> active flip, a failed charge then a paid retry, or a repeat of the same state inside one
+  // Store period never starts a new period (which would expire the old grant and grant 100 fresh credits). A renewal moves `periodEnd`: a new period.
+  const samePeriod = includes
+    ? await env.DB.prepare("SELECT period_start FROM workspace_subscriptions WHERE workspace_id = ? AND package_id = ? AND source = 'store_plan' AND period_end = ?").bind(ws, STORE_INCLUDED, periodEnd).first<{ period_start: number }>()
+    : null;
+  const periodStart = samePeriod ? Math.min(samePeriod.period_start, eff) : eff;
   const claim = env.DB.prepare(
     `INSERT INTO store_plan_applied (workspace_id, effective_at, event_id, includes_whatsapp, status, period_end, claimed) VALUES (?, ?, ?, ?, ?, ?, 1)
      ON CONFLICT(workspace_id) DO UPDATE SET effective_at = excluded.effective_at, event_id = excluded.event_id, includes_whatsapp = excluded.includes_whatsapp,
@@ -45,7 +52,7 @@ export async function applyStorePlan(env: Env, event: PlanEvent, now = Date.now(
   const notProtected = { sql: "((workspace_subscriptions.source IS NOT NULL AND workspace_subscriptions.source NOT IN ('purchase', 'operator')) OR workspace_subscriptions.period_end <= ? OR workspace_subscriptions.status NOT IN ('active', 'trialing'))", binds: [now] };
 
   const r = includes
-    ? await setSubscription(env, { workspaceId: ws, packageId: STORE_INCLUDED, status, periodStart: eff, periodEnd, source: 'store_plan', ref: event.id, ...(pastDueSince !== undefined ? { pastDueSince } : {}) }, now, { before: [claim], after: [release], only: claimed, guard: notProtected })
+    ? await setSubscription(env, { workspaceId: ws, packageId: STORE_INCLUDED, status, periodStart, periodEnd, source: 'store_plan', ref: event.id, ...(pastDueSince !== undefined ? { pastDueSince } : {}) }, now, { before: [claim], after: [release], only: claimed, guard: notProtected })
     : await cancelSubscription(env, { workspaceId: ws, actor: 'store_plan', ref: event.id, takeSource: true }, now, {
       before: [claim], after: [release], only: claimed, guard: { sql: `workspace_subscriptions.status != 'cancelled' AND ${notProtected.sql}`, binds: notProtected.binds },
     });

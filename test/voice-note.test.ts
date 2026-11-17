@@ -452,3 +452,33 @@ describe('review fix 8: a voice note whose media is not stored yet is retried qu
     expect(t.due_at - Date.now()).toBeLessThanOrEqual(6_000);
   });
 });
+
+// WA-OWNER-FREE-1 (#115): the speech model is paid for every note it transcribes, so a transcription that ended silent, as a hand-over or as a noise note is
+// charged to the merchant's AI credits (one credit, AI_TURN_CREDITS) instead of being released for free; a call that threw (slot given back) stays free.
+describe('transcription is charged to the merchant, not released', () => {
+  const balanceOf = async (ws: string) => (await workspace(ws).aiCredits()).balance;
+  it('a silent note (the model ran, nothing to answer) costs one credit', async () => {
+    const ws = W(70);
+    const pn = await setup(ws);
+    configureAgent({ transcriber: () => stt('   ').fn });
+    const before = await balanceOf(ws);
+    await say(ws, pn, audioMsg('media-v70'), graphWith(ogg(3_000)));
+    expect(await balanceOf(ws)).toBe(before - 1);
+  });
+  it('a spoken request for a person (no language-model call) costs the transcription credit', async () => {
+    const ws = W(71);
+    const pn = await setup(ws);
+    configureAgent({ transcriber: () => stt('عايز اكلم حد من الفريق لو سمحت').fn });
+    const before = await balanceOf(ws);
+    await say(ws, pn, audioMsg('media-v71'), graphWith(ogg(4_000)));
+    expect(await balanceOf(ws)).toBe(before - 1);
+  });
+  it('a speech call that threw costs nothing (its slot is given back)', async () => {
+    const ws = W(72);
+    const pn = await setup(ws);
+    configureAgent({ transcriber: () => stt(new Error('boom')).fn });
+    const before = await balanceOf(ws);
+    await say(ws, pn, audioMsg('media-v72'), graphWith(ogg(3_000)));
+    expect(await balanceOf(ws)).toBe(before);
+  });
+});

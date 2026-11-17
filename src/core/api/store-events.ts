@@ -7,7 +7,7 @@
  */
 import { z } from 'zod';
 
-/** The minor version of this contract (envelope `v` stays 1: every change so far is additive). v1.5 = `customer.consent_changed.wording`, v1.6 = the optional COD-request fields below. */
+/** The minor version of this contract (envelope `v` stays 1: every change so far is additive). v1.5 = `customer.consent_changed.wording`; v1.6 = `store.suspended` / `store.reactivated` / `store.deleted` and the optional COD-request fields (`storefrontOrigin`, `storeName`, `shippingAddressLine`, `itemCount`, `orderUrlSuffix`). */
 export const CONTRACT_VERSION = '1.6';
 
 const iso = z.string().datetime({ offset: true });
@@ -57,6 +57,13 @@ export const storeEventSchema = z.discriminatedUnion('type', [
   // v1.5 (additive): `wording` = the exact words shown beside the checkout opt-in tick, in the locale shown (proof of what the buyer agreed to). Present
   // only when marketingOptIn is true and the Store recorded the locale.
   ev('customer.consent_changed', z.object({ buyerKey: key, marketingOptIn: z.boolean(), at: iso, wording: z.object({ text: z.string().min(1).max(600), locale: z.enum(['ar', 'en']) }).optional() })),
+  // v1.6 (additive, STORE-STANDING-1): the store's standing at the Store, sent on EVERY write of its status or deletion (one database observer)
+  // and re-sent by the 12-hourly reconcile. `store.suspended` = suspended for a billing reason (`unpaid`, `over_store_limit`) or by a super admin
+  // (`admin`); `store.reactivated` = live again (also sent for a live store by the reconcile); `store.deleted` = gone. `at` orders them: an
+  // older one than the last applied is dropped. While suspended or deleted, messaging sends nothing that costs money.
+  ev('store.suspended', z.object({ reason: z.enum(['unpaid', 'over_store_limit', 'admin']), at: iso })),
+  ev('store.reactivated', z.object({ at: iso })),
+  ev('store.deleted', z.object({ at: iso })),
 ]);
 export type StoreEvent = z.infer<typeof storeEventSchema>;
 export type StoreEventType = StoreEvent['type'];
