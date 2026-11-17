@@ -1,5 +1,5 @@
 /**
- * Ruling CHAT-ENABLE-1: a Chat workspace exists only because a store OWNER chose to connect Ebda Chat. This is the ONE place that creates the registry row
+ * Ruling CHAT-ENABLE-1: a Chat workspace exists only because a store OWNER chose to connect Chat. This is the ONE place that creates the registry row
  * (`workspaces`, the row every store route resolves the store through) and records the owner; every consent path goes through it, nothing creates a row on a visit.
  *
  * What enabling starts: the registry row and the owner row, nothing else. No charge (money moves only through the plan / wallet flows the owner starts), no trial clock;

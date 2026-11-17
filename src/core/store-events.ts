@@ -62,7 +62,7 @@ export async function consumeStoreEvents(batch: MessageBatch<unknown>, env: Env)
     }
     const event = parsed.event;
     try {
-      // The workspace id is the store id. Ruling CHAT-ENABLE-1: a workspace is registered ONLY by the owner's own "connect Ebda Chat" action in Store admin, which is what emits
+      // The workspace id is the store id. Ruling CHAT-ENABLE-1: a workspace is registered ONLY by the owner's own "connect Chat" action in Store admin, which is what emits
       // `store.linked` (its owner/admin check and plan entitlement happen there). That event registers the store here, after the Store confirms the owner; no other event does.
       let known = await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(event.storeId).first();
       if (!known && event.type === 'store.linked') {

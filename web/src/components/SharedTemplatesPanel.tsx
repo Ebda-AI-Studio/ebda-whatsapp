@@ -15,6 +15,7 @@ const NAME = /^[a-z0-9_]{1,512}$/;
 export function SharedTemplatesPanel({ t, lang, api, run, fail }: Props) {
   const [items, setItems] = useState<TemplateDto[] | null>(null);
   const [asks, setAsks] = useState<(SharedRequestDto & { workspaceId: string })[]>([]);
+  const [asksFailed, setAsksFailed] = useState(false); // a failed read of the asks is unknown, never "no asks"
   const [state, setState] = useState<'ok' | 'unavailable' | 'error'>('ok');
   const [form, setForm] = useState({ name: '', language: 'ar', category: 'UTILITY', body: '' });
 
@@ -22,7 +23,7 @@ export function SharedTemplatesPanel({ t, lang, api, run, fail }: Props) {
     try {
       setItems(await api.list());
       setState('ok');
-      if (api.requests) setAsks(await api.requests().catch(() => []));
+      if (api.requests) { setAsksFailed(false); try { setAsks(await api.requests()); } catch { setAsksFailed(true); } }
     } catch (e) {
       setState(e instanceof ApiError && e.status === 404 ? 'unavailable' : 'error');
     }
@@ -68,7 +69,7 @@ export function SharedTemplatesPanel({ t, lang, api, run, fail }: Props) {
         <section className="wallet-card" aria-labelledby="op-shared-asks">
           <h2 id="op-shared-asks">{t.opSharedRequestsTitle}</h2>
           <p className="muted">{t.opSharedReqHelp}</p>
-          {asks.length === 0 ? <p className="muted">{t.opSharedRequestsEmpty}</p> : (
+          {asksFailed ? <p className="error-text" role="alert">{t.opLoadError} <button type="button" className="btn ghost" onClick={() => void reload()}>{t.retry}</button></p> : asks.length === 0 ? <p className="muted">{t.opSharedRequestsEmpty}</p> : (
             <table className="op-table">
               <thead><tr><th scope="col">{t.opSharedReqStore}</th><th scope="col">{t.opSharedName}</th><th scope="col">{t.opSharedCategory}</th><th scope="col">{t.opSharedStatus}</th><th scope="col">{t.opSharedReqText}</th></tr></thead>
               <tbody>

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ConversationDto, MessageDto, OrderSummaryDto, SendMessageRequest, TemplateDto } from '../../src/core/api/contract';
 import { ChatPane } from './components/ChatPane';
 import { ConversationList } from './components/ConversationList';
+import { NoWorkspace } from './components/NoWorkspace';
+import { activeStoreName } from './components/StoreMenu';
 import { OrderPane } from './components/OrderPane';
 import { IntegrationsScreen } from './components/IntegrationsScreen';
 import { Rail, type View } from './components/Rail';
@@ -25,7 +27,24 @@ import { useTypeahead } from './lib/useTypeahead';
 
 type Props = { source: InboxSource; now?: () => number; initialLang?: Lang; /** The screen to open on (the address bar's screen once real routes land). */ initialView?: View };
 
-export function App({ source, now = Date.now, initialLang = 'ar', initialView = 'inbox' }: Props) {
+/** A store with no Chat workspace gets its own screen (rail + the "not enabled" state); the inbox and its list calls never run (they would all 404 and read as failures). */
+export function App(props: Props) {
+  return props.source.workspaceMissing ? <NoWorkspaceShell {...props} /> : <AppInner {...props} />;
+}
+
+function NoWorkspaceShell({ source, initialLang = 'ar' }: Props) {
+  const [lang] = useState<Lang>(initialLang);
+  const t = STRINGS[lang];
+  const none = { templates: false, campaigns: false, contacts: false, integrations: false, agent: false, bot: false, numbers: false, wallet: false, team: false, operator: false };
+  return (
+    <div className="app" data-view="screen">
+      <Rail t={t} view="inbox" onNavigate={() => undefined} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={none} store={source} />
+      <NoWorkspace t={t} lang={lang} storeId={source.storeId} storeName={activeStoreName(source, t.storeUnnamed)} />
+    </div>
+  );
+}
+
+function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'inbox' }: Props) {
   const [lang, setLang] = useState<Lang>(initialLang);
   // Connectors reach the client's own systems with a secret: owner only. The server refuses staff (routes/connectors.ts, 403); this keeps the screen from rendering for them too, whatever address they typed.
   // The server lets a super admin READ connector status and never write (WA-SECRETS-1): they see the list without the form; staff are refused.
@@ -56,6 +75,7 @@ export function App({ source, now = Date.now, initialLang = 'ar', initialView = 
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
   const [error, setError] = useState(false);
+  const [listLoaded, setListLoaded] = useState(false); // the plain list has answered at least once (until then "no conversations" would be a guess)
   const [toast, setToast] = useState<{ kind: 'confirmed' | 'refused'; orderNumber: string } | { kind: 'error' } | null>(null);
   type Pending = { waId: string; orderNumber: string; outcome: 'confirmed' | 'refused'; before: OrderSummaryDto['status']; timer: ReturnType<typeof setTimeout> };
   const pending = useRef(new Map<string, Pending>());
@@ -99,6 +119,7 @@ export function App({ source, now = Date.now, initialLang = 'ar', initialView = 
       // The unread total is only knowable from the unfiltered list; keep the last value under a filter.
       if (filter === 'all') setTotalUnread(list.reduce((n, c) => n + c.unread, 0));
       setError(false);
+      setListLoaded(true);
     } catch {
       if (seq === latest.current.seq) setError(true);
     }
@@ -263,7 +284,7 @@ export function App({ source, now = Date.now, initialLang = 'ar', initialView = 
   return (
     <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
       {source.viewAs && <p className="view-as-banner" role="status" aria-label={t.viewAsBanner}>{t.viewAsBanner}</p>}
-      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, integrations: canIntegrations, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
+      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} store={source} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, integrations: canIntegrations, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'integrations' && source.connectors ? (canIntegrations ? <IntegrationsScreen t={t} lang={lang} source={source} readOnly={source.role !== 'owner'} /> : <p className="view-denied" role="alert">{t.notAllowed}</p>)
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
@@ -275,10 +296,10 @@ export function App({ source, now = Date.now, initialLang = 'ar', initialView = 
         : view === 'numbers' && source.numbers ? <NumbersScreen t={t} lang={lang} source={source} api={source.numbers} />
         : view === 'contacts' && source.contacts ? <ContactsScreen t={t} lang={lang} source={source} api={source.contacts} now={now} /> : (
         <>
-      <ConversationList t={t} lang={lang} now={now()} items={shown} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} searchStatus={searching ? search.status : 'idle'} onFilter={setFilter} onQuery={search.setQuery} onOpen={open} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} notice={walletNotice} onOpenWallet={() => setView('wallet')} />
+      <ConversationList t={t} lang={lang} now={now()} items={shown} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} searchStatus={searching ? search.status : 'idle'} onFilter={setFilter} onQuery={search.setQuery} onOpen={open} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} notice={walletNotice} onOpenWallet={() => setView('wallet')} listState={error ? 'error' : listLoaded ? 'ok' : 'loading'} onRetry={() => void refresh()} />
       <div className="center">
         {!online && <p className="notice offline" role="status">{t.offline}</p>}
-        {error && <p className="notice offline" role="alert">{t.loadError} <button type="button" className="btn ghost" onClick={() => void refresh()}>{t.retry}</button></p>}
+        {error && items.length > 0 && <p className="notice offline" role="alert">{t.loadError} <button type="button" className="btn ghost" onClick={() => void refresh()}>{t.retry}</button></p>}
         {templatesFailed && <p className="notice offline" role="alert">{t.dataLoadError} <button type="button" className="btn ghost" onClick={loadTemplates}>{t.retry}</button></p>}
         <ChatPane t={t} lang={lang} now={now()} conversation={selected} source={source} userNames={source.userNames} currentOrder={orders?.[0] ?? null} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onSendMedia={sendMedia} onRetry={retry} onBack={() => setSelectedId(null)} onShowOrders={() => setOrdersOpen(true)} onTakeOver={source.assign ? () => void takeOver() : undefined} />
       </div>
