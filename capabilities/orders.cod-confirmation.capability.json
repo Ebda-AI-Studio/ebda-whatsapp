@@ -2,8 +2,8 @@
   "id": "orders.cod-confirmation",
   "status": "live",
   "area": "orders",
-  "version": 1,
-  "versionDate": "2026-11-14",
+  "version": 3,
+  "versionDate": "2026-11-15",
   "titleAr": "رسالة تأكيد الأوردر كاش",
   "titleEn": "COD confirmation template with Confirm/Refuse buttons",
   "screens": [],
@@ -31,12 +31,15 @@
     ]
   },
   "steps": [
-    "Store creates COD order; Chat sends template with Confirm/Refuse; result sent to the Store; no answer in 24h = no_reply"
+    "Store creates COD order; Chat sends template with Confirm/Refuse; result sent to the Store; no answer in 24h = no_reply",
+    "When cod_confirmation_v2 is APPROVED for the workspace, its URL base matches the order link and the Store sent store name, address, item count and order link, the richer v2 template is sent instead; otherwise the plain template",
+    "cod_confirmation_v2 is submitted per store on store.linked (with storefrontOrigin) and when a number connects; a REJECTED one is replaced from the Templates screen (POST /templates/cod-v2/resubmit)"
   ],
   "edgeCases": [
     "Template must be approved and number connected",
     "Order confirmations setting on",
     "Duplicate taps recorded once",
+    "v2 needs its own Meta approval per workspace (the URL button base is the store's own origin); never assumed, falls back to the plain template",
     "Result delivery retried automatically",
     "No active package: sends, agent and number connect answer 403 plan_required (no free plan, WA-NOFREE-1); a past_due package keeps replies/confirmations up to 7 days"
   ],
