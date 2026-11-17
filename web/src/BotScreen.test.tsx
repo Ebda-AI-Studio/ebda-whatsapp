@@ -166,6 +166,64 @@ describe('WhatsApp catalog on the Bot screen', () => {
     expect(screen.queryByRole('button', { name: 'اعمل كتالوج واتساب' })).toBeNull();
   });
 
+  const connected = (over: Record<string, unknown> = {}) => {
+    const source = createSampleSource();
+    source.catalog!.status = async () => ({ catalogId: '5550001111', lastSyncAt: Date.UTC(2026, 9, 24, 16, 0), items: { synced: 41, excluded: 2, rejected: 1 }, leftOut: [{ retailerId: 'v7', reason: 'no_image' }, { retailerId: 'v8', reason: 'meta_rejected' }], commerce: { catalogVisible: false, cartEnabled: true, failed: null }, error: null, syncing: false, pending: 3, ...over });
+    return source;
+  };
+
+  it('shows what is in the catalog, what was left out and why, and the changes waiting', async () => {
+    await open(connected());
+    expect(screen.getByText(/41 منتج على واتساب/).textContent).toContain('3 مش ظاهرين');
+    expect(screen.getByText(/3 تعديل مستني/)).toBeTruthy();
+    expect(screen.getByText('v7: مفيش صورة')).toBeTruthy();
+    expect(screen.getByText('v8: ميتا رفضت المنتج')).toBeTruthy();
+  });
+
+  it('an empty catalog after a sync says how to fill it', async () => {
+    await open(connected({ items: { synced: 0, excluded: 0, rejected: 0 }, leftOut: [], pending: 0 }));
+    expect(screen.getByText(/مفيش منتجات على الكتالوج لسه/)).toBeTruthy();
+  });
+
+  it('a sync problem is shown as an alert: missing permission tells the merchant to reconnect, other failures say we retry', async () => {
+    await open(connected({ error: 'missing_permission' }));
+    expect(screen.getByRole('alert').textContent).toMatch(/صلاحية الكتالوج/);
+    cleanup();
+    await open(connected({ error: 'sync_failed' }));
+    expect(screen.getByRole('alert').textContent).toMatch(/هنكرر المحاولة/);
+  });
+
+  it('the shop button and cart switches call the server and show the new state; a failure is explained', async () => {
+    const source = connected();
+    const set = vi.fn().mockResolvedValue({ catalogVisible: true, cartEnabled: true });
+    source.catalog!.setCommerce = set;
+    await open(source);
+    const button = screen.getByRole('checkbox', { name: /زر المتجر ظاهر/ }) as HTMLInputElement;
+    expect(button.checked).toBe(false);
+    await act(async () => fireEvent.click(button));
+    expect(set).toHaveBeenCalledWith({ catalogVisible: true, cartEnabled: true });
+    expect((screen.getByRole('checkbox', { name: /زر المتجر ظاهر/ }) as HTMLInputElement).checked).toBe(true);
+    set.mockRejectedValue(fail('missing_permission', 403));
+    await act(async () => fireEvent.click(screen.getByRole('checkbox', { name: /العميل يقدر يبعت سلة/ })));
+    expect(screen.getByRole('alert').textContent).toMatch(/صلاحية الكتالوج/);
+  });
+
+  it('"update now" starts a resync and confirms; staff see no actions', async () => {
+    const source = connected();
+    const resync = vi.fn().mockResolvedValue({ started: true });
+    source.catalog!.resync = resync;
+    await open(source);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'حدّث الكتالوج دلوقتي' })));
+    expect(resync).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('status').textContent).toContain('التحديث بدأ');
+    cleanup();
+    const staff = connected();
+    staff.role = 'staff';
+    await open(staff);
+    expect(screen.queryByRole('button', { name: 'حدّث الكتالوج دلوقتي' })).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /زر المتجر ظاهر/ }).matches(':disabled')).toBe(true);
+  });
+
   it('English strings exist for every state', async () => {
     const { STRINGS } = await import('./i18n');
     const ar = Object.keys(STRINGS.ar).filter((k) => k.startsWith('cat'));

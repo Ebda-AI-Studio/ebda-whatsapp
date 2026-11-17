@@ -75,3 +75,28 @@ export function slugFormatError(slug: string): SlugFormatError | null {
   if (slug.startsWith('-') || slug.endsWith('-') || slug.includes('--')) return 'SLUG_INVALID_HYPHEN';
   return null;
 }
+
+export interface SlugifyOptions {
+  /** DNS/URL-safe: [a-z0-9-] only (store addresses, blog). Default keeps Arabic letters. */
+  ascii?: boolean;
+  /** Cut to this many characters; never ends on a hyphen after the cut. */
+  max?: number;
+  /** Live typing: keep one trailing hyphen so "a-" can become "a-b". Clean on submit. */
+  keepTrailingHyphen?: boolean;
+}
+
+/**
+ * THE slugifier (standard: docs/standard/slugs.md). Lower-case, drop characters outside the charset, fold whitespace/underscore/hyphen runs
+ * into ONE hyphen, no leading hyphen. Can return '' (Arabic-only text with `ascii`): persisting callers use `slugifyWithFallback`.
+ */
+export function slugify(text: string, opts: SlugifyOptions = {}): string {
+  const strip = opts.ascii ? /[^a-z0-9\s-]+/g : /[^a-z0-9؀-ۿ\s-]+/g;
+  const cut = (text ?? '').toLowerCase().trim().replace(strip, '').replace(/[\s_-]+/g, '-').replace(/^-+/, '');
+  const sized = opts.max ? cut.slice(0, opts.max) : cut;
+  return opts.keepTrailingHyphen ? sized : sized.replace(/-+$/g, '');
+}
+
+/** `slugify` that never returns '' (an empty slug makes an unreachable URL and '-1', '-2' duplicates). */
+export function slugifyWithFallback(text: string, prefix = 'item', opts: SlugifyOptions = {}): string {
+  return slugify(text, opts) || `${prefix}-${Date.now().toString(36)}`;
+}

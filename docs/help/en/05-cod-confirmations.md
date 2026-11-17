@@ -1,3 +1,11 @@
+---
+capabilities:
+  - bot.order-confirmations-toggle@2
+  - inbox.cod-outcome@1
+  - inbox.customer-orders-pane@1
+  - orders.cod-confirmation@3
+---
+
 # Cash-on-delivery (COD) confirmations
 
 The goal is fewer orders refused at the door. As soon as a COD order is created in Ebda Store, we send the customer a WhatsApp message to confirm it.
@@ -11,14 +19,18 @@ The goal is fewer orders refused at the door. As soon as a COD order is created 
 
 The order itself (status, price, stock) belongs to Ebda Store. Ebda Chat only reports the outcome.
 
+## The richer message (optional)
+If your store also has the **cod_confirmation_v2** template approved, the customer gets a fuller message: your store name as the title, the delivery address, the number of items, the order total (it includes any amount already paid) and a **Order details** button that opens their order page, next to the Confirm and Cancel buttons. The button opens a read-only summary of the order (status, items, total and the delivery area, never a phone, email or street); the link is personal to that order and stops working after 14 days. If that template is not approved yet, or the order is missing any detail, we send the plain message above; nothing breaks. Meta reviews the new template like any other ([Templates](04-templates-and-the-24-hour-window.md)); the link in it points at your store's own address, so it is submitted once per store. It is submitted for you when your store is linked; its status shows in **Templates**, and if Meta rejects it you can resubmit it from its page.
+
 ## What you need before you start
 - Your store linked to Ebda Chat.
 - A connected number ([your own](02-connect-your-own-number.md) or [the shared number](03-use-the-shared-number.md)).
 - An approved COD confirmation template ([Templates](04-templates-and-the-24-hour-window.md)).
-- **Order confirmations** switched on in the store-link settings.
+- **Order confirmation messages** switched on. They are on by default; to stop them or check, open **Bot**, then **Bot switches** ([guide 30](30-bot-switches-and-sending-speed.md)).
+- A running package. Without one no confirmation is sent and the app says "a package is required" ([wallet guide](09-wallet-top-ups-and-refunds.md)). If a renewal fails, confirmations keep working for up to 7 days.
 
 ## If the customer does not tap a button
-From the inbox you can open the order and record **Confirm** or **Refuse** yourself (owner or staff). The first answer counts; recording the opposite answer afterwards shows a conflict message.
+You can open the conversation and record **Confirm** or **Refuse** yourself from the order panel (owner or staff). You get a 5-second undo before the result is sent to Ebda Store. The first answer counts; recording the opposite answer afterwards shows a conflict message.
 
 ## Tips
 - Reach the customer quickly after the order; a late confirmation is worth less.
@@ -31,4 +43,4 @@ From the inbox you can open the order and record **Confirm** or **Refuse** yours
 - **The result did not reach Ebda Store:** we retry automatically.
 
 ---
-Last checked: 2026-10-25. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.
+Last checked: 2026-11-15. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.

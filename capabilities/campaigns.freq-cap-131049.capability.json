@@ -1,0 +1,39 @@
+{
+  "id": "campaigns.freq-cap-131049",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "قيود ميتا على الرسايل التسويقية 131049",
+  "titleEn": "Meta frequency cap (131049)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "فيه رسايل مابتوصلش ليه؟",
+      "إيه معنى 131049؟",
+      "الرسالة التسويقية مابتوصلش لعميل معين"
+    ],
+    "en": [
+      "What is error 131049?"
+    ]
+  },
+  "steps": [
+    "Meta did not deliver that marketing message to that customer; we retry after 24h twice then stop; do not resend by hand"
+  ],
+  "edgeCases": [
+    "Not a quality problem and not a block by the customer"
+  ],
+  "gaps": []
+}

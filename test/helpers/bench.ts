@@ -1,3 +1,6 @@
+import { onTestFinished } from 'vitest';
+import { configureApiLimits } from '../../src/core/api-rate';
+
 /**
  * Bench budgets that are FIXED, not runner-sized (M-176). A wall-clock budget in milliseconds measures the machine: the nightly job used to pass a 10x "runner-sized"
  * budget, which certifies nothing. Instead every bench measures a baseline on the SAME machine in the SAME run (the mean of 200 trivial authenticated calls through
@@ -23,4 +26,15 @@ export function overBudget(name: string, p95: number, baseline: number, ratio: n
   const abs = Number(absoluteMs);
   if (absoluteMs !== undefined && absoluteMs !== '' && Number.isFinite(abs) && p95 > abs) return `${name}: p95 ${p95.toFixed(2)} ms is over the absolute product budget ${abs} ms`;
   return null;
+}
+
+/**
+ * A speed bench times the read/enqueue path, not the F4 API rate limit (20 req/s, burst 100 per workspace, src/core/api-rate.ts). A bench issues hundreds of calls to ONE
+ * workspace at ~1-3 ms each, so on any machine it runs past the burst and gets 429 instead of timing anything (the nightly failed 3 days running on exactly this, 2026-11-12..14).
+ * Lifts the limit for the calling test only and puts the previous one back when the test ends, pass or fail. The limiter itself stays covered by test/api-rate-limit.test.ts.
+ */
+export function unthrottleApiForBench(): void {
+  const open = { ratePerSec: 1_000_000, burst: 1_000_000 };
+  const prev = configureApiLimits({ workspace: open, integration: open });
+  onTestFinished(() => void configureApiLimits(prev));
 }

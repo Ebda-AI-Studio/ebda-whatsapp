@@ -1,0 +1,46 @@
+{
+  "id": "inbox.failed-retry",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إعادة إرسال رسالة فشلت",
+  "titleEn": "Retry a message that failed",
+  "screens": [
+    "ChatPane \"Try again\"",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/failed-messages-and-sending-limits",
+  "questions": {
+    "ar": [
+      "الرسالة فشلت ازاي ابعتها تاني؟",
+      "Not sent معناها إيه؟",
+      "ازاي إعادة إرسال رسالة فشلت؟"
+    ],
+    "en": [
+      "A message shows Not sent, how do I retry?"
+    ]
+  },
+  "steps": [
+    "Press Try again on the failed message"
+  ],
+  "edgeCases": [
+    "Non-retryable Meta codes: 131026 not on WhatsApp/blocked, 131047 window, 131049 frequency cap, 131051 unsupported type, 132001 template missing, 2494051 no payment method on Meta account",
+    "Retryable codes retried automatically by the queue"
+  ],
+  "gaps": [
+    "The UI does not translate Meta error codes into Arabic reasons per message (help docs list a few)"
+  ]
+}

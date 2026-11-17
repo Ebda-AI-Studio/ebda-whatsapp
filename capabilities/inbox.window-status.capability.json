@@ -1,0 +1,48 @@
+{
+  "id": "inbox.window-status",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مؤشر نافذة الـ24 ساعة",
+  "titleEn": "24-hour window indicator",
+  "screens": [
+    "ChatPane header (windowOpen/windowClosing/windowClosed)",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "يعني إيه window اتقفل؟",
+      "ليه مش قادر اكتب؟",
+      "امتى اقدر ارد بحرية؟",
+      "ya3ni eh 24 hour window"
+    ],
+    "en": [
+      "What is the 24-hour window?",
+      "Why can I not type freely?"
+    ]
+  },
+  "steps": [
+    "A customer message opens 24h; every new message renews it",
+    "Header shows hours left, minutes when closing, closed + send a template"
+  ],
+  "edgeCases": [
+    "24-hour window closed: free text blocked (Meta 131047), only an approved template can be sent",
+    "Business-app echoes and imported history never open the window",
+    "AI agent replies only inside the window"
+  ],
+  "gaps": []
+}

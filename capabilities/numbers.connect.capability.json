@@ -1,0 +1,61 @@
+{
+  "id": "numbers.connect",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "ربط رقم واتساب بتاعك",
+  "titleEn": "Connect your own number (Embedded Signup)",
+  "screens": [
+    "NumbersScreen Connect a WhatsApp number (Meta popup)",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [
+    "GET /stores/:storeId/numbers/signup-config",
+    "POST /stores/:storeId/numbers/connect"
+  ],
+  "mcpTool": null,
+  "planGate": "active package (planRequired)",
+  "roles": [
+    "owner"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "ازاي اربط رقمي بالواتساب؟",
+      "عايز استخدم رقم المتجر",
+      "الرقم مش بيتربط",
+      "rabbat el ra2am ezay",
+      "ظهرلي إن الكود انتهى"
+    ],
+    "en": [
+      "How do I connect my WhatsApp number?",
+      "The connect window closed with an error"
+    ]
+  },
+  "steps": [
+    "Numbers > Connect a WhatsApp number",
+    "Meta window: sign in, pick business portfolio and WABA, enter number, verify (Business-app number confirms from the phone)",
+    "Display name, description, category, payment method on Meta",
+    "Finish within a few seconds: the code expires after 30 s",
+    "Number shows Connected with limit and quality"
+  ],
+  "edgeCases": [
+    "number_conflict (connected to another account), registration_locked (72 h after 10 tries), signup_unavailable, signup_failed, signup cancelled, no number in the chosen account",
+    "Needs a package: 403 plan_required",
+    "Meta needs a valid payment method (2494051)",
+    "Display name rules/rejection",
+    "Business verification not done: low limits",
+    "Meta unreachable or rate-limited: 503 rate_limited, retry shortly; nothing is lost",
+    "Mobile: rail collapses to a bottom/side nav; the orders pane opens as a sheet"
+  ],
+  "gaps": [
+    "Business Verification is outside the product; no in-product status of it"
+  ],
+  "assistantNote": "merchant completes the Meta popup; the assistant guides and deep-links only"
+}

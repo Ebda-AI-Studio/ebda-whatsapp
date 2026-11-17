@@ -1,11 +1,12 @@
 import { ApiError } from './api';
 import type {
-  AgentSettingsDto, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+  AgentSettingsDto, BotFunnelDto, BotSettingsDto, BotSwitchesDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
 } from '../../../src/core/api/contract';
 import { normaliseText } from '../../../src/core/text-normalise';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
 import type { SharedTemplatesApi } from './shared-templates';
 import type { InboxSource, TeamApi } from './source';
+import type { AssistantApi } from './assistant';
 
 // Sample data for preview only (labelled in the UI). Names and orders are invented; no real customers.
 const BASE = Date.UTC(2026, 9, 24, 17, 0);
@@ -120,7 +121,9 @@ export function createSampleSource(): InboxSource {
     tags: s.tags,
     windowOpenUntil: s.windowH === null ? null : BASE + s.windowH * H,
   }));
-  let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, hasApiKey: false, credits: 500, knowledgeReady: false };
+  let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', tone: 'warm', notifyPhone: null, provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, hasApiKey: false, credits: 500, knowledgeReady: false };
+  let switches: BotSwitchesDto = { orderingBot: true, orderConfirmations: false, otpViaWhatsApp: false };
+  const pendingConfirms = new Set<string>();
   let bot: BotSettingsDto = {
     menu: { enabled: false, items: [] },
     hours: { enabled: false, timezone: 'Africa/Cairo', week: { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }, awayMessage: { ar: 'احنا مقفولين دلوقتي، هنرد عليك أول ما نفتح.', en: 'We are closed right now; we will reply as soon as we open.' }, ordersWhileClosed: true },
@@ -157,7 +160,7 @@ export function createSampleSource(): InboxSource {
   let nextId = 1000;
   return {
     kind: 'sample',
-    capabilities: { codOutcome: true, numbers: true },
+    capabilities: { codOutcome: true, numbers: true, assistant: true },
     role: 'owner',
     currentUserId: 'u-me',
     userNames: { 'u-me': 'أنا', 'u-dina': 'دينا' },
@@ -212,6 +215,16 @@ export function createSampleSource(): InboxSource {
       bot = structuredClone(update);
       return structuredClone(bot);
     },
+    switches: {
+      async get() { return { ...switches }; },
+      async preview() { const confirmToken = crypto.randomUUID().replace(/-/g, '').padEnd(64, '0'); pendingConfirms.add(confirmToken); return { confirmToken }; },
+      async save(change, confirmToken) {
+        if ((change.orderConfirmations === true || change.otpViaWhatsApp === true) && !(confirmToken && pendingConfirms.delete(confirmToken))) throw Object.assign(new Error('confirm_required'), { detail: confirmToken ? 'confirm_invalid' : 'confirm_required' });
+        switches = { ...switches, ...change };
+        return { ...switches };
+      },
+      async throttle() { return { tier: 1000, mps: 80, usedInWindow: 120, waiting: 0, nextSlotAt: null }; },
+    },
     async botFunnel(days) {
       const totals = { 7: [120, 96, 54, 31, 22, 40, 9], 30: [520, 410, 236, 140, 101, 170, 38], 90: [1480, 1150, 650, 390, 281, 470, 104] }[days];
       const steps = ['conversation', 'browse', 'cart', 'checkout', 'order', 'menu', 'handoff'] as const;
@@ -223,8 +236,17 @@ export function createSampleSource(): InboxSource {
         return { ...catalog };
       },
       async provision() {
-        catalog = { catalogId: '1234567890123', lastSyncAt: null };
+        catalog = { catalogId: '1234567890123', lastSyncAt: null, items: { synced: 0, excluded: 0, rejected: 0 }, leftOut: [], commerce: { catalogVisible: true, cartEnabled: true, failed: null }, error: null, syncing: true, pending: 0 };
         return { catalogId: '1234567890123' };
+      },
+      async resync() {
+        if (!catalog.catalogId) throw Object.assign(new Error('catalog_not_set'), { detail: 'catalog_not_set' });
+        catalog = { ...catalog, syncing: true };
+        return { started: true };
+      },
+      async setCommerce(v) {
+        catalog = { ...catalog, commerce: { ...v, failed: null } };
+        return v;
       },
     },
     async assign(id, userId) {
@@ -286,6 +308,7 @@ export function createSampleSource(): InboxSource {
         };
       })(),
     },
+    assistant: createSampleAssistant(),
     team: createSampleTeam(),
     wallet: createSampleWallet(),
     operator: createSampleOperator('u-me'),
@@ -347,11 +370,31 @@ function createSampleSharedTemplates(): SharedTemplatesApi {
   return {
     list: async () => items.map((t) => ({ ...t })),
     sync: async () => ({ upserted: items.length, removed: 0 }),
+    requests: async () => [{ id: 'sr-1', workspaceId: 'ws-sample-1', name: 'order_ready', language: 'ar', category: 'UTILITY', body: 'أهلًا {{1}}، طلبك {{2}} جاهز للاستلام.', status: 'open', createdAt: BASE - 3 * H, decidedAt: null }],
     submit: async (input) => { items.push({ name: input.name, language: input.language, category: input.category, status: 'PENDING', bodyText: input.components[0]!.text, paramCount: 0, rejectedReason: null }); return { status: 'PENDING' }; },
   };
 }
 
 /** Sample team for the preview: the owner, three staff and a package with room for two staff seats (the owner counts as one of three). */
+/** The preview's assistant: one canned grounded answer, so the panel can be seen without a server. */
+function createSampleAssistant(): AssistantApi {
+  return {
+    turn: async () => ({
+      status: 'answered', previews: [], turnId: crypto.randomUUID(),
+      segments: [
+        { kind: 'text', text: 'تقدر تشحن المحفظة من شاشة المحفظة، وبتختار الكارت أو إنستاباي. ' },
+        { kind: 'cap', capabilityId: 'wallet.view', label: 'المحفظة', appPath: '/wallet' },
+      ],
+    }),
+    conversation: async () => [],
+    feedback: async () => undefined,
+    apply: async () => ({ status: 'applied', appliedId: crypto.randomUUID(), undoUntil: Date.now() + 86_400_000 }),
+    undo: async () => ({ status: 'undone' }),
+    confirm: async () => ({ status: 'applied', appliedId: crypto.randomUUID() }),
+    reject: async () => ({ status: 'rejected' }),
+  };
+}
+
 function createSampleTeam(): TeamApi {
   const people = [
     { userId: 'u-me', displayName: 'ليلى', role: 'owner' as const, addedAt: '2026-09-01T00:00:00.000Z' },

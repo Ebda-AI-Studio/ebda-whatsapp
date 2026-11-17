@@ -1,0 +1,46 @@
+{
+  "id": "campaigns.pause",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إيقاف الحملة مؤقتا",
+  "titleEn": "Pause a running campaign",
+  "screens": [
+    "CampaignsScreen Pause",
+    "view:CampaignsScreen",
+    "/campaigns"
+  ],
+  "api": [
+    "POST /stores/:storeId/campaigns/:id/pause"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "وقف الحملة",
+      "عايز اوقف الإرسال دلوقتي",
+      "wa2ef el hamla"
+    ],
+    "en": [
+      "Pause my campaign"
+    ]
+  },
+  "steps": [
+    "Open the campaign > Pause"
+  ],
+  "edgeCases": [
+    "Staff may pause (safe direction)",
+    "Messages already sent cannot be recalled"
+  ],
+  "gaps": []
+}

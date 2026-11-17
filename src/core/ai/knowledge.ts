@@ -6,7 +6,7 @@
  */
 import { BACKUP_TIME_ZONE, nextLocalHour, sha256Hex } from '../backup';
 import { errClass, alert } from '../observability';
-import { serviceAllowed } from '../billing/entitlements';
+import { serviceOpen } from './gates'; // a package AND not suspended / Store-held (STORE-STANDING-1)
 import { addTask } from '../scheduler';
 import type { CatalogRow } from '../store-bridge';
 import { bridgeFor } from '../store-link';
@@ -93,7 +93,7 @@ export async function runKbIndex(host: LinkHost, now: number): Promise<number | 
   const version = num(getAgentState(host.sql, 'kb.version'));
   if (!version) return undefined;
   // Background Workers AI spend stops with the package (WA-NOFREE-1). Dropped, not retried: the next FAQ save (or a new package then a save) indexes again.
-  if (!serviceAllowed(host.sql, now)) return undefined;
+  if (!serviceOpen(host, now)) return undefined;
   const store = cfg.vectors(host.env);
   const embed = cfg.embedder(host.env);
   const count = host.sql.exec<{ n: number }>('SELECT count(*) AS n FROM kb_chunks WHERE version = ?', version).one().n;
@@ -150,7 +150,7 @@ const catalogDoc = (r: CatalogRow): string => [r.title, r.titleAr, r.brand, r.de
 
 /** Asks for a (debounced) refresh of the catalog index. Does nothing while the agent is off, so no embedding spend. */
 export function scheduleCatalogEmbed(host: Pick<LinkHost, 'sql'>, now: number, delayMs = 60_000): void {
-  if (!serviceAllowed(host.sql, now)) return; // no package, no background AI spend (WA-NOFREE-1)
+  if (!serviceOpen(host, now)) return; // no package, no background AI spend (WA-NOFREE-1)
   if (agentConfig().copy && readAgentSettings(host.sql).enabled) addTask(host.sql, 'catalog_embed', now + delayMs);
 }
 
@@ -158,7 +158,7 @@ export function scheduleCatalogEmbed(host: Pick<LinkHost, 'sql'>, now: number, d
 export async function runCatalogEmbed(host: LinkHost, now: number): Promise<number | undefined> {
   const next = nextLocalHour(now + 3_600_000, CATALOG_EMBED_HOUR_LOCAL, BACKUP_TIME_ZONE);
   if (!agentConfig().copy || !readAgentSettings(host.sql).enabled) return undefined;
-  if (!serviceAllowed(host.sql, now)) return next; // no package, no embedding spend (WA-NOFREE-1); the nightly chain survives
+  if (!serviceOpen(host, now)) return next; // no package, no embedding spend (WA-NOFREE-1); the nightly chain survives
   const cfg = agentConfig();
   const store = cfg.vectors(host.env);
   const embed = cfg.embedder(host.env);
@@ -202,6 +202,7 @@ export async function runCatalogEmbed(host: LinkHost, now: number): Promise<numb
 }
 
 /** Product ids the vector index thinks match, best first; null when the index is unavailable or empty (the caller falls back). */
+/** Retailer ids of the catalogue rows closest in meaning to `query` (best first), or null when there is no index / no good hit. */
 export async function catalogCandidates(host: LinkHost, query: string): Promise<string[] | null> {
   try {
     if (!host.sql.exec('SELECT 1 FROM catalog_vectors LIMIT 1').toArray().length) return null;
@@ -212,7 +213,12 @@ export async function catalogCandidates(host: LinkHost, query: string): Promise<
     const [vector] = await embed([maskForModel(query).slice(0, 200)]);
     if (!vector) return null;
     const hits = await store.query(vector, { namespace: nsCatalog(host.workspaceId), topK: 8 });
-    const ids = [...new Set(hits.filter((h) => h.score >= KB_MIN_SCORE).map((h) => h.metadata?.productId).filter((x): x is string => !!x))];
+    // A hit's vector id maps to the RETAILER id in catalog_vectors (the id the Store's getProducts answers to; for a product with
+    // variants that is a variant id, never the product id). Returned in score order.
+    const good = hits.filter((h) => h.score >= KB_MIN_SCORE).map((h) => h.id);
+    if (!good.length) return null;
+    const byVec = new Map(host.sql.exec<{ retailer_id: string; vec_id: string }>(`SELECT retailer_id, vec_id FROM catalog_vectors WHERE vec_id IN (${good.map(() => '?').join(',')})`, ...good).toArray().map((r) => [r.vec_id, r.retailer_id]));
+    const ids = [...new Set(good.map((v) => byVec.get(v)).filter((x): x is string => !!x))];
     return ids.length ? ids : null;
   } catch (err) {
     alert('catalog_vector_search_failed', { workspace: host.workspaceId, error: errClass(err) });

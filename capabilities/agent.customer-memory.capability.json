@@ -1,0 +1,41 @@
+{
+  "id": "agent.customer-memory",
+  "status": "in-pr",
+  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "المساعد بيفتكر العميل",
+  "titleEn": "Agent greets by name and remembers last orders",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "المساعد بيعرف اسم العميل؟",
+      "العميل راجع ويتعرف عليه",
+      "ازاي المساعد بيفتكر العميل؟"
+    ],
+    "en": [
+      "Does the agent remember returning customers?"
+    ]
+  },
+  "steps": [
+    "getCustomerProfile by the sender number: first name, address, last 3 orders; 15-min in-memory cache"
+  ],
+  "edgeCases": [
+    "Shopper-typed profile fields are untrusted (fenced)",
+    "Dropped on erasure/address save/order"
+  ],
+  "gaps": []
+}

@@ -11,6 +11,7 @@ import { HISTORY_DECLINED_CODE, REGISTRATION_LOCKED_CODE, deregisterNumber, exch
 import { graphTokenFor, invalidateNumber, invalidateWaba, TokenUnavailable } from './token';
 import { alert } from '../observability';
 import { funnel } from '../funnel';
+import { installStarterOnConnect } from '../starter-templates';
 
 /** Meta fixes the throughput of a number that stays on the WhatsApp Business app at 20 messages per second. */
 export const BUSINESS_APP_MPS = 20;
@@ -92,6 +93,9 @@ export function generatePin(): string {
   }
 }
 
+/** Runs a promise after the response (the route's `waitUntil`). */
+export type Defer = (p: Promise<unknown>) => void;
+
 /**
  * Runs after a number finished connecting (and again whenever a half-finished connect is completed, so it must be idempotent).
  * billing records funding = merchant_card here (Ruling WA-FUND-1). Intentionally empty until Phase 7's number_funding is merged.
@@ -101,10 +105,12 @@ export function generatePin(): string {
  * explicitly here (no default anywhere: a number without it cannot send), then the workspace's copy of the price inputs is refreshed
  * at once so the number is usable now rather than after the next 30-minute pull. Idempotent: a resumed connect calls it again.
  */
-export async function onNumberConnected(env: Env, n: { workspaceId: string; phoneNumberId: string; wabaId: string; kind: 'own' }): Promise<void> {
+export async function onNumberConnected(env: Env, n: { workspaceId: string; phoneNumberId: string; wabaId: string; kind: 'own' }, defer?: Defer): Promise<void> {
   funnel(env, 'number_connected', n.workspaceId);
   await recordNumberFunding(env, n.phoneNumberId, 'merchant_card');
   await env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(n.workspaceId)).refreshPricing();
+  // The starter templates (and Meta's own list) are put in place in the background: a slow or failing Meta must never fail the connect. installStarterOnConnect never throws.
+  defer?.(installStarterOnConnect(env, { workspaceId: n.workspaceId, wabaId: n.wabaId }));
 }
 
 // ---- status ----------------------------------------------------------------------------------------------------------
@@ -163,7 +169,7 @@ async function verifiedBusinessId(env: Env, workspaceId: string, token: string, 
  * After that every step is resumable: a failure leaves the number `disconnected` with the step that failed visible, and
  * `resumeSetup` (POST /numbers/:id/register) finishes it without a new code.
  */
-export async function connectNumber(env: Env, workspaceId: string, req: ConnectNumberRequest): Promise<NumberResult> {
+export async function connectNumber(env: Env, workspaceId: string, req: ConnectNumberRequest, defer?: Defer): Promise<NumberResult> {
   const cfg = signupConfig(env);
   const { wabaId, phoneNumberId } = req;
   if (await conflicts(env, workspaceId, wabaId, phoneNumberId)) return fail(409, 'number_conflict', 'number_belongs_to_another_workspace');
@@ -214,11 +220,11 @@ export async function connectNumber(env: Env, workspaceId: string, req: ConnectN
   invalidateWaba(wabaId);
   invalidateNumber(phoneNumberId);
   await applyStatus(env, workspaceId, phoneNumberId, phone, now);
-  return completeSetup(env, workspaceId, phoneNumberId, token);
+  return completeSetup(env, workspaceId, phoneNumberId, token, defer);
 }
 
 /** Retry whatever step of a half-finished connect is still open (webhook subscription, registration, syncs). */
-export async function resumeSetup(env: Env, workspaceId: string, phoneNumberId: string): Promise<NumberResult> {
+export async function resumeSetup(env: Env, workspaceId: string, phoneNumberId: string, defer?: Defer): Promise<NumberResult> {
   const row = await numberRow(env, workspaceId, phoneNumberId);
   if (!row) return fail(404, 'not_found', 'no_such_number');
   if (row.kind !== 'own') return fail(400, 'invalid_request', 'not_an_own_number');
@@ -230,10 +236,10 @@ export async function resumeSetup(env: Env, workspaceId: string, phoneNumberId: 
     if (err instanceof TokenUnavailable) return fail(400, 'signup_failed', 'token_unavailable', numberDto(row));
     throw err;
   }
-  return completeSetup(env, workspaceId, phoneNumberId, token);
+  return completeSetup(env, workspaceId, phoneNumberId, token, defer);
 }
 
-async function completeSetup(env: Env, workspaceId: string, phoneNumberId: string, token: string): Promise<NumberResult> {
+async function completeSetup(env: Env, workspaceId: string, phoneNumberId: string, token: string, defer?: Defer): Promise<NumberResult> {
   const cfg = signupConfig(env);
   const warnings: string[] = [];
   const reload = async () => numberDto((await numberRow(env, workspaceId, phoneNumberId))!);
@@ -275,7 +281,7 @@ async function completeSetup(env: Env, workspaceId: string, phoneNumberId: strin
   await env.DB.prepare("UPDATE phone_numbers SET status = 'active', connected_at = coalesce(connected_at, ?) WHERE phone_number_id = ? AND workspace_id = ?").bind(now, phoneNumberId, workspaceId).run();
   await pullStatus(env, workspaceId, phoneNumberId, token); // best effort: the numbers screen has a refresh button
   invalidateNumber(phoneNumberId);
-  await onNumberConnected(env, { workspaceId, phoneNumberId, wabaId: row.waba_id, kind: 'own' });
+  await onNumberConnected(env, { workspaceId, phoneNumberId, wabaId: row.waba_id, kind: 'own' }, defer);
   console.log(JSON.stringify({ audit: 'number_connected', workspace: workspaceId, phoneNumberId, onboarding: row.onboarding }));
   return { ok: true, number: await reload(), warnings };
 }

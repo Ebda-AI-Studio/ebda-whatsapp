@@ -1,0 +1,52 @@
+{
+  "id": "operator.subscription-set",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تعيين باقة لحساب",
+  "titleEn": "Assign a package to a workspace",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "PUT /operator/workspaces/:workspaceId/subscription"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": null,
+    "text": "commercial exception (audit #20)",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل تعيين باقة لحساب؟",
+      "ليه مش لاقي تعيين باقة لحساب عندي؟",
+      "عايز تعيين باقة لحساب اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Assign a package to a workspace?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: packages.list-checkout (deal or goodwill extension)"
+  ]
+}

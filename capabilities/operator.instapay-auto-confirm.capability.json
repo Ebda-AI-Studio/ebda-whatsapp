@@ -1,0 +1,57 @@
+{
+  "id": "operator.instapay-auto-confirm",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "التأكيد التلقائي لانستاباي: القرارات وزرار لم تصل ومفاتيح الإيقاف",
+  "titleEn": "InstaPay auto-confirm: verdicts, not received, and the kill switches",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/instapay/auto",
+    "POST /operator/instapay/auto/:id/revert",
+    "PUT /operator/instapay/auto/mode",
+    "PUT /operator/instapay/auto/workspaces/:workspaceId",
+    "POST /operator/instapay/auto/backfill"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "money-dispute",
+    "text": "platform kill switch and money dispute: a payment the bank never received is reverted by the platform owner, the merchant has no screen for it",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيقفل التأكيد التلقائي لانستاباي؟",
+      "ليه مش لاقي مفاتيح التأكيد التلقائي عندي؟",
+      "عايز أرجّع دفعة اتأكدت تلقائيًا اكلم مين؟"
+    ],
+    "en": [
+      "Who switches InstaPay auto-confirm off?",
+      "Who reverts a payment that did not arrive?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write needs a reason, re-checks the session (fails closed) and is audited with actor and reason",
+    "Mode off | shadow | live takes effect on the very next decision (never cached); a revert is idempotent",
+    "POST /operator/instapay/auto/backfill (reason) burns every confirmed bank reference + proof hash in the shared duplicate index once; re-runnable, idempotent"
+  ],
+  "edgeCases": [
+    "Revert only applies to payments the system confirmed",
+    "Signed endpoint POST /internal/instapay/auto-confirm/not-received serves the owner's Telegram tap (HMAC, not a session)"
+  ],
+  "gaps": []
+}

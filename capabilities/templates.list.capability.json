@@ -1,0 +1,52 @@
+{
+  "status": "live",
+  "area": "templates",
+  "versionDate": "2026-11-14",
+  "mcpTool": null,
+  "id": "templates.list",
+  "version": 2,
+  "titleAr": "قايمة القوالب وحالتها عند ميتا",
+  "titleEn": "List templates with Meta review status and rejection reason",
+  "screens": [
+    "view:templates",
+    "/templates"
+  ],
+  "api": [
+    "GET /stores/:storeId/templates",
+    "GET /stores/:storeId/templates/:name/:language"
+  ],
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "فين القوالب بتاعتي؟",
+      "القالب اتقبل ولا اترفض؟",
+      "امتى القالب هيتفعل؟",
+      "el templates feen",
+      "ليه القالب اترفض؟"
+    ],
+    "en": [
+      "Where are my templates?",
+      "Was my template approved?"
+    ]
+  },
+  "steps": [
+    "Open Templates in the side menu: every template with its type, language and Meta status (live, in Meta review, rejected, paused, disabled, being deleted)",
+    "Open one for its preview, the rejection reason in plain words (Meta's code below it) and what can be done"
+  ],
+  "edgeCases": [
+    "Own number not connected: 404 no_active_number (a store on the shared number sees the platform templates instead, never an empty list)",
+    "Connection to WhatsApp expired or closed: 503 token_unavailable, reconnect the number on the Numbers screen",
+    "A template made in WhatsApp Manager shows after Sync with Meta, with its raw name when it has no title",
+    "Staff see the list and detail read-only"
+  ],
+  "gaps": []
+}

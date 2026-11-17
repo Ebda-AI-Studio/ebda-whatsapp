@@ -1,0 +1,53 @@
+{
+  "id": "operator.yearly-refund",
+  "status": "live",
+  "area": "operator",
+  "version": 2,
+  "versionDate": "2026-11-14",
+  "titleAr": "إلغاء الباقة السنوية واسترداد",
+  "titleEn": "Cancel a yearly package and refund unused months",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/package-orders/:orderId/refund-quote",
+    "POST /operator/package-orders/:orderId/yearly-refund",
+    "GET /operator/yearly-refund-requests"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "money-dispute",
+    "text": "this is the money-out half: a person executes the cancellation and sends any card refund by hand through the provider's dashboard; the merchant sees the same quote and files the request themselves (wallet.yearly-refund-request)",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل إلغاء الباقة السنوية واسترداد؟",
+      "ليه مش لاقي إلغاء الباقة السنوية واسترداد عندي؟",
+      "عايز إلغاء الباقة السنوية واسترداد اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Cancel a yearly package and refund unused months?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason",
+    "Merchant requests waiting for a person are listed (GET /operator/yearly-refund-requests); running the refund closes the request"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": []
+}

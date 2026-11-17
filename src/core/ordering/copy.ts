@@ -9,6 +9,8 @@ export type OrderingCopy = {
   templates: {
     orderConfirmation: string;
     codConfirmation: string;
+    /** Richer COD template (header, address, items, order link). Optional: used only when approved and the Store sent every field. */
+    codConfirmationV2?: string;
     shippingTracking: string;
     shippingStatus: string;
     cartRecovery: string;
@@ -54,6 +56,10 @@ export type OrderingCopy = {
     chooseAddress: Localised;
     addressesButton: Localised;
     newAddressRow: Localised;
+    /** Optional (Ruling CHAT-AGENT-3): a returning customer with a default address is asked "same address as last time?" with two buttons instead of the list. Without it the list is always shown. */
+    sameAddress?: (summary: string, locale: Locale) => string;
+    sameAddressYes?: Localised;
+    sameAddressNo?: Localised;
     askAddress: Localised;
     outOfStock: (names: string[], locale: Locale) => string;
     codPlaced: (orderNumber: string, total: string | null, locale: Locale) => string;
@@ -72,5 +78,23 @@ export type OrderingCopy = {
     orderLine: (orderNumber: string, status: string, locale: Locale) => string;
     noOrders: Localised;
     orderStatusNames: Record<string, Localised>;
+    /** WhatsApp catalogue messages (product cards, the catalogue button) and the cart sent from the catalogue. Limits: header 60, section title 24, footer 60, body 1024. */
+    cards: {
+      single: (title: string, price: string, locale: Locale) => string;
+      listHeader: Localised;
+      listBody: Localised;
+      listSection: Localised;
+      moreSection: Localised;
+      catalogBody: Localised;
+      catalogFooter: Localised;
+      /** A cart line the Store no longer sells (or whose id it does not know). */
+      cartUnknown: (names: string[], locale: Locale) => string;
+      /** The cart's prices were not the live prices: the live ones apply. */
+      cartRepriced: Localised;
+      /** Every cart line was gone: nothing left to order. */
+      cartAllGone: Localised;
+      /** The cart came from a catalogue that is not this store's. */
+      cartOtherCatalogue: Localised;
+    };
   };
 };

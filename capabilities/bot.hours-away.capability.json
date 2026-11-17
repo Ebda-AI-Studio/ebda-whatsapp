@@ -1,0 +1,55 @@
+{
+  "id": "bot.hours-away",
+  "status": "live",
+  "area": "bot",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مواعيد العمل ورسالة الغياب",
+  "titleEn": "Opening hours and away message",
+  "screens": [
+    "BotScreen opening hours",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "PATCH /stores/:storeId/store-link/settings {hours}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/service-menu-hours-and-location",
+  "questions": {
+    "ar": [
+      "عايز العميل يعرف مواعيدي",
+      "ازاي اظبط رسالة \"مقفولين دلوقتي\"؟",
+      "البوت يرد برة المواعيد؟",
+      "mawa3id el 3amal"
+    ],
+    "en": [
+      "How do I set opening hours and an away message?"
+    ]
+  },
+  "steps": [
+    "Turn on hours",
+    "Add one or two periods per day (past-midnight allowed)",
+    "Away message in Arabic and English",
+    "Choose whether the bot and agent keep taking orders while closed",
+    "Save"
+  ],
+  "edgeCases": [
+    "Cairo time with DST handled",
+    "Away message sent once per closed period",
+    "ordersWhileClosed=off: away message replaces bot and agent"
+  ],
+  "gaps": [
+    "Single timezone (Africa/Cairo) only; no holidays/Ramadan special hours",
+    "No holiday override"
+  ]
+}

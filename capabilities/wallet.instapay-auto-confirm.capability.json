@@ -1,0 +1,51 @@
+{
+  "id": "wallet.instapay-auto-confirm",
+  "status": "live",
+  "area": "billing",
+  "version": 2,
+  "versionDate": "2026-11-14",
+  "titleAr": "تأكيد انستاباي تلقائي لما الإيصال يطابق",
+  "titleEn": "Instant InstaPay confirmation when the receipt matches (kill switch off by default)",
+  "screens": [
+    "WalletScreen Pay with InstaPay",
+    "view:WalletScreen",
+    "/wallet",
+    "view:InstaPay"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/wallet-top-ups-and-refunds",
+  "questions": {
+    "ar": [
+      "ليه الإيصال مستني ساعات؟",
+      "امتى يتفعل فورا؟",
+      "ازاي تأكيد انستاباي تلقائي؟"
+    ],
+    "en": [
+      "Why is my InstaPay payment not instant?"
+    ]
+  },
+  "steps": [
+    "Pay the exact amount by InstaPay and upload the receipt",
+    "The receipt is read into amount, recipient, date and reference; plain code checks all of them against what is due",
+    "A full match confirms within minutes; anything else waits for a person exactly as before",
+    "If the owner finds the money did not arrive the payment goes back to unpaid with a 48 hour grace: upload a correct receipt or pay by card"
+  ],
+  "edgeCases": [
+    "Off by default and per workspace: the platform owner switches it (off, shadow, live) with no deploy",
+    "First automatic payment is capped at one month of the plan; a yearly first payment waits for a person",
+    "A receipt already used anywhere (any workspace, any product) never confirms again",
+    "After a not-received revert unused credits of that payment are removed, consumed ones are kept, never negative"
+  ],
+  "gaps": [],
+  "assistantNote": "Say: confirmed within minutes when the receipt matches, otherwise a person reviews it; if told not received you have 48 hours to upload a correct receipt or pay by card"
+}

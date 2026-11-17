@@ -1,0 +1,46 @@
+{
+  "id": "system.meta-webhook",
+  "status": "live",
+  "area": "system",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "ويب هوك ميتا",
+  "titleEn": "Meta webhook: messages, statuses, templates, tiers, quality, account, name, coexistence",
+  "screens": [],
+  "api": [
+    "GET /meta/webhook (verify)",
+    "POST /meta/webhook (HMAC x-hub-signature-256)"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "الرسايل بتوصل ازاي؟",
+      "ليه رسالة العميل مجتش؟",
+      "webhook mesh sha8al"
+    ],
+    "en": [
+      "Why did a customer message not arrive?"
+    ]
+  },
+  "steps": [
+    "Signed webhook; unrouted phone_number_id ignored (200); DO write failure answers 5xx so Meta redelivers"
+  ],
+  "edgeCases": [
+    "Bad signature 401",
+    "Number not connected to a workspace: dropped",
+    "Replies queued to SEND_QUEUE with DLQ ebda-wa-send-dlq"
+  ],
+  "gaps": [
+    "Webhook delivery health not shown to merchants",
+    "roles unverified"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "id": "agent.connectors",
+  "status": "live",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "ربط المساعد بسيستم الشركة",
+  "titleEn": "Connect the agent to your own systems (webhook / Odoo)",
+  "screens": [],
+  "api": [
+    "GET /stores/:storeId/connectors",
+    "PUT /stores/:storeId/connectors/:id",
+    "DELETE /stores/:storeId/connectors/:id",
+    "POST /stores/:storeId/connectors/:id/test"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/connect-your-systems",
+  "questions": {
+    "ar": [
+      "ينفع المساعد يشوف الحجوزات بتاعتي؟",
+      "عايز اربطه بـ Odoo",
+      "webhook للسيستم بتاعي"
+    ],
+    "en": [
+      "Can the agent call my own system or Odoo?"
+    ]
+  },
+  "steps": [
+    "API only: kind webhook or odoo, https:443 only, HMAC-signed calls, secret write-only, one test per 5 s"
+  ],
+  "edgeCases": [
+    "SSRF rules on every call",
+    "Erased/STOP customers make no connector call",
+    "10 tools, 10 params per tool"
+  ],
+  "gaps": [],
+  "assistantNote": "gives the agent tool access to external systems"
+}

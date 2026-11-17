@@ -1,0 +1,41 @@
+{
+  "id": "agent.golden-eval",
+  "status": "in-pr",
+  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تقييم جودة المساعد",
+  "titleEn": "Agent quality evaluation (golden set)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "المساعد دقيق قد إيه؟",
+      "اتجرب على لهجتنا؟",
+      "ازاي تقييم جودة المساعد؟"
+    ],
+    "en": [
+      "How accurate is the agent?"
+    ]
+  },
+  "steps": [
+    "76 scripted cases in CI; real-model run not done"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "No real-model score exists yet: the assistant must not claim accuracy",
+    "roles unverified"
+  ],
+  "assistantNote": "internal quality gate, not a merchant feature"
+}

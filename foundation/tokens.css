@@ -3,7 +3,24 @@
   --ebda-gold:  #B08D57;   /* primary brand colour */
   --ebda-lift:  #CBA873;   /* secondary brand colour */
   --ebda-cream: #FAF8F3;   /* surfaces and UI */
-  --ebda-font-headline: "Playfair Display", Georgia, "Times New Roman", serif;
-  --ebda-font-ui: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* DS-FONT-1: ONE family, Arabic and Latin. The 2026-10-22 brand sheet's own headline and UI faces apply to the logo sheet only. */
+  --ebda-font-ui: "IBM Plex Sans Arabic", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ebda-font-headline: var(--ebda-font-ui);
+  --ebda-text-caption: 12px;
+  --ebda-text-ui: 14px;
+  --ebda-text-body: 16px;
+  --ebda-text-title-sm: 18px;
+  --ebda-text-title: 20px;
+  --ebda-text-kpi: 24px;
+  --ebda-text-display: 30px;
+  --ebda-radius-control: 12px;
+  --ebda-radius-surface: 14px;
+  --ebda-control-sm: 32px;
+  --ebda-control-md: 40px;
+  --ebda-control-lg: 44px;
+  --ebda-dur-fast: 150ms;
+  --ebda-dur-base: 200ms;
+  --ebda-dur-slow: 300ms;
+  --ebda-ease: cubic-bezier(0.2, 0, 0, 1);
   --ebda-app-icon-radius: 22.37%;
 }

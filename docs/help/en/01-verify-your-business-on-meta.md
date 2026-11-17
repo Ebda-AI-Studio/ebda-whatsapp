@@ -1,3 +1,8 @@
+---
+capabilities:
+  - numbers.meta-verification@1
+---
+
 # Verify your business on Meta
 
 Business Verification proves to Meta that your company is real. Without it your number works, but with tight limits.

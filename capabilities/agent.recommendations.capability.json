@@ -1,0 +1,38 @@
+{
+  "id": "agent.recommendations",
+  "status": "planned",
+  "plan": "register: Product recommendations in the Chat agent (NOT BUILT)",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "ترشيحات المنتجات من المساعد",
+  "titleEn": "Product recommendations by the agent",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "عايز المساعد يرشح منتجات مكملة",
+      "upsell ازاي",
+      "ازاي ترشيحات المنتجات من المساعد؟"
+    ],
+    "en": [
+      "Can the agent recommend related products?"
+    ]
+  },
+  "steps": [
+    "Not built; depends on Store #742 data"
+  ],
+  "edgeCases": [],
+  "gaps": []
+}

@@ -1,0 +1,44 @@
+{
+  "id": "inbox.realtime",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "التحديث الفوري للمحادثات",
+  "titleEn": "Live updates (WebSocket) and missed-event recovery",
+  "screens": [],
+  "api": [
+    "GET /stores/:storeId/ws (upgrade)",
+    "GET /stores/:storeId/events?after="
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/read-a-conversation-and-live-updates",
+  "questions": {
+    "ar": [
+      "الرسايل الجديدة مابتظهرش لوحدها",
+      "لازم اعمل refresh؟",
+      "el rasael mabtezharsh lewahdaha"
+    ],
+    "en": [
+      "New messages do not appear by themselves"
+    ]
+  },
+  "steps": [
+    "The app opens a WebSocket; if events are missed beyond repair it reloads"
+  ],
+  "edgeCases": [
+    "Offline banner; messages queue and send on reconnect",
+    "Integration tokens poll /events (no WS)",
+    "WS lifetime is capped; reconnects automatically"
+  ],
+  "gaps": []
+}

@@ -1,0 +1,52 @@
+{
+  "id": "operator.workspace-wallet",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "عرض محفظة حساب",
+  "titleEn": "View a workspace wallet",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/workspaces/:workspaceId/wallet"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "none"
+  },
+  "operatorReason": {
+    "code": null,
+    "text": "support read (view-as is logged)",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل عرض محفظة حساب؟",
+      "ليه مش لاقي عرض محفظة حساب عندي؟",
+      "عايز عرض محفظة حساب اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: View a workspace wallet?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: wallet.view (own wallet is already merchant-visible)"
+  ]
+}

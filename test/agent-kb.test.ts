@@ -22,6 +22,8 @@ const FAQ = `الشحن مجاني لأي طلب فوق 500 جنيه، والت�
 
 مواعيد العمل من العاشرة صباحا حتى العاشرة مساء كل يوم ما عدا الجمعة.`;
 const SHORT_FAQ = 'الشحن مجاني لأي طلب فوق 500 جنيه.';
+/** A FAQ over the inline limit (3 KB) stays in the vector index; the small ones are read whole (test/chat-agent-context.test.ts). */
+const big = (t: string) => `${t}\n\n${'ملحوظة داخلية للمتجر لا علاقة لها بالسؤال '.repeat(90)}`;
 const ready = async (ws: string) => (await workspace(ws).getAgentSettings()).knowledgeReady;
 async function withKb(ws: string, faq = FAQ) {
   const pn = await agentWorkspace(ws, { faqText: faq });
@@ -81,11 +83,11 @@ describe('FAQ -> chunks -> vectors', () => {
 
   it('while the new version is not in, the old one keeps answering; a failed index run is retried', async () => {
     const ws = W(3);
-    const pn = await withKb(ws, SHORT_FAQ);
+    const pn = await withKb(ws, big(SHORT_FAQ));
     const m = model([{ text: 'ok' }]);
     vectors.v.failUpserts = 1;
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    await workspace(ws).setAgentSettings({ faqText: 'الدفع عند الاستلام متاح في كل المحافظات.' });
+    await workspace(ws).setAgentSettings({ faqText: big('الدفع عند الاستلام متاح في كل المحافظات.') });
     await workspace(ws).runDueTasks(); // whoever runs it first (this call or the alarm), the run fails once
     await until(async () => ((await rows<{ attempts: number }>(ws, "SELECT attempts FROM scheduled_tasks WHERE kind = 'kb_index'"))[0]?.attempts ?? 0) >= 1);
     err.mockRestore();
@@ -95,7 +97,7 @@ describe('FAQ -> chunks -> vectors', () => {
     await exec(ws, "UPDATE scheduled_tasks SET due_at = 1, lease_until = NULL WHERE kind = 'kb_index'");
     await workspace(ws).runDueTasks();
     await until(async () => (await rows<{ version: number }>(ws, 'SELECT version FROM kb_chunks'))[0]?.version === 2);
-    expect(vectors.v.all(`${ws}:kb`).length).toBe(1);
+    expect(vectors.v.all(`${ws}:kb`).length).toBe((await rows<{ n: number }>(ws, 'SELECT count(*) AS n FROM kb_chunks'))[0]!.n);
   });
 
   it('an emptied FAQ clears the knowledge base', async () => {
@@ -128,8 +130,8 @@ describe('retrieval into the prompt', () => {
   it('only this workspace namespace is ever queried', async () => {
     const a = W(6);
     const b = W(7);
-    const pnA = await withKb(a);
-    await withKb(b, 'سياسة أخرى خالص عن الهدايا.');
+    const pnA = await withKb(a, big(FAQ));
+    await withKb(b, big('سياسة أخرى خالص عن الهدايا.'));
     model([{ text: 'x' }]);
     await say(a, pnA, text('الشحن'), stubGraph());
     expect(vectors.v.queries.map((q) => q.namespace)).toEqual([`${a}:kb`]);
@@ -158,7 +160,7 @@ describe('retrieval into the prompt', () => {
 
   it('a vector index that fails at question time is skipped, not fatal', async () => {
     const ws = W(9);
-    const pn = await withKb(ws);
+    const pn = await withKb(ws, big(FAQ));
     vectors.v.query = async () => { throw new Error('boom 01001234567'); };
     const log: string[] = [];
     const err = vi.spyOn(console, 'error').mockImplementation((...a) => { log.push(a.join(' ')); });
@@ -189,6 +191,7 @@ describe('catalog index', () => {
     link.fake.catalog[4] = { ...link.fake.catalog[4]!, priceMinor: 88_800 };
     link.fake.stock['v5'] = 0;
     const m = model([search('محفظة جلد'), { text: 'ok' }]);
+    link.fake.failNext.set('searchProducts', 'unavailable'); // the Store's own search is down: the agent's index is the fallback
     link.fake.calls.length = 0;
     await say(ws, pn, text('عايز محفظة جلد'), stubGraph());
     const result = JSON.parse((m.calls[1]!.messages.at(-1) as { content: string }).content) as { results: { id: string; price: number; inStock: boolean }[] };
@@ -203,6 +206,7 @@ describe('catalog index', () => {
     await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 't', credits: 5 });
     const prev = (await import('../src/core/ai/config')).configureAgent({ vectors: () => null });
     try {
+      link.fake.failNext.set('searchProducts', 'unavailable');
       const m = model([search('Item 3'), { text: 'ok' }]);
       await say(ws, pn, text('item 3'), stubGraph());
       const r = JSON.parse((m.calls[1]!.messages.at(-1) as { content: string }).content) as { results: { id: string }[] };

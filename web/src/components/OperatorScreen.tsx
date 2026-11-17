@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../data/api';
-import type { Adjustment, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, MetaDeletion, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView, OperatorOffboarding, AuditFilter, AuditLogItem } from '../data/billing';
+import type { AutoMode, OperatorAuto, OperatorAutoList, Adjustment, ChangeLogItem, FxRate, KillSwitchAction, MarginOverride, MetaDeletion, OperatorApi, OpsStatusDto, OperatorInstapay, PricingSettings, RateCardVersion, RefundRequest, YearlyRefundQuoteView, OperatorOffboarding, AuditFilter, AuditLogItem } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
@@ -418,6 +418,7 @@ function QueuesPanel({ t, lang, api, source, run, now, fail }: PanelProps) {
         </ul>
       </Card>
       <InstapayReview t={t} lang={lang} api={api} source={source} run={run} now={now} fail={fail} />
+      <AutoConfirmPanel t={t} lang={lang} api={api} source={source} run={run} now={now} fail={fail} />
       <Card id="op-adjlist" title={t.opAdjList}>
         {adjustments.error && <p className="error-text">{t.opLoadError}</p>}
         {adjustments.items?.length === 0 && <p className="muted">{t.opAdjEmpty}</p>}
@@ -457,6 +458,8 @@ function YearlyPlanCard({ t, lang, api, run, fail }: Pick<PanelProps, 't' | 'lan
   const [orderId, setOrderId] = useState('');
   const [reason, setReason] = useState('');
   const [quote, setQuote] = useState<YearlyRefundQuoteView | null>(null);
+  const [waiting, setWaiting] = useState<Awaited<ReturnType<typeof api.yearlyRefundRequests>>>([]);
+  useEffect(() => { void api.yearlyRefundRequests().then(setWaiting, () => setWaiting([])); }, [api]);
   const money = (m: number) => formatMoney(m, 'EGP', lang);
   const show = async (e: FormEvent) => {
     e.preventDefault();
@@ -471,12 +474,24 @@ function YearlyPlanCard({ t, lang, api, run, fail }: Pick<PanelProps, 't' | 'lan
     await run(async () => {
       const done = await api.yearlyRefundExecute(quote.orderId, reason.trim());
       setQuote(null);
+      void api.yearlyRefundRequests().then(setWaiting, () => undefined);
       return done.noMoneyOut ? `${t.opYrDone(num(done.shortenedMonths, lang), money(done.debtSettledMinor), money(0))} ${t.opYrNoMoney}` : t.opYrDone(num(done.shortenedMonths, lang), money(done.debtSettledMinor), money(done.cashRefundMinor));
     });
   };
   return (
     <Card id="op-yearly" title={t.opYrTitle}>
       <p className="muted">{t.opYrHelp}</p>
+      <h3 className="pane-sub">{t.opYrWaiting}</h3>
+      {waiting.length === 0 ? <p className="muted">{t.opYrWaitingEmpty}</p> : (
+        <ul className="wallet-rows op-rows">
+          {waiting.map((w) => (
+            <li key={w.id}>
+              <span className="wallet-row-main"><bdi dir="ltr">{w.workspaceId}</bdi> <span className="muted">{t.opYrWaitingLine(num(w.unusedMonths, lang), money(w.refundMinor))}</span></span>
+              <button type="button" className="btn ghost" onClick={() => setOrderId(w.orderId)}>{t.opYrUse}</button>
+            </li>
+          ))}
+        </ul>
+      )}
       <form className="wallet-form op-inline" onSubmit={(e) => void show(e)}>
         <label className="field"><span>{t.opYrOrder}</span><input dir="ltr" value={orderId} onChange={(e) => setOrderId(e.target.value)} /></label>
         <button type="submit" className="btn">{t.opYrShow}</button>
@@ -691,6 +706,61 @@ function InstapayReview({ t, lang, api, source, run }: PanelProps) {
             </li>
           );
         })}
+      </ul>
+    </Card>
+  );
+}
+
+// ---- InstaPay auto-confirm: verdicts with every reason, "not received", and the two kill switches -----------------------------------------------
+
+function AutoConfirmPanel({ t, lang, api, run }: PanelProps) {
+  const a = t.opAuto;
+  const [data, setData] = useState<OperatorAutoList | null>(null);
+  const [error, setError] = useState(false);
+  const [mode, setMode] = useState<AutoMode>('off');
+  const [modeWhy, setModeWhy] = useState('');
+  const [why, setWhy] = useState<Record<string, string>>({});
+  const reload = useCallback(() => { api.autoConfirmations().then((d) => { setData(d); setMode(d.mode); setError(false); }, () => setError(true)); }, [api]);
+  useEffect(reload, [reload]);
+  const money = (m: number | null) => (m === null ? '' : formatMoney(m, 'EGP', lang));
+  const revert = (r: OperatorAuto) => async () => { await run(async () => { await api.revertAutoConfirmed(r.requestId, (why[r.requestId] ?? '').trim()); reload(); }); };
+  const toggleWs = (r: OperatorAuto, enabled: boolean) => async () => { await run(async () => { await api.setWorkspaceAuto(r.workspaceId, enabled, (why[r.requestId] ?? '').trim()); reload(); }); };
+  return (
+    <Card id="op-instapay-auto" title={a.title}>
+      <p className="muted" role="note">{a.note}</p>
+      {error && <p className="error-text">{t.opLoadError}</p>}
+      {data && !data.ready.ready && <p className="error-text" role="note">{a.notReady(data.ready.missing)}</p>}
+      <div className="op-actions">
+        <label className="field"><span>{a.mode}</span>
+          <select value={mode} onChange={(e) => setMode(e.target.value as AutoMode)}>
+            {(['off', 'shadow', 'live'] as const).map((m) => <option key={m} value={m}>{a.modes[m]}</option>)}
+          </select>
+        </label>
+        <label className="field"><span>{a.reason}</span><input dir="auto" maxLength={300} value={modeWhy} onChange={(e) => setModeWhy(e.target.value)} /></label>
+        <div className="campaign-actions">
+          <button type="button" className="btn primary" disabled={modeWhy.trim().length < 5 || mode === data?.mode} onClick={() => void run(async () => { await api.setAutoMode(mode, modeWhy.trim()); setModeWhy(''); reload(); })}>{a.apply}</button>
+        </div>
+      </div>
+      {data?.items.length === 0 && <p className="muted">{a.empty}</p>}
+      <ul className="wallet-rows op-rows">
+        {data?.items.map((r) => (
+          <li key={r.requestId}>
+            <span className="wallet-row-main">
+              <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={r.state === 'auto_confirmed' ? 'done' : 'pending'}>{a.states[r.state] ?? r.state}</span>
+              <span className="muted op-line">{r.workspaceName ?? ''} <bdi dir="ltr">{r.workspaceId}</bdi>{r.isFirstPayment ? ` • ${a.first}` : ''}</span>
+              {r.reasons.length > 0 && <span className="error-text op-line" role="note">{r.reasons.map((c) => a.reasons[c] ?? c).join(' • ')}</span>}
+              {r.revertedAt !== null && r.graceUntil !== null && <span className="muted op-line">{a.reverted(dateTime(r.graceUntil, lang))}</span>}
+            </span>
+            <div className="op-actions">
+              <label className="field"><span>{a.revertReason}</span><input dir="auto" maxLength={300} value={why[r.requestId] ?? ''} onChange={(e) => setWhy({ ...why, [r.requestId]: e.target.value })} /></label>
+              <div className="campaign-actions">
+                {r.state === 'auto_confirmed' && <button type="button" className="btn quiet" disabled={(why[r.requestId] ?? '').trim().length < 5} onClick={() => void revert(r)()}>{a.notReceived}</button>}
+                <button type="button" className="btn" disabled={(why[r.requestId] ?? '').trim().length < 5} onClick={() => void toggleWs(r, false)()}>{a.workspaceOff}</button>
+                <button type="button" className="btn" disabled={(why[r.requestId] ?? '').trim().length < 5} onClick={() => void toggleWs(r, true)()}>{a.workspaceOn}</button>
+              </div>
+            </div>
+          </li>
+        ))}
       </ul>
     </Card>
   );

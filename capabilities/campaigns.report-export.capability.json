@@ -1,0 +1,41 @@
+{
+  "id": "campaigns.report-export",
+  "status": "planned",
+  "plan": "none yet (future)",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تقرير الحملة وتصديره",
+  "titleEn": "Campaign report / compliance export",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "عايز تقرير الحملة",
+      "ازاي احمل نتايج الحملة؟",
+      "عايز اثبت لميتا إني بعت لناس موافقة"
+    ],
+    "en": [
+      "Can I export a campaign report?"
+    ]
+  },
+  "steps": [
+    "Not built"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "No API, UI or help; only on-screen counts"
+  ],
+  "assistantNote": "Assistant should say it is not available yet and offer the Statement CSV for costs"
+}

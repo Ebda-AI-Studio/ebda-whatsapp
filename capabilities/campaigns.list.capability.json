@@ -1,0 +1,50 @@
+{
+  "id": "campaigns.list",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "قايمة الحملات ونتايجها",
+  "titleEn": "Campaign list with status and results",
+  "screens": [
+    "CampaignsScreen",
+    "view:CampaignsScreen",
+    "/campaigns"
+  ],
+  "api": [
+    "GET /stores/:storeId/campaigns?status=&cursor=",
+    "GET /stores/:storeId/campaigns/:id"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "فين الحملات بتاعتي؟",
+      "الحملة وصلت لكام واحد؟",
+      "كام واحد فتح اللينك؟",
+      "el hamla wasalet le kam wa7ed"
+    ],
+    "en": [
+      "Where are my campaigns?",
+      "How many people opened my link?"
+    ]
+  },
+  "steps": [
+    "Open Campaigns; status: Draft, Scheduled, Running, Paused, Completed, Cancelled",
+    "See sent/delivered/read, failed/skipped, link opens"
+  ],
+  "edgeCases": [
+    "Pause reasons: manual, wallet_empty, template_unavailable, internal_error, plan_blocked, number quality",
+    "Link previews are not counted as opens"
+  ],
+  "gaps": []
+}

@@ -146,7 +146,7 @@ describe('the model falls for it; the customer still never sees the damage', () 
     expect(JSON.stringify(m.calls[1]!.messages)).not.toMatch(/765 4321|7654321|sara\.k@/);
   });
   it('38 a knowledge-base question carrying a phone number: the embedder never receives it', async () => {
-    const { ws, pn } = await fresh({ faqText: 'الشحن مجاني لأي طلب فوق 500 جنيه والتوصيل خلال يومين.' });
+    const { ws, pn } = await fresh({ faqText: `${'الشحن مجاني لأي طلب فوق 500 جنيه والتوصيل خلال يومين.'}\n\n${'ملحوظة داخلية للمتجر لا علاقة لها بالسؤال. '.repeat(90)}` /* over the 3 KB inline limit: this test is about the index */ });
     await workspace(ws).runDueTasks();
     await until(async () => (await workspace(ws).getAgentSettings()).knowledgeReady);
     embedded.length = 0;
