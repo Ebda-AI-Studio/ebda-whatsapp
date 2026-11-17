@@ -22,14 +22,24 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
   it('scores every case with the rubric', async () => {
     const host = new URL(e.CHAT_EVAL_BASE_URL!).host;
     // Workers AI (the production path): the SAME WorkersAiProvider production runs, over a binding that calls the account's REST run endpoint (CHAT_EVAL_BASE_URL = .../accounts/<id>/ai/v1).
+    const stats = { lat: [] as number[], inTok: 0, outTok: 0 };
     const restBinding: AiBinding = {
       async run(model, rawInputs) {
         // Until foundation fdn#100 is vendored, WorkersAiProvider sends content:null on tool-calling turns and Workers AI answers 400; coerce so the eval measures the MODEL.
         const inputs = { ...rawInputs, messages: (rawInputs.messages as { content: unknown }[]).map((m) => (m.content === null ? { ...m, content: '' } : m)) };
-        const res = await realFetch(`${e.CHAT_EVAL_BASE_URL!.replace(/\/v1\/?$/, '')}/run/${model}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${e.CHAT_EVAL_API_KEY!}` }, body: JSON.stringify(inputs) });
+        const t0 = Date.now();
+        // A per-minute inference limit (HTTP 429) is waited out so a slow-tier model is graded on its answers, not on the account's rate.
+        let res!: Response;
+        for (let attempt = 0; attempt < 6; attempt++) {
+          res = await realFetch(`${e.CHAT_EVAL_BASE_URL!.replace(/\/v1\/?$/, '')}/run/${model}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${e.CHAT_EVAL_API_KEY!}` }, body: JSON.stringify(inputs) });
+          if (res.status !== 429) break;
+          await new Promise((r) => setTimeout(r, 15_000));
+        }
         if (!res.ok) console.log(`CHAT_EVAL_HTTP ${res.status} ${(await res.clone().text()).slice(0, 300)}`);
         if (!res.ok) throw new Error(`workers-ai ${res.status} ${(await res.text()).slice(0, 200)}`);
-        return ((await res.json()) as { result: unknown }).result;
+        const result = ((await res.json()) as { result: { usage?: { prompt_tokens?: number; completion_tokens?: number } } }).result;
+        stats.lat.push(Date.now() - t0); stats.inTok += result?.usage?.prompt_tokens ?? 0; stats.outTok += result?.usage?.completion_tokens ?? 0;
+        return result;
       },
     };
     const make = () => host === 'api.cloudflare.com' ? new WorkersAiProvider(restBinding, e.CHAT_EVAL_MODEL!) : new OpenAiCompatibleProvider({ baseUrl: e.CHAT_EVAL_BASE_URL!, apiKey: e.CHAT_EVAL_API_KEY!, model: e.CHAT_EVAL_MODEL! });
@@ -45,10 +55,13 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
     for (const [i, c] of CASES.entries()) {
       if (e.CHAT_EVAL_ONLY && c.group !== e.CHAT_EVAL_ONLY) continue;
       const v = await runCase(c, { fake: link.fake, agent, other }, i, make);
+      console.log(`CHAT_EVAL_CASE ${JSON.stringify({ id: v.id, pass: v.pass, outcome: v.run.outcome, reply: v.run.replies.join(' | ').slice(0, 160) })}`);
       if (!v.pass) console.log(`CHAT_EVAL_FAIL ${JSON.stringify({ id: v.id, failed: v.failed, outcome: v.run.outcome, tools: v.run.tools.map((t) => t.name), reply: v.run.replies.join(' | ').slice(0, 200) })}`);
       verdicts.push(v);
     }
     const board = scoreboard(verdicts);
+    const l = [...stats.lat].sort((a, b) => a - b);
+    console.log(`CHAT_EVAL_STATS ${JSON.stringify({ calls: l.length, p50: l[Math.floor(l.length * 0.5)], p95: l[Math.floor(l.length * 0.95)], inTok: stats.inTok, outTok: stats.outTok })}`);
     console.log(`CHAT_EVAL_SCOREBOARD ${JSON.stringify({ model: e.CHAT_EVAL_MODEL, ...board })}`);
     expect(board.rate).toBeGreaterThanOrEqual(Number(e.CHAT_EVAL_MIN ?? 0));
   }, 3_600_000);
