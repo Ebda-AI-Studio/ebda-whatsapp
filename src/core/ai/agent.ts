@@ -24,7 +24,7 @@ import { AI_TURN_CREDITS, heartbeatHold, holdCredits, releaseHold, settleHold } 
 import { funnelOnce } from '../funnel';
 import { markAiTurn } from '../timing';
 import { recordTurnCost } from './cost';
-import { EMPTY_RETRY_NOTE, GUARD_RETRY_NOTE, LANGUAGE_RETRY_NOTE, isArabicScriptReply, isFlaggedModel, readAgentModelFlag, whatsappFormat, type AgentModelId } from './model-flag';
+import { EMPTY_RETRY_NOTE, LANGUAGE_RETRY_NOTE, isArabicScriptReply, isFlaggedModel, readAgentModelFlag, whatsappFormat, type AgentModelId } from './model-flag';
 import { LlmError, type ChatTurn, type LlmProvider, type LlmResponse } from './provider';
 import { getAgentState, promisePolicyOf, providerFor, putAgentState, readAgentSettings, type AgentSettings } from './settings';
 import { MAX_CALLS_PER_ROUND, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_ROUNDS, runTool, toolDefs, type ToolContext } from './tools';
@@ -40,7 +40,7 @@ import { storeLink } from '../store-link';
 export const AGENT_MAX_TOKENS = 450;
 /** One credit buys at most this many model calls: up to MAX_TOOL_ROUNDS rounds that use tools, the last call that must answer, and at most one corrective call (M-084). */
 export const MAX_MODEL_CALLS_PER_CREDIT = MAX_TOOL_ROUNDS + 2;
-/** The ONE corrective call a turn may make (an empty final answer, a flagged-model wrong-language or guard-refused reply): the +1 above. It never costs a second credit. */
+/** The ONE corrective call a turn may make (an empty answer, or the flagged model's English-ask-answered-in-Arabic): the +1 above. The two share the slot, so the worst turn is 3 tool rounds + the answer + this call. It never costs a second credit. */
 const CORRECTIVE_CALLS_PER_TURN = 1;
 const HISTORY_MESSAGES = 8;
 const HISTORY_CHARS = 500;
@@ -333,15 +333,6 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
       if (flagged && settings.language === 'auto' && locale === 'en') {
         const first = cleanReply(res.text);
         if (first && isArabicScriptReply(first)) res = await correct(res, first, LANGUAGE_RETRY_NOTE);
-      }
-      // Flagged model: a reply the reply guard would refuse (an amount, link or promise nobody vouched for, typically the customer's own budget echoed back) gets the corrective call
-      // BEFORE it becomes a handoff. The guard itself is untouched: the second answer is checked by it exactly like the first.
-      if (flagged) {
-        const first = cleanReply(res.text);
-        if (first) {
-          const verdict = guardReply(whatsappFormat(first) || first, trusted, turn.system);
-          if (!verdict.ok && verdict.reason !== 'leak') res = await correct(res, first, GUARD_RETRY_NOTE);
-        }
       }
       // Cards without words still go out, with the store's own one-line lead-in. The flagged model's Markdown becomes WhatsApp formatting here, BEFORE the reply guard sees it.
       const cleaned = cleanReply(res.text);

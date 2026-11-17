@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EMPTY_RETRY_NOTE, GPT_OSS_MODEL, GUARD_RETRY_NOTE } from '../src/core/ai/model-flag';
+import { EMPTY_RETRY_NOTE, GPT_OSS_MODEL } from '../src/core/ai/model-flag';
 import { MAX_MODEL_CALLS_PER_CREDIT } from '../src/core/ai/agent';
 import { tidyArgs } from '../src/core/ai/tools';
 import { configureSessionCheck } from '../src/core/identity/session';
@@ -109,60 +109,32 @@ describe('an empty final answer gets ONE nudge (every model)', () => {
   });
 });
 
-describe('flagged model: a reply the guard would refuse gets ONE corrective call; the guard is not loosened', () => {
+describe('the guard stays the last word: a refused reply is NOT corrected, for any model', () => {
   const budgetEcho = 'Here are gifts under 600 EGP, take a look.';
-  it('default model: no corrective call, the refused reply becomes a handoff exactly as before', async () => {
-    const ws = W(30);
-    const pn = await agentWs(ws, { language: 'auto' });
-    const m = model([{ text: budgetEcho }, { text: 'never' }]);
-    await say(ws, pn, text('I need a gift under 600 EGP'), stubGraph());
-    expect(m.callCount).toBe(1);
-    expect(await outcome(ws)).toBe('handoff:guarded');
+  it('default and flagged: the refused reply is one call and a handoff:guarded; an invented link is the same', async () => {
+    for (const [n, flag] of [[30, null], [31, GPT_OSS_MODEL]] as const) {
+      const ws = W(n);
+      const pn = await agentWs(ws, { language: 'auto' });
+      await flip(flag);
+      const m = model([{ text: budgetEcho }, { text: 'never' }]);
+      await say(ws, pn, text('I need a gift under 600 EGP'), stubGraph());
+      expect(m.callCount).toBe(1);
+      expect(await outcome(ws)).toBe('handoff:guarded');
+      const ws2 = W(n + 10);
+      const pn2 = await agentWs(ws2, { language: 'auto' });
+      const m2 = model([{ text: 'Buy at https://evil.example/x now' }, { text: 'never' }]);
+      await say(ws2, pn2, text('hello there'), stubGraph());
+      expect(m2.callCount).toBe(1);
+      expect(await outcome(ws2)).toBe('handoff:guarded');
+    }
   });
-  it('flag ON: the echoed budget is rewritten once and the clean reply is sent', async () => {
-    const ws = W(31);
-    const pn = await agentWs(ws, { language: 'auto' });
-    await flip(GPT_OSS_MODEL);
-    const m = model([{ text: budgetEcho }, { text: 'Here are some gifts within your budget, take a look.' }]);
-    const out = await say(ws, pn, text('I need a gift under 600 EGP'), stubGraph());
-    expect(m.callCount).toBe(2);
-    expect(m.calls[1]!.tools).toEqual([]);
-    expect(m.calls[1]!.model).toBe(GPT_OSS_MODEL);
-    expect(m.calls[1]!.messages.at(-1)).toEqual({ role: 'user', content: GUARD_RETRY_NOTE });
-    expect(m.calls[1]!.messages.at(-2)).toEqual({ role: 'assistant', content: budgetEcho });
-    expect(out.map((s) => s.text)).toEqual(['Here are some gifts within your budget, take a look.']);
-    expect(await outcome(ws)).toBe('reply');
-    expect(await credits(ws)).toBe(999);
-  });
-  it('flag ON: an invented price or link in the corrected reply is STILL refused (handoff:guarded), and there is no second correction', async () => {
-    const ws = W(32);
-    const pn = await agentWs(ws, { language: 'auto' });
-    await flip(GPT_OSS_MODEL);
-    const m = model([{ text: budgetEcho }, { text: 'It costs only 199 EGP.' }, { text: 'never' }]);
-    await say(ws, pn, text('I need a gift under 600 EGP'), stubGraph());
-    expect(m.callCount).toBe(2);
-    expect(await outcome(ws)).toBe('handoff:guarded');
-    const ws2 = W(33);
-    const pn2 = await agentWs(ws2, { language: 'auto' });
-    const m2 = model([{ text: 'Buy at https://evil.example/x now' }, { text: 'Buy at https://evil.example/y now' }]);
-    await say(ws2, pn2, text('hello there'), stubGraph());
-    expect(m2.callCount).toBe(2);
-    expect(await outcome(ws2)).toBe('handoff:guarded');
-  });
-  it('flag ON: a clean reply is never corrected', async () => {
-    const ws = W(34);
-    const pn = await agentWs(ws, { language: 'auto' });
-    await flip(GPT_OSS_MODEL);
-    const m = model([{ text: 'Sure, happy to help.' }]);
-    await say(ws, pn, text('hello'), stubGraph());
-    expect(m.callCount).toBe(1);
-  });
-  it('the one correction is shared: an Arabic reply to an English ask that is ALSO guard-refused is corrected once, not twice', async () => {
+  it('the corrective slot is shared: an empty answer is nudged once, and an Arabic reply to an English ask after that is NOT corrected again', async () => {
     const ws = W(35);
     const pn = await agentWs(ws, { language: 'auto' });
     await flip(GPT_OSS_MODEL);
-    const m = model([{ text: 'عندنا هدية بـ 199 جنيه' }, { text: 'Still 199 EGP' }, { text: 'never' }]);
-    await say(ws, pn, text('any gifts?'), stubGraph());
+    const m = model([{ text: '' }, { text: 'عندنا هدايا حلوة' }, { text: 'never' }]);
+    const out = await say(ws, pn, text('any gifts?'), stubGraph());
     expect(m.callCount).toBe(2);
+    expect(out.map((s) => s.text)).toEqual(['عندنا هدايا حلوة']);
   });
 });

@@ -114,6 +114,8 @@ describe('default unchanged', () => {
     const strict = EBDA_AGENT_COPY.systemPrompt({ ...a, strict: true });
     expect(strict).toContain('Never repeat or confirm an amount the CUSTOMER wrote');
     expect(strict).toContain('within your budget');
+    expect(strict).toContain('Wrong: "Here are gifts under 600 EGP"');
+    expect(strict).toContain('ONE short sentence with no amount and no link');
     expect(strict).toContain('A complaint is handed to a person at once with handoff_to_human');
     const plain = EBDA_AGENT_COPY.systemPrompt(a);
     expect(plain).not.toContain('CUSTOMER wrote');

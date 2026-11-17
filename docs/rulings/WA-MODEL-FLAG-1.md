@@ -7,7 +7,7 @@
 - **Flip:** `PUT /api/v1/operator/agent/model {"model":"@cf/openai/gpt-oss-120b","reason":"<why>"}`. **Revert (one line):** `PUT /api/v1/operator/agent/model {"model":null,"reason":"<why>"}`. Takes effect on the next AI turn (read per turn, no cache).
 - Before flipping set `AI_PRICE_INPUT_USD_PER_M_GPT_OSS` / `AI_PRICE_OUTPUT_USD_PER_M_GPT_OSS` (Cloudflare pricing page), otherwise cost per credit is unknown and `ai_cost_over_threshold` cannot fire while the model is on.
 
-- Amendment (2026-11-17): one shared corrective call per turn (empty final answer for every model; wrong language and guard-refused reply for the flagged model), cap raised from 4 to 5 model calls per credit, still one credit; tool arguments treat null/"" as absent. Reply guard unchanged.
+- Amendment (2026-11-17): one shared corrective call per turn (empty answer for every model; English-ask-in-Arabic for the flagged model), cap raised from 4 to 5 model calls per credit, still one credit; tool arguments treat null/"" as absent. Reply guard unchanged.
 
 **Evidence:** `test/agent-model-flag.test.ts` (allow-list 400, authorization, audit, default byte-identical, flip/flip-back, format table incl. Arabic/RTL/URLs, language retry bounds). Measured background (live Egyptian golden eval, 76 cases, Workers AI): default model 32/76; gpt-oss-120b 60, 59, 57 /76 with p95 about 3 s before these three mitigations.
 
