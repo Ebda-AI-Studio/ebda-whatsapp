@@ -60,6 +60,7 @@ FAQ text (`faqText`, up to 20,000 chars) is chunked (paragraphs, then sentences,
 **Turning it on (done in `wrangler.jsonc`, Ruling WA-VECTORIZE-1; `/health` is 503 if the binding is absent):** the index must exist before a deploy: `npx wrangler vectorize create ebda-wa-kb --dimensions=1024 --metric=cosine`. Vectorize writes are asynchronous (a vector can take seconds to be searchable). After a backup restore the FAQ chunks are gone (derived data): save the FAQ again.
 
 ## Settings API (owner only; staff get 403)
+Ruling WA-SECRETS-1: `PUT` is the owner's alone (a custom model key lives here); a platform super admin is refused (`403 operator_session`) even as a member. `GET` stays readable by the owner and a super admin (it returns `hasApiKey`, never the key).
 `GET /stores/:storeId/agent` -> `agentSettingsDto`; `PUT /stores/:storeId/agent` (partial merge, `agentSettingsUpdate`): `enabled, persona (<=1000), language, tone (warm|professional|playful), notifyPhone (E.164 or null), handoffMinutes (5-1440), faqText, provider, model, baseUrl, apiKey` (string = set, `null` = remove, absent = keep; never returned). Answers add `hasApiKey`, `credits` (available) and `knowledgeReady`. Refusals are fixed codes: `invalid_base_url, model_required, api_key_required, model_not_allowed` (400), `secrets_unavailable` (503). Messages gain an optional `author: 'agent' | 'bot' | 'staff'` (set only when known).
 
 ## DO migrations added

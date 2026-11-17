@@ -3,7 +3,9 @@ import { decryptSecret } from '../src/core/ai/secrets';
 import { connectorDto } from '../src/core/api/contract';
 import { validConnectorUrl } from '../src/core/connectors/net';
 import { TEST_SECRETS_KEY, useAgent } from './helpers/agent';
-import { apiFor, storeId, useApiKey } from './helpers/api';
+import { SELF } from 'cloudflare:test';
+import { apiFor, apiKey, storeId, useApiKey } from './helpers/api';
+import { mint } from './helpers/issuer';
 import { rows } from './helpers/workspace';
 
 useApiKey();
@@ -31,6 +33,23 @@ describe('connector settings', () => {
     expect(stored).not.toContain(SECRET);
     expect(await decryptSecret(stored, TEST_SECRETS_KEY, s)).toBe(SECRET);
     expect(await decryptSecret(stored, TEST_SECRETS_KEY, storeId(9399))).toBeNull(); // bound to its workspace
+  });
+
+  it('WA-SECRETS-1: a super admin who is a member can READ connectors (status only, no secret) but never write, delete or test one', async () => {
+    const s = storeId(9398);
+    const owner = await apiFor(s);
+    await owner.call('PUT', '/connectors/crm', webhook());
+    const token = await mint(apiKey(), { pa: 'super_admin', stores: [{ id: s, role: 'owner' }] });
+    const op = (method: string, path: string, body?: unknown) => SELF.fetch(`https://x/api/v1/stores/${s}${path}`, { method, headers: { authorization: `Bearer ${token}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+    const read = await op('GET', '/connectors');
+    expect(read.status).toBe(200);
+    const text = await read.text();
+    expect(text).not.toContain(SECRET);
+    expect(JSON.parse(text)).toMatchObject([{ id: 'crm', hasSecret: true }]);
+    expect((await op('PUT', '/connectors/crm', webhook({ enabled: false }))).status).toBe(403);
+    expect((await op('DELETE', '/connectors/crm')).status).toBe(403);
+    expect((await op('POST', '/connectors/crm/test')).status).toBe(403);
+    expect((await rows<{ enabled: number }>(s, "SELECT enabled FROM connectors WHERE id = 'crm'"))[0]!.enabled).toBe(1);
   });
 
   it('staff can neither read nor write nor delete nor test connectors', async () => {

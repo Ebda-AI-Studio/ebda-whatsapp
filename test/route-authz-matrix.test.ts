@@ -43,9 +43,9 @@ const R: Record<string, Role> = {
   'GET /store-link/settings': 'member', 'GET /store-link/catalog': 'member', 'GET /bot/funnel': 'member',
   'PATCH /store-link/settings': 'manager', 'POST /store-link/settings/preview': 'manager', 'POST /store-link/catalog/provision': 'manager',
   'POST /store-link/catalog/resync': 'manager', 'PUT /store-link/catalog/commerce': 'manager',
-  // agent, connectors, retention
-  'GET /agent': 'manager', 'PUT /agent': 'owner', 'GET /connectors': 'manager', 'PUT /connectors/:connectorId': 'manager', 'DELETE /connectors/:connectorId': 'manager',
-  'POST /connectors/:connectorId/test': 'manager', 'GET /retention': 'manager', 'PUT /retention': 'manager',
+  // agent, connectors, retention (WA-SECRETS-1: what writes or tests a merchant's secrets is the owner's alone; a super admin keeps the GET, which never carries a secret)
+  'GET /agent': 'manager', 'PUT /agent': 'owner', 'GET /connectors': 'manager', 'PUT /connectors/:connectorId': 'owner', 'DELETE /connectors/:connectorId': 'owner',
+  'POST /connectors/:connectorId/test': 'owner', 'GET /retention': 'manager', 'PUT /retention': 'manager',
   // numbers and shared number
   'GET /numbers': 'member', 'POST /numbers/:phoneNumberId/refresh': 'member', 'GET /shared-number': 'member',
   'GET /numbers/signup-config': 'manager', 'POST /numbers/connect': 'manager', 'POST /numbers/notices/:noticeId/dismiss': 'manager',
