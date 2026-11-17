@@ -27,6 +27,7 @@ export const EBDA_ORDERING_COPY: OrderingCopy = {
   templates: {
     orderConfirmation: 'order_confirmation',
     codConfirmation: 'cod_confirmation',
+    codConfirmationV2: 'cod_confirmation_v2',
     shippingTracking: 'shipping_tracking',
     shippingStatus: 'shipping_status',
     cartRecovery: 'cart_recovery',
