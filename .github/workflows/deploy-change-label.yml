@@ -20,7 +20,7 @@ jobs:
     # check pinned to GitHub-hosted fails in 2 s once the org has no hosted minutes, blocking every PR (PR #52).
     # A fork's PR never runs on the self-hosted runner: it gets GitHub-hosted, and the gate is never skipped (a skipped
     # required check would pass).
-    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-24.04"') || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -1,3 +1,4 @@
+import { isPlainEnglish } from './franco';
 import { isSuspended } from './numbers/health';
 /**
  * The front desk: what answers a customer before the ordering bot and the AI agent do. The merchant's service menu (a list of
@@ -9,6 +10,7 @@ import { isSuspended } from './numbers/health';
 import { recordFunnel } from './bot-funnel';
 import { isOpen, nextOpenAt } from './front-desk-hours';
 import { markHandoff } from './ai/handoff';
+import { notifyOwnerOfHandoff, prepareOwnerNotice } from './ai/handoff-notify';
 import type { Locale } from './ordering/copy';
 import { orderingActive, orderingEngaged, runBotTurnLocked, toJob, turnGone, type BotInput, type BotMsg } from './ordering/bot';
 import type { LinkHost } from './store-link/host';
@@ -56,7 +58,8 @@ function awaitingAddress(host: Pick<LinkHost, 'sql'>, from: string, now: number)
 
 function localeOfText(host: Pick<LinkHost, 'sql'>, input: BotInput): Locale {
   if (input.text && /[؀-ۿ]/.test(input.text)) return 'ar';
-  if (input.text && /[A-Za-z]/.test(input.text)) return 'en';
+  if (isPlainEnglish(input.text)) return 'en';
+  if (input.text && /[A-Za-z]/.test(input.text)) return 'ar'; // Franco-Arabic ("3ayez menu")
   const row = host.sql.exec<{ locale: string }>('SELECT locale FROM bot_sessions WHERE wa_id = ?', input.from).toArray()[0];
   return row?.locale === 'en' ? 'en' : 'ar';
 }
@@ -171,9 +174,11 @@ export async function runFrontDesk(host: LinkHost, input: BotInput, now: number,
       return 'handled';
     }
     if (tap[2] === 'human') {
+      await prepareOwnerNotice(host);
       const ok = host.storage.transactionSync(() => {
         if (turnGone(host, input)) return false;
         markHandoff(host, input.from, 'asked', now);
+        notifyOwnerOfHandoff(host, { waId: input.from, phoneNumberId: input.phoneNumberId, profileName: input.profileName, now });
         return true;
       });
       if (ok) {

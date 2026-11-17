@@ -7,6 +7,7 @@ import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import type { TemplateDraft } from '../../../src/core/template-draft';
 import type { OperatorApi, WalletApi } from './billing';
 import type { SharedTemplatesApi } from './shared-templates';
+import type { AssistantApi } from './assistant';
 
 export type ConversationFilter = 'all' | 'unread' | 'mine' | 'unassigned';
 export type Role = 'owner' | 'staff' | 'super_admin';
@@ -120,7 +121,7 @@ export interface InboxSource {
   /** Confirm or refuse a pending COD order (the store stays the writer of order state). */
   recordCodOutcome(waId: string, orderNumber: string, outcome: 'confirmed' | 'refused'): Promise<void>;
   /** What this source can do today (e.g. COD outcomes need the store route, Phase 4). */
-  capabilities: { codOutcome: boolean; numbers?: boolean };
+  capabilities: { codOutcome: boolean; numbers?: boolean; assistant?: boolean };
   /** A displayable URL for a protected media path (fetch with the token → blob URL). */
   mediaUrl?(path: string): Promise<string>;
   /** Full text of a message longer than 1 KB. */
@@ -160,6 +161,8 @@ export interface InboxSource {
   /** Create, submit, edit and delete templates; absent in builds that cannot manage them. */
   templatesApi?: TemplatesApi;
   numbers?: NumbersApi;
+  /** The assistant side panel (answer-only for now); offered only while `capabilities.assistant` is true (the server's own switch for this store). */
+  assistant?: AssistantApi;
   /** The team and its seats; offered to the owner only. */
   team?: TeamApi;
   contacts?: ContactsApi;

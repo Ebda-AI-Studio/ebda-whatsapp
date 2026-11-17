@@ -1,6 +1,6 @@
 import { mintedKey, mintedRoles } from './issuer';
 import type {
-  Address, BridgeFailure, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, StoreBridge, StoreProfile,
+  Address, BridgeFailure, CustomerProfile, SearchOptions, StorePolicies, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, StoreBridge, StoreProfile,
 } from '../../src/core/store-bridge';
 
 type Order = {
@@ -46,6 +46,28 @@ export class FakeStore implements StoreBridge {
     this.catalog = opts.catalog ?? Array.from({ length: 23 }, (_, i) => row(`v${i + 1}`, `p${i + 1}`, `Item ${i + 1}`, 10_000 + i * 500));
     this.stock = opts.stock ?? Object.fromEntries(this.catalog.map((c) => [c.retailerId, 50]));
   }
+
+  /** `degraded` on the search answer: the Store skipped the meaning leg (Store ruling CHAT-AGENT-6). */
+  searchDegraded = false;
+  /** What `searchProducts` answers (the Store's ranked search): default = rows whose title contains a query word, in catalogue order, cheaper than the ceiling. A test may replace it (meaning search, Franco). */
+  searchImpl: (query: string, opts: SearchOptions) => CatalogRow[] = (query, opts) => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = (c: CatalogRow) => {
+      const hay = `${c.title} ${c.titleAr ?? ''}`.toLowerCase();
+      const tokens = hay.split(/\s+/);
+      return words.length > 0 && words.every((w) => tokens.includes(w) || (w.length > 3 && hay.includes(w)));
+    };
+    return this.catalog.filter(hit).filter((c) => opts.maxPriceMinor === undefined || c.priceMinor <= opts.maxPriceMinor).slice(0, opts.limit);
+  };
+  /** The merchant's declared policies (a test sets `null` fields or empty shipping to prove the agent does not invent). */
+  policies: StorePolicies = {
+    name: 'متجر الاختبار', nameAr: 'متجر الاختبار', currency: 'EGP', locale: 'ar', paymentMethods: ['cod', 'link', 'instapay'], instapay: true,
+    cod: { available: true, fixedFeeMinor: 2500, percentBps: null },
+    shipping: { zones: [{ name: 'Cairo', nameAr: 'القاهرة', areas: ['Maadi'], feeMinor: 6000, freeOverMinor: 100_000, etaDaysMin: 1, etaDaysMax: 2 }], governorates: [{ governorate: 'Giza', governorateAr: 'الجيزة', feeMinor: 7000, feeMaxMinor: 7000, freeOverMinor: null }] },
+    returns: { windowDays: 14, feesPaidBy: 'customer' }, hours: 'السبت للخميس 10ص - 10م', location: { address: '9 Road 233, Maadi', addressAr: null, mapsUrl: null },
+  };
+  /** Customer profiles by E.164 phone (the proof). An absent phone answers `null`, like the Store. */
+  readonly profiles = new Map<string, CustomerProfile>();
 
   /** Store membership by store id: userId -> member. Tests set it with `setMembers`; an unknown store has no members. */
   readonly members = new Map<string, Map<string, StoreMember>>();
@@ -113,6 +135,18 @@ export class FakeStore implements StoreBridge {
   getProducts(storeId: string, productIds: string[]) {
     // The real bridge schema caps an id at 64 characters and refuses the WHOLE call for one longer (schemas.ts getProducts).
     return this.gate('getProducts', storeId, [storeId, productIds], () => productIds.some((id) => id.length > 64) ? { ok: false, reason: 'invalid' } : ({ ok: true, value: { items: this.catalog.filter((c) => productIds.includes(c.retailerId)).map((c) => ({ ...c, availability: (this.stock[c.retailerId] ?? 0) > 0 ? ('in_stock' as const) : ('out_of_stock' as const) })) } }));
+  }
+
+  searchProducts(storeId: string, query: string, opts: SearchOptions) {
+    return this.gate('searchProducts', storeId, [storeId, query, opts], () => ({ ok: true, value: { items: this.searchImpl(query, opts).map((c) => ({ ...c, availability: (this.stock[c.retailerId] ?? 0) > 0 ? ('in_stock' as const) : ('out_of_stock' as const) })), degraded: this.searchDegraded } }));
+  }
+
+  getStorePolicies(storeId: string) {
+    return this.gate<StorePolicies>('getStorePolicies', storeId, [storeId], () => ({ ok: true, value: this.policies }));
+  }
+
+  getCustomerProfile(storeId: string, phoneE164: string) {
+    return this.gate<CustomerProfile | null>('getCustomerProfile', storeId, [storeId, phoneE164], () => ({ ok: true, value: this.profiles.get(phoneE164) ?? null }));
   }
 
   createCheckoutLink(storeId: string, req: { items: OrderLine[]; buyer: Buyer }) {

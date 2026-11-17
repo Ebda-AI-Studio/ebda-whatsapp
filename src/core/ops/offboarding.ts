@@ -36,6 +36,7 @@ export const OFFBOARD_TABLES = {
     waba_signup_users: 'workspace_id', workspace_notices: 'workspace_id', workspace_owners: 'workspace_id', new_cap_usage: 'workspace_id', // final review: Meta-user links, owner notices, the Store owner and the campaign-cap usage go with the workspace
     audit_reasons: 'workspace_id', // operators' free-text reasons (AUDIT-RETENTION-1): deletable on purpose
     instapay_auto_workspace: 'workspace_id', // the per-workspace auto-confirm switch: configuration, nothing to keep
+    money_confirmations: 'workspace_id', // single-use money-action tokens (hash only): worthless after the workspace is gone, and they name a user id
     erasure_records: 'workspace_id', // the workspace's backups are erased with it, so nothing is left for a restore to bring back
   } as Record<string, string>,
   keep: {
@@ -48,6 +49,9 @@ export const OFFBOARD_TABLES = {
     card_refunds: { people: [], clear: ['note'] },
     wallet_adjustments: { people: [], clear: [] }, // requested_by / approved_by are our operators
     shared_number_usage: { people: [], clear: [] },
+    credit_order_refunds: { people: [], clear: [] }, // a provider refund of a credit pack: ids and an amount (WA-PACK-REFUND-1); a record of money, kept like credit_orders
+    credit_orders: { people: ['created_by'], clear: [] }, // a card purchase of AI credits: amount, credits, provider transaction id; a record of money, kept like topups
+    yearly_refund_requests: { people: ['requested_by'], clear: [] }, // a merchant's request to cancel a yearly package and refund unused months: figures only (executed_by is our operator)
   } as Record<string, { people: string[]; clear: string[] }>,
   // Immutable by trigger (a row can be neither updated nor deleted): they keep the opaque workspace id, which names no one once everything above is erased.
   audit: ['operator_actions', 'offboarding', 'offboarding_log', 'ledger_mirror', 'billing_audit', 'workspace_pricing_overrides', 'audit_log', 'operator_view_log'], // operator_view_log: who looked at a workspace, when and which route (no text, the reason is in audit_reasons and goes with the workspace)
@@ -131,9 +135,10 @@ export async function releaseAbuseHold(env: Env, a: { workspaceId: string; actor
   await env.DB.batch(logRows(env, a.workspaceId, a.actor, 'abuse_hold_released', now, a.reason));
   return { ok: true };
 }
-async function abuseSuspended(env: Env, ws: string): Promise<boolean> {
+export async function abuseSuspended(env: Env, ws: string): Promise<boolean> {
   const w = await env.DB.prepare('SELECT suspended_at, suspended_reason FROM workspaces WHERE id = ?').bind(ws).first<{ suspended_at: number | null; suspended_reason: string | null }>();
-  return !!w && w.suspended_at !== null && w.suspended_reason !== 'offboarding';
+  // A Store hold (STORE-STANDING-1: the Store store is suspended or deleted) is not an abuse suspension either: it never holds an erasure; nor does a wallet debt hold (WA-DEBT-1, a money block). D1's reason is derived with the operator's reason first, so any other reason is an operator suspension.
+  return !!w && w.suspended_at !== null && w.suspended_reason !== 'offboarding' && w.suspended_reason !== 'store_suspended' && w.suspended_reason !== 'store_deleted' && w.suspended_reason !== 'wallet_debt';
 }
 
 export async function getOffboarding(env: Env, ws: string): Promise<OffboardingStatus | null> {
@@ -258,7 +263,7 @@ export async function cancelOffboarding(env: Env, a: { workspaceId: string; acto
 
 /**
  * Work in flight that a deletion must not cut off. Null = clear to go. Money is held on ANY open row however old (a late confirmation would otherwise credit a
- * deleted workspace, review item 2): an open refund, a card refund, a top-up or package order still pending, a paid-but-ungranted order, an InstaPay request
+ * deleted workspace, review item 2): an open refund, a card refund, a pending yearly-refund request, a top-up, credit-pack or package order still pending, a paid-but-ungranted order, an InstaPay request
  * awaiting proof or review (or confirmed and not granted).
  */
 async function moneyHold(env: Env, ws: string): Promise<string | null> {
@@ -267,6 +272,8 @@ async function moneyHold(env: Env, ws: string): Promise<string | null> {
   if (await q("SELECT 1 FROM card_refunds WHERE workspace_id = ? AND state IN ('planned', 'sending', 'calling', 'pending', 'uncertain', 'held')", ws)) return 'open_card_refund';
   if (await q("SELECT 1 FROM topups WHERE workspace_id = ? AND state = 'pending'", ws)) return 'payment_in_flight';
   if (await q("SELECT 1 FROM package_orders WHERE workspace_id = ? AND (status = 'pending' OR (status = 'paid' AND granted_at IS NULL))", ws)) return 'payment_in_flight';
+  if (await q("SELECT 1 FROM credit_orders WHERE workspace_id = ? AND state = 'pending'", ws)) return 'payment_in_flight'; // an AI-credit card purchase still waiting for its payment
+  if (await q("SELECT 1 FROM yearly_refund_requests WHERE workspace_id = ? AND state = 'pending'", ws)) return 'open_yearly_refund_request'; // the merchant asked to cancel a yearly package and be refunded: a person must run it first
   if (await q("SELECT 1 FROM instapay_requests WHERE workspace_id = ? AND (state IN ('awaiting_proof', 'under_review') OR (state = 'confirmed' AND granted_at IS NULL))", ws)) return 'payment_in_flight';
   return null;
 }
@@ -305,6 +312,14 @@ class Unfinished extends Error {}
 async function runStep(env: Env, ws: string, step: Step, pseudo: string, now: number): Promise<string | undefined> {
   switch (step) {
     case 'suspend': {
+      // WA-DEBT-1: the erasure of DATA is never blocked by a debt, but the DEBT survives it. A negative wallet is recorded ONCE in the append-only offboarding log (`debt_preserved`,
+      // the amount) next to the full ledger copy in D1 `ledger_mirror` (kept), with a P1 alert. It is never written off here: a write-off exists only for a positive balance the
+      // owner gives up (`write_off_accepted`, explicit approval), and nothing on the way out pays or refunds against a debt.
+      const debt = -Math.min(0, (await stub(env, ws).walletView(now)).balanceMinor);
+      if (debt > 0 && !(await env.DB.prepare("SELECT 1 FROM offboarding_log WHERE workspace_id = ? AND action = 'debt_preserved' LIMIT 1").bind(ws).first())) {
+        await env.DB.batch(logRows(env, ws, 'system', 'debt_preserved', now, null, `debt_minor=${debt}`));
+        alert('offboarding_debt_outstanding', { workspace: ws, debtMinor: debt });
+      }
       await env.DB.prepare("UPDATE workspaces SET suspended_at = coalesce(suspended_at, ?), suspended_reason = coalesce(suspended_reason, 'offboarding') WHERE id = ?").bind(now, ws).run();
       await stub(env, ws).setSuspended(true, 'offboarding', now);
       return;

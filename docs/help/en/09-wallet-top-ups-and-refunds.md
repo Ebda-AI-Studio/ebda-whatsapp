@@ -2,6 +2,7 @@
 capabilities:
   - packages.list-checkout@1
   - packages.plan-status@1
+  - agent.credits-topup@2
   - packages.yearly-switch@1
   - wallet.card-topup@1
   - wallet.instapay@1
@@ -9,6 +10,7 @@ capabilities:
   - wallet.refund-request@2
   - wallet.statement@1
   - wallet.view@1
+  - wallet.yearly-refund-request@1
 ---
 
 # Wallet, top-ups and refunds
@@ -26,6 +28,15 @@ The wallet is a prepaid balance in Egyptian pounds. It pays Meta's cost on the *
 4. Complete the payment. The balance is added when Kashier confirms the payment, not just when you return to the page. If it is late, wait a few minutes and refresh.
 
 *Note:* if the wallet is in debt, your first top-up pays the debt and the rest is added to the balance.
+
+## Buy AI credits
+If your package credits run out before the month ends, you can buy more by card (the owner does this; staff see the low-credit warning but not the card).
+1. Open **Wallet** and find **Buy AI credits**. The low-credit warning (in the inbox banner and on the Wallet page) takes you there.
+2. Pick a pack. You see the number of credits and the **price in EGP**, which is set by us: it is the highest per-credit price among the monthly packages, so a pack never costs less than upgrading.
+3. Press **Yes, pay**. You are taken to the card page. Nothing is added until the payment is confirmed.
+4. The credits are added **when the card provider confirms the payment**, exactly once for that payment, not when you return to the page. If it is late, wait a few minutes; a lost confirmation is repaired by a daily check.
+
+Credits you buy stay with you and **do not expire at the end of the month** (the monthly package credits do). A double click, a refresh or a repeated confirmation never adds them twice. A failed payment adds nothing and takes nothing. If the price changed after you opened the confirmation, it is refused and you look again. If you ask for the payment to be refunded, a person on our team handles the credits; they are not taken back automatically.
 
 ## Pay with InstaPay
 While card payment is not switched on for your account, you pay by InstaPay transfer. It works for top-ups and for packages.
@@ -54,6 +65,8 @@ When you upload a receipt that matches exactly (the amount due, our InstaPay add
 **Yearly packages** (Starter, Growth and Pro "yearly") cost 9 times the monthly price and run for **12 months**. They have the same features and the same AI credits per month as the monthly package; the credits are added **every month**, not all at once, and a month's unused credits end when the next month's arrive.
 
 **There is no free plan.** Without a package in good standing you can still sign in, read your inbox, see the packages and buy one, but you cannot send any message (replies, order and COD confirmations and one-time codes included), use the AI agent, or connect a number. The app tells you "a package is required". If a renewal fails your package becomes **past due**: replies and confirmations keep working for up to **7 days** (or until the package period ends, whichever comes first), marketing campaigns stop at once, and then sending stops until you pay.
+
+**Cancel a yearly package and ask for a refund.** With a yearly package running, **Wallet > Cancel the yearly package** shows what you would get back: the months not started, their value, any wallet debt settled first, and the refund to your card. These are the same figures our team uses to carry it out. Press **Request cancellation and refund**, check the figures and press **Yes, send the request**. This only files a request and **no money moves**: our team reviews it, cancels the package at the end of the month you are in and sends any card refund by hand. The month you are in is never refunded, so in the last month there is nothing to request. If your wallet owes money, the debt is settled first; if it covers the whole refund, nothing goes back to your card. One request at a time. If the figures changed between the preview and your confirmation (a new month began, or the debt changed), it is refused and you look again. If a renewal is queued after your package, this card is not offered; contact our team.
 
 *Refunding a yearly package:* we can refund the **whole months you have not started**, at the yearly price divided by 12 (rounded down). The month you are in is never refunded, so a refund in the last month is nothing. If your wallet is in debt, the debt is settled first out of the refund. A partial refund shortens the yearly period by the months refunded (all refunds add up, and the end date can only move earlier). A month that starts on the 31st can begin on the 3rd of the following month and on the 31st after that (a short month overflows), so two monthly credit grants can fall in the same calendar month; each month is still granted once.
 

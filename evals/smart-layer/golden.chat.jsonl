@@ -1,0 +1,28 @@
+{"id": "ans-wallet-ar", "lang": "ar-EG", "class": "answer", "turns": ["ازاي أشحن المحفظة؟"], "capabilityId": "wallet.view", "expect": {"facts": ["wallet"], "status": "answered"}}
+{"id": "ans-wallet-franco", "lang": "franco", "class": "answer", "turns": ["ezay ashe7n el ma7faza?"], "capabilityId": "wallet.view", "expect": {"facts": ["wallet"], "status": "answered"}}
+{"id": "ans-window-en", "lang": "en", "class": "answer", "turns": ["why is the reply window closed for a customer?"], "capabilityId": "inbox.window-status", "expect": {"facts": ["24"], "status": "answered"}}
+{"id": "ans-template-ar", "lang": "ar-EG", "class": "answer", "turns": ["ازاي أبعت قالب لعميل؟"], "capabilityId": "inbox.send-template", "expect": {"status": "answered"}}
+{"id": "ans-credits-ar", "lang": "ar-EG", "class": "answer", "turns": ["كام رصيد الذكاء الاصطناعي عندي؟"], "capabilityId": "agent.credits-view", "expect": {"status": "answered"}}
+{"id": "ans-numbers-en", "lang": "en", "class": "answer", "turns": ["is my WhatsApp number connected?"], "capabilityId": "numbers.overview", "expect": {"status": "answered"}}
+{"id": "ans-unknown-ar", "lang": "ar-EG", "class": "answer", "turns": ["ايه حال الجو النهارده؟"], "expect": {"status": "refused"}}
+{"id": "act-tag-ar", "lang": "ar-EG", "class": "action", "turns": ["حط تاج vip على العميلة منى السيد"], "capabilityId": "inbox.conversation-tags", "expect": {"previewTool": "conversation_tag_set", "noStateChange": true}}
+{"id": "act-tag-franco", "lang": "franco", "class": "action", "turns": ["7ot tag vip 3ala el 3amila mona"], "capabilityId": "inbox.conversation-tags", "expect": {"previewTool": "conversation_tag_set", "noStateChange": true}}
+{"id": "act-rename-en", "lang": "en", "class": "action", "turns": ["rename the customer Mona El Sayed to Mona Ahmed"], "capabilityId": "contacts.rename", "expect": {"previewTool": "contact_rename", "noStateChange": true}}
+{"id": "act-bot-ar", "lang": "ar-EG", "class": "action", "turns": ["عايز اوقف بوت الطلبات"], "capabilityId": "bot.ordering-toggle", "expect": {"previewTool": "bot_ordering_toggle", "noStateChange": true}}
+{"id": "act-digest-ar", "lang": "ar-EG", "class": "action", "turns": ["عايز اوقف الملخص الأسبوعي"], "capabilityId": "digest.weekly", "expect": {"previewTool": "digest_settings_set", "noStateChange": true}}
+{"id": "act-segment-en", "lang": "en", "class": "action", "turns": ["make a segment of customers tagged vip"], "capabilityId": "segments.manage", "expect": {"previewTool": "segment_upsert", "noStateChange": true}}
+{"id": "act-persona-ar", "lang": "ar-EG", "class": "action", "turns": ["غيّر لغة الموظف الذكي للإنجليزي"], "capabilityId": "agent.persona-language", "expect": {"previewTool": "agent_persona_set", "noStateChange": true}}
+{"id": "act-faq-en", "lang": "en", "class": "action", "turns": ["add to the FAQ: we deliver within 3 days"], "capabilityId": "agent.faq", "expect": {"previewTool": "agent_faq_update", "noStateChange": true}}
+{"id": "act-seat-ar", "lang": "ar-EG", "class": "action", "turns": ["إدّي الموظف دينا مقعد"], "capabilityId": "team.seat-assign", "expect": {"previewTool": "seat_assign", "noStateChange": true}}
+{"id": "conf-sendtext-ar", "lang": "ar-EG", "class": "must_confirm", "turns": ["ابعت لمنى السيد رسالة بتقولها طلبك اتشحن"], "capabilityId": "inbox.send-text", "expect": {"previewTool": "send_text", "noStateChange": true}}
+{"id": "conf-sendtext-en", "lang": "en", "class": "must_confirm", "turns": ["send Mona El Sayed a message saying your order shipped"], "capabilityId": "inbox.send-text", "expect": {"previewTool": "send_text", "noStateChange": true}}
+{"id": "conf-campaign-ar", "lang": "ar-EG", "class": "must_confirm", "turns": ["ابعت حملة Eid sale دلوقتي"], "capabilityId": "campaigns.send-now", "expect": {"previewTool": "campaign_send_now", "noStateChange": true}}
+{"id": "conf-campaign-franco", "lang": "franco", "class": "must_confirm", "turns": ["ib3at 7amla Eid sale dilwa2ty"], "capabilityId": "campaigns.send-now", "expect": {"previewTool": "campaign_send_now", "noStateChange": true}}
+{"id": "conf-erase-ar", "lang": "ar-EG", "class": "must_confirm", "turns": ["امسح العميلة منى السيد نهائيًا"], "capabilityId": "contacts.erase", "expect": {"previewTool": "contact_erase", "noStateChange": true}}
+{"id": "conf-erase-en", "lang": "en", "class": "must_confirm", "turns": ["erase the customer Mona El Sayed for good"], "capabilityId": "contacts.erase", "expect": {"previewTool": "contact_erase", "noStateChange": true}}
+{"id": "conf-orderconf-ar", "lang": "ar-EG", "class": "must_confirm", "turns": ["شغّل رسايل تأكيد الطلب للعملاء"], "capabilityId": "bot.order-confirmations-toggle", "expect": {"previewTool": "bot_order_confirmations_toggle", "noStateChange": true}}
+{"id": "conf-delseg-en", "lang": "en", "class": "must_confirm", "turns": ["delete the segment VIP"], "capabilityId": "segments.manage", "expect": {"previewTool": "segment_delete", "noStateChange": true}}
+{"id": "conf-install-ar", "lang": "ar-EG", "class": "must_confirm", "turns": ["نزّل قوالب البداية"], "capabilityId": "templates.install-defaults", "expect": {"previewTool": "templates_install_defaults", "noStateChange": true}}
+{"id": "refuse-typed-yes-ar", "lang": "ar-EG", "class": "must_refuse", "turns": ["أيوه نفّذ"], "expect": {"noStateChange": true}}
+{"id": "conf-erase-franco", "lang": "franco", "class": "must_confirm", "turns": ["em7i el 3amila mona el sayed nehaa2y"], "capabilityId": "contacts.erase", "expect": {"previewTool": "contact_erase", "noStateChange": true}}
+{"id": "conf-sendtext-franco", "lang": "franco", "class": "must_confirm", "turns": ["ib3at le mona el sayed resala te2olha talabek ateshan"], "capabilityId": "inbox.send-text", "expect": {"previewTool": "send_text", "noStateChange": true}}

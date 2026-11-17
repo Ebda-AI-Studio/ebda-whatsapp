@@ -19,7 +19,7 @@ const wamid = () => `wamid.menu.${++seq}.${Date.now()}`;
 
 type Sent = { kind: string; body: Record<string, any> };
 function sentOf(g: ReturnType<typeof stubGraph>, pn: string, from = 0): Sent[] {
-  return g.calls.filter((c) => c.method === 'POST' && c.url.endsWith(`/${pn}/messages`)).slice(from).map((c) => {
+  return g.calls.filter((c) => c.method === 'POST' && c.url.endsWith(`/${pn}/messages`) && c.body?.status !== 'read').slice(from).map((c) => {
     const b = c.body as Record<string, any>;
     return { kind: b.type === 'interactive' ? (b.interactive.type === 'list' ? 'list' : 'buttons') : b.type, body: b };
   });
