@@ -73,6 +73,20 @@ export type ToolContext = { host: LinkHost; from: string; bridge: StoreBridge | 
 const searchArgs = z.object({ query: z.string().trim().min(1).max(120), maxPrice: z.number().positive().max(1_000_000).optional() });
 const showArgs = z.object({ ids: z.array(z.string().trim().min(1).max(200)).min(1).max(10) });
 const statusArgs = z.object({ orderNumber: z.string().trim().regex(/^[\w-]{1,40}$/).optional() });
+/**
+ * Tolerance at the tool boundary, for every model: an optional field the model sends as null or "" is ABSENT (gpt-oss sends `orderNumber: ""` for "no number"), and a budget sent as a plain numeric string
+ * ("500", at most 7 digits) is a number. Unknown keys are ignored by the schemas; a required field that is blank, or any other bad value, is still `invalid_arguments`.
+ */
+export function tidyArgs(args: unknown, optional: readonly string[]): unknown {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return args;
+  const out: Record<string, unknown> = { ...(args as Record<string, unknown>) };
+  for (const k of optional) {
+    const v = out[k];
+    if (v === null || (typeof v === 'string' && v.trim() === '')) delete out[k];
+  }
+  if (typeof out.maxPrice === 'string' && /^\d{1,7}(\.\d{1,2})?$/.test(out.maxPrice.trim())) out.maxPrice = Number(out.maxPrice.trim());
+  return out;
+}
 const json = (v: unknown): ToolOutcome => ({ content: JSON.stringify(v).slice(0, 3000) });
 const err = (code: string): ToolOutcome => json({ error: code });
 
@@ -81,7 +95,7 @@ export async function runTool(ctx: ToolContext, call: ToolCall): Promise<ToolOut
     switch (call.name) {
       case 'search_catalog': {
         if (!ctx.availability.catalog || !ctx.bridge) return err('unavailable');
-        const args = searchArgs.safeParse(call.arguments);
+        const args = searchArgs.safeParse(tidyArgs(call.arguments, ['maxPrice']));
         if (!args.success) return err('invalid_arguments');
         return json(await searchCatalog(ctx, args.data.query, args.data.maxPrice));
       }
@@ -101,7 +115,7 @@ export async function runTool(ctx: ToolContext, call: ToolCall): Promise<ToolOut
       }
       case 'order_status': {
         if (!ctx.availability.orders || !ctx.bridge) return err('unavailable');
-        const args = statusArgs.safeParse(call.arguments ?? {});
+        const args = statusArgs.safeParse(tidyArgs(call.arguments ?? {}, ['orderNumber']));
         if (!args.success) return err('invalid_arguments');
         return json(await orderStatus(ctx, args.data.orderNumber));
       }

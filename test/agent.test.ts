@@ -97,10 +97,10 @@ describe('tools', () => {
     const ws = W(7);
     const pn = await agentWs(ws);
     const again = { tools: [{ name: 'search_catalog', arguments: { query: 'item' } }] };
-    const m = model([again, again, again, again]);
+    const m = model([again, again, again, again, again]);
     const out = await say(ws, pn, text('عايز حاجة'), stubGraph());
-    expect(m.callCount).toBe(4);
-    expect(m.calls.map((c) => c.tools.length > 0)).toEqual([true, true, true, false]);
+    expect(m.callCount).toBe(5); // 3 tool rounds, the tools-off answer (empty: it asked for a tool again), and the ONE nudge (also empty)
+    expect(m.calls.map((c) => c.tools.length > 0)).toEqual([true, true, true, false, false]);
     expect(out.map((s) => s.text)).toEqual([EBDA_AGENT_COPY.t.handoffAck.ar]);
     expect((await rows(ws, "SELECT outcome FROM agent_turns"))[0]).toEqual({ outcome: 'handoff:no_answer' });
   });

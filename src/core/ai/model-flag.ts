@@ -92,3 +92,6 @@ const LATIN_LETTER = /[A-Za-z]/g;
 export const isArabicScriptReply = (text: string): boolean => (text.match(ARABIC_LETTER)?.length ?? 0) > (text.match(LATIN_LETTER)?.length ?? 0);
 
 export const LANGUAGE_RETRY_NOTE = 'Your last reply was in Arabic, but the customer wrote in English. Write the same reply again in English only: plain text, short, no markdown. Do not call any tool.';
+
+export const EMPTY_RETRY_NOTE = 'Answer the customer now in one short reply, using the tool results above. Do not call any tool.';
+export const GUARD_RETRY_NOTE = 'Your last reply was refused: it contained an amount, a link or a promise that is not in the store data. Write it again in one short reply: no amount unless it is copied exactly from a tool result, never repeat or confirm a number the customer wrote (say "within your budget"), no link unless a tool result has it, no promise. Do not call any tool.';
