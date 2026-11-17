@@ -60,6 +60,14 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`PUT ${S}/quick-replies/:quickReplyId`]: 'person_only',
   [`DELETE ${S}/quick-replies/:quickReplyId`]: 'person_only',
 
+  [`POST ${S}/assistant/turn`]: 'person_only', // the assistant acts on the merchant's own session: never an integration token
+  [`GET ${S}/assistant/conversations/:conversationId`]: 'person_only',
+  [`POST ${S}/assistant/feedback`]: 'person_only',
+  [`POST ${S}/assistant/previews/:previewId/apply`]: 'person_only', // the merchant's own press on a preview card: never an integration token
+  [`POST ${S}/assistant/applied/:appliedId/undo`]: 'person_only',
+  [`POST ${S}/assistant/approvals/:approvalId/confirm`]: 'person_only', // the merchant's own press on a confirm card
+  [`POST ${S}/assistant/approvals/:approvalId/reject`]: 'person_only',
+
   [`GET ${S}/digest`]: 'person_only', // the merchant's own usage summary
   [`PUT ${S}/digest`]: 'person_only',
 
@@ -171,6 +179,7 @@ export function gateForRoute(method: string, pattern: string): Gate | null {
  */
 export const SESSION_CHECKED_READS: ReadonlySet<string> = new Set(['GET /stores/:storeId/contacts/:waId/export', 'GET /stores/:storeId/offboarding', 'GET /stores/:storeId/members']); // the deletion status names the balance being given up; the team list names people
 export const SESSION_UNCHECKED_READS: Readonly<Record<string, string>> = {
+  'GET /stores/:storeId/assistant/conversations/:conversationId': "the caller's own masked assistant turns (secrets and phones masked before storage): the merchant's own text; a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/digest': "the weekly usage summary: counts only, no personal data; low-risk aggregate (Ruling READ-SESSION-1: a revoked token expires within minutes)",
   'GET /stores/:storeId/me': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/conversations': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",

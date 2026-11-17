@@ -39,7 +39,7 @@ function bypassFiles(): { path: string; src: string }[] {
 
 describe('capability registry rules (lens 192)', () => {
   it('loads every seeded capability', () => {
-    expect(entries.length).toBe(178); // + wallet.yearly-refund-request (money surfaces); 177 = + operator.instapay-auto-confirm (InstaPay auto-confirm); 172 seeded + templates.shared-list, templates.shared-request, templates.shared-number-marketing, operator.shared-template-requests
+    expect(entries.length).toBe(181); // + templates.check-draft (Smart Layer template tools) + assistant.apply-changes (Smart Layer apply/undo) + operator.assistant-controls (Smart Layer assistant) + wallet.yearly-refund-request (money surfaces) + operator.instapay-auto-confirm (InstaPay auto-confirm); 172 seeded + templates.shared-list, templates.shared-request, templates.shared-number-marketing, operator.shared-template-requests
   });
   it('has no new registry violation and no stale baseline id', () => {
     expect(judge('registry', violations).failures).toEqual([]);
@@ -69,11 +69,13 @@ describe('templates self-service registry entries (plan 2 task 13)', () => {
     expect(s.readOnlyPost?.routes).toEqual(['POST /stores/:storeId/templates/sync']);
     expect(s.undo.class).toBe('none');
   });
-  it('the guard config excuses only the sync: every other templates POST still needs confirm (mutation proof)', () => {
+  it('the guard config excuses only the sync and the draft check (both send nothing): every other templates POST still needs confirm (mutation proof)', () => {
     const entry = (api: string[], readOnly?: string[]) => ({ ...(get('templates.sync') as object), api, ...(readOnly ? { readOnlyPost: { routes: readOnly, reason: 'x' } } : { readOnlyPost: undefined }) });
     const run = (api: string[], readOnly?: string[]) => checkRegistry([{ name: 'templates.sync.capability.json', json: entry(api, readOnly) }], guardConfig).violations.map((v) => v.rule);
     expect(run(['POST /stores/:storeId/templates/sync'], ['POST /stores/:storeId/templates/sync'])).toEqual([]);
-    expect(run(['POST /stores/:storeId/templates/check'], ['POST /stores/:storeId/templates/check'])).toContain('policy-must-confirm');
+    // Ruling CHAT-SL-D1-1: the draft check runs Meta's rules on our side (no Meta call, no store), so it is free like the sync; it must still DECLARE itself read-only.
+    expect(run(['POST /stores/:storeId/templates/check'], ['POST /stores/:storeId/templates/check'])).toEqual([]);
+    expect(run(['POST /stores/:storeId/templates/check'])).toContain('policy-free-writes');
     expect(run(['POST /stores/:storeId/templates'], ['POST /stores/:storeId/templates'])).toContain('policy-must-confirm');
     expect(run(['POST /stores/:storeId/templates/sync', 'POST /stores/:storeId/templates'], ['POST /stores/:storeId/templates/sync'])).toEqual(expect.arrayContaining(['policy-free-writes', 'policy-must-confirm']));
     expect(run(['POST /stores/:storeId/templates/sync', 'DELETE /stores/:storeId/templates/:name/:language'], ['POST /stores/:storeId/templates/sync'])).toContain('policy-free-writes');

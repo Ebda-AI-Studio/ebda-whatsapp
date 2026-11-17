@@ -3,6 +3,7 @@ import type { Env } from '../env';
 import { DEFAULT_CHUNK_ROWS, exportTable, highWaterMarks } from './backup-export';
 import { BACKUP_HOUR_LOCAL, BACKUP_ORDER, BACKUP_TABLES, BACKUP_TIME_ZONE, backupManifestSchema, backupPrefix, nextLocalHour, sha256Hex, signManifest, toNdjson, verifyManifestSignature, type BackupManifest } from './backup';
 import { DO_MIGRATIONS, migrate } from './do-migrations';
+import { SL_OPS, doStorageOps, type SlOp } from './smart-layer/storage-do';
 import type { SendResult } from './meta/client';
 import type { CoexMessage, InboundMessage, StatusEvent, StatusPricing, SyncedContact } from './meta/webhook-schema';
 import type { SendJob } from './send-queue';
@@ -17,7 +18,8 @@ import { exportContact, mergeContacts, renameContact } from './contact-data';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptOutMessage, matchOptIn } from './consent';
-import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, debtHold, storeHold, suspensionState, type SuspensionState, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { syncSuspendedMirror } from './ops/suspension-mirror';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
 import { writeSessionState } from './identity/session';
 import { DAILY_KINDS, addTask, dailyHour, retryDelayMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
@@ -50,9 +52,11 @@ import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importStat
 import type { DigestDto, AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
 import { funnelOnce } from './funnel';
 import { digestCounts, digestEnabled, setDigestEnabled } from './digest';
-import { lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, grantCredits, lastGrantStart, postCredit, revokeGrantExcess, upgradeGrant, type CreditKind, type Posted } from './ai/credits';
+import { holdCredits, lowCreditsThreshold, monthlyAllowance, creditBalance, creditsAvailable, expireGrant, expireGrantFraction, expirePackUnused, grantCredits, lastGrantStart, postCredit, releaseHold, revokeGrantExcess, settleHold, upgradeGrant, type CreditKind, type HoldResult, type Posted } from './ai/credits';
 import { staffReplied } from './ai/handoff';
 import { abandonVoiceTurn } from './ai/agent';
+import { dropProfile } from './ai/context';
+import { DIGEST_HOUR_LOCAL, ensureDigestTask, prepareOwnerNotice, runHandoffDigest } from './ai/handoff-notify';
 import { knowledgeReady, nextKbVersion, prepareChunks, runCatalogEmbed, runKbIndex, scheduleCatalogEmbed, stageFaq } from './ai/knowledge';
 import { hasApiKey, planAgentUpdate, readAgentSettings, writeAgentSettings, type AgentSettingsUpdate, type SettingsRefusal } from './ai/settings';
 import { OTP_RATE_WINDOW_MS } from './otp-policy';
@@ -758,13 +762,13 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** running | scheduled -> paused for one reason, on one number (or every number when null). The merchant resumes them; nothing here ever does. */
-  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused', now = Date.now()): Promise<number> {
+  async pauseCampaignsOn(phoneNumberId: string | null, reason: 'quality_flagged' | 'operator_paused' | 'store_suspended' | 'wallet_empty', now = Date.now(), park = false): Promise<number> {
     const ids = this.sql
       .exec<{ id: string }>(`SELECT id FROM campaigns WHERE status IN ('running', 'scheduled') ${phoneNumberId === null ? '' : 'AND phone_number_id = ?'}`, ...(phoneNumberId === null ? [] : [phoneNumberId]))
       .toArray();
     let n = 0;
     for (const { id } of ids) {
-      const r = await pauseCampaign(this.host(), id, reason, now);
+      const r = await pauseCampaign(this.host(), id, reason, now, park);
       if (r.ok) { n++; await endInstance(this.host(), id, this.campaignAttempt(id)); }
     }
     return n;
@@ -776,8 +780,18 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { paused: suspended ? await this.pauseCampaignsOn(null, 'operator_paused', now) : 0 };
   }
 
+  /** Every reason this workspace may not spend (operator, Store, wallet debt): what D1's `suspended_*` is derived from (`syncSuspendedMirror`). */
+  async suspensionState(): Promise<SuspensionState> {
+    return suspensionState(this.sql);
+  }
+
   async suspended(): Promise<boolean> {
     return isSuspended(this.sql);
+  }
+
+  /** The Store hold's reason (STORE-STANDING-1), or null: the operator unsuspend keeps D1 in step with it. */
+  async storeHold(): Promise<string | null> {
+    return storeHold(this.sql);
   }
 
   async throttleReport(phoneNumberId: string, now = Date.now()): Promise<ThrottleReport> {
@@ -1269,7 +1283,11 @@ export class WorkspaceDO extends DurableObject<Env> {
   async applyStoreEvent(event: StoreEvent, opts: { phoneNumberId: string | null; shared?: boolean }): Promise<StoreEventOutcome> {
     await this.ensurePricing();
     if (opts.phoneNumberId) await this.repullIfUnknown(opts.phoneNumberId, Date.now());
-    return applyStoreEvent(this.host(), event, opts);
+    const result = await applyStoreEvent(this.host(), event, opts);
+    // STORE-STANDING-1: a Store suspension or deletion also pauses every running / scheduled campaign (nothing resumes them on reactivation:
+    // the merchant resumes, as after an operator suspension). The hold flag itself already stops every send at its claim.
+    if (result.status === 'applied' && (event.type === 'store.suspended' || event.type === 'store.deleted')) await this.pauseCampaignsOn(null, 'store_suspended');
+    return result;
   }
 
   /**
@@ -1625,6 +1643,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       writeAgentSettings(this.sql, plan.settings, plan.secret);
       if (faqChanged) stageFaq(this.host(), chunks, Date.now());
       if (plan.settings.enabled && !before.enabled) scheduleCatalogEmbed(this.host(), Date.now(), 0);
+      if (plan.settings.notifyPhone) ensureDigestTask(this.host(), Date.now());
     });
     await this.arm();
     return { ok: true, settings: this.agentDto() };
@@ -1685,6 +1704,10 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** A partial refund of a package: `num/den` of the period's unused granted credits expire under `ref` (idempotent). */
   async expireAiCreditsFraction(a: { periodStart: number; num: number; den: number; ref: string }, now = Date.now()): Promise<{ expired: number }> {
     return { expired: this.ctx.storage.transactionSync(() => expireGrantFraction(this.sql, { ...a, now })) };
+  }
+  /** WA-PACK-REFUND-1: expires the unused part of a refunded credit pack (see expirePackUnused). Idempotent under `ref`. */
+  async expireRefundedPack(a: { credits: number; num: number; den: number; ref: string; orderId: string }, now = Date.now()): Promise<{ expired: number; spent: number; duplicate?: true }> {
+    return this.ctx.storage.transactionSync(() => expirePackUnused(this.sql, { ...a, now }));
   }
   /** A purchase, refund or operator adjustment: the ref makes it idempotent; an operator adjustment needs an actor and a reason. */
   async postAiCredits(a: { kind: Extract<CreditKind, 'purchase' | 'refund' | 'adjustment'>; amount: number; ref: string; actor?: string; note?: string }, now = Date.now()): Promise<Posted | { ok: false; reason: 'actor_and_note_required' }> {
@@ -2417,6 +2440,12 @@ export class WorkspaceDO extends DurableObject<Env> {
         const r = await this.retentionPurge(now);
         return r.more ? now + 60_000 : nextLocalHour(now + 3_600_000, dailyHour('retention_purge'), BACKUP_TIME_ZONE);
       }
+      case 'handoff_digest': {
+        const pn = (await this.env.DB.prepare("SELECT phone_number_id FROM phone_numbers WHERE workspace_id = ? AND status = 'active' ORDER BY phone_number_id LIMIT 1").bind(this.workspaceId).first<{ phone_number_id: string }>())?.phone_number_id ?? null;
+        await prepareOwnerNotice(this.host());
+        runHandoffDigest(this.host(), pn, now);
+        return readAgentSettings(this.sql).notifyPhone ? nextLocalHour(now + 3_600_000, DIGEST_HOUR_LOCAL, BACKUP_TIME_ZONE) : undefined; // asked for only while an owner number is set
+      }
       case 'template_refresh': {
         // No polling while nothing is waiting: the task is armed by a submission and ends when no template is PENDING any more.
         const number = await this.env.DB.prepare("SELECT waba_id FROM phone_numbers WHERE workspace_id = ? AND status = 'active' ORDER BY rowid LIMIT 1").bind(this.workspaceId).first<{ waba_id: string }>();
@@ -2510,6 +2539,11 @@ export class WorkspaceDO extends DurableObject<Env> {
         return sweepCampaigns(this.host(), now);
       case 'wallet_sweep':
         return this.ctx.storage.transactionSync(() => this.billing.sweep(now)) ?? undefined;
+      case 'wallet_debt_sync':
+        // WA-DEBT-1: a debt hold pauses running / scheduled campaigns (reason wallet_empty, queued pages parked, nothing resumes them) and D1 is derived from the flags.
+        if (debtHold(this.sql)) await this.pauseCampaignsOn(null, 'wallet_empty', now, true);
+        await syncSuspendedMirror(this.env.DB, this.workspaceId, suspensionState(this.sql), now);
+        return undefined;
       case 'ledger_drain': {
         const r = await drainOutbox(this.env, this.sql, this.workspaceId, now);
         return r.remaining > 0 ? now + 5_000 : undefined;
@@ -2657,9 +2691,10 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   async eraseContact(waId: string): Promise<EraseResult> {
     const found = this.ctx.storage.transactionSync(() => {
-      const contact = this.sql.exec<{ id: number; buyer_key: string | null }>('SELECT id, buyer_key FROM contacts WHERE wa_id = ?', waId).toArray()[0];
+      const contact = this.sql.exec<{ id: number; buyer_key: string | null; profile_name: string | null }>('SELECT id, buyer_key, profile_name FROM contacts WHERE wa_id = ?', waId).toArray()[0];
       if (!contact) return { found: false, keys: 0, messages: 0, statusEvents: 0 };
       forgetBuyer(this.host(), contact.buyer_key);
+      dropProfile(this.host(), waId); // the agent's in-memory copy of the customer's Store profile (name, address) goes with the contact
       const conv = this.sql.exec<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ?', contact.id).toArray()[0];
       const msgs = conv
         ? this.sql.exec<{ wamid: string | null; body_r2_key: string | null; media_r2_key: string | null; idempotency_key: string | null; direction: string }>('SELECT wamid, body_r2_key, media_r2_key, idempotency_key, direction FROM messages WHERE conversation_id = ?', conv.id).toArray()
@@ -2693,6 +2728,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       this.sql.exec("DELETE FROM scheduled_tasks WHERE kind = 'bot_turn' AND json_extract(payload, '$.from') = ?", waId);
       deleteTargets(this.sql, { waId, contactId: contact.id, convId: conv?.id ?? null });
       this.sql.exec('DELETE FROM contacts_fts WHERE rowid = ?', contact.id);
+      // The assistant's masked journal may carry this person's name (a customer list it read for the merchant): those rows go with them.
+      doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f)).eraseMentions([contact.profile_name ?? '', waId]);
       return { found: true, keys, messages: msgs.length, statusEvents };
     });
     // After the delete (a turn recording a step checks the message still exists, so nothing new can land): their unrolled analytics markers go too.
@@ -2737,6 +2774,34 @@ export class WorkspaceDO extends DurableObject<Env> {
     return { vectors };
   }
 
+  /** The assistant's journal (SL-CHAT-1). One RPC for the whole SmartLayerStorage; every op runs synchronously here, so each compare-and-set is atomic. */
+  async smartLayer(op: SlOp, args: unknown[]): Promise<unknown> {
+    if (!SL_OPS.includes(op)) throw new Error('unknown smart layer op');
+    const ops = doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f));
+    return (ops[op] as (...a: unknown[]) => unknown)(...args);
+  }
+
+  /** This workspace's assistant mode (the per-store rollout flag, default off). Set only by an operator (`setAssistantMode`); a merchant can never raise it. */
+  async assistantMode(): Promise<'off' | 'answer-only' | 'suggest' | 'act'> {
+    const v = this.sql.exec<{ value: string }>("SELECT value FROM agent_state WHERE key = 'assistant.mode'").toArray()[0]?.value;
+    return v === 'answer-only' || v === 'suggest' || v === 'act' ? v : 'off';
+  }
+
+  async setAssistantMode(mode: 'off' | 'answer-only' | 'suggest' | 'act'): Promise<void> {
+    this.ctx.storage.transactionSync(() => this.sql.exec("INSERT INTO agent_state (key, value) VALUES ('assistant.mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", mode));
+  }
+
+  /** Heavy assistant jobs spend AI credits: hold first (the cost was shown), settle on success, release on failure. Same ledger as the agent, note `assistant`. */
+  async assistantHold(ref: string, credits: number, now = Date.now()): Promise<HoldResult> {
+    return this.ctx.storage.transactionSync(() => holdCredits(this.sql, ref, now, credits));
+  }
+  async assistantSettle(ref: string, now = Date.now()): Promise<'charged' | 'refused' | 'noop'> {
+    return this.ctx.storage.transactionSync(() => settleHold(this.sql, ref, now, this.workspaceId, 'assistant'));
+  }
+  async assistantRelease(ref: string, now = Date.now()): Promise<void> {
+    this.ctx.storage.transactionSync(() => releaseHold(this.sql, ref, now));
+  }
+
   // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------
 
   async getRetention() {
@@ -2760,6 +2825,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       if (n < (opts.batch ?? RETENTION_BATCH)) break;
     }
     this.ctx.storage.transactionSync(() => purgeOldEvents(this.sql, cutoff)); // the realtime log is capped by age too, not only by count
+    this.ctx.storage.transactionSync(() => doStorageOps(this.sql, (f) => this.ctx.storage.transactionSync(f)).purgeBefore(now - 90 * 86_400_000)); // the assistant's journal keeps 90 days (spec 6.9)
     if (deleted > 0) {
       const owed = await this.drainR2Deletes();
       if (owed > 0) await this.schedule('r2_drain', now + 3_600_000);

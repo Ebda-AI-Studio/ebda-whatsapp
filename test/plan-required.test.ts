@@ -320,6 +320,7 @@ describe('route walk: every non-GET store route is decided (sends and number set
   // Decided: cannot send a WhatsApp message or set a number up, or are gated by the campaigns feature (plan_feature, see package-feature-gates-campaigns-ordering).
   const NOT_SENDING = new Set([
     'PUT /stores/:storeId/members/:userId/seat', 'DELETE /stores/:storeId/members/:userId/seat', // WA-SEATS-1: the owner's seat choices; no message, no spend
+    'POST /stores/:storeId/assistant/turn', 'POST /stores/:storeId/assistant/feedback', 'POST /stores/:storeId/assistant/previews/:previewId/apply', 'POST /stores/:storeId/assistant/applied/:appliedId/undo', 'POST /stores/:storeId/assistant/approvals/:approvalId/confirm', 'POST /stores/:storeId/assistant/approvals/:approvalId/reject', // apply/undo run the merchant's own routes with their own plan gates, so a package check here would double-gate; the assistant answers and reads in phase A (it sends nothing and spends only the free cap); it must work for a workspace that is still choosing a package
     'PUT /stores/:storeId/agent', 'DELETE /stores/:storeId/contacts/:waId', 'DELETE /stores/:storeId/campaigns/:campaignId',
     'POST /stores/:storeId/campaigns', 'POST /stores/:storeId/campaigns/:campaignId/send', 'POST /stores/:storeId/campaigns/:campaignId/resume',
     'POST /stores/:storeId/campaigns/:campaignId/pause', 'POST /stores/:storeId/campaigns/:campaignId/cancel',
