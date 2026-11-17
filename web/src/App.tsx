@@ -24,6 +24,9 @@ import { STRINGS, type Lang } from './i18n';
 
 import { formatMoney } from './lib/format';
 import { useTypeahead } from './lib/useTypeahead';
+import { useRoute } from './lib/route';
+import { EmptyState } from './components/EmptyState';
+import { SearchX } from 'lucide-react';
 
 type Props = { source: InboxSource; now?: () => number; initialLang?: Lang; /** The screen to open on (the address bar's screen once real routes land). */ initialView?: View };
 
@@ -61,7 +64,11 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [assistantOn]);
-  const [view, setView] = useState<View>(initialView);
+  // The address bar is the source of truth for the screen (and the open chat): refresh, deep links and back/forward all land here.
+  const { route, go } = useRoute();
+  const notFound = route.kind === 'notfound';
+  const view: View = route.kind === 'view' ? route.view : 'inbox';
+  const setView = useCallback((v: View) => go(v), [go]);
   const t = STRINGS[lang];
   const [filter, setFilter] = useState<ConversationFilter>('all');
   const [reloadTick, setReloadTick] = useState(0);
@@ -85,8 +92,9 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
   useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-    document.title = `${lang === 'ar' && BRAND.productNameAr ? BRAND.productNameAr : BRAND.productName} ·${lang === 'ar' ? 'المحادثات' : 'Inbox'}`;
-  }, [lang]);
+    const screen = notFound ? t.nfTitle : { inbox: t.inbox, campaigns: t.campaigns, templates: t.tplNav, contacts: t.contacts, agent: t.agent, bot: t.botNav, numbers: t.numbersNav, wallet: t.walletNav, team: t.teamNav, operator: t.opNav }[view];
+    document.title = `${lang === 'ar' && BRAND.productNameAr ? BRAND.productNameAr : BRAND.productName} · ${screen}`;
+  }, [lang, t, view, notFound]);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -160,22 +168,38 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
 
   const open = useCallback(async (id: number) => {
     setSelectedId(id);
-    setOrders(null);
-    setOrdersFailed(false);
+    go('inbox', id);
     setMessages([]);
-    const conv = shown.find((c) => c.id === id) ?? items.find((c) => c.id === id);
     // Messages, read receipt and orders load in parallel: nothing waits on anything else.
     [...pending.current.keys()].forEach((k) => flushRef.current(k)); // a decision on the previous chat is sent, never lost
     // Messages, read receipt and orders load in parallel and independently: one failing never blanks the others.
     void source.markRead(id).catch(() => undefined);
-    if (conv) void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrdersFailed(true));
     try {
       setMessages([...(await source.getMessages(id))]);
     } catch {
       setError(true);
     }
     void refresh();
-  }, [source, refresh, shown, items]);
+  }, [source, refresh, go]);
+
+  // The orders rail follows the open chat (a deep link opens a chat before the list has arrived, so this waits for the conversation).
+  const selectedWaId = selected?.contact.waId;
+  useEffect(() => {
+    if (!selectedWaId) return;
+    let live = true;
+    setOrders(null);
+    setOrdersFailed(false);
+    void source.orders(selectedWaId).then((o) => { if (live) setOrders(o.items); }, () => { if (live) setOrdersFailed(true); });
+    return () => { live = false; };
+  }, [source, selectedId, selectedWaId]);
+
+  // Back/forward and a fresh load: the address names the open chat (or none).
+  const wantedChat = route.kind === 'view' && route.view === 'inbox' ? route.chatId : selectedId; // on another screen the open chat is kept, as before
+  useEffect(() => {
+    if (wantedChat === selectedId) return;
+    if (wantedChat === null) setSelectedId(null); else void open(wantedChat);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only an address change should (re)open a chat
+  }, [wantedChat]);
 
   useEffect(() => source.onReload?.(() => {
     void refresh();
@@ -282,10 +306,11 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
   };
 
   return (
-    <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
+    <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' || notFound ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
       {source.viewAs && <p className="view-as-banner" role="status" aria-label={t.viewAsBanner}>{t.viewAsBanner}</p>}
       <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} store={source} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, integrations: canIntegrations, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
-      {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
+      {notFound ? <main className="screen"><EmptyState icon={<SearchX size={28} />} title={t.nfTitle} body={t.nfBody} /><p><button type="button" className="btn" onClick={() => go('inbox')}>{t.nfBack}</button></p></main>
+        : view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'integrations' && source.connectors ? (canIntegrations ? <IntegrationsScreen t={t} lang={lang} source={source} readOnly={source.role !== 'owner'} /> : <p className="view-denied" role="alert">{t.notAllowed}</p>)
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
         : view === 'templates' && source.templatesApi ? <TemplatesScreen t={t} lang={lang} source={source} api={source.templatesApi} onNavigate={setView} />
@@ -301,7 +326,7 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
         {!online && <p className="notice offline" role="status">{t.offline}</p>}
         {error && items.length > 0 && <p className="notice offline" role="alert">{t.loadError} <button type="button" className="btn ghost" onClick={() => void refresh()}>{t.retry}</button></p>}
         {templatesFailed && <p className="notice offline" role="alert">{t.dataLoadError} <button type="button" className="btn ghost" onClick={loadTemplates}>{t.retry}</button></p>}
-        <ChatPane t={t} lang={lang} now={now()} conversation={selected} source={source} userNames={source.userNames} currentOrder={orders?.[0] ?? null} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onSendMedia={sendMedia} onRetry={retry} onBack={() => setSelectedId(null)} onShowOrders={() => setOrdersOpen(true)} onTakeOver={source.assign ? () => void takeOver() : undefined} />
+        <ChatPane t={t} lang={lang} now={now()} conversation={selected} source={source} userNames={source.userNames} currentOrder={orders?.[0] ?? null} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onSendMedia={sendMedia} onRetry={retry} onBack={() => go('inbox')} onShowOrders={() => setOrdersOpen(true)} onTakeOver={source.assign ? () => void takeOver() : undefined} />
       </div>
       <OrderPane key={selectedId ?? 'none'} t={t} lang={lang} orders={selected ? orders : null} failed={ordersFailed} onRetry={() => { const conv = shown.find((c) => c.id === selectedId) ?? items.find((c) => c.id === selectedId); if (!conv) return; setOrdersFailed(false); void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrdersFailed(true)); }} hasChat={!!selected} canDecide={source.capabilities.codOutcome} onConfirm={(o) => recordOutcome(o, 'confirmed')} onRefuse={(o) => recordOutcome(o, 'refused')} onClose={() => setOrdersOpen(false)} />
         </>

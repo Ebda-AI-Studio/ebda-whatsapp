@@ -102,6 +102,9 @@ function useList<T>(load: () => Promise<T[]>): { items: T[] | null; error: boole
   return { items, error, reload };
 }
 
+/** "From <date>" for an effective-dated version; a version with no start (the launch seed row stores 0) reads "From the start", never 1 January 1970. */
+const fromLabel = (t: Strings, lang: Lang, at: number | null | undefined) => (typeof at === 'number' && Number.isFinite(at) && at > 0 ? t.opFrom(dateTime(at, lang)) : t.opFromStart);
+
 const pct = (bps: number, lang: Lang) => num(bps / 100, lang);
 
 // ---- Pricing settings ------------------------------------------------------------------------------------------------------
@@ -138,7 +141,7 @@ function PricingPanel({ t, lang, api, now, run, fail }: PanelProps) {
     <ul className="wallet-rows">
       {xs.map((s) => (
         <li key={s.ver}>
-          <span className="wallet-row-main"><b>{t.opVersion(num(s.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(s.effectiveFrom, lang))} • {t.opBy(s.actor)}</span>
+          <span className="wallet-row-main"><b>{t.opVersion(num(s.ver, lang))}</b> <span className="muted">• {fromLabel(t, lang, s.effectiveFrom)} • {t.opBy(s.actor)}</span>
             <span className="op-line">{line(s)}</span><span className="muted op-line" dir="auto">{s.actor === 'system' ? t.opSystemDefault : s.reason}</span></span>
         </li>
       ))}
@@ -202,7 +205,7 @@ function RatesPanel({ t, lang, api, now, run, fail }: PanelProps) {
         {cards.error && <p className="error-text">{t.opLoadError}</p>}
         <ul className="wallet-rows">
           {cards.items?.map((c) => (
-            <li key={c.ver}><span className="wallet-row-main"><b>{t.opVersion(num(c.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(c.effectiveFrom, lang))} • {t.opRatesRows(num(c.rows, lang))} • {t.opBy(c.actor)}</span></span></li>
+            <li key={c.ver}><span className="wallet-row-main"><b>{t.opVersion(num(c.ver, lang))}</b> <span className="muted">• {fromLabel(t, lang, c.effectiveFrom)} • {t.opRatesRows(num(c.rows, lang))} • {t.opBy(c.actor)}</span></span></li>
           ))}
         </ul>
         <p className="muted">{t.opNeverRetro}</p>
@@ -221,7 +224,7 @@ function RatesPanel({ t, lang, api, now, run, fail }: PanelProps) {
         {fxs.error && <p className="error-text">{t.opLoadError}</p>}
         <ul className="wallet-rows">
           {fxs.items?.map((x) => (
-            <li key={x.ver}><span className="wallet-row-main"><b>{t.opVersion(num(x.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(x.effectiveFrom, lang))} • {t.opBy(x.actor)}</span>
+            <li key={x.ver}><span className="wallet-row-main"><b>{t.opVersion(num(x.ver, lang))}</b> <span className="muted">• {fromLabel(t, lang, x.effectiveFrom)} • {t.opBy(x.actor)}</span>
               <span className="op-line">{t.opFxLine(num(x.egpPerUsdMicros / 1_000_000, lang), pct(x.bufferBps, lang))}</span></span></li>
           ))}
         </ul>
@@ -292,7 +295,7 @@ function AccountPanel({ t, lang, api, now, run, fail }: PanelProps) {
         {loaded && (loaded.items.length === 0 ? <p className="muted">{t.opOverrideNone}</p> : (
           <ul className="wallet-rows">
             {loaded.items.map((o) => (
-              <li key={o.ver}><span className="wallet-row-main"><b>{t.opVersion(num(o.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(o.effectiveFrom, lang))} • {t.opBy(o.actor)}</span>
+              <li key={o.ver}><span className="wallet-row-main"><b>{t.opVersion(num(o.ver, lang))}</b> <span className="muted">• {fromLabel(t, lang, o.effectiveFrom)} • {t.opBy(o.actor)}</span>
                 <span className="op-line">{t.opMargin} {pct(o.marginBps, lang)}</span><span className="muted op-line" dir="auto">{o.reason}</span></span></li>
             ))}
           </ul>

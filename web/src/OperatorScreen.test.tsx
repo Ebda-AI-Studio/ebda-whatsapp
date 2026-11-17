@@ -339,3 +339,15 @@ describe('Meta data-deletion requests in the console (B9)', () => {
     expect(screen.getByText(t.opDeletionState.done)).toBeTruthy();
   });
 });
+
+describe('operator: a pricing version with no start date', () => {
+  it('the launch seed row (effective-from 0) reads "from the start", never 1970', async () => {
+    const source = createSampleSource();
+    const api = source.operator!;
+    const real = api.pricingSettings;
+    api.pricingSettings = async () => [...(await real()), { ver: 1, effectiveFrom: 0, marginBps: 0, creditLimitMinor: 5000, fxBufferBps: 0, vatBps: 0, actor: 'system', reason: 'launch', createdAt: 0 } as never];
+    await openOperator(source);
+    expect(await screen.findAllByText(new RegExp(t.opFromStart))).not.toHaveLength(0);
+    expect(document.body.textContent).not.toMatch(/1970|يناير، 2:00 ص/);
+  });
+});
