@@ -163,6 +163,23 @@ describe('wave 2 tools', () => {
     expect(((await t.get('/segments')) as { items: Array<{ name: string }> }).items.map((s) => s.name)).toEqual(['VIP']);
   });
 
+  it('segment: Undo of a delete REFUSES when a segment with the same name was made since (nothing is overwritten) and says why', async () => {
+    const t = await setup(7414);
+    const first = await t.ask('اعمل شريحة VIP', { name: 'segment_upsert', args: { name: 'VIP', criteria: { everyone: true } } });
+    await t.apply(first.previews[0]!.previewId);
+    const del = await t.ask('امسح شريحة VIP', { name: 'segment_delete', args: { segment: 'VIP' } });
+    const done = (await (await t.confirm(del.approvals![0]!.approvalId, del.approvals![0]!.token)).json()) as { status: string; appliedId: string };
+    expect(done.status).toBe('applied');
+    // the merchant (or the assistant) makes a new "VIP" with a different filter before pressing Undo
+    const made = await t.ask('اعمل شريحة VIP', { name: 'segment_upsert', args: { name: 'VIP', criteria: { tags: { any: ['vip'] } } } });
+    await t.apply(made.previews[0]!.previewId);
+    const undo = (await (await t.undo(done.appliedId)).json()) as { status: string; reason?: string };
+    expect(undo).toEqual({ status: 'refused', reason: 'name_taken' });
+    const list = ((await t.get('/segments')) as { items: Array<{ name: string; criteria: unknown }> }).items;
+    expect(list).toHaveLength(1);
+    expect(list[0]!.criteria).toEqual({ tags: { any: ['vip'] } }); // the newer segment is untouched
+  });
+
   it('contact_erase and contact_merge keep phone numbers out of the stored draft', async () => {
     const t = await setup(7413, 'owner', ['منى السيد', 'سارة علي']);
     const m = await t.ask('ادمج سارة علي في منى السيد', { name: 'contact_merge', args: { from: 'سارة علي', into: 'منى السيد' } });

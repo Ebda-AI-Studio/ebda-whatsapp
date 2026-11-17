@@ -616,6 +616,11 @@ export const DO_MIGRATIONS: readonly string[] = [
      created_at INTEGER NOT NULL
    );
    CREATE UNIQUE INDEX quick_replies_text ON quick_replies (text);`,
+  // v47 (inbox tools follow-up): conversation tags are lower-cased at write time since A27, so older mixed-case rows ('VIP' next to 'vip') are folded once. The lower-case twin is
+  // inserted first with OR IGNORE (the primary key merges a duplicate into the row that is already there, and the conversation link is kept), then the mixed-case originals go.
+  // The table has no per-row attribution to keep. SQLite lower() folds ASCII only, which is all a Latin-script tag has to fold (Arabic has no case).
+  `INSERT OR IGNORE INTO conversation_tags (conversation_id, tag) SELECT conversation_id, lower(trim(tag)) FROM conversation_tags WHERE tag <> lower(trim(tag)) AND lower(trim(tag)) <> '';
+   DELETE FROM conversation_tags WHERE tag <> lower(trim(tag));`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

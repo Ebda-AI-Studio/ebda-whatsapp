@@ -21,6 +21,17 @@ export type Req = { method: CallInit['method']; path: string; body?: unknown };
 export type Reader = { get(path: string, query?: Record<string, string>): Promise<unknown>; ask(path: string, body: unknown): Promise<unknown> };
 
 /** A request the model's words cannot be turned into a change from: no match, several matches, or nothing to change. The engine shows the model a generic failure. */
+/**
+ * An undo the product refuses on purpose (nothing is written): the inverse's preview throws this and the engine answers the merchant with `refused` and this code, not a generic
+ * failure. Foundation duck-types the `refusal` field, so it never imports from src.
+ */
+export class ToolRefusal extends Error {
+  constructor(readonly refusal: 'name_taken') {
+    super(refusal);
+    this.name = 'ToolRefusal';
+  }
+}
+
 export class ToolInputError extends Error {
   constructor(readonly code: 'not_found' | 'ambiguous' | 'no_change' | 'unavailable' | 'invalid') {
     super(code);

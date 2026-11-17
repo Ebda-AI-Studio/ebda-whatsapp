@@ -2,11 +2,12 @@
 import { z } from 'zod';
 import { segmentCriteria, type SegmentDto } from '../../api/contract';
 import type { ToolSpec } from '../../../../foundation/smart-layer/types';
-import { ToolInputError, pickByName, row, writeTool, type Kit } from './write';
+import { ToolInputError, ToolRefusal, pickByName, row, writeTool, type Kit } from './write';
 
 const args = z.object({
   name: z.string().trim().min(1).max(60).describe('the segment name: an existing one is changed, a new one is created'),
   criteria: segmentCriteria.describe('who is in it: tags, last-message dates, has ordered, or everyone'),
+  restoring: z.literal(true).optional().describe('set only by Undo of a delete: refuses when a segment with this name exists now, instead of changing it'),
 }).strict();
 
 const deleteArgs = z.object({ segment: z.string().trim().min(1).max(60).describe('the segment name') }).strict();
@@ -26,7 +27,7 @@ export function segmentTools(kit: Kit): ToolSpec[] {
         summary: { ar: `مسح شريحة "${s.name}"`, en: `Delete the segment "${s.name}"` },
         rows: [row('الشريحة', 'Segment', s.name, undefined), row('الفلتر', 'Filter', JSON.stringify(s.criteria), undefined)],
         request: { method: 'DELETE', path: `/segments/${s.id}` },
-        restore: { tool: 'segment_upsert', args: { name: s.name, criteria: s.criteria } },
+        restore: { tool: 'segment_upsert', args: { name: s.name, criteria: s.criteria, restoring: true } },
       }),
     }, kit),
     writeTool({
@@ -40,6 +41,8 @@ export function segmentTools(kit: Kit): ToolSpec[] {
         return { id: have?.id ?? null, criteria: have?.criteria ?? null, audience };
       },
       plan: (a, s) => {
+        // Undo of a delete must put the segment BACK, never write over one made since (same name, any filter): it refuses and says why.
+        if (a.restoring && s.id !== null) throw new ToolRefusal('name_taken');
         if (s.id !== null && JSON.stringify(s.criteria) === JSON.stringify(a.criteria)) throw new ToolInputError('no_change');
         const who = (c: unknown) => (c === null ? '-' : JSON.stringify(c));
         return {

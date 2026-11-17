@@ -5,8 +5,11 @@ import { destructiveStatements } from './helpers/additive';
 
 // Rollback safety (W1-DEPLOY, audit M-098): migrations are forward-only, so a Worker rolled back to the previous version runs against the NEWER schema.
 // That is only safe if every migration is ADDITIVE: the old code never finds a table, column or index it relies on gone or renamed.
-// A genuinely destructive step needs an entry in ALLOWED below with a reason (and a human decision); today there are none.
-const ALLOWED: { where: string; reason: string }[] = [];
+// A genuinely destructive step needs an entry in ALLOWED below with a reason (and a human decision).
+const ALLOWED: { where: string; reason: string }[] = [
+  // Asked for by the controller with the A27 follow-up (wa#92 review): the fold needs the mixed-case twin deleted once its lower-case copy exists. A Worker rolled back across it reads lower-case tags, which it already writes.
+  { where: 'DO v47: DELETE FROM conversation_tags WHERE tag <> lower(trim(tag))', reason: 'folds mixed-case conversation tags into their lower-case twin; no conversation link is lost (the INSERT OR IGNORE before it keeps it)' },
+];
 
 it('the checker flags what rollback cannot survive and passes what it can (fixtures)', () => {
   for (const bad of [
