@@ -315,7 +315,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
         const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
         if (wasCodReply) linkWork = true;
-        else if ((ordering || agent || front) && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image' || (agent && (m.type === 'audio' || m.type === 'video' || m.type === 'document')))) {
+        else if ((ordering || agent || front) && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image' || (agent && (m.type === 'audio' || m.type === 'video' || m.type === 'document')) || ((ordering || agent) && m.type === 'location' && !!m.location))) {
           addTask(this.sql, 'bot_turn', now, botInputFrom(m, inserted.id, batch.phoneNumberId));
           linkWork = true;
         }

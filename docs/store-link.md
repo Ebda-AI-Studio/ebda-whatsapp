@@ -121,3 +121,6 @@ v13 `processed_events`, `entity_versions`, `store_state`, `contacts.buyer_key`, 
 
 ## Not done / needs the other side
 The Store's real RPC and queues; `PUBLIC_BASE_URL`/`PROOF_URL_SECRET` values; wallet checks (done in Phase 7, `docs/billing.md`). The AI agent and its handoff words are in `docs/ai-agent.md`.
+
+## Store-side ask: delivery coordinates (optional)
+Chat accepts a WhatsApp location pin as the delivery address, but `newAddress` in bridge v1 (`{label?, area, street}`) has no coordinates field, so only the pin's own name/address text reaches the Store; the coordinates stay in Chat's bot session and are dropped when the order is placed. If the Store wants them for couriers, add an optional `location: { latitude, longitude }` (numbers, -90..90 / -180..180) to `newAddress` and the order `address`; Chat will then send it (a contract change on both sides first, with the vendored vector).

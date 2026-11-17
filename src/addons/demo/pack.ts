@@ -28,6 +28,7 @@ const agentCopy: AgentCopy = {
     handoffAck: { ar: 'تمام، بحولك لأحد من الفريق، وبيرد عليك بأقرب وقت 🙏', en: 'Sure, I am passing you to a member of the team. They will reply shortly 🙏' },
     voiceDeclined: { ar: 'الرسالة الصوتية طويلة. ممكن تكتب سؤالك؟', en: 'That voice note is too long. Could you type your question?' },
     voiceFailed: { ar: 'لم أتمكن من سماع الرسالة الصوتية. ممكن تكتب سؤالك؟', en: 'I could not make out that voice note. Could you type your question?' },
+    locationNote: { ar: 'وصلتني اللوكيشن. عايز إيه؟ اكتب «طلب جديد» للطلب.', en: 'I got your location. What do you need? Write "new order" to order.' },
     textOnly: { ar: 'أقرأ الرسائل المكتوبة فقط. ممكن تكتب سؤالك؟', en: 'I can only read written messages. Could you type your question?' },
   },
 };

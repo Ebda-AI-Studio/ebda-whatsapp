@@ -4,6 +4,7 @@ capabilities:
   - agent.credits-view@2
   - agent.enable@2
   - agent.faq@1
+  - agent.location-pin@1
   - agent.notify-phone@1
   - agent.persona-language@1
   - agent.promises@1
@@ -53,6 +54,9 @@ Only the store owner can change these settings. Your AI credit balance shows at 
 - The agent replies **only inside the 24-hour window**. Outside it you need a template ([guide 4](04-templates-and-the-24-hour-window.md)).
 - Every reply uses AI credits. When credits run out the agent stops and hands the conversation to staff.
 - The agent does not change prices or add discounts. Orders, prices and stock come from Ebda Store.
+
+## Location pins
+When a customer sends a **location pin** while the agent is asking for the delivery address, the pin's name or address text becomes the delivery address and the agent shows it back. A pin with no text makes the agent ask for one line (area, street, building). Anywhere else, the agent just asks what the customer needs and offers to start an order. The coordinates are kept in the chat only until the order is placed and are never sent to the Store or to any outside service.
 
 ## Voice notes
 When a customer sends a **voice note**, the agent listens to it, and the text appears under the voice note in your inbox (marked "Voice note transcript"). It then answers like it would a typed message. Voice notes longer than 2 minutes, or beyond your store's daily limit, get a polite request to type instead. If a voice note could not be understood, the inbox shows **Voice note (not transcribed)**: listen to it and reply yourself.
