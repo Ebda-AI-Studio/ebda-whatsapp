@@ -38,7 +38,7 @@ export function PreviewCard({ t, lang, card: first, api }: { t: Strings; lang: L
     try {
       const r = await api.undo(appliedId);
       if (r.status === 'undone') setPhase({ k: 'undone' });
-      else if (r.status === 'refused') { setPhase({ k: 'applied', appliedId }); setUndoNote(t.assistantUndoRefused[r.reason ?? ''] ?? t.assistantUndoRefusedGeneric); }
+      else if (r.status === 'failed') { setPhase({ k: 'applied', appliedId }); setUndoNote(t.assistantUndoFailed); }
       else if (r.status === 'stale' && r.card) { setCard(r.card); setPhase({ k: 'note', text: t.assistantUndoStale }); }
       else if (r.status === 'needs_confirm' && r.card && r.approvals?.[0]) { setInverse({ card: r.card, approval: r.approvals[0] }); setPhase({ k: 'applied', appliedId }); }
       else setPhase({ k: 'applied', appliedId });

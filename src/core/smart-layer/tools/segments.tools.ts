@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { segmentCriteria, type SegmentDto } from '../../api/contract';
 import type { ToolSpec } from '../../../../foundation/smart-layer/types';
-import { ToolInputError, ToolRefusal, pickByName, row, writeTool, type Kit } from './write';
+import { ToolInputError, pickByName, row, writeTool, type Kit } from './write';
 
 const args = z.object({
   name: z.string().trim().min(1).max(60).describe('the segment name: an existing one is changed, a new one is created'),
@@ -41,8 +41,8 @@ export function segmentTools(kit: Kit): ToolSpec[] {
         return { id: have?.id ?? null, criteria: have?.criteria ?? null, audience };
       },
       plan: (a, s) => {
-        // Undo of a delete must put the segment BACK, never write over one made since (same name, any filter): it refuses and says why.
-        if (a.restoring && s.id !== null) throw new ToolRefusal('name_taken');
+        // Undo of a delete must put the segment BACK, never write over one made since (same name, any filter): it refuses (writes nothing).
+        if (a.restoring && s.id !== null) throw new ToolInputError('name_taken'); // the engine answers the Undo press with `failed` and writes nothing; the cards say why
         if (s.id !== null && JSON.stringify(s.criteria) === JSON.stringify(a.criteria)) throw new ToolInputError('no_change');
         const who = (c: unknown) => (c === null ? '-' : JSON.stringify(c));
         return {

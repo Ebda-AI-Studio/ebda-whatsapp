@@ -76,12 +76,12 @@ describe('ConfirmCard', () => {
     await screen.findByText(STRINGS.en.assistantCardUndone);
   });
 
-  it('an Undo the server refuses (name taken since the delete) says so and changes nothing; the card stays', async () => {
-    const a = api({ undo: vi.fn(async () => ({ status: 'refused', reason: 'name_taken' })) });
+  it('an Undo the server could not do (name taken since the delete) says so and changes nothing; the card stays', async () => {
+    const a = api({ undo: vi.fn(async () => ({ status: 'failed' })) });
     mount(card({ undo: 'reversible', reasons: ['delete'] }), a);
     fireEvent.click(screen.getByRole('button', { name: t.assistantConfirmYes }));
     fireEvent.click(await screen.findByRole('button', { name: t.assistantUndo }));
-    expect((await screen.findByText(t.assistantUndoRefused.name_taken!)).textContent).toContain('نفس الاسم');
+    expect((await screen.findByText(t.assistantUndoFailed)).textContent).toContain('نفس الاسم');
     expect(screen.queryByText(t.assistantCardUndone)).toBeNull();
     expect(screen.getByText(t.assistantConfirmDone)).toBeTruthy();
   });

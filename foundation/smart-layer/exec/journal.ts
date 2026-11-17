@@ -126,7 +126,6 @@ export async function applyPreview(a: SmartLayerAdapter, ctx: TurnCtx, previewId
 export type UndoResult =
   | { status: 'undone' }
   | { status: 'stale' | 'needs_confirm'; card: PreviewCard }
-  | { status: 'refused'; reason: string }
   | { status: 'expired' | 'irreversible' | 'not_found' | 'killed' | 'forbidden' | 'failed' };
 
 /**
@@ -151,10 +150,8 @@ export async function undoApplied(a: SmartLayerAdapter, ctx: TurnCtx, appliedId:
   let draft: PreviewDraft;
   try {
     draft = await inv.preview(ctx, parsed.data);
-  } catch (e) {
-    // A refusal the tool chose (e.g. the name was taken since a delete): nothing is written and the merchant is told why. Duck-typed so foundation never imports from src.
-    const refusal = (e as { refusal?: unknown } | null)?.refusal;
-    return typeof refusal === 'string' ? { status: 'refused', reason: refusal } : { status: 'failed' };
+  } catch {
+    return { status: 'failed' };
   }
   if (draft.etag !== rec.etagAfter) {
     // The item changed after the assistant's change (the merchant edited it by hand): show what undo WOULD do, write nothing.

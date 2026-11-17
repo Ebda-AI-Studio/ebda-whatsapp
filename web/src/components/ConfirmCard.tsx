@@ -43,7 +43,7 @@ export function ConfirmCard({ t, lang, card: first, approval: firstApproval, api
     setPhase({ k: 'working' });
     try {
       const r = await api.undo(appliedId);
-      setUndoNote(r.status === 'refused' ? (t.assistantUndoRefused[r.reason ?? ''] ?? t.assistantUndoRefusedGeneric) : null);
+      setUndoNote(r.status === 'failed' ? t.assistantUndoFailed : null);
       setPhase(r.status === 'undone' ? { k: 'undone' } : { k: 'done', appliedId });
     } catch {
       setPhase({ k: 'done', appliedId });

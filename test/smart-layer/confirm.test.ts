@@ -163,7 +163,7 @@ describe('wave 2 tools', () => {
     expect(((await t.get('/segments')) as { items: Array<{ name: string }> }).items.map((s) => s.name)).toEqual(['VIP']);
   });
 
-  it('segment: Undo of a delete REFUSES when a segment with the same name was made since (nothing is overwritten) and says why', async () => {
+  it('segment: Undo of a delete REFUSES when a segment with the same name was made since (nothing is overwritten) and writes nothing', async () => {
     const t = await setup(7414);
     const first = await t.ask('اعمل شريحة VIP', { name: 'segment_upsert', args: { name: 'VIP', criteria: { everyone: true } } });
     await t.apply(first.previews[0]!.previewId);
@@ -173,8 +173,8 @@ describe('wave 2 tools', () => {
     // the merchant (or the assistant) makes a new "VIP" with a different filter before pressing Undo
     const made = await t.ask('اعمل شريحة VIP', { name: 'segment_upsert', args: { name: 'VIP', criteria: { tags: { any: ['vip'] } } } });
     await t.apply(made.previews[0]!.previewId);
-    const undo = (await (await t.undo(done.appliedId)).json()) as { status: string; reason?: string };
-    expect(undo).toEqual({ status: 'refused', reason: 'name_taken' });
+    const undo = (await (await t.undo(done.appliedId)).json()) as { status: string };
+    expect(undo.status).toBe('failed'); // refused: nothing is written (a stale card would have offered to overwrite)
     const list = ((await t.get('/segments')) as { items: Array<{ name: string; criteria: unknown }> }).items;
     expect(list).toHaveLength(1);
     expect(list[0]!.criteria).toEqual({ tags: { any: ['vip'] } }); // the newer segment is untouched
