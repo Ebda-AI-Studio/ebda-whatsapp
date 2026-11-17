@@ -41,6 +41,8 @@ export interface TemplatesApi {
   remove(name: string, language: string): Promise<void>;
   sync(): Promise<{ upserted: number; removed: number }>;
   installDefaults(): Promise<{ submitted: string[]; skipped: string[]; failed: string[] }>;
+  /** Owner/staff-manager: replaces a REJECTED `cod_confirmation_v2` with a fresh submission for this store (Ruling WA-COD-V2-2). */
+  resubmitCodV2?(): Promise<{ status: string }>;
   /** A store on the SHARED number (no own number): the platform's sendable templates and its asks for new utility ones. `list` rejects with 404 for a store that is not on the shared number. */
   shared?: {
     list(): Promise<SharedTemplateDto[]>;

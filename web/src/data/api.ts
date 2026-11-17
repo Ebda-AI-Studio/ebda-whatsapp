@@ -108,6 +108,7 @@ export function createApiSource(o: Opts): LiveSource {
         requests: async () => (await call('/templates/shared-requests', listSharedRequestsResponse)).items,
         request: (r) => call('/templates/shared-requests', sharedRequestDto, post(r)),
       },
+      resubmitCodV2: () => call('/templates/cod-v2/resubmit', z.object({ status: z.string() }), post({})),
       installDefaults: () => call('/templates/install-defaults', z.object({ submitted: z.array(z.string()), skipped: z.array(z.string()), failed: z.array(z.string()) }), post({})),
     },
     async recordCodOutcome(waId, orderNumber, outcome) {
