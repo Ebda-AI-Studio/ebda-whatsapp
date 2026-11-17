@@ -23,10 +23,12 @@ import { STRINGS, type Lang } from './i18n';
 import { formatMoney } from './lib/format';
 import { useTypeahead } from './lib/useTypeahead';
 
-type Props = { source: InboxSource; now?: () => number; initialLang?: Lang };
+type Props = { source: InboxSource; now?: () => number; initialLang?: Lang; /** The screen to open on (the address bar's screen once real routes land). */ initialView?: View };
 
-export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
+export function App({ source, now = Date.now, initialLang = 'ar', initialView = 'inbox' }: Props) {
   const [lang, setLang] = useState<Lang>(initialLang);
+  // Connectors reach the client's own systems with a secret: owner only. The server refuses staff (routes/connectors.ts, 403); this keeps the screen from rendering for them too, whatever address they typed.
+  const canIntegrations = !!source.connectors && source.role === 'owner';
   // The assistant: offered only while the server says it is on for this store; a first turn that answers "off" withdraws it for the session.
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantGone, setAssistantGone] = useState(false);
@@ -39,7 +41,7 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [assistantOn]);
-  const [view, setView] = useState<View>('inbox');
+  const [view, setView] = useState<View>(initialView);
   const t = STRINGS[lang];
   const [filter, setFilter] = useState<ConversationFilter>('all');
   const [reloadTick, setReloadTick] = useState(0);
@@ -260,9 +262,9 @@ export function App({ source, now = Date.now, initialLang = 'ar' }: Props) {
   return (
     <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
       {source.viewAs && <p className="view-as-banner" role="status" aria-label={t.viewAsBanner}>{t.viewAsBanner}</p>}
-      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, integrations: !!source.connectors && source.role === 'owner', agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
+      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, integrations: canIntegrations, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
-        : view === 'integrations' && source.connectors ? <IntegrationsScreen t={t} lang={lang} source={source} />
+        : view === 'integrations' && source.connectors ? (canIntegrations ? <IntegrationsScreen t={t} lang={lang} source={source} /> : <p className="view-denied" role="alert">{t.notAllowed}</p>)
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
         : view === 'templates' && source.templatesApi ? <TemplatesScreen t={t} lang={lang} source={source} api={source.templatesApi} onNavigate={setView} />
         : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} onNavigate={setView} />

@@ -86,6 +86,15 @@ describe('agent connectors (A35)', () => {
     expect(screen.queryByRole('link', { name: t.intNav })).toBeNull();
   });
 
+  it('a staff user who lands on the integrations screen (typed address) sees a not-allowed state, never the form', async () => {
+    const staff = createSampleSource();
+    staff.role = 'staff';
+    render(<App source={staff} now={now} initialView="integrations" />);
+    expect((await screen.findByRole('alert')).textContent).toContain(t.notAllowed);
+    expect(screen.queryByRole('heading', { name: t.intTitle })).toBeNull();
+    expect(screen.queryByLabelText(t.connSecretWebhook)).toBeNull();
+  });
+
   it('saving needs an explicit confirm that names what the agent may call; nothing is sent before it', async () => {
     const source = createSampleSource();
     const save = vi.spyOn(source.connectors!, 'save');
