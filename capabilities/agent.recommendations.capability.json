@@ -38,7 +38,7 @@
     ]
   },
   "steps": [
-    "Settings > AI agent > switch Agent recommends products (on by default)",
+    "Settings > AI agent > switch Agent recommends products (off for stores that existed before 2026-11-17 until the merchant turns it on; on for new stores; one-line explanation next to the switch)",
     "The agent calls recommend_products only when the customer asks for ideas, alternatives, a complement or a budget, or once after an order",
     "Cards are built from the Store's own recommendation engine (curated, AI, bought-together, similar), re-read live: active, public, in stock, price from the Store",
     "At most 3 suggestion sets per customer per 24 h, one per turn, never the same product twice in 24 h"

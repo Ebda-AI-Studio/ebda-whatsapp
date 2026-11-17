@@ -10,6 +10,7 @@ import type { PromisePolicy } from './reply-guard';
 export const agentSettingsSchema = agentSettingsFields;
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', tone: 'warm', notifyPhone: null, provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, recommendProducts: true };
+// recommendProducts: the default above is what a workspace with no stored row reads; the stored row is always written (v46 migration: OFF for workspaces that existed before Ruling WA-RECS-1, ON for new ones).
 /** The promise policy the reply guard applies (Ruling WA-GUARD-PROMISE-1): off unless the merchant switched it on. */
 export const promisePolicyOf = (s: AgentSettings): PromisePolicy => ({ refund: s.allowRefund, discount: s.allowDiscount, freeDelivery: s.allowFreeDelivery, exchange: s.allowExchange, guarantee: s.allowGuarantee });
 const BOOLEAN_KEYS: ReadonlySet<keyof AgentSettings> = new Set(['enabled', 'allowRefund', 'allowDiscount', 'allowFreeDelivery', 'allowExchange', 'allowGuarantee', 'recommendProducts']);

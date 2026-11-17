@@ -59,6 +59,7 @@ Only the store owner can change these settings. Your AI credit balance shows at 
 The agent suggests products from your catalog as picture cards: items similar to one the customer liked, something that goes with it, ideas after an order, or a pick within a budget ("هدية تحت 300 جنيه", "3ayez 7aga ta7t 500"). It only suggests products that are active, public and **in stock**, and the price on the card is always read from your store at that moment.
 - It does not push products: it suggests when the customer asks (or once after an order), at most **3 suggestions per customer per day**, and never the same product twice in a day.
 - It follows your **persona** (tone) when it introduces the cards.
+- **Default (Ruling WA-RECS-1):** a suggestion after an order is a message your store starts, so it is **off for stores that existed before 2026-11-17** until you turn on **Agent recommends products** in Settings > AI agent, and **on for new stores**. The budget ceiling is at most 1,000,000.
 - To switch it off, turn off **Agent recommends products** in Settings > AI agent. Your automatic recommendations on the storefront are a separate switch in Ebda Store.
 - Suggestions are only sent inside the 24-hour window; there is no automatic follow-up after it.
 

@@ -316,7 +316,7 @@ export const agentSettingsFields = z.object({
   allowFreeDelivery: z.boolean(),
   allowExchange: z.boolean(),
   allowGuarantee: z.boolean(),
-  /** The agent may recommend products from the catalogue (similar items, complements, after an order, budget asks). Default on; off = it only answers what was asked. */
+  /** The agent may recommend products from the catalogue (similar items, complements, after an order, budget asks). Proactive (it can message a customer after an order), so Ruling WA-RECS-1: OFF for workspaces that existed before it, ON for new ones; off = it only answers what was asked. */
   recommendProducts: z.boolean(),
 });
 export const agentSettingsDto = agentSettingsFields.extend({

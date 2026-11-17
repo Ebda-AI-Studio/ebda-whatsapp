@@ -16,6 +16,8 @@ import { putAgentState } from './settings';
 import type { ToolDef } from './provider';
 import type { ToolContext } from './tools';
 
+/** The Store's own cap on a budget ceiling (maxPriceMinor 100_000_000 = 1,000,000 in major units); the same cap as `search_catalog`. */
+export const MAX_BUDGET = 1_000_000;
 /** Recommendation sets (one tool call that found something) one customer may be sent in 24 h. The fourth is refused until the oldest ages out. */
 export const RECS_PER_DAY = 3;
 /** Products one set may carry. */
@@ -29,7 +31,7 @@ export const recommendArgs = z.object({
   productId: z.string().trim().min(1).max(MAX_RETAILER_ID).optional(),
   orderNumber: z.string().trim().regex(/^[\w-]{1,40}$/).optional(),
   /** Budget ceiling in the store's currency (major units, as the customer says it). */
-  maxPrice: z.number().positive().max(10_000_000).optional(),
+  maxPrice: z.number().positive().max(MAX_BUDGET).optional(),
   /** budget / occasion: what the customer wants, in their words. */
   query: z.string().trim().min(1).max(120).optional(),
 });
@@ -57,11 +59,28 @@ function windowOf(ctx: ToolContext, now: number): Window {
 
 const toHit = (r: CatalogRow) => ({ id: r.retailerId, name: r.title, nameAr: r.titleAr, price: r.priceMinor / 100, currency: r.currency, inStock: r.availability === 'in_stock', link: r.link });
 
+/**
+ * The daily ration is claimed ATOMICALLY: the count and the reservation row are one synchronous step inside the workspace Durable Object (no await between
+ * the read and the write), so two turns of the same customer running at once cannot both pass with one slot left. The reservation is released on every
+ * path that sends nothing, and replaced by the real set when something is sent.
+ */
 export async function recommendProducts(ctx: ToolContext, a: RecommendArgs, deps: RecommendDeps, now = Date.now()): Promise<unknown> {
-  const bridge = ctx.bridge!;
   if (ctx.recommended) return { error: 'already_recommended_this_turn' };
   const win = windowOf(ctx, now);
   if (win.count >= RECS_PER_DAY) return { error: 'rate_limited', note: 'Enough suggestions were sent already today: answer in plain words, do not suggest more products.' };
+  putAgentState(ctx.host.sql, keyOf(ctx.messageId), JSON.stringify({ at: now, ids: [] }));
+  let sent = false;
+  try {
+    const out = await recommendOnce(ctx, a, deps, win, now);
+    sent = ctx.recommended === true;
+    return out;
+  } finally {
+    if (!sent) ctx.host.sql.exec('DELETE FROM agent_state WHERE key = ?', keyOf(ctx.messageId));
+  }
+}
+
+async function recommendOnce(ctx: ToolContext, a: RecommendArgs, deps: RecommendDeps, win: Window, now: number): Promise<unknown> {
+  const bridge = ctx.bridge!;
 
   const maxPriceMinor = a.maxPrice !== undefined ? Math.round(a.maxPrice * 100) : undefined;
   let candidates: string[];
@@ -80,7 +99,7 @@ export async function recommendProducts(ctx: ToolContext, a: RecommendArgs, deps
       let orderNumber = a.orderNumber;
       if (!orderNumber) {
         const latest = await bridge.listCustomerOrders(ctx.host.workspaceId, key, 1);
-        if (!latest.ok) return { error: 'store_unavailable' };
+        if (!latest.ok) return { error: latest.reason === 'invalid' ? 'invalid_arguments' : 'store_unavailable' };
         orderNumber = latest.value.items[0]?.orderNumber;
         if (!orderNumber) return { error: 'no_order' };
       }
@@ -90,7 +109,8 @@ export async function recommendProducts(ctx: ToolContext, a: RecommendArgs, deps
       req.seedIds = [a.productId];
     }
     const res = await bridge.getRecommendations(ctx.host.workspaceId, req);
-    if (!res.ok) return { error: res.reason === 'not_found' ? 'not_found' : 'store_unavailable' };
+    // `invalid` is the Store refusing the request (a bad budget, seed or buyer proof): a fixed code, never the Store's message. Only a real outage is `store_unavailable`.
+    if (!res.ok) return { error: res.reason === 'not_found' ? 'not_found' : res.reason === 'invalid' ? 'invalid_arguments' : 'store_unavailable' };
     // The engine's answer is re-checked here too: in stock, inside the budget, not the seed, not already suggested to this customer.
     candidates = res.value.items.filter((r) => r.availability === 'in_stock' && (maxPriceMinor === undefined || r.priceMinor <= maxPriceMinor) && r.retailerId !== a.productId).map((r) => r.retailerId);
   }
@@ -116,7 +136,7 @@ export const recommendToolDef: ToolDef = {
       basis: { type: 'string', enum: ['similar', 'complement', 'after_order', 'budget'] },
       productId: { type: 'string', description: 'The `id` of the product from a search result (similar / complement).' },
       orderNumber: { type: 'string', description: 'The order number the customer wrote (after_order); omit for their latest order.' },
-      maxPrice: { type: 'number', description: 'Budget ceiling in the store currency, as the customer said it.' },
+      maxPrice: { type: 'number', maximum: MAX_BUDGET, description: 'Budget ceiling in the store currency, as the customer said it (at most 1,000,000).' },
       query: { type: 'string', description: 'What the customer wants, in their words (budget / occasion).' },
     },
     required: ['basis'],

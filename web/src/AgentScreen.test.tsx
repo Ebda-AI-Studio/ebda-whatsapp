@@ -22,6 +22,16 @@ describe('AI agent', () => {
     expect(screen.getByRole('status').textContent).toContain('اتحفظ');
   });
 
+  it('shows the recommendations opt-in with its one-line explanation that existing stores start with it off (WA-RECS-1)', async () => {
+    render(<App source={createSampleSource()} now={now} />);
+    await act(async () => fireEvent.click(screen.getByRole('link', { name: 'المساعد الذكي' })));
+    const sw = await screen.findByRole('switch', { name: STRINGS.ar.agentRecommend });
+    expect(sw.getAttribute('aria-describedby')).toBe('agent-recommend-hint');
+    expect(document.getElementById('agent-recommend-hint')!.textContent).toBe(STRINGS.ar.agentRecommendHint);
+    expect(STRINGS.ar.agentRecommendHint).toContain('مقفولة للمتاجر القديمة');
+    expect(STRINGS.en.agentRecommendHint).toContain('off for existing stores until you turn it on');
+  });
+
   it('never shows a saved API key, only that one is set', async () => {
     const source = createSampleSource();
     await source.saveAgentSettings!({ provider: 'openai-compatible', baseUrl: 'https://api.openai.com/v1', model: 'gpt-x', apiKey: 'sk-test-12345678' });

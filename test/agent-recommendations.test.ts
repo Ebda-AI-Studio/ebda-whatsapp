@@ -1,4 +1,7 @@
+import { runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { MAX_BUDGET, recommendArgs, recommendProducts, recommendToolDef } from '../src/core/ai/recommend';
+import { migrate } from '../src/core/do-migrations';
 import { ScriptedProvider, useAgent } from './helpers/agent';
 import { agentWorkspace, say, text } from './helpers/agent-chat';
 import { useApiKey } from './helpers/api';
@@ -204,5 +207,91 @@ describe('recommend_products', () => {
     await say(id, pn, text('حاجة شبهه'), graph());
     expect(lastTool(m)).toMatchObject({ error: 'invalid_arguments' });
     expect(link.fake.count('getRecommendations')).toBe(0);
+  });
+
+  it('the budget cap is the Store\'s (1,000,000): the schema and the tool definition refuse more', () => {
+    expect(MAX_BUDGET).toBe(1_000_000);
+    expect(recommendArgs.safeParse({ basis: 'budget', query: 'x', maxPrice: 1_000_000 }).success).toBe(true);
+    expect(recommendArgs.safeParse({ basis: 'budget', query: 'x', maxPrice: 1_000_001 }).success).toBe(false);
+    expect((recommendToolDef.parameters as { properties: { maxPrice: { maximum: number } } }).properties.maxPrice.maximum).toBe(1_000_000);
+  });
+
+  it('a Store validation refusal reaches the model as invalid_arguments, a real outage stays store_unavailable', async () => {
+    const id = W(20);
+    const pn = await shop(id);
+    link.fake.failNext.set('getRecommendations', 'invalid');
+    const m = model([{ tools: [rec({ basis: 'similar', productId: 'v1' })] }, { text: 'تمام' }]);
+    await say(id, pn, text('حاجة شبهه'), graph());
+    expect(lastTool(m)).toEqual({ error: 'invalid_arguments' });
+    // the refused call released its slot: nothing was sent, nothing is counted
+    expect((await rows<{ n: number }>(id, "SELECT count(*) AS n FROM agent_state WHERE key LIKE 'recs:%'"))[0]!.n).toBe(0);
+  });
+
+  it('the ration is claimed atomically: two calls at once with ONE slot left send exactly one set (the turn lock is not what protects it)', async () => {
+    const id = W(21);
+    await shop(id);
+    const { openChat } = await import('./helpers/workspace');
+    for (let i = 1; i <= 4; i++) await openChat(id, '201005550001', { wamid: `wamid.race.${i}`, ts: Math.floor(Date.now() / 1000) + i });
+    const mids = (await rows<{ id: number }>(id, "SELECT m.id FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id WHERE ct.wa_id = '201005550001' ORDER BY m.id")).map((r) => r.id);
+    expect(mids.length).toBeGreaterThanOrEqual(4);
+    const sentSets = await runInDurableObject(workspace(id), async (_i, state) => {
+      const sql = state.storage.sql;
+      const now = Date.now();
+      // two of the three slots are already used
+      for (const m of mids.slice(0, 2)) sql.exec("INSERT INTO agent_state (key, value) VALUES (?, ?)", `recs:${m}`, JSON.stringify({ at: now - 1000, ids: [`old${m}`] }));
+      const mk = (messageId: number) => ({ host: { sql, workspaceId: id, env: {} }, from: '201005550001', bridge: {}, availability: {}, locale: 'ar', cards: [], messageId }) as never;
+      const lag = () => new Promise((r) => setTimeout(r, 20)); // the Store round trip: both calls are in flight together
+      const deps = (pid: string) => ({
+        search: async () => { await lag(); return { results: [{ id: pid, price: 10, inStock: true }] }; },
+        show: async () => { await lag(); return { products: [{ id: pid }] }; },
+      });
+      const args = { basis: 'budget' as const, query: 'gift' };
+      const [x, y] = await Promise.all([recommendProducts(mk(mids[2]!), args, deps('pA'), now), recommendProducts(mk(mids[3]!), args, deps('pB'), now)]);
+      return [x, y].filter((r) => !(r as { error?: string }).error).length;
+    });
+    expect(sentSets).toBe(1);
+    expect((await rows<{ n: number }>(id, "SELECT count(*) AS n FROM agent_state WHERE key LIKE 'recs:%'"))[0]!.n).toBe(3);
+  });
+});
+
+/** Ruling WA-RECS-1: proactive suggestions default OFF for workspaces that existed at migration time, ON for new ones. */
+describe('recommendProducts default (Ruling WA-RECS-1)', () => {
+  const settingOf = async (id: string) => (await rows<{ value: string }>(id, "SELECT value FROM agent_state WHERE key = 'setting.recommendProducts'"))[0]?.value;
+
+  it('a workspace created now gets an explicit ON row', async () => {
+    const id = W(30);
+    await shop(id);
+    expect(await settingOf(id)).toBe('1');
+    expect((await workspace(id).getAgentSettings()).recommendProducts).toBe(true);
+  });
+
+  it('a workspace that existed before the migration (schema at v45, no row) is switched OFF, and stays OFF when the merchant saves other settings', async () => {
+    const id = W(31);
+    await shop(id);
+    await runInDurableObject(workspace(id), (_i, state) => {
+      state.storage.sql.exec("DELETE FROM agent_state WHERE key = 'setting.recommendProducts'");
+      state.storage.sql.exec('DELETE FROM _migrations WHERE version >= 46');
+      migrate(state.storage);
+    });
+    expect(await settingOf(id)).toBe('0');
+    expect((await workspace(id).getAgentSettings()).recommendProducts).toBe(false);
+    expect((await workspace(id).setAgentSettings({ persona: 'x' })).ok).toBe(true);
+    expect(await settingOf(id)).toBe('0');
+  });
+
+  it('while OFF nothing is recommended (the tool is not offered and the bridge is never called); the merchant opt-in turns it on', async () => {
+    const id = W(32);
+    const pn = await shop(id);
+    await runInDurableObject(workspace(id), (_i, state) => {
+      state.storage.sql.exec("UPDATE agent_state SET value = '0' WHERE key = 'setting.recommendProducts'");
+    });
+    link.fake.recs.v1 = ['v2'];
+    const m = model([{ tools: [rec({ basis: 'similar', productId: 'v1' })] }, { text: 'تمام' }]);
+    const out = await say(id, pn, text('حاجة شبهه'), graph());
+    expect(m.calls[0]!.tools.map((t) => t.name)).not.toContain('recommend_products');
+    expect(retailerIdsIn(out)).toEqual([]);
+    expect(link.fake.count('getRecommendations')).toBe(0);
+    expect((await workspace(id).setAgentSettings({ recommendProducts: true })).ok).toBe(true);
+    expect((await workspace(id).getAgentSettings()).recommendProducts).toBe(true);
   });
 });

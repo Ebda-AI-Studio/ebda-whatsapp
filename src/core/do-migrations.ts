@@ -607,6 +607,9 @@ export const DO_MIGRATIONS: readonly string[] = [
    CREATE INDEX sl_cache_at ON sl_cache (at);`,
   // v45 (Chat agent, review I2): when the owner was told about this handoff. Lives on the row (erased by wa_id with the contact), not as a phone-keyed agent_state key.
   `ALTER TABLE agent_handoffs ADD COLUMN notified_at INTEGER;`,
+  // v46 (Ruling WA-RECS-1): post-order product recommendations are proactive messages to customers, so a workspace that EXISTED before this deploy gets an explicit OFF row
+  // (the merchant opts in from Settings > AI agent). A workspace created after it is switched ON by migrate() below (done === 0), not by this statement.
+  `INSERT OR IGNORE INTO agent_state (key, value) VALUES ('setting.recommendProducts', '0');`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
@@ -618,5 +621,7 @@ export function migrate(storage: DurableObjectStorage): void {
       sql.exec(DO_MIGRATIONS[v - 1]!);
       sql.exec('INSERT INTO _migrations (version, applied_at) VALUES (?, ?)', v, Date.now());
     }
+    // Ruling WA-RECS-1: a brand-new workspace (no migration had ever run) starts with recommendations ON; v46 above made every older one OFF.
+    if (done === 0) sql.exec("INSERT INTO agent_state (key, value) VALUES ('setting.recommendProducts', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value");
   });
 }
