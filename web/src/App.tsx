@@ -28,7 +28,8 @@ type Props = { source: InboxSource; now?: () => number; initialLang?: Lang; /** 
 export function App({ source, now = Date.now, initialLang = 'ar', initialView = 'inbox' }: Props) {
   const [lang, setLang] = useState<Lang>(initialLang);
   // Connectors reach the client's own systems with a secret: owner only. The server refuses staff (routes/connectors.ts, 403); this keeps the screen from rendering for them too, whatever address they typed.
-  const canIntegrations = !!source.connectors && source.role === 'owner';
+  // The server lets a super admin READ connector status and never write (WA-SECRETS-1): they see the list without the form; staff are refused.
+  const canIntegrations = !!source.connectors && (source.role === 'owner' || source.role === 'super_admin');
   // The assistant: offered only while the server says it is on for this store; a first turn that answers "off" withdraws it for the session.
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantGone, setAssistantGone] = useState(false);
@@ -264,7 +265,7 @@ export function App({ source, now = Date.now, initialLang = 'ar', initialView = 
       {source.viewAs && <p className="view-as-banner" role="status" aria-label={t.viewAsBanner}>{t.viewAsBanner}</p>}
       <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, integrations: canIntegrations, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
-        : view === 'integrations' && source.connectors ? (canIntegrations ? <IntegrationsScreen t={t} lang={lang} source={source} /> : <p className="view-denied" role="alert">{t.notAllowed}</p>)
+        : view === 'integrations' && source.connectors ? (canIntegrations ? <IntegrationsScreen t={t} lang={lang} source={source} readOnly={source.role !== 'owner'} /> : <p className="view-denied" role="alert">{t.notAllowed}</p>)
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
         : view === 'templates' && source.templatesApi ? <TemplatesScreen t={t} lang={lang} source={source} api={source.templatesApi} onNavigate={setView} />
         : view === 'campaigns' && source.campaigns ? <CampaignsScreen t={t} lang={lang} source={source} api={source.campaigns} now={now} onNavigate={setView} />

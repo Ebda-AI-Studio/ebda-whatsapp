@@ -18,7 +18,7 @@ This guide is for a store owner who has a developer or a system (such as Odoo). 
 ## 2. Connect the AI agent to your system (a connector)
 If you want the AI agent to answer from your system's data (bookings, for example), you connect it with a **webhook** or with **Odoo**. Steps: **Connect systems**, then **Add a connector**; choose the type, fill in the address and the secret, and for a webhook paste the tools as JSON. Before it saves, you are asked to confirm: the screen names the host and the tools the agent will be able to call. Use **Test the connection** to check it, and **Delete connector** to remove it (it asks first).
 - You describe up to 10 tools for the agent, each with up to 10 inputs.
-- The address must be https on port 443, and calls are signed with HMAC so you can verify them on your side. The secret is written once and never shown again; when you edit a saved connector, leave the secret empty to keep it.
+- The address must be https on port 443, and calls are signed with HMAC so you can verify them on your side. The secret is written once and never shown again; when you edit a saved connector, leave the secret empty to keep it, unless you change the address (then enter it again). The secret must be at least 16 characters for a webhook and 8 for Odoo. A platform admin who is a member of your store can see the status of your connectors but cannot add, change or test them.
 - There is a connector test, once every 5 seconds.
 - A customer who asked to be erased or who stopped messages (STOP) never triggers a call.
 - Internal or unsafe addresses are refused.

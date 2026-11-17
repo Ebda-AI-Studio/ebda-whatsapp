@@ -76,8 +76,13 @@ describe('agent connectors (A35)', () => {
     await type(t.connSecretWebhook, SECRET);
   };
 
-  it('is in the rail for the owner only', async () => {
+  it('is in the rail for the owner and a super admin member, never for staff', async () => {
     render(<App source={createSampleSource()} now={now} />);
+    expect(screen.getByRole('link', { name: t.intNav })).toBeTruthy();
+    cleanup();
+    const admin = createSampleSource();
+    admin.role = 'super_admin';
+    render(<App source={admin} now={now} />);
     expect(screen.getByRole('link', { name: t.intNav })).toBeTruthy();
     cleanup();
     const staff = createSampleSource();
@@ -93,6 +98,56 @@ describe('agent connectors (A35)', () => {
     expect((await screen.findByRole('alert')).textContent).toContain(t.notAllowed);
     expect(screen.queryByRole('heading', { name: t.intTitle })).toBeNull();
     expect(screen.queryByLabelText(t.connSecretWebhook)).toBeNull();
+  });
+
+  it('a super admin member sees the connectors read-only (WA-SECRETS-1): the list and status, no form, no write buttons, no not-allowed', async () => {
+    const admin = createSampleSource();
+    admin.role = 'super_admin';
+    admin.connectors!.list = vi.fn().mockResolvedValue([{ id: 'crm', kind: 'webhook', enabled: true, hasSecret: true, config: { url: 'https://hooks.acme-client.com/wa', tools: JSON.parse(tools) }, tools: ['check_booking'] }]);
+    const save = vi.spyOn(admin.connectors!, 'save');
+    render(<App source={admin} now={now} initialView="integrations" />);
+    expect(await screen.findByRole('heading', { name: t.intTitle })).toBeTruthy();
+    expect(await screen.findByRole('article', { name: 'crm' })).toBeTruthy();
+    expect(screen.getByText(t.connReadOnly)).toBeTruthy();
+    expect(screen.queryByText(t.notAllowed)).toBeNull();
+    for (const name of [t.connAdd, t.connEdit, t.connTest, t.connDelete]) expect(screen.queryByRole('button', { name }), name).toBeNull();
+    expect(screen.queryByLabelText(t.connSecretWebhook)).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('the owner never sees the read-only note', async () => {
+    await openIntegrations();
+    expect(screen.queryByText(t.connReadOnly)).toBeNull();
+    expect(screen.getByRole('button', { name: t.connAdd })).toBeTruthy();
+  });
+
+  it('a secret shorter than the server minimum (16 webhook, 8 Odoo) blocks the save and says why next to the field', async () => {
+    await openIntegrations();
+    await click(t.connAdd);
+    await type(t.connId, 'crm');
+    await type(t.connUrl, 'https://hooks.acme-client.com/wa');
+    await type(t.connTools, tools);
+    const saveBtn = () => screen.getByRole('button', { name: t.connSave }) as HTMLButtonElement;
+    await type(t.connSecretWebhook, 'x'.repeat(15));
+    expect(saveBtn().disabled).toBe(true);
+    expect(screen.getByText(t.connSecretShort(16))).toBeTruthy();
+    await type(t.connSecretWebhook, 'x'.repeat(16));
+    expect(saveBtn().disabled).toBe(false);
+    expect(screen.queryByText(t.connSecretShort(16))).toBeNull();
+    await act(async () => fireEvent.change(screen.getByLabelText(t.connKind), { target: { value: 'odoo' } }));
+    await type(t.connUrl, 'https://erp.acme-client.com');
+    await type(t.connDb, 'acme');
+    await type(t.connLogin, 'bot@acme-client.com');
+    await type(t.connSecretOdoo, 'x'.repeat(7));
+    expect(saveBtn().disabled).toBe(true);
+    expect(screen.getByText(t.connSecretShort(8))).toBeTruthy();
+    await type(t.connSecretOdoo, 'x'.repeat(8));
+    expect(saveBtn().disabled).toBe(false);
+  });
+
+  it('the secret_required message covers a changed address, not only the first save', () => {
+    expect(STRINGS.en.connErr.secret_required).toContain('change the address');
+    expect(STRINGS.ar.connErr.secret_required).toContain('غيّرت العنوان');
   });
 
   it('saving needs an explicit confirm that names what the agent may call; nothing is sent before it', async () => {

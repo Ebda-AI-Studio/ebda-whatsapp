@@ -32,10 +32,14 @@ const draftOf = (c: ConnectorDto): Draft => ({
   login: 'login' in c.config ? c.config.login : '',
 });
 
+/** The shortest secret the server accepts (src/core/api/contract.ts connectorPut): 16 for a webhook, 8 for Odoo. */
+export const SECRET_MIN = { webhook: 16, odoo: 8 } as const;
+
 /** The body to save, or null while the draft is not savable. A secret is sent only when typed (an edit keeps the stored one). */
 function bodyOf(d: Draft): ConnectorPut | null {
   const secret = d.secret.trim() === '' ? {} : { secret: d.secret };
   if (!d.existing && d.secret.trim() === '') return null;
+  if (d.secret.trim() !== '' && d.secret.length < SECRET_MIN[d.kind]) return null;
   if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(d.id) || d.id.length > 16 || !d.url.trim()) return null;
   if (d.kind === 'webhook') {
     const tools = parseTools(d.tools);
@@ -47,7 +51,7 @@ function bodyOf(d: Draft): ConnectorPut | null {
 const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
 
 /** Agent connectors (owner) and where an integration token is made. The server owns every rule; this screen only hides what the role cannot do. */
-export function IntegrationsScreen({ t, source }: { t: Strings; lang: Lang; source: InboxSource }) {
+export function IntegrationsScreen({ t, source, readOnly = false }: { t: Strings; lang: Lang; source: InboxSource; readOnly?: boolean }) {
   const api: Connectors = source.connectors!;
   const [list, setList] = useState<ConnectorDto[] | undefined | 'error'>(undefined);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -107,6 +111,7 @@ export function IntegrationsScreen({ t, source }: { t: Strings; lang: Lang; sour
       <section className="settings" aria-labelledby="conn-title">
         <h2 id="conn-title">{t.connTitle}</h2>
         <p className="muted">{t.connIntro}</p>
+        {readOnly && <p className="muted" role="note">{t.connReadOnly}</p>}
         {list === undefined && <p className="muted">…</p>}
         {list === 'error' && <LoadError t={t} onRetry={load} />}
         {Array.isArray(list) && list.length === 0 && !draft && <p className="muted">{t.connNone}</p>}
@@ -116,7 +121,7 @@ export function IntegrationsScreen({ t, source }: { t: Strings; lang: Lang; sour
             <p className="muted small" dir="auto">{hostOf(c.config.url)} · {t.connToolsLine(c.tools.join('، '))}</p>
             {c.hasSecret && <p className="muted small">{t.connHasSecret}</p>}
             {tests[c.id] && <p role="status" className="muted">{tests[c.id]}</p>}
-            {deleting === c.id ? (
+            {readOnly ? null : deleting === c.id ? (
               <div className="confirm-inline" role="group" aria-label={t.connDeleteAsk}>
                 <span>{t.connDeleteAsk}</span>
                 <button type="button" className="btn danger" disabled={busy} onClick={() => void remove(c.id)}>{t.connDeleteYes}</button>
@@ -131,8 +136,8 @@ export function IntegrationsScreen({ t, source }: { t: Strings; lang: Lang; sour
             )}
           </article>
         ))}
-        {!draft && <div className="settings-actions"><button type="button" className="btn primary" onClick={() => { setDraft(blank); setMessage(null); }}>{t.connAdd}</button></div>}
-        {draft && (
+        {!readOnly && !draft && <div className="settings-actions"><button type="button" className="btn primary" onClick={() => { setDraft(blank); setMessage(null); }}>{t.connAdd}</button></div>}
+        {!readOnly && draft && (
           <form onSubmit={(e) => { e.preventDefault(); if (body) setAsking(true); }}>
             <label className="field"><span>{t.connId}</span><input dir="ltr" maxLength={16} value={draft.id} readOnly={draft.existing} onChange={(e) => set({ id: e.target.value })} /></label>
             <label className="field"><span>{t.connKind}</span>
@@ -158,7 +163,9 @@ export function IntegrationsScreen({ t, source }: { t: Strings; lang: Lang; sour
               <span>{draft.kind === 'webhook' ? t.connSecretWebhook : t.connSecretOdoo}</span>
               <input dir="ltr" type="password" autoComplete="off" value={draft.secret} onChange={(e) => set({ secret: e.target.value })} />
             </label>
-            <small className="muted">{t.connSecretHint}</small>
+            {draft.secret !== '' && draft.secret.length < SECRET_MIN[draft.kind]
+              ? <small className="error-text" role="status">{t.connSecretShort(SECRET_MIN[draft.kind])}</small>
+              : <small className="muted">{t.connSecretHint} {t.connSecretMin(SECRET_MIN[draft.kind])}</small>}
             {asking && body && (
               <div className="confirm-inline" role="group" aria-label={t.connConfirmTitle}>
                 <span>{t.connConfirmText(hostOf(draft.url), toolNames)}</span>
