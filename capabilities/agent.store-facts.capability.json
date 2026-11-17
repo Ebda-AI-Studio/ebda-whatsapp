@@ -1,0 +1,41 @@
+{
+  "id": "agent.store-facts",
+  "status": "in-pr",
+  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "المساعد بيعرف سياسة الشحن والاسترجاع المعلنة",
+  "titleEn": "Agent knows declared shipping, COD and return facts",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "المساعد قال سعر شحن غلط",
+      "ازاي يعرف الشحن بكام؟",
+      "fein ye3raf el shipping fee"
+    ],
+    "en": [
+      "The agent quoted a wrong shipping fee"
+    ]
+  },
+  "steps": [
+    "getStorePolicies read every turn; undeclared = NOT DECLARED and any invented amount is refused (handoff)"
+  ],
+  "edgeCases": [
+    "Store down: prompt says facts could not be loaded",
+    "Declared policies are edited in Ebda Store, not in Chat"
+  ],
+  "gaps": []
+}

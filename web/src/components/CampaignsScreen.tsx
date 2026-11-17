@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CampaignDto } from '../../../src/core/api/contract';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { templateTitle } from '../lib/format';
+import type { View } from './Rail';
 import { useFocusOn } from '../lib/useFocusOn';
 import { useLoad } from '../lib/useLoad';
 import { CampaignForm } from './CampaignForm';
@@ -11,16 +13,19 @@ import { LoadError } from './LoadError';
 import { EmptyState } from './EmptyState';
 import { Skeleton } from './Skeleton';
 
-type Props = { t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number };
+type Props = { t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number; onNavigate?: ((v: View) => void) | undefined };
 
 export function dateTime(at: number, lang: Lang): string {
   return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Cairo' }).format(at);
 }
 
-export function CampaignsScreen({ t, lang, source, api, now }: Props) {
+export function CampaignsScreen({ t, lang, source, api, now, onNavigate }: Props) {
   const list = useCallback(() => api.list(), [api]);
   const { data: items, setData: setItems, error: loadFailed, reload: load } = useLoad<CampaignDto[]>(list);
   const [mode, setMode] = useState<'list' | 'new'>('list');
+  // The merchant's own titles for templates (best effort: without them a campaign shows the shipped or raw name).
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  useEffect(() => { void source.templates().then((all) => setTitles(Object.fromEntries(all.filter((x) => x.label).map((x) => [`${x.name}|${x.language}`, templateTitle(t, x)]))), () => undefined); }, [source, t]);
   const owner = source.role !== 'staff';
   // Running campaigns move on their own: refresh while one is in flight.
   useEffect(() => {
@@ -30,7 +35,7 @@ export function CampaignsScreen({ t, lang, source, api, now }: Props) {
   }, [items, load]);
 
   if (mode === 'new') {
-    return <CampaignForm t={t} lang={lang} source={source} api={api} now={now} onClose={() => { setMode('list'); load(); }} />;
+    return <CampaignForm t={t} lang={lang} source={source} api={api} now={now} onClose={() => { setMode('list'); load(); }} onOpenTemplates={onNavigate ? () => onNavigate('templates') : undefined} />;
   }
 
   const replace = (c: CampaignDto) => setItems((xs) => xs?.map((x) => (x.id === c.id ? c : x)) ?? null);
@@ -46,13 +51,13 @@ export function CampaignsScreen({ t, lang, source, api, now }: Props) {
         {loadFailed ? <LoadError t={t} onRetry={load} />
           : items === null ? <Skeleton t={t} kind="campaign" />
           : items.length === 0 ? <EmptyState icon={<Megaphone size={22} />} title={t.campaignsEmptyTitle} body={t.campaignsEmpty} />
-          : items.map((c) => <CampaignRow key={c.id} c={c} t={t} lang={lang} owner={owner} api={api} onChange={replace} onRemoved={load} />)}
+          : items.map((c) => <CampaignRow key={c.id} c={c} title={titles[`${c.template.name}|${c.template.language}`]} t={t} lang={lang} owner={owner} api={api} onChange={replace} onRemoved={load} />)}
       </div>
     </main>
   );
 }
 
-function CampaignRow({ c, t, lang, owner, api, onChange, onRemoved }: { c: CampaignDto; t: Strings; lang: Lang; owner: boolean; api: CampaignsApi; onChange: (c: CampaignDto) => void; onRemoved: () => void }) {
+function CampaignRow({ c, title, t, lang, owner, api, onChange, onRemoved }: { c: CampaignDto; title: string | undefined; t: Strings; lang: Lang; owner: boolean; api: CampaignsApi; onChange: (c: CampaignDto) => void; onRemoved: () => void }) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [acted, setActed] = useState(0);
@@ -77,7 +82,7 @@ function CampaignRow({ c, t, lang, owner, api, onChange, onRemoved }: { c: Campa
         <span className="status-chip" data-status={c.status}>{t.campaignStatus[c.status]}</span>
       </div>
       <p className="muted campaign-meta">
-        <bdi>{t.templateNames[c.template.name] ?? c.template.name}</bdi>{when && <> · {when}</>}
+        <bdi>{title ?? t.templateNames[c.template.name] ?? c.template.name}</bdi>{when && <> · {when}</>}
       </p>
       {c.status === 'paused' && c.pauseReason && <p className="campaign-reason" data-reason={c.pauseReason}>{t.pauseReasons[c.pauseReason] ?? t.pauseUnknown}</p>}
       {c.status === 'paused' && c.pauseReason && (c.pauseReason === 'operator_paused' || !t.pauseReasons[c.pauseReason]) && <p className="campaign-reason-contact">{t.pauseContact(BRAND.supportEmail ?? t.wSupport)}</p>}

@@ -279,8 +279,10 @@ describe('cart and checkout paths', () => {
     const { ws, pn } = await setup(17);
     const g = stubGraph();
     const cart = await say(ws, pn, catalogOrder(wamid(), [{ id: 'v1', qty: 2, price: 100 }, { id: 'v5', qty: 1, price: 120.5 }]), g);
-    expect(cart[0]!.body.interactive.body.text).toContain('2 × v1');
-    expect(cart[0]!.body.interactive.body.text).toContain('320.50 جنيه'); // 2 x 100.00 + 120.50, integer piasters
+    const summary = cart.at(-1)!;
+    expect(summary.body.interactive.body.text).toContain('2 × Item 1 (ع)'); // the Store's name for the id, not the id
+    expect(summary.body.interactive.body.text).toContain('320 جنيه'); // the Store's live prices (100.00 x2 + 120.00), not Meta's 120.50
+    expect(cart.some((m) => JSON.stringify(m.body).includes('الأسعار اتحدثت'))).toBe(true); // and the customer is told they differ
     await say(ws, pn, tapBtn('cart:checkout'), g);
     await say(ws, pn, tapBtn('pay:cod'), g);
     await say(ws, pn, text('المعادي، شارع 9'), g);

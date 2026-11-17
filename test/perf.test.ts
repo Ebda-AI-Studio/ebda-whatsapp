@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
-import { BUDGET_RATIO, baselineMs, overBudget } from './helpers/bench';
+import { BUDGET_RATIO, baselineMs, overBudget, unthrottleApiForBench } from './helpers/bench';
 import { seedConversations } from './helpers/seed';
 
 useApiKey();
@@ -15,6 +15,7 @@ const stats = (xs: number[]) => ({ n: xs.length, p50: p(xs, 0.5), p95: p(xs, 0.9
  */
 // Opt-in (BENCH=1, via scripts/bench-local.mjs): seeding 5,000 conversations is too heavy for every suite run.
 it.runIf(env.BENCH === '1')('bench: conversation list, open chat and send-enqueue stay under the 150 ms p95 budget', { timeout: 60_000 }, async () => {
+  unthrottleApiForBench();
   const ws = W(600);
   const api = await apiFor(ws);
   const chatId = await seedConversations(ws);

@@ -63,7 +63,7 @@ grant_type=client_credentials&audience=whatsapp&scope=conversations:read message
 |---|---|
 | `conversations:read` | قراءة المحادثات والرسايل والميديا والبحث وحالة الإرسال وتدفق الأحداث (بالاستعلام الدوري `GET /events?after=`) |
 | `messages:send` | إرسال رسايل ورفع ميديا ليها |
-| `templates:read` | عرض القوالب |
+| `templates:read` | عرض القوالب وقراءتها ومراجعة مسودة |
 | `contacts:read` | قراءة العملاء وطلبات العميل |
 | `contacts:write` | تغيير وسوم العميل |
 | `campaigns:read` | قراءة الحملات والشرايح المحفوظة (ومعاينة الجمهور) |
@@ -71,7 +71,7 @@ grant_type=client_credentials&audience=whatsapp&scope=conversations:read message
 أي صلاحية مش معاك بيرد عليها بـ `403 forbidden`.
 
 #### مسارات بترفض توكن السيرفر دايمًا
-المسارات دي بترد بـ `403 forbidden` على أي توكن سيرفر مهما كانت صلاحياته: الـ WebSocket المباشر (السيرفر بيتابع الصندوق بالاستعلام الدوري على `/events`، فالعميل الملغي مابيفضلش متصل)؛ ربط الأرقام وتسجيلها وفصلها وقايمة الأرقام؛ والمحفظة والشحن ومدفوعات إنستاباي وكشف الحساب والاسترداد؛ والباقات وشراء الباقة؛ والانضمام للرقم المشترك أو الخروج منه؛ وتغييرات الموظفين (تعيين المحادثات والملاحظات الداخلية وعلامة المقروء ووسوم المحادثة)؛ ومسح بيانات عميل؛ وإعدادات البوت والمساعد وإعدادات ربط المتجر؛ والموصّلات؛ وإنشاء الحملات والشرايح أو تعديلها أو إرسالها؛ وإرسال القوالب ومزامنتها وتركيب الافتراضي؛ والاستيراد؛ ولوحة المشغّل. وأي مسار مش مذكور في جدول الصلاحيات برضه `403`.
+المسارات دي بترد بـ `403 forbidden` على أي توكن سيرفر مهما كانت صلاحياته: الـ WebSocket المباشر (السيرفر بيتابع الصندوق بالاستعلام الدوري على `/events`، فالعميل الملغي مابيفضلش متصل)؛ ربط الأرقام وتسجيلها وفصلها وقايمة الأرقام؛ والمحفظة والشحن ومدفوعات إنستاباي وكشف الحساب والاسترداد؛ والباقات وشراء الباقة؛ والانضمام للرقم المشترك أو الخروج منه؛ وتغييرات الموظفين (تعيين المحادثات والملاحظات الداخلية وعلامة المقروء ووسوم المحادثة)؛ ومسح بيانات عميل؛ وإعدادات البوت والمساعد وإعدادات ربط المتجر؛ والموصّلات؛ وإنشاء الحملات والشرايح أو تعديلها أو إرسالها؛ وإرسال القوالب وتعديلها ومسحها ومزامنتها وتركيب الافتراضي؛ والاستيراد؛ ولوحة المشغّل. وأي مسار مش مذكور في جدول الصلاحيات برضه `403`.
 
 #### الإلغاء
 صاحب المتجر يقدر يلغي العميل في أي وقت. العميل الملغي بياخد `401 invalid_client` لما يطلب توكن، والتوكن اللي معاه بالفعل بيترفض بـ `401 unauthorized` خلال حوالي 30 ثانية (الخدمة بتفتكر الرد السليم المدة دي). تغيير السر بيسيب السر القديم شغّال لمدة صاحب المتجر بيختارها (لحد 7 أيام)، والتوكنات اللي اتصدرت قبل كده تفضل صالحة لحد ما تخلص. ولو خدمة تسجيل الدخول مش متاحة وقت فحص العميل، الـ API بيرد بـ `503 rate_limited` مع `message: "session_check_unavailable"` ومابيسمحش للطلب يعدّي.
@@ -175,12 +175,22 @@ grant_type=client_credentials&audience=whatsapp&scope=conversations:read message
 
 ## القوالب
 
+القوالب بتبقى على حساب واتساب **الخاص** بالمتجر؛ المتجر اللي مفيش عنده رقم متصل بياخد `404` ومعاه `message: "no_active_number"` على كل المسارات دي.
+
 | الطريقة والمسار | الغرض |
 |---|---|
-| `GET /templates` | قايمة القوالب: `{ items: [{ name, language, category, status, bodyText, paramCount, rejectedReason }] }`. الـ `category` ‏`MARKETING` أو `UTILITY` أو `AUTHENTICATION`. والـ `status` ‏`APPROVED` أو `PENDING` أو `REJECTED` أو `PAUSED` أو `DISABLED` |
+| `GET /templates` | قايمة القوالب: `{ items: [{ name, language, category, status, bodyText, paramCount, rejectedReason, label, components, updatedAt, editAllowance, advice }], starterInstalled }`. الـ `category` ‏`MARKETING` أو `UTILITY` أو `AUTHENTICATION`. والـ `status` ‏`APPROVED` أو `PENDING` أو `REJECTED` أو `PAUSED` أو `DISABLED` أو `PENDING_DELETION`. والـ `editAllowance` ‏`{ allowed: true }` أو `{ allowed: false, reason: "status" \| "daily" \| "monthly", retryAt }`. والـ `advice` ‏`{ ar, en, kind }` للقالب المرفوض أو الموقوف أو المتعطّل |
+| `GET /templates/{name}/{language}` | قالب واحد بمكوّناته وإذن التعديل |
+| `POST /templates/check` | مراجعة مسودة على قواعد Meta من غير ما نكلّم Meta: `{ issues: [{ code, severity, field, params }], payloadHash }` |
 | `POST /templates/sync` | سحب القوالب الحالية وحالة مراجعتها من Meta |
-| `POST /templates` | تقديم قالب جديد للمراجعة. **للمالك فقط** |
+| `POST /templates` | تقديم مسودة للمراجعة: `201 { name, language, status, category, categoryChanged }`. **للمالك فقط**. بياخد شكل المسودة تحت و`expectedHash` إجباري |
+| `PUT /templates/{name}/{language}` | تعديل وإعادة إرسال: `{ status }`. **للمالك فقط** |
+| `DELETE /templates/{name}/{language}` | مسح لغة واحدة من قالب: `204`. **للمالك فقط** |
 | `POST /templates/install-defaults` | تقديم مجموعة القوالب الجاهزة. **للمالك فقط** |
+
+المسودة `{ name, label, language, category, header, body: { text, examples }, footer, buttons, auth }`: الـ `header` ‏`{ text, example? }` أو `null`؛ والـ `buttons` ‏`QUICK_REPLY { text }` أو `URL { text, url, example? }` أو `PHONE_NUMBER { text, phone }` أو `COPY_CODE { example }`؛ والـ `auth` ‏`{ expiryMinutes, securityRecommendation }` لقوالب `AUTHENTICATION`. الـ `expectedHash` **إجباري** على `POST` و`PUT`: ابعت الـ `payloadHash` اللي رجع من `check` للمسودة دي بالظبط. من غيره بترجع `400` ومعاها `message: "hash_required"` ومفيش حاجة بتوصل لـ Meta؛ ولو المسودة مش هي اللي اتراجعت بترجع `409 payload_changed`.
+
+الأخطاء على مسارات الكتابة: `400` ومعاه `message: "invalid_template"` و`issues` (قاعدة اتكسرت ومفيش حاجة اتبعتت لـ Meta) أو برسالة Meta نفسها (Meta رفضت)؛ و`409` ومعاه `message` = ‏`exists` (نفس الاسم واللغة) أو `payload_changed` أو `not_editable` (ومنها الفئة المقفولة) أو `not_deletable` (قالب متعطّل) أو `in_use` (حملة أو رسالة مستنية لسه بتستخدمه) أو `edit_in_progress` (تعديل تاني لنفس القالب شغّال) أو `edit_limit` ومعاه `retryAt` (Meta بتسمح بتعديل واحد للقالب المعتمد كل 24 ساعة وعشرة في 30 يوم)؛ و`503` لما Meta أو الربط مع واتساب مش متاح.
 
 القوالب `APPROVED` بس هي اللي تتبعت.
 

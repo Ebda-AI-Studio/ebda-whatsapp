@@ -1,0 +1,47 @@
+{
+  "id": "contacts.rename",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تغيير اسم العميل",
+  "titleEn": "Rename a contact",
+  "screens": [
+    "ContactsScreen customer data panel",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
+  "api": [
+    "PATCH /stores/:storeId/contacts/:waId {name}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/your-customers-data",
+  "questions": {
+    "ar": [
+      "ازاي اغير اسم العميل؟",
+      "الاسم غلط",
+      "ghayyar esm el 3amil"
+    ],
+    "en": [
+      "How do I rename a customer?"
+    ]
+  },
+  "steps": [
+    "Pick the customer",
+    "Type the name",
+    "Save the name; WhatsApp profile name no longer overrides it"
+  ],
+  "edgeCases": [
+    "null name = follow WhatsApp name again"
+  ],
+  "gaps": []
+}

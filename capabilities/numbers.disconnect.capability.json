@@ -1,0 +1,47 @@
+{
+  "id": "numbers.disconnect",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "فصل الرقم",
+  "titleEn": "Disconnect a number",
+  "screens": [
+    "NumbersScreen Disconnect (confirm)",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [
+    "POST /stores/:storeId/numbers/:phoneNumberId/disconnect"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "عايز افصل الرقم",
+      "ازاي ارجع للتطبيق بس؟",
+      "الغي ربط الرقم"
+    ],
+    "en": [
+      "How do I disconnect my number?"
+    ]
+  },
+  "steps": [
+    "Numbers > Disconnect number > Yes, disconnect"
+  ],
+  "edgeCases": [
+    "Past conversations stay",
+    "Meta account is not changed: remove the number at Meta yourself",
+    "Campaigns on that number stop"
+  ],
+  "gaps": [],
+  "assistantNote": "reconnect via Embedded Signup; stops sends/receives immediately"
+}

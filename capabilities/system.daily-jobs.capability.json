@@ -1,0 +1,38 @@
+{
+  "id": "system.daily-jobs",
+  "status": "live",
+  "area": "system",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "المهام اليومية",
+  "titleEn": "Daily billing and cleanup pass (cron)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "الرصيد بيتحدث امتى؟",
+      "التسويات بتتم امتى؟",
+      "ازاي المهام اليومية؟"
+    ],
+    "en": [
+      "When do balances and refunds reconcile?"
+    ]
+  },
+  "steps": [
+    "FX pull, entitlements reconcile, top-up repair, card refund reconcile, InstaPay expiry/purge/repair, package repair, due offboardings, shared sweep, deletion sweep, new-cap purge"
+  ],
+  "edgeCases": [],
+  "gaps": [
+    "roles unverified"
+  ]
+}

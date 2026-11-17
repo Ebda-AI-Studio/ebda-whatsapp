@@ -1,0 +1,45 @@
+{
+  "id": "numbers.finish-registration",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إكمال تسجيل الرقم",
+  "titleEn": "Finish a half-done registration",
+  "screens": [
+    "NumbersScreen Finish registration",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [
+    "POST /stores/:storeId/numbers/:phoneNumberId/register"
+  ],
+  "mcpTool": null,
+  "planGate": "active package",
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "الرقم واقف عند \"التسجيل لم يكتمل\"",
+      "كمل التسجيل",
+      "complete el registration"
+    ],
+    "en": [
+      "My number says registration not finished"
+    ]
+  },
+  "steps": [
+    "Press Finish registration (no need to repeat the Meta window)"
+  ],
+  "edgeCases": [
+    "Locked 72 h after 10 failed attempts",
+    "PIN is created and stored encrypted by Ebda Chat"
+  ],
+  "gaps": []
+}

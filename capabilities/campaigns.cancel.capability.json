@@ -1,0 +1,46 @@
+{
+  "id": "campaigns.cancel",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إلغاء الحملة",
+  "titleEn": "Cancel a campaign",
+  "screens": [
+    "CampaignsScreen Cancel campaign (confirm)",
+    "view:CampaignsScreen",
+    "/campaigns"
+  ],
+  "api": [
+    "POST /stores/:storeId/campaigns/:id/cancel"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "الغي الحملة",
+      "ازاي الغي حملة اتجدولت؟",
+      "elghy el hamla"
+    ],
+    "en": [
+      "Cancel a campaign"
+    ]
+  },
+  "steps": [
+    "Open the campaign > Cancel > Yes, cancel"
+  ],
+  "edgeCases": [
+    "Messages not yet sent will not be sent; already delivered stay",
+    "Staff may cancel"
+  ],
+  "gaps": []
+}

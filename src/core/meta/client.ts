@@ -35,6 +35,24 @@ async function postMessage(opts: Base, payload: Record<string, unknown>): Promis
   return { ok: false, code, retryable: isRetryable(code, res.status), message: json?.error?.message ?? `http ${res.status}` };
 }
 
+/**
+ * Marks an inbound message read and shows the typing indicator (Cloud API, verified 2026-11-14 on developers.facebook.com/docs/whatsapp/cloud-api/typing-indicators):
+ * POST /{phone-number-id}/messages { messaging_product, status: 'read', message_id: <inbound wamid>, typing_indicator: { type: 'text' } }. The indicator ends when we
+ * send our reply or after 25 s. Best effort by design: false on any failure, never throws, never retried (a missed indicator costs nothing).
+ */
+export async function markReadTyping(opts: { token: string; graphVersion: string; phoneNumberId: string; wamid: string }): Promise<boolean> {
+  try {
+    const res = await fetchWithTimeout(graphUrl(opts.graphVersion, `${opts.phoneNumberId}/messages`), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${opts.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', status: 'read', message_id: opts.wamid, typing_indicator: { type: 'text' } }),
+    }, { label: 'meta.typing', timeoutMs: 5_000 });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export function sendText(opts: Base & { text: string }): Promise<SendResult> {
   return postMessage(opts, { type: 'text', text: { body: opts.text } });
 }
@@ -87,4 +105,48 @@ export function sendImageLink(opts: Base & { link: string; caption?: string }): 
 /** A location message (a pin with a name and an address). Free-form: only inside the 24 h window, like every non-template send. */
 export function sendLocation(opts: Base & { latitude: number; longitude: number; name?: string; address?: string }): Promise<SendResult> {
   return postMessage(opts, { type: 'location', location: { latitude: opts.latitude, longitude: opts.longitude, ...(opts.name ? { name: opts.name } : {}), ...(opts.address ? { address: opts.address } : {}) } });
+}
+
+/** Meta's limits for a multi-product message: 30 products over at most 10 sections (section titles 24 characters, header 60). */
+export const PRODUCT_LIST_MAX_ITEMS = 30;
+export const PRODUCT_LIST_MAX_SECTIONS = 10;
+
+/** One product card from the catalogue connected to the number (`interactive.type = product`). The product must exist in that catalogue: with no match Meta refuses and nothing is sent. */
+export function sendProduct(opts: Base & { catalogId: string; retailerId: string; body?: string; footer?: string }): Promise<SendResult> {
+  return postMessage(opts, {
+    type: 'interactive',
+    interactive: {
+      type: 'product',
+      ...(opts.body ? { body: { text: opts.body } } : {}),
+      ...(opts.footer ? { footer: { text: opts.footer } } : {}),
+      action: { catalog_id: opts.catalogId, product_retailer_id: opts.retailerId },
+    },
+  });
+}
+
+/** A multi-product message (`interactive.type = product_list`): a text header, a body and sections of product ids. Items Meta cannot match are dropped by Meta; none matching is an error. */
+export function sendProductList(opts: Base & { catalogId: string; header: string; body: string; footer?: string; sections: { title: string; retailerIds: string[] }[] }): Promise<SendResult> {
+  return postMessage(opts, {
+    type: 'interactive',
+    interactive: {
+      type: 'product_list',
+      header: { type: 'text', text: opts.header },
+      body: { text: opts.body },
+      ...(opts.footer ? { footer: { text: opts.footer } } : {}),
+      action: { catalog_id: opts.catalogId, sections: opts.sections.map((sec) => ({ title: sec.title, product_items: sec.retailerIds.map((id) => ({ product_retailer_id: id })) })) },
+    },
+  });
+}
+
+/** The "View catalog" message (`interactive.type = catalog_message`): opens the whole catalogue. The thumbnail is one product's image (the first item's when absent). */
+export function sendCatalogMessage(opts: Base & { body: string; footer?: string; thumbnailRetailerId?: string }): Promise<SendResult> {
+  return postMessage(opts, {
+    type: 'interactive',
+    interactive: {
+      type: 'catalog_message',
+      body: { text: opts.body },
+      action: { name: 'catalog_message', ...(opts.thumbnailRetailerId ? { parameters: { thumbnail_product_retailer_id: opts.thumbnailRetailerId } } : {}) },
+      ...(opts.footer ? { footer: { text: opts.footer } } : {}),
+    },
+  });
 }

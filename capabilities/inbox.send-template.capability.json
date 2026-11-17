@@ -1,0 +1,60 @@
+{
+  "id": "inbox.send-template",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إرسال قالب رسالة معتمد",
+  "titleEn": "Send an approved template (outside the 24h window)",
+  "screens": [
+    "ChatPane template picker (popover)",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [
+    "GET /stores/:storeId/templates",
+    "POST /stores/:storeId/conversations/:id/messages {type:template,name,language,params}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "العميل كلمني من يومين وعايز ابعتله",
+      "مش قادر اكتب للعميل، بيقولي الـ window اتقفل",
+      "ابعت template ازاي؟",
+      "el window etaffal 3ayez ab3at message"
+    ],
+    "en": [
+      "The 24h window closed, how do I message the customer?",
+      "How do I send a template?"
+    ]
+  },
+  "steps": [
+    "Open the chat",
+    "Press the template button",
+    "Pick an APPROVED template and fill the variables",
+    "Send"
+  ],
+  "edgeCases": [
+    "Only APPROVED templates are listed (empty list = none created yet: no templates screen)",
+    "Template parameter mismatch 132000; not approved 132001",
+    "Custom template names show as raw snake_case (display-name map is hard-coded)",
+    "On the shared platform number: marketing templates are refused, templates come from the platform catalogue, wallet pays Meta",
+    "Number quality drops to YELLOW/RED or WhatsApp restricts the account: campaigns auto-pause, no new templates until recovered; campaigns never restart by themselves",
+    "Meta may reclassify a utility template as marketing (cost + consent change)",
+    "No active package: sends, agent and number connect answer 403 plan_required (no free plan, WA-NOFREE-1); a past_due package keeps replies/confirmations up to 7 days"
+  ],
+  "gaps": [
+    "Merchant cannot create templates in UI (see templates.create-submit)",
+    "Template display names hard-coded"
+  ]
+}

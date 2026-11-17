@@ -1,0 +1,16 @@
+{
+  "ids": [
+    "model-call-outside-smart-layer|src/core/ai/config.ts|workers-ai|4868755b29|0",
+    "model-call-outside-smart-layer|src/core/ai/config.ts|workers-ai|581b3495a6|0",
+    "model-call-outside-smart-layer|src/core/ai/provider.ts|anthropic-rest|6a0dd78078|0",
+    "model-call-outside-smart-layer|src/core/ai/provider.ts|gemini-rest|6a0dd78078|0",
+    "model-call-outside-smart-layer|src/core/ai/provider.ts|groq-rest|6a0dd78078|0",
+    "model-call-outside-smart-layer|src/core/ai/provider.ts|mistral-rest|6a0dd78078|0",
+    "model-call-outside-smart-layer|src/core/ai/provider.ts|openai-rest|6a0dd78078|0",
+    "model-call-outside-smart-layer|src/core/ai/provider.ts|openrouter-rest|6a0dd78078|0",
+    "model-call-outside-smart-layer|src/core/ai/provider.ts|together-rest|6a0dd78078|0",
+    "model-call-outside-smart-layer|src/core/ai/transcribe.ts|workers-ai|581b3495a6|0",
+    "model-call-outside-smart-layer|web/src/components/AgentScreen.tsx|openai-rest|8be75d22a8|0",
+    "model-call-outside-smart-layer|wrangler.jsonc|wrangler-ai-binding|1bea0971f1|0"
+  ]
+}

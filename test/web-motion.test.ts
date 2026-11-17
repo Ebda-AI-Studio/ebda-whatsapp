@@ -14,11 +14,11 @@ it('mirrors the foundation motion tokens exactly (--ebda-ease, --ebda-dur-fast/b
   expect(css).toMatch(/--dur:\s*200ms/);
   expect(css).toMatch(/--dur-slow:\s*250ms/);
 });
-it('every transition and animation uses a duration token or a literal of at most 250 ms (the skeleton pulse loop excepted)', () => {
+it('every transition and animation uses a duration token or a literal of at most 250 ms (the skeleton pulse and assistant typing-dots loops excepted)', () => {
   const values = [...decls('transition'), ...decls('animation')].filter((v) => v !== 'none !important' && v !== 'none');
   expect(values.length).toBeGreaterThan(8);
   for (const v of values) {
-    if (v.includes('skeleton-pulse')) continue;
+    if (v.includes('skeleton-pulse') || v.includes('as-dot')) continue;
     for (const [, n, unit] of v.matchAll(/(\d*\.?\d+)(ms|s)\b/g)) {
       const ms = unit === 's' ? Number(n) * 1000 : Number(n);
       expect(ms, v).toBeLessThanOrEqual(250);

@@ -1,0 +1,52 @@
+{
+  "id": "operator.meta-deletions",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "طلبات حذف ميتا اللي محتاجة مراجعة",
+  "titleEn": "Finish Meta data-deletion requests marked Needs review",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/meta-deletions"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "none"
+  },
+  "operatorReason": {
+    "code": "legal",
+    "text": "legal, needs a person",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل طلبات حذف ميتا اللي محتاجة مراجعة؟",
+      "ليه مش لاقي طلبات حذف ميتا اللي محتاجة مراجعة عندي؟",
+      "عايز طلبات حذف ميتا اللي محتاجة مراجعة اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Finish Meta data-deletion requests marked Needs review?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none"
+  ]
+}

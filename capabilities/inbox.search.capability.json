@@ -1,0 +1,49 @@
+{
+  "id": "inbox.search",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "البحث في المحادثات والرسايل",
+  "titleEn": "Search conversations and messages",
+  "screens": [
+    "SearchBox + ConversationList",
+    "view:SearchBox",
+    "/inbox",
+    "view:ConversationList"
+  ],
+  "api": [
+    "GET /stores/:storeId/search?q=",
+    "GET /stores/:storeId/conversations?q="
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/find-your-conversations",
+  "questions": {
+    "ar": [
+      "ازاي ادور على رسالة قديمة؟",
+      "عايز ادور باسم العميل",
+      "ادور برقم التليفون",
+      "ezay adawwar 3ala message"
+    ],
+    "en": [
+      "How do I search old messages?"
+    ]
+  },
+  "steps": [
+    "Type in the search box; typeahead with highlights"
+  ],
+  "edgeCases": [
+    "Search failure shows \"try again\"",
+    "Messages beyond the retention window are deleted and not searchable"
+  ],
+  "gaps": []
+}

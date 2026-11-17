@@ -1,0 +1,50 @@
+{
+  "id": "team.seat-assign",
+  "status": "live",
+  "area": "team",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إدّي موظف مقعد",
+  "titleEn": "Give a staff member a seat",
+  "screens": [
+    "TeamScreen Give a seat",
+    "view:TeamScreen",
+    "/team"
+  ],
+  "api": [
+    "PUT /stores/:storeId/members/:userId/seat"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/team-members-and-seats",
+  "questions": {
+    "ar": [
+      "ازاي اضيف موظف على الشات؟",
+      "الموظف بيقولي ماعندوش مقعد",
+      "edi el mowazzaf seat",
+      "اضافة موظف"
+    ],
+    "en": [
+      "How do I give an employee access to Ebda Chat?"
+    ]
+  },
+  "steps": [
+    "Add the person as staff in Ebda Store (cross-product step)",
+    "Team > Give a seat"
+  ],
+  "edgeCases": [
+    "seat_limit 403 when the package is full: remove a seat or upgrade",
+    "Staff removed/suspended in the Store lose access at once",
+    "Over-limit seats pause (earliest keep working)"
+  ],
+  "gaps": [
+    "Adding the staff user happens in Ebda Store; Chat cannot invite people"
+  ]
+}

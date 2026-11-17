@@ -1,0 +1,50 @@
+{
+  "id": "agent.provider-byok",
+  "status": "live",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "استخدام مفتاح AI بتاعك",
+  "titleEn": "Use your own AI engine and key (OpenAI-compatible)",
+  "screens": [
+    "AgentScreen AI engine",
+    "view:AgentScreen",
+    "/agent"
+  ],
+  "api": [
+    "PUT /stores/:storeId/agent {provider,model,baseUrl,apiKey}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "عايز استخدم OpenAI بتاعي",
+      "فين احط الـ API key؟",
+      "ينفع موديل تاني؟",
+      "ast5dem el key bta3i"
+    ],
+    "en": [
+      "Can I use my own OpenAI key?"
+    ]
+  },
+  "steps": [
+    "Choose Your own key, URL (https:443 only, allowed hosts), model, key (stored encrypted, never shown again)"
+  ],
+  "edgeCases": [
+    "Changing the URL origin requires re-entering the key",
+    "Refusals: invalid_base_url, model_required, api_key_required, model_not_allowed, secrets_unavailable (503)",
+    "Own key: no AI credits are consumed (verify)"
+  ],
+  "gaps": [
+    "Whether credits are charged with a BYO key is not stated in help (verify)"
+  ],
+  "assistantNote": "secret entry stays in the UI; the assistant never sees or handles the key"
+}

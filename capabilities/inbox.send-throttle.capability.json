@@ -1,0 +1,47 @@
+{
+  "id": "inbox.send-throttle",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "سرعة الإرسال وحد الرسايل اليومي",
+  "titleEn": "Sending throughput and tier usage",
+  "screens": [
+    "BotScreen Sending speed",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "GET /stores/:storeId/throttle"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/failed-messages-and-sending-limits",
+  "questions": {
+    "ar": [
+      "ليه الرسايل بتتأخر؟",
+      "وصلت للحد اليومي؟",
+      "leh el campaign batee2a"
+    ],
+    "en": [
+      "Why are my messages delayed?"
+    ]
+  },
+  "steps": [
+    "Open Bot in Settings, then Sending speed",
+    "See your tier, how much of it is used in the last 24 hours, how many sends wait, and when the next slot frees"
+  ],
+  "edgeCases": [
+    "Messaging-limit tier reached (TIER_50/250/1K/10K/100K/unlimited): extra new conversations wait until the next day automatically",
+    "Per-number throughput limit (130429 / 131056 pair limit): sends are queued and retried by the throttle"
+  ],
+  "gaps": []
+}

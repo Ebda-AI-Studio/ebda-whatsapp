@@ -17,6 +17,8 @@ export interface LinkHost {
   /** Inserts an outbound 'queued' message row (search index, realtime events included). Call inside a transaction. */
   insertOutbound(conversationId: number, row: OutboundRow, now: number): number;
   emitConversationUpdated(conversationId: number): void;
+  /** Voice note result, first write wins: a transcript becomes the message's text (voice_state 'ok'), null marks it never transcribed ('failed'). False = the message is gone. Inbox clients are told. */
+  recordVoice(messageId: number, transcript: string | null): boolean;
   /** Re-points the single alarm at the earliest task. */
   arm(): Promise<void>;
   /** Sends an already-stored message now (claim, throttle, Meta call, record); falls back to the send queue on a retryable failure. */

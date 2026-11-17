@@ -1,0 +1,49 @@
+{
+  "id": "numbers.coexistence",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "استخدام تطبيق واتساب بيزنس مع المنصة",
+  "titleEn": "Keep using the WhatsApp Business app on the same number (coexistence)",
+  "screens": [
+    "NumbersScreen (badge: Also working on the WhatsApp Business app)",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "ينفع استخدم التطبيق والمنصة سوا؟",
+      "هخسر محادثاتي؟",
+      "ينفع رقمي القديم يفضل على الموبايل؟",
+      "a2dar astakhdem el app ma3 el platform"
+    ],
+    "en": [
+      "Can I keep the Business app and Ebda Chat on one number?"
+    ]
+  },
+  "steps": [
+    "Choose the Business-app path in the Meta flow; confirm from the app"
+  ],
+  "edgeCases": [
+    "History (up to 180 days) and contacts transfer ONCE and only within 24 h of connecting",
+    "Contacts arrive without marketing consent",
+    "History never opens the 24h window or triggers replies",
+    "App number: 20 msg/s",
+    "Business app must be recent",
+    "Declined history stays declined"
+  ],
+  "gaps": []
+}

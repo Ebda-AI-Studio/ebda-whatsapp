@@ -1,3 +1,9 @@
+---
+capabilities:
+  - bot.ordering-toggle@2
+  - orders.instapay-in-chat@1
+---
+
 # InstaPay orders in WhatsApp
 
 A customer can order from your catalog on WhatsApp and pay with InstaPay. The order stays **awaiting payment** until your store confirms the money arrived.
@@ -5,7 +11,8 @@ A customer can order from your catalog on WhatsApp and pay with InstaPay. The or
 ## What you need before you start
 - Your store on Ebda Store with the **InstaPay** payment method turned on and your InstaPay address (IPA) entered correctly.
 - The catalog synced with Ebda Chat.
-- A connected number, and **ordering in chat** switched on in the store-link settings.
+- A connected number. The **Ordering bot** is on by default; to stop it, open **Bot**, then **Bot switches** ([guide 30](30-bot-switches-and-sending-speed.md)).
+- A running package that includes ordering in chat.
 
 ## How it works (customer side)
 1. The customer picks products from the catalog on WhatsApp and sends the cart.
@@ -32,4 +39,4 @@ A customer can order from your catalog on WhatsApp and pay with InstaPay. The or
 - **Money arrived but the order is still pending:** confirm the payment in Ebda Store.
 
 ---
-Last checked: 2026-10-25. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.
+Last checked: 2026-11-14. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.

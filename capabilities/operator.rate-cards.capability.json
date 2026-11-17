@@ -1,0 +1,53 @@
+{
+  "id": "operator.rate-cards",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "أسعار ميتا",
+  "titleEn": "Meta rate cards",
+  "screens": [
+    "OperatorScreen (Meta rates and FX)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/rate-cards",
+    "POST /operator/rate-cards"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "platform-wide config",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل أسعار ميتا؟",
+      "ليه مش لاقي أسعار ميتا عندي؟",
+      "عايز أسعار ميتا اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Meta rate cards?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none (platform-wide)"
+  ]
+}

@@ -1,6 +1,6 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { expect, it } from 'vitest';
-import { BUDGET_RATIO, baselineMs, mean, overBudget, p95Of } from './helpers/bench';
+import { BUDGET_RATIO, baselineMs, mean, overBudget, p95Of, unthrottleApiForBench } from './helpers/bench';
 import { apiFor, storeId as W, useApiKey } from './helpers/api';
 import { workspace } from './helpers/workspace';
 
@@ -19,6 +19,7 @@ const CONVERSATIONS = 50_000;
 const PER_CHAT = 10;
 
 it.runIf(env.BENCH === '1')('spike: 500,000 messages in one workspace: reads inside the ratio budget, the chunked export completes and does not block the workspace', { timeout: 900_000 }, async () => {
+  unthrottleApiForBench();
   const ws = W(9500);
   const api = await apiFor(ws);
   const t0 = Date.now();

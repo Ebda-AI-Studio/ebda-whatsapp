@@ -1,0 +1,47 @@
+{
+  "id": "segments.preview",
+  "status": "live",
+  "area": "segments",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "معاينة عدد المستلمين",
+  "titleEn": "Preview audience size and exclusions",
+  "screens": [
+    "CampaignForm audience step",
+    "view:CampaignForm",
+    "/campaigns"
+  ],
+  "api": [
+    "POST /stores/:storeId/segments/preview",
+    "GET /stores/:storeId/segments/:id/preview"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "كام عميل هيوصله العرض؟",
+      "ليه العدد أقل؟",
+      "ليه فيه ناس مش هيوصلهم؟"
+    ],
+    "en": [
+      "How many customers will this reach?",
+      "Why are some excluded?"
+    ]
+  },
+  "steps": [
+    "Pick segment/tag/everyone; \"Reaches N customers\"; excluded line explains opted out vs no consent"
+  ],
+  "edgeCases": [
+    "Count unavailable: \"We could not count who this would reach\""
+  ],
+  "gaps": []
+}

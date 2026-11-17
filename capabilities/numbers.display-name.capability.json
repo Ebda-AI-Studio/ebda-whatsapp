@@ -1,0 +1,46 @@
+{
+  "id": "numbers.display-name",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "اسم العرض واعتماده من ميتا",
+  "titleEn": "Display name approval status",
+  "screens": [],
+  "api": [
+    "POST /meta/webhook (phone_number_name_update)"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "اسم المتجر اترفض",
+      "امتى الاسم هيظهر؟",
+      "ازاي اغير اسم الواتساب؟"
+    ],
+    "en": [
+      "My display name was rejected",
+      "How do I change my WhatsApp name?"
+    ]
+  },
+  "steps": [
+    "Name reviewed by Meta; decision stored as name_status; verified name updated on approval"
+  ],
+  "edgeCases": [
+    "Rules: reflect real business, close to website/papers, no generic words, no emoji/punctuation/\"WhatsApp\"",
+    "Change/resubmit is done in Meta WhatsApp settings, not in Ebda Chat"
+  ],
+  "gaps": [
+    "name_status exists in DB but NumbersScreen does not show it (verify)",
+    "No in-product way to request a name change"
+  ]
+}

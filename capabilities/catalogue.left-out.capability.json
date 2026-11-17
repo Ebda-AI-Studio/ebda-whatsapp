@@ -1,0 +1,45 @@
+{
+  "id": "catalogue.left-out",
+  "status": "live",
+  "area": "catalogue",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "منتجات مش ظاهرة في واتساب وليه",
+  "titleEn": "Products not shown on WhatsApp and why",
+  "screens": [
+    "BotScreen left-out list",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/your-products-on-whatsapp",
+  "questions": {
+    "ar": [
+      "منتج مش ظاهر في واتساب",
+      "ليه المنتج متشالش من الكتالوج؟",
+      "montag mesh zaher"
+    ],
+    "en": [
+      "A product is missing from the WhatsApp catalogue"
+    ]
+  },
+  "steps": [
+    "Reasons: no picture, picture link not https, no name, Meta refused the product; fix in the store"
+  ],
+  "edgeCases": [
+    "Variants appear as one item per option grouped by product"
+  ],
+  "gaps": [
+    "Fix happens in Ebda Store (cross-product); no deep link from Chat to the product"
+  ]
+}

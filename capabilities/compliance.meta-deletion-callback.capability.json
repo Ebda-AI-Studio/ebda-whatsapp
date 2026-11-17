@@ -1,0 +1,45 @@
+{
+  "id": "compliance.meta-deletion-callback",
+  "status": "live",
+  "area": "compliance",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "طلب مسح بيانات من فيسبوك",
+  "titleEn": "Meta data-deletion callback and status page",
+  "screens": [],
+  "api": [
+    "POST /meta/data-deletion",
+    "GET /meta/data-deletion",
+    "GET /meta/data-deletion/status?code="
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/terms-privacy-and-meta-data-deletion",
+  "questions": {
+    "ar": [
+      "شخص ربط الرقم وشال التطبيق من فيسبوك",
+      "إيه صفحة حذف البيانات؟",
+      "ازاي طلب مسح بيانات من فيسبوك؟"
+    ],
+    "en": [
+      "What is the data deletion page?"
+    ]
+  },
+  "steps": [
+    "Meta signed request removes the connections for that user; owner sees a notice; \"Needs review\" cases finished by a person"
+  ],
+  "edgeCases": [
+    "No ERASURE_HMAC_KEY: 503 and Meta retries"
+  ],
+  "gaps": [
+    "Needs-review cases are operator-only (valid: legal)",
+    "roles unverified"
+  ]
+}

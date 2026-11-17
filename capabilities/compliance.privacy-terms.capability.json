@@ -1,0 +1,43 @@
+{
+  "id": "compliance.privacy-terms",
+  "status": "live",
+  "area": "compliance",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "الشروط والخصوصية واتفاقية البيانات",
+  "titleEn": "Terms, privacy and DPA for Ebda Chat",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/terms-privacy-and-meta-data-deletion",
+  "questions": {
+    "ar": [
+      "فين شروط الاستخدام؟",
+      "بياناتي فين؟",
+      "عايز اتفاقية معالجة بيانات",
+      "privacy policy"
+    ],
+    "en": [
+      "Where are the terms and privacy policy?",
+      "Do you have a DPA?"
+    ]
+  },
+  "steps": [
+    "Legal docs published with the product; AUP in CHAT-AUP-1"
+  ],
+  "edgeCases": [
+    "Refund wording pending final ToS"
+  ],
+  "gaps": [
+    "No link from the app to the legal pages (verify)"
+  ]
+}

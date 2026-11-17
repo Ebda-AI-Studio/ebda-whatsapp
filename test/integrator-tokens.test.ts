@@ -123,7 +123,7 @@ describe('API: what an integrator token may do', () => {
       ['POST', `${s}/packages/p1/checkout`], ['GET', `${s}/packages`],
       ['DELETE', `${s}/contacts/201001234567`], ['PUT', `${s}/agent`], ['GET', `${s}/agent`], ['PATCH', `${s}/store-link/settings`], ['GET', `${s}/store-link/settings`],
       ['PUT', `${s}/connectors/c1`], ['GET', `${s}/connectors`], ['POST', `${s}/shared-number/join`],
-      ['POST', `${s}/templates`], ['POST', `${s}/templates/sync`], ['POST', `${s}/campaigns`], ['POST', `${s}/imports`],
+      ['POST', `${s}/templates`], ['POST', `${s}/templates/sync`], ['POST', `${s}/templates/install-defaults`], ['POST', `${s}/templates/cod-v2/resubmit`], ['PUT', `${s}/templates/x/ar`], ['DELETE', `${s}/templates/x/ar`], ['POST', `${s}/campaigns`], ['POST', `${s}/imports`],
       ['POST', `${s}/conversations/1/assign`], ['POST', `${s}/conversations/1/notes`],
     ];
     for (const [m, p] of surfaces) expect((await call(t, m, p, {}, m === 'GET' || m === 'DELETE' ? undefined : {})).status, `${m} ${p}`).toBe(403);

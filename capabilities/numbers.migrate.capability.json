@@ -1,0 +1,42 @@
+{
+  "id": "numbers.migrate",
+  "status": "planned",
+  "plan": "none yet (future)",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "نقل الرقم أو تغييره",
+  "titleEn": "Move/migrate to a different number or from another provider",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "عايز اغير الرقم",
+      "عندي رقم على مزود تاني",
+      "انقل الرقم من مكان تاني"
+    ],
+    "en": [
+      "How do I change my number or migrate from another provider?"
+    ]
+  },
+  "steps": [
+    "Disconnect the old number then connect the new one (campaigns/chats stay by workspace); no migration wizard"
+  ],
+  "edgeCases": [
+    "Number conflict if it is attached to another workspace"
+  ],
+  "gaps": [
+    "No migration flow or guide; moving a number from another BSP is manual at Meta"
+  ]
+}

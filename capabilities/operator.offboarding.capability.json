@@ -1,0 +1,58 @@
+{
+  "id": "operator.offboarding",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مسح حساب بالنيابة",
+  "titleEn": "Delete a workspace on behalf of a merchant (request, cancel, approve second operator, release abuse hold, run)",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/offboardings",
+    "GET /operator/workspaces/:workspaceId/offboarding",
+    "POST /operator/workspaces/:workspaceId/offboarding",
+    "DELETE /operator/workspaces/:workspaceId/offboarding",
+    "POST /operator/workspaces/:workspaceId/offboarding/approve",
+    "POST /operator/workspaces/:workspaceId/offboarding/release-hold",
+    "POST /operator/offboardings/run"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "abuse",
+    "text": "abuse hold, money >= 1,000 EGP second approver, interrupted-run recovery",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل مسح حساب بالنيابة؟",
+      "ليه مش لاقي مسح حساب بالنيابة عندي؟",
+      "عايز مسح حساب بالنيابة اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Delete a workspace on behalf of a merchant (request, cancel, approve second operator, release abuse hold, run)?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: offboarding.request (owner can do it themselves)"
+  ]
+}

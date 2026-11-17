@@ -1,0 +1,53 @@
+{
+  "id": "inbox.read-thread",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "قراية المحادثة والصور والملفات",
+  "titleEn": "Read a conversation (messages, media, long messages)",
+  "screens": [
+    "ChatPane + MediaView",
+    "view:ChatPane",
+    "/inbox",
+    "view:MediaView"
+  ],
+  "api": [
+    "GET /stores/:storeId/conversations/:id/messages",
+    "GET /stores/:storeId/messages/:messageId/body",
+    "GET /stores/:storeId/media/:messageId"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/read-a-conversation-and-live-updates",
+  "questions": {
+    "ar": [
+      "الصورة مش بتفتح",
+      "ازاي اشوف الرسالة الطويلة كاملة؟",
+      "فين الملف اللي العميل بعته؟"
+    ],
+    "en": [
+      "An image will not load",
+      "How do I read a long message?"
+    ]
+  },
+  "steps": [
+    "Open the conversation",
+    "Messages over 1 KB show \"Read the full message\"",
+    "Media is fetched with your token (blob URL)"
+  ],
+  "edgeCases": [
+    "Media failed 131053 -> \"File unavailable\"",
+    "Older messages deleted by retention",
+    "Business-app history appears but never opens the window"
+  ],
+  "gaps": []
+}

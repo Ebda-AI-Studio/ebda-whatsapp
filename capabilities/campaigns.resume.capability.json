@@ -1,0 +1,47 @@
+{
+  "id": "campaigns.resume",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "استئناف الحملة",
+  "titleEn": "Resume a paused campaign",
+  "screens": [
+    "CampaignsScreen Resume",
+    "view:CampaignsScreen",
+    "/campaigns"
+  ],
+  "api": [
+    "POST /stores/:storeId/campaigns/:id/resume"
+  ],
+  "mcpTool": null,
+  "planGate": "feat_campaigns (Growth, Pro; not Starter / store-included)",
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "كمل الحملة",
+      "الحملة وقفت وعايز اكملها",
+      "kammel el hamla"
+    ],
+    "en": [
+      "Resume the campaign"
+    ]
+  },
+  "steps": [
+    "Fix the reason shown (top up, replace template, recover number quality), then Resume"
+  ],
+  "edgeCases": [
+    "Owner only (spends money)",
+    "Number quality drops to YELLOW/RED or WhatsApp restricts the account: campaigns auto-pause, no new templates until recovered; campaigns never restart by themselves",
+    "Wallet still empty: pauses again",
+    "Template no longer approved"
+  ],
+  "gaps": []
+}

@@ -1,3 +1,11 @@
+---
+capabilities:
+  - access.roles@1
+  - team.seat-assign@1
+  - team.seat-remove@1
+  - team.seats-view@1
+---
+
 # فريقك والمقاعد في Ebda Chat
 
 باقتك بتحدد كام واحد يقدروا يشتغلوا في Ebda Chat، **وإنت منهم**: Starter والباقة المشمولة مع المتجر 2، Growth 5، Pro 15. وإنت اللي بتقرر مين ياخد المقاعد.

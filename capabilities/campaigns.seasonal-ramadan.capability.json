@@ -1,0 +1,44 @@
+{
+  "id": "campaigns.seasonal-ramadan",
+  "status": "planned",
+  "plan": "future (assistant skill)",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "حملات رمضان والعيد",
+  "titleEn": "Seasonal campaigns (Ramadan, Eid, White Friday) playbook",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "عايز اعمل حملة رمضان",
+      "امتى افضل وقت ابعت العروض؟",
+      "ramadan campaign tips"
+    ],
+    "en": [
+      "Help me plan a Ramadan campaign"
+    ]
+  },
+  "steps": [
+    "Planned: assistant playbook using campaigns + templates + hours override"
+  ],
+  "edgeCases": [
+    "Volume spikes hit tier limits and quality rating",
+    "Seasonal templates need approval lead time (hours to a day)",
+    "Special opening hours not supported by Bot hours"
+  ],
+  "gaps": [
+    "No seasonal template pack, no holiday hours"
+  ]
+}

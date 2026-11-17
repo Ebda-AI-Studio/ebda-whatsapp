@@ -1,10 +1,13 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
-  ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
+  ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto,
 } from '../../../src/core/api/contract';
 
+import type { RuleIssue } from '../../../src/core/meta/template-rules';
+import type { TemplateDraft } from '../../../src/core/template-draft';
 import type { OperatorApi, WalletApi } from './billing';
 import type { SharedTemplatesApi } from './shared-templates';
+import type { AssistantApi } from './assistant';
 
 export type ConversationFilter = 'all' | 'unread' | 'mine' | 'unassigned';
 export type Role = 'owner' | 'staff' | 'super_admin';
@@ -22,6 +25,31 @@ export interface CampaignsApi {
   remove(id: string): Promise<void>;
   segments(): Promise<SegmentDto[]>;
   preview(criteria: SegmentCriteria): Promise<SegmentPreviewDto>;
+}
+
+/**
+ * Merchant template self-service on the merchant's OWN WhatsApp account. The server checks every role; the UI only hides what the role cannot do.
+ * Rejections are ApiErrors: `detail` = exists | in_use | edit_limit (with `extra.retryAt`) | payload_changed | not_editable | not_deletable | token_unavailable | invalid_template (with `extra.issues`) | no_active_number (404).
+ */
+export interface TemplatesApi {
+  list(): Promise<{ items: TemplateDto[]; starterInstalled: boolean }>;
+  detail(name: string, language: string): Promise<TemplateDto>;
+  /** Free: Meta's rules against a draft, and the hash that `create` / `edit` must carry to prove the sent draft is the checked one. */
+  check(d: TemplateDraft): Promise<{ issues: RuleIssue[]; payloadHash: string }>;
+  create(d: TemplateDraft, expectedHash: string): Promise<{ name: string; language: string; status: string; category: TemplateDto['category']; categoryChanged: boolean }>;
+  edit(name: string, language: string, d: TemplateDraft, expectedHash: string): Promise<{ status: string }>;
+  remove(name: string, language: string): Promise<void>;
+  sync(): Promise<{ upserted: number; removed: number }>;
+  installDefaults(): Promise<{ submitted: string[]; skipped: string[]; failed: string[] }>;
+  /** Owner/staff-manager: replaces a REJECTED `cod_confirmation_v2` with a fresh submission for this store (Ruling WA-COD-V2-2). */
+  resubmitCodV2?(): Promise<{ status: string }>;
+  /** A store on the SHARED number (no own number): the platform's sendable templates and its asks for new utility ones. `list` rejects with 404 for a store that is not on the shared number. */
+  shared?: {
+    list(): Promise<SharedTemplateDto[]>;
+    requests(): Promise<SharedRequestDto[]>;
+    /** Rejects with an ApiError `rate_limited` (429, `too_many_open_requests`) at 5 open requests, and 400 `marketing_not_on_shared_number`. */
+    request(r: { name: string; language: string; category: 'UTILITY' | 'AUTHENTICATION'; body: string }): Promise<SharedRequestDto>;
+  };
 }
 
 /** Team seats (owner only; WA-SEATS-1). `assign` rejects with an ApiError `seat_limit` (status 403) when the package has no seat left, and 503 when the team cannot be read. */
@@ -93,7 +121,7 @@ export interface InboxSource {
   /** Confirm or refuse a pending COD order (the store stays the writer of order state). */
   recordCodOutcome(waId: string, orderNumber: string, outcome: 'confirmed' | 'refused'): Promise<void>;
   /** What this source can do today (e.g. COD outcomes need the store route, Phase 4). */
-  capabilities: { codOutcome: boolean; numbers?: boolean };
+  capabilities: { codOutcome: boolean; numbers?: boolean; assistant?: boolean };
   /** A displayable URL for a protected media path (fetch with the token → blob URL). */
   mediaUrl?(path: string): Promise<string>;
   /** Full text of a message longer than 1 KB. */
@@ -107,13 +135,34 @@ export interface InboxSource {
   botSettings?(): Promise<BotSettingsDto>;
   saveBotSettings?(update: BotSettingsDto): Promise<BotSettingsDto>;
   /** The merchant's Meta catalog. `provision` rejects with an error carrying `detail` = missing_permission | no_business | business_mismatch | catalog_already_set | meta_error. */
-  catalog?: { status(): Promise<CatalogStatusDto>; provision(name?: string): Promise<{ catalogId: string }> };
+  catalog?: {
+    status(): Promise<CatalogStatusDto>;
+    provision(name?: string): Promise<{ catalogId: string }>;
+    /** Starts a fresh full pass of the sync (owner). Rejects with `detail` = catalog_not_set. */
+    resync(): Promise<{ started: boolean }>;
+    /** Turns the shop button and the cart on the number on or off (owner). Rejects with `detail` = missing_permission | catalog_not_set | meta_error. */
+    setCommerce(v: { catalogVisible: boolean; cartEnabled: boolean }): Promise<{ catalogVisible: boolean; cartEnabled: boolean }>;
+  };
+  /**
+   * The owner switches (ordering bot, order confirmations, store-login codes over WhatsApp) and the sending-speed report. Turning confirmations or codes ON takes
+   * `preview` first, then `save` with its single-use token (`save` rejects with `detail` = confirm_required | confirm_invalid | confirm_expired). `throttle` is null when no number is connected.
+   */
+  switches?: {
+    get(): Promise<BotSwitchesDto>;
+    preview(change: Partial<BotSwitchesDto>): Promise<{ confirmToken: string }>;
+    save(change: Partial<BotSwitchesDto>, confirmToken?: string): Promise<BotSwitchesDto>;
+    throttle(): Promise<ThrottleReportDto | null>;
+  };
   /** Bot results: customers per step over the last 7, 30 or 90 days (Cairo calendar days, today included). Counts only; owner and staff read. */
   botFunnel?(days: 7 | 30 | 90): Promise<BotFunnelDto>;
   /** Assign a conversation (null = unassign). */
   assign?(conversationId: number, userId: string | null): Promise<void>;
   campaigns?: CampaignsApi;
+  /** Create, submit, edit and delete templates; absent in builds that cannot manage them. */
+  templatesApi?: TemplatesApi;
   numbers?: NumbersApi;
+  /** The assistant side panel (answer-only for now); offered only while `capabilities.assistant` is true (the server's own switch for this store). */
+  assistant?: AssistantApi;
   /** The team and its seats; offered to the owner only. */
   team?: TeamApi;
   contacts?: ContactsApi;
