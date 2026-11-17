@@ -7,7 +7,7 @@
  */
 import { z } from 'zod';
 
-/** The minor version of this contract (envelope `v` stays 1: every change so far is additive). v1.5 = `customer.consent_changed.wording`; v1.6 = `store.suspended` / `store.reactivated` / `store.deleted`. */
+/** The minor version of this contract (envelope `v` stays 1: every change so far is additive). v1.5 = `customer.consent_changed.wording`; v1.6 = `store.suspended` / `store.reactivated` / `store.deleted` and the optional COD-request fields (`storefrontOrigin`, `storeName`, `shippingAddressLine`, `itemCount`, `orderUrlSuffix`). */
 export const CONTRACT_VERSION = '1.6';
 
 const iso = z.string().datetime({ offset: true });
@@ -25,7 +25,8 @@ export const storeEventSchema = z.discriminatedUnion('type', [
   // v1.4 (additive, WA-GRACE-1): `pastDueSince` = when the subscription first went past_due (set only while status is past_due). WhatsApp ends its
   // grace at min(periodEnd, pastDueSince + 7 days).
   ev('store.plan_changed', z.object({ planCode: z.string(), includesWhatsApp: z.boolean(), ownerUserId: z.string(), effectiveAt: iso, status: planStatus.optional(), periodEnd: iso.optional(), pastDueSince: iso.optional() })),
-  ev('store.linked', z.object({ ownerUserId: z.string() })),
+  // v1.6 (additive): `storefrontOrigin` = where the store's customers shop (its custom domain, else the platform subdomain). Chat submits its per-store COD v2 template (fixed URL base) with it.
+  ev('store.linked', z.object({ ownerUserId: z.string(), storefrontOrigin: z.string().url().max(200).optional() })),
   ev('store.unlinked', z.object({ ownerUserId: z.string() })),
   ev('catalog.product_upserted', z.object({ productId: z.string().min(1), variantIds: z.array(z.string().min(1)), updatedAt: iso })),
   ev('catalog.product_deleted', z.object({ productId: z.string().min(1), variantIds: z.array(z.string().min(1)), updatedAt: iso })),
@@ -38,6 +39,11 @@ export const storeEventSchema = z.discriminatedUnion('type', [
     orderId: z.string().min(1), buyerKey: key, phoneE164: phone, locale, deadlineAt: iso,
     // Not in the contract's minimum; the Store should add them. Without them we look the order up by id.
     orderNumber: z.string().min(1).optional(), totalMinor: z.number().int().nonnegative().optional(), currency: z.string().length(3).optional(),
+    // v1.6 (additive, all optional: an older Chat ignores them): what the richer COD message shows. `shippingAddressLine` is PII for the
+    // same customer only (never logged). `orderUrlSuffix` is the storefront path of the customer's order page (account/orders/<uuid>, sign-in
+    // gated), joined to `storefrontOrigin` for the template's URL button.
+    storeName: z.string().min(1).max(60).optional(), shippingAddressLine: z.string().min(1).max(300).optional(), itemCount: z.number().int().min(1).max(9999).optional(),
+    orderUrlSuffix: z.string().min(1).max(200).optional(), storefrontOrigin: z.string().url().max(200).optional(),
   })),
   ev('order.status_changed', z.object({ orderId: z.string().min(1), status: z.string().min(1), updatedAt: iso })),
   ev('shipment.updated', z.object({
