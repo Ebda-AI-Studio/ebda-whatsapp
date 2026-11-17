@@ -58,8 +58,8 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],
   "d1_databases": [
     { "binding": "DB", "database_name": "ebda-wa-platform", "database_id": "80c011f6-b03c-4289-b20a-102aa3ca79ef", "migrations_dir": "migrations/d1" },
-    // Shared InstaPay duplicate index (docs/rulings/INSTAPAY-AUTO-1.md ruling 1.10). The all-zero id is a PLACEHOLDER: the real id of ebda-instapay-dedupe replaces it in this same PR once the D1 exists. Do not merge before.
-    { "binding": "INSTAPAY_DEDUPE_DB", "database_name": "ebda-instapay-dedupe", "database_id": "00000000-0000-0000-0000-000000000000" }
+    // Shared InstaPay duplicate index (docs/rulings/INSTAPAY-AUTO-1.md ruling 1.10). Created 2026-11-17 on the personal Cloudflare account (schema = DEDUPE_SCHEMA_SQL, applied). Auto-confirm still needs INSTAPAY_BRIDGE_SECRET (secret) and the brain secret of the same value, and stays mode off until an operator sets shadow.
+    { "binding": "INSTAPAY_DEDUPE_DB", "database_name": "ebda-instapay-dedupe", "database_id": "2b86d92e-f14a-4270-a646-225d8b2766f6" }
   ],
   "r2_buckets": [
     { "binding": "MEDIA", "bucket_name": "ebda-wa-media" },
