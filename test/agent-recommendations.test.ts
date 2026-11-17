@@ -291,6 +291,17 @@ describe('recommendProducts default (Ruling WA-RECS-1)', () => {
     const r = await workspace(dst).importSnapshot(`backups/${src}/2026-11-17/`);
     expect(r.ok).toBe(true);
     expect((await settingsOf(dst)).recommendProducts).toBe(false);
+    // agent_state is exactly what the backup held: restore writes no hidden default row
+    expect((await rows<{ n: number }>(dst, 'SELECT count(*) AS n FROM agent_state'))[0]!.n).toBe((await rows<{ n: number }>(src, 'SELECT count(*) AS n FROM agent_state'))[0]!.n);
+  });
+
+  it('a backup that HAS a recommendProducts row restores it as stored, with agent_state row counts equal', async () => {
+    const src = W(36), dst = W(37);
+    await shop(src); // saved settings: the row is explicit
+    await workspace(src).exportSnapshot('2026-11-17');
+    expect((await workspace(dst).importSnapshot(`backups/${src}/2026-11-17/`)).ok).toBe(true);
+    expect((await settingsOf(dst)).recommendProducts).toBe(true);
+    expect((await rows<{ n: number }>(dst, 'SELECT count(*) AS n FROM agent_state'))[0]!.n).toBe((await rows<{ n: number }>(src, 'SELECT count(*) AS n FROM agent_state'))[0]!.n);
   });
 
   it('a retried turn (same message id) that sends nothing keeps the set it already sent in the daily count', async () => {

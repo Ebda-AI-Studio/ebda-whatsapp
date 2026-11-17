@@ -2654,8 +2654,9 @@ export class WorkspaceDO extends DurableObject<Env> {
           this.sql.exec(`INSERT INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, ...cols.map((c) => row[c] as SqlStorageValue));
         }
       }
-      // WA-RECS-1: a backup taken before the ruling has no recommendProducts row; into a fresh (marked ON) workspace it must stay OFF, like the workspace it came from.
-      this.sql.exec("INSERT OR IGNORE INTO agent_state (key, value) VALUES ('setting.recommendProducts', '0')");
+      // WA-RECS-1: a backup without a recommendProducts row (taken before the ruling) must stay OFF in a fresh, marked-ON workspace. The marker is dropped here;
+      // agent_state is restored EXACTLY as backed up (no extra row), the default comes from workspace_meta, which is not a backed-up table.
+      if (!this.sql.exec("SELECT 1 FROM agent_state WHERE key = 'setting.recommendProducts'").toArray().length) this.sql.exec("DELETE FROM workspace_meta WHERE key = 'recs_default_on'");
     });
     this.rebuildFts();
     return { manifest, erasedSkipped };
