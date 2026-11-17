@@ -319,3 +319,38 @@ describe('handoff vs erasure in the bot results', () => {
     expect(await rows(ws, 'SELECT step FROM bot_funnel_markers ORDER BY step')).toEqual([{ step: 'conversation' }]);
   });
 });
+
+describe('handoff safety net (Ruling CHAT-EVAL-1b)', () => {
+  it.each([
+    ['تمام، هحوّلك لحد من فريقنا يكمّل معاك.', 'ar'],
+    ['Sure, I am handing you over to a member of our team.', 'en'],
+    ['A team member will get back to you shortly.', 'en'],
+  ])('a reply that promises a person ("%s") without the tool opens a real handoff instead of leaving the customer waiting', async (words) => {
+    const ws = W(91 + seq++ % 3);
+    const pn = await agentWorkspace(ws, { language: 'auto' });
+    await grant(ws);
+    model([{ text: words }]);
+    await say(ws, pn, text('ينفع ارجع المنتج؟'), stubGraph());
+    expect((await rows(ws, 'SELECT reason FROM agent_handoffs'))[0]).toEqual({ reason: 'model' });
+    expect(await tags(ws)).toContain('needs_human');
+  });
+
+  it('an ordinary answer that merely mentions a team or a transfer is not a handoff', async () => {
+    const ws = W(94);
+    const pn = await agentWorkspace(ws, { language: 'auto' });
+    await grant(ws);
+    model([{ text: 'أيوه، تقدر ترجّع المنتج خلال 14 يوم.' }]);
+    await say(ws, pn, text('ينفع ارجع المنتج؟'), stubGraph());
+    expect(await rows(ws, 'SELECT reason FROM agent_handoffs')).toEqual([]);
+  });
+
+  it('two rounds in a row of made-up tools hand the customer to a person at once (bad_output), not after the round cap', async () => {
+    const ws = W(95);
+    const pn = await agentWorkspace(ws, { language: 'auto' });
+    await grant(ws);
+    const m = model([{ tools: [{ name: 'does_not_exist' }] }, { tools: [{ name: 'also_made_up' }] }]);
+    await say(ws, pn, text('عايز فستان'), stubGraph());
+    expect(m.callCount).toBe(2);
+    expect((await rows(ws, 'SELECT reason FROM agent_handoffs'))[0]).toEqual({ reason: 'bad_output' });
+  });
+});

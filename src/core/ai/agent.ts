@@ -237,6 +237,13 @@ function historyOf(host: LinkHost, input: BotInput): ChatTurn[] {
   return turns;
 }
 
+/**
+ * A reply that PROMISES a person ("هحوّلك لحد من فريقنا", "I am handing you over to a team member") without the handoff tool having run would leave the
+ * customer waiting for someone nobody paged (measured 2026-11-17: the live eval's model said it in prose). The words are checked here, in code, not trusted to the model.
+ */
+const HANDOFF_CLAIM = /ه(?:ا)?حوّ?ل(?:ك|لك)|هوصّ?لك (?:ب|ل)(?:حد|موظف|فريق|خدمة)|(?:حد|واحد) من (?:فريقنا|الفريق|خدمة العملاء) (?:ه|ي)(?:رد|كلم|تواصل)|\b(?:i(?:'| a)?m|i will|i'll|let me) (?:hand(?:ing)?|transfer(?:ring)?|connect(?:ing)?|pass(?:ing)?)(?: you| this)?(?: over)? (?:to|with) (?:a |one of |our |the )?(?:member of (?:our |the )?(?:team|staff)|team|human|person|colleague|agent|staff|support)|\b(?:a|our) (?:team member|colleague|human|agent) will (?:reply|contact|get back|reach)/i;
+export const claimsHandoff = (t: string): boolean => HANDOFF_CLAIM.test(t) || HANDOFF_CLAIM.test(normaliseText(t));
+
 async function callModel(provider: LlmProvider, req: Parameters<LlmProvider['complete']>[0]): Promise<LlmResponse> {
   try {
     return await provider.complete(req);
@@ -270,6 +277,7 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   const tools = [...toolDefs(availability), ...(connectors?.tools ?? [])];
   let connectorCalls = 0;
   let executed = 0;
+  let badRounds = 0;
   const persona = settings.persona.trim() || copy.defaultPersona[locale];
   // The merchant's declared facts (every turn) and the customer's profile (cached per conversation) come from the Store; both are rendered for the prompt and vouched for the reply guard.
   const [policies, profile] = await Promise.all([loadPolicies(host, bridge), loadProfile(host, bridge, input.from, now)]);
@@ -306,10 +314,12 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
       putAgentState(host.sql, 'latency_ewma_ms', String(Math.round(recent > 0 ? recent * 0.7 + elapsed * 0.3 : elapsed)));
       // Cards without words still go out, with the store's own one-line lead-in.
       const text = cleanReply(res.text) ?? (ctx.cards.length ? (storeLink().copy?.t.cards.listBody[locale] ?? null) : null);
+      if (text && claimsHandoff(text)) return { kind: 'handoff', reason: 'model' };
       return text ? { kind: 'reply', text, cards: ctx.cards } : { kind: 'handoff', reason: res.text ? 'bad_output' : 'no_answer' };
     }
     if (!acked && Date.now() - started >= agentConfig().slowMs) await ack();
     messages.push({ role: 'assistant', content: res.text ?? '', toolCalls: calls });
+    let malformed = 0;
     for (const call of calls) {
       if (++executed > MAX_TOOL_CALLS_PER_TURN) {
         messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify({ error: 'tool_budget' }) });
@@ -327,9 +337,13 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
       const out = await runTool(ctx, call);
       if ('handoff' in out) return { kind: 'handoff', reason: 'model' };
       if ('startOrder' in out) return { kind: 'order' };
+      if (/^\{"error":"(unknown_tool|invalid_arguments)"\}$/.test(out.content)) malformed++;
       trusted.addStoreResult(out.content);
       messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: out.content });
     }
+    // Every call of two rounds in a row was unusable (a made-up tool, arguments that do not parse): the model is not coping, a person takes over now instead of after the round cap.
+    badRounds = malformed === calls.length ? badRounds + 1 : 0;
+    if (badRounds >= 2) return { kind: 'handoff', reason: 'bad_output' };
     if (turnGone(host, input)) throw new Aborted();
   }
   return { kind: 'handoff', reason: 'no_answer' };
