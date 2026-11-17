@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { OpenAiCompatibleProvider } from '../src/core/ai/provider';
+import { OpenAiCompatibleProvider, WorkersAiProvider, type AiBinding } from '../src/core/ai/provider';
 import { CASES } from './eval/golden-cases';
 import { runCase, scoreboard, type Verdict } from './eval/run';
 import { useAgent } from './helpers/agent';
@@ -21,12 +21,32 @@ const agent = useAgent();
 describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () => {
   it('scores every case with the rubric', async () => {
     const host = new URL(e.CHAT_EVAL_BASE_URL!).host;
-    const make = () => new OpenAiCompatibleProvider({ baseUrl: e.CHAT_EVAL_BASE_URL!, apiKey: e.CHAT_EVAL_API_KEY!, model: e.CHAT_EVAL_MODEL! });
-    const other = (url: string, init: RequestInit | undefined) => (new URL(url).host === host ? realFetch(url, init) : undefined);
+    // Workers AI (the production path): the SAME WorkersAiProvider production runs, over a binding that calls the account's REST run endpoint (CHAT_EVAL_BASE_URL = .../accounts/<id>/ai/v1).
+    const restBinding: AiBinding = {
+      async run(model, rawInputs) {
+        // Until foundation fdn#100 is vendored, WorkersAiProvider sends content:null on tool-calling turns and Workers AI answers 400; coerce so the eval measures the MODEL.
+        const inputs = { ...rawInputs, messages: (rawInputs.messages as { content: unknown }[]).map((m) => (m.content === null ? { ...m, content: '' } : m)) };
+        const res = await realFetch(`${e.CHAT_EVAL_BASE_URL!.replace(/\/v1\/?$/, '')}/run/${model}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${e.CHAT_EVAL_API_KEY!}` }, body: JSON.stringify(inputs) });
+        if (!res.ok) console.log(`CHAT_EVAL_HTTP ${res.status} ${(await res.clone().text()).slice(0, 300)}`);
+        if (!res.ok) throw new Error(`workers-ai ${res.status} ${(await res.text()).slice(0, 200)}`);
+        return ((await res.json()) as { result: unknown }).result;
+      },
+    };
+    const make = () => host === 'api.cloudflare.com' ? new WorkersAiProvider(restBinding, e.CHAT_EVAL_MODEL!) : new OpenAiCompatibleProvider({ baseUrl: e.CHAT_EVAL_BASE_URL!, apiKey: e.CHAT_EVAL_API_KEY!, model: e.CHAT_EVAL_MODEL! });
+    // A failing model call is logged (status + first 300 chars of the body) so a provider_error is never a mystery; the key is never printed.
+    const other = (url: string, init: RequestInit | undefined) => {
+      if (new URL(url).host !== host) return undefined;
+      return realFetch(url, init).then(async (res) => {
+        if (!res.ok) console.log(`CHAT_EVAL_HTTP ${res.status} ${(await res.clone().text()).slice(0, 300)}`);
+        return res;
+      });
+    };
     const verdicts: Verdict[] = [];
     for (const [i, c] of CASES.entries()) {
       if (e.CHAT_EVAL_ONLY && c.group !== e.CHAT_EVAL_ONLY) continue;
-      verdicts.push(await runCase(c, { fake: link.fake, agent, other }, i, make));
+      const v = await runCase(c, { fake: link.fake, agent, other }, i, make);
+      if (!v.pass) console.log(`CHAT_EVAL_FAIL ${JSON.stringify({ id: v.id, failed: v.failed, outcome: v.run.outcome, tools: v.run.tools.map((t) => t.name), reply: v.run.replies.join(' | ').slice(0, 200) })}`);
+      verdicts.push(v);
     }
     const board = scoreboard(verdicts);
     console.log(`CHAT_EVAL_SCOREBOARD ${JSON.stringify({ model: e.CHAT_EVAL_MODEL, ...board })}`);
