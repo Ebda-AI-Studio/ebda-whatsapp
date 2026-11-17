@@ -1,18 +1,18 @@
 import { Hono } from 'hono';
 import { agentSettingsUpdate } from '../core/api/contract';
-import { apiError, workspaceStub, type ApiEnv } from './shared';
+import { apiError, managesStore, workspaceStub, type ApiEnv } from './shared';
 
 export const agentRoutes = new Hono<ApiEnv>();
 
 // The agent's settings (persona, FAQ, endpoint) are the merchant's to read and change: owner only.
 agentRoutes.get('/stores/:storeId/agent', async (c) => {
-  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  if (!managesStore(c)) return apiError(c, 403, 'forbidden');
   const ws = await workspaceStub(c);
   return ws ? c.json(await ws.getAgentSettings()) : apiError(c, 404, 'not_found');
 });
 
 agentRoutes.put('/stores/:storeId/agent', async (c) => {
-  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  if (!managesStore(c)) return apiError(c, 403, 'forbidden');
   // The agent speaks to customers and may promise refunds and discounts: an operator's session (a super admin, even one who is also a member) never changes it; operators have no store-route writes.
   if (c.get('storeRole') === 'super_admin') return apiError(c, 403, 'forbidden', 'operator_session');
   const body = agentSettingsUpdate.safeParse(await c.req.json().catch(() => null));
