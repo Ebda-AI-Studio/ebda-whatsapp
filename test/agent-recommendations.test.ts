@@ -258,25 +258,57 @@ describe('recommend_products', () => {
 describe('recommendProducts default (Ruling WA-RECS-1)', () => {
   const settingOf = async (id: string) => (await rows<{ value: string }>(id, "SELECT value FROM agent_state WHERE key = 'setting.recommendProducts'"))[0]?.value;
 
-  it('a workspace created now gets an explicit ON row', async () => {
+  const settingsOf = (id: string) => workspace(id).getAgentSettings();
+  const bareWorkspace = async (id: string) => { await workspace(id).ingest({ phoneNumberId: 'pn', inbound: [{ wamid: `wamid.${id}`, from: '201000000001', ts: 1000, type: 'text', text: 'hi' }], statuses: [], receivedAt: 1 }); };
+
+  it('a workspace created now reads ON, and migrate() wrote nothing into agent_state (a restore needs it empty)', async () => {
     const id = W(30);
-    await shop(id);
-    expect(await settingOf(id)).toBe('1');
-    expect((await workspace(id).getAgentSettings()).recommendProducts).toBe(true);
+    await bareWorkspace(id);
+    expect((await settingsOf(id)).recommendProducts).toBe(true);
+    expect(await rows(id, 'SELECT 1 FROM agent_state')).toEqual([]);
   });
 
-  it('a workspace that existed before the migration (schema at v45, no row) is switched OFF, and stays OFF when the merchant saves other settings', async () => {
+  it('a workspace that existed before v46 (no marker, no row) reads OFF, and stays OFF when the merchant saves other settings', async () => {
     const id = W(31);
     await shop(id);
     await runInDurableObject(workspace(id), (_i, state) => {
       state.storage.sql.exec("DELETE FROM agent_state WHERE key = 'setting.recommendProducts'");
+      state.storage.sql.exec('DELETE FROM workspace_meta');
       state.storage.sql.exec('DELETE FROM _migrations WHERE version >= 46');
-      migrate(state.storage);
+      state.storage.sql.exec('DROP TABLE workspace_meta');
+      migrate(state.storage); // an old workspace: done > 0, so no marker is written
     });
-    expect(await settingOf(id)).toBe('0');
-    expect((await workspace(id).getAgentSettings()).recommendProducts).toBe(false);
+    expect(await rows(id, "SELECT 1 FROM workspace_meta WHERE key = 'recs_default_on'")).toEqual([]);
+    expect((await settingsOf(id)).recommendProducts).toBe(false);
     expect((await workspace(id).setAgentSettings({ persona: 'x' })).ok).toBe(true);
-    expect(await settingOf(id)).toBe('0');
+    expect((await settingsOf(id)).recommendProducts).toBe(false);
+  });
+
+  it('a backup restores into a fresh workspace, and a pre-v46 backup (no recommendProducts row) restores OFF', async () => {
+    const src = W(33), dst = W(34);
+    await bareWorkspace(src); // no agent_state rows at all: what a pre-v46 backup carries
+    await workspace(src).exportSnapshot('2026-11-17');
+    const r = await workspace(dst).importSnapshot(`backups/${src}/2026-11-17/`);
+    expect(r.ok).toBe(true);
+    expect((await settingsOf(dst)).recommendProducts).toBe(false);
+  });
+
+  it('a retried turn (same message id) that sends nothing keeps the set it already sent in the daily count', async () => {
+    const id = W(35);
+    await shop(id);
+    const { openChat } = await import('./helpers/workspace');
+    await openChat(id, '201005550002', { wamid: 'wamid.retry.1' });
+    const mid = (await rows<{ id: number }>(id, "SELECT m.id FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id WHERE ct.wa_id = '201005550002'"))[0]!.id;
+    const after = await runInDurableObject(workspace(id), async (_i, state) => {
+      const sql = state.storage.sql;
+      const now = Date.now();
+      sql.exec('INSERT INTO agent_state (key, value) VALUES (?, ?)', `recs:${mid}`, JSON.stringify({ at: now - 1000, ids: ['sent1'] }));
+      const ctx = { host: { sql, workspaceId: id, env: {} }, from: '201005550002', bridge: {}, availability: {}, locale: 'ar', cards: [], messageId: mid } as never;
+      const out = await recommendProducts(ctx, { basis: 'budget', query: 'x' }, { search: async () => ({ results: [] }), show: async () => ({}) }, now);
+      return { out, row: sql.exec<{ value: string }>('SELECT value FROM agent_state WHERE key = ?', `recs:${mid}`).toArray()[0]?.value };
+    });
+    expect(after.out).toMatchObject({ error: 'nothing_to_recommend' });
+    expect(JSON.parse(after.row!).ids).toEqual(['sent1']);
   });
 
   it('while OFF nothing is recommended (the tool is not offered and the bridge is never called); the merchant opt-in turns it on', async () => {

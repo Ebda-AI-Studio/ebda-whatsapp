@@ -12,7 +12,7 @@ import { buyerKey } from '../buyer-key';
 import { isE164 } from '../phone';
 import { storeLink } from '../store-link';
 import { MAX_RETAILER_ID, type CatalogRow, type RecommendationRequest } from '../store-bridge';
-import { putAgentState } from './settings';
+import { getAgentState, putAgentState } from './settings';
 import type { ToolDef } from './provider';
 import type { ToolContext } from './tools';
 
@@ -68,6 +68,8 @@ export async function recommendProducts(ctx: ToolContext, a: RecommendArgs, deps
   if (ctx.recommended) return { error: 'already_recommended_this_turn' };
   const win = windowOf(ctx, now);
   if (win.count >= RECS_PER_DAY) return { error: 'rate_limited', note: 'Enough suggestions were sent already today: answer in plain words, do not suggest more products.' };
+  // A retried turn reuses its message id: keep what it already sent so a failed retry restores it instead of erasing it from the daily count.
+  const previous = getAgentState(ctx.host.sql, keyOf(ctx.messageId));
   putAgentState(ctx.host.sql, keyOf(ctx.messageId), JSON.stringify({ at: now, ids: [] }));
   let sent = false;
   try {
@@ -75,7 +77,10 @@ export async function recommendProducts(ctx: ToolContext, a: RecommendArgs, deps
     sent = Boolean((ctx as ToolContext).recommended); // set by recommendOnce once cards went out (TS narrows the early return above)
     return out;
   } finally {
-    if (!sent) ctx.host.sql.exec('DELETE FROM agent_state WHERE key = ?', keyOf(ctx.messageId));
+    if (!sent) {
+      if (previous === null) ctx.host.sql.exec('DELETE FROM agent_state WHERE key = ?', keyOf(ctx.messageId));
+      else putAgentState(ctx.host.sql, keyOf(ctx.messageId), previous);
+    }
   }
 }
 

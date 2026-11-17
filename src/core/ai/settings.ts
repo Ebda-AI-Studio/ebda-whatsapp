@@ -9,8 +9,8 @@ import type { PromisePolicy } from './reply-guard';
 /** Workspace settings of the AI agent (stored as key/value text in `agent_state`). The shape is the API contract's. */
 export const agentSettingsSchema = agentSettingsFields;
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;
-export const DEFAULT_AGENT_SETTINGS: AgentSettings = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', tone: 'warm', notifyPhone: null, provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, recommendProducts: true };
-// recommendProducts: the default above is what a workspace with no stored row reads; the stored row is always written (v46 migration: OFF for workspaces that existed before Ruling WA-RECS-1, ON for new ones).
+export const DEFAULT_AGENT_SETTINGS: AgentSettings = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', tone: 'warm', notifyPhone: null, provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, recommendProducts: false };
+// recommendProducts (Ruling WA-RECS-1): a stored row wins; with none, a workspace created after the ruling reads ON (workspace_meta marker) and an older one OFF.
 /** The promise policy the reply guard applies (Ruling WA-GUARD-PROMISE-1): off unless the merchant switched it on. */
 export const promisePolicyOf = (s: AgentSettings): PromisePolicy => ({ refund: s.allowRefund, discount: s.allowDiscount, freeDelivery: s.allowFreeDelivery, exchange: s.allowExchange, guarantee: s.allowGuarantee });
 const BOOLEAN_KEYS: ReadonlySet<keyof AgentSettings> = new Set(['enabled', 'allowRefund', 'allowDiscount', 'allowFreeDelivery', 'allowExchange', 'allowGuarantee', 'recommendProducts']);
@@ -28,7 +28,7 @@ export const putAgentState = (sql: Sql, key: string, value: string): void => {
 
 export function readAgentSettings(sql: Sql): AgentSettings {
   const stored = new Map(sql.exec<{ key: string; value: string }>("SELECT key, value FROM agent_state WHERE key LIKE 'setting.%'").toArray().map((r) => [r.key.slice(8), r.value]));
-  const out: AgentSettings = { ...DEFAULT_AGENT_SETTINGS };
+  const out: AgentSettings = { ...DEFAULT_AGENT_SETTINGS, recommendProducts: sql.exec("SELECT 1 FROM workspace_meta WHERE key = 'recs_default_on'").toArray().length > 0 };
   for (const k of KEYS) {
     const v = stored.get(k);
     if (v === undefined) continue;

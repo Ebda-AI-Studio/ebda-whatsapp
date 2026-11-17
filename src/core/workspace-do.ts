@@ -2649,6 +2649,8 @@ export class WorkspaceDO extends DurableObject<Env> {
           this.sql.exec(`INSERT INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, ...cols.map((c) => row[c] as SqlStorageValue));
         }
       }
+      // WA-RECS-1: a backup taken before the ruling has no recommendProducts row; into a fresh (marked ON) workspace it must stay OFF, like the workspace it came from.
+      this.sql.exec("INSERT OR IGNORE INTO agent_state (key, value) VALUES ('setting.recommendProducts', '0')");
     });
     this.rebuildFts();
     return { manifest, erasedSkipped };
