@@ -1,6 +1,6 @@
 {
-  "tag": "v0.3.1",
-  "commit": "ee185f498d1a88a40d49592a113651eefc5dd241",
+  "tag": "v0.3.2",
+  "commit": "3ef654b3689e7835299e691c42c599626ad5aee5",
   "dir": "foundation",
   "parity": "test/foundation-parity.test.ts",
   "files": {
@@ -16,7 +16,7 @@
     "foundation/instapay-digest.ts": "af5d0ff2a9f126c03681eb44e82136f50954d6aeaa5fcdeb7cc59e3dcd338b5f",
     "foundation/instapay-extract.ts": "82af206b9fac70738257274ca80cd622e543fd4b1208268dec2b9702ce11ca88",
     "foundation/instapay-state.ts": "ecbebbd1f5c081b4eef178d789cee425b775f064a5b63b1b6a79c4a2a302d88a",
-    "foundation/package.json": "c124cff5a50ba94969a6ceb394684bfa6acbe5d52a88e62cbf6c63487a646606",
+    "foundation/package.json": "998a83dc109262b6c3324ec2ee30e48f0e4265ccad9062e911332f948c22abc6",
     "foundation/phone.ts": "30d8982b7094b392d00795685fd7cb5d4f0b482d6ff564c7aec40d6eb67f5f97",
     "foundation/ratchet.ts": "3c5d4bf29c9ccefdc5b876dc2722031eedf1af74c90bada61674f9d449f13ecb",
     "foundation/self-service-routes.ts": "d02168fd4f8132ea9562a356994f6104f96262a2285b1bdccf423c0b3d92ad99",
@@ -42,7 +42,7 @@
     "foundation/smart-layer/handoff.ts": "4943c2b3255eaf3a5533915ee7bfc538c7b7cd840fbbd02175b7163781c199ad",
     "foundation/smart-layer/help.ts": "be1dcc8e493ddfe44bfd4fa616da6ca12bd22638044b65410dcf983e1cceaf1e",
     "foundation/smart-layer/index.ts": "5e563b3fe78459319d00fd27bb62e741bb6b7214e73d363425789f1d9741a7bf",
-    "foundation/smart-layer/loop.ts": "0af7063d23d4b297a96209daf069b486ea12a76a1ba74a2fc18b9f0b4ef18726",
+    "foundation/smart-layer/loop.ts": "fcee9e78aaa89a29aca56c22cb21feb73ab59fc060e55be33880e81fafc3cd98",
     "foundation/smart-layer/models.ts": "c6fa3f1f13867e710f632ee55794cceeae3195dded2d4904dc07c7b8d6496242",
     "foundation/smart-layer/plan/budget.ts": "c5db4b104ceb6f77d33ab0979c2313c00e9c1970951174bfc59ac0c8a507778c",
     "foundation/smart-layer/plan/select-tools.ts": "d12447984c2706b74a185feb53dac75989ce218ae9127a23ab324445afd1fb77",
@@ -54,7 +54,7 @@
     "foundation/smart-layer/rails/mask.ts": "88ec0a96b0b43dff2585fb27f2cf190a6ac01734875c3df79440744b6abddff6",
     "foundation/smart-layer/rails/register.ts": "9d3d86fc7dde808f7f0217f359ed27c7b324630dcb01c8920da1c2f46469518e",
     "foundation/smart-layer/rails/scope.ts": "99b70a838d13e0c469d249366720b26757e0a36ffdc0b8879e0b5b380bd217d4",
-    "foundation/smart-layer/rails/secrets.ts": "dad2fa982df4f937e0b86aedbc71b8346634ea97766f8711200e435cb111d49a",
+    "foundation/smart-layer/rails/secrets.ts": "07e3942e1bee2ecb80c1e9334ec82abf443eb7adb8bbaee03a041ef859c02ed9",
     "foundation/smart-layer/rails/ui-truth.ts": "1c798b52c270ec0cf38ce1102818b40ab5b791919b327f3797bfba5d18d9a099",
     "foundation/smart-layer/registry-view.ts": "152cb25d21485d5f1648a125e166683d2aa9ae719bf68dd405740de7ee12d0ae",
     "foundation/smart-layer/release.ts": "a78daa4b051616370147ef17ed0e7f4f56599d313ffd8163ca55a6ce44367fe3",
@@ -72,7 +72,7 @@
     "foundation/vectors/smart-layer-links.json": "1c66a7d32a057b26437630e2375ba5e9556325e0c1d988cd2ee836fff7a2c96c",
     "foundation/vectors/smart-layer-mask.json": "7d67264a3ca83ad354602887d2770ec7dad9b8a23a0bdb232a5d09b400b4ce8c",
     "foundation/vectors/smart-layer-scope.json": "135e0512c60e58be02ec825dd72677c2b96d9816f21c9a7dec8c05624dc83610",
-    "foundation/vectors/smart-layer-secrets.json": "c8e957fdfe4f6701997d97f941773bdc62664f37f48b12256b7ce17f82f5909e",
+    "foundation/vectors/smart-layer-secrets.json": "cd8862c7bcce1d467f3e792278622f69fcb894b397e133ba11a4149840b69edb",
     "test/foundation-parity.test.ts": "6172e3526f37e75f763aeb24e65de0195eabd93fafa85979ca4e2fd7536bc290"
   },
   "managed": []

@@ -1,4 +1,4 @@
-import { FileText, LogOut, Megaphone, MessagesSquare, Bot, Phone, ShieldCheck, Sparkles, Users, UsersRound, Wallet } from 'lucide-react';
+import { CircleHelp, FileText, LogOut, Megaphone, MessagesSquare, Bot, Phone, ShieldCheck, Sparkles, Users, UsersRound, Wallet } from 'lucide-react';
 import { BRAND } from '@brand';
 import type { ReactNode } from 'react';
 import type { Strings } from '../i18n';
@@ -6,7 +6,7 @@ import type { Strings } from '../i18n';
 // Only sections that exist are listed: settings join the rail when their screen ships.
 export type View = 'inbox' | 'campaigns' | 'templates' | 'contacts' | 'agent' | 'bot' | 'numbers' | 'wallet' | 'team' | 'operator';
 
-export function Rail({ t, view, onNavigate, show, onSignOut }: { t: Strings; view: View; onNavigate: (v: View) => void; show: Record<Exclude<View, 'inbox'>, boolean>; onSignOut?: (() => void) | undefined }) {
+export function Rail({ t, view, onNavigate, show, onSignOut, assistant }: { t: Strings; view: View; onNavigate: (v: View) => void; show: Record<Exclude<View, 'inbox'>, boolean>; onSignOut?: (() => void) | undefined; assistant?: { open: boolean; onToggle: () => void } | undefined }) {
   const item = (v: View, icon: ReactNode, label: string) => (
     <a href={`#${v}`} aria-current={view === v ? 'page' : undefined} onClick={(e) => { e.preventDefault(); onNavigate(v); }}>{icon}<span>{label}</span></a>
   );
@@ -23,6 +23,7 @@ export function Rail({ t, view, onNavigate, show, onSignOut }: { t: Strings; vie
       {show.wallet && item('wallet', <Wallet size={20} aria-hidden />, t.walletNav)}
       {show.team && item('team', <UsersRound size={20} aria-hidden />, t.teamNav)}
       {show.operator && item('operator', <ShieldCheck size={20} aria-hidden />, t.opNav)}
+      {assistant && <button type="button" id="assistant-launcher" className="rail-assistant" aria-expanded={assistant.open} aria-controls="assistant-panel" aria-keyshortcuts="Control+J Meta+J" onClick={assistant.onToggle}><CircleHelp size={20} aria-hidden /><span>{t.assistantNav}</span></button>}
       {onSignOut && <button type="button" className="rail-signout" onClick={onSignOut}><LogOut size={20} aria-hidden /><span>{t.signOut}</span></button>}
     </nav>
   );

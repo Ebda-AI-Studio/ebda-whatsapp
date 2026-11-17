@@ -227,13 +227,14 @@ function unparkUnsent(host: LinkHost, id: string, now: number): void {
  * running|scheduled -> paused. A manual pause also holds the messages already queued for the scheduler; a pause for a reason that is
  * not the merchant's (empty wallet, template withdrawn) lets the already-reserved pages go out and only stops new pages.
  */
-export async function pauseCampaign(host: LinkHost, id: string, reason: PauseReason, now: number): Promise<Transition> {
+/** `park` holds what is already queued even for a money reason (a wallet debt suspension refuses every send, so reserved pages must not run into it and fail their audience). */
+export async function pauseCampaign(host: LinkHost, id: string, reason: PauseReason, now: number, park = false): Promise<Transition> {
   const c = read(host, id);
   if (!c) return { ok: false, reason: 'not_found' };
   if (c.status !== 'running' && c.status !== 'scheduled') return { ok: false, reason: 'bad_state' };
   host.sql.exec("UPDATE campaigns SET status = 'paused', pause_reason = ?, updated_at = ? WHERE id = ?", reason, now, id);
   // The merchant's own pause, a quality pause and an operator pause all hold what is already queued; the money reasons let reserved pages go out.
-  if (reason === 'manual' || reason === 'quality_flagged' || reason === 'operator_paused') parkUnsent(host, id, now);
+  if (park || reason === 'manual' || reason === 'quality_flagged' || reason === 'operator_paused' || reason === 'store_suspended') parkUnsent(host, id, now);
   return { ok: true, campaign: await view(host, read(host, id)!, false), launch: false };
 }
 

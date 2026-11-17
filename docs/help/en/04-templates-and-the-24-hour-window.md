@@ -1,6 +1,8 @@
 ---
 capabilities:
   - inbox.send-template@1
+  - templates.ai-writer@1
+  - templates.check-draft@1
   - inbox.send-text@1
   - inbox.window-status@1
   - templates.install-defaults@2
@@ -67,3 +69,6 @@ If you send from the shared number, you use the ready-made templates the platfor
 
 ---
 Last checked: 2026-11-14. Meta's rules change; if the Meta screen in front of you differs from this guide, follow what you see.
+
+## Let the assistant write it
+Tell the assistant what the message is for, for example "a message telling the customer their order shipped". It writes the template (Egyptian Arabic by default, English if you ask), checks it against Meta's rules, and shows it exactly as the customer will see it, with its cost in AI credits (2 credits for a draft, charged only when you press the confirm button; if you say no, or it cannot produce a draft that passes, nothing is charged). Press **Yes, do it** to submit it to Meta, or ask for changes. If Meta rejects a template, ask the assistant to fix it: it starts from Meta's reason and shows the corrected version before anything is sent.

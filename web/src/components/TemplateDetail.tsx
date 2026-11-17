@@ -38,6 +38,22 @@ export function TemplateDetail({ t, lang, api, owner, template, onBack, onEdit, 
   const blockedReason = status === 'DISABLED' ? null : !canEditByStatus ? t.tplEditNotNow : allowance && !allowance.allowed ? (waitText ?? t.tplEditNotNow) : null;
   const canEdit = owner && canEditByStatus && (!allowance || allowance.allowed);
 
+  const [resubmitted, setResubmitted] = useState(false);
+  const canResubmitCod = owner && tpl.name === 'cod_confirmation_v2' && status === 'REJECTED' && !!api.resubmitCodV2;
+  const resubmitCod = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.resubmitCodV2!();
+      setResubmitted(true);
+      setTpl(await api.detail(tpl.name, tpl.language).catch(() => ({ ...tpl, status: 'PENDING' as const })));
+    } catch (e) {
+      setError(e instanceof ApiError && e.status === 503 ? t.tplErrUnavailable : t.tplErrGeneric);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async () => {
     setBusy(true);
     setError(null);
@@ -84,6 +100,8 @@ export function TemplateDetail({ t, lang, api, owner, template, onBack, onEdit, 
                 <Pencil size={16} aria-hidden />{status === 'APPROVED' ? t.tplEditApproved : t.tplEditResubmit}
               </button>
             )}
+            {canResubmitCod && <button type="button" className="btn primary" disabled={busy} onClick={() => void resubmitCod()}>{t.tplResubmitCod}</button>}
+            {resubmitted && <p className="muted small" role="status">{t.tplResubmitCodDone}</p>}
             {status === 'APPROVED' && <p className="muted small">{t.tplCategoryLocked}</p>}
             {blockedReason && <p id={`${uid}-why`} className="muted">{blockedReason}</p>}
             {status === 'DISABLED' ? <p className="muted">{t.tplDisabledNote}</p> : (
