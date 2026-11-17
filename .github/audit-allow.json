@@ -1,0 +1,8 @@
+[
+  {
+    "id": "GHSA-fc5q-39xc-vjpf",
+    "package": "picomatch",
+    "reason": "ReDoS in extglob matching; no patched version exists (npm audit fix --force would only downgrade vite). Reached only by build-time and test tooling (vite, vitest, tinyglobby, fdir), never by a running Worker. Drop when picomatch ships a fix.",
+    "expires": "2026-12-17"
+  }
+]
