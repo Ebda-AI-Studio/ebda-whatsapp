@@ -6,6 +6,7 @@ import { DEFAULT_WORKERS_AI_MODEL } from '../src/core/ai/config';
 import { modelPrices } from '../src/core/ai/cost';
 import { GPT_OSS_MODEL, LANGUAGE_RETRY_NOTE, isArabicScriptReply, readAgentModelFlag, whatsappFormat } from '../src/core/ai/model-flag';
 import { configureSessionCheck } from '../src/core/identity/session';
+import { Trusted, guardReply } from '../src/core/ai/reply-guard';
 import { findUrls, linkParts } from '../src/core/url-extract';
 import { configureAgent, type AgentCopy } from '../src/core/ai/config';
 import { ScriptedProvider, useAgent } from './helpers/agent';
@@ -106,6 +107,25 @@ describe('default unchanged', () => {
     expect(strict).toContain('قريبًا');
     expect(strict).toContain('الـ توصيل');
     expect(strict).toContain('no Markdown');
+  });
+
+  it('strict block: never echo the customer\'s own amount, hand complaints over at once; the default prompt has neither (gpt-oss restated budgets and was guard-blocked)', () => {
+    const a = { persona: 'p', language: 'auto' as const, tone: 'warm' as const, storeName: 'S', knowledge: [], tools: ['handoff_to_human'], facts: null, customer: null, faq: null };
+    const strict = EBDA_AGENT_COPY.systemPrompt({ ...a, strict: true });
+    expect(strict).toContain('Never repeat or confirm an amount the CUSTOMER wrote');
+    expect(strict).toContain('within your budget');
+    expect(strict).toContain('A complaint is handed to a person at once with handoff_to_human');
+    const plain = EBDA_AGENT_COPY.systemPrompt(a);
+    expect(plain).not.toContain('CUSTOMER wrote');
+    expect(plain).not.toContain('A complaint is handed');
+  });
+
+  it('the reply guard is NOT loosened: a restated customer budget or an invented price is still refused, a tool price is accepted', () => {
+    const t = new Trusted();
+    t.prices.add(250);
+    expect(guardReply('Silk scarf 250 EGP', t)).toEqual({ ok: true });
+    expect(guardReply('Here are gifts under 600 EGP', t)).toMatchObject({ ok: false, reason: 'price' });
+    expect(guardReply('Silk scarf 199 EGP', t)).toMatchObject({ ok: false, reason: 'price' });
   });
 
   it('cost: the default model keeps the existing prices; the flagged model has its own and is unknown (not the default price) when unset', () => {
