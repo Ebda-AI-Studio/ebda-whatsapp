@@ -1,0 +1,133 @@
+{
+ "version": 1,
+ "cases": [
+  {
+   "name": "similar to one seed, in stock only",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "seedIds": [
+      "v1"
+     ],
+     "mode": "similar",
+     "limit": 5
+    }
+   ],
+   "method": "getRecommendations",
+   "expect": {
+    "ok": true,
+    "value": {
+     "items": [
+      {
+       "retailerId": "v2",
+       "productId": "p-v2",
+       "title": "Item v2",
+       "titleAr": null,
+       "description": null,
+       "priceMinor": 40000,
+       "currency": "EGP",
+       "availability": "in_stock",
+       "imageUrl": null,
+       "link": "https://dar-mona.ebda.app/products/v2",
+       "brand": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "budget caps the price",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "seedIds": [
+      "v1"
+     ],
+     "mode": "complement",
+     "limit": 5,
+     "maxPriceMinor": 30000
+    }
+   ],
+   "method": "getRecommendations",
+   "expect": {
+    "ok": true,
+    "value": {
+     "items": []
+    }
+   }
+  },
+  {
+   "name": "no seeds and no order is invalid",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "seedIds": [],
+     "mode": "similar",
+     "limit": 5
+    }
+   ],
+   "method": "getRecommendations",
+   "expect": {
+    "ok": false,
+    "reason": "invalid",
+    "message": "getRecommendations: args"
+   }
+  },
+  {
+   "name": "limit over 8 is invalid",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    {
+     "seedIds": [
+      "v1"
+     ],
+     "mode": "similar",
+     "limit": 9
+    }
+   ],
+   "method": "getRecommendations",
+   "expect": {
+    "ok": false,
+    "reason": "invalid",
+    "message": "getRecommendations: limit"
+   }
+  },
+  {
+   "name": "unlinked store is not_linked",
+   "args": [
+    "22222222-2222-4222-8222-222222222222",
+    {
+     "seedIds": [
+      "v1"
+     ],
+     "mode": "similar",
+     "limit": 3
+    }
+   ],
+   "method": "getRecommendations",
+   "expect": {
+    "ok": false,
+    "reason": "not_linked"
+   }
+  },
+  {
+   "name": "unknown store is not_found",
+   "args": [
+    "33333333-3333-4333-8333-333333333333",
+    {
+     "seedIds": [
+      "v1"
+     ],
+     "mode": "similar",
+     "limit": 3
+    }
+   ],
+   "method": "getRecommendations",
+   "expect": {
+    "ok": false,
+    "reason": "not_found",
+    "message": "store not resolved"
+   }
+  }
+ ]
+}
