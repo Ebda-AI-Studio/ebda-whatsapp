@@ -60,7 +60,7 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
       if (e.CHAT_EVAL_MODEL === GPT_OSS_MODEL) await setAgentModelFlag(env as unknown as Env, { model: GPT_OSS_MODEL, actor: 'eval', reason: 'live golden eval' });
       const v = await runCase(c, { fake: link.fake, agent, other }, i, make);
       console.log(`CHAT_EVAL_CASE ${JSON.stringify({ id: v.id, pass: v.pass, outcome: v.run.outcome, reply: v.run.replies.join(' | ').slice(0, 160) })}`);
-      if (!v.pass) console.log(`CHAT_EVAL_FAIL ${JSON.stringify({ id: v.id, failed: v.failed, outcome: v.run.outcome, tools: v.run.tools.map((t) => t.name), reply: v.run.replies.join(' | ').slice(0, 200) })}`);
+      if (!v.pass) console.log(`CHAT_EVAL_FAIL ${JSON.stringify({ id: v.id, failed: v.failed, outcome: v.run.outcome, tools: v.run.tools.map((t) => t.name), modelTexts: (v.run.modelTexts ?? []).map((x) => x.slice(0, 240)), reply: v.run.replies.join(' | ').slice(0, 200) })}`);
       verdicts.push(v);
     }
     const board = scoreboard(verdicts);

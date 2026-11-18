@@ -14,6 +14,8 @@ export class Recorder implements LlmProvider {
   readonly tools: { name: string; args: unknown }[] = [];
   /** Products a show_products / recommend_products result carried (cards or text hits), with the price the customer saw, in store currency units. */
   readonly shown: { id: string; price: number }[] = [];
+  /** Every text the model itself produced, in order (the guard may have replaced the last one with a handoff: this keeps what it TRIED to say). */
+  readonly texts: string[] = [];
   private readonly seen = new Set<string>();
   constructor(private readonly inner: LlmProvider) {}
   get byoKey() { return this.inner.byoKey; }
@@ -28,11 +30,12 @@ export class Recorder implements LlmProvider {
     }
     const out = await this.inner.complete(req);
     for (const t of out.toolCalls ?? []) this.tools.push({ name: t.name, args: t.arguments });
+    if (out.text) this.texts.push(out.text);
     return out;
   }
 }
 
-export type Run = { replies: string[]; outcome: string; tools: { name: string; args: unknown }[]; /** Products shown in the graded turn (default: none). */ shown?: { id: string; price: number }[] };
+export type Run = { replies: string[]; outcome: string; tools: { name: string; args: unknown }[]; /** Products shown in the graded turn (default: none). */ shown?: { id: string; price: number }[]; /** What the model said in the graded turn, even if the reply guard refused it (diagnostics only, never graded). */ modelTexts?: string[] };
 export type Verdict = { id: string; pass: boolean; failed: string[]; run: Run };
 
 const arabicShare = (s: string) => { const l = [...s].filter((ch) => /\p{L}/u.test(ch)); return l.length ? l.filter((ch) => /[؀-ۿ]/.test(ch)).length / l.length : 0; };
@@ -100,14 +103,16 @@ export async function runCase(c: Case, env: Env, n: number, makeModel: (c: Case)
   let replies: string[] = [];
   let before = 0;
   let shownBefore = 0;
+  let textsBefore = 0;
   for (const turn of c.turns) {
     before = rec.tools.length;
     shownBefore = rec.shown.length;
+    textsBefore = rec.texts.length;
     replies = (await say(ws, pn, text(turn), g)).map((s) => s.text ?? '').filter(Boolean);
   }
   const outcome = (await rows<{ outcome: string }>(ws, 'SELECT outcome FROM agent_turns ORDER BY rowid DESC LIMIT 1'))[0]?.outcome ?? 'none';
   g.restore();
-  const run: Run = { replies, outcome, tools: rec.tools.slice(before), shown: rec.shown.slice(shownBefore) };
+  const run: Run = { replies, outcome, tools: rec.tools.slice(before), shown: rec.shown.slice(shownBefore), modelTexts: rec.texts.slice(textsBefore) };
   const failed = grade(c, run);
   return { id: c.id, pass: failed.length === 0, failed, run };
 }
