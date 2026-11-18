@@ -2,7 +2,7 @@ import { z } from 'zod';
 import {
   agentSettingsDto, apiError, assistantActResponse, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, connectorDto, connectorTestResult, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
-  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
+  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest, segmentDto, quickReplyDto, listQuickRepliesResponse, noteDto, conversationDto,
 } from '../../../src/core/api/contract';
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
@@ -240,6 +240,25 @@ export function createApiSource(o: Opts): LiveSource {
       mergeContacts: async (fromWaId, intoWaId) => { await call('/contacts/merge', z.unknown(), post({ fromWaId, intoWaId })); },
       retention: () => call('/retention', retentionDto),
       setRetention: (days) => call('/retention', retentionDto, { method: 'PUT', body: JSON.stringify({ days }) }),
+      setContactTags: (waId, tags) => call(`/contacts/${encodeURIComponent(waId)}/tags`, z.object({ tags: z.array(z.string()) }).loose(), { method: 'PUT', body: JSON.stringify({ tags }) }),
+      segments: {
+        list: async () => (await call('/segments', listSegmentsResponse)).items,
+        create: (name, criteria) => call('/segments', segmentDto, post({ name, criteria })),
+        update: (id, patch) => call(`/segments/${id}`, segmentDto, { method: 'PUT', body: JSON.stringify(patch) }),
+        remove: async (id) => { await call(`/segments/${id}`, done, { method: 'DELETE' }); },
+        preview: (criteria) => call('/segments/preview', segmentPreviewDto, post({ criteria })),
+      },
+    },
+    inboxTools: {
+      quickReplies: {
+        list: async () => (await call('/quick-replies', listQuickRepliesResponse)).items,
+        create: (text) => call('/quick-replies', quickReplyDto, post({ text })),
+        update: (id, text) => call(`/quick-replies/${id}`, quickReplyDto, { method: 'PUT', body: JSON.stringify({ text }) }),
+        remove: async (id) => { await call(`/quick-replies/${id}`, done, { method: 'DELETE' }); },
+      },
+      notes: async (id) => (await call(`/conversations/${id}/notes`, items(noteDto))).items,
+      addNote: (id, text) => call(`/conversations/${id}/notes`, noteDto, post({ text })),
+      setTags: (id, tags) => call(`/conversations/${id}/tags`, conversationDto, { method: 'PUT', body: JSON.stringify({ tags }) }),
     },
     wallet: {
       wallet: () => call('/wallet', walletDto),
