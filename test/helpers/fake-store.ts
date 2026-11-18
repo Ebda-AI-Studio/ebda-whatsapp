@@ -25,6 +25,8 @@ export type FakeStoreOptions = { linked?: boolean; paymentMethods?: ChatPaymentM
 export class FakeStore implements StoreBridge {
   readonly calls: { method: string; args: unknown[] }[] = [];
   readonly orders = new Map<string, Order>();
+  /** Shipments by order number, as the bridge carries them today: a status and a tracking link only (no courier, no estimate). */
+  readonly shipments = new Map<string, { status: string; trackingUrl: string | null }>();
   readonly addresses = new Map<string, Address[]>();
   readonly byKey = new Map<string, string>();
   catalog: CatalogRow[];
@@ -256,7 +258,7 @@ export class FakeStore implements StoreBridge {
   getOrderStatus(storeId: string, orderNumber: string, buyerKey: string) {
     return this.gate('getOrderStatus', storeId, [storeId, orderNumber, buyerKey], () => {
       const o = [...this.orders.values()].find((x) => x.orderNumber === orderNumber && x.buyerKey === buyerKey);
-      return o ? { ok: true, value: { orderNumber, status: o.status, paymentMethod: o.paymentMethod, shipment: null } } : { ok: false, reason: 'not_found' };
+      return o ? { ok: true, value: { orderNumber, status: o.status, paymentMethod: o.paymentMethod, shipment: this.shipments.get(orderNumber) ?? null } } : { ok: false, reason: 'not_found' };
     });
   }
 
