@@ -9,6 +9,7 @@
 import type { Env } from '../../env';
 import { PLATFORM_WORKSPACE, billingAudit } from '../audit-reason';
 import { alert, errClass } from '../observability';
+import { isPlainEnglish } from '../franco';
 import { DEFAULT_WORKERS_AI_MODEL } from './config';
 
 export const GPT_OSS_MODEL = '@cf/openai/gpt-oss-120b';
@@ -92,3 +93,12 @@ const LATIN_LETTER = /[A-Za-z]/g;
 export const isArabicScriptReply = (text: string): boolean => (text.match(ARABIC_LETTER)?.length ?? 0) > (text.match(LATIN_LETTER)?.length ?? 0);
 
 export const LANGUAGE_RETRY_NOTE = 'Your last reply was in Arabic, but the customer wrote in English. Write the same reply again in English only: plain text, short, no markdown. Do not call any tool.';
+
+export const EMPTY_RETRY_NOTE = 'Answer the customer now in one short reply, using the tool results above. Do not call any tool.';
+
+/**
+ * Is the customer's message real English (not Franco-Arabic the heuristic missed, such as "fe shanta gel bony?" or "ektebly code python")? The language correction fires only for
+ * these: Latin letters only, not Franco, AND at least one common English function word. A Latin-only message without one is left alone (an Arabic reply to it is right).
+ */
+const ENGLISH_WORDS = new Set(['i', 'a', 'the', 'is', 'are', 'do', 'does', 'you', 'your', 'have', 'has', 'any', 'for', 'my', 'me', 'to', 'of', 'what', 'how', 'can', 'could', 'need', 'want', 'where', 'when', 'which', 'please', 'hi', 'hello', 'hey', 'thanks', 'thank', 'with', 'this', 'that', 'it', 'and', 'or', 'not', 'there', 'would', 'will', 'about', 'under', 'over', 'around', 'much', 'many']);
+export const looksEnglishAsk = (text: string | null | undefined): boolean => isPlainEnglish(text) && (text ?? '').toLowerCase().split(/[^a-z]+/).some((w) => ENGLISH_WORDS.has(w));

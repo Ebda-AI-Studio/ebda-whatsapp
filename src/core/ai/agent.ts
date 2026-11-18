@@ -24,7 +24,7 @@ import { AI_TURN_CREDITS, heartbeatHold, holdCredits, releaseHold, settleHold } 
 import { funnelOnce } from '../funnel';
 import { markAiTurn } from '../timing';
 import { recordTurnCost } from './cost';
-import { LANGUAGE_RETRY_NOTE, isArabicScriptReply, isFlaggedModel, readAgentModelFlag, whatsappFormat, type AgentModelId } from './model-flag';
+import { EMPTY_RETRY_NOTE, LANGUAGE_RETRY_NOTE, isArabicScriptReply, isFlaggedModel, looksEnglishAsk, readAgentModelFlag, whatsappFormat, type AgentModelId } from './model-flag';
 import { LlmError, type ChatTurn, type LlmProvider, type LlmResponse } from './provider';
 import { getAgentState, promisePolicyOf, providerFor, putAgentState, readAgentSettings, type AgentSettings } from './settings';
 import { MAX_CALLS_PER_ROUND, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_ROUNDS, runTool, toolDefs, type ToolContext } from './tools';
@@ -38,8 +38,10 @@ import { cardJob, type BuiltCard, type CardSpec } from '../store-link/product-ca
 import { storeLink } from '../store-link';
 
 export const AGENT_MAX_TOKENS = 450;
-/** One credit buys at most this many model calls: up to MAX_TOOL_ROUNDS rounds that use tools, then the last call that must answer (M-084). */
-export const MAX_MODEL_CALLS_PER_CREDIT = MAX_TOOL_ROUNDS + 1;
+/** One credit buys at most this many model calls: up to MAX_TOOL_ROUNDS rounds that use tools, the last call that must answer, and at most one corrective call (M-084). */
+export const MAX_MODEL_CALLS_PER_CREDIT = MAX_TOOL_ROUNDS + 2;
+/** The ONE corrective call a turn may make (an empty answer, or the flagged model's English-ask-answered-in-Arabic): the +1 above. The two share the slot, so the worst turn is 3 tool rounds + the answer + this call. It never costs a second credit. */
+const CORRECTIVE_CALLS_PER_TURN = 1;
 const HISTORY_MESSAGES = 8;
 const HISTORY_CHARS = 500;
 /** Older messages (beyond the verbatim window) folded into one short recap: at most this many rows, each cut to RECAP_LINE chars, the whole recap to RECAP_CHARS (about 400 tokens). No extra model call. */
@@ -50,6 +52,9 @@ export const REPLY_MAX_CHARS = 1500;
 
 // A suspended workspace's agent is off (W2-OPS): it would otherwise keep spending AI credits and queueing replies that every send gate then refuses.
 export const agentActive = (host: Pick<LinkHost, 'sql'>): boolean => agentConfig().copy !== null && readAgentSettings(host.sql).enabled && !isSuspended(host.sql);
+
+/** What the reply guard refused, as a fixed mask for the alert (the reply text itself is never logged). */
+const BLOCK_SHAPE = { url: '<link>', price: '<amount>', promise: '<promise>', leak: '<rules>' } as const;
 
 class Aborted extends Error {}
 
@@ -300,6 +305,20 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
     if (!(await sayNow(host, input, 'ack', copy.t.ack[locale], now))) throw new Aborted();
   };
   if (recent > agentConfig().slowMs) await ack();
+  let correctiveLeft: number = CORRECTIVE_CALLS_PER_TURN;
+  // ONE corrective call per turn (tools off, same model): `note` is appended as a user turn after the model's own text (when it wrote any). A failed call keeps the original answer.
+  const correct = async (res: LlmResponse, first: string | null, note: string): Promise<LlmResponse> => {
+    if (correctiveLeft <= 0) return res;
+    correctiveLeft--;
+    try {
+      const again = await callModel(provider, { system, messages: [...messages, ...(first ? [{ role: 'assistant' as const, content: first }] : []), { role: 'user', content: note }], tools: [], maxTokens: AGENT_MAX_TOKENS, ...modelReq });
+      if (turnGone(host, input)) throw new Aborted();
+      return cleanReply(again.text) ? again : res;
+    } catch (err) {
+      if (err instanceof Aborted) throw err;
+      return res;
+    }
+  };
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const offered = round < MAX_TOOL_ROUNDS ? tools : [];
     let res = await callModel(provider, { system, messages, tools: offered, maxTokens: AGENT_MAX_TOKENS, ...modelReq });
@@ -308,19 +327,12 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
     if (!calls.length) {
       const elapsed = Date.now() - started;
       putAgentState(host.sql, 'latency_ewma_ms', String(Math.round(recent > 0 ? recent * 0.7 + elapsed * 0.3 : elapsed)));
-      // Flagged model, language `auto`, a plain-English customer and an Arabic-script reply: ONE corrective call (tools off), then whatever comes back is sent. It only runs
-      // while the turn is still inside its call budget (MAX_MODEL_CALLS_PER_CREDIT, M-084), so it never costs a second credit; a failed retry keeps the first reply.
-      if (flagged && settings.language === 'auto' && locale === 'en' && round < MAX_TOOL_ROUNDS) {
+      // An empty answer with no cards (any model; typically the last call, made with tools off after the tool rounds): one nudge to answer from the tool results.
+      if (!(res.text ?? '').trim() && !ctx.cards.length) res = await correct(res, null, EMPTY_RETRY_NOTE); // truly empty only: a leaked structure or a thinking-only block is handled as before
+      // Flagged model, language `auto`, a plain-English customer and an Arabic-script reply: the corrective call asks for English.
+      if (flagged && settings.language === 'auto' && locale === 'en' && looksEnglishAsk(input.text)) {
         const first = cleanReply(res.text);
-        if (first && isArabicScriptReply(first)) {
-          try {
-            const again = await callModel(provider, { system, messages: [...messages, { role: 'assistant', content: first }, { role: 'user', content: LANGUAGE_RETRY_NOTE }], tools: [], maxTokens: AGENT_MAX_TOKENS, ...modelReq });
-            if (turnGone(host, input)) throw new Aborted();
-            if (cleanReply(again.text)) res = again;
-          } catch (err) {
-            if (err instanceof Aborted) throw err;
-          }
-        }
+        if (first && isArabicScriptReply(first)) res = await correct(res, first, LANGUAGE_RETRY_NOTE);
       }
       // Cards without words still go out, with the store's own one-line lead-in. The flagged model's Markdown becomes WhatsApp formatting here, BEFORE the reply guard sees it.
       const cleaned = cleanReply(res.text);
@@ -487,7 +499,7 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
       // F2 / M-069: a link, a price or a promise nobody vouched for never reaches the customer; a person takes over.
       const verdict = guardReply(outcome.text, turn.trusted, turn.system);
       if (!verdict.ok) {
-        alert('agent_reply_blocked', { workspace: host.workspaceId, why: verdict.reason });
+        alert('agent_reply_blocked', { workspace: host.workspaceId, why: verdict.reason, shape: BLOCK_SHAPE[verdict.reason], model: modelFlag ?? 'default' }); // class + fixed mask only: never the reply, the customer's words or a number
         outcome = { kind: 'handoff', reason: 'guarded' };
       }
     }
