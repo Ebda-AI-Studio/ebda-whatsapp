@@ -1,28 +1,39 @@
 ---
 capabilities:
-  - contacts.tags-edit@1
-  - inbox.conversation-tags@1
-  - inbox.notes@1
-  - inbox.quick-replies@1
+  - contacts.tags-edit@2
+  - inbox.conversation-tags@2
+  - inbox.notes@2
+  - inbox.quick-replies@2
 ---
 
-# Notes, tags and quick replies: what exists today
+# Quick replies, notes and tags
 
-This guide says exactly what you can do from the screen right now and what has no screen yet. Nothing here describes something that does not exist.
+These tools save your team time in the **Inbox**. Everything here works for the store owner and for staff.
 
 ## Quick replies
-Above the message box in a conversation there are four ready replies (a greeting, "your order is confirmed", "could you send your full address", "thank you"). Press one and its text drops into the box, where you can edit it before sending. **These replies are fixed:** there is nowhere to add your own. They disappear when the 24-hour window closes.
+Quick replies are the buttons above the message box. Pressing one puts its text in the box so you can change it before you send.
+1. Open a chat and press **Edit quick replies**.
+2. Write the reply under **New quick reply** and press **Add the reply**.
+3. To change a reply, edit it in its box and press **Save the reply**. To remove it, press **Delete the reply**.
 
-If you want a repeated answer in your own words, the AI agent uses the questions and answers you write ([AI agent guide](07-ai-agent.md)), and the service menu answers common questions ([service menu guide](11-service-menu-hours-and-location.md)).
-
-## Tags
-- **Customer tags:** shown on each customer under **Contacts**. You can set them in bulk with a tags column when you import a CSV ([customer data guide](13-your-customers-data.md)), and pick them as a campaign audience ([campaigns guide](08-campaigns-and-opt-out.md)). **There is no button to edit one customer's tag from the screen.**
-- **Conversation tags:** the system adds two by itself and they show in the list: the dot while a cash-on-delivery order waits for an answer, and **Needs your team** when the customer asked for a person. There is no button to add or remove a conversation tag.
+You can keep up to 20 replies and the same text cannot be saved twice. Until you add your own, the starter replies that come with Ebda Chat are shown. Everyone on the team sees the same list.
 
 ## Internal notes
-Internal notes on a conversation exist as a feature, but **Ebda Chat has no screen for them today**, so there is nowhere to type one. Any existing notes (if written from a connected system) are included when you download or erase a customer's data ([customer data guide](13-your-customers-data.md)).
+Press **Notes and tags** in the chat header, write under **Write a note** and press **Add the note**. Only your team sees notes. The customer never does. A note cannot be edited or deleted after you add it, and it is included when you download or erase that customer's data ([Your customers' data](13-your-customers-data.md)).
 
-If you need one of these on the screen, tell us at ahlan@ebda.app.
+## Tags on a chat
+In the same panel, type a tag and press **Add the tag**. Press the x on a tag to remove it. Tags are saved in lower case, so "VIP" and "vip" are the same tag. A chat can have up to 10 tags of up to 32 characters. System tags such as `cod_pending` and `needs_human` have no x: Ebda Chat adds and clears them by itself.
 
----
+## Tags on a customer
+On **Contacts**, pick the customer and use **Customer's tags**. Customer tags are what you pick when you make a segment or a campaign audience.
+
+## Customer segments (store owner)
+A segment is a saved group of customers. On **Contacts > Customer segments**:
+1. Type a **Segment name**.
+2. Set the rules: any of some tags, all of some tags, whether they ordered before, how recently they wrote to you, or everyone.
+3. Press **Show the count** to see how many customers would get a campaign, and how many are left out because they opted out or never agreed to messages.
+4. Press **Create the segment**. Use **Edit** to change it later.
+
+Customers who opted out or have no consent on record are never in a segment's audience, whatever the rules say. To delete a segment, press **Delete**, read what is kept and type the segment's name to confirm. Deleting a segment does not delete customers or campaigns already made. Then pick the segment when you [create a campaign](08-campaigns-and-opt-out.md).
+
 Last checked: 2026-11-14.
