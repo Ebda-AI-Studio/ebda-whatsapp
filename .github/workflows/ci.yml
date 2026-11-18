@@ -68,4 +68,12 @@ jobs:
           echo "::notice title=Suite duration::${secs}s"
           echo "### Test suite (${mode}): ${secs}s" >> "$GITHUB_STEP_SUMMARY"
           exit $rc
-      - run: npm audit --audit-level=low
+      - name: Audit production dependencies (blocking)
+        # Ruling AUDIT-SPLIT-1: `npm audit --omit=dev`, zero tolerance beyond .github/audit-allow.json (id, package, reason, expiry; an expired
+        # entry fails this step). Was `npm audit --audit-level=low` over EVERY dependency: GHSA-fc5q-39xc-vjpf (picomatch ReDoS, no patched
+        # version, build/test tooling only) turned every PR red.
+        run: node .github/scripts/audit-gate.mjs
+      - name: Report development advisories (non-blocking)
+        # The same allow-list over EVERY dependency; red for an unlisted advisory, never stops a merge.
+        continue-on-error: true
+        run: node .github/scripts/audit-gate.mjs --all
