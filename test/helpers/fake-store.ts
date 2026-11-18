@@ -1,6 +1,6 @@
 import { mintedKey, mintedRoles } from './issuer';
 import type {
-  Address, BridgeFailure, CustomerProfile, SearchOptions, StorePolicies, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, StoreBridge, StoreProfile,
+  Address, BridgeFailure, CustomerProfile, SearchOptions, StorePolicies, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, RecommendationRequest, StoreBridge, StoreProfile,
 } from '../../src/core/store-bridge';
 
 type Order = {
@@ -31,6 +31,8 @@ export class FakeStore implements StoreBridge {
   requireProof = true;
   readonly calls: { method: string; args: unknown[] }[] = [];
   readonly orders = new Map<string, Order>();
+  /** Shipments by order number, as the bridge carries them today: a status and a tracking link only (no courier, no estimate). */
+  readonly shipments = new Map<string, { status: string; trackingUrl: string | null }>();
   readonly addresses = new Map<string, Address[]>();
   readonly byKey = new Map<string, string>();
   catalog: CatalogRow[];
@@ -155,6 +157,24 @@ export class FakeStore implements StoreBridge {
     return this.gate<CustomerProfile | null>('getCustomerProfile', storeId, [storeId, phoneE164], () => ({ ok: true, value: this.profiles.get(phoneE164) ?? null }));
   }
 
+  /** Recommendation seeds -> retailer ids the engine would return (set by a test). `hidden` = inactive / non-public / other-store products the real Store re-read drops. */
+  recs: Record<string, string[]> = {};
+  hidden = new Set<string>();
+  /** Like the Store: re-read live, so out-of-stock, hidden and over-budget rows never come back; an unknown order or a wrong buyer key is `not_found`. */
+  getRecommendations(storeId: string, req: RecommendationRequest) {
+    return this.gate('getRecommendations', storeId, [storeId, req], () => {
+      let seeds = req.seedIds;
+      if (req.orderNumber !== undefined) {
+        const o = [...this.orders.values()].find((x) => x.orderNumber === req.orderNumber && x.buyerKey === req.buyerKey);
+        if (!o) return { ok: false, reason: 'not_found' };
+        seeds = o.lines.map((l) => l.variantId);
+      }
+      const ids = [...new Set(seeds.flatMap((s) => this.recs[s] ?? []))].filter((id) => !seeds.includes(id) && !this.hidden.has(id));
+      const items = ids.map((id) => this.catalog.find((c) => c.retailerId === id)).filter((c): c is CatalogRow => !!c && (this.stock[c.retailerId] ?? 0) > 0 && (req.maxPriceMinor === undefined || c.priceMinor <= req.maxPriceMinor));
+      return { ok: true, value: { items: items.slice(0, req.limit).map((c) => ({ ...c, availability: 'in_stock' as const })) } };
+    });
+  }
+
   createCheckoutLink(storeId: string, req: { items: OrderLine[]; buyer: Buyer }) {
     return this.gate('createCheckoutLink', storeId, [storeId, req], () => {
       const total = this.price(req.items);
@@ -262,7 +282,7 @@ export class FakeStore implements StoreBridge {
       const bad = this.noPhone(phoneE164);
       if (bad) return bad;
       const o = [...this.orders.values()].find((x) => x.orderNumber === orderNumber && x.buyerKey === buyerKey);
-      return o ? { ok: true, value: { orderNumber, status: o.status, paymentMethod: o.paymentMethod, shipment: null } } : { ok: false, reason: 'not_found' };
+      return o ? { ok: true, value: { orderNumber, status: o.status, paymentMethod: o.paymentMethod, shipment: this.shipments.get(orderNumber) ?? null } } : { ok: false, reason: 'not_found' };
     });
   }
 

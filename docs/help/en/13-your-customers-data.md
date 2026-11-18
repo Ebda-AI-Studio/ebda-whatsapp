@@ -18,6 +18,9 @@ Under "How long messages are kept" the store owner picks the period: 90 days, 6 
 ## Download one customer's data
 Pick the customer in the list and choose **Download the customer's data** (store owner only). You get a JSON file with their messages, your notes, their tags and orders. Use it when a customer asks what you hold about them. Every download is recorded in the action log.
 
+## Tag a customer
+Pick the customer and use **Customer's tags**: type a tag and choose **Add the tag**, or press the x on a tag to remove it. Owner and staff can both do it. See [Quick replies, notes and tags](23-notes-tags-and-quick-replies.md).
+
 ## Rename a customer
 Pick the customer, type the name, **Save the name**. The name you set stays: WhatsApp's profile name no longer replaces it.
 

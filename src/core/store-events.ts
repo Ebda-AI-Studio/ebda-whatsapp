@@ -3,6 +3,7 @@ import { parseStoreEvent } from './api/store-events';
 import { recordWorkspaceOwner } from './campaigns/new-cap';
 import { applyStorePlan } from './billing/store-plan';
 import { errClass, alert } from './observability';
+import { ensureCodV2 } from './cod-v2';
 import { syncSuspendedMirror } from './ops/suspension-mirror';
 import { senderNumberFor } from './shared/shared-number';
 
@@ -61,6 +62,8 @@ export async function consumeStoreEvents(batch: MessageBatch<unknown>, env: Env)
         await mirrorStoreHold(env, event.storeId, held === null ? null : held === 'store_deleted' ? 'store_deleted' : 'store_suspended', Date.now());
       }
       console.log(JSON.stringify({ audit: 'store_event', type: event.type, storeId: event.storeId, status: result.status, ...(result.detail ? { detail: result.detail } : {}) }));
+      // A store that told us where it shops gets its COD v2 template submitted (idempotent; never blocks or fails the event).
+      if (event.type === 'store.linked' && event.data.storefrontOrigin && result.status === 'applied') await ensureCodV2(env, event.storeId);
       if (result.status === 'retry') msg.retry({ delaySeconds: retryDelay(msg.attempts) });
       else msg.ack();
     } catch (err) {

@@ -48,7 +48,7 @@ export const EBDA = {
   social: {
     handle: 'ebdaaistudio',
     accounts: [
-      { id: 'instagram', label: 'Instagram', url: 'https://www.instagram.com/ebdaaistudio/' },
+      { id: 'instagram', label: 'Instagram', url: 'https://www.instagram.com/ebdaai.studio/' },
       { id: 'facebook', label: 'Facebook', url: 'https://www.facebook.com/ebdaaistudio' },
       { id: 'tiktok', label: 'TikTok', url: 'https://www.tiktok.com/@ebdaaistudio' },
       { id: 'linkedin', label: 'LinkedIn', url: 'https://www.linkedin.com/company/ebda-ai-studio/' },
