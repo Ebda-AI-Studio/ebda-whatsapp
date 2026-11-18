@@ -163,9 +163,10 @@ export type SharedRequestDto = z.infer<typeof sharedRequestDto>;
 export const listTemplatesResponse = z.object({ items: z.array(templateDto), /** the brand's starter set is in place for the connected number (the screen installs it once when this is false and the list is empty) */ starterInstalled: z.boolean().optional() });
 
 export const noteDto = z.object({ id: z.number().int(), authorUserId: z.string(), text: z.string(), at: z.number().int() });
-export const addNoteRequest = z.object({ text: z.string().min(1).max(2000) });
+export const addNoteRequest = z.object({ text: z.string().trim().min(1).max(2000) }).strict();
 export const assignRequest = z.object({ userId: z.string().nullable() });
-export const setTagsRequest = z.object({ tags: z.array(z.string().min(1).max(32)).max(10) });
+/** PUT /conversations/:id/tags: the whole tag list (trimmed, lower-cased and de-duplicated by the server, like a contact's tags). */
+export const setTagsRequest = z.object({ tags: z.array(z.string().trim().min(1).max(32)).max(10) }).strict();
 export const searchQuery = z.object({ q: z.string().min(1).max(100), limit: z.coerce.number().int().min(1).max(50).default(20) });
 export const searchResponse = z.object({ items: z.array(z.object({ conversationId: z.number().int(), messageId: z.number().int(), snippet: z.string(), at: z.number().int() })) });
 
@@ -462,6 +463,14 @@ export const updateSegmentRequest = createSegmentRequest.partial().refine((p) =>
 export const segmentPreviewRequest = z.object({ criteria: segmentCriteria });
 /** `count` = people who would receive a marketing send; `excluded` = people the filter matches but who cannot be messaged, and why. */
 export const segmentPreviewDto = z.object({ count: z.number().int().nonnegative(), excluded: z.object({ optedOut: z.number().int().nonnegative(), noConsent: z.number().int().nonnegative() }) });
+/** A canned reply the merchant keeps for the inbox composer (A25). At most MAX_QUICK_REPLIES per workspace; the text is unique. */
+export const MAX_QUICK_REPLIES = 20;
+export const quickReplyText = z.string().trim().min(1).max(500);
+export const quickReplyDto = z.object({ id: z.number().int(), text: quickReplyText, position: z.number().int(), createdAt: z.number().int() });
+export const createQuickReplyRequest = z.object({ text: quickReplyText }).strict();
+export const updateQuickReplyRequest = z.object({ text: quickReplyText }).strict();
+export const listQuickRepliesResponse = z.object({ items: z.array(quickReplyDto) });
+export type QuickReplyDto = z.infer<typeof quickReplyDto>;
 export const listSegmentsResponse = z.object({ items: z.array(segmentDto) });
 export type SegmentDto = z.infer<typeof segmentDto>;
 export type SegmentPreviewDto = z.infer<typeof segmentPreviewDto>;
@@ -779,6 +788,8 @@ export const ROUTES = {
   connectorTest: 'POST /connectors/:connectorId/test',
   contacts: 'GET /contacts',
   contactTags: 'PUT /contacts/:waId/tags',
+  quickReplies: 'GET|POST /quick-replies',
+  quickReply: 'PUT|DELETE /quick-replies/:quickReplyId',
   imports: 'GET|POST /imports',
   import: 'GET /imports/:importId',
   importRejects: 'GET /imports/:importId/rejects',

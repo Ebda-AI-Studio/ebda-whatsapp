@@ -268,13 +268,13 @@ describe('recommendProducts default (Ruling WA-RECS-1)', () => {
     expect(await rows(id, 'SELECT 1 FROM agent_state')).toEqual([]);
   });
 
-  it('a workspace that existed before v46 (no marker, no row) reads OFF, and stays OFF when the merchant saves other settings', async () => {
+  it('a workspace that existed before v47 (no marker, no row) reads OFF, and stays OFF when the merchant saves other settings', async () => {
     const id = W(31);
     await shop(id);
     await runInDurableObject(workspace(id), (_i, state) => {
       state.storage.sql.exec("DELETE FROM agent_state WHERE key = 'setting.recommendProducts'");
       state.storage.sql.exec('DELETE FROM workspace_meta');
-      state.storage.sql.exec('DELETE FROM _migrations WHERE version >= 46');
+      state.storage.sql.exec('DELETE FROM _migrations WHERE version >= 47');
       state.storage.sql.exec('DROP TABLE workspace_meta');
       migrate(state.storage); // an old workspace: done > 0, so no marker is written
     });
@@ -284,9 +284,9 @@ describe('recommendProducts default (Ruling WA-RECS-1)', () => {
     expect((await settingsOf(id)).recommendProducts).toBe(false);
   });
 
-  it('a backup restores into a fresh workspace, and a pre-v46 backup (no recommendProducts row) restores OFF', async () => {
+  it('a backup restores into a fresh workspace, and a pre-v47 backup (no recommendProducts row) restores OFF', async () => {
     const src = W(33), dst = W(34);
-    await bareWorkspace(src); // no agent_state rows at all: what a pre-v46 backup carries
+    await bareWorkspace(src); // no agent_state rows at all: what a pre-v47 backup carries
     await workspace(src).exportSnapshot('2026-11-17');
     const r = await workspace(dst).importSnapshot(`backups/${src}/2026-11-17/`);
     expect(r.ok).toBe(true);

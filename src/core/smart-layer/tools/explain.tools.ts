@@ -13,7 +13,7 @@ export type ExplainData = Record<string, { titleAr: string; titleEn: string; ste
 /** The behaviour capabilities that get an explain tool. Listed, never derived: a capability with a merchant route gets a real tool instead. */
 export const EXPLAIN_IDS: readonly string[] = [
   // inbox, contacts, campaigns (E6)
-  'inbox.coexistence-echo', 'inbox.failed-retry', 'inbox.handoff-needs-human', 'inbox.quick-replies', 'inbox.voice-note-transcript',
+  'inbox.coexistence-echo', 'inbox.failed-retry', 'inbox.handoff-needs-human', 'inbox.voice-note-transcript',
   'contacts.opt-in-keyword', 'contacts.opt-out',
   // access, numbers, orders, catalogue, billing behaviours (E7)
   'access.language', 'access.sign-out', 'agent.voice-notes', 'catalogue.google-feeds-clash', 'compliance.privacy-terms', 'inbox.realtime', 'notifications.alerts',

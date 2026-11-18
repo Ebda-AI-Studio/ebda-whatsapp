@@ -607,7 +607,16 @@ export const DO_MIGRATIONS: readonly string[] = [
    CREATE INDEX sl_cache_at ON sl_cache (at);`,
   // v45 (Chat agent, review I2): when the owner was told about this handoff. Lives on the row (erased by wa_id with the contact), not as a phone-keyed agent_state key.
   `ALTER TABLE agent_handoffs ADD COLUMN notified_at INTEGER;`,
-  // v46 (Ruling WA-RECS-1): post-order product recommendations are proactive messages to customers, so they are OFF for a workspace that existed before this deploy and
+  // v46 (self-service inbox tools, A25): the merchant's own quick replies for the composer. Text is unique; the API caps the list at 20.
+  `CREATE TABLE quick_replies (
+     id INTEGER PRIMARY KEY,
+     text TEXT NOT NULL,
+     position INTEGER NOT NULL,
+     created_by TEXT,
+     created_at INTEGER NOT NULL
+   );
+   CREATE UNIQUE INDEX quick_replies_text ON quick_replies (text);`,
+  // v47 (Ruling WA-RECS-1): post-order product recommendations are proactive messages to customers, so they are OFF for a workspace that existed before this deploy and
   // ON for one created after it. The marker lives in workspace_meta, a table that is NOT in BACKUP_TABLES (agent_state is, and a restore needs every backed-up table empty,
   // so migrate() must never write into one). migrate() inserts the marker only when no migration had ever run (a brand-new workspace); no row = OFF.
   `CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
