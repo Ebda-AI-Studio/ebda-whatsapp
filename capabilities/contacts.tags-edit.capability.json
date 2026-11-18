@@ -2,11 +2,15 @@
   "id": "contacts.tags-edit",
   "status": "live",
   "area": "contacts",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "تعديل تاجات العميل",
   "titleEn": "Edit a contact's tags",
-  "screens": [],
+  "screens": [
+    "ContactsScreen customer data panel tags",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
   "api": [
     "PUT /stores/:storeId/contacts/:waId/tags"
   ],
@@ -32,10 +36,11 @@
     ]
   },
   "steps": [
-    "Tags display in Contacts; edit only through the API (and import CSV tags column)"
+    "Pick the customer on Contacts, type a tag under Customer's tags, press Add the tag; the x on a tag removes it",
+    "CSV import with a tags column still adds tags"
   ],
-  "edgeCases": [],
-  "gaps": [
-    "NO merchant UI to edit tags (display only + CSV import)"
-  ]
+  "edgeCases": [
+    "Tags are lower-cased and de-duplicated; at most 10 per customer"
+  ],
+  "gaps": []
 }

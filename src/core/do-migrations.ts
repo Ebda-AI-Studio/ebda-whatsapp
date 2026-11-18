@@ -607,6 +607,15 @@ export const DO_MIGRATIONS: readonly string[] = [
    CREATE INDEX sl_cache_at ON sl_cache (at);`,
   // v45 (Chat agent, review I2): when the owner was told about this handoff. Lives on the row (erased by wa_id with the contact), not as a phone-keyed agent_state key.
   `ALTER TABLE agent_handoffs ADD COLUMN notified_at INTEGER;`,
+  // v46 (self-service inbox tools, A25): the merchant's own quick replies for the composer. Text is unique; the API caps the list at 20.
+  `CREATE TABLE quick_replies (
+     id INTEGER PRIMARY KEY,
+     text TEXT NOT NULL,
+     position INTEGER NOT NULL,
+     created_by TEXT,
+     created_at INTEGER NOT NULL
+   );
+   CREATE UNIQUE INDEX quick_replies_text ON quick_replies (text);`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
