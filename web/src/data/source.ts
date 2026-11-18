@@ -1,6 +1,6 @@
 import type {
   AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
-  ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto,
+  ListMembersResponse, NoteDto, QuickReplyDto, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto,
 } from '../../../src/core/api/contract';
 
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
@@ -80,6 +80,29 @@ export interface NumbersApi {
   launch?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<{ code: string; event: ConnectNumberRequest['event']; wabaId: string; phoneNumberId: string; businessId?: string }>;
 }
 
+/** The merchant's saved segments (A30). Owner only for every write; the server answers 403 to staff and 404 for an id from another workspace. */
+export interface SegmentsApi {
+  list(): Promise<SegmentDto[]>;
+  create(name: string, criteria: SegmentCriteria): Promise<SegmentDto>;
+  update(id: number, patch: { name?: string; criteria?: SegmentCriteria }): Promise<SegmentDto>;
+  remove(id: number): Promise<void>;
+  preview(criteria: SegmentCriteria): Promise<SegmentPreviewDto>;
+}
+
+/** Inbox helpers on a conversation (A25-A27): the team's quick replies, internal notes and tags. Owner and staff may use all of them. */
+export interface InboxToolsApi {
+  quickReplies: {
+    list(): Promise<QuickReplyDto[]>;
+    create(text: string): Promise<QuickReplyDto>;
+    update(id: number, text: string): Promise<QuickReplyDto>;
+    remove(id: number): Promise<void>;
+  };
+  notes(conversationId: number): Promise<NoteDto[]>;
+  addNote(conversationId: number, text: string): Promise<NoteDto>;
+  /** Replaces the whole tag list; the server trims, lower-cases and de-duplicates and answers with the conversation. */
+  setTags(conversationId: number, tags: string[]): Promise<ConversationDto>;
+}
+
 export type ContactsQuery = { q?: string; tag?: string; optedOut?: boolean; cursor?: string | null };
 
 export interface ContactsApi {
@@ -97,6 +120,9 @@ export interface ContactsApi {
   /** B4: how long messages are kept (owner only). `days: null` = the platform default. */
   retention(): Promise<RetentionDto>;
   setRetention(days: number | null): Promise<RetentionDto>;
+  /** A29: replaces the contact's tags (the server lower-cases and de-duplicates). */
+  setContactTags(waId: string, tags: string[]): Promise<{ tags: string[] }>;
+  segments: SegmentsApi;
 }
 
 /** Where the inbox reads from: the live API (contract.ts) or labelled sample data. */
@@ -166,6 +192,7 @@ export interface InboxSource {
   /** The team and its seats; offered to the owner only. */
   team?: TeamApi;
   contacts?: ContactsApi;
+  inboxTools?: InboxToolsApi;
   /** Wallet, statement, top-ups and refunds (Phase 7). */
   wallet?: WalletApi;
   /** Super-admin console; only offered when `role` is super_admin. */
