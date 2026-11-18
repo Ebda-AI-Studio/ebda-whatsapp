@@ -50,11 +50,17 @@
     "PACKAGE_CHECKOUT_ENABLED": "true",
     "INSTAPAY_BILLING_ENABLED": "true",
     "EBDA_INSTAPAY_QR_URL": "https://media.ebda.app/platform/instapay-qr.jpg",
+    // InstaPay auto-confirm notifications go to the brain (src/core/billing/instapay-notify.ts); must be a plain https URL.
+    "BRAIN_BRIDGE_URL": "https://os-brain.mypovonai.com/api/instapay/notify",
     "REQUIRED_SECRETS": "TOKEN_ENC_KEY,AGENT_SECRETS_KEY,PROOF_URL_SECRET,SUITE_BUYER_KEY_SECRET,ERASURE_HMAC_KEY,BACKUP_HMAC_KEY"
   },
   "durable_objects": { "bindings": [{ "name": "WORKSPACE_DO", "class_name": "WorkspaceDO" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],
-  "d1_databases": [{ "binding": "DB", "database_name": "ebda-wa-platform", "database_id": "80c011f6-b03c-4289-b20a-102aa3ca79ef", "migrations_dir": "migrations/d1" }],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "ebda-wa-platform", "database_id": "80c011f6-b03c-4289-b20a-102aa3ca79ef", "migrations_dir": "migrations/d1" },
+    // Shared InstaPay duplicate index (docs/rulings/INSTAPAY-AUTO-1.md ruling 1.10). Created 2026-11-17 on the personal Cloudflare account (schema = DEDUPE_SCHEMA_SQL, applied). Auto-confirm still needs INSTAPAY_BRIDGE_SECRET (secret) and the brain secret of the same value, and stays mode off until an operator sets shadow.
+    { "binding": "INSTAPAY_DEDUPE_DB", "database_name": "ebda-instapay-dedupe", "database_id": "2b86d92e-f14a-4270-a646-225d8b2766f6" }
+  ],
   "r2_buckets": [
     { "binding": "MEDIA", "bucket_name": "ebda-wa-media" },
     { "binding": "BACKUPS", "bucket_name": "ebda-wa-backups" }

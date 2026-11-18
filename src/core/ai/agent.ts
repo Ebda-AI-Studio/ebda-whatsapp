@@ -268,7 +268,7 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   const trusted = turn.trusted;
   const copy = agentConfig().copy!;
   const bridge = bridgeFor(host.env);
-  const availability = { catalog: bridge !== null, orders: bridge !== null, ordering: orderingActive(host) };
+  const availability = { catalog: bridge !== null, orders: bridge !== null, ordering: orderingActive(host), recommend: bridge !== null && settings.recommendProducts };
   // Tools of the workspace's enabled connectors (the agent is on, or this turn would not be running); names are `<connector>__<tool>`.
   const connectors = loadConnectors(host);
   const tools = [...toolDefs(availability), ...(connectors?.tools ?? [])];
@@ -289,7 +289,7 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   const system = prompt(persona, knowledge, true);
   // What a reply must never recite: the rules, without the merchant's own persona, knowledge and facts (those may be quoted).
   turn.system = prompt('', [], false);
-  const ctx: ToolContext = { host, from: input.from, bridge, availability, locale, cards: [] };
+  const ctx: ToolContext = { host, from: input.from, bridge, availability, locale, cards: [], messageId: input.messageId };
   const messages = historyOf(host, input);
   const started = Date.now();
   // A slow model is announced before it is asked: the recent answer time of this workspace decides.
