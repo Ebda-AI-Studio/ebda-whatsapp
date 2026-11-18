@@ -1,0 +1,208 @@
+name: AI review
+
+# Independent review of every PR except an all-safe one (docs / markdown / tests only), run in CI, not on the controller's laptop.
+# THE GATE RUNS FROM THE BASE BRANCH. The workflow file comes from the base (pull_request_target), the scripts and prompt are
+# checked out from the base branch tip, and the PR's commits are fetched as DATA (git diff) only: never checked out, never
+# executed. A PR that edits the gate cannot change how it is judged, and the edit is itself a non-safe path, so it is reviewed.
+# Classification is fail-closed (ci/ai-review/risky-paths.mjs): only docs, markdown and NEWLY ADDED test files skip review; a modified or
+# deleted existing test is reviewed, because several safety guards are test files.
+# FORK PRs are never reviewed with secrets and never skipped: the `fork-gate` job fails until a maintainer reviews the PR and adds the label
+# `ai-review-passed` (the `labeled` event re-runs it green). A manual label on a same-repo PR (e.g. an oversized diff) is honoured the same way.
+# A diff over 400 KB fails with a clear message: it needs human/controller review, then the label `ai-review-passed` by hand.
+# Risky + any infra problem (no secret, CLI crash, bad JSON) = FAIL, never pass. Secret: CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`).
+# Copy of ebda-foundation/.github/workflows/ai-review.yml with `on:` = pull_request_target (foundation Ruling AIR-3: switch to `uses:` once the
+# foundation's Actions access is `organization`). Everything under `jobs:` must stay identical to the foundation file.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  # label events get their own group: a person adding any label must not cancel a bot review that is running (only a new push should)
+  group: ai-review-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.action == 'labeled' && 'label' || 'review' }}
+  cancel-in-progress: true
+
+jobs:
+  classify:
+    name: AI review classify
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    timeout-minutes: 5
+    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft && github.event.action != 'labeled'
+    outputs:
+      risky: ${{ steps.paths.outputs.risky }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.base_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/pull/$PR/head:refs/pr/head"
+          [ "$(git rev-parse refs/pr/head)" = "$HEAD" ] || { echo "::error::PR head moved while the job started; re-run"; exit 1; }
+          # Ruling AI-REVIEW-LABEL-1: this step NEVER removes ai-review-passed. A label set by the controller after an independent
+          # review must survive a size refusal or an infra failure; only a real verdict with criticals removes it (step below).
+          # Staleness vs a new head is the merge drain's job (it requires the label set AFTER the head).
+          git diff --name-status --no-renames "origin/$BASE_REF...refs/pr/head" > changed.txt
+          node .github/ai-review/risky-paths.mjs < changed.txt > risky.txt
+          if [ -s risky.txt ]; then
+            echo "risky=true" >> "$GITHUB_OUTPUT"
+            gh label create risky-path --color B60205 --description "needs ai-review-passed (anything but docs, markdown or newly added tests)" 2>/dev/null || true
+            gh pr edit "$PR" --add-label risky-path
+            echo "paths that need review:"; cat risky.txt
+          else
+            echo "risky=false" >> "$GITHUB_OUTPUT"
+            gh pr edit "$PR" --remove-label risky-path 2>/dev/null || true
+            echo "all-safe diff (docs, markdown, newly added tests only): review not required"
+          fi
+
+  review:
+    name: AI review
+    needs: classify
+    # light (Ruling HOST-RUNNERS-3): one CLI install + one tool-less `claude -p`; no heavy lock, no database
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    timeout-minutes: 20
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action != 'labeled' && needs.classify.outputs.risky == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.base_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Require the Claude credential (fail closed)
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is not set. This PR cannot merge unreviewed. Ahmad: run 'claude setup-token', then 'gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner>/<repo>' (or once at org level)."
+            exit 1
+          fi
+      - name: Install the Claude CLI (pinned)
+        # Into this job's RUNNER_TEMP, never --global: a global install writes into the shared Mac host's Homebrew prefix.
+        run: |
+          npm install --prefix "$RUNNER_TEMP/claude-cli" --no-save --ignore-scripts @anthropic-ai/claude-code@2.1.310
+          # --ignore-scripts skips the package's postinstall, which copies the per-platform native binary over the bin/claude.exe
+          # stub ("claude native binary not installed"); link the binary npm installed for this platform ourselves.
+          bin="$(ls "$RUNNER_TEMP"/claude-cli/node_modules/@anthropic-ai/claude-code-*/claude 2>/dev/null | head -1)"
+          [ -n "$bin" ] && [ -x "$bin" ] || { echo "::error::no native claude binary was installed for $(uname -s)-$(uname -m)"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/claude-cli/bin" && ln -sf "$bin" "$RUNNER_TEMP/claude-cli/bin/claude"
+          echo "$RUNNER_TEMP/claude-cli/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/claude-cli/bin/claude" --version
+      - name: Build the diff (fail closed when it is too large)
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/pull/$PR/head:refs/pr/head"
+          [ "$(git rev-parse refs/pr/head)" = "$HEAD" ] || { echo "::error::PR head moved while the job started; re-run"; exit 1; }
+          git diff --no-renames --unified=3 "origin/$BASE_REF...refs/pr/head" > pr.diff
+          size="$(wc -c < pr.diff | tr -d ' ')"
+          if [ "$size" -ge 400000 ]; then
+            echo "::error::The diff is $size bytes (limit 400000). Labels are left untouched (an existing ai-review-passed stays). A partial review would pass what it never read, so this PR is NOT reviewed automatically: it needs human/controller review, then the label ai-review-passed applied by hand. Splitting the PR is the better fix."
+            exit 1
+          fi
+      - name: Review the diff
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+          CLAUDE_OUTPUT: ${{ runner.temp }}/claude-out.json
+        run: |
+          set -euo pipefail
+          # diff on stdin as data, rules as the prompt; no tools: the reviewer reads, it cannot act
+          model=(); [ -n "${AI_REVIEW_MODEL:-}" ] && model=(--model "$AI_REVIEW_MODEL")
+          # Ruling AI-REVIEW-HANG-1: a call that hangs on the network is cut at 8 min and retried once, so one hang no
+          # longer burns the whole job timeout and a manual rerun (2026-11-13: #740 timed out twice on a 35 KB diff).
+          # Fail closed: two failed attempts fail the step and no label is applied.
+          for attempt in 1 2; do
+            rc=0
+            timeout 480 claude -p "$(cat .github/ai-review/prompt.md)" "${model[@]}" --output-format json --max-turns 1 --disallowedTools '*' < pr.diff > "$CLAUDE_OUTPUT" || rc=$?
+            [ "$rc" -eq 0 ] && exit 0
+            echo "::warning::review attempt $attempt failed (exit $rc; 124 = cut at 8 min)"
+          done
+          exit 1
+      - name: Post findings and gate
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          FAIL_CLOSED: 'true'
+          CLAUDE_OUTPUT: ${{ runner.temp }}/claude-out.json
+        run: node .github/ai-review/review.mjs
+      - name: Drop ai-review-passed on a real critical verdict
+        # only a real review with criticals (review.mjs sets verdict=critical); a size refusal / crash / timeout never reaches here
+        if: always() && steps.gate.outputs.verdict == 'critical'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr edit "$PR" --remove-label ai-review-passed 2>/dev/null || true
+      - name: Label ai-review-passed
+        if: steps.gate.outputs.passed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh label create ai-review-passed --color 0E8A16 --description "independent AI review found no criticals on this head" 2>/dev/null || true
+          gh pr edit "$PR" --add-label ai-review-passed
+
+  # A same-repo PR a maintainer labelled by hand (reviewed a diff the bot could not, e.g. over 400 KB). Same check name as `review`, so the
+  # newest run on this head (green) supersedes the red one. Passes only while the label is really on the PR.
+  manual-pass:
+    name: AI review
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    timeout-minutes: 5
+    if: github.event.action == 'labeled' && github.event.label.name == 'ai-review-passed' && github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          gh pr view "$PR" --json labels --jq '.labels[].name' | grep -qx ai-review-passed || { echo "::error::the ai-review-passed label is no longer on the PR"; exit 1; }
+          echo "ai-review-passed applied by hand by $ACTOR; the bot review is superseded by that human review"
+
+  # Fork PRs: no secret is ever used and nothing is skipped. Red until a maintainer reviews the PR and labels it ai-review-passed.
+  fork-gate:
+    # fork-guard-exempt: this job IS the fork handler; it runs only gh label/view commands from the base workflow and never touches PR content
+    name: AI review
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    timeout-minutes: 5
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+        run: |
+          set -euo pipefail
+          if [ "$ACTION" != labeled ]; then
+            # a new head invalidates an earlier manual pass
+            gh pr edit "$PR" --remove-label ai-review-passed 2>/dev/null || true
+            gh label create risky-path --color B60205 --description "needs ai-review-passed" 2>/dev/null || true
+            gh pr edit "$PR" --add-label risky-path
+          fi
+          if gh pr view "$PR" --json labels --jq '.labels[].name' | grep -qx ai-review-passed; then
+            echo "fork PR: ai-review-passed was applied by a maintainer"
+          else
+            echo "::error::Fork PR: it is never reviewed with secrets and never skipped. A maintainer must review it, then add the label ai-review-passed (that re-runs this check)."
+            exit 1
+          fi
