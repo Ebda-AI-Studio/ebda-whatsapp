@@ -113,3 +113,15 @@ it('the on-main guard uses the checked-out origin/main without fetching, passes 
   expect(bad.status).not.toBe(0);
   expect(bad.stderr).toContain('is not an ancestor of origin/main');
 });
+
+// Self-hosted Macs must never pull the remote Actions cache (14 GB once, a deploy stuck 5+ min in "Setup Node.js"): setup-node `cache:` is only ever a runner-switch conditional.
+it('no workflow has an unconditional setup-node `cache: npm` (the remote Actions cache is hosted-runner only)', () => {
+  const dir = new URL('../.github/workflows/', import.meta.url);
+  const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
+  expect(files).toContain('cf-deploy.yml');
+  for (const f of files) {
+    const text = readFileSync(new URL(f, dir), 'utf8');
+    expect(text, f).not.toMatch(/^\s*cache:\s*['"]?(npm|pnpm|yarn)['"]?\s*(#.*)?$/m);
+  }
+  expect(wf).toMatch(/cache: \$\{\{ vars\.EBDA_DEPLOY_RUNS_ON == '' && 'npm' \|\| '' \}\}/);
+});
