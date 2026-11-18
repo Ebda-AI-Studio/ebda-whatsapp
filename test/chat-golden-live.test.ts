@@ -1,5 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import { GPT_OSS_MODEL, setAgentModelFlag } from '../src/core/ai/model-flag';
+import type { Env } from '../src/env';
 import { OpenAiCompatibleProvider, WorkersAiProvider, type AiBinding } from '../src/core/ai/provider';
 import { CASES } from './eval/golden-cases';
 import { runCase, scoreboard, type Verdict } from './eval/run';
@@ -54,6 +56,8 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
     const verdicts: Verdict[] = [];
     for (const [i, c] of CASES.entries()) {
       if (e.CHAT_EVAL_ONLY && c.group !== e.CHAT_EVAL_ONLY) continue;
+      // Production picks the gpt-oss prompt block, format strip and language check from the D1 flag `agent.model` (Ruling WA-MODEL-FLAG-1), NOT from the provider's model id: set it the way the operator does so the eval measures the path that ships.
+      if (e.CHAT_EVAL_MODEL === GPT_OSS_MODEL) await setAgentModelFlag(env as unknown as Env, { model: GPT_OSS_MODEL, actor: 'eval', reason: 'live golden eval' });
       const v = await runCase(c, { fake: link.fake, agent, other }, i, make);
       console.log(`CHAT_EVAL_CASE ${JSON.stringify({ id: v.id, pass: v.pass, outcome: v.run.outcome, reply: v.run.replies.join(' | ').slice(0, 160) })}`);
       if (!v.pass) console.log(`CHAT_EVAL_FAIL ${JSON.stringify({ id: v.id, failed: v.failed, outcome: v.run.outcome, tools: v.run.tools.map((t) => t.name), reply: v.run.replies.join(' | ').slice(0, 200) })}`);
