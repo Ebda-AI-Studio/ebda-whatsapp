@@ -180,6 +180,7 @@ describe('recommend_products', () => {
     const out = await say(id, pn, text('شكرا على الاوردر'), graph());
     expect(retailerIdsIn(out)).toEqual(['v5']);
     expect(link.fake.lastCall('getRecommendations')).toEqual([id, expect.objectContaining({ mode: 'complement', buyerKey: BUYER_KEY_1, phoneE164: `+${WA_1}`, orderNumber: expect.any(String) })]);
+    expect(link.fake.lastCall('listCustomerOrders')).toEqual([id, BUYER_KEY_1, 1, `+${WA_1}`]); // the latest-order lookup carries the sender's phone proof (WA-BRIDGE-BIND-1)
   });
 
   it('after an order for a customer with no orders: no_order, nothing sent', async () => {
