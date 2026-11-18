@@ -11,6 +11,8 @@ import { Highlight } from './Highlight';
 import { LoadError } from './LoadError';
 import { EmptyState } from './EmptyState';
 import { SearchBox, optionId } from './SearchBox';
+import { SegmentsPanel } from './SegmentsPanel';
+import { TagEditor } from './TagEditor';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: ContactsApi; now: () => number };
 
@@ -99,8 +101,9 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
             )}
         </section>
         <div className="contact-side">
-          <CustomerTools t={t} api={api} owner={owner} contact={selected} onRenamed={(name) => { setSelected((c) => (c ? { ...c, name } : c)); setAttemptList((a) => a + 1); }} onMerged={() => { setSelected(null); setAttemptList((a) => a + 1); }} />
+          <CustomerTools t={t} api={api} owner={owner} contact={selected} onRenamed={(name) => { setSelected((c) => (c ? { ...c, name } : c)); setAttemptList((a) => a + 1); }} onMerged={() => { setSelected(null); setAttemptList((a) => a + 1); }} onTagged={(tags) => { setSelected((c) => (c ? { ...c, tags } : c)); setAttemptList((a) => a + 1); }} />
           {owner && <RetentionCard t={t} api={api} />}
+          {owner && <SegmentsPanel t={t} lang={lang} api={api.segments} now={now} />}
         </div>
         {owner && <ImportPanel t={t} lang={lang} api={api} imports={imports} failed={importsFailed} onRetry={() => void loadImports()} onStarted={() => void loadImports()} />}
       </div>
@@ -199,7 +202,7 @@ export function toWaId(raw: string): string | null {
   return /^[1-9]\d{7,14}$/.test(d) ? d : null;
 }
 
-function CustomerTools({ t, api, owner, contact, onRenamed, onMerged }: { t: Strings; api: ContactsApi; owner: boolean; contact: ContactDto | null; onRenamed: (name: string) => void; onMerged: () => void }) {
+function CustomerTools({ t, api, owner, contact, onRenamed, onMerged, onTagged }: { t: Strings; api: ContactsApi; owner: boolean; contact: ContactDto | null; onRenamed: (name: string) => void; onMerged: () => void; onTagged: (tags: string[]) => void }) {
   const [eraseTyped, setEraseTyped] = useState('');
   const [name, setName] = useState('');
   const [into, setInto] = useState('');
@@ -234,6 +237,7 @@ function CustomerTools({ t, api, owner, contact, onRenamed, onMerged }: { t: Str
           <div className="settings-actions">
             <button type="button" className="btn primary" disabled={busy || name.trim() === ''} onClick={() => void run(async () => { const r = await api.renameContact(contact.waId, name.trim()); onRenamed(r.name ?? name.trim()); }, t.cdSaved)}>{t.cdSave}</button>
           </div>
+          <TagEditor t={t} label={t.cdTags} tags={contact.tags ?? []} onSave={async (next) => { const r = await api.setContactTags(contact.waId, next); onTagged(r.tags); return r.tags; }} />
           {owner && (
             <>
               <div className="settings-actions"><button type="button" className="btn" disabled={busy} onClick={() => void run(download, '')}>{t.cdExport}</button></div>
