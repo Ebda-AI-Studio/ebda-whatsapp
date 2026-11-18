@@ -2,11 +2,15 @@
   "id": "inbox.conversation-tags",
   "status": "live",
   "area": "inbox",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "وضع تاج على المحادثة",
   "titleEn": "Tag a conversation",
-  "screens": [],
+  "screens": [
+    "ChatPane notes and tags panel",
+    "view:ChatPane",
+    "/inbox"
+  ],
   "api": [
     "PUT /stores/:storeId/conversations/:id/tags"
   ],
@@ -32,10 +36,11 @@
     ]
   },
   "steps": [
-    "API only; system tags cod_pending and needs_human are shown"
+    "Open a chat, press Notes and tags, type a tag, press Add the tag; the x on a tag removes it",
+    "System tags (cod_pending, needs_human) are shown without a remove button and are kept on every save"
   ],
-  "edgeCases": [],
-  "gaps": [
-    "NO merchant UI to add/remove tags"
-  ]
+  "edgeCases": [
+    "Tags are trimmed, lower-cased and de-duplicated by the server; at most 10 tags of 32 characters"
+  ],
+  "gaps": []
 }
