@@ -29,7 +29,7 @@ concurrency:
 jobs:
   classify:
     name: AI review classify
-    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '["ebda-mac-light"]') }}
     timeout-minutes: 5
     if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft && github.event.action != 'labeled'
     outputs:
@@ -72,7 +72,7 @@ jobs:
     name: AI review
     needs: classify
     # light (Ruling HOST-RUNNERS-3): one CLI install + one tool-less `claude -p`; no heavy lock, no database
-    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '["ebda-mac-light"]') }}
     timeout-minutes: 20
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action != 'labeled' && needs.classify.outputs.risky == 'true'
     steps:
@@ -165,7 +165,7 @@ jobs:
   # newest run on this head (green) supersedes the red one. Passes only while the label is really on the PR.
   manual-pass:
     name: AI review
-    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '["ebda-mac-light"]') }}
     timeout-minutes: 5
     if: github.event.action == 'labeled' && github.event.label.name == 'ai-review-passed' && github.event.pull_request.head.repo.full_name == github.repository
     steps:
@@ -183,7 +183,7 @@ jobs:
   fork-gate:
     # fork-guard-exempt: this job IS the fork handler; it runs only gh label/view commands from the base workflow and never touches PR content
     name: AI review
-    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '["ebda-mac-light"]') }}
     timeout-minutes: 5
     if: github.event.pull_request.head.repo.full_name != github.repository
     steps:

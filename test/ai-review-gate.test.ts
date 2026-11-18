@@ -43,7 +43,7 @@ describe('the workflow', () => {
     expect(wf).toMatch(/on:\n\s+pull_request_target:/);
     const runs = wf.match(/^\s+runs-on: .*$/gm) ?? [];
     expect(runs.length).toBe(4);
-    for (const r of runs) expect(r).toContain("fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '\"ubuntu-24.04\"')");
+    for (const r of runs) expect(r).toContain("fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '[\"ebda-mac-light\"]')");
   });
   it('a label event gets its own concurrency group, so adding a label never cancels a running bot review', () => {
     expect(/^  group: (.*)$/m.exec(wf)?.[1] ?? '').toMatch(/github\.event\.action == 'labeled' && 'label' \|\| 'review'/);
