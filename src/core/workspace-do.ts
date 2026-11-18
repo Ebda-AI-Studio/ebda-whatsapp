@@ -47,7 +47,7 @@ import { errClass, safeMessage, alert, bindAlerts } from './observability';
 import { recordClick } from './campaigns/campaigns';
 import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, cancelCampaign, createCampaign, deleteDraft, endInstance, gateFor, getCampaign, launchCampaign, listCampaigns, pauseCampaign, resumeCampaign, sendCampaign, settleWallet, sweepCampaigns, type CreateArgs } from './campaigns/campaigns';
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
-import type { SegmentCriteria } from './api/contract';
+import { MAX_QUICK_REPLIES, type QuickReplyDto, type SegmentCriteria } from './api/contract';
 import { MAX_IMPORT_ROWS, applyImportChunk, createImport, failImport, importState, importSummary, listContacts, listImports, listRejects, setContactTags, type ApplyArgs, type ContactQuery, type ImportState } from './campaigns/contacts';
 import type { DigestDto, AgentSettingsDto, BotFunnelDto, CatalogStatusDto } from './api/contract';
 import { funnelOnce } from './funnel';
@@ -2281,13 +2281,43 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   async setTags(conversationId: number, tags: string[], now = Date.now()): Promise<ConversationDto | null> {
     if (!this.sql.exec('SELECT 1 FROM conversations WHERE id = ?', conversationId).toArray().length) return null;
-    const clean = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
+    const clean = [...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))]; // lower-cased like a contact's tags: "VIP" and "vip" are one tag
     this.ctx.storage.transactionSync(() => {
       this.sql.exec('DELETE FROM conversation_tags WHERE conversation_id = ?', conversationId);
       for (const t of clean) this.sql.exec('INSERT INTO conversation_tags (conversation_id, tag) VALUES (?, ?)', conversationId, t);
       this.emitConversationUpdated(conversationId);
     });
     return this.conversationById(conversationId, now);
+  }
+
+  // ---- Quick replies (A25): the merchant's canned texts for the composer ----------------------------------------------------------
+  async listQuickReplies(): Promise<QuickReplyDto[]> {
+    return this.sql.exec<{ id: number; text: string; position: number; created_at: number }>('SELECT id, text, position, created_at FROM quick_replies ORDER BY position, id').toArray()
+      .map((r) => ({ id: r.id, text: r.text, position: r.position, createdAt: r.created_at }));
+  }
+
+  async createQuickReply(a: { text: string; actor: string }, now = Date.now()): Promise<{ ok: true; reply: QuickReplyDto } | { ok: false; reason: 'limit' | 'duplicate' }> {
+    return this.ctx.storage.transactionSync(() => {
+      const have = this.sql.exec<{ n: number; p: number }>('SELECT count(*) AS n, coalesce(max(position), 0) AS p FROM quick_replies').one();
+      if (have.n >= MAX_QUICK_REPLIES) return { ok: false as const, reason: 'limit' as const };
+      if (this.sql.exec('SELECT 1 FROM quick_replies WHERE text = ?', a.text).toArray().length) return { ok: false as const, reason: 'duplicate' as const };
+      const id = this.sql.exec<{ id: number }>('INSERT INTO quick_replies (text, position, created_by, created_at) VALUES (?, ?, ?, ?) RETURNING id', a.text, have.p + 1, a.actor, now).one().id;
+      return { ok: true as const, reply: { id, text: a.text, position: have.p + 1, createdAt: now } };
+    });
+  }
+
+  async updateQuickReply(id: number, text: string): Promise<{ ok: true; reply: QuickReplyDto } | { ok: false; reason: 'not_found' | 'duplicate' }> {
+    return this.ctx.storage.transactionSync(() => {
+      const row = this.sql.exec<{ position: number; created_at: number }>('SELECT position, created_at FROM quick_replies WHERE id = ?', id).toArray()[0];
+      if (!row) return { ok: false as const, reason: 'not_found' as const };
+      if (this.sql.exec('SELECT 1 FROM quick_replies WHERE text = ? AND id <> ?', text, id).toArray().length) return { ok: false as const, reason: 'duplicate' as const };
+      this.sql.exec('UPDATE quick_replies SET text = ? WHERE id = ?', text, id);
+      return { ok: true as const, reply: { id, text, position: row.position, createdAt: row.created_at } };
+    });
+  }
+
+  async deleteQuickReply(id: number): Promise<boolean> {
+    return this.sql.exec('DELETE FROM quick_replies WHERE id = ?', id).rowsWritten > 0;
   }
 
   async addNote(conversationId: number, authorUserId: string, text: string, now = Date.now()): Promise<NoteDto | null> {
