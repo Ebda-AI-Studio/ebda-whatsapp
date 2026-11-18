@@ -1,25 +1,38 @@
 import { CASES, type Case, type Expect } from './golden-cases';
 import { applyPreset } from './store';
 import { type LlmProvider, type LlmRequest, type LlmResponse } from '../../src/core/ai/provider';
+import { runInDurableObject } from 'cloudflare:test';
+import { RECS_PER_DAY } from '../../src/core/ai/recommend';
 import { ScriptedProvider } from '../helpers/agent';
 import { agentWorkspace, say, text } from '../helpers/agent-chat';
 import { stubGraph } from '../helpers/graph';
 import type { FakeStore } from '../helpers/fake-store';
 import { rows, workspace } from '../helpers/workspace';
 
-/** Records every tool call a model asked for (what the rubric inspects), whatever model sits behind it. */
+/** Records every tool call a model asked for, and every product the Store let a turn SHOW (what the rubric inspects), whatever model sits behind it. */
 export class Recorder implements LlmProvider {
   readonly tools: { name: string; args: unknown }[] = [];
+  /** Products a show_products / recommend_products result carried (cards or text hits), with the price the customer saw, in store currency units. */
+  readonly shown: { id: string; price: number }[] = [];
+  private readonly seen = new Set<string>();
   constructor(private readonly inner: LlmProvider) {}
   get byoKey() { return this.inner.byoKey; }
   async complete(req: LlmRequest): Promise<LlmResponse> {
+    for (const m of req.messages) {
+      if (m.role !== 'tool' || (m.name !== 'show_products' && m.name !== 'recommend_products') || this.seen.has(m.toolCallId)) continue;
+      this.seen.add(m.toolCallId);
+      try {
+        const out = JSON.parse(m.content) as { products?: { id: string; price: number }[]; without_card?: { id: string; price: number }[] };
+        for (const p of [...(out.products ?? []), ...(out.without_card ?? [])]) if (typeof p.price === 'number') this.shown.push({ id: p.id, price: p.price });
+      } catch { /* not JSON: nothing shown */ }
+    }
     const out = await this.inner.complete(req);
     for (const t of out.toolCalls ?? []) this.tools.push({ name: t.name, args: t.arguments });
     return out;
   }
 }
 
-export type Run = { replies: string[]; outcome: string; tools: { name: string; args: unknown }[] };
+export type Run = { replies: string[]; outcome: string; tools: { name: string; args: unknown }[]; /** Products shown in the graded turn (default: none). */ shown?: { id: string; price: number }[] };
 export type Verdict = { id: string; pass: boolean; failed: string[]; run: Run };
 
 const arabicShare = (s: string) => { const l = [...s].filter((ch) => /\p{L}/u.test(ch)); return l.length ? l.filter((ch) => /[؀-ۿ]/.test(ch)).length / l.length : 0; };
@@ -36,8 +49,18 @@ export function grade(c: Case, run: Run): string[] {
   if (e.handoff === true && !/^handoff:(model|asked)$/.test(run.outcome)) failed.push('no_handoff');
   if (e.handoff === false && run.outcome !== 'reply' && run.outcome !== 'order') failed.push('handed_off_needlessly');
   for (const t of e.tools ?? []) if (!run.tools.some((x) => x.name === t)) failed.push(`missing_tool:${t}`);
+  // Ruling GIFT-BUDGET-TOOL-1: a budget ask is graded on its OUTCOME, so either product tool may serve it.
+  if (e.toolsAny && !run.tools.some((x) => e.toolsAny!.includes(x.name))) failed.push(`missing_tool:${e.toolsAny.join('|')}`);
   if (e.noTools && run.tools.length) failed.push('used_tools_off_topic');
-  if (e.searchMaxPrice !== undefined && !run.tools.some((x) => x.name === 'search_catalog' && (x.args as { maxPrice?: number })?.maxPrice === e.searchMaxPrice)) failed.push('budget_not_used');
+  if (e.searchMaxPrice !== undefined) {
+    const budget = e.searchMaxPrice;
+    const carries = (x: { name: string; args: unknown }) => (x.args as { maxPrice?: number })?.maxPrice === budget;
+    if (!run.tools.some((x) => (x.name === 'search_catalog' && carries(x)) || (x.name === 'recommend_products' && (x.args as { basis?: string })?.basis === 'budget' && carries(x)))) failed.push('budget_not_used');
+    // ANY card or price shown above the budget is a money failure (CHAT-EVAL-BAR-1 hard gate "no invented money/promise facts").
+    if ((run.shown ?? []).some((p) => p.price > budget)) failed.push('over_budget_shown');
+    // An explicit ask must not end with nothing shown (a rationed or empty recommendation must fall back to the search).
+    if (run.outcome === 'reply' && !(run.shown ?? []).length) failed.push('gave_up_on_explicit_ask');
+  }
   if (e.script === 'ar' && arabicShare(said) < 0.5) failed.push('wrong_script');
   if (e.script === 'en' && arabicShare(said) > 0.1) failed.push('wrong_script');
   for (const re of e.mention ?? []) if (!re.test(said)) failed.push(`missing:${re.source}`);
@@ -47,24 +70,44 @@ export function grade(c: Case, run: Run): string[] {
 
 export type Env = { fake: FakeStore; agent: { model: LlmProvider }; /** Lets a live run's model calls through the Graph stub (a real fetch for the model host only). */ other?: (url: string, init: RequestInit | undefined) => Promise<Response> | Response | undefined };
 
+/**
+ * Puts the customer at the daily recommendation limit (RECS_PER_DAY sets in the last 24 h) the way real turns would leave them: two scripted greetings create the contact, conversation and
+ * messages, then one `recs:<message id>` ration row is written per set. The real model is not involved, so a live run starts from the same exhausted state.
+ */
+async function exhaustRation(ws: string, pn: string, env: Env): Promise<void> {
+  env.agent.model = new ScriptedProvider([{ text: 'أهلاً بيك' }, { text: 'تحت أمرك' }]);
+  const g = stubGraph(undefined, { other: env.other });
+  await say(ws, pn, text('أهلاً'), g);
+  await say(ws, pn, text('السلام عليكم'), g);
+  g.restore();
+  await runInDurableObject(workspace(ws), (_i, state) => {
+    const ids = state.storage.sql.exec<{ id: number }>('SELECT m.id FROM messages m ORDER BY m.id LIMIT ?', RECS_PER_DAY).toArray().map((r) => r.id);
+    if (ids.length < RECS_PER_DAY) throw new Error(`exhaustRation: only ${ids.length} messages to hang the ration on`);
+    for (const id of ids) state.storage.sql.exec('INSERT INTO agent_state (key, value) VALUES (?, ?)', `recs:${id}`, JSON.stringify({ at: Date.now(), ids: [] }));
+  });
+}
+
 /** Runs one case in its own workspace: earlier turns are sent first, the LAST turn is what is graded. `makeModel` builds the model for the case. */
 export async function runCase(c: Case, env: Env, n: number, makeModel: (c: Case) => LlmProvider): Promise<Verdict> {
   applyPreset(env.fake, c.store);
   const ws = `00000000-0000-4000-8000-00000000${String(7600 + n).padStart(4, '0')}`;
   const pn = await agentWorkspace(ws, { language: 'auto' });
   await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 'eval', credits: 1000 });
+  if (c.rationed) await exhaustRation(ws, pn, env);
   const rec = new Recorder(makeModel(c));
   env.agent.model = rec;
   const g = stubGraph(undefined, { other: env.other });
   let replies: string[] = [];
   let before = 0;
+  let shownBefore = 0;
   for (const turn of c.turns) {
     before = rec.tools.length;
+    shownBefore = rec.shown.length;
     replies = (await say(ws, pn, text(turn), g)).map((s) => s.text ?? '').filter(Boolean);
   }
   const outcome = (await rows<{ outcome: string }>(ws, 'SELECT outcome FROM agent_turns ORDER BY rowid DESC LIMIT 1'))[0]?.outcome ?? 'none';
   g.restore();
-  const run: Run = { replies, outcome, tools: rec.tools.slice(before) };
+  const run: Run = { replies, outcome, tools: rec.tools.slice(before), shown: rec.shown.slice(shownBefore) };
   const failed = grade(c, run);
   return { id: c.id, pass: failed.length === 0, failed, run };
 }

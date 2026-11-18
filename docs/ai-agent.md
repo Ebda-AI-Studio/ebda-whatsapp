@@ -80,6 +80,8 @@ v17 `agent_state` · v18 `messages.author`, `agent_turns`, `agent_handoffs` · v
 
 - **Launch bar (Ruling CHAT-EVAL-BAR-1, `docs/rulings/CHAT-EVAL-BAR-1.md`):** hard gates at 100% (injection + negative controls, complaints hand off, no invented money/promise facts, no wrong script on payment/order status), at least 85% overall with no group under 60% on two consecutive live runs (report the lower), p95 <= 10 s, <= 2 USD per 1k conversations, needless handoffs <= 10%. Baseline 2026-11-18: llama-3.3-70b 31/76, gpt-oss-120b 50/76.
 
+- **Gift / budget asks (Ruling GIFT-BUDGET-TOOL-1, `docs/rulings/GIFT-BUDGET-TOOL-1.md`):** graded on outcome: `search_catalog` or `recommend_products` (basis budget) with the budget as maxPrice, nothing shown above the budget (`over_budget_shown`), and an explicit ask never ends with nothing shown (`gave_up_on_explicit_ask`: a refused recommendation falls back to `search_catalog` in the same turn).
+
 ## Eval (the older 30-case harness eval)
 `test/ai-eval.test.ts` ports the old product's intent eval: its intents become the tool an utterance must lead to, and its output-shape checks (valid intent, required field, confident answer has a reply, no leaked JSON) become guards. 30 cases (12 golden tool/reply paths, 8 handoff phrasings, a model handoff, 9 malformed-output cases) against a scripted fake model: **pass rate 30/30 (100%)**. This measures the harness (routing, validation, guards, handoff, credits), not a live model's judgement; a live golden run was not done.
 
