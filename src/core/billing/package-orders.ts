@@ -12,6 +12,7 @@
  * in which money is taken, the order says paid and nothing was granted; a retried webhook finds `granted_at` and only re-announces.
  * The daily `repairPackageOrders` grants any `paid` + `granted_at IS NULL` row anyway and alerts. No card fee is added to a package price.
  */
+import { chatPackageName } from './package-names';
 import type { Env } from '../../env';
 import { PACKAGE_FEATURE_KEYS } from '../api/contract';
 import { addMonthsUtc, monthsStarted, partialRefundCut, periodLengthMonths, upgradePriceMinor, yearlyRefundQuote, type YearlyRefundQuote } from './yearly';
@@ -50,7 +51,8 @@ export async function listPackages(env: Env): Promise<PackageDto[]> {
       members: true, shared_inbox: true, order_confirmations: true, templates: true, campaigns: r.feat_campaigns === 1, order_in_chat: r.feat_order_in_chat === 1,
       api: r.feat_api === 1, priority_support: r.priority_support === 1, ai_credits: r.ai_credits > 0,
     };
-    return { id: r.id, name: r.name, priceMinor: r.price_minor, aiCredits: r.ai_credits, maxMembers: r.max_members, features: PACKAGE_FEATURE_KEYS.filter((k) => on[k]), periodMonths: r.period_months };
+    const names = chatPackageName(r.ai_credits, r.period_months);
+    return { id: r.id, name: names.nameEn, nameAr: names.nameAr, nameEn: names.nameEn, priceMinor: r.price_minor, aiCredits: r.ai_credits, maxMembers: r.max_members, features: PACKAGE_FEATURE_KEYS.filter((k) => on[k]), periodMonths: r.period_months };
   });
 }
 
