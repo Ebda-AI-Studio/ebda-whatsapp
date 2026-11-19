@@ -1,0 +1,194 @@
+import { SELF, env } from 'cloudflare:test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { instapayRequestDto } from '../src/core/api/contract';
+import { CONTEST_WINDOW_MS, cancelInstapay, confirmInstapay, contestInstapay, expireInstapay, getRequestRow, rejectInstapay } from '../src/core/billing/instapay';
+import { triggerAutoConfirm } from '../src/core/billing/instapay-auto';
+import { configurePayments } from '../src/core/billing/payments';
+import { configureSessionCheck } from '../src/core/identity/session';
+import { OP1, OP2, apiFor, operatorCall, storeId as W0, useApiKey } from './helpers/api';
+import { testKashier } from './helpers/kashier';
+import { useStoreLink } from './helpers/store-link';
+
+// Self-service gap #3 (Chat half): the owner cancels a proof-less InstaPay request and contests a rejection once. Neither can confirm or credit anything.
+useApiKey();
+useStoreLink();
+const W = (n: number) => W0(9900 + n);
+const PNG = (tag: string) => { const b = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new TextEncoder().encode(tag)]); return b.buffer.slice(0) as ArrayBuffer; };
+beforeEach(() => { configureSessionCheck(async () => false); configurePayments(() => testKashier()); });
+afterEach(() => { configureSessionCheck(null); vi.restoreAllMocks(); });
+
+type Api = Awaited<ReturnType<typeof apiFor>>;
+const create = async (api: Api, kind: 'topup' | 'package' = 'topup') => {
+  const r = await api.call('POST', '/wallet/instapay', kind === 'topup' ? { kind: 'topup', amountMinor: 20_000 } : { kind: 'package', packageId: 'growth' });
+  expect(r.status).toBe(201);
+  return instapayRequestDto.parse(await r.json());
+};
+const upload = async (api: Api, id: string, tag: string) => {
+  return (await SELF.fetch(`https://x/api/v1/stores/${api.phoneNumberId.replace('pn-', '')}/wallet/instapay/${id}/proof`, { method: 'PUT', headers: { authorization: `Bearer ${api.token}`, 'content-type': 'image/png' }, body: PNG(tag) })).status;
+};
+const row = (id: string) => env.DB.prepare('SELECT state, cancelled_at, contested_at, contest_note, decided_by, decided_at FROM instapay_requests WHERE id = ?').bind(id).first<{ state: string; cancelled_at: number | null; contested_at: number | null; contest_note: string | null; decided_by: string | null; decided_at: number | null }>();
+const order = (id: string) => env.DB.prepare('SELECT state FROM topups WHERE order_id = ?').bind(id).first<{ state: string }>();
+const porder = (id: string) => env.DB.prepare('SELECT status FROM package_orders WHERE order_id = ?').bind(id).first<{ status: string }>();
+const audited = (action: string, ws: string) => env.DB.prepare('SELECT count(*) AS n FROM billing_audit WHERE action = ? AND workspace_id = ?').bind(action, ws).first<{ n: number }>().then((r) => r!.n);
+const wallet = (ws: string) => env.DB.prepare('SELECT count(*) AS n FROM topups WHERE workspace_id = ? AND state = ?').bind(ws, 'paid').first<{ n: number }>().then((r) => r!.n);
+const rejected = async (ws: string, tag: string) => {
+  const api = await apiFor(ws);
+  const r = await create(api);
+  expect(await upload(api, r.id, tag)).toBe(200);
+  expect(await rejectInstapay(env, { id: r.id, actor: OP1, reason: 'The amount on the receipt is 150' })).toMatchObject({ ok: true });
+  return { api, r };
+};
+
+describe('cancel: owner withdraws a request that has no proof yet', () => {
+  it('moves awaiting_proof to expired with cancelled_at, closes the order, audits, and the list shows it', async () => {
+    const ws = W(1);
+    const api = await apiFor(ws);
+    const t = await create(api);
+    const p = await create(api, 'package');
+    const res = await api.call('POST', `/wallet/instapay/${t.id}/cancel`);
+    expect(res.status).toBe(200);
+    expect(instapayRequestDto.parse(await res.json())).toMatchObject({ id: t.id, state: 'expired', cancelledAt: expect.any(Number) });
+    expect(await row(t.id)).toMatchObject({ state: 'expired', cancelled_at: expect.any(Number) });
+    expect(await order(t.id)).toEqual({ state: 'expired' });
+    expect(await audited('instapay_cancelled_by_owner', ws)).toBe(1);
+    expect(await porder(p.id)).toEqual({ status: 'pending' }); // the other request is untouched
+    const list = await (await api.call('GET', '/wallet/instapay')).json() as { items: { id: string; cancelledAt?: number | null }[] };
+    expect(list.items.find((i) => i.id === t.id)!.cancelledAt).toBeTruthy();
+    expect(await wallet(ws)).toBe(0);
+  });
+
+  it('twice is refused (exactly one change), and a request with a proof cannot be cancelled: a person decides it', async () => {
+    const ws = W(2);
+    const api = await apiFor(ws);
+    const a = await create(api);
+    expect((await api.call('POST', `/wallet/instapay/${a.id}/cancel`)).status).toBe(200);
+    expect((await api.call('POST', `/wallet/instapay/${a.id}/cancel`)).status).toBe(409);
+    expect(await audited('instapay_cancelled_by_owner', ws)).toBe(1);
+    const b = await create(api);
+    expect(await upload(api, b.id, 'cancel-proof')).toBe(200);
+    expect((await api.call('POST', `/wallet/instapay/${b.id}/cancel`)).status).toBe(409);
+    expect((await row(b.id))!.state).toBe('under_review');
+  });
+
+  it('staff are refused; another store gets a 404 and its request is untouched', async () => {
+    const ws = W(3);
+    const other = W(4);
+    const mine = await apiFor(ws);
+    const theirs = await apiFor(other);
+    const r = await create(theirs);
+    expect((await (await apiFor(ws, 'staff')).call('POST', `/wallet/instapay/${r.id}/cancel`)).status).toBe(403);
+    expect((await mine.call('POST', `/wallet/instapay/${r.id}/cancel`)).status).toBe(404);
+    expect((await row(r.id))!.state).toBe('awaiting_proof');
+    expect((await (await apiFor(other, 'staff')).call('POST', `/wallet/instapay/${r.id}/cancel`)).status).toBe(403);
+  });
+
+  it('a revoked session cannot cancel or contest, at the edge (403) and in the function itself', async () => {
+    const ws = W(5);
+    const api = await apiFor(ws);
+    const r = await create(api);
+    configureSessionCheck(async () => true);
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/cancel`)).status).toBe(403);
+    expect(await cancelInstapay(env, { workspaceId: ws, requestId: r.id, sessionId: 's1', userId: 'u' })).toEqual({ ok: false, reason: 'session_revoked' });
+    expect(await contestInstapay(env, { workspaceId: ws, requestId: r.id, sessionId: 's1', userId: 'u', note: 'a long enough note' })).toEqual({ ok: false, reason: 'session_revoked' });
+    expect((await row(r.id))!.state).toBe('awaiting_proof');
+  });
+
+  it('the daily expiry pass leaves a cancelled request exactly as the owner left it', async () => {
+    const ws = W(6);
+    const api = await apiFor(ws);
+    const r = await create(api);
+    await api.call('POST', `/wallet/instapay/${r.id}/cancel`);
+    const before = await row(r.id);
+    await expireInstapay(env, Date.now() + 3 * 86_400_000);
+    expect(await row(r.id)).toEqual(before);
+    expect(await order(r.id)).toEqual({ state: 'expired' });
+  });
+});
+
+describe('contest: owner asks for a second look at a rejection, once', () => {
+  const note = { note: 'The transfer went through at 14:05, the amount on the receipt is 200 EGP' };
+
+  it('puts the request back under review for a person, reopens its order, audits, shows to the operator with the note, and never confirms or credits', async () => {
+    const ws = W(11);
+    const { api, r } = await rejected(ws, 'contest-1');
+    expect(await order(r.id)).toEqual({ state: 'failed' });
+    const res = await api.call('POST', `/wallet/instapay/${r.id}/contest`, note);
+    expect(res.status).toBe(200);
+    expect(instapayRequestDto.parse(await res.json())).toMatchObject({ state: 'under_review', contestedAt: expect.any(Number) });
+    expect(await row(r.id)).toMatchObject({ state: 'under_review', contest_note: note.note, decided_by: null, decided_at: null });
+    expect(await order(r.id)).toEqual({ state: 'pending' });
+    expect(await audited('instapay_contested_by_owner', ws)).toBe(1);
+    expect(await wallet(ws)).toBe(0); // nothing credited by contesting
+    const ops = await (await operatorCall(OP1, 'GET', '/instapay?state=under_review')).json() as { items: { id: string; contestedAt: number | null; contestNote: string | null }[] };
+    expect(ops.items.find((i) => i.id === r.id)).toMatchObject({ contestedAt: expect.any(Number), contestNote: note.note });
+  });
+
+  it('the operator still has to confirm it, with the normal bank-reference rule; the owner cannot confirm their own payment', async () => {
+    const ws = W(12);
+    const { api, r } = await rejected(ws, 'contest-2');
+    await api.call('POST', `/wallet/instapay/${r.id}/contest`, note);
+    // the owner has no route that confirms; the operator route refuses without a bank reference and refuses a merchant token
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/confirm`, {})).status).toBe(404);
+    expect((await operatorCall(null, 'POST', `/instapay/${r.id}/confirm`, { bankRef: 'BK-1' })).status).toBe(401);
+    expect(await confirmInstapay(env, { id: r.id, actor: OP1 })).toEqual({ ok: false, reason: 'bank_reference_required' });
+    expect(await confirmInstapay(env, { id: r.id, actor: OP2, bankRef: 'BK-CONTEST-1' })).toMatchObject({ ok: true });
+    expect((await row(r.id))!.state).toBe('confirmed');
+  });
+
+  it('only once; a second contest is refused and the request stays where the person put it', async () => {
+    const ws = W(13);
+    const { api, r } = await rejected(ws, 'contest-3');
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, note)).status).toBe(200);
+    expect(await rejectInstapay(env, { id: r.id, actor: OP2, reason: 'Still not the right amount' })).toMatchObject({ ok: true });
+    const again = await api.call('POST', `/wallet/instapay/${r.id}/contest`, note);
+    expect(again.status).toBe(409);
+    expect(await again.json()).toMatchObject({ message: 'already_contested' });
+    expect((await row(r.id))!.state).toBe('rejected');
+    expect(await audited('instapay_contested_by_owner', ws)).toBe(1);
+  });
+
+  it('refuses a request that is not rejected, a bad note (Zod), and a rejection older than the window', async () => {
+    const ws = W(14);
+    const { api, r } = await rejected(ws, 'contest-4');
+    const fresh = await create(api);
+    expect((await api.call('POST', `/wallet/instapay/${fresh.id}/contest`, note)).status).toBe(409);
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, { note: 'no' })).status).toBe(400);
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, { note: 'x'.repeat(501) })).status).toBe(400);
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, { ...note, state: 'confirmed' })).status).toBe(400);
+    await env.DB.prepare('UPDATE instapay_requests SET decided_at = ? WHERE id = ?').bind(Date.now() - CONTEST_WINDOW_MS - 1000, r.id).run();
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, note)).status).toBe(409);
+    expect((await row(r.id))!.state).toBe('rejected');
+  });
+
+  it('staff are refused; another store gets a 404; the other store request stays rejected', async () => {
+    const ws = W(15);
+    const { r } = await rejected(ws, 'contest-5');
+    const other = W(16);
+    const attacker = await apiFor(other);
+    expect((await (await apiFor(ws, 'staff')).call('POST', `/wallet/instapay/${r.id}/contest`, note)).status).toBe(403);
+    expect((await attacker.call('POST', `/wallet/instapay/${r.id}/contest`, note)).status).toBe(404);
+    expect((await row(r.id))!.state).toBe('rejected');
+  });
+
+  it('a system (auto-confirm) decision and a full queue cannot be contested into review', async () => {
+    const ws = W(17);
+    const { api, r } = await rejected(ws, 'contest-6');
+    await env.DB.prepare("UPDATE instapay_requests SET decided_by = 'system:auto-confirm' WHERE id = ?").bind(r.id).run();
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, note)).status).toBe(409);
+    await env.DB.prepare("UPDATE instapay_requests SET decided_by = ? WHERE id = ?").bind(OP1, r.id).run();
+    for (let i = 0; i < 5; i++) await create(api); // the queue cap is the creation cap
+    const full = await api.call('POST', `/wallet/instapay/${r.id}/contest`, note);
+    expect(full.status).toBe(409);
+    expect(await full.json()).toMatchObject({ message: 'too_many_open' });
+    expect((await row(r.id))!.state).toBe('rejected');
+  });
+
+  it('the auto-confirm machinery never touches a contested request', async () => {
+    const ws = W(18);
+    const { api, r } = await rejected(ws, 'contest-7');
+    await api.call('POST', `/wallet/instapay/${r.id}/contest`, note);
+    await triggerAutoConfirm(env, r.id, Date.now() + 60 * 60_000);
+    const cur = await getRequestRow(env, r.id);
+    expect(cur).toMatchObject({ state: 'under_review', decided_by: null });
+  });
+});
