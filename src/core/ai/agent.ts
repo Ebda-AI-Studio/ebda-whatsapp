@@ -24,6 +24,7 @@ import { AI_TURN_CREDITS, heartbeatHold, holdCredits, releaseHold, settleHold } 
 import { funnelOnce } from '../funnel';
 import { markAiTurn } from '../timing';
 import { recordTurnCost } from './cost';
+import { EMPTY_RETRY_NOTE, LANGUAGE_RETRY_NOTE, isArabicScriptReply, isFlaggedModel, looksEnglishAsk, readAgentModelFlag, whatsappFormat, type AgentModelId } from './model-flag';
 import { LlmError, type ChatTurn, type LlmProvider, type LlmResponse } from './provider';
 import { getAgentState, promisePolicyOf, providerFor, putAgentState, readAgentSettings, type AgentSettings } from './settings';
 import { MAX_CALLS_PER_ROUND, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_ROUNDS, runTool, toolDefs, type ToolContext } from './tools';
@@ -37,8 +38,10 @@ import { cardJob, type BuiltCard, type CardSpec } from '../store-link/product-ca
 import { storeLink } from '../store-link';
 
 export const AGENT_MAX_TOKENS = 450;
-/** One credit buys at most this many model calls: up to MAX_TOOL_ROUNDS rounds that use tools, then the last call that must answer (M-084). */
-export const MAX_MODEL_CALLS_PER_CREDIT = MAX_TOOL_ROUNDS + 1;
+/** One credit buys at most this many model calls: up to MAX_TOOL_ROUNDS rounds that use tools, the last call that must answer, and at most one corrective call (M-084). */
+export const MAX_MODEL_CALLS_PER_CREDIT = MAX_TOOL_ROUNDS + 2;
+/** The ONE corrective call a turn may make (an empty answer, or the flagged model's English-ask-answered-in-Arabic): the +1 above. The two share the slot, so the worst turn is 3 tool rounds + the answer + this call. It never costs a second credit. */
+const CORRECTIVE_CALLS_PER_TURN = 1;
 const HISTORY_MESSAGES = 8;
 const HISTORY_CHARS = 500;
 /** Older messages (beyond the verbatim window) folded into one short recap: at most this many rows, each cut to RECAP_LINE chars, the whole recap to RECAP_CHARS (about 400 tokens). No extra model call. */
@@ -49,6 +52,9 @@ export const REPLY_MAX_CHARS = 1500;
 
 // A suspended workspace's agent is off (W2-OPS): it would otherwise keep spending AI credits and queueing replies that every send gate then refuses.
 export const agentActive = (host: Pick<LinkHost, 'sql'>): boolean => agentConfig().copy !== null && readAgentSettings(host.sql).enabled && !isSuspended(host.sql);
+
+/** What the reply guard refused, as a fixed mask for the alert (the reply text itself is never logged). */
+const BLOCK_SHAPE = { url: '<link>', price: '<amount>', promise: '<promise>', leak: '<rules>' } as const;
 
 class Aborted extends Error {}
 
@@ -260,11 +266,14 @@ export function cleanReply(raw: string | undefined): string | null {
 type Outcome = { kind: 'reply'; text: string; cards: BuiltCard[] } | { kind: 'handoff'; reason: HandoffReason } | { kind: 'order' };
 
 /** `turn` is filled with the system prompt and with every text the merchant (or the Store) vouches for in this turn: the reply guard checks the answer against it. */
-async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, settings: AgentSettings, locale: Locale, now: number, knowledge: string[], turn: { trusted: Trusted; system: string }): Promise<Outcome> {
+async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, settings: AgentSettings, locale: Locale, now: number, knowledge: string[], turn: { trusted: Trusted; system: string }, modelFlag: AgentModelId | null = null): Promise<Outcome> {
+  // Ruling WA-MODEL-FLAG-1: `modelFlag` null = the default path, untouched. The id rides on every request (`req.model`); the flagged model also gets the format strip, language check and strict prompt.
+  const flagged = isFlaggedModel(modelFlag);
+  const modelReq = modelFlag ? { model: modelFlag } : {};
   const trusted = turn.trusted;
   const copy = agentConfig().copy!;
   const bridge = bridgeFor(host.env);
-  const availability = { catalog: bridge !== null, orders: bridge !== null, ordering: orderingActive(host) };
+  const availability = { catalog: bridge !== null, orders: bridge !== null, ordering: orderingActive(host), recommend: bridge !== null && settings.recommendProducts };
   // Tools of the workspace's enabled connectors (the agent is on, or this turn would not be running); names are `<connector>__<tool>`.
   const connectors = loadConnectors(host);
   const tools = [...toolDefs(availability), ...(connectors?.tools ?? [])];
@@ -281,11 +290,11 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   for (const p of profilePrices(profile)) trusted.prices.add(p);
   trusted.setPolicy(promisePolicyOf(settings));
   if (policies) trusted.setDeclared({ freeOver: [...policies.shipping.zones, ...policies.shipping.governorates].flatMap((z) => (z.freeOverMinor !== null ? [z.freeOverMinor / 100] : [])), returnDays: policies.returns.windowDays });
-  const prompt = (p: string, k: string[], rich: boolean) => `${copy.systemPrompt({ persona: p, language: settings.language, tone: settings.tone, storeName: policies?.name ?? null, knowledge: k, tools: tools.map((t) => t.name), facts: rich ? facts : null, customer: rich ? customer : null, faq: rich ? faq : null })}\n\n${BOUNDARY}`;
+  const prompt = (p: string, k: string[], rich: boolean) => `${copy.systemPrompt({ persona: p, language: settings.language, tone: settings.tone, storeName: policies?.name ?? null, knowledge: k, tools: tools.map((t) => t.name), facts: rich ? facts : null, customer: rich ? customer : null, faq: rich ? faq : null, ...(flagged ? { strict: true } : {}) })}\n\n${BOUNDARY}`;
   const system = prompt(persona, knowledge, true);
   // What a reply must never recite: the rules, without the merchant's own persona, knowledge and facts (those may be quoted).
   turn.system = prompt('', [], false);
-  const ctx: ToolContext = { host, from: input.from, bridge, availability, locale, cards: [] };
+  const ctx: ToolContext = { host, from: input.from, bridge, availability, locale, cards: [], messageId: input.messageId };
   const messages = historyOf(host, input);
   const started = Date.now();
   // A slow model is announced before it is asked: the recent answer time of this workspace decides.
@@ -296,16 +305,38 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
     if (!(await sayNow(host, input, 'ack', copy.t.ack[locale], now))) throw new Aborted();
   };
   if (recent > agentConfig().slowMs) await ack();
+  let correctiveLeft: number = CORRECTIVE_CALLS_PER_TURN;
+  // ONE corrective call per turn (tools off, same model): `note` is appended as a user turn after the model's own text (when it wrote any). A failed call keeps the original answer.
+  const correct = async (res: LlmResponse, first: string | null, note: string): Promise<LlmResponse> => {
+    if (correctiveLeft <= 0) return res;
+    correctiveLeft--;
+    try {
+      const again = await callModel(provider, { system, messages: [...messages, ...(first ? [{ role: 'assistant' as const, content: first }] : []), { role: 'user', content: note }], tools: [], maxTokens: AGENT_MAX_TOKENS, ...modelReq });
+      if (turnGone(host, input)) throw new Aborted();
+      return cleanReply(again.text) ? again : res;
+    } catch (err) {
+      if (err instanceof Aborted) throw err;
+      return res;
+    }
+  };
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const offered = round < MAX_TOOL_ROUNDS ? tools : [];
-    const res = await callModel(provider, { system, messages, tools: offered, maxTokens: AGENT_MAX_TOKENS });
+    let res = await callModel(provider, { system, messages, tools: offered, maxTokens: AGENT_MAX_TOKENS, ...modelReq });
     if (turnGone(host, input)) throw new Aborted();
     const calls = offered.length ? (res.toolCalls ?? []).slice(0, MAX_CALLS_PER_ROUND) : [];
     if (!calls.length) {
       const elapsed = Date.now() - started;
       putAgentState(host.sql, 'latency_ewma_ms', String(Math.round(recent > 0 ? recent * 0.7 + elapsed * 0.3 : elapsed)));
-      // Cards without words still go out, with the store's own one-line lead-in.
-      const text = cleanReply(res.text) ?? (ctx.cards.length ? (storeLink().copy?.t.cards.listBody[locale] ?? null) : null);
+      // An empty answer with no cards (any model; typically the last call, made with tools off after the tool rounds): one nudge to answer from the tool results.
+      if (!(res.text ?? '').trim() && !ctx.cards.length) res = await correct(res, null, EMPTY_RETRY_NOTE); // truly empty only: a leaked structure or a thinking-only block is handled as before
+      // Flagged model, language `auto`, a plain-English customer and an Arabic-script reply: the corrective call asks for English.
+      if (flagged && settings.language === 'auto' && locale === 'en' && looksEnglishAsk(input.text)) {
+        const first = cleanReply(res.text);
+        if (first && isArabicScriptReply(first)) res = await correct(res, first, LANGUAGE_RETRY_NOTE);
+      }
+      // Cards without words still go out, with the store's own one-line lead-in. The flagged model's Markdown becomes WhatsApp formatting here, BEFORE the reply guard sees it.
+      const cleaned = cleanReply(res.text);
+      const text = (flagged && cleaned ? whatsappFormat(cleaned) || cleaned : cleaned) ?? (ctx.cards.length ? (storeLink().copy?.t.cards.listBody[locale] ?? null) : null);
       return text ? { kind: 'reply', text, cards: ctx.cards } : { kind: 'handoff', reason: res.text ? 'bad_output' : 'no_answer' };
     }
     if (!acked && Date.now() - started >= agentConfig().slowMs) await ack();
@@ -391,13 +422,15 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
         return await deliverStored(host, input);
       }
     }
+    // Ruling WA-MODEL-FLAG-1: the platform's model choice (a merchant's own model key is never touched). Read each turn from D1, unset/unreadable = default.
+    const modelFlag = real.byoKey ? null : await readAgentModelFlag(host.env);
     let answered = 0;
     let inputTokens = 0;
     let outputTokens = 0;
     let audioMs = 0;
     let speechRan = false; // the speech model completed a call (text, silence or noise): billed, so its credit is charged
     const startedAt = Date.now();
-    const turnPoint = (outcome: string) => markAiTurn(host.env, host.workspaceId, { outcome, inputTokens, outputTokens, rounds: answered, ms: Date.now() - startedAt, credits: real.byoKey || (answered === 0 && !speechRan) ? 0 : AI_TURN_CREDITS, costEgpMicros: answered === 0 && audioMs === 0 ? 0 : recordTurnCost(host, { inputTokens, outputTokens, audioMs }, real.byoKey, Date.now()) });
+    const turnPoint = (outcome: string) => markAiTurn(host.env, host.workspaceId, { outcome, inputTokens, outputTokens, rounds: answered, ms: Date.now() - startedAt, credits: real.byoKey || (answered === 0 && !speechRan) ? 0 : AI_TURN_CREDITS, costEgpMicros: answered === 0 && audioMs === 0 ? 0 : recordTurnCost(host, { inputTokens, outputTokens, audioMs }, real.byoKey, Date.now(), modelFlag) });
     // Hold times use the real clock: a turn can outlast the moment it started. Each round tells the hold the turn is still alive.
     const provider: LlmProvider = { byoKey: real.byoKey, complete: async (r) => { if (!real.byoKey) heartbeatHold(host.sql, holdRef, Date.now()); const out = await real.complete(r); answered++; inputTokens += out.usage?.inputTokens ?? 0; outputTokens += out.usage?.outputTokens ?? 0; return out; } };
     // WA-OWNER-FREE-1: a transcription that ran was billed by the speech model, so the hold is CHARGED (one credit) when the speech model completed a call even if no answer followed (silence,
@@ -455,7 +488,7 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     try {
       // A FAQ small enough to read whole is in the prompt (no retrieval); a bigger one is searched in the index, and an index that is still empty is flagged to the merchant.
       faqIndexAlert(host, settings, knowledgeReady(host.sql), now);
-      outcome = await converse(host, heard, provider, settings, heardLocale, now, faqInline(settings) ? [] : await retrieveKnowledge(host, heard.text ?? ''), turn);
+      outcome = await converse(host, heard, provider, settings, heardLocale, now, faqInline(settings) ? [] : await retrieveKnowledge(host, heard.text ?? ''), turn, modelFlag);
     } catch (err) {
       finishHold();
       if (err instanceof Aborted) {
@@ -471,7 +504,7 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
       // F2 / M-069: a link, a price or a promise nobody vouched for never reaches the customer; a person takes over.
       const verdict = guardReply(outcome.text, turn.trusted, turn.system);
       if (!verdict.ok) {
-        alert('agent_reply_blocked', { workspace: host.workspaceId, why: verdict.reason });
+        alert('agent_reply_blocked', { workspace: host.workspaceId, why: verdict.reason, shape: BLOCK_SHAPE[verdict.reason], model: modelFlag ?? 'default' }); // class + fixed mask only: never the reply, the customer's words or a number
         outcome = { kind: 'handoff', reason: 'guarded' };
       }
     }

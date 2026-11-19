@@ -75,6 +75,7 @@ export function createServiceBindingBridge(env: Pick<Env, 'STORE_BRIDGE'>): Stor
     saveCustomerAddress: (s, key, address) => call('saveCustomerAddress', z.object({ address: addressSchema }), s, key, address),
     getOrderStatus: (s, n, key) => call('getOrderStatus', orderStatusSchema, s, n, key),
     listCustomerOrders: (s, key, limit) => call('listCustomerOrders', customerOrdersSchema, s, key, limit),
+    getRecommendations: (s, req) => call('getRecommendations', productsSchema, s, req),
     listStoreMembers: (s, asUserId) => callBare('listStoreMembers', storeMembersSchema, s, asUserId),
     memberRole: async (s, userId) => {
       const r = await callBare('memberRole', memberRoleSchema.nullable(), s, userId);

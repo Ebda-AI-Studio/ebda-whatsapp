@@ -18,8 +18,7 @@ jobs:
     name: Scan for leaked secrets
     # Never run code from a fork's PR on a self-hosted runner.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # ubuntu-latest became 26.04 (2026-11); Playwright 1.60 unsupported — Ruling CI-HOSTED-2
-    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '["ebda-mac-light"]') }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -29,7 +28,7 @@ jobs:
         run: |
           set -eu
           GITLEAKS_VERSION=8.21.2
-          # The runner's OS + arch (linux x64 on hosted ubuntu, darwin arm64 on the ebda-mac runner), checksum-pinned from the
+          # The runner's OS + arch (darwin arm64 on the ebda-mac runner; linux x64 if a Linux runner is ever added), checksum-pinned from the
           # v8.21.2 release's checksums.txt, installed into this job's RUNNER_TEMP (no sudo, nothing left on a shared host).
           case "$(uname -s)-$(uname -m)" in
             Linux-x86_64) P=linux_x64; SHA=5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba ;;

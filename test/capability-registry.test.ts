@@ -39,7 +39,7 @@ function bypassFiles(): { path: string; src: string }[] {
 
 describe('capability registry rules (lens 192)', () => {
   it('loads every seeded capability', () => {
-    expect(entries.length).toBe(181); // + templates.check-draft (Smart Layer template tools) + assistant.apply-changes (Smart Layer apply/undo) + operator.assistant-controls (Smart Layer assistant) + wallet.yearly-refund-request (money surfaces) + operator.instapay-auto-confirm (InstaPay auto-confirm); 172 seeded + templates.shared-list, templates.shared-request, templates.shared-number-marketing, operator.shared-template-requests
+    expect(entries.length).toBe(182); // + operator.agent-model (WA-MODEL-FLAG-1) + templates.check-draft (Smart Layer template tools) + assistant.apply-changes (Smart Layer apply/undo) + operator.assistant-controls (Smart Layer assistant) + wallet.yearly-refund-request (money surfaces) + operator.instapay-auto-confirm (InstaPay auto-confirm); 172 seeded + templates.shared-list, templates.shared-request, templates.shared-number-marketing, operator.shared-template-requests
   });
   it('has no new registry violation and no stale baseline id', () => {
     expect(judge('registry', violations).failures).toEqual([]);
