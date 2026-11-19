@@ -25,6 +25,7 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
     const host = new URL(e.CHAT_EVAL_BASE_URL!).host;
     // Workers AI (the production path): the SAME WorkersAiProvider production runs, over a binding that calls the account's REST run endpoint (CHAT_EVAL_BASE_URL = .../accounts/<id>/ai/v1).
     const stats = { lat: [] as number[], inTok: 0, outTok: 0 };
+    const reason = { calls: 0, length: 0, reasoningChars: 0, contentChars: 0 };
     let voidRun = ''; // set on the first 401/403 from the model endpoint: the run is aborted as VOID after the current case
     const calls: { id: string; ms: number; inTok: number; outTok: number; msgs: number; tools: number }[] = [];
     let curId = '';
@@ -45,6 +46,9 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
         if (res.status === 401 || res.status === 403) voidRun = `HTTP ${res.status}`; // the OAuth token expired mid-run: every later case would score as a provider error
         if (!res.ok) throw new Error(`workers-ai ${res.status} ${(await res.text()).slice(0, 200)}`);
         const result = ((await res.json()) as { result: { usage?: { prompt_tokens?: number; completion_tokens?: number } } }).result;
+        const msg = (result as { choices?: { message?: { content?: string; reasoning?: string; reasoning_content?: string }; finish_reason?: string }[] })?.choices?.[0];
+        reason.calls++; if (msg?.finish_reason === 'length') reason.length++;
+        reason.reasoningChars += (msg?.message?.reasoning_content ?? msg?.message?.reasoning ?? '').length; reason.contentChars += (msg?.message?.content ?? '').length; // the provider reports the hidden reasoning as text, not as a token count: characters are the measure
         calls.push({ id: curId, ms: Date.now() - t0, inTok: result?.usage?.prompt_tokens ?? 0, outTok: result?.usage?.completion_tokens ?? 0, msgs: (inputs.messages as unknown[]).length, tools: (rawInputs.tools as unknown[] | undefined)?.length ?? 0 });
         stats.lat.push(Date.now() - t0); stats.inTok += result?.usage?.prompt_tokens ?? 0; stats.outTok += result?.usage?.completion_tokens ?? 0;
         return result;
@@ -79,6 +83,7 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
     }
     const board = scoreboard(verdicts);
     const l = [...stats.lat].sort((a, b) => a - b);
+    console.log(`CHAT_EVAL_REASONING ${JSON.stringify({ ...reason, reasoningShareOfText: Number((reason.reasoningChars / Math.max(1, reason.reasoningChars + reason.contentChars)).toFixed(3)) })}`); // length = calls that stopped at the token cap
     console.log(`CHAT_EVAL_SLOW ${JSON.stringify([...calls].sort((a, b) => b.ms - a.ms).slice(0, 10))}`); // the ten slowest model calls: which case, how long, how big (messages = tool round-trips so far)
     console.log(`CHAT_EVAL_STATS ${JSON.stringify({ calls: l.length, p50: l[Math.floor(l.length * 0.5)], p95: l[Math.floor(l.length * 0.95)], inTok: stats.inTok, outTok: stats.outTok })}`);
     console.log(`CHAT_EVAL_SCOREBOARD ${JSON.stringify({ model: e.CHAT_EVAL_MODEL, ...board })}`);
