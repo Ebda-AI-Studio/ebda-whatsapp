@@ -24,7 +24,7 @@ Last checked against Meta's documentation: 2026-10-25.
 
 ## 3. Payments (Ahmad)
 1. **Kashier** merchant account for Ebda AI Studio (top-ups). Keys go into the `KASHIER_*` secrets listed in `docs/billing.md`; webhook URL from the same doc.
-2. Decide and publish the open billing items: VAT presentation (Q5, after VAT/e-invoice registration), FX buffer (Q6), and the refund terms text (WA-REFUND-1) checked by a lawyer.
+2. Decide and publish the open billing items: VAT presentation (Q5, after VAT/e-invoice registration), FX buffer (Q6), and the refund terms text (WA-REFUND-1; reviewed and approved by counsel, confirmed by Ahmad 2026-11-19).
 
 ## 4. Legal pages (Ahmad approves, Claude drafts)
 Privacy policy, terms of service (incl. refund terms), and a **data deletion** URL/instructions page. Meta's app review requires the privacy policy URL and the data deletion URL. The policy and terms live on the Store's public site (ebda.app); **the data-deletion URL is this product's own route** (B9, Ruling LEGAL-DELETE-1): in the Meta app (Settings, Basic, "Data Deletion Request URL") enter `https://wa.ebda.app/meta/data-deletion`.

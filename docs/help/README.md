@@ -52,7 +52,7 @@ capabilities:
 - Guides 04, 16 and 17 (and every guide the capability help guard knows) start with front matter: a `capabilities:` block list of `<id>@<version>` and an `appPath`. The Store import (`import-wa-help.mjs`) must drop it before publishing.
 - Each guide ends with "Last checked" (2026-10-25). Re-check every guide against Meta's current screens before launch and when Meta changes its flows; update the date.
 - Copy rules: product name "Ebda Chat", company "Ebda AI Studio"; no infrastructure provider names. Undecided values (package prices, add-on price) are deliberately left to "set by the Ebda AI Studio team".
-- Guide 09 refund text is marked "subject to final terms of service": align it with the terms before launch (legal check pending). Margin is stated as 0% "for now" (WA-MARGIN-1 is operator-editable); update guides 03 and 10 if it changes.
+- Guide 09 refund text no longer says "subject to final terms" (counsel approved, 2026-11-19). Margin is stated as 0% "for now" (WA-MARGIN-1 is operator-editable); update guides 03 and 10 if it changes.
 - No screenshots are included (none of this product's screens are final); add them in the help app once the onboarding UI is audited.
 | 16 | write-and-submit-a-template | Create a template on the Templates page: type, variables with examples, header/footer/buttons, Meta's limits, the irreversible confirm, shared-number request |
 | 17 | template-review-and-rejections | Statuses, reading a rejection in plain words, edit and resubmit (24 h / 10 per 30 days), delete (30-day name rule), recategorisation |
