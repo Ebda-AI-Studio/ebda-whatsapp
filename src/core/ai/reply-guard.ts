@@ -106,8 +106,9 @@ const PROMISES: Record<keyof PromisePolicy, RegExp> = {
 };
 
 /** Free SHIPPING / delivery only (not a free gift, not "free of charge"). */
-// "ship(s) free" and a shipping VERB followed by the adverb ("توصل مجانا", "بيوصل مجانا", "شحن ببلاش") are shipping statements too: without them the bare adverb read as "something else free" and a declared threshold was refused (ship-ar-1).
-const SHIPS_FREE = String.raw`\b(?:ships?|shipped|deliver(?:s|ed)?)\s+(?:for\s+)?free\b|(?:توصل|يوصل|بيوصل|هيوصل|هتوصل|تتوصل|توصيل|شحن)(?:ك|لك|كم)?\s+(?:مجانا|ببلاش)`;
+// "ship(s) free" and a shipping word followed, within three plain words, by the free word ("توصل مجانا", "الشحن يبقى مجاني", "شحن ببلاش") are shipping statements too: without them the bare adverb read as "something else free" and a declared
+// threshold was refused (ship-ar-1, twice with two spellings). The window is lazy (it stops at the FIRST free word, so a later "هدية مجانا" stays outside it), may not cross a gift word, and the free word must end there.
+const SHIPS_FREE = String.raw`\b(?:ships?|shipped|deliver(?:s|ed)?)\s+(?:for\s+)?free\b|(?:توصل|يوصل|بيوصل|هيوصل|هتوصل|تتوصل|توصيل|شحن)(?:ك|لك|كم)?\s+(?:(?!هدي|gift)\S+\s+){0,3}?(?:مجانا|مجاني|ببلاش)(?![ء-ي])`;
 const FREE_SHIPPING = new RegExp(String.raw`free (?:shipping|delivery)|شحن مجاني|توصيل مجاني|شحن ببلاش|${SHIPS_FREE}`, 'gu');
 /** The money-back part of the refund promise: never allowed by a declared return window. */
 const MONEY_BACK = /\brefund|money back|reimburs|استرداد|ارجاع (?:الفلوس|المبلغ|فلوس)|(?:هرجع|هرد|هنرجع|هنرد|ارجع|رجع)(?:لك|لكم|ك|لك)? (?:الفلوس|فلوس|المبلغ)|رجوع الفلوس|استرجاع (?:الفلوس|المبلغ|فلوس)/u;

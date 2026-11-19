@@ -70,6 +70,7 @@ describe('free shipping stated with a verb + adverb ("توصل مجانًا"), d
     }
     expect(verdict('الطلب بيوصل مجانًا لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(true);
     expect(verdict('Orders over 1000 EGP ship free', { freeOver: [1000] })).toBe(true);
+    expect(verdict('الشحن للقاهرة 60 جنيه، ولو قيمة الطلب فوق 1000 جنيه الشحن يبقى مجاني', { freeOver: [1000] })).toBe(true); // the exact reply the live eval refused in the second run
   });
   it('is still refused with no declared free shipping, with a wrong amount, or with no amount', () => {
     expect(verdict('وممكن توصل مجانًا لو قيمة الطلب أكتر من 1000 جنيه')).toBe(false);
@@ -80,6 +81,8 @@ describe('free shipping stated with a verb + adverb ("توصل مجانًا"), d
   it('a free GIFT or any other free thing stays refused, and a diacritic-decorated invented promise stays refused', () => {
     expect(verdict('هدية مجانًا مع الطلب فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
     expect(verdict('توصل مجانًا وكمان هدية مجانًا لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
+    expect(verdict('الشحن هدية مجانية لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(false); // a gift word inside the window
+    expect(verdict('الشحن للقاهرة 60 جنيه وهدية مجانا لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(false); // the free word is the gift's, outside the window
     expect(verdict('هنرجّعلك الفُلوس كلها', { freeOver: [1000] })).toBe(false);
     expect(verdict('فيه خَصْمٌ عشرين في المية لو الطلب فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
     expect(verdict('ضَمَانٌ سنة على المنتج', { freeOver: [1000] })).toBe(false);
