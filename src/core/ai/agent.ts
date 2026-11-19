@@ -266,7 +266,7 @@ async function callModel(provider: LlmProvider, req: Parameters<LlmProvider['com
 export function cleanReply(raw: string | undefined): string | null {
   const t = (raw ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   if (!t) return null;
-  if (/^[{[]/.test(t) || /"(tool_calls?|intent|arguments)"\s*:/.test(t) || /<\/?(tool_call|function)/i.test(t)) return null;
+  if (/^[{[]/.test(t) || /"(tool_calls?|intent|arguments)"\s*:/.test(t) || /<\/?(tool_call|function)/i.test(t) || /<\|[^|>\s]{1,40}\|>/.test(t)) return null; // a model control token (<|start|>, <|channel|>, ...) leaked into the text: live eval voice-ar-1 got "<|start|>assistant<|channel|>" as its whole reply
   return Array.from(t).length > REPLY_MAX_CHARS ? `${Array.from(t).slice(0, REPLY_MAX_CHARS - 1).join('')}…` : t;
 }
 

@@ -138,3 +138,13 @@ describe('the guard stays the last word: a refused reply is NOT corrected, for a
     expect(out.map((s) => s.text)).toEqual(['عندنا هدايا حلوة']);
   });
 });
+
+describe('cleanReply: model control tokens never reach a customer', () => {
+  it('a reply that is (or contains) a harmony control token is unusable', async () => {
+    const { cleanReply } = await import('../src/core/ai/agent');
+    expect(cleanReply('<|start|>assistant<|channel|>')).toBeNull();
+    expect(cleanReply('تمام <|channel|> أهلاً')).toBeNull();
+    expect(cleanReply('أهلاً بيك، تحت أمرك')).toBe('أهلاً بيك، تحت أمرك');
+    expect(cleanReply('2 < 3 | 4 > 1')).toBe('2 < 3 | 4 > 1'); // ordinary angle brackets and pipes are fine
+  });
+});
