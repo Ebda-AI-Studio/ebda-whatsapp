@@ -89,6 +89,7 @@ const P0_ALERTS = new Set([
   'duplicate_success', 'package_amount_mismatch', 'topup_amount_mismatch', 'credit_pack_amount_mismatch', 'shared_sent_not_recorded', 'number_restricted',
 ]);
 const P1_ALERTS = new Set([
+  'agent_reply_blocked_rate', 'ai_cost_per_1k_over_threshold',
   'send_dlq', 'unhandled_error', 'secret_misconfigured', 'binding_missing', 'entitlement_push_failed', 'entitlement_reconcile_failed', 'entitlement_event_not_queued', 'webhook_reconfirm_failed',
   'webhook_unconfirmed_abandoned', 'webhook_unconfirmed_aged', 'topup_repair_failed', 'package_repair_failed', 'instapay_repair_failed', 'card_refund_reconcile_failed', 'card_refund_stuck',
   'refund_abandon_sweep_failed', 'instapay_expiry_failed', 'instapay_overdue_check_failed', 'instapay_grant_failed', 'instapay_auto_digest_stale', 'instapay_proof_overdue', 'instapay_amount_mismatch', 'send_enqueue_failed',
@@ -109,11 +110,12 @@ const P1_ALERTS = new Set([
 /** Known and deliberately log-only. A NEW alert name must be added to exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS (test/guards.test.ts fails otherwise). */
 export const INFO_ALERTS = new Set([
   'instapay_auto_error', // a request waits for a person after an unexpected error in the auto-confirm attempt; read in the weekly log pass
-  'agent_no_credits', 'assistant_handoff', 'assistant_help_index_failed', 'assistant_status_failed', 'agent_tool_failed', 'agent_turn_cap', 'agent_reply_blocked', 'campaign_content_blocked', 'ai_overdraw_refused', 'catalog_not_linked', 'catalog_provision_failed', 'catalog_items_rejected', 'catalog_vector_search_failed', 'cod_outcome_refused', 'ai_credits_low',
+  'agent_no_credits', 'agent_model_timeout', 'assistant_handoff', 'assistant_help_index_failed', 'assistant_status_failed', 'agent_tool_failed', 'agent_turn_cap', 'agent_reply_blocked', 'campaign_content_blocked', 'ai_overdraw_refused', 'catalog_not_linked', 'catalog_provision_failed', 'catalog_items_rejected', 'catalog_vector_search_failed', 'cod_outcome_refused', 'ai_credits_low',
   'cod_request_details_missing', 'connector_call_crashed', 'connector_call_failed', 'kb_index_unavailable', 'kb_retrieve_failed', 'r2_delete_failed', 'rate_missing_pending',
   'send_tier_exhausted', 'shared_pick_id_refused', 'shared_trueup_no_rebate', 'topup_inquiry_unsupported', 'wallet_low_balance', 'webhook_unconfirmed',
   'seats_over_limit', // WA-SEATS-1: a downgrade left more seated staff than the package allows; nothing is deleted, the owner sees it on the Team screen
   // Chat agent context (Rulings CHAT-AGENT-2/4): each is a degraded answer or a notice that could not be delivered, never a stopped service; the customer is still answered.
+  'agent_model_flag_unreadable', // WA-MODEL-FLAG-1: the agentModel flag could not be read; the turn used the default model
   'agent_policies_unavailable', 'agent_profile_unavailable', 'agent_faq_not_indexed', 'handoff_owner_unreachable', 'handoff_owner_notice_failed', 'handoff_digest_failed',
   'starter_templates_failed', // the brand's starter templates could not be put in place on connect (Meta slow or refused); the Templates screen retries by itself and has a retry button
   'instapay_no_reference', // DUP-REF-REQUIRED-1: an operator confirmed an InstaPay transfer with the audited "no reference" box ticked; review the weekly count

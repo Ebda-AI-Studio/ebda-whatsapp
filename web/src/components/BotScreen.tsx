@@ -33,6 +33,7 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState(false);
   const [resynced, setResynced] = useState(false);
+  const [linkId, setLinkId] = useState('');
   const load = useCallback(() => { setCat(undefined); void api.status().then(setCat, () => setCat('error')); }, [api]);
   useEffect(load, [load]);
 
@@ -47,6 +48,24 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
       const detail = (e as { detail?: string }).detail;
       if (detail === 'catalog_already_set') load();
       else setError(detail === 'missing_permission' ? t.catErrPermission : detail === 'no_business' || detail === 'business_mismatch' ? t.catErrReconnect : detail === 'meta_error' ? t.catErrMeta : t.catErrGeneric);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const linkIdOk = /^\d{5,25}$/.test(linkId.trim());
+  const link = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.linkExisting(linkId.trim());
+      setLinkId('');
+      load();
+      setCreated(false);
+      setResynced(false);
+    } catch (e) {
+      const detail = (e as { detail?: string }).detail;
+      setError(detail === 'catalog_not_linked' ? t.catLinkNotYours : detail === 'meta_unavailable' ? t.catErrMeta : t.catErrGeneric);
     } finally {
       setBusy(false);
     }
@@ -121,7 +140,19 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
             <p className="muted">{t.catNone}</p>
             {readOnly
               ? <p className="notice" role="note">{t.catOwnerOnly}</p>
-              : <div className="settings-actions"><button type="button" className="btn primary" disabled={busy} onClick={() => void create()}>{t.catCreate}</button></div>}
+              : (
+                <>
+                  <div className="settings-actions"><button type="button" className="btn primary" disabled={busy} onClick={() => void create()}>{t.catCreate}</button></div>
+                  <h3>{t.catLinkTitle}</h3>
+                  <label className="field">
+                    <span>{t.catLinkLabel}</span>
+                    <input dir="ltr" inputMode="numeric" value={linkId} aria-describedby="cat-link-hint" aria-invalid={linkId !== '' && !linkIdOk} onChange={(e) => setLinkId(e.target.value)} />
+                  </label>
+                  <small id="cat-link-hint" className="muted">{t.catLinkHint}</small>
+                  {linkId !== '' && !linkIdOk && <small className="error-text">{t.catLinkBad}</small>}
+                  <div className="settings-actions"><button type="button" className="btn" disabled={busy || !linkIdOk} onClick={() => void link()}>{t.catLinkBtn}</button></div>
+                </>
+              )}
           </>
         ))}
       {busy && <p role="status" className="muted">{t.catCreating}</p>}

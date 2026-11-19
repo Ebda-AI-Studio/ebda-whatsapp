@@ -1,6 +1,6 @@
 import { ApiError } from './api';
 import type {
-  AgentSettingsDto, BotFunnelDto, BotSettingsDto, BotSwitchesDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, NoteDto, OrderSummaryDto, QuickReplyDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+  AgentSettingsDto, BotFunnelDto, ConnectorDto, BotSettingsDto, BotSwitchesDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto, NoteDto, QuickReplyDto,
 } from '../../../src/core/api/contract';
 import { normaliseText } from '../../../src/core/text-normalise';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
@@ -130,6 +130,7 @@ export function createSampleSource(): InboxSource {
     location: null,
   };
   let catalog: CatalogStatusDto = { catalogId: null, lastSyncAt: null };
+  const connectorList: ConnectorDto[] = [];
   let retentionDays: number | null = null;
   const contacts: ContactDto[] = [
     ...SEEDS.map((x): ContactDto => ({ waId: x.waId, name: x.name, optedOut: false, tags: x.tags.filter((t) => t !== 'needs_human' && t !== 'cod_pending'), consent: x.id % 2 ? { source: 'keyword_start', at: BASE - 10 * D } : null, lastInboundAt: BASE - x.ago })),
@@ -252,6 +253,25 @@ export function createSampleSource(): InboxSource {
         catalog = { ...catalog, commerce: { ...v, failed: null } };
         return v;
       },
+      async linkExisting(catalogId) {
+        catalog = { catalogId, lastSyncAt: null, items: { synced: 0, excluded: 0, rejected: 0 }, leftOut: [], commerce: { catalogVisible: true, cartEnabled: true, failed: null }, error: null, syncing: true, pending: 0 };
+      },
+    },
+    connectors: {
+      list: async () => connectorList.map((c) => ({ ...c })),
+      async save(id, body) {
+        const had = connectorList.findIndex((c) => c.id === id);
+        const prev = had >= 0 ? connectorList[had]! : undefined;
+        if (!prev && !body.secret) throw new ApiError('invalid_request', 400, 'secret_required');
+        const row: ConnectorDto = {
+          id, kind: body.kind, enabled: body.enabled, hasSecret: !!body.secret || !!prev?.hasSecret, config: body.config,
+          tools: body.kind === 'webhook' ? body.config.tools.map((x) => `${id}__${x.name}`) : [`${id}__odoo`], updatedAt: Date.now(), updatedBy: 'u-me',
+        };
+        if (had >= 0) connectorList[had] = row; else connectorList.push(row);
+        return { ...row };
+      },
+      async remove(id) { const i = connectorList.findIndex((c) => c.id === id); if (i >= 0) connectorList.splice(i, 1); },
+      test: async () => ({ ok: true }),
     },
     inboxTools: {
       quickReplies: {
@@ -407,6 +427,11 @@ export function createSampleSource(): InboxSource {
       async exportContact(waId) {
         if (!contacts.some((x) => x.waId === waId)) throw new ApiError('not_found', 404);
         return { version: 1, subject: { waId }, messages: [], nextAfter: null };
+      },
+      async eraseContact(waId) {
+        const i = contacts.findIndex((x) => x.waId === waId);
+        if (i < 0) throw new ApiError('contact not found', 404);
+        contacts.splice(i, 1);
       },
       async mergeContacts(fromWaId, intoWaId) {
         const i = contacts.findIndex((x) => x.waId === fromWaId);

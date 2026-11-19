@@ -6,7 +6,11 @@
   "versionDate": "2026-11-14",
   "titleAr": "ربط سيرفرك بالـ API بتوكن مخصص",
   "titleEn": "Call the API from your own server (integration tokens, scopes)",
-  "screens": [],
+  "screens": [
+    "IntegrationsScreen API access panel",
+    "view:IntegrationsScreen",
+    "/integrations"
+  ],
   "api": [
     "all GET routes scoped via ROUTE_SCOPES",
     "POST /stores/:storeId/conversations/:id/messages (messages:send)",
@@ -37,7 +41,8 @@
   },
   "steps": [
     "Plan must include API (Pro)",
-    "Token is issued by accounts.ebda.app with scopes conversations:read, messages:send, templates:read, contacts:read/write, campaigns:read",
+    "Connect systems > Call the API from your server explains the scopes and opens the account settings",
+    "The API client (token issuer) is created, rotated and revoked by the store owner in the account settings; the account service is the only mint (identity contract v1.3, ID-12)",
     "Poll /events with `after`; no websocket for tokens"
   ],
   "edgeCases": [
@@ -46,8 +51,7 @@
     "Rate limits per API route class"
   ],
   "gaps": [
-    "No merchant screen in Chat to issue/revoke a token (issuance lives in accounts service; unverified where merchant does it)",
-    "Docs live only in site mdx"
+    "Create/revoke is not built in Chat on purpose: Ebda Chat stores and shows no token (the account service mints and revokes; Chat only verifies). Chat shows the scopes and links to the account settings"
   ],
-  "assistantNote": "Assistant may explain and deep-link; issuing a token is a confirm action in accounts, not exposed from Chat"
+  "assistantNote": "Assistant may explain and deep-link to the account settings; issuing or revoking a token is a confirm action in the account service, never exposed from Chat"
 }

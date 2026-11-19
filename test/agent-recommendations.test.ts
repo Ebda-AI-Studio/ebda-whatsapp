@@ -143,6 +143,18 @@ describe('recommend_products', () => {
     expect(lastTool(m)).toMatchObject({ error: 'rate_limited' });
   });
 
+  it('GIFT-BUDGET-TOOL-1: a refused recommendation tells the model to fall back to search_catalog for an explicit ask, and the prompt says an explicit ask never ends empty', async () => {
+    const id = W(41);
+    const pn = await shop(id);
+    link.fake.recs = { v1: ['v2'], v3: ['v4'], v5: ['v6'], v7: ['v8'] };
+    const g = graph();
+    const ask = (seed: string) => rec({ basis: 'similar', productId: seed });
+    const m = model([{ tools: [ask('v1')] }, { text: 'a' }, { tools: [ask('v3')] }, { text: 'b' }, { tools: [ask('v5')] }, { text: 'c' }, { tools: [ask('v7')] }, { text: 'd' }]);
+    for (const n of ['1', '2', '3', '4']) await say(id, pn, text(n), g);
+    expect(lastTool(m)).toMatchObject({ error: 'rate_limited', note: expect.stringContaining('search_catalog') });
+    expect(m.calls[0]!.system).toContain('must NEVER end with nothing shown');
+  });
+
   it('the ration is a 24 h window: sets older than a day no longer count, and an erased-looking stale row is pruned', async () => {
     const id = W(15);
     const pn = await shop(id);

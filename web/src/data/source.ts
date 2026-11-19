@@ -1,6 +1,6 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
-  ListMembersResponse, NoteDto, QuickReplyDto, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, ConnectorDto, ConnectorPut, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto,
+  MessageDto, OrderSummaryDto, ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto, NoteDto, QuickReplyDto,
 } from '../../../src/core/api/contract';
 
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
@@ -115,6 +115,8 @@ export interface ContactsApi {
   renameContact(waId: string, name: string | null): Promise<{ waId: string; name: string | null; optedOut: boolean }>;
   /** B5: all of one contact's data (every page of messages joined). Owner only. */
   exportContact(waId: string): Promise<unknown>;
+  /** Data-subject erasure of one contact (owner only). Cannot be undone; financial records stay. */
+  eraseContact(waId: string): Promise<void>;
   /** M-175: the same person on a new number. Owner only; cannot be undone. */
   mergeContacts(fromWaId: string, intoWaId: string): Promise<void>;
   /** B4: how long messages are kept (owner only). `days: null` = the platform default. */
@@ -168,6 +170,15 @@ export interface InboxSource {
     resync(): Promise<{ started: boolean }>;
     /** Turns the shop button and the cart on the number on or off (owner). Rejects with `detail` = missing_permission | catalog_not_set | meta_error. */
     setCommerce(v: { catalogVisible: boolean; cartEnabled: boolean }): Promise<{ catalogVisible: boolean; cartEnabled: boolean }>;
+    /** Links a catalogue the merchant already has on Meta (owner). Rejects with `detail` = catalog_not_linked (not on this WhatsApp account) | meta_unavailable (503). */
+    linkExisting(catalogId: string): Promise<void>;
+  };
+  /** The agent's connectors to the owner's own systems (owner only; the server refuses staff). A secret goes in on `save` and never comes back: the list carries `hasSecret` only. `save` rejects with `detail` = invalid_url | secret_required | secrets_unavailable | kind_mismatch | too_many_connectors; `test` answers `ok:false` with a code. */
+  connectors?: {
+    list(): Promise<ConnectorDto[]>;
+    save(id: string, body: ConnectorPut): Promise<ConnectorDto>;
+    remove(id: string): Promise<void>;
+    test(id: string): Promise<{ ok: boolean; error?: string; detail?: string }>;
   };
   /**
    * The owner switches (ordering bot, order confirmations, store-login codes over WhatsApp) and the sending-speed report. Turning confirmations or codes ON takes

@@ -312,7 +312,7 @@ async function claimMarker(bucket: R2Bucket, key: string, ttl: number, now: numb
 const parkedMessage = z.object({
   wamid: z.string().min(1), from: z.string().min(1), ts: z.number(), type: z.string().min(1),
   text: z.string().optional(), caption: z.string().optional(), profileName: z.string().optional(),
-  media: z.object({ id: z.string(), mime: z.string(), filename: z.string().optional() }).optional(),
+  media: z.object({ id: z.string(), mime: z.string(), filename: z.string().optional(), voice: z.boolean().optional() }).optional(),
   reply: z.object({ kind: z.enum(['button', 'list']), id: z.string(), title: z.string() }).optional(),
   order: z.unknown().optional(),
 }).loose();

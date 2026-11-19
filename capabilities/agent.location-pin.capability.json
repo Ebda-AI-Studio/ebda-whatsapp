@@ -1,12 +1,11 @@
 {
   "id": "agent.location-pin",
-  "status": "planned",
-  "plan": "register row \"Chat agent: Meta polish\" (remaining two items)",
+  "status": "live",
   "area": "agent",
   "version": 1,
   "versionDate": "2026-11-14",
-  "titleAr": "تحويل اللوكيشن لعنوان",
-  "titleEn": "Agent turns a shared location pin into an address",
+  "titleAr": "اللوكيشن اللي العميل يبعته بيتحول لعنوان توصيل",
+  "titleEn": "A shared location pin becomes the delivery address",
   "screens": [],
   "api": [],
   "mcpTool": null,
@@ -19,7 +18,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/ai-agent",
   "questions": {
     "ar": [
       "العميل بعت لوكيشن بدل العنوان",
@@ -31,8 +30,15 @@
     ]
   },
   "steps": [
-    "Not built"
+    "In the address step of an order, the pin's own name or address text becomes the delivery address (shown back to the customer)",
+    "Anywhere else the agent asks what the customer needs and offers a new order (no model call, no credit)"
   ],
-  "edgeCases": [],
-  "gaps": []
+  "edgeCases": [
+    "A pin with no name or address: the customer is asked for one line of text, and the typed address completes the order",
+    "The coordinates stay on the Chat side only (the Store contract has no coordinates field), are never logged, and are erased with the customer",
+    "No reverse geocoding: nothing is sent to an outside service"
+  ],
+  "gaps": [
+    "The Store receives the address text only, not the coordinates (Store-side ask in docs/store-link.md)"
+  ]
 }
