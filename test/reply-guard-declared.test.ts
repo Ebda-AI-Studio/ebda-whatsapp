@@ -78,11 +78,24 @@ describe('free shipping stated with a verb + adverb ("توصل مجانًا"), d
     expect(verdict('وممكن توصل مجانًا', { freeOver: [1000] })).toBe(false);
     expect(verdict('Orders over 1000 EGP ship free')).toBe(false); // "ship free" is now a recognised free-delivery promise (it was a blind spot), refused unless declared
   });
+  it('a SECOND free thing joined by a conjunction is a new promise and stays refused, with the threshold declared', () => {
+    expect(verdict('الشحن والتغليف مجاني فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
+    expect(verdict('الشحن والتركيب ببلاش فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
+    expect(verdict('الشحن مجاني والتركيب فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
+    expect(verdict('Free shipping and installation over 1000 EGP', { freeOver: [1000] })).toBe(false);
+    expect(verdict('Free shipping & gift wrapping over 1000 EGP', { freeOver: [1000] })).toBe(false);
+  });
+  it('the window is short and stops at a gift word: a free word further away, or behind a gift word, is not the shipping one', () => {
+    expect(verdict('الشحن للقاهرة 60 جنيه فيه عبوة حلوة مجانا لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(false); // free word 6 plain words away
+    expect(verdict('الشحن هديه مجانا لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(false); // a gift word inside the window
+  });
   it('a free GIFT or any other free thing stays refused, and a diacritic-decorated invented promise stays refused', () => {
     expect(verdict('هدية مجانًا مع الطلب فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
     expect(verdict('توصل مجانًا وكمان هدية مجانًا لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
     expect(verdict('الشحن هدية مجانية لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(false); // a gift word inside the window
     expect(verdict('الشحن للقاهرة 60 جنيه وهدية مجانا لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(false); // the free word is the gift's, outside the window
+    expect(verdict('الهدية ببلاش مع الطلب فوق 1000 جنيه', { freeOver: [1000] })).toBe(false); // bare "ببلاش" is a free-delivery/gift word now (blind spot closed)
+    expect(verdict('التغليف ببلاش')).toBe(false);
     expect(verdict('هنرجّعلك الفُلوس كلها', { freeOver: [1000] })).toBe(false);
     expect(verdict('فيه خَصْمٌ عشرين في المية لو الطلب فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
     expect(verdict('ضَمَانٌ سنة على المنتج', { freeOver: [1000] })).toBe(false);
