@@ -14,6 +14,8 @@ export type Step = { text?: string; tools?: { name: string; arguments?: unknown 
 export type Expect = {
   /** Tools this turn must call (all of them). */
   tools?: string[];
+  /** At least ONE of these tools must be called (a budget ask may be served by search_catalog or recommend_products: Ruling GIFT-BUDGET-TOOL-1). */
+  toolsAny?: string[];
   /** This turn must call no tool at all. */
   noTools?: boolean;
   /** true = a person takes over for a legitimate reason (the model asked or the shopper did); false = the agent answers. */
@@ -22,15 +24,18 @@ export type Expect = {
   script?: 'ar' | 'en';
   mention?: RegExp[];
   avoid?: RegExp[];
-  /** search_catalog must carry this budget (store currency units). */
+  /** A budget tool (search_catalog, or recommend_products basis budget) must carry this ceiling (store currency units); nothing shown may cost more; the ask must end with something shown. */
   searchMaxPrice?: number;
 };
 export type Group = 'gift' | 'product' | 'price' | 'shipping' | 'policy' | 'tracking' | 'complaint' | 'offtopic' | 'returning' | 'voice' | 'injection';
 export type StorePreset = 'default' | 'noShipping' | 'returning' | 'orders' | 'noPolicies';
-export type Case = { id: string; group: Group; lang: 'ar' | 'franco' | 'en'; store: StorePreset; turns: string[]; expect: Expect; scripted: Step[] };
+export type Case = { id: string; group: Group; lang: 'ar' | 'franco' | 'en'; store: StorePreset; turns: string[]; expect: Expect; scripted: Step[]; /** The customer is already at the daily recommendation limit when the graded turns start. */ rationed?: true };
 
 const search = (query: string, maxPrice?: number): Step => ({ tools: [{ name: 'search_catalog', arguments: { query, ...(maxPrice ? { maxPrice } : {}) } }] });
 const say = (text: string): Step => ({ text });
+const show = (...ids: string[]): Step => ({ tools: [{ name: 'show_products', arguments: { ids } }] });
+/** What a correct model does when recommend_products is refused on an explicit ask: it searches with the same ceiling instead (Ruling GIFT-BUDGET-TOOL-1). */
+const rec = (query: string, maxPrice: number): Step => ({ tools: [{ name: 'recommend_products', arguments: { basis: 'budget', query, maxPrice } }] });
 const handoff: Step = { tools: [{ name: 'handoff_to_human' }] };
 const status = (orderNumber?: string): Step => ({ tools: [{ name: 'order_status', arguments: orderNumber ? { orderNumber } : {} }] });
 const c = (id: string, group: Group, lang: Case['lang'], turns: string[] | string, expect: Expect, scripted: Step[], store: StorePreset = 'default'): Case => ({ id, group, lang, store, turns: Array.isArray(turns) ? turns : [turns], expect, scripted });
@@ -41,16 +46,20 @@ const EN = 'en' as const;
 
 export const CASES: Case[] = [
   // ---- gift under a budget -------------------------------------------------------------------------------------------------------
-  c('gift-ar-1', 'gift', AR, 'عايز هدية لمراتي في حدود 500 جنيه', { tools: ['search_catalog'], searchMaxPrice: 500, script: 'ar', handoff: false }, [search('هدية للسيدات', 500), say('اخترتلك حاجات تنفع هدية، شوف الاختيارات دي ولو عايز أبعتلك صورها قولي.')]),
-  c('gift-ar-2', 'gift', AR, 'محتاج هدية لأمي بحوالي 300 جنيه', { tools: ['search_catalog'], searchMaxPrice: 300, script: 'ar', handoff: false }, [search('هدية للسيدات', 300), say('لقيتلك كام حاجة تنفع هدية لوالدتك ضمن ميزانيتك.')]),
-  c('gift-franco-1', 'gift', 'franco', '3ayez hadia le sa7bi 2a2al men 400', { tools: ['search_catalog'], searchMaxPrice: 400, script: 'ar', handoff: false }, [search('هدية', 400), say('عندي اختيارات هدية في ميزانيتك، شوفها كده.')]),
-  c('gift-franco-2', 'gift', 'franco', 'momken a3raf 3andokom hadaya lel banat?', { tools: ['search_catalog'], script: 'ar', handoff: false }, [search('هدايا للبنات'), say('أيوه عندنا هدايا حلوة، دي بعض الاختيارات.')]),
-  c('gift-en-1', 'gift', EN, 'I need a gift for my wife under 600 EGP', { tools: ['search_catalog'], searchMaxPrice: 600, script: 'en', handoff: false }, [search('gift for women', 600), say('Here are a few gift ideas within your budget.')]),
-  c('gift-en-2', 'gift', EN, 'any gift ideas for my dad around 350?', { tools: ['search_catalog'], searchMaxPrice: 350, script: 'en', handoff: false }, [search('gift for men', 350), say('I found some options that fit that budget.')]),
-  c('gift-ar-3', 'gift', AR, 'عايز حاجة هدية بسيطة ومتتعداش 250', { tools: ['search_catalog'], searchMaxPrice: 250, script: 'ar', handoff: false }, [search('هدية بسيطة', 250), say('دي اختيارات بسيطة وتنفع هدية.')]),
-  c('gift-ar-4', 'gift', AR, ['السلام عليكم', 'عايز هدية لخطيبتي', 'ميزانيتي 1000 جنيه'], { tools: ['search_catalog'], searchMaxPrice: 1000, script: 'ar', handoff: false }, after(2, search('هدية للسيدات', 1000), say('اخترتلك أحلى الاختيارات في الميزانية دي.'))),
-  c('gift-ar-5', 'gift', AR, 'عيد ميلاد صاحبتي بكرة، اقترحلي حاجة لحد 700 جنيه', { tools: ['search_catalog'], searchMaxPrice: 700, script: 'ar', handoff: false }, [search('هدية للسيدات', 700), say('أقترح عليكِ الاختيارات دي، وكلها في حدود ميزانيتك.')]),
-  c('gift-en-3', 'gift', EN, 'birthday present for a friend, nothing over 250 please', { tools: ['search_catalog'], searchMaxPrice: 250, script: 'en', handoff: false }, [search('birthday gift', 250), say('Here are some nice options under that limit.')]),
+  c('gift-ar-1', 'gift', AR, 'عايز هدية لمراتي في حدود 500 جنيه', { toolsAny: ['search_catalog', 'recommend_products'], searchMaxPrice: 500, script: 'ar', handoff: false }, [search('هدية للسيدات', 500), show('v10'), say('اخترتلك حاجات تنفع هدية، شوف الاختيارات دي ولو عايز أبعتلك صورها قولي.')]),
+  c('gift-ar-2', 'gift', AR, 'محتاج هدية لأمي بحوالي 300 جنيه', { toolsAny: ['search_catalog', 'recommend_products'], searchMaxPrice: 300, script: 'ar', handoff: false }, [search('هدية للسيدات', 300), show('v10'), say('لقيتلك كام حاجة تنفع هدية لوالدتك ضمن ميزانيتك.')]),
+  c('gift-franco-1', 'gift', 'franco', '3ayez hadia le sa7bi 2a2al men 400', { toolsAny: ['search_catalog', 'recommend_products'], searchMaxPrice: 400, script: 'ar', handoff: false }, [search('هدية', 400), show('v10'), say('عندي اختيارات هدية في ميزانيتك، شوفها كده.')]),
+  c('gift-franco-2', 'gift', 'franco', 'momken a3raf 3andokom hadaya lel banat?', { toolsAny: ['search_catalog', 'recommend_products'], script: 'ar', handoff: false }, [search('هدايا للبنات'), show('v10'), say('أيوه عندنا هدايا حلوة، دي بعض الاختيارات.')]),
+  c('gift-en-1', 'gift', EN, 'I need a gift for my wife under 600 EGP', { toolsAny: ['search_catalog', 'recommend_products'], searchMaxPrice: 600, script: 'en', handoff: false }, [search('gift for women', 600), show('v10'), say('Here are a few gift ideas within your budget.')]),
+  c('gift-en-2', 'gift', EN, 'any gift ideas for my dad around 350?', { toolsAny: ['search_catalog', 'recommend_products'], searchMaxPrice: 350, script: 'en', handoff: false }, [search('gift for men', 350), show('v10'), say('I found some options that fit that budget.')]),
+  c('gift-ar-3', 'gift', AR, 'عايز حاجة هدية بسيطة ومتتعداش 250', { toolsAny: ['search_catalog', 'recommend_products'], searchMaxPrice: 250, script: 'ar', handoff: false }, [search('هدية بسيطة', 250), show('v10'), say('دي اختيارات بسيطة وتنفع هدية.')]),
+  c('gift-ar-4', 'gift', AR, ['السلام عليكم', 'عايز هدية لخطيبتي', 'ميزانيتي 1000 جنيه'], { toolsAny: ['search_catalog', 'recommend_products'], searchMaxPrice: 1000, script: 'ar', handoff: false }, after(2, search('هدية للسيدات', 1000), show('v10'), say('اخترتلك أحلى الاختيارات في الميزانية دي.'))),
+  c('gift-ar-5', 'gift', AR, 'عيد ميلاد صاحبتي بكرة، اقترحلي حاجة لحد 700 جنيه', { toolsAny: ['search_catalog', 'recommend_products'], searchMaxPrice: 700, script: 'ar', handoff: false }, [search('هدية للسيدات', 700), show('v10'), say('أقترح عليكِ الاختيارات دي، وكلها في حدود ميزانيتك.')]),
+  c('gift-en-3', 'gift', EN, 'birthday present for a friend, nothing over 250 please', { toolsAny: ['search_catalog', 'recommend_products'], searchMaxPrice: 250, script: 'en', handoff: false }, [search('birthday gift', 250), show('v10'), say('Here are some nice options under that limit.')]),
+
+  // Ruling GIFT-BUDGET-TOOL-1: the customer is already at the daily recommendation limit (recommend_products answers rate_limited), and an explicit budget ask must STILL end with in-budget products shown (fall back to search_catalog with the same ceiling in the same turn).
+  { ...c('gift-ration-ar-1', 'gift', AR, 'عايز هدية لمراتي في حدود 500 جنيه', { tools: ['search_catalog'], searchMaxPrice: 500, script: 'ar', handoff: false }, [rec('هدية للسيدات', 500), search('هدية للسيدات', 500), show('v10'), say('اخترتلك حاجات تنفع هدية في ميزانيتك.')]), rationed: true },
+  { ...c('gift-ration-en-1', 'gift', EN, 'I need a gift for my sister under 400 EGP', { tools: ['search_catalog'], searchMaxPrice: 400, script: 'en', handoff: false }, [rec('gift for women', 400), search('gift for women', 400), show('v10'), say('Here are a few gift ideas within your budget.')]), rationed: true },
 
   // ---- product, size, availability ---------------------------------------------------------------------------------------------------
   c('product-ar-1', 'product', AR, 'عندكم فساتين؟', { tools: ['search_catalog'], script: 'ar', handoff: false }, [search('فساتين'), say('أيوه عندنا فساتين، هبعتلك الاختيارات.')]),

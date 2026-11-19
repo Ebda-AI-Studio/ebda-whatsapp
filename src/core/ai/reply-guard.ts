@@ -88,7 +88,7 @@ export class Trusted {
     const walk = (v: unknown, key: string, depth: number): void => {
       if (depth > 6 || v === null) return;
       if (typeof v === 'number' && Number.isFinite(v)) { if (PRICE_KEY.test(key)) this.prices.add(v); return; }
-      if (typeof v === 'string') { if (/^(?:link|url|href)$/i.test(key)) this.storeLinks.push(...linksOf(v)); return; }
+      if (typeof v === 'string') { if (/^(?:link|url|href|trackingUrl)$/i.test(key)) this.storeLinks.push(...linksOf(v)); return; }
       if (Array.isArray(v)) { for (const x of v.slice(0, 50)) walk(x, key, depth + 1); return; }
       if (typeof v === 'object') for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 50)) walk(x, k, depth + 1);
     };
