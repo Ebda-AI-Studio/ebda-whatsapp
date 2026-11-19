@@ -24,7 +24,7 @@ import { AI_TURN_CREDITS, heartbeatHold, holdCredits, releaseHold, settleHold } 
 import { funnelOnce } from '../funnel';
 import { markAiTurn } from '../timing';
 import { recordTurnCost } from './cost';
-import { recordAgentHealth } from './health';
+import { agentHealthHook } from './health';
 import { EMPTY_RETRY_NOTE, LANGUAGE_RETRY_NOTE, isArabicScriptReply, isFlaggedModel, looksEnglishAsk, readAgentModelFlag, whatsappFormat, type AgentModelId } from './model-flag';
 import { LlmError, type ChatTurn, type LlmProvider, type LlmResponse } from './provider';
 import { getAgentState, promisePolicyOf, providerFor, putAgentState, readAgentSettings, type AgentSettings } from './settings';
@@ -438,8 +438,8 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
     let audioMs = 0;
     let speechRan = false; // the speech model completed a call (text, silence or noise): billed, so its credit is charged
     const startedAt = Date.now();
-    // AGENT-HEALTH-1: platform-wide hourly/daily counters behind the blocked-rate and cost-per-1k alerts (a turn that made no model call is not an AI turn).
-    const healthPoint = (outcome: string) => { if (answered > 0) void recordAgentHealth(host.env, { model: modelFlag ?? null, byoKey: real.byoKey, blocked: outcome === 'handoff:guarded', inputTokens, outputTokens }); };
+    // AGENT-HEALTH-1: platform-wide hourly/daily counters behind the blocked-rate and cost-per-1k alerts (a turn that made no model call is not an AI turn). NEVER awaited: the D1 upserts and the alert evaluation run beside the reply, off its critical path (a slow D1 adds no customer latency; tested with a delayed recorder).
+    const healthPoint = (outcome: string) => { if (answered > 0) void agentHealthHook.record(host.env, { model: modelFlag ?? null, byoKey: real.byoKey, blocked: outcome === 'handoff:guarded', inputTokens, outputTokens }); };
     const turnPoint = (outcome: string) => { healthPoint(outcome); markAiTurn(host.env, host.workspaceId, { outcome, inputTokens, outputTokens, rounds: answered, ms: Date.now() - startedAt, credits: real.byoKey || (answered === 0 && !speechRan) ? 0 : AI_TURN_CREDITS, costEgpMicros: answered === 0 && audioMs === 0 ? 0 : recordTurnCost(host, { inputTokens, outputTokens, audioMs }, real.byoKey, Date.now(), modelFlag) }); };
     // Hold times use the real clock: a turn can outlast the moment it started. Each round tells the hold the turn is still alive.
     const provider: LlmProvider = { byoKey: real.byoKey, complete: async (r) => { if (!real.byoKey) heartbeatHold(host.sql, holdRef, Date.now()); const out = await real.complete(r); answered++; inputTokens += out.usage?.inputTokens ?? 0; outputTokens += out.usage?.outputTokens ?? 0; return out; } };

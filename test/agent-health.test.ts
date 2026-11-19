@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { COST_USD_PER_1K_MAX, MIN_PAID_TURNS_FOR_COST_ALERT, MIN_TURNS_FOR_BLOCKED_ALERT, pruneAgentHealth, readAgentHealth, recordAgentHealth } from '../src/core/ai/health';
+import { COST_USD_PER_1K_MAX, agentHealthHook, MIN_PAID_TURNS_FOR_COST_ALERT, MIN_TURNS_FOR_BLOCKED_ALERT, pruneAgentHealth, readAgentHealth, recordAgentHealth } from '../src/core/ai/health';
 import { GPT_OSS_MODEL } from '../src/core/ai/model-flag';
 import { bindAlerts, resetAlerts } from '../src/core/observability';
 import type { Env } from '../src/env';
@@ -103,6 +103,35 @@ describe('plumbing', () => {
   });
   it('a failing database never throws into the turn', async () => {
     await expect(recordAgentHealth({ ...PRICED, DB: { prepare: () => { throw new Error('d1 down'); } } } as unknown as Env, { model: null, byoKey: false, blocked: true, inputTokens: 1, outputTokens: 1 })).resolves.toBeUndefined();
+  });
+});
+
+describe('the counters never sit on the reply\'s critical path', () => {
+  useStoreLink();
+  const agent = useAgent();
+  it('the reply is stored and sent while a deliberately slow counter write is still pending', async () => {
+    const ws = '00000000-0000-4000-8000-000000009992';
+    const pn = await agentWorkspace(ws);
+    await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 'test', credits: 1000 });
+    agent.model = new ScriptedProvider([{ text: 'أهلاً بيك' }]);
+    const real = agentHealthHook.record;
+    let pending = false;
+    let settledAt = 0;
+    agentHealthHook.record = async (...a) => { pending = true; await new Promise((r) => setTimeout(r, 600)); await real(...a); pending = false; settledAt = Date.now(); };
+    try {
+      const g = stubGraph();
+      const sent = await say(ws, pn, text('مساء الخير', '201555000999'), g);
+      const returnedAt = Date.now();
+      g.restore();
+      expect(sent.map((x) => x.text)).toEqual(['أهلاً بيك']); // the customer's reply went out
+      expect(pending).toBe(true); // ...while the counter write was still waiting
+      expect(settledAt).toBe(0);
+      await new Promise((r) => setTimeout(r, 900));
+      expect(pending).toBe(false); // and it did complete afterwards
+      expect(settledAt).toBeGreaterThan(returnedAt);
+    } finally {
+      agentHealthHook.record = real;
+    }
   });
 });
 

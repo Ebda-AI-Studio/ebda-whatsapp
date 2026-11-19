@@ -22,6 +22,9 @@ const RETENTION_MS = 8 * DAY;
 
 type Row = { kind: string; slot: number; turns: number; blocked: number; paid_turns: number; cost_usd_micros: number };
 
+/** The recorder the agent calls (a seam so a test can delay it and prove the customer's reply never waits for it). */
+export const agentHealthHook: { record: typeof recordAgentHealth } = { record: (...a) => recordAgentHealth(...a) };
+
 /** Records one AI turn (a turn that made at least one model call). `blocked` = the reply guard refused the model's reply. */
 export async function recordAgentHealth(env: Env, t: { model: string | null; byoKey: boolean; blocked: boolean; inputTokens: number; outputTokens: number }, now = Date.now()): Promise<void> {
   try {
