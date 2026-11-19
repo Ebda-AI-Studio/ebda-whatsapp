@@ -9,6 +9,7 @@
   "screens": [],
   "api": [
     "GET /operator/agent/model",
+    "GET /operator/agent/health",
     "PUT /operator/agent/model"
   ],
   "mcpTool": null,
@@ -39,7 +40,7 @@
     ]
   },
   "steps": [
-    "Operator API: read the current agent model and switch between the two allowed models with a reason; switching back restores the default at once"
+    "Operator API: read the current agent model and switch between the two allowed models with a reason; switching back restores the default at once; read the live hour/day guard-refusal rate and AI cost per 1k turns (GET /operator/agent/health) while watching a switch"
   ],
   "edgeCases": [
     "Only two model ids are accepted; any other id is refused",
