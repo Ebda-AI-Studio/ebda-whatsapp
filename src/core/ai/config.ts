@@ -24,6 +24,10 @@ export type AgentCopy = {
     textOnly: Localised;
     /** A location pin outside the address step: ask what the customer needs and offer to start an order (no model call). */
     locationNote: Localised;
+    /** A picture, document, video or audio file: ask the customer to say it in words, or offer a person. Once per MEDIA_NOTE_GAP_MS per customer. */
+    mediaNote: Localised;
+    /** A sticker: a friendly one-liner (same throttle). */
+    stickerNote: Localised;
     /** A voice note that is too long or over the store's daily limit: ask for text. */
     voiceDeclined: Localised;
     /** A voice note that could not be heard (unclear, failed): ask the customer to type. */

@@ -5,6 +5,7 @@ capabilities:
   - agent.enable@2
   - agent.faq@1
   - agent.location-pin@1
+  - agent.inbound-media@1
   - agent.notify-phone@1
   - agent.persona-language@1
   - agent.promises@1
@@ -66,6 +67,8 @@ The agent suggests products from your catalog as picture cards: items similar to
 
 ## Location pins
 When a customer sends a **location pin** while the agent is asking for the delivery address, the pin's name or address text becomes the delivery address and the agent shows it back. A pin with no text makes the agent ask for one line (area, street, building). Anywhere else, the agent just asks what the customer needs and offers to start an order. The coordinates are kept in the chat only until the order is placed and are never sent to the Store or to any outside service.
+## Pictures, files and stickers
+The agent reads text and voice notes only. When a customer sends a picture, document, video, audio file or sticker, the agent answers once with a short note asking them to write what they need, or to say they want a person (and then hands over). It does not call the AI model or use a credit, and the file stays in your inbox. It never repeats the note for the same customer within 10 minutes. A payment screenshot for an InstaPay order is still handled by the ordering flow.
 
 ## Voice notes
 When a customer sends a **voice note**, the agent listens to it, and the text appears under the voice note in your inbox (marked "Voice note transcript"). It then answers like it would a typed message. Voice notes longer than 2 minutes, or beyond your store's daily limit, get a polite request to type instead. If a voice note could not be understood, the inbox shows **Voice note (not transcribed)**: listen to it and reply yourself.

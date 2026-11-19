@@ -4,7 +4,7 @@
  */
 import { isPlainEnglish } from '../franco';
 import type { LinkHost } from '../store-link/host';
-import { awaitingAddress, orderingActive, orderingEngaged, runBotTurnLocked, serialisedTurn, turnGone, type BotInput } from '../ordering/bot';
+import { awaitingAddress, orderingActive, orderingEngaged, proofExpected, runBotTurnLocked, serialisedTurn, turnGone, type BotInput } from '../ordering/bot';
 import { recordFunnel } from '../bot-funnel';
 import { frontDeskActive, runFrontDesk, runHoursGate } from '../front-desk';
 import { agentConfig } from './config';
@@ -34,6 +34,8 @@ export async function runTurn(host: LinkHost, input: BotInput, now: number): Pro
     }
     // A location pin answers the address question of an open order; anywhere else the agent politely asks what the customer needs (no model call).
     if (input.type === 'location' && orderingOn && awaitingAddress(host, input.from, now)) return runBotTurnLocked(host, input, now);
+    // A picture is the ordering bot's only at its payment-proof step; for the agent it is a message it cannot read, answered with one short note.
+    if (agentOn && input.type === 'image' && !proofExpected(host, input.from)) return runAgentTurn(host, input, now);
     if (!ORDERING_TYPES.has(input.type)) return agentOn ? runAgentTurn(host, input, now) : undefined;
     if (orderingOn && (!agentOn || orderingEngaged(host, input, now))) return runBotTurnLocked(host, input, now);
     if (agentOn && agentConfig().copy) return runAgentTurn(host, input, now);
