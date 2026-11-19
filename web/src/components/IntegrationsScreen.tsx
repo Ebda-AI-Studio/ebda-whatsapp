@@ -3,6 +3,7 @@ import { BRAND } from '@brand';
 import { useCallback, useEffect, useState } from 'react';
 import { webhookTool, type ConnectorDto, type ConnectorPut } from '../../../src/core/api/contract';
 import { z } from 'zod';
+import { WHATSAPP_SCOPES } from '../../../src/core/identity/scopes';
 import type { InboxSource } from '../data/source';
 import type { Lang, Strings } from '../i18n';
 import { LoadError } from './LoadError';
@@ -10,7 +11,7 @@ import { LoadError } from './LoadError';
 type Connectors = NonNullable<InboxSource['connectors']>;
 type Draft = { id: string; kind: 'webhook' | 'odoo'; enabled: boolean; url: string; tools: string; database: string; login: string; secret: string; existing: boolean };
 
-const SCOPES = ['conversations:read', 'messages:send', 'templates:read', 'contacts:read', 'contacts:write', 'campaigns:read'];
+const SCOPES = WHATSAPP_SCOPES;
 const blank: Draft = { id: '', kind: 'webhook', enabled: true, url: '', tools: '', database: '', login: '', secret: '', existing: false };
 const toolsSchema = z.array(webhookTool).min(1).max(10);
 
@@ -51,7 +52,7 @@ function bodyOf(d: Draft): ConnectorPut | null {
 const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
 
 /** Agent connectors (owner) and where an integration token is made. The server owns every rule; this screen only hides what the role cannot do. */
-export function IntegrationsScreen({ t, source, readOnly = false }: { t: Strings; lang: Lang; source: InboxSource; readOnly?: boolean }) {
+export function IntegrationsScreen({ t, lang, source, readOnly = false }: { t: Strings; lang: Lang; source: InboxSource; readOnly?: boolean }) {
   const api: Connectors = source.connectors!;
   const [list, setList] = useState<ConnectorDto[] | undefined | 'error'>(undefined);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -184,8 +185,8 @@ export function IntegrationsScreen({ t, source, readOnly = false }: { t: Strings
       <section className="settings" aria-labelledby="api-title">
         <h2 id="api-title">{t.apiTitle}</h2>
         <p>{t.apiBody}</p>
-        <p className="muted">{t.apiScopes}: <bdi dir="ltr">{SCOPES.join(', ')}</bdi></p>
-        <p className="muted">{t.apiPlan}</p>
+        <p className="muted">{t.apiScopes}: {SCOPES.map((s) => t.apiScopeLabels[s] ?? s).join(lang === 'ar' ? '، ' : ', ')}</p>
+        <p className="muted">{t.apiPlan}{BRAND.helpUrl && <> <a className="help-link" href={BRAND.helpUrl(lang, 'connect-your-systems')} target="_blank" rel="noopener">{t.howTo}</a></>}</p>
         {BRAND.accountsUrl && <a className="btn" href={BRAND.accountsUrl} target="_blank" rel="noopener noreferrer">{t.apiOpen}</a>}
       </section>
     </main>

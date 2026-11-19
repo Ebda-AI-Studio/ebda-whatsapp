@@ -134,7 +134,7 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
                 {s.done ? <Check size={18} aria-hidden className="step-icon" /> : <Circle size={18} aria-hidden className="step-icon" />}
                 <span className="step-label">{s.label}</span>
                 <span className="vh">{s.done ? t.stepDone : t.stepTodo}</span>
-                {BRAND.helpUrl ? <a href={BRAND.helpUrl(lang, s.guide)} target="_blank" rel="noopener">{t.howTo}</a> : <span />}
+                {BRAND.helpUrl ? <a href={BRAND.helpUrl(lang, s.guide)} target="_blank" rel="noopener" className="help-link">{t.howTo}</a> : <span />}
               </li>
             ))}
           </ol>

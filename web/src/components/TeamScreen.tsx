@@ -53,7 +53,7 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
         <span className="muted">{t.teamUsage(num(data.seats.used, lang), num(data.seats.limit, lang))}</span>
       </header>
       <section className="settings">
-        <p className="muted">{t.teamIntro}{BRAND.helpUrl && <> <a href={BRAND.helpUrl(lang, 'team-members-and-seats')} target="_blank" rel="noopener">{t.howTo}</a></>}</p>
+        <p className="muted">{t.teamIntro}{BRAND.helpUrl && <> <a href={BRAND.helpUrl(lang, 'team-members-and-seats')} target="_blank" rel="noopener" className="help-link">{t.howTo}</a></>}</p>
         {/* The status region is always in the page; the card is inserted into it, so a screen reader announces "no seats left" (polite) after the click. */}
         <div role="status" aria-live="polite" className="live-region">
           {(data.seats.overLimit || seatLimit) && <UpgradeCard title={t.upgradeTeamTitle} body={data.seats.overLimit ? t.teamOverLimit : t.teamSeatLimit(num(data.seats.limit, lang))} cta={t.upgradeCta} href={billingUrl(source.storeId)} />}

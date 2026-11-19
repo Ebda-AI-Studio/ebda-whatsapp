@@ -27,3 +27,15 @@ it('the phone rail label is 12 px, not 11', () => {
   expect(hasRule(phone, '.rail a', /font-size:\s*12px/)).toBe(true);
   expect(hasRule(phone, '.rail a', /font-size:\s*11px/)).toBe(false);
 });
+
+it('the desktop rail is wide enough for one-line labels, and says so (CHAT-QA-10)', () => {
+  expect(Number(/--rail:\s*(\d+)px/.exec(css)?.[1])).toBeGreaterThanOrEqual(84); // the first --rail is the desktop value
+  const desk = media('min-width: 820px');
+  expect(hasRule(desk, '.rail a > span', /white-space:\s*nowrap/)).toBe(true);
+  expect(hasRule(desk, '.rail a > span', /text-overflow:\s*ellipsis/)).toBe(true);
+  expect(/\.rail a \{ width: 7[6-9]px;/.test(css)).toBe(true);
+});
+
+it('the help link is brand brass and never the browser default blue or visited purple (CHAT-QA-13)', () => {
+  expect(/\.help-link,\s*\.help-link:visited\s*\{[^}]*color:\s*var\(--gold-ink\)/.test(css)).toBe(true);
+});
