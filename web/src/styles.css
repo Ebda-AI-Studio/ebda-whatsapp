@@ -671,3 +671,6 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
   .store-menu-panel { inset-inline: 12px; inset-block-end: 72px; width: auto; }
 }
 @media (max-width: 479px) { .rail-store > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
+
+/* CHAT-QA-6: the Cairo reading under a datetime-local picker (the picker itself is drawn by the browser). */
+.cairo-when { display: block; margin-block: 2px 8px; font-size: 12px; }

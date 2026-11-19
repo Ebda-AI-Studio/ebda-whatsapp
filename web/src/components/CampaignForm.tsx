@@ -6,6 +6,7 @@ import { ApiError } from '../data/api';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, templateTitle } from '../lib/format';
+import { CairoWhen } from './CairoWhen';
 import { LoadError } from './LoadError';
 
 type Props = {
@@ -277,7 +278,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose, onOpenTemplat
           <legend>{t.stepTiming}</legend>
           <label className="radio"><input type="radio" name="when" checked={timing === 'now'} onChange={() => setTiming('now')} />{t.sendNow}</label>
           <label className="radio"><input type="radio" name="when" checked={timing === 'later'} onChange={() => setTiming('later')} />{t.sendLater}</label>
-          {timing === 'later' && <label className="field inset"><span>{t.sendAt}</span><input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} /></label>}
+          {timing === 'later' && <><label className="field inset"><span>{t.sendAt}</span><input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} /></label><CairoWhen t={t} lang={lang} value={at} /></>}
           <div className="field">
             <label htmlFor="camp-limit">{t.dailyLimit}</label>
             <input id="camp-limit" type="number" min={1} inputMode="numeric" value={dailyLimit} aria-describedby="camp-limit-hint" onChange={(e) => setDailyLimit(e.target.value.replace(/\D/g, ''))} />
