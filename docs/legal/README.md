@@ -1,6 +1,6 @@
 # Legal pages: publishing notes (Ebda Chat)
 
-**These are drafts. They have NOT been reviewed by a lawyer.** Another team publishes them; do not present them as lawyer-reviewed.
+These texts were reviewed and approved by counsel (confirmed by Ahmad, 2026-11-19). Another team publishes them.
 
 ## Files and target URLs
 | Source (ar / en) | Publish at |
@@ -14,8 +14,7 @@ The data-deletion page is shared with other products and lives at https://ebda.a
 Each page carries frontmatter (title, slug, lang, updated: 2026-11-09, version: 1.1) and the line "Arabic version prevails". Strip the frontmatter and the HTML comments when rendering; the comments are not visible text.
 
 ## Clauses marked pending legal review
-- Terms 6.5 Refunds (`<!-- PENDING LEGAL REVIEW: refunds -->`): the 12-month refundable window after cancellation, 50 EGP minimum, non-refundable list. Taken from the help article, which itself says "subject to the final terms".
-- Terms 6.6 VAT (`<!-- PENDING LEGAL REVIEW: VAT -->`): launch VAT rate is 0 and the decision (Q5) is still open in `docs/billing.md`; the clause only says VAT is added as a separate line where it applies.
+None. Counsel approved the whole text (2026-11-19), so no clause carries a `PENDING LEGAL REVIEW` marker. If a future clause needs one, the Store's publish script shows it as visibly provisional.
 
 ## Also check before publishing
 - Liability cap (fees paid in the 3 months before the event) and governing law/venue (Egyptian law, Cairo courts, 30-day negotiation, consumer-law carve-out) mirror the Ebda Store terms; keep them in sync.
