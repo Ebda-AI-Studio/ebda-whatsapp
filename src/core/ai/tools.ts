@@ -258,7 +258,7 @@ async function orderStatus(ctx: ToolContext, orderNumber: string | undefined): P
   const shipments = await Promise.all(res.value.items.map(async (o, i) => {
     if (o.status !== 'shipped' || i >= LISTING_SHIPMENTS) return null;
     try {
-      const r = await bridge.getOrderStatus(ctx.host.workspaceId, o.orderNumber, key);
+      const r = await bridge.getOrderStatus(ctx.host.workspaceId, o.orderNumber, key, e164);
       return r.ok ? r.value.shipment : null;
     } catch {
       return null; // the listing is still the answer
