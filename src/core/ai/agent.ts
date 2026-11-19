@@ -38,6 +38,8 @@ import { cardJob, type BuiltCard, type CardSpec } from '../store-link/product-ca
 import { storeLink } from '../store-link';
 
 export const AGENT_MAX_TOKENS = 450;
+/** gpt-oss spends part of the completion budget on hidden reasoning: at 450 the live eval saw replies cut mid-link (refused by the guard as a broken URL) and empty answers (no_answer); the flagged model gets room for both. */
+export const FLAGGED_MAX_TOKENS = 1200;
 /** One credit buys at most this many model calls: up to MAX_TOOL_ROUNDS rounds that use tools, the last call that must answer, and at most one corrective call (M-084). */
 export const MAX_MODEL_CALLS_PER_CREDIT = MAX_TOOL_ROUNDS + 2;
 /** The ONE corrective call a turn may make (an empty answer, or the flagged model's English-ask-answered-in-Arabic): the +1 above. The two share the slot, so the worst turn is 3 tool rounds + the answer + this call. It never costs a second credit. */
@@ -279,7 +281,7 @@ type Outcome = { kind: 'reply'; text: string; cards: BuiltCard[] } | { kind: 'ha
 async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, settings: AgentSettings, locale: Locale, now: number, knowledge: string[], turn: { trusted: Trusted; system: string }, modelFlag: AgentModelId | null = null): Promise<Outcome> {
   // Ruling WA-MODEL-FLAG-1: `modelFlag` null = the default path, untouched. The id rides on every request (`req.model`); the flagged model also gets the format strip, language check and strict prompt.
   const flagged = isFlaggedModel(modelFlag);
-  const modelReq = modelFlag ? { model: modelFlag } : {};
+  const modelReq = modelFlag ? { model: modelFlag, maxTokens: isFlaggedModel(modelFlag) ? FLAGGED_MAX_TOKENS : AGENT_MAX_TOKENS } : {};
   const trusted = turn.trusted;
   const copy = agentConfig().copy!;
   const bridge = bridgeFor(host.env);

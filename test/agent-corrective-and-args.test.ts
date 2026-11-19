@@ -148,3 +148,26 @@ describe('cleanReply: model control tokens never reach a customer', () => {
     expect(cleanReply('2 < 3 | 4 > 1')).toBe('2 < 3 | 4 > 1'); // ordinary angle brackets and pipes are fine
   });
 });
+
+// A fresh sender: this file already spends most of the 30 AI turns/day one customer (WA_1) may use, and a refused turn makes no model call.
+const FRESH = '201555000777';
+describe('completion budget: the flagged model gets room for its hidden reasoning', () => {
+  it('the default model asks for AGENT_MAX_TOKENS', async () => {
+    const { AGENT_MAX_TOKENS } = await import('../src/core/ai/agent');
+    const ws = W(40);
+    const pn = await agentWs(ws);
+    const m = model([{ text: 'أهلاً بيك' }]);
+    await say(ws, pn, text('مساء الخير', FRESH), stubGraph());
+    expect(m.calls.map((c) => c.maxTokens)).toEqual([AGENT_MAX_TOKENS]);
+  });
+  it('the flagged gpt-oss model asks for FLAGGED_MAX_TOKENS on every call of the turn, the corrective call included', async () => {
+    const { AGENT_MAX_TOKENS, FLAGGED_MAX_TOKENS } = await import('../src/core/ai/agent');
+    const ws = W(41);
+    const pn = await agentWs(ws, { language: 'auto' });
+    await flip(GPT_OSS_MODEL);
+    const m = model([{ text: '' }, { text: 'عندنا هدايا حلوة' }]);
+    await say(ws, pn, text('any gifts?', FRESH), stubGraph());
+    expect(m.calls.map((c) => c.maxTokens)).toEqual([FLAGGED_MAX_TOKENS, FLAGGED_MAX_TOKENS]);
+    expect(FLAGGED_MAX_TOKENS).toBeGreaterThan(AGENT_MAX_TOKENS);
+  });
+});
