@@ -36,6 +36,7 @@ import { waIdParam } from './contacts';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 import { FLAG, readPlatformFlags, setPlatformFlag } from '../core/smart-layer/controls';
 import { AGENT_MODEL_IDS, readAgentModelFlag, setAgentModelFlag } from '../core/ai/model-flag';
+import { readAgentHealth } from '../core/ai/health';
 import { DEFAULT_WORKERS_AI_MODEL } from '../core/ai/config';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -460,6 +461,8 @@ operatorRoutes.put('/assistant/flags', async (c) => {
 });
 // ---- Ruling WA-MODEL-FLAG-1: the Chat agent's platform model (two allowed ids; null = the current default). Super admin only (this whole router), a reason is required and audited. ----
 operatorRoutes.get('/agent/model', async (c) => c.json({ model: await readAgentModelFlag(c.env), default: DEFAULT_WORKERS_AI_MODEL, allowed: AGENT_MODEL_IDS }));
+// AGENT-HEALTH-1: the live hour and day counters behind the blocked-rate and cost-per-1k alerts (read-only; used for the 24 h watch after a model switch).
+operatorRoutes.get('/agent/health', async (c) => c.json(await readAgentHealth(c.env)));
 operatorRoutes.put('/agent/model', async (c) => {
   const b = z.object({ model: z.enum(AGENT_MODEL_IDS).nullable(), reason: z.string().trim().min(5).max(300) }).strict().safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, b.error.issues.some((i) => i.path[0] === 'reason') ? 'reason_required' : 'model_not_allowed');
