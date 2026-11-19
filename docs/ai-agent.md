@@ -86,6 +86,8 @@ v17 `agent_state` · v18 `messages.author`, `agent_turns`, `agent_handoffs` · v
 
 - **Gift / budget asks (Ruling GIFT-BUDGET-TOOL-1, `docs/rulings/GIFT-BUDGET-TOOL-1.md`):** graded on outcome: `search_catalog` or `recommend_products` (basis budget) with the budget as maxPrice, nothing shown above the budget (`over_budget_shown`), and an explicit ask never ends with nothing shown (`gave_up_on_explicit_ask`: a refused recommendation falls back to `search_catalog` in the same turn).
 
+- **Platform health alerts (AGENT-HEALTH-1, `src/core/ai/health.ts`, D1 `agent_health`):** `agent_reply_blocked_rate` (P1, guard refused >3% of AI turns in an hour) and `ai_cost_per_1k_over_threshold` (P1, >2 USD per 1k AI turns in a UTC day); live counters at `GET /api/v1/operator/agent/health`. See `docs/rulings/CHAT-EVAL-BAR-1.md` (1b) for the flip sequence.
+
 ## Eval (the older 30-case harness eval)
 `test/ai-eval.test.ts` ports the old product's intent eval: its intents become the tool an utterance must lead to, and its output-shape checks (valid intent, required field, confident answer has a reply, no leaked JSON) become guards. 30 cases (12 golden tool/reply paths, 8 handoff phrasings, a model handoff, 9 malformed-output cases) against a scripted fake model: **pass rate 30/30 (100%)**. This measures the harness (routing, validation, guards, handoff, credits), not a live model's judgement; a live golden run was not done.
 
