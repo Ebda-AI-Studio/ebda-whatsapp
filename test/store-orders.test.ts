@@ -37,7 +37,7 @@ describe('GET /contacts/:waId/orders', () => {
     const body = (await res.json()) as { items: { orderNumber: string; status: string; paymentMethod: string; totalMinor: number }[]; source: string };
     expect(body.source).toBe('store');
     expect(body.items.map((o) => [o.paymentMethod, o.status]).sort()).toEqual([['cod', 'pending_confirmation'], ['instapay', 'pending_confirmation']]);
-    expect(link.fake.lastCall('listCustomerOrders')).toEqual([ws, BUYER_KEY_1, 10]);
+    expect(link.fake.lastCall('listCustomerOrders')).toEqual([ws, BUYER_KEY_1, 10, `+${WA_1}`]);
   });
 
   it('without a Store bound it answers a labelled sample and never calls out', async () => {

@@ -103,7 +103,7 @@ async function recommendOnce(ctx: ToolContext, a: RecommendArgs, deps: Recommend
       const key = await buyerKey(secret, e164);
       let orderNumber = a.orderNumber;
       if (!orderNumber) {
-        const latest = await bridge.listCustomerOrders(ctx.host.workspaceId, key, 1);
+        const latest = await bridge.listCustomerOrders(ctx.host.workspaceId, key, 1, e164);
         if (!latest.ok) return { error: latest.reason === 'invalid' ? 'invalid_arguments' : 'store_unavailable' };
         orderNumber = latest.value.items[0]?.orderNumber;
         if (!orderNumber) return { error: 'no_order' };
