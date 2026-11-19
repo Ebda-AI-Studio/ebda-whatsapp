@@ -28,7 +28,8 @@ export class Recorder implements LlmProvider {
         for (const p of [...(out.products ?? []), ...(out.without_card ?? [])]) if (typeof p.price === 'number') this.shown.push({ id: p.id, price: p.price });
       } catch { /* not JSON: nothing shown */ }
     }
-    const out = await this.inner.complete(req);
+    let out: LlmResponse;
+    try { out = await this.inner.complete(req); } catch (err) { console.log(`CHAT_EVAL_PROVIDER_ERR ${JSON.stringify({ name: err instanceof Error ? err.name : typeof err, msg: err instanceof Error ? err.message.slice(0, 160) : '', roles: req.messages.map((m) => m.role) })}`); throw err; } // roles + the platform's error text only: no customer text
     for (const t of out.toolCalls ?? []) this.tools.push({ name: t.name, args: t.arguments });
     if (out.text) this.texts.push(out.text);
     return out;
@@ -77,12 +78,10 @@ export type Env = { fake: FakeStore; agent: { model: LlmProvider }; /** Lets a l
  * Puts the customer at the daily recommendation limit (RECS_PER_DAY sets in the last 24 h) the way real turns would leave them: two scripted greetings create the contact, conversation and
  * messages, then one `recs:<message id>` ration row is written per set. The real model is not involved, so a live run starts from the same exhausted state.
  */
-async function exhaustRation(ws: string, pn: string, env: Env): Promise<void> {
+async function exhaustRation(ws: string, pn: string, env: Env, g: ReturnType<typeof stubGraph>): Promise<void> {
   env.agent.model = new ScriptedProvider([{ text: 'أهلاً بيك' }, { text: 'تحت أمرك' }]);
-  const g = stubGraph(undefined, { other: env.other });
   await say(ws, pn, text('أهلاً'), g);
   await say(ws, pn, text('السلام عليكم'), g);
-  g.restore();
   await runInDurableObject(workspace(ws), (_i, state) => {
     const ids = state.storage.sql.exec<{ id: number }>('SELECT m.id FROM messages m ORDER BY m.id LIMIT ?', RECS_PER_DAY).toArray().map((r) => r.id);
     if (ids.length < RECS_PER_DAY) throw new Error(`exhaustRation: only ${ids.length} messages to hang the ration on`);
@@ -96,10 +95,10 @@ export async function runCase(c: Case, env: Env, n: number, makeModel: (c: Case)
   const ws = `00000000-0000-4000-8000-00000000${String(7600 + n).padStart(4, '0')}`;
   const pn = await agentWorkspace(ws, { language: 'auto' });
   await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 'eval', credits: 1000 });
-  if (c.rationed) await exhaustRation(ws, pn, env);
+  const g = stubGraph(undefined, { other: env.other }); // ONE Graph stub per case: a second one would restart the outgoing message ids and collide on messages.wamid
+  if (c.rationed) await exhaustRation(ws, pn, env, g);
   const rec = new Recorder(makeModel(c));
   env.agent.model = rec;
-  const g = stubGraph(undefined, { other: env.other });
   let replies: string[] = [];
   let before = 0;
   let shownBefore = 0;

@@ -37,6 +37,7 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
           if (res.status !== 429) break;
           await new Promise((r) => setTimeout(r, 15_000));
         }
+        if (!res.ok) console.log(`CHAT_EVAL_SHAPE ${JSON.stringify({ model, tools: (rawInputs.tools as unknown[] | undefined)?.length ?? 0, max_tokens: rawInputs.max_tokens, messages: (inputs.messages as { role: string; content: unknown; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[]).map((m) => ({ role: m.role, len: typeof m.content === 'string' ? m.content.length : m.content === null ? null : 'x', calls: m.tool_calls?.length, id: m.tool_call_id ? 1 : undefined, name: m.name })) })}`); // request SHAPE only (roles, lengths, counts): no customer or model text, so no PII
         if (!res.ok) console.log(`CHAT_EVAL_HTTP ${res.status} ${(await res.clone().text()).slice(0, 300)}`);
         if (!res.ok) throw new Error(`workers-ai ${res.status} ${(await res.text()).slice(0, 200)}`);
         const result = ((await res.json()) as { result: { usage?: { prompt_tokens?: number; completion_tokens?: number } } }).result;
@@ -56,6 +57,7 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
     const verdicts: Verdict[] = [];
     for (const [i, c] of CASES.entries()) {
       if (e.CHAT_EVAL_ONLY && c.group !== e.CHAT_EVAL_ONLY) continue;
+      if (e.CHAT_EVAL_ID && c.id !== e.CHAT_EVAL_ID) continue;
       // Production picks the gpt-oss prompt block, format strip and language check from the D1 flag `agent.model` (Ruling WA-MODEL-FLAG-1), NOT from the provider's model id: set it the way the operator does so the eval measures the path that ships.
       if (e.CHAT_EVAL_MODEL === GPT_OSS_MODEL) await setAgentModelFlag(env as unknown as Env, { model: GPT_OSS_MODEL, actor: 'eval', reason: 'live golden eval' });
       const v = await runCase(c, { fake: link.fake, agent, other }, i, make);
