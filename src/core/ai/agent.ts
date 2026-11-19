@@ -263,10 +263,13 @@ async function callModel(provider: LlmProvider, req: Parameters<LlmProvider['com
 }
 
 /** A reply the customer may see: no thinking blocks, no leaked structure, bounded. Null = unusable. */
+/** A model control token (<|start|>, <|channel|>, ...) that leaked into the text. */
+const CONTROL_TOKEN = /<\|[^|>\s]{1,40}\|>/;
+
 export function cleanReply(raw: string | undefined): string | null {
   const t = (raw ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   if (!t) return null;
-  if (/^[{[]/.test(t) || /"(tool_calls?|intent|arguments)"\s*:/.test(t) || /<\/?(tool_call|function)/i.test(t) || /<\|[^|>\s]{1,40}\|>/.test(t)) return null; // a model control token (<|start|>, <|channel|>, ...) leaked into the text: live eval voice-ar-1 got "<|start|>assistant<|channel|>" as its whole reply
+  if (/^[{[]/.test(t) || /"(tool_calls?|intent|arguments)"\s*:/.test(t) || /<\/?(tool_call|function)/i.test(t) || CONTROL_TOKEN.test(t)) return null; // a model control token (<|start|>, <|channel|>, ...) leaked into the text: live eval voice-ar-1 got "<|start|>assistant<|channel|>" as its whole reply
   return Array.from(t).length > REPLY_MAX_CHARS ? `${Array.from(t).slice(0, REPLY_MAX_CHARS - 1).join('')}…` : t;
 }
 
@@ -335,7 +338,7 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
       const elapsed = Date.now() - started;
       putAgentState(host.sql, 'latency_ewma_ms', String(Math.round(recent > 0 ? recent * 0.7 + elapsed * 0.3 : elapsed)));
       // An empty answer with no cards (any model; typically the last call, made with tools off after the tool rounds): one nudge to answer from the tool results.
-      if (!(res.text ?? '').trim() && !ctx.cards.length) res = await correct(res, null, EMPTY_RETRY_NOTE); // truly empty only: a leaked structure or a thinking-only block is handled as before
+      if ((!(res.text ?? '').trim() || CONTROL_TOKEN.test(res.text ?? '')) && !ctx.cards.length) res = await correct(res, null, EMPTY_RETRY_NOTE); // truly empty, or only a leaked control token (live eval gift-en-3: '<|start|>assistant<|channel|>final' ended as bad_output without a retry); a leaked JSON structure or a thinking-only block is handled as before
       // Flagged model, language `auto`, a plain-English customer and an Arabic-script reply: the corrective call asks for English.
       if (flagged && settings.language === 'auto' && locale === 'en' && looksEnglishAsk(input.text)) {
         const first = cleanReply(res.text);

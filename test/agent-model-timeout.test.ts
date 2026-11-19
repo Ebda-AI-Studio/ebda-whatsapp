@@ -40,3 +40,28 @@ describe('model call timeout', () => {
     expect(await outcome(ws)).toBe('handoff:provider_error');
   });
 });
+
+describe('a leaked control token is retried once like an empty answer', () => {
+  it('first reply is only a control token, the corrective call answers: reply, 2 calls', async () => {
+    const ws = W(11);
+    const pn = await agentWorkspace(ws);
+    await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 'test', credits: 1000 });
+    const m = model([{ text: '<|start|>assistant<|channel|>final' }, { text: 'أهلاً بيك، تحت أمرك' }]);
+    const g = stubGraph();
+    await say(ws, pn, text('أهلاً'), g);
+    g.restore();
+    expect(m.callCount).toBe(2);
+    expect(await outcome(ws)).toBe('reply');
+  });
+  it('the retry also leaks the token: handed over as bad_output after exactly 2 calls (one corrective call per turn)', async () => {
+    const ws = W(12);
+    const pn = await agentWorkspace(ws);
+    await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 'test', credits: 1000 });
+    const m = model([{ text: '<|start|>assistant<|channel|>final' }, { text: '<|start|>assistant<|channel|>final' }, { text: 'never used' }]);
+    const g = stubGraph();
+    await say(ws, pn, text('أهلاً'), g);
+    g.restore();
+    expect(m.callCount).toBe(2);
+    expect(await outcome(ws)).toBe('handoff:bad_output');
+  });
+});
