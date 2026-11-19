@@ -246,7 +246,7 @@ function historyOf(host: LinkHost, input: BotInput): ChatTurn[] {
 /** One model call, abandoned after `modelTimeoutMs` as a retryable `timeout` (the abandoned call may still finish in the background; its answer is dropped). */
 function completeWithin(provider: LlmProvider, req: Parameters<LlmProvider['complete']>[0]): Promise<LlmResponse> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new LlmError('timeout', true)), agentConfig().modelTimeoutMs); });
+  const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => { alert('agent_model_timeout', { limitMs: agentConfig().modelTimeoutMs }); reject(new LlmError('timeout', true)); }, agentConfig().modelTimeoutMs); }); // info line per abandoned call (a cost line: the call may still bill in the background); count them in the Worker logs to see how often Workers AI stalls
   return Promise.race([provider.complete(req), limit]).finally(() => clearTimeout(timer));
 }
 
