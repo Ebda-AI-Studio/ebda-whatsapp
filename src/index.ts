@@ -173,7 +173,14 @@ api.use('*', apiContentTypes()); // after auth: 401/403 first, then 415 for a bo
 api.route('/operator', operatorRoutes);
 api.get('/stores/:storeId/me', async (c) => {
   const p = c.get('principal');
-  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env), assistant: await assistantEnabled(c.env, c.req.param('storeId')!) } });
+  const storeId = c.req.param('storeId')!;
+  // The picker lists only stores that have a Chat workspace (a store without one has nothing to open); the active store's own row also answers `workspace`.
+  const memberships = p.stores.slice(0, 50);
+  const ids = [...new Set([storeId, ...memberships.map((m) => m.id)])].slice(0, 51);
+  const rows = (await c.env.DB.prepare(`SELECT id, name FROM workspaces WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all<{ id: string; name: string }>()).results ?? [];
+  const names = new Map(rows.map((r) => [r.id, r.name]));
+  const stores = memberships.filter((m) => names.has(m.id)).map((m) => ({ id: m.id, name: names.get(m.id)!, role: m.role }));
+  return c.json({ userId: p.userId, storeId, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env), assistant: await assistantEnabled(c.env, storeId) }, workspace: names.has(storeId), stores });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   // The member's own right to erase (STORE-ROUTES-OWNER-1): the owner, or a super admin who is a MEMBER of the store (requireStoreAccess already refused a non-member's write; that operator uses the operator route, which needs a stated reason).

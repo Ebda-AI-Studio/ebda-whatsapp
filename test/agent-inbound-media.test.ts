@@ -1,4 +1,6 @@
+import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import { proofExpected } from '../src/core/ordering/bot';
 import { EBDA_AGENT_COPY } from '../src/addons/ebda/agent-copy';
 import { EBDA_ORDERING_COPY } from '../src/addons/ebda/store-copy';
 import { ScriptedProvider, useAgent } from './helpers/agent';
@@ -84,5 +86,63 @@ describe('inbound media in an agent conversation', () => {
     const out = await say(ws, pn, image(), stubGraph());
     expect(out.map((s) => s.text)).toEqual([EBDA_ORDERING_COPY.t.proofExpired.ar]);
     expect(await rows(ws, "SELECT 1 FROM agent_turns WHERE outcome LIKE 'media%'")).toHaveLength(1); // only the sticker's
+  });
+});
+
+// m1 + m2 (review of #152): ONE source for "is a payment proof expected", and a picture after the order is paid/delivered/over is the agent's throttled media note,
+// never an unthrottled "proof already received" reply.
+describe('proofExpected is the single source, and settled/closed orders get the throttled media note', () => {
+  const O = EBDA_ORDERING_COPY.t;
+  const order = (status: string, proofWamid: string | null = null) => ['INSERT INTO store_orders (order_id, order_number, wa_id, payment_method, status, proof_wamid, proof_deadline_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', 'o1', '1001', WA_1, 'instapay', status, proofWamid, 1, Date.now()] as const;
+  const withOrder = async (ws: string, status: string, proofWamid: string | null = null) => {
+    const { pn } = await start(ws);
+    const g = stubGraph();
+    await say(ws, pn, sticker(), g); // creates the contact (answered once with the sticker note)
+    await exec(ws, ...order(status, proofWamid));
+    await exec(ws, "UPDATE messages SET created_at = created_at - ? WHERE idempotency_key LIKE 'agent:%:medianote'", 11 * 60_000); // the sticker note is out of the gap
+    return { pn, g };
+  };
+
+  it('open order, no proof yet: the ordering bot owns the picture (here: the deadline is past)', async () => {
+    const ws = W(70);
+    const { pn, g } = await withOrder(ws, 'pending_payment');
+    expect((await say(ws, pn, image(), g)).map((x) => x.text)).toEqual([O.proofExpired.ar]);
+    expect(await rows(ws, "SELECT 1 FROM agent_turns WHERE outcome = 'media_note'")).toHaveLength(1); // only the sticker's
+  });
+  it('open order with a proof already forwarded: still the bot ("proof already received", it is waiting for the Store to confirm)', async () => {
+    const ws = W(71);
+    const { pn, g } = await withOrder(ws, 'pending_payment', 'wamid.earlier');
+    expect((await say(ws, pn, image(), g)).map((x) => x.text)).toEqual([O.proofAlready.ar]);
+  });
+  it('open order with a proof already forwarded: the first reply stays, a resent screenshot within 10 minutes gets nothing, after the gap it is answered again', async () => {
+    const ws = W(95 + 4);
+    const { pn, g } = await withOrder(ws, 'pending_payment', 'wamid.earlier');
+    expect((await say(ws, pn, image(), g)).map((x) => x.text)).toEqual([O.proofAlready.ar]); // the first reply is kept
+    expect(await say(ws, pn, image(), g)).toHaveLength(0); // resent: quiet
+    expect(await say(ws, pn, image(), g)).toHaveLength(0);
+    expect((await rows(ws, "SELECT 1 FROM messages WHERE direction = 'out' AND body = ?", O.proofAlready.ar))).toHaveLength(1);
+    await exec(ws, "UPDATE messages SET created_at = created_at - ? WHERE direction = 'out' AND body = ?", 11 * 60_000, O.proofAlready.ar);
+    expect((await say(ws, pn, image(), g)).map((x) => x.text)).toEqual([O.proofAlready.ar]); // after the gap: answered again
+  });
+  it.each(['paid', 'delivered', 'cancelled', 'refunded', 'returned'])('latest order %s: the picture goes to the agent media note (once per 10 min), not to an unthrottled proof reply', async (status) => {
+    const ws = W(72 + ['paid', 'delivered', 'cancelled', 'refunded', 'returned'].indexOf(status));
+    const { pn, g } = await withOrder(ws, status);
+    expect((await say(ws, pn, image(), g)).map((x) => x.text)).toEqual([T.mediaNote.ar]);
+    expect(await say(ws, pn, image(), g)).toHaveLength(0); // the second picture within the gap: quiet, nothing sent
+    expect(await say(ws, pn, image(), g)).toHaveLength(0);
+    expect(await rows(ws, "SELECT outcome FROM agent_turns WHERE outcome = 'media_quiet'")).toHaveLength(2);
+  });
+  it.each([['pending_payment', true], ['pending_payment_with_proof', true], ['paid', false], ['delivered', false], ['cancelled', false], ['refunded', false], ['returned', false]] as const)('proofExpected(%s) = %s, on the real workspace data', async (label, expected) => {
+    const ws = W(80 + ['pending_payment', 'pending_payment_with_proof', 'paid', 'delivered', 'cancelled', 'refunded', 'returned'].indexOf(label));
+    const status = label === 'pending_payment_with_proof' ? 'pending_payment' : label;
+    const { pn, g } = await withOrder(ws, status, label === 'pending_payment_with_proof' ? 'wamid.earlier' : null);
+    void pn; void g;
+    const got = await runInDurableObject(workspace(ws), (_i, state) => proofExpected({ sql: state.storage.sql }, WA_1));
+    expect(got).toBe(expected);
+  });
+  it('no order at all: nothing is expected (the picture is the agent\'s)', async () => {
+    const ws = W(88);
+    await start(ws);
+    expect(await runInDurableObject(workspace(ws), (_i, state) => proofExpected({ sql: state.storage.sql }, WA_1))).toBe(false);
   });
 });
