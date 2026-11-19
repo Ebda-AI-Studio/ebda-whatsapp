@@ -3,6 +3,8 @@
   "name": "ebda-wa",
   "account_id": "69188202efc4df480140dd76545aa3ab",
   "main": "src/index.ts",
+  // The assistant assets (assistant/*.generated.json) are built here, not committed: a branch can never carry a stale copy (Ruling WA-GEN-1).
+  "build": { "command": "node scripts/build-help-corpus.mjs" },
   "compatibility_date": "2026-10-24",
   "compatibility_flags": ["nodejs_compat"],
   // Production host (LAUNCH-SUITE-1). workers.dev stays on until wa.ebda.app is verified live, then goes off (one surface).

@@ -1,9 +1,12 @@
+import { execFileSync } from 'node:child_process';
 import { defineConfig } from 'vitest/config';
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 import react from '@vitejs/plugin-react';
 
 // Test-only key, generated from a byte sequence (never a literal), not a secret.
 const testKey = () => Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => i + 101)).toString('base64');
+// assistant/*.generated.json are build output (gitignored): build them before any test imports them, so a plain `npx vitest` works too.
+execFileSync(process.execPath, ['scripts/build-help-corpus.mjs'], { stdio: 'inherit' });
 const migrations = await readD1Migrations('./migrations/d1');
 
 export default defineConfig({
