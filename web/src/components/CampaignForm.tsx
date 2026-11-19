@@ -11,7 +11,9 @@ import { LoadError } from './LoadError';
 type Props = {
   t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number; onClose: () => void;
   /** goes to the Templates screen (the empty state points there) */
-  onOpenTemplates?: (() => void) | undefined };
+  onOpenTemplates?: (() => void) | undefined;
+  /** goes to the Numbers screen (the shared-number notice points there) */
+  onOpenNumbers?: (() => void) | undefined };
 type AudienceMode = 'segment' | 'tags' | 'everyone';
 type ParamDraft = { kind: 'text' | 'name' | 'link'; value: string };
 
@@ -29,7 +31,7 @@ function previewText(body: string, params: ParamDraft[], lang: Lang): string {
   });
 }
 
-export function CampaignForm({ t, lang, source, api, now, onClose, onOpenTemplates }: Props) {
+export function CampaignForm({ t, lang, source, api, now, onClose, onOpenTemplates, onOpenNumbers }: Props) {
   const [name, setName] = useState('');
   const [mode, setMode] = useState<AudienceMode>('segment');
   const [segments, setSegments] = useState<SegmentDto[]>([]);
@@ -91,6 +93,14 @@ export function CampaignForm({ t, lang, source, api, now, onClose, onOpenTemplat
     && (timing === 'now' || (scheduledAt !== undefined && Number.isFinite(scheduledAt) && scheduledAt > now()))
     && (dailyLimit === '' || Number(dailyLimit) >= 1);
 
+  // WA-SHARED-NOCAMP-1: a store with no own number but a seat on the shared number can never send marketing; say so instead of showing a form that cannot work.
+  const [sharedOnly, setSharedOnly] = useState(false);
+  useEffect(() => {
+    const numbers = source.numbers;
+    if (!numbers?.shared) return;
+    void Promise.all([numbers.list(), numbers.shared.status()]).then(([own, shared]) => setSharedOnly(shared.member && !own.some((x) => x.kind === 'own' && x.status === 'active')), () => undefined);
+  }, [source]);
+
   const [funding, setFunding] = useState<{ funding: WalletDto['funding'][number]['funding'] }[] | null>(null);
   useEffect(() => {
     void source.wallet?.wallet().then((w) => setFunding(w.funding), () => undefined);
@@ -151,6 +161,24 @@ export function CampaignForm({ t, lang, source, api, now, onClose, onOpenTemplat
   const est = draft?.estimate;
   // A zero price is "Meta bills the merchant's card" only when every active number says so; anything unknown stays "not ready".
   const cardBilled = !!funding && funding.length > 0 && funding.every((f) => f.funding === 'merchant_card');
+
+  if (sharedOnly) {
+    return (
+      <main className="screen" aria-labelledby="new-campaign-title">
+        <header className="screen-head">
+          <button type="button" className="icon-btn" onClick={onClose} aria-label={t.backToCampaigns}><ArrowRight size={20} aria-hidden className="dir-icon" /></button>
+          <h1 id="new-campaign-title">{t.newCampaign}</h1>
+        </header>
+        <div className="settings">
+          <section className="notice" role="note" aria-labelledby="camp-shared-title">
+            <h2 id="camp-shared-title">{t.campSharedTitle}</h2>
+            <p>{t.campSharedBody}</p>
+            {onOpenNumbers && <button type="button" className="btn primary" onClick={onOpenNumbers}>{t.tplSharedGoNumbers}</button>}
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="screen" aria-labelledby="new-campaign-title">
