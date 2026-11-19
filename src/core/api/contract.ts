@@ -203,6 +203,10 @@ export const meResponse = z.object({
   storeId: z.string(),
   role: z.enum(['owner', 'staff', 'super_admin']),
   capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional(), assistant: z.boolean().optional() }),
+  /** Whether THIS store has a Chat workspace. false = Chat was never switched on for it (every workspace route answers 404). Additive: absent from older servers. */
+  workspace: z.boolean().optional(),
+  /** The stores this person may act on that DO have a Chat workspace (id, name, role), for the store picker. At most 50. */
+  stores: z.array(z.object({ id: z.string(), name: z.string(), role: z.enum(['owner', 'staff']) })).max(50).optional(),
 });
 export type MeResponse = z.infer<typeof meResponse>;
 
