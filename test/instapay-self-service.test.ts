@@ -1,11 +1,12 @@
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { instapayRequestDto } from '../src/core/api/contract';
-import { CONTEST_WINDOW_MS, cancelInstapay, confirmInstapay, contestInstapay, expireInstapay, getRequestRow, rejectInstapay } from '../src/core/billing/instapay';
-import { triggerAutoConfirm } from '../src/core/billing/instapay-auto';
+import { CONTEST_WINDOW_MS, cancelInstapay, confirmInstapay, contestInstapay, expireInstapay, rejectInstapay } from '../src/core/billing/instapay';
+import { autoConfirmInstapay, sweepAutoConfirm } from '../src/core/billing/instapay-auto';
 import { configurePayments } from '../src/core/billing/payments';
 import { configureSessionCheck } from '../src/core/identity/session';
 import { OP1, OP2, apiFor, operatorCall, storeId as W0, useApiKey } from './helpers/api';
+import { aiCalls, aiEnv, autoRow, goodAnswer, request, reqRow, seedGold, seedSub, setMode } from './helpers/instapay-auto';
 import { testKashier } from './helpers/kashier';
 import { useStoreLink } from './helpers/store-link';
 
@@ -182,13 +183,26 @@ describe('contest: owner asks for a second look at a rejection, once', () => {
     expect(await full.json()).toMatchObject({ message: 'too_many_open' });
     expect((await row(r.id))!.state).toBe('rejected');
   });
+});
 
-  it('the auto-confirm machinery never touches a contested request', async () => {
-    const ws = W(18);
-    const { api, r } = await rejected(ws, 'contest-7');
-    await api.call('POST', `/wallet/instapay/${r.id}/contest`, note);
-    await triggerAutoConfirm(env, r.id, Date.now() + 60 * 60_000);
-    const cur = await getRequestRow(env, r.id);
-    expect(cur).toMatchObject({ state: 'under_review', decided_by: null });
+describe('contest vs the auto-confirm machine (live mode)', () => {
+  beforeEach(async () => { await env.INSTAPAY_DEDUPE_DB!.prepare('DELETE FROM instapay_dedupe').run(); await seedGold(); await setMode('off'); });
+  afterEach(() => setMode('off'));
+
+  it('a request a person rejected and the owner contested is never confirmed by the machine, neither by a direct attempt nor by the sweep, even with a perfect receipt', async () => {
+    const ws = W(19);
+    await seedSub(ws);
+    const e = aiEnv(goodAnswer(20_000));
+    const r = await request(ws, 'topup', { e }); // mode off: waits for a person
+    expect(await rejectInstapay(env, { id: r.id, actor: OP1, reason: 'The amount on the receipt is 150' })).toMatchObject({ ok: true });
+    const api = await apiFor(ws);
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, { note: 'The transfer went through, receipt attached' })).status).toBe(200);
+    await setMode('live');
+    await env.DB.prepare('UPDATE instapay_requests SET proof_at = ? WHERE id = ?').bind(Date.now() - 11 * 60_000, r.id).run();
+    await autoConfirmInstapay(e, r.id);
+    expect(await sweepAutoConfirm(e, Date.now())).toEqual({ decided: 0, completed: 0 });
+    expect(aiCalls(e)).toBe(0); // the machine never even read the receipt
+    expect(await reqRow(r.id)).toMatchObject({ state: 'under_review' });
+    expect(await autoRow(r.id)).not.toMatchObject({ state: 'auto_confirmed' });
   });
 });
