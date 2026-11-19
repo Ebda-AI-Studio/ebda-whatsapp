@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { exportContactQuery, listContactsQuery, mergeContactsRequest, renameContactRequest, setContactTagsRequest } from '../core/api/contract';
+import { exportContactQuery, exportContactsQuery, listContactsQuery, mergeContactsRequest, renameContactRequest, setContactTagsRequest } from '../core/api/contract';
 import { recordAudit } from '../core/audit';
 import { subjectHash } from '../core/erasure';
 import { normaliseE164 } from '../core/phone';
@@ -20,6 +20,22 @@ contactsRoutes.get('/stores/:storeId/contacts', async (c) => {
   if (!ws) return apiError(c, 404, 'not_found');
   const { cursor, ...rest } = q.data;
   return c.json(await ws.listContacts({ ...rest, ...(cursor !== undefined ? { cursor: Number(cursor) } : {}) }));
+});
+
+/**
+ * Self-service export of ALL the store's own contacts (the merchant is the controller of that data): owner only, a page of at most 500 per call, no filters (it is the whole list).
+ * Every page read is audited with its size and cursor, never a number or a name. An operator session is refused: an operator uses the operator route with a stated reason.
+ */
+contactsRoutes.get('/stores/:storeId/contacts/export', async (c) => {
+  if (c.get('storeRole') !== 'owner') return apiError(c, 403, 'forbidden');
+  const q = exportContactsQuery.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
+  if (!q.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const out = await ws.listContacts({ limit: q.data.limit, ...(q.data.cursor !== undefined ? { cursor: Number(q.data.cursor) } : {}) });
+  await recordAudit(c.env, { workspaceId: c.req.param('storeId')!, actor: c.get('principal').userId, role: 'owner', action: 'contacts.export_all', targetType: 'workspace', targetId: c.req.param('storeId')!, detail: { count: out.items.length, cursor: q.data.cursor ?? null } });
+  c.header('cache-control', 'no-store');
+  return c.json(out);
 });
 
 contactsRoutes.put('/stores/:storeId/contacts/:waId/tags', async (c) => {

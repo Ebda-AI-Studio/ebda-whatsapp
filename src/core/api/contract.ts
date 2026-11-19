@@ -400,6 +400,8 @@ export const listContactsQuery = z.object({
   cursor: z.string().regex(/^\d{1,15}$/).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
+/** Owner export of ALL the store's contacts, a page at a time (cursor = the last contact id of the previous page). */
+export const exportContactsQuery = z.object({ cursor: z.string().regex(/^\d{1,15}$/).optional(), limit: z.coerce.number().int().min(1).max(500).default(200) });
 export const listContactsResponse = z.object({ items: z.array(contactDto), nextCursor: z.string().nullable() });
 export const setContactTagsRequest = z.object({ tags: z.array(tagName).max(10) });
 /** PATCH /contacts/:waId: a name the merchant gives the contact (null = follow WhatsApp's name again). */
