@@ -121,7 +121,9 @@ describe('a failed load shows an error with Retry, never the empty copy', () => 
     failOnce(source.contacts!, 'imports');
     await openFailing('العملاء', 'العملاء', source);
     const panel = screen.getByRole('complementary', { name: t.importTitle });
-    const alert = await within(panel).findByRole('alert');
+    const alert = await screen.findByRole('alert'); // one page-level banner (CHAT-QA-9), the import controls are disabled until it clears
+    expect(within(panel).queryByRole('alert')).toBeNull();
+    expect((within(panel).getByRole('button', { name: t.startImport }) as HTMLButtonElement).disabled).toBe(true);
     await act(async () => fireEvent.click(within(alert).getByRole('button', { name: t.retry })));
     expect(await within(panel).findByText('customers.csv')).toBeTruthy();
     failOnce(source.contacts!, 'rejects');
