@@ -497,6 +497,8 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
   const [created, setCreated] = useState<InstapayCreated | null>(null);
   const [msg, setMsg] = useState<{ kind: 'alert' | 'status'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [contesting, setContesting] = useState<string | null>(null);
+  const [contestNote, setContestNote] = useState('');
   const money = (m: number) => formatMoney(m, 'EGP', lang);
 
   const load = useCallback(() => {
@@ -523,6 +525,15 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
     }
     setBusy(true);
     try { setCreated(await api.createInstapay(input)); load(); } catch (err) { setMsg({ kind: 'alert', text: err instanceof ApiError && err.code === 'yearly_queued' ? t.wYearlyQueued(BRAND.supportEmail ?? t.wSupport) : err instanceof ApiError && err.detail === 'offboarding_pending' ? t.wOffFrozen : t.wIpError }); } finally { setBusy(false); }
+  };
+
+  const cancel = async (id: string) => {
+    setBusy(true); setMsg(null);
+    try { await api.cancelInstapay(id); setCreated((c) => (c?.id === id ? null : c)); setMsg({ kind: 'status', text: t.wIpCancelled }); load(); } catch { setMsg({ kind: 'alert', text: t.wIpCancelFailed }); } finally { setBusy(false); }
+  };
+  const contest = async (id: string) => {
+    setBusy(true); setMsg(null);
+    try { await api.contestInstapay(id, contestNote.trim()); setContesting(null); setContestNote(''); setMsg({ kind: 'status', text: t.wIpContestSent }); load(); } catch { setMsg({ kind: 'alert', text: t.wIpContestFailed }); } finally { setBusy(false); }
   };
 
   const upload = async (id: string, file: File | undefined) => {
@@ -588,7 +599,7 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
           {view.items.map((r: InstapayRequest) => (
             <li key={r.id}>
               <span className="wallet-row-main">
-                <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={r.state === 'confirmed' ? 'done' : r.state === 'rejected' || r.state === 'expired' ? 'failed' : 'pending'}>{t.instapayStates[r.state] ?? r.state}</span>
+                <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={r.state === 'confirmed' ? 'done' : r.state === 'rejected' || r.state === 'expired' ? 'failed' : 'pending'}>{r.cancelledAt ? t.wIpCancelled : (t.instapayStates[r.state] ?? r.state)}</span>
                 <span className="muted op-line"><bdi dir="ltr">{r.reference}</bdi> • {dateTime(r.createdAt, lang)}</span>
                 {r.checking && <span className="muted op-line">{t.wIpAuto.checking}</span>}
                 {r.autoConfirmed && !r.revertedAt && <span className="muted op-line">{t.wIpAuto.done}</span>}
@@ -596,6 +607,19 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
                 {r.state === 'rejected' && r.rejectReason && <span className="op-line" dir="auto">{t.wIpRejectedLine(r.rejectReason)}</span>}
               </span>
               {r.state === 'awaiting_proof' && Date.now() < r.expiresAt && <button type="button" className="btn" onClick={() => setCreated({ ...r, payee: view.payee! })}>{t.wIpOpen}</button>}
+              {r.state === 'awaiting_proof' && <span><button type="button" className="btn" disabled={busy} aria-describedby={`ip-cancel-hint-${r.id}`} onClick={() => void cancel(r.id)}>{t.wIpCancel}</button> <small id={`ip-cancel-hint-${r.id}`} className="muted">{t.wIpCancelHint}</small></span>}
+              {r.state === 'under_review' && r.contestedAt && <span className="muted op-line">{t.wIpContested}</span>}
+              {r.state === 'rejected' && !r.contestedAt && !r.autoConfirmed && r.hasProof && (
+                contesting === r.id ? (
+                  <form className="wallet-form" onSubmit={(e) => { e.preventDefault(); void contest(r.id); }}>
+                    <label className="field"><span>{t.wIpContestNote}</span><textarea dir="auto" maxLength={500} rows={3} value={contestNote} onChange={(e) => setContestNote(e.target.value)} /></label>
+                    <div className="campaign-actions">
+                      <button type="submit" className="btn primary" disabled={busy || contestNote.trim().length < 5}>{t.wIpContestSend}</button>
+                      <button type="button" className="btn" disabled={busy} onClick={() => { setContesting(null); setContestNote(''); }}>{t.close}</button>
+                    </div>
+                  </form>
+                ) : <button type="button" className="btn" onClick={() => { setContesting(r.id); setContestNote(''); }}>{t.wIpContest}</button>
+              )}
             </li>
           ))}
         </ul>

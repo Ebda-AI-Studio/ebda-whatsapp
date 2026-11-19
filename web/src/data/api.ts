@@ -287,6 +287,8 @@ export function createApiSource(o: Opts): LiveSource {
         if (!res.ok) throw new ApiError('invalid_request', res.status);
         return instapayRequestDto.parse(await res.json());
       },
+      cancelInstapay: (requestId) => call(`/wallet/instapay/${encodeURIComponent(requestId)}/cancel`, instapayRequestDto, post({})),
+      contestInstapay: (requestId, note) => call(`/wallet/instapay/${encodeURIComponent(requestId)}/contest`, instapayRequestDto, post({ note })),
       refundRequests: async () => (await call('/wallet/refund-requests', items(refundRequestDto))).items,
       requestRefund: (amountMinor, note) => call('/wallet/refund-requests', refundRequestDto, post({ amountMinor, ...(note.trim() ? { note: note.trim() } : {}) })),
       previewNumberFunding: (pn) => call(`/numbers/${encodeURIComponent(pn)}/funding/preview`, numberFundingPreviewDto, post({ funding: 'merchant_card' })),

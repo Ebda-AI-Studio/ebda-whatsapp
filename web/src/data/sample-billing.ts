@@ -116,6 +116,20 @@ export function createSampleWallet(): WalletApi {
       Object.assign(r, { state: 'under_review', hasProof: true });
       return { ...r };
     },
+    async cancelInstapay(requestId) {
+      const r = instapayItems.find((x) => x.id === requestId);
+      if (!r) throw new ApiError('not_found', 404);
+      if (r.state !== 'awaiting_proof') throw new ApiError('invalid_request', 409, 'bad_state');
+      Object.assign(r, { state: 'expired', cancelledAt: Date.now() });
+      return { ...r };
+    },
+    async contestInstapay(requestId) {
+      const r = instapayItems.find((x) => x.id === requestId);
+      if (!r) throw new ApiError('not_found', 404);
+      if (r.state !== 'rejected' || r.contestedAt) throw new ApiError('invalid_request', 409, r.contestedAt ? 'already_contested' : 'bad_state');
+      Object.assign(r, { state: 'under_review', contestedAt: Date.now(), decidedAt: null });
+      return { ...r };
+    },
     refundRequests: async () => refunds.map((r) => ({ ...r })).sort((a, b) => b.createdAt - a.createdAt),
     async requestRefund(amountMinor, note) {
       if (amountMinor < 5000) throw new ApiError('invalid_request', 409, 'below_minimum');
