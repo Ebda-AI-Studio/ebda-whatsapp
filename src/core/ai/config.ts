@@ -53,6 +53,8 @@ export type AgentConfig = {
   allowedHosts: (env: Env) => string[];
   /** An answer expected to take longer than this gets a quick acknowledgement first. */
   slowMs: number;
+  /** One model call longer than this is abandoned as a retryable timeout (then retried once, then handed to a person): a stalled Workers AI call must not hold a customer for a minute (live eval 2026-11-19: one 81 s call). */
+  modelTimeoutMs: number;
   /** Workers AI model used for the platform-funded agent. */
   defaultModel: (env: Env) => string;
   /** F1: AI turns one customer may use per rolling 24 h; the next message is handed to a person without calling the model. */
@@ -95,6 +97,7 @@ let current: AgentConfig = {
   secretsKey: (env) => env.AGENT_SECRETS_KEY,
   allowedHosts: (env) => (env.AGENT_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim()).filter(Boolean),
   slowMs: 2000,
+  modelTimeoutMs: 25_000,
   defaultModel: (env) => env.AGENT_MODEL || DEFAULT_WORKERS_AI_MODEL,
   turnsPerDay: 30,
 };

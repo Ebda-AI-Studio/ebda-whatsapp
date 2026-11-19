@@ -243,13 +243,20 @@ function historyOf(host: LinkHost, input: BotInput): ChatTurn[] {
   return turns;
 }
 
+/** One model call, abandoned after `modelTimeoutMs` as a retryable `timeout` (the abandoned call may still finish in the background; its answer is dropped). */
+function completeWithin(provider: LlmProvider, req: Parameters<LlmProvider['complete']>[0]): Promise<LlmResponse> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new LlmError('timeout', true)), agentConfig().modelTimeoutMs); });
+  return Promise.race([provider.complete(req), limit]).finally(() => clearTimeout(timer));
+}
+
 async function callModel(provider: LlmProvider, req: Parameters<LlmProvider['complete']>[0]): Promise<LlmResponse> {
   try {
-    return await provider.complete(req);
+    return await completeWithin(provider, req);
   } catch (err) {
     if (err instanceof LlmError && err.retryable) {
       await sleep(300);
-      return provider.complete(req);
+      return completeWithin(provider, req);
     }
     throw err;
   }
