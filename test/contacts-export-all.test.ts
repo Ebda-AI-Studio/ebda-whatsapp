@@ -76,6 +76,15 @@ describe('GET /contacts/export', () => {
     expect(await audit(ws, 'contacts.export_all')).toEqual([]);
   });
 
+  it('a revoked session cannot read the export (the bulk read re-checks the session like a write)', async () => {
+    const ws = W(4208);
+    await seed(ws, 1);
+    const owner = await apiFor(ws);
+    configureSessionCheck(async () => true);
+    expect((await owner.call('GET', '/contacts/export')).status).toBe(403);
+    expect(await audit(ws, 'contacts.export_all')).toEqual([]);
+  });
+
   it('validates the page size and the cursor at the edge (Zod)', async () => {
     const ws = W(4207);
     await seed(ws, 1);
