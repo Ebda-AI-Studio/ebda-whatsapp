@@ -4,7 +4,7 @@ import type { View } from '../components/Rail';
 // One address per screen (History API, no router dependency). The Worker serves the shell for exactly these paths (src/index.ts SHELL_PATHS),
 // so a refresh or a shared link lands on the same screen. Keep both lists in step: test/shell-routes.test.ts compares them.
 export const VIEW_PATHS: Record<View, string> = {
-  inbox: '/', campaigns: '/campaigns', templates: '/templates', contacts: '/contacts', agent: '/agent', bot: '/bot', numbers: '/numbers', wallet: '/wallet', team: '/team', operator: '/ops',
+  inbox: '/', campaigns: '/campaigns', templates: '/templates', contacts: '/contacts', agent: '/agent', bot: '/bot', numbers: '/numbers', integrations: '/integrations', wallet: '/wallet', team: '/team', operator: '/ops',
 };
 export const CHAT_PREFIX = '/chat/';
 

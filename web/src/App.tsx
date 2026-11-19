@@ -28,7 +28,7 @@ import { useRoute } from './lib/route';
 import { EmptyState } from './components/EmptyState';
 import { SearchX } from 'lucide-react';
 
-type Props = { source: InboxSource; now?: () => number; initialLang?: Lang; /** The screen to open on (the address bar's screen once real routes land). */ initialView?: View };
+type Props = { source: InboxSource; now?: () => number; initialLang?: Lang; };
 
 /** A store with no Chat workspace gets its own screen (rail + the "not enabled" state); the inbox and its list calls never run (they would all 404 and read as failures). */
 export function App(props: Props) {
@@ -47,7 +47,7 @@ function NoWorkspaceShell({ source, initialLang = 'ar' }: Props) {
   );
 }
 
-function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'inbox' }: Props) {
+function AppInner({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const [lang, setLang] = useState<Lang>(initialLang);
   // Connectors reach the client's own systems with a secret: owner only. The server refuses staff (routes/connectors.ts, 403); this keeps the screen from rendering for them too, whatever address they typed.
   // The server lets a super admin READ connector status and never write (WA-SECRETS-1): they see the list without the form; staff are refused.
@@ -92,7 +92,7 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
   useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-    const screen = notFound ? t.nfTitle : { inbox: t.inbox, campaigns: t.campaigns, templates: t.tplNav, contacts: t.contacts, agent: t.agent, bot: t.botNav, numbers: t.numbersNav, wallet: t.walletNav, team: t.teamNav, operator: t.opNav }[view];
+    const screen = notFound ? t.nfTitle : { inbox: t.inbox, campaigns: t.campaigns, templates: t.tplNav, contacts: t.contacts, agent: t.agent, bot: t.botNav, numbers: t.numbersNav, integrations: t.intNav, wallet: t.walletNav, team: t.teamNav, operator: t.opNav }[view];
     document.title = `${lang === 'ar' && BRAND.productNameAr ? BRAND.productNameAr : BRAND.productName} · ${screen}`;
   }, [lang, t, view, notFound]);
 
