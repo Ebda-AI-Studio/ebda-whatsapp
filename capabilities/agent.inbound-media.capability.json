@@ -1,0 +1,43 @@
+{
+  "id": "agent.inbound-media",
+  "status": "live",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "المساعد بيرد على الصور والملفات والاستيكرز",
+  "titleEn": "Agent answers pictures, files and stickers politely",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "العميل بعت صورة والمساعد عمل إيه؟",
+      "المساعد بيشوف الصور؟",
+      "العميل بعت ستيكر"
+    ],
+    "en": [
+      "What does the agent do when a customer sends a picture or a file?"
+    ]
+  },
+  "steps": [
+    "A picture, document, video, audio file or sticker gets one short note: say it in words or ask for a person (no model call, no credit, nothing read from the file; the media stays in the inbox)",
+    "At most one note per customer per 10 minutes; a payment screenshot at the InstaPay proof step still goes to the ordering bot"
+  ],
+  "edgeCases": [
+    "A voice note (Meta voice flag true or absent) is still transcribed",
+    "'عايز اكلم حد' after the note still hands over"
+  ],
+  "gaps": [
+    "The agent does not read pictures (no OCR, no visual search)"
+  ]
+}

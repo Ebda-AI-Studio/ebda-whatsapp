@@ -3,7 +3,8 @@ import { z } from 'zod';
 export const MESSAGE_TYPES = ['text', 'interactive', 'image', 'audio', 'video', 'document', 'sticker', 'location', 'order'] as const;
 export type MessageType = (typeof MESSAGE_TYPES)[number] | 'unsupported';
 
-export type InboundMedia = { id: string; mime: string; filename?: string };
+/** `voice`: Meta's flag on an audio message (true = recorded voice note, false = an audio file); absent = treated as a voice note. */
+export type InboundMedia = { id: string; mime: string; filename?: string; voice?: boolean };
 /** A tap on a button, a list row or a template quick-reply. `id` is what we set when we sent it (a template button without a payload echoes its title). */
 export type InboundReply = { kind: 'button' | 'list'; id: string; title: string };
 /** A cart sent from Meta's catalog. Prices stay the decimal strings Meta sent (no float arithmetic on money). */
@@ -27,7 +28,7 @@ export const locationSchema = z.object({
   latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180),
   name: z.string().optional(), address: z.string().optional(),
 }).loose();
-const mediaBodySchema = z.object({ id: z.string().min(1), mime_type: z.string().optional(), caption: z.string().optional(), filename: z.string().optional() }).loose();
+const mediaBodySchema = z.object({ id: z.string().min(1), mime_type: z.string().optional(), caption: z.string().optional(), filename: z.string().optional(), voice: z.boolean().optional() }).loose();
 /** Meta's `pricing` object on a status: whether the message is billable, under which model and category. Absent fields stay null. */
 export type StatusPricing = { billable: boolean | null; pricingModel: string | null; category: string | null; type: string | null };
 export type StatusEvent = { wamid: string; status: 'sent' | 'delivered' | 'read' | 'failed'; ts: number; errorCode?: number; pricing?: StatusPricing };
@@ -135,7 +136,7 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
           ...(order ? { order, text: `🛒 ${order.items.reduce((n, i) => n + i.quantity, 0)}` } : {}),
           // The inbox shows the pin's own label only (never the coordinates).
           ...(location ? { location, text: `📍 ${location.name ?? location.address ?? ''}`.trim() } : {}),
-          ...(media?.success ? { media: { id: media.data.id, mime: media.data.mime_type ?? 'application/octet-stream', ...(media.data.filename ? { filename: media.data.filename } : {}) }, ...(media.data.caption ? { caption: media.data.caption } : {}) } : {}),
+          ...(media?.success ? { media: { id: media.data.id, mime: media.data.mime_type ?? 'application/octet-stream', ...(media.data.filename ? { filename: media.data.filename } : {}), ...(media.data.voice !== undefined ? { voice: media.data.voice } : {}) }, ...(media.data.caption ? { caption: media.data.caption } : {}) } : {}),
           ...(names.get(m.from) ? { profileName: names.get(m.from) } : {}),
         });
       }
