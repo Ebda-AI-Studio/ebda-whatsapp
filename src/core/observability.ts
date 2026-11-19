@@ -114,6 +114,7 @@ export const INFO_ALERTS = new Set([
   'send_tier_exhausted', 'shared_pick_id_refused', 'shared_trueup_no_rebate', 'topup_inquiry_unsupported', 'wallet_low_balance', 'webhook_unconfirmed',
   'seats_over_limit', // WA-SEATS-1: a downgrade left more seated staff than the package allows; nothing is deleted, the owner sees it on the Team screen
   // Chat agent context (Rulings CHAT-AGENT-2/4): each is a degraded answer or a notice that could not be delivered, never a stopped service; the customer is still answered.
+  'agent_model_flag_unreadable', // WA-MODEL-FLAG-1: the agentModel flag could not be read; the turn used the default model
   'agent_policies_unavailable', 'agent_profile_unavailable', 'agent_faq_not_indexed', 'handoff_owner_unreachable', 'handoff_owner_notice_failed', 'handoff_digest_failed',
   'starter_templates_failed', // the brand's starter templates could not be put in place on connect (Meta slow or refused); the Templates screen retries by itself and has a retry button
   'instapay_no_reference', // DUP-REF-REQUIRED-1: an operator confirmed an InstaPay transfer with the audited "no reference" box ticked; review the weekly count

@@ -14,6 +14,7 @@ import { normaliseText } from '../text-normalise';
 import { buildCatalogCard, buildProductCards, cardableIds, catalogueOpenable, type BuiltCard } from '../store-link/product-cards';
 import { catalogCandidates } from './knowledge';
 import type { ToolCall, ToolDef } from './provider';
+import { recommendArgs, recommendProducts, recommendToolDef } from './recommend';
 
 export const MAX_TOOL_ROUNDS = 3;
 export const MAX_CALLS_PER_ROUND = 3;
@@ -23,7 +24,7 @@ const SEARCH_PAGES = 5;
 const SEARCH_PAGE_SIZE = 100;
 const SEARCH_RESULTS = 5;
 
-export type ToolAvailability = { catalog: boolean; orders: boolean; ordering: boolean };
+export type ToolAvailability = { catalog: boolean; orders: boolean; ordering: boolean; /** The merchant allows product recommendations (setting `recommendProducts`) and the Store is reachable. */ recommend?: boolean };
 
 export function toolDefs(a: ToolAvailability): ToolDef[] {
   const defs: ToolDef[] = [];
@@ -44,6 +45,7 @@ export function toolDefs(a: ToolAvailability): ToolDef[] {
       parameters: { type: 'object', properties: {} },
     });
   }
+  if (a.catalog && a.recommend) defs.push(recommendToolDef);
   if (a.orders) {
     defs.push({
       name: 'order_status',
@@ -68,11 +70,25 @@ export function toolDefs(a: ToolAvailability): ToolDef[] {
 
 export type ToolOutcome = { content: string } | { handoff: true } | { startOrder: true };
 /** `cards` collects the catalogue messages a turn asked for; the agent sends them after its text. */
-export type ToolContext = { host: LinkHost; from: string; bridge: StoreBridge | null; availability: ToolAvailability; locale: 'ar' | 'en'; cards: BuiltCard[]; /** Rows shown by show_products this turn: one product message is built from all of them (WA-CAT-5). */ shown?: CatalogRow[] };
+export type ToolContext = { host: LinkHost; from: string; bridge: StoreBridge | null; availability: ToolAvailability; locale: 'ar' | 'en'; cards: BuiltCard[]; /** The message this turn answers (keys the per-customer recommendation ration). */ messageId: number; /** A recommendation set was already sent this turn. */ recommended?: boolean; /** Rows shown by show_products this turn: one product message is built from all of them (WA-CAT-5). */ shown?: CatalogRow[] };
 
 const searchArgs = z.object({ query: z.string().trim().min(1).max(120), maxPrice: z.number().positive().max(1_000_000).optional() });
 const showArgs = z.object({ ids: z.array(z.string().trim().min(1).max(200)).min(1).max(10) });
 const statusArgs = z.object({ orderNumber: z.string().trim().regex(/^[\w-]{1,40}$/).optional() });
+/**
+ * Tolerance at the tool boundary, for every model: an optional field the model sends as null or "" is ABSENT (gpt-oss sends `orderNumber: ""` for "no number"), and a budget sent as a plain numeric string
+ * ("500", at most 7 digits) is a number. Unknown keys are ignored by the schemas; a required field that is blank, or any other bad value, is still `invalid_arguments`.
+ */
+export function tidyArgs(args: unknown, optional: readonly string[]): unknown {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return args;
+  const out: Record<string, unknown> = { ...(args as Record<string, unknown>) };
+  for (const k of optional) {
+    const v = out[k];
+    if (v === null || (typeof v === 'string' && v.trim() === '')) delete out[k];
+  }
+  if (typeof out.maxPrice === 'string' && /^\d{1,7}(\.\d{1,2})?$/.test(out.maxPrice.trim())) out.maxPrice = Number(out.maxPrice.trim());
+  return out;
+}
 const json = (v: unknown): ToolOutcome => ({ content: JSON.stringify(v).slice(0, 3000) });
 const err = (code: string): ToolOutcome => json({ error: code });
 
@@ -81,7 +97,7 @@ export async function runTool(ctx: ToolContext, call: ToolCall): Promise<ToolOut
     switch (call.name) {
       case 'search_catalog': {
         if (!ctx.availability.catalog || !ctx.bridge) return err('unavailable');
-        const args = searchArgs.safeParse(call.arguments);
+        const args = searchArgs.safeParse(tidyArgs(call.arguments, ['maxPrice']));
         if (!args.success) return err('invalid_arguments');
         return json(await searchCatalog(ctx, args.data.query, args.data.maxPrice));
       }
@@ -90,6 +106,12 @@ export async function runTool(ctx: ToolContext, call: ToolCall): Promise<ToolOut
         const args = showArgs.safeParse(call.arguments);
         if (!args.success) return err('invalid_arguments');
         return json(await showProducts(ctx, args.data.ids));
+      }
+      case 'recommend_products': {
+        if (!ctx.availability.catalog || !ctx.availability.recommend || !ctx.bridge) return err('unavailable');
+        const args = recommendArgs.safeParse(call.arguments);
+        if (!args.success) return err('invalid_arguments');
+        return json(await recommendProducts(ctx, args.data, { show: showProducts, search: searchCatalog }));
       }
       case 'open_catalog': {
         if (!ctx.availability.catalog) return err('unavailable');
@@ -101,7 +123,7 @@ export async function runTool(ctx: ToolContext, call: ToolCall): Promise<ToolOut
       }
       case 'order_status': {
         if (!ctx.availability.orders || !ctx.bridge) return err('unavailable');
-        const args = statusArgs.safeParse(call.arguments ?? {});
+        const args = statusArgs.safeParse(tidyArgs(call.arguments ?? {}, ['orderNumber']));
         if (!args.success) return err('invalid_arguments');
         return json(await orderStatus(ctx, args.data.orderNumber));
       }
@@ -205,6 +227,20 @@ async function searchCatalog(ctx: ToolContext, query: string, maxPrice?: number)
   return { results: [], uncertain: true, ...(cursor ? { incomplete: true as const } : {}) };
 }
 
+/**
+ * What the Store tells about a shipment: its status code, that code in the customer's words (the same phrases the shipping notifications use; null for a code with
+ * no phrase) and the tracking link. The bridge's shipment has NO courier name, tracking number or delivery estimate (docs/store-link.md, Store-side ask): the result
+ * says so, and the prompt forbids guessing one.
+ */
+type Shipment = { status: string; trackingUrl: string | null };
+function shipmentOf(ctx: ToolContext, s: Shipment | null): unknown {
+  if (!s) return null;
+  return { status: s.status, statusText: storeLink().copy?.shipmentPhrase(s.status, ctx.locale) ?? null, trackingUrl: s.trackingUrl, courier: null, estimatedDelivery: null };
+}
+
+/** At most this many shipped orders get their shipment read in one listing (one Store read each, in parallel). */
+const LISTING_SHIPMENTS = 3;
+
 async function orderStatus(ctx: ToolContext, orderNumber: string | undefined): Promise<unknown> {
   const secret = storeLink().buyerSecret(ctx.host.env);
   const e164 = `+${ctx.from}`;
@@ -214,9 +250,19 @@ async function orderStatus(ctx: ToolContext, orderNumber: string | undefined): P
   if (orderNumber) {
     const res = await bridge.getOrderStatus(ctx.host.workspaceId, orderNumber, key);
     if (!res.ok) return { error: res.reason === 'not_found' ? 'order_not_found' : 'store_unavailable' };
-    return { orderNumber: res.value.orderNumber, status: res.value.status, paymentMethod: res.value.paymentMethod, shipment: res.value.shipment };
+    return { orderNumber: res.value.orderNumber, status: res.value.status, paymentMethod: res.value.paymentMethod, shipment: shipmentOf(ctx, res.value.shipment) };
   }
   const res = await bridge.listCustomerOrders(ctx.host.workspaceId, key, 3);
   if (!res.ok) return { error: res.reason === 'not_found' || res.reason === 'not_linked' ? 'no_orders' : 'store_unavailable' };
-  return { orders: res.value.items.map((o) => ({ orderNumber: o.orderNumber, status: o.status, paymentMethod: o.paymentMethod, total: o.totalMinor / 100, currency: o.currency, items: o.itemsCount })) };
+  // "فين أوردري؟" with no number: a shipped order carries its shipment already, so the model needs no second round (a failed read just leaves the shipment out).
+  const shipments = await Promise.all(res.value.items.map(async (o, i) => {
+    if (o.status !== 'shipped' || i >= LISTING_SHIPMENTS) return null;
+    try {
+      const r = await bridge.getOrderStatus(ctx.host.workspaceId, o.orderNumber, key);
+      return r.ok ? r.value.shipment : null;
+    } catch {
+      return null; // the listing is still the answer
+    }
+  }));
+  return { orders: res.value.items.map((o, i) => ({ orderNumber: o.orderNumber, status: o.status, paymentMethod: o.paymentMethod, total: o.totalMinor / 100, currency: o.currency, items: o.itemsCount, ...(shipments[i] ? { shipment: shipmentOf(ctx, shipments[i]!) } : {}) })) };
 }

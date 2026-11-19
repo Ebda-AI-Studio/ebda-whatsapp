@@ -16,7 +16,7 @@ it('deploys on a push to main and on dispatch only (Ruling WA-DEPLOY-2): no pull
 it('one deploy at a time and never cancelled halfway; bounded; its own runner switch EBDA_DEPLOY_RUNS_ON, never the PR runner switch EBDA_RUNS_ON (CI-UMBRA-ON-1)', () => {
   expect(wf).toMatch(/concurrency:\n\s+group: deploy\n\s+cancel-in-progress: false/);
   expect(wf).toMatch(/timeout-minutes: \d+/);
-  expect(wf).toContain(`runs-on: \${{ fromJSON(vars.EBDA_DEPLOY_RUNS_ON || '"ubuntu-24.04"') }}`);
+  expect(wf).toContain(`runs-on: \${{ fromJSON(vars.EBDA_DEPLOY_RUNS_ON || '["ebda-mac-light"]') }}`);
   expect(wf).not.toContain('vars.EBDA_RUNS_ON');
   expect(wf).not.toMatch(/ubuntu-latest/);
 });
@@ -112,4 +112,16 @@ it('the on-main guard uses the checked-out origin/main without fetching, passes 
   const bad = run();
   expect(bad.status).not.toBe(0);
   expect(bad.stderr).toContain('is not an ancestor of origin/main');
+});
+
+// Self-hosted Macs must never pull the remote Actions cache (14 GB once, a deploy stuck 5+ min in "Setup Node.js"): setup-node `cache:` is only ever a runner-switch conditional.
+it('no workflow has a setup-node `cache:` at all (every job is on the Mac pool; the remote Actions cache is never used)', () => {
+  const dir = new URL('../.github/workflows/', import.meta.url);
+  const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
+  expect(files).toContain('cf-deploy.yml');
+  for (const f of files) {
+    const text = readFileSync(new URL(f, dir), 'utf8');
+    expect(text, f).not.toMatch(/^\s*cache:\s*['"]?(npm|pnpm|yarn)['"]?\s*(#.*)?$/m);
+  }
+  expect(wf).not.toMatch(/^\s*cache:/m);
 });
