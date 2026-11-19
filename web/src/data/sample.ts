@@ -428,6 +428,11 @@ export function createSampleSource(): InboxSource {
         if (!contacts.some((x) => x.waId === waId)) throw new ApiError('not_found', 404);
         return { version: 1, subject: { waId }, messages: [], nextAfter: null };
       },
+      async eraseContact(waId) {
+        const i = contacts.findIndex((x) => x.waId === waId);
+        if (i < 0) throw new ApiError('contact not found', 404);
+        contacts.splice(i, 1);
+      },
       async mergeContacts(fromWaId, intoWaId) {
         const i = contacts.findIndex((x) => x.waId === fromWaId);
         if (i < 0 || !contacts.some((x) => x.waId === intoWaId)) throw new ApiError('not_found', 404);

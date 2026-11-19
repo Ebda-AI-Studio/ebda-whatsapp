@@ -115,6 +115,8 @@ export interface ContactsApi {
   renameContact(waId: string, name: string | null): Promise<{ waId: string; name: string | null; optedOut: boolean }>;
   /** B5: all of one contact's data (every page of messages joined). Owner only. */
   exportContact(waId: string): Promise<unknown>;
+  /** Data-subject erasure of one contact (owner only). Cannot be undone; financial records stay. */
+  eraseContact(waId: string): Promise<void>;
   /** M-175: the same person on a new number. Owner only; cannot be undone. */
   mergeContacts(fromWaId: string, intoWaId: string): Promise<void>;
   /** B4: how long messages are kept (owner only). `days: null` = the platform default. */
