@@ -65,9 +65,9 @@ const toHit = (r: CatalogRow) => ({ id: r.retailerId, name: r.title, nameAr: r.t
  * path that sends nothing, and replaced by the real set when something is sent.
  */
 export async function recommendProducts(ctx: ToolContext, a: RecommendArgs, deps: RecommendDeps, now = Date.now()): Promise<unknown> {
-  if (ctx.recommended) return { error: 'already_recommended_this_turn' };
+  if (ctx.recommended) return { error: 'already_recommended_this_turn', note: 'Cards for this turn were already sent: write your one short sentence now. If the customer asked for something different, use search_catalog and show_products.' };
   const win = windowOf(ctx, now);
-  if (win.count >= RECS_PER_DAY) return { error: 'rate_limited', note: 'Enough suggestions were sent already today: answer in plain words, do not suggest more products.' };
+  if (win.count >= RECS_PER_DAY) return { error: 'rate_limited', note: 'Enough suggestions were sent already today: do not call recommend_products again. If the customer ASKED for products, ideas, a gift or gave a budget, do not stop here: in this same turn call search_catalog (with the same maxPrice when they gave one) and then show_products. Only when nothing was asked (a suggestion of your own) answer in plain words and suggest nothing more.' };
   // A retried turn reuses its message id: keep what it already sent so a failed retry restores it instead of erasing it from the daily count.
   const previous = getAgentState(ctx.host.sql, keyOf(ctx.messageId));
   putAgentState(ctx.host.sql, keyOf(ctx.messageId), JSON.stringify({ at: now, ids: [] }));
@@ -120,7 +120,7 @@ async function recommendOnce(ctx: ToolContext, a: RecommendArgs, deps: Recommend
     candidates = res.value.items.filter((r) => r.availability === 'in_stock' && (maxPriceMinor === undefined || r.priceMinor <= maxPriceMinor) && r.retailerId !== a.productId).map((r) => r.retailerId);
   }
   const ids = [...new Set(candidates)].filter((id) => !win.shown.has(id)).slice(0, RECS_PER_SET);
-  if (!ids.length) return { error: 'nothing_to_recommend', note: 'Say so plainly; do not invent products.' };
+  if (!ids.length) return { error: 'nothing_to_recommend', note: 'Do not invent products. If the customer ASKED for products, ideas, a gift or gave a budget, do not stop here: in this same turn call search_catalog (with the same maxPrice when they gave one) and then show_products. Only if that finds nothing too, say so plainly.' };
 
   // Cards (or text hits) read live from the Store: the price and stock the customer sees are never the engine's or the model's.
   const shown = await deps.show(ctx, ids) as { products?: { id: string }[]; without_card?: { id: string }[]; error?: string };

@@ -1,5 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import { GPT_OSS_MODEL, setAgentModelFlag } from '../src/core/ai/model-flag';
+import type { Env } from '../src/env';
 import { OpenAiCompatibleProvider, WorkersAiProvider, type AiBinding } from '../src/core/ai/provider';
 import { CASES } from './eval/golden-cases';
 import { runCase, scoreboard, type Verdict } from './eval/run';
@@ -23,6 +25,8 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
     const host = new URL(e.CHAT_EVAL_BASE_URL!).host;
     // Workers AI (the production path): the SAME WorkersAiProvider production runs, over a binding that calls the account's REST run endpoint (CHAT_EVAL_BASE_URL = .../accounts/<id>/ai/v1).
     const stats = { lat: [] as number[], inTok: 0, outTok: 0 };
+    const calls: { id: string; ms: number; inTok: number; outTok: number; msgs: number; tools: number }[] = [];
+    let curId = '';
     const restBinding: AiBinding = {
       async run(model, rawInputs) {
         // Until foundation fdn#100 is vendored, WorkersAiProvider sends content:null on tool-calling turns and Workers AI answers 400; coerce so the eval measures the MODEL.
@@ -35,9 +39,11 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
           if (res.status !== 429) break;
           await new Promise((r) => setTimeout(r, 15_000));
         }
+        if (!res.ok) console.log(`CHAT_EVAL_SHAPE ${JSON.stringify({ model, tools: (rawInputs.tools as unknown[] | undefined)?.length ?? 0, max_tokens: rawInputs.max_tokens, messages: (inputs.messages as { role: string; content: unknown; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[]).map((m) => ({ role: m.role, len: typeof m.content === 'string' ? m.content.length : m.content === null ? null : 'x', calls: m.tool_calls?.length, id: m.tool_call_id ? 1 : undefined, name: m.name })) })}`); // request SHAPE only (roles, lengths, counts): no customer or model text, so no PII
         if (!res.ok) console.log(`CHAT_EVAL_HTTP ${res.status} ${(await res.clone().text()).slice(0, 300)}`);
         if (!res.ok) throw new Error(`workers-ai ${res.status} ${(await res.text()).slice(0, 200)}`);
         const result = ((await res.json()) as { result: { usage?: { prompt_tokens?: number; completion_tokens?: number } } }).result;
+        calls.push({ id: curId, ms: Date.now() - t0, inTok: result?.usage?.prompt_tokens ?? 0, outTok: result?.usage?.completion_tokens ?? 0, msgs: (inputs.messages as unknown[]).length, tools: (rawInputs.tools as unknown[] | undefined)?.length ?? 0 });
         stats.lat.push(Date.now() - t0); stats.inTok += result?.usage?.prompt_tokens ?? 0; stats.outTok += result?.usage?.completion_tokens ?? 0;
         return result;
       },
@@ -53,14 +59,19 @@ describe.skipIf(!LIVE)('golden set against a real model (CHAT_EVAL_LIVE=1)', () 
     };
     const verdicts: Verdict[] = [];
     for (const [i, c] of CASES.entries()) {
+      curId = c.id;
       if (e.CHAT_EVAL_ONLY && c.group !== e.CHAT_EVAL_ONLY) continue;
+      if (e.CHAT_EVAL_ID && c.id !== e.CHAT_EVAL_ID) continue;
+      // Production picks the gpt-oss prompt block, format strip and language check from the D1 flag `agent.model` (Ruling WA-MODEL-FLAG-1), NOT from the provider's model id: set it the way the operator does so the eval measures the path that ships.
+      if (e.CHAT_EVAL_MODEL === GPT_OSS_MODEL) await setAgentModelFlag(env as unknown as Env, { model: GPT_OSS_MODEL, actor: 'eval', reason: 'live golden eval' });
       const v = await runCase(c, { fake: link.fake, agent, other }, i, make);
       console.log(`CHAT_EVAL_CASE ${JSON.stringify({ id: v.id, pass: v.pass, outcome: v.run.outcome, reply: v.run.replies.join(' | ').slice(0, 160) })}`);
-      if (!v.pass) console.log(`CHAT_EVAL_FAIL ${JSON.stringify({ id: v.id, failed: v.failed, outcome: v.run.outcome, tools: v.run.tools.map((t) => t.name), reply: v.run.replies.join(' | ').slice(0, 200) })}`);
+      if (!v.pass) console.log(`CHAT_EVAL_FAIL ${JSON.stringify({ id: v.id, failed: v.failed, outcome: v.run.outcome, tools: v.run.tools.map((t) => t.name), modelTexts: (v.run.modelTexts ?? []).map((x) => x.slice(0, 240)), reply: v.run.replies.join(' | ').slice(0, 200) })}`);
       verdicts.push(v);
     }
     const board = scoreboard(verdicts);
     const l = [...stats.lat].sort((a, b) => a - b);
+    console.log(`CHAT_EVAL_SLOW ${JSON.stringify([...calls].sort((a, b) => b.ms - a.ms).slice(0, 10))}`); // the ten slowest model calls: which case, how long, how big (messages = tool round-trips so far)
     console.log(`CHAT_EVAL_STATS ${JSON.stringify({ calls: l.length, p50: l[Math.floor(l.length * 0.5)], p95: l[Math.floor(l.length * 0.95)], inTok: stats.inTok, outTok: stats.outTok })}`);
     console.log(`CHAT_EVAL_SCOREBOARD ${JSON.stringify({ model: e.CHAT_EVAL_MODEL, ...board })}`);
     expect(board.rate).toBeGreaterThanOrEqual(Number(e.CHAT_EVAL_MIN ?? 0));
