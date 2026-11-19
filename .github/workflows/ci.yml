@@ -21,10 +21,9 @@ jobs:
     name: Typecheck, tests, audit
     # Never run code from a fork's PR on a self-hosted runner.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # Umbra self-hosted runner when the repo variable EBDA_RUNS_ON is set, else GitHub-hosted.
-    # EBDA_RUNS_ON must be a JSON value, e.g. ["self-hosted","umbra-ebda"], not a bare label.
-    # ubuntu-latest became 26.04 (2026-11); Playwright 1.60 unsupported — Ruling CI-HOSTED-2
-    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    # The Mac runner pool: the repo variable EBDA_RUNS_ON (a JSON value, e.g. ["ebda-mac-light"], not a bare label), else the Mac label itself.
+    # Never a GitHub-hosted runner (Ahmad 2026-11-16: no hosted minutes); test/workflow-no-hosted-runners.test.ts pins it.
+    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '["ebda-mac-light"]') }}
     # The full suite takes 19-27 min on the shared VM under load from other products' jobs (main run at 0976248: 19 min; PR #43 run 40840747987 was cut at 25 while still passing files).
     timeout-minutes: 40
     steps:
@@ -37,7 +36,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           # Remote Actions cache only on hosted runners; on Umbra ~/.npm is already local.
-          cache: ${{ vars.EBDA_RUNS_ON == '' && 'npm' || '' }}
       - run: npm ci
       - run: npm run typecheck
       # CI-only: 2 workers (the shared 4.9 GB VM ran out of memory and time with the default pool); local runs keep the default.
