@@ -121,3 +121,6 @@ v13 `processed_events`, `entity_versions`, `store_state`, `contacts.buyer_key`, 
 
 ## Not done / needs the other side
 The Store's real RPC and queues; `PUBLIC_BASE_URL`/`PROOF_URL_SECRET` values; wallet checks (done in Phase 7, `docs/billing.md`). The AI agent and its handoff words are in `docs/ai-agent.md`.
+
+## Store-side ask: courier and delivery estimate in the order shipment
+`getOrderStatus` (bridge v1) returns `shipment: { status, trackingUrl } | null` (`do-port.ts` selects only those two columns), so the Chat agent cannot tell a customer the courier or when the parcel arrives, and its prompt forbids guessing. The Store's `Shipment` model already has the data. Ask (additive, optional, all nullable): `shipment: { status, trackingUrl, courier: string | null (carrierName ?? carrier), trackingNumber: string | null, estimatedDeliveryAt: string | null (ISO 8601 from estimated_delivery_at) }`. When it ships, Chat adds the three fields to `orderStatusSchema` with the vendored vector, puts them in the `order_status` result, and the reply guard gets a date class that trusts only a date the tool returned.

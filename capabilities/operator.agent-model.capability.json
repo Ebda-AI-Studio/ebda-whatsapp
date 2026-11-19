@@ -1,0 +1,51 @@
+{
+  "id": "operator.agent-model",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-17",
+  "titleAr": "اختيار موديل مساعد الشات (تبديل من الإعدادات)",
+  "titleEn": "Chat agent model (operator switch)",
+  "screens": [],
+  "api": [
+    "GET /operator/agent/model",
+    "PUT /operator/agent/model"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "reversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "which model answers customers is a platform-wide quality and cost decision; the merchant never sees or sets it (Ruling WA-MODEL-FLAG-1)",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيختار الموديل اللي بيرد على عملائي؟",
+      "ليه رد المساعد اتغير؟",
+      "ينفع أغير الموديل بنفسي؟"
+    ],
+    "en": [
+      "Who chooses the model that answers my customers?",
+      "Why did the assistant's replies change?",
+      "Can I change the model myself?"
+    ]
+  },
+  "steps": [
+    "Operator API: read the current agent model and switch between the two allowed models with a reason; switching back restores the default at once"
+  ],
+  "edgeCases": [
+    "Only two model ids are accepted; any other id is refused",
+    "The default model keeps today's prompt and replies unchanged"
+  ],
+  "gaps": [
+    "No operator screen yet: set through the API"
+  ]
+}

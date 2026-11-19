@@ -5,7 +5,7 @@
 //   assistant/explain.generated.json      per live, non-forbidden BEHAVIOUR capability (no merchant route of its own, or reads only): title (ar/en), steps, edge cases, guide: what the explain tools answer from; the registry view keeps none of it
 // `node scripts/build-help-corpus.mjs` writes them; `--check` exits 1 when they are stale (test/smart-layer/assets.test.ts runs the same builder).
 import { build } from 'esbuild';
-import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -51,5 +51,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (process.argv.includes('--check')) {
     const stale = files.filter(([n, c]) => !existsSync(join(OUT, n)) || readFileSync(join(OUT, n), 'utf8') !== c).map(([n]) => n);
     if (stale.length) { console.error(`stale: ${stale.join(', ')} (run node scripts/build-help-corpus.mjs)`); process.exit(1); }
-  } else for (const [n, c] of files) writeFileSync(join(OUT, n), c);
+  } else { mkdirSync(OUT, { recursive: true }); for (const [n, c] of files) writeFileSync(join(OUT, n), c); } // assistant/ holds only build output, so it does not exist on a fresh checkout
 }
