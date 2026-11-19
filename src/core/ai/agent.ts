@@ -94,7 +94,7 @@ const windowOpen = (host: LinkHost, waId: string, now: number): boolean => {
 function turnsUsed(host: LinkHost, waId: string, now: number): number {
   return host.sql.exec<{ n: number }>(
     `SELECT count(*) AS n FROM agent_turns t JOIN messages m ON m.id = t.message_id JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
-     WHERE ct.wa_id = ? AND t.at > ? AND t.outcome NOT IN ('text_only', 'handoff:turn_cap', 'voice_declined')`,
+     WHERE ct.wa_id = ? AND t.at > ? AND t.outcome NOT IN ('text_only', 'location', 'handoff:turn_cap', 'voice_declined')`,
     waId, now - 86_400_000,
   ).one().n;
 }
@@ -385,6 +385,11 @@ export async function runAgentTurn(host: LinkHost, input: BotInput, now: number)
   }
   if (turnGone(host, input)) return;
   if (!windowOpen(host, input.from, now)) return; // AI replies (the text-only note included) only inside the 24 h window
+  if (input.type === 'location') {
+    // A pin outside the address step: one polite question and an offer to start an order. No model, no credit; the coordinates are not read here.
+    if (await sayNow(host, input, 'location', copy.t.locationNote[locale], now)) host.storage.transactionSync(() => recordTurn(host, input, 'location', now));
+    return;
+  }
   const isVoice = input.type === 'audio';
   if (!isVoice && (input.type !== 'text' || !input.text)) {
     if (await sayNow(host, input, 'textonly', copy.t.textOnly[locale], now)) host.storage.transactionSync(() => recordTurn(host, input, 'text_only', now));

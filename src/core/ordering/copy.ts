@@ -61,6 +61,9 @@ export type OrderingCopy = {
     sameAddressYes?: Localised;
     sameAddressNo?: Localised;
     askAddress: Localised;
+    /** Optional: a location pin is accepted as the delivery address. Without them a pin is ignored in the address step. */
+    pinReceived?: (label: string, locale: Locale) => string;
+    pinNeedsText?: Localised;
     outOfStock: (names: string[], locale: Locale) => string;
     codPlaced: (orderNumber: string, total: string | null, locale: Locale) => string;
     linkPlaced: (orderNumber: string, url: string, locale: Locale) => string;

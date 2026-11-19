@@ -22,6 +22,8 @@ export type AgentCopy = {
     handoffAck: Localised;
     /** Pictures and files: the agent reads text only (a voice note is transcribed, see the two below). */
     textOnly: Localised;
+    /** A location pin outside the address step: ask what the customer needs and offer to start an order (no model call). */
+    locationNote: Localised;
     /** A voice note that is too long or over the store's daily limit: ask for text. */
     voiceDeclined: Localised;
     /** A voice note that could not be heard (unclear, failed): ask the customer to type. */

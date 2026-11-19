@@ -14,10 +14,11 @@ import { featureAllowed } from '../billing/entitlements';
 import { z } from 'zod';
 import { recordFunnel, type FunnelStep } from '../bot-funnel';
 import { buyerKey } from '../buyer-key';
-import type { InboundOrder, InboundReply } from '../meta/webhook-schema';
+import { locationSchema } from '../meta/webhook-schema';
+import type { InboundLocation, InboundOrder, InboundReply } from '../meta/webhook-schema';
 import { isE164 } from '../phone';
 import type { SendJob } from '../send-queue';
-import { MAX_RETAILER_ID, type Address, type Buyer, type CatalogRow, type ChatPaymentMethod, type OrderLine, type StoreBridge, type StoreProfile } from '../store-bridge';
+import { MAX_RETAILER_ID, type Address, type Buyer, type NewAddress, type CatalogRow, type ChatPaymentMethod, type OrderLine, type StoreBridge, type StoreProfile } from '../store-bridge';
 import { bridgeFor, storeLink } from '../store-link';
 import { dropProfile, loadProfile } from '../ai/context';
 import type { LinkHost } from '../store-link/host';
@@ -49,13 +50,16 @@ export const botInputSchema = z.object({
   type: z.string(),
   text: z.string().nullable(),
   reply: z.object({ kind: z.enum(['button', 'list']), id: z.string(), title: z.string() }).nullable(),
+  /** A location pin (PII: kept only in the task and the session, never logged). Optional so tasks stored before this field still parse. */
+  location: z.object({ latitude: z.number(), longitude: z.number(), name: z.string().optional(), address: z.string().optional() }).nullish(),
   order: z.object({ catalogId: z.string().optional(), note: z.string().optional(), items: z.array(z.object({ retailerId: z.string(), quantity: z.number().int(), price: z.string(), currency: z.string() })) }).nullable(),
 });
 export type BotInput = z.infer<typeof botInputSchema>;
 
 /** The slice of an inbound message the bot needs, as stored on its scheduled task. */
-export function botInputFrom(m: { wamid: string; from: string; type: string; text?: string; reply?: InboundReply; order?: InboundOrder; profileName?: string }, messageId: number, phoneNumberId: string): BotInput {
-  return { messageId, wamid: m.wamid, from: m.from, phoneNumberId, profileName: m.profileName ?? null, type: m.type, text: m.text ? m.text.slice(0, 1024) : null, reply: m.reply ?? null, order: m.order ?? null };
+export function botInputFrom(m: { wamid: string; from: string; type: string; text?: string; reply?: InboundReply; order?: InboundOrder; location?: InboundLocation; profileName?: string }, messageId: number, phoneNumberId: string): BotInput {
+  const pin = m.location ? locationSchema.safeParse(m.location) : null;
+  return { messageId, wamid: m.wamid, from: m.from, phoneNumberId, profileName: m.profileName ?? null, type: m.type, text: m.text ? m.text.slice(0, 1024) : null, reply: m.reply ?? null, order: m.order ?? null, ...(pin?.success ? { location: { latitude: pin.data.latitude, longitude: pin.data.longitude, ...(pin.data.name ? { name: pin.data.name.slice(0, 120) } : {}), ...(pin.data.address ? { address: pin.data.address.slice(0, 240) } : {}) } } : {}) };
 }
 
 type Line = { variantId: string; title: string; priceMinor: number; currency: string; quantity: number };
@@ -69,6 +73,8 @@ const sessionData = z.object({
   orderKey: z.string().nullable().default(null),
   proofOrderId: z.string().nullable().default(null),
   lastMessageId: z.number().int().default(0),
+  /** A delivery pin the customer sent without a label: kept (Chat side only, the Store contract has no coordinates) until the typed address arrives, dropped when the order is placed. */
+  pin: z.object({ latitude: z.number(), longitude: z.number() }).nullable().default(null),
 });
 type Data = z.infer<typeof sessionData>;
 const STATES = ['idle', 'browsing', 'choosing_qty', 'cart', 'choosing_payment', 'choosing_address', 'awaiting_address', 'awaiting_proof'] as const;
@@ -184,6 +190,12 @@ export const ORDERING_STALE_MS = 30 * 60_000;
  * Does the ordering bot own this message? Yes while the customer is mid-order (a recent session that is not idle), for
  * everything that is not free text (list/button taps, a Meta cart, a payment picture) and for its keywords.
  */
+/** Is this customer's recent bot session waiting for the delivery address? (A location pin is the answer only there.) */
+export function awaitingAddress(host: Pick<LinkHost, 'sql'>, from: string, now: number): boolean {
+  const row = host.sql.exec<{ state: string; updated_at: number }>('SELECT state, updated_at FROM bot_sessions WHERE wa_id = ?', from).toArray()[0];
+  return !!row && row.state === 'awaiting_address' && now - row.updated_at < ORDERING_STALE_MS;
+}
+
 export function orderingEngaged(host: Pick<LinkHost, 'sql'>, input: BotInput, now: number): boolean {
   if (input.type !== 'text' || input.reply || input.order) return true;
   const row = host.sql.exec<{ state: string; updated_at: number }>('SELECT state, updated_at FROM bot_sessions WHERE wa_id = ?', input.from).toArray()[0];
@@ -272,6 +284,7 @@ async function dispatch(t: Turn): Promise<void> {
     for (const l of ['ar', 'en'] as const) if (normIn(copy.languageWords[l]).has(word)) { t.session.locale = l; return restart(t); }
   }
   if (i.order) return receiveCart(t);
+  if (i.type === 'location') return receivePin(t);
   if (i.type === 'image') return receiveImage(t);
   const id = i.reply?.id;
   if (id) {
@@ -325,6 +338,7 @@ async function restart(t: Turn): Promise<void> {
   t.session.data.selected = null;
   t.session.data.payment = null;
   t.session.data.orderKey = null;
+  t.session.data.pin = null;
   return browse(t, null, true);
 }
 
@@ -572,16 +586,38 @@ async function placeWithText(t: Turn, text: string): Promise<void> {
   const parts = text.split(/[,،]/).map((s) => s.trim()).filter(Boolean);
   const area = cut(parts[0] ?? text, 120);
   const street = cut(parts.slice(1).join(', ') || area, 240);
+  return placeAddress(t, { area, street });
+}
+
+/** Saves the address in the Store's address book (best effort) and orders to it; a failed save still orders with the address inline. */
+async function placeAddress(t: Turn, address: NewAddress): Promise<void> {
   const buyer = await buyerOf(t);
   if (buyer) {
     alive(t);
-    const saved = await t.bridge.saveCustomerAddress(t.ws, buyer.buyerKey, { area, street });
+    const saved = await t.bridge.saveCustomerAddress(t.ws, buyer.buyerKey, address);
     if (saved.ok) {
       dropProfile(t.host, t.input.from); // the cached customer profile (default address) is stale now
       return placeOrder(t, { addressId: saved.value.address.id });
     }
   }
-  return placeOrder(t, { address: { area, street } });
+  return placeOrder(t, { address });
+}
+
+/**
+ * A WhatsApp location pin in the address step is the delivery address. The Store contract (bridge v1) has no coordinates field, so only the pin's own
+ * label/address text goes to the Store (as the address text) and the coordinates stay in this session (Chat side, dropped when the order is placed).
+ * No reverse geocoding: nothing leaves for an outside service. A pin with no label asks for one line of text; the typed address then completes it.
+ */
+async function receivePin(t: Turn): Promise<void> {
+  const pin = t.input.location;
+  const { pinReceived, pinNeedsText } = t.copy.t;
+  if (t.session.state !== 'awaiting_address' || !pin || !pinReceived || !pinNeedsText) return;
+  t.session.data.pin = { latitude: pin.latitude, longitude: pin.longitude };
+  const shown = pin.name ?? pin.address;
+  if (!shown) return say(t, loc(t, pinNeedsText));
+  say(t, pinReceived(cut(shown, 120), t.session.locale));
+  if (!pin.name) return placeWithText(t, pin.address!);
+  return placeAddress(t, { label: cut(pin.name, 40), area: cut(pin.name, 120), street: cut(pin.address ?? pin.name, 240) });
 }
 
 async function placeOrder(t: Turn, where: { addressId: string } | { address: { area: string; street: string } }): Promise<void> {
@@ -630,6 +666,7 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
   d.selected = null;
   d.orderKey = null;
   d.payment = null;
+  d.pin = null; // the coordinates were never sent anywhere; they go with the order
   t.session.state = 'idle'; // never terminal: the next message starts a new order
   if (method === 'cod') {
     t.out.push({ kind: 'text', text: t.copy.t.codPlaced(o.orderNumber, money(t, total, currency), L) });
