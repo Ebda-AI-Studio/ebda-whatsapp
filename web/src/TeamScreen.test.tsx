@@ -96,15 +96,15 @@ describe('team and seats (WA-SEATS-1)', () => {
 describe('no seat page', () => {
   it('says why in both languages and retries only on the button', () => {
     const retry = vi.fn();
-    render(<NoSeat reason="none" onRetry={retry} />);
+    render(<NoSeat reason="none" onRetry={retry} onSignOut={() => undefined} onSwitch={() => undefined} />);
     const box = screen.getByRole('alert');
     expect(within(box).getByText(STRINGS.ar.noSeatBody)).toBeTruthy();
     expect(within(box).getByText(STRINGS.en.noSeatBody)).toBeTruthy();
     expect(retry).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(STRINGS.ar.noSeatRetry) }));
     expect(retry).toHaveBeenCalledTimes(1);
     cleanup();
-    render(<NoSeat reason="over_limit" onRetry={retry} />);
+    render(<NoSeat reason="over_limit" onRetry={retry} onSignOut={() => undefined} onSwitch={() => undefined} />);
     expect(screen.getByText(STRINGS.ar.noSeatOver)).toBeTruthy();
   });
 });

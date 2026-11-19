@@ -3,13 +3,16 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { accountsUrlFor, chooseMode, pickStore, signInMode, viewAsStore } from './boot';
 import { STRINGS } from './i18n';
+import { NotLinked } from './components/NotLinked';
 import { NoSeat } from './components/NoSeat';
 import { SignInError } from './components/SignInError';
 import { makeAccountsSignOut, makeSignOut } from './signout';
+import { AccountActions } from './components/AccountActions';
+import { clearAssistantConversations } from './data/assistant';
 import { SignedOutLocally } from './components/SignedOutLocally';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
 import { connectRealtime, createApiSource } from './data/api';
-import { SIGNED_OUT, createTokenProvider, decodeStores, decodeSub } from './data/auth';
+import { SIGNED_OUT, createTokenProvider, decodeEmail, decodeStores, decodeSub } from './data/auth';
 import { SignInGate } from './components/SignInGate';
 import { CALLBACK_PATH, OidcSignInError, createOidcSession } from './data/oidc';
 import type { InboxSource } from './data/source';
@@ -35,6 +38,15 @@ async function boot(): Promise<void> {
     if (mode === 'none') { root.render(<SignInNotConfigured />); return; }
     let tokens: { getToken: () => Promise<string> };
     let oidcSession: ReturnType<typeof createOidcSession> | null = null;
+    let accountsTokens: ReturnType<typeof createTokenProvider> | null = null;
+    // The way out of a gate screen: the SAME sign-out the rail uses (#155's makeAccountsSignOut / makeSignOut). Accounts mode ends the shared
+    // session (one POST /logout) then `after` runs: reload lands on the sign-in entry, 'use another account' goes straight to the login URL.
+    const gateSignOut = (after: () => void): (() => void) => () => {
+      if (oidcSession) { const session = oidcSession; makeSignOut({ stopRealtime: () => undefined, session, onLocal: () => root.render(<SignedOutLocally onSignIn={() => { void session.startSignIn('/'); }} />) })(); return; }
+      makeAccountsSignOut({ stopRealtime: () => undefined, accountsUrl: ACCOUNTS_URL!, getToken: tokens.getToken, reload: after })();
+    };
+    const signOutNow = gateSignOut(() => location.reload());
+    const switchAccount = gateSignOut(() => location.assign(accountsTokens ? accountsTokens.loginUrl() : '/'));
     if (mode === 'oidc') {
       const session = createOidcSession({ oidc: BRAND.oidc!, origin: location.origin });
       if (location.pathname === CALLBACK_PATH) {
@@ -43,7 +55,8 @@ async function boot(): Promise<void> {
         } catch (e) {
           // Show why, with one explicit retry: a refused answer never bounces back to the provider by itself.
           const code = e instanceof OidcSignInError ? e.code : 'token';
-          root.render(<SignInError code={code} onRetry={() => { void session.startSignIn('/'); }} />);
+          oidcSession = session;
+          root.render(<SignInError code={code} onRetry={() => { void session.startSignIn('/'); }} onSignOut={signOutNow} onSwitch={switchAccount} />);
           return;
         }
       }
@@ -51,7 +64,7 @@ async function boot(): Promise<void> {
       oidcSession = session;
     } else {
       // Signed out: show the brand's own sign-in entry; its button (not an automatic redirect) goes to the shared sign-in and returns here.
-      tokens = createTokenProvider({
+      tokens = accountsTokens = createTokenProvider({
         accountsUrl: ACCOUNTS_URL!,
         ...(BRAND.signInProduct ? { product: BRAND.signInProduct } : {}),
         redirect: (url) => root.render(<SignInGate kind="signedOut" onContinue={() => location.assign(url)} />),
@@ -69,12 +82,12 @@ async function boot(): Promise<void> {
     const viewAsId = viewAsStore(location.search);
     const reason = viewAsId ? (window.prompt(STRINGS.ar.viewAsPrompt) ?? '').trim() : '';
     if (viewAsId && reason.length < 10) {
-      document.body.textContent = STRINGS.ar.viewAsNeedsReason;
+      root.render(<main className="screen"><div className="placeholder" role="alert"><p lang="ar" dir="rtl">{STRINGS.ar.viewAsNeedsReason}</p><AccountActions onSignOut={signOutNow} onSwitch={switchAccount} /></div></main>);
       return;
     }
     const storeId = viewAsId ?? pickStore(decodeStores(token), location.search);
     if (!storeId) {
-      document.body.textContent = 'حسابك مش مربوط بأي متجر لسه. / Your account is not linked to a store yet.';
+      root.render(<NotLinked email={decodeEmail(token)} onSignOut={signOutNow} onSwitch={switchAccount} />);
       return;
     }
     const api = createApiSource({ baseUrl: location.origin, storeId, getToken: tokens.getToken, userNames: {}, currentUserId: decodeSub(token) ?? '', ...(viewAsId ? { viewAs: { reason } } : {}) });
@@ -86,10 +99,11 @@ async function boot(): Promise<void> {
       onReload: api.reload,
       fetchEvents: api.fetchEvents,
     });
+    stopRealtimeNow = stopRealtime;
     await api.loadCapabilities();
     if (api.noSeat) { // a member the owner has not seated (or whose seat the package no longer covers): say so, with a retry, instead of an inbox that cannot load
       stopRealtime();
-      root.render(<NoSeat reason={api.noSeat} onRetry={() => location.reload()} />);
+      root.render(<NoSeat reason={api.noSeat} onRetry={() => location.reload()} onSignOut={signOutNow} onSwitch={switchAccount} />);
       return;
     }
     if (oidcSession) {

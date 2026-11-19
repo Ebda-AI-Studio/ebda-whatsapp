@@ -17,3 +17,13 @@ it('a redirect to the provider shows nothing else', async () => {
   await Promise.resolve(); await Promise.resolve();
   expect(onLocal).not.toHaveBeenCalled();
 });
+
+it('gate-screen sign-out and use-another-account share makeAccountsSignOut: exactly one /logout POST, then the chosen landing', async () => {
+  const { makeAccountsSignOut } = await import('./signout');
+  const f = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+  const after = vi.fn();
+  makeAccountsSignOut({ stopRealtime: () => undefined, accountsUrl: 'https://accounts.ebda.app', getToken: async () => 't', fetchImpl: f as unknown as typeof fetch, reload: after })();
+  await vi.waitFor(() => expect(after).toHaveBeenCalledTimes(1));
+  expect(f).toHaveBeenCalledTimes(1);
+  expect(f.mock.calls[0]![0]).toBe('https://accounts.ebda.app/logout');
+});

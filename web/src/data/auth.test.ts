@@ -96,3 +96,13 @@ describe('token provider (identity v1)', () => {
     expect(decodeSub('x')).toBeNull();
   });
 });
+
+it('loginUrl returns here', () => {
+  const p = createTokenProvider({ accountsUrl: 'https://accounts.ebda.app', fetchImpl: vi.fn() as unknown as typeof fetch, currentUrl: () => 'https://wa.ebda.app/', product: 'chat' });
+  expect(p.loginUrl()).toBe('https://accounts.ebda.app/login?product=chat&return=https%3A%2F%2Fwa.ebda.app%2F');
+});
+
+it('maskEmail keeps the first letter and the domain only', async () => {
+  const { maskEmail } = await import('./auth');
+  expect(maskEmail('ahmad@gmail.com')).toBe('a***@gmail.com');
+});
