@@ -100,13 +100,15 @@ export class Trusted {
 const PROMISES: Record<keyof PromisePolicy, RegExp> = {
   refund: /\brefund|money back|reimburs|استرجاع|استرداد|ارجاع (?:الفلوس|المبلغ|فلوس)|(?:هرجع|هرد|هنرجع|هنرد|ارجع|رجع)(?:لك|لكم|ك|لك)? (?:الفلوس|فلوس|المبلغ)|رجوع الفلوس/u,
   discount: /\bdiscount|% ?off\b|percent off|\bcoupon|promo code|voucher|خصم|تخفيض|كوبون|عرض خاص|كود خصم/u,
-  freeDelivery: /free (?:shipping|delivery|gift|of charge)|شحن مجاني|توصيل مجاني|شحن ببلاش|هديه مجانيه|مجانا|مجاني/u,
+  freeDelivery: /free (?:shipping|delivery|gift|of charge)|\b(?:ships?|shipped|deliver(?:s|ed)?)\s+(?:for\s+)?free\b|شحن مجاني|توصيل مجاني|شحن ببلاش|هديه مجانيه|مجانا|مجاني/u,
   exchange: /\bexchange|\bswap\b|replacement|we(?:'ll| will) replace|استبدال|تبديل|هبدل|هنبدل|بدل(?:ه|ها|ك)? ?لك/u,
   guarantee: /guarantee|warranty|ضمان|مضمون|كفاله/u,
 };
 
 /** Free SHIPPING / delivery only (not a free gift, not "free of charge"). */
-const FREE_SHIPPING = /free (?:shipping|delivery)|شحن مجاني|توصيل مجاني|شحن ببلاش/gu;
+// "ship(s) free" and a shipping VERB followed by the adverb ("توصل مجانا", "بيوصل مجانا", "شحن ببلاش") are shipping statements too: without them the bare adverb read as "something else free" and a declared threshold was refused (ship-ar-1).
+const SHIPS_FREE = String.raw`\b(?:ships?|shipped|deliver(?:s|ed)?)\s+(?:for\s+)?free\b|(?:توصل|يوصل|بيوصل|هيوصل|هتوصل|تتوصل|توصيل|شحن)(?:ك|لك|كم)?\s+(?:مجانا|ببلاش)`;
+const FREE_SHIPPING = new RegExp(String.raw`free (?:shipping|delivery)|شحن مجاني|توصيل مجاني|شحن ببلاش|${SHIPS_FREE}`, 'gu');
 /** The money-back part of the refund promise: never allowed by a declared return window. */
 const MONEY_BACK = /\brefund|money back|reimburs|استرداد|ارجاع (?:الفلوس|المبلغ|فلوس)|(?:هرجع|هرد|هنرجع|هنرد|ارجع|رجع)(?:لك|لكم|ك|لك)? (?:الفلوس|فلوس|المبلغ)|رجوع الفلوس|استرجاع (?:الفلوس|المبلغ|فلوس)/u;
 const NO_RETURNS = /مفيش|مش بنقبل|مش بنستقبل|لا يوجد|لا نقبل|لا نستقبل|\bno returns?\b|not accept|n't accept|do not (?:allow|accept)/u;

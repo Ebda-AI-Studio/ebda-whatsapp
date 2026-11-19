@@ -60,3 +60,28 @@ describe('returns only with the declared window', () => {
     expect(guardReply('هرجعلك فلوسك والشحن مجاني', t).ok).toBe(true);
   });
 });
+
+// ship-ar-1 (live golden eval, 2026-11-19): "وممكن توصل مجانًا لو قيمة الطلب أكتر من 1000 جنيه" with a DECLARED 1000 threshold was refused as a promise. The diacritic was never the cause (normaliseText already strips
+// tashkeel and tatweel, asserted below): the bare adverb "مجانا" after a shipping VERB sat outside the shipping phrases, so it read as "something else free". A declared threshold is a fact, not a promise.
+describe('free shipping stated with a verb + adverb ("توصل مجانًا"), diacritics and tatweel', () => {
+  it('passes with the declared threshold, whatever the diacritics or tatweel', () => {
+    for (const w of ['مجانًا', 'مجانا', 'مَجّانًا', 'مجـانا']) {
+      expect(verdict(`وممكن توصل ${w} لو قيمة الطلب أكتر من 1000 جنيه`, { freeOver: [1000] }), w).toBe(true);
+    }
+    expect(verdict('الطلب بيوصل مجانًا لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(true);
+    expect(verdict('Orders over 1000 EGP ship free', { freeOver: [1000] })).toBe(true);
+  });
+  it('is still refused with no declared free shipping, with a wrong amount, or with no amount', () => {
+    expect(verdict('وممكن توصل مجانًا لو قيمة الطلب أكتر من 1000 جنيه')).toBe(false);
+    expect(verdict('وممكن توصل مجانًا لو قيمة الطلب أكتر من 500 جنيه', { freeOver: [1000] })).toBe(false);
+    expect(verdict('وممكن توصل مجانًا', { freeOver: [1000] })).toBe(false);
+    expect(verdict('Orders over 1000 EGP ship free')).toBe(false); // "ship free" is now a recognised free-delivery promise (it was a blind spot), refused unless declared
+  });
+  it('a free GIFT or any other free thing stays refused, and a diacritic-decorated invented promise stays refused', () => {
+    expect(verdict('هدية مجانًا مع الطلب فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
+    expect(verdict('توصل مجانًا وكمان هدية مجانًا لو فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
+    expect(verdict('هنرجّعلك الفُلوس كلها', { freeOver: [1000] })).toBe(false);
+    expect(verdict('فيه خَصْمٌ عشرين في المية لو الطلب فوق 1000 جنيه', { freeOver: [1000] })).toBe(false);
+    expect(verdict('ضَمَانٌ سنة على المنتج', { freeOver: [1000] })).toBe(false);
+  });
+});
