@@ -702,19 +702,32 @@ async function paymentUrl(t: Turn, o: { orderId: string; paymentUrl: string | nu
  * A picture while an InstaPay order waits for its transfer: forwarded to the Store once (the order stays
  * pending_payment until the Store itself confirms the money). Pictures at any other time are ignored.
  */
-/** Would `receiveImage` act on a picture from this customer? Yes while they hold an InstaPay order that is not cancelled/refunded/returned (the proof step); then the bot owns the picture. */
+/** The ONE query for "this customer's latest InstaPay order" (the proof step reads it; the router and `receiveImage` both go through it, so they cannot disagree). */
+type ProofOrder = { order_id: string; order_number: string | null; status: string | null; proof_wamid: string | null; proof_deadline_at: number | null };
+function latestInstapayOrder(host: Pick<LinkHost, 'sql'>, from: string): ProofOrder | undefined {
+  return host.sql.exec<ProofOrder>(
+    "SELECT order_id, order_number, status, proof_wamid, proof_deadline_at FROM store_orders WHERE wa_id = ? AND payment_method = 'instapay' ORDER BY updated_at DESC LIMIT 1", from,
+  ).toArray()[0];
+}
+/** The order is over: a picture means nothing for it. */
+const proofClosed = (status: string | null): boolean => ['cancelled', 'refunded', 'returned'].includes(status ?? '');
+/** The money is in (or the goods are): the order no longer waits for a proof. */
+const proofSettled = (status: string | null): boolean => status === 'paid' || status === 'delivered';
+/**
+ * Is this customer's latest InstaPay order waiting for a payment proof? Yes while it is open and not yet paid/delivered; then the ordering bot owns the picture (`receiveImage`).
+ * Anywhere else a picture goes to the agent's throttled media note (one per 10 minutes), never to an unthrottled "proof already received" reply (audit row 25, m2).
+ */
 export function proofExpected(host: Pick<LinkHost, 'sql'>, from: string): boolean {
-  const order = host.sql.exec<{ status: string | null }>("SELECT status FROM store_orders WHERE wa_id = ? AND payment_method = 'instapay' ORDER BY updated_at DESC LIMIT 1", from).toArray()[0];
-  return !!order && !['cancelled', 'refunded', 'returned'].includes(order.status ?? '');
+  const order = latestInstapayOrder(host, from);
+  return !!order && !proofClosed(order.status) && !proofSettled(order.status);
 }
 
 async function receiveImage(t: Turn): Promise<void> {
   const { host, input: i } = t;
-  const order = host.sql.exec<{ order_id: string; order_number: string | null; status: string | null; proof_wamid: string | null; proof_deadline_at: number | null }>(
-    "SELECT order_id, order_number, status, proof_wamid, proof_deadline_at FROM store_orders WHERE wa_id = ? AND payment_method = 'instapay' ORDER BY updated_at DESC LIMIT 1", i.from,
-  ).toArray()[0];
-  if (!order || ['cancelled', 'refunded', 'returned'].includes(order.status ?? '')) return;
-  if (order.proof_wamid || order.status === 'paid' || order.status === 'delivered') {
+  const order = latestInstapayOrder(host, i.from);
+  if (!order || proofClosed(order.status)) return;
+  // Reached with a settled order only when the agent is off (the router sends those pictures to the agent's media note otherwise): the old one-line answer stays for that case.
+  if (order.proof_wamid || proofSettled(order.status)) {
     say(t, loc(t, t.copy.t.proofAlready));
     return;
   }

@@ -283,3 +283,10 @@ it('the product is never called Ebda WhatsApp (banned spellings, WA-COPY-1)', ()
   const hits = findMatches(banned).filter((m) => !/^(docs\/rulings|graphify-out)\//.test(m) && !/^docs\/plans\//.test(m));
   expect(hits).toEqual([]);
 });
+
+it('"is a payment proof expected" has ONE source: the InstaPay-order query exists once, and both the router predicate (proofExpected) and receiveImage go through it (review of #152, m1)', () => {
+  const src = readFileSync(join(process.cwd(), 'src/core/ordering/bot.ts'), 'utf8');
+  expect(src.match(/FROM store_orders WHERE wa_id = \? AND payment_method = 'instapay'/g)).toHaveLength(1);
+  expect(src).toMatch(/export function proofExpected[\s\S]*?latestInstapayOrder\(host, from\)/);
+  expect(src).toMatch(/async function receiveImage[\s\S]*?latestInstapayOrder\(host, i\.from\)/);
+});
