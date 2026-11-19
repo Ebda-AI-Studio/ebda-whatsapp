@@ -114,6 +114,16 @@ describe('proofExpected is the single source, and settled/closed orders get the 
     const { pn, g } = await withOrder(ws, 'pending_payment', 'wamid.earlier');
     expect((await say(ws, pn, image(), g)).map((x) => x.text)).toEqual([O.proofAlready.ar]);
   });
+  it('open order with a proof already forwarded: the first reply stays, a resent screenshot within 10 minutes gets nothing, after the gap it is answered again', async () => {
+    const ws = W(95 + 4);
+    const { pn, g } = await withOrder(ws, 'pending_payment', 'wamid.earlier');
+    expect((await say(ws, pn, image(), g)).map((x) => x.text)).toEqual([O.proofAlready.ar]); // the first reply is kept
+    expect(await say(ws, pn, image(), g)).toHaveLength(0); // resent: quiet
+    expect(await say(ws, pn, image(), g)).toHaveLength(0);
+    expect((await rows(ws, "SELECT 1 FROM messages WHERE direction = 'out' AND body = ?", O.proofAlready.ar))).toHaveLength(1);
+    await exec(ws, "UPDATE messages SET created_at = created_at - ? WHERE direction = 'out' AND body = ?", 11 * 60_000, O.proofAlready.ar);
+    expect((await say(ws, pn, image(), g)).map((x) => x.text)).toEqual([O.proofAlready.ar]); // after the gap: answered again
+  });
   it.each(['paid', 'delivered', 'cancelled', 'refunded', 'returned'])('latest order %s: the picture goes to the agent media note (once per 10 min), not to an unthrottled proof reply', async (status) => {
     const ws = W(72 + ['paid', 'delivered', 'cancelled', 'refunded', 'returned'].indexOf(status));
     const { pn, g } = await withOrder(ws, status);

@@ -722,13 +722,26 @@ export function proofExpected(host: Pick<LinkHost, 'sql'>, from: string): boolea
   return !!order && !proofClosed(order.status) && !proofSettled(order.status);
 }
 
+/** One "proof already received" reply per customer per this long (10 minutes); a customer who resends the screenshot gets nothing more until the gap has passed. */
+export const PROOF_ALREADY_GAP_MS = 10 * 60_000;
+/** The reply is answered once, then quiet: measured from the stored reply itself (same text, same customer), so erasure/retention cover it and there is no new state. */
+function sayProofAlready(t: Turn): void {
+  const text = loc(t, t.copy.t.proofAlready);
+  const recent = t.host.sql.exec<{ n: number }>(
+    `SELECT count(*) AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
+     WHERE ct.wa_id = ? AND m.direction = 'out' AND m.body = ? AND m.created_at > ? AND m.idempotency_key NOT LIKE ?`, // not this turn's own reply: a replayed turn must still re-deliver it
+    t.input.from, text, t.now - PROOF_ALREADY_GAP_MS, `bot:${t.input.messageId}:%`,
+  ).one().n > 0;
+  if (!recent) say(t, text);
+}
+
 async function receiveImage(t: Turn): Promise<void> {
   const { host, input: i } = t;
   const order = latestInstapayOrder(host, i.from);
   if (!order || proofClosed(order.status)) return;
   // Reached with a settled order only when the agent is off (the router sends those pictures to the agent's media note otherwise): the old one-line answer stays for that case.
   if (order.proof_wamid || proofSettled(order.status)) {
-    say(t, loc(t, t.copy.t.proofAlready));
+    sayProofAlready(t);
     return;
   }
   if (order.proof_deadline_at !== null && order.proof_deadline_at < t.now) {
@@ -744,7 +757,7 @@ async function receiveImage(t: Turn): Promise<void> {
   alive(t);
   const claimed = host.sql.exec('UPDATE store_orders SET proof_wamid = ?, proof_at = ? WHERE order_id = ? AND proof_wamid IS NULL', i.wamid, t.now, order.order_id).rowsWritten > 0;
   if (!claimed) {
-    say(t, loc(t, t.copy.t.proofAlready));
+    sayProofAlready(t);
     return;
   }
   const release = () => host.sql.exec('UPDATE store_orders SET proof_wamid = NULL, proof_at = NULL WHERE order_id = ? AND proof_wamid = ?', order.order_id, i.wamid);
