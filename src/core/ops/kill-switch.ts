@@ -105,7 +105,7 @@ export async function restoreIntegrations(env: Env, a: { actor: string; workspac
 }
 
 export type WorkspaceOpsStatus = {
-  suspended: boolean; suspendedReason: string | null; integrationsRevokedAt: number | null; evicted: boolean;
+  suspended: boolean; suspendedReason: string | null; integrationsRevokedAt: number | null; evicted: boolean; storeStandingAt: number | null;
   numbers: { phoneNumberId: string; health: string; healthReason: string | null; healthAt: number | null }[];
   sharedNumber: { phoneNumberId: string; health: string; healthReason: string | null; healthAt: number | null } | null;
   recentActions: { at: number; actor: string; action: string; reason: string }[];
@@ -118,7 +118,7 @@ export async function opsStatus(env: Env, workspaceId: string): Promise<Workspac
   const shared = await env.DB.prepare('SELECT phone_number_id, health_state, health_reason, health_at FROM shared_numbers ORDER BY created_at, rowid LIMIT 1').first<{ phone_number_id: string; health_state: string; health_reason: string | null; health_at: number | null }>();
   const recent = await env.DB.prepare(`SELECT o.at, o.actor, o.action, coalesce(${reasonSql('o', 'r')}, '') AS reason FROM operator_actions o LEFT JOIN audit_reasons r ON r.id = o.reason_id WHERE o.workspace_id = ? ORDER BY o.id DESC LIMIT 20`).bind(workspaceId).all<{ at: number; actor: string; action: string; reason: string }>();
   return {
-    suspended: ws.suspended_at !== null, suspendedReason: ws.suspended_reason, integrationsRevokedAt: ws.integrations_revoked_at, evicted: await isEvicted(env, workspaceId),
+    suspended: ws.suspended_at !== null, suspendedReason: ws.suspended_reason, integrationsRevokedAt: ws.integrations_revoked_at, evicted: await isEvicted(env, workspaceId), storeStandingAt: await stub(env, workspaceId).lastStandingAt(),
     numbers: numbers.results.map((n) => ({ phoneNumberId: n.phone_number_id, health: n.health_state, healthReason: n.health_reason, healthAt: n.health_at })),
     sharedNumber: shared ? { phoneNumberId: shared.phone_number_id, health: shared.health_state, healthReason: shared.health_reason, healthAt: shared.health_at } : null,
     recentActions: recent.results,

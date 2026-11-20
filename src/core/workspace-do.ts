@@ -18,7 +18,7 @@ import { exportContact, mergeContacts, renameContact } from './contact-data';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptOutMessage, matchOptIn } from './consent';
-import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, debtHold, storeHold, suspensionState, type SuspensionState, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
+import { MEMBER_BLOCK_MS, QUALITY_ERROR_CODES, blockMember, blocksTemplates, currentHealth, memberBlockedUntil, isSuspended, debtHold, storeHold, suspensionState, standingStale, lastStandingAt, syncStandingPolicy, type SuspensionState, HEALTH_STATES, lastSignalAt, logHealth, mirrorHealth, nextHealth, noteQualityError, recordSignalAt, setSuspendedFlag, signalSource, worsened, type HealthSignal, type HealthState } from './numbers/health';
 import { syncSuspendedMirror } from './ops/suspension-mirror';
 import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/health-events';
 import { writeSessionState } from './identity/session';
@@ -180,6 +180,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       if (await ctx.storage.get('offboarded')) { this.offboarded = true; return; }
       migrate(ctx.storage);
+      syncStandingPolicy(this.sql, env.STORE_STANDING_STALE_REFUSE, Date.now()); // STORE-STANDING-2 (default off)
       this.reindexIfEmpty();
       this.reindexContactsIfEmpty();
       this.lastBroadcast = this.sql.exec<{ s: number | null }>('SELECT max(seq) AS s FROM events').one().s ?? 0;
@@ -484,7 +485,10 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Why this send must not leave right now, or null. Suspended stops everything; a red / restricted number stops business-initiated templates only. */
   private sendRefusal(job: SendJob): 'workspace_suspended' | 'number_restricted' | null {
-    if (isSuspended(this.sql)) return 'workspace_suspended';
+    if (isSuspended(this.sql)) {
+      this.alertIfStandingStale();
+      return 'workspace_suspended';
+    }
     if (jobKind(job) === 'template' && (blocksTemplates(currentHealth(this.sql, job.phoneNumberId)) || memberBlockedUntil(this.sql, job.phoneNumberId) > Date.now())) return 'number_restricted';
     return null;
   }
@@ -786,7 +790,18 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   async suspended(): Promise<boolean> {
+    this.alertIfStandingStale();
     return isSuspended(this.sql);
+  }
+
+  /** STORE-STANDING-2: the Store has been silent past the window and spend is refused for it: a human should know (alert() throttles per workspace). */
+  private alertIfStandingStale(): void {
+    if (standingStale(this.sql, Date.now())) alert('store_standing_stale', { workspace: this.workspaceId, lastStandingAt: lastStandingAt(this.sql) ?? 'never' });
+  }
+
+  /** When the Store's standing last arrived (epoch ms), or null: the operator console shows it so heartbeats can be seen arriving. */
+  async lastStandingAt(): Promise<number | null> {
+    return lastStandingAt(this.sql);
   }
 
   /** The Store hold's reason (STORE-STANDING-1), or null: the operator unsuspend keeps D1 in step with it. */

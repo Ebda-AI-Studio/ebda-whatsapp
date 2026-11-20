@@ -805,6 +805,7 @@ function KillSwitchPanel({ t, lang, api, run, fail }: PanelProps) {
         {st && (
           <div className="op-ks-status" aria-live="polite">
             <p><span className={st.status.suspended ? 'flag bad' : 'flag'} data-ok={!st.status.suspended}>{st.status.suspended ? k.stateOn : k.stateOff}</span> <span className="muted">{st.status.evicted ? k.evicted : k.notEvicted}</span></p>
+            <p className="muted small">{st.status.storeStandingAt === null ? k.standingNever : k.standingAt(dateTime(st.status.storeStandingAt, lang))}</p>
             {st.status.integrationsRevokedAt !== null && <p className="muted small">{k.integrationsRevoked(dateTime(st.status.integrationsRevokedAt, lang))}</p>}
             <h3 className="pane-sub">{k.numbers}</h3>
             {st.status.numbers.length === 0 ? <p className="muted">{k.none}</p> : (
