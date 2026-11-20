@@ -72,6 +72,7 @@ describe('AI agent', () => {
     expect(await screen.findByRole('switch', { name: 'شغّل المساعد الذكي' })).toBeTruthy();
     cleanup();
     const staff = createSampleSource();
+    staff.role = 'staff';
     staff.agentSettings = async () => null;
     render(<App source={staff} now={now} />);
     await act(async () => fireEvent.click(screen.getByRole('link', { name: 'المساعد الذكي' })));

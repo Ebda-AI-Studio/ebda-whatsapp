@@ -2,8 +2,8 @@
 title: Ebda Chat Terms of Service
 slug: whatsapp-terms
 lang: en
-updated: 2026-11-09
-version: 1.1
+updated: 2026-11-10
+version: 1.2
 ---
 
 Arabic version prevails.
@@ -88,7 +88,7 @@ You will not use the Service to: send spam or unsolicited messages; send unlawfu
 
 ## 10. Your data
 
-Your customers' messages and contact data are processed as described in the Ebda Chat Privacy Policy and the Data Processing Agreement, which form part of these terms. Contact deletion is available as described at https://ebda.app/legal/data-deletion/.
+Your customers' messages and contact data are processed as described in the Ebda Chat Privacy Policy and the Data Processing Agreement, which form part of these terms. Contact deletion is available as described at https://ebda.app/en/legal/data-deletion/.
 
 ## 11. Suspension and termination
 
