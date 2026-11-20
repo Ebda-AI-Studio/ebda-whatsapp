@@ -6,7 +6,8 @@ import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { formatMoney, formatSigned } from '../lib/format';
 import { parseRates, parseScaled, toMicros } from '../lib/rates';
-import { dateTime } from './CampaignsScreen';
+import { CairoWhen } from './CairoWhen';
+import { dateTime } from '../lib/datetime';
 import { SharedTemplatesPanel } from './SharedTemplatesPanel';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: OperatorApi; now: () => number };
@@ -138,7 +139,7 @@ function PricingPanel({ t, lang, api, now, run, fail }: PanelProps) {
       {xs.map((s) => (
         <li key={s.ver}>
           <span className="wallet-row-main"><b>{t.opVersion(num(s.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(s.effectiveFrom, lang))} • {t.opBy(s.actor)}</span>
-            <span className="op-line">{line(s)}</span><span className="muted op-line" dir="auto">{s.reason}</span></span>
+            <span className="op-line">{line(s)}</span><span className="muted op-line" dir="auto">{s.actor === 'system' ? t.opSystemDefault : s.reason}</span></span>
         </li>
       ))}
     </ul>
@@ -156,7 +157,7 @@ function PricingPanel({ t, lang, api, now, run, fail }: PanelProps) {
           <label className="field"><span>{t.opOverdraft}</span><input inputMode="decimal" dir="ltr" value={f.overdraft} onChange={set('overdraft')} /></label>
           <label className="field"><span>{t.opFxBuffer}</span><input inputMode="decimal" dir="ltr" value={f.fx} onChange={set('fx')} /></label>
           <label className="field"><span>{t.opVat}</span><input inputMode="decimal" dir="ltr" value="0" readOnly aria-describedby="op-vat-locked" /><small id="op-vat-locked">{t.opVatLocked}</small></label>
-          <label className="field"><span>{t.opEffective}</span><input type="datetime-local" value={f.at} onChange={set('at')} /></label>
+          <label className="field"><span>{t.opEffective}</span><input type="datetime-local" value={f.at} onChange={set('at')} /></label><CairoWhen t={t} lang={lang} value={f.at} />
           <label className="field op-wide"><span>{t.opReason}</span><input dir="auto" maxLength={500} value={f.reason} onChange={set('reason')} /></label>
           <div className="settings-actions op-wide"><button type="submit" className="btn primary">{t.opPublishSettings}</button></div>
         </form>
@@ -211,7 +212,7 @@ function RatesPanel({ t, lang, api, now, run, fail }: PanelProps) {
             <textarea id="op-rates-text" dir="ltr" rows={6} spellCheck={false} placeholder="EG,marketing,0.0529" aria-describedby="op-rates-help" value={rates} onChange={(e) => setRates(e.target.value)} />
             <small id="op-rates-help" className="muted">{t.opRatesHelp} • {t.opRatesLead}</small>
           </div>
-          <label className="field"><span>{t.opRatesEffective}</span><input type="datetime-local" value={ratesAt} onChange={(e) => setRatesAt(e.target.value)} /></label>
+          <label className="field"><span>{t.opRatesEffective}</span><input type="datetime-local" value={ratesAt} onChange={(e) => setRatesAt(e.target.value)} /></label><CairoWhen t={t} lang={lang} value={ratesAt} />
           <label className="field"><span>{t.opReason}</span><input dir="auto" maxLength={500} value={ratesReason} onChange={(e) => setRatesReason(e.target.value)} /></label>
           <div className="settings-actions"><button type="submit" className="btn primary">{t.opPublishRates}</button></div>
         </form>
@@ -227,7 +228,7 @@ function RatesPanel({ t, lang, api, now, run, fail }: PanelProps) {
         <form className="wallet-form op-grid" onSubmit={(e) => void publishFx(e)} noValidate>
           <label className="field"><span>{t.opFxRate}</span><input inputMode="decimal" dir="ltr" value={fx.rate} onChange={(e) => setFx({ ...fx, rate: e.target.value })} /></label>
           <label className="field"><span>{t.opFxBufferLabel}</span><input inputMode="decimal" dir="ltr" value={fx.buffer} onChange={(e) => setFx({ ...fx, buffer: e.target.value })} /></label>
-          <label className="field"><span>{t.opFxEffective}</span><input type="datetime-local" value={fx.at} onChange={(e) => setFx({ ...fx, at: e.target.value })} /></label>
+          <label className="field"><span>{t.opFxEffective}</span><input type="datetime-local" value={fx.at} onChange={(e) => setFx({ ...fx, at: e.target.value })} /></label><CairoWhen t={t} lang={lang} value={fx.at} />
           <label className="field"><span>{t.opFxReason}</span><input dir="auto" maxLength={500} value={fx.reason} onChange={(e) => setFx({ ...fx, reason: e.target.value })} /></label>
           <div className="settings-actions op-wide"><button type="submit" className="btn primary">{t.opPublishFx}</button></div>
         </form>
@@ -299,7 +300,7 @@ function AccountPanel({ t, lang, api, now, run, fail }: PanelProps) {
         <p className="muted">{t.opNeverRetro}</p>
         <form className="wallet-form op-grid" onSubmit={(e) => void publishOverride(e)} noValidate>
           <label className="field"><span>{t.opMargin}</span><input inputMode="decimal" dir="ltr" value={ov.margin} onChange={(e) => setOv({ ...ov, margin: e.target.value })} /></label>
-          <label className="field"><span>{t.opEffective}</span><input type="datetime-local" value={ov.at} onChange={(e) => setOv({ ...ov, at: e.target.value })} /></label>
+          <label className="field"><span>{t.opEffective}</span><input type="datetime-local" value={ov.at} onChange={(e) => setOv({ ...ov, at: e.target.value })} /></label><CairoWhen t={t} lang={lang} value={ov.at} />
           <label className="field op-wide"><span>{t.opReason}</span><input dir="auto" maxLength={500} value={ov.reason} onChange={(e) => setOv({ ...ov, reason: e.target.value })} /></label>
           <div className="settings-actions op-wide"><button type="submit" className="btn primary">{t.opPublishOverride}</button></div>
         </form>

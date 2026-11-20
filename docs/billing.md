@@ -220,3 +220,7 @@ Meta bills us in USD; merchants pay from an EGP wallet. The USD->EGP rate is no 
 - **Health**: `GET /health` carries `fxObsDay` (newest observed rate day, `SELECT max(obs_day)`) and `fxAgeHours`, null when unknown; a failing read never fails the probe (always 200). The OS watchdog alerts at `fxAgeHours` > 48, a backstop that does not depend on the cron.
 - **Category change**: `meta_adjust` is the new price minus what was CHARGED (`charged_minor`, VAT from the ledger), never a re-price of the old category.
 - **Residual**: if the whole cron trigger is dead, both tasks stop and the missing `daily_billing` log line is the only signal. A rate moved by hand through `POST /fx-rates` counts as the newest rate for the band and is skipped by the volatility history (history = cron rows only).
+
+
+## How the wallet names the plan (CHAT-QA-13)
+`GET /wallet` returns `plan.storePlan` ({code, nameAr, nameEn}) when the running package is `store-included`: the code is the Store's `planCode` kept in `store_plan_applied.plan_code` (migration 0039), the names come from `src/core/billing/store-plan-names.ts` (the Store's own names, one per plan; an unknown code shows as the code). A package bought in Chat returns `plan.packageName` and is labelled "Ebda Chat package" in the UI, so Chat's Starter / Growth / Pro are never read as the Store's plans. Cost if wrong: a plan the Store adds before this table learns it shows as its code until the table is updated.

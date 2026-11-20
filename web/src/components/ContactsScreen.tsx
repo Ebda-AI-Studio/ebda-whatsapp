@@ -6,6 +6,7 @@ import { ApiError } from '../data/api';
 import type { ContactsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { contactsCsv } from '../lib/contacts-csv';
+import { dateOnly } from '../lib/datetime';
 import { relativeTime } from '../lib/format';
 import { useTypeahead } from '../lib/useTypeahead';
 import { Highlight } from './Highlight';
@@ -91,7 +92,7 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
                     {c.consent?.proof && (
                       <details className="consent-proof small">
                         <summary>{t.consentProof}</summary>
-                        <p className="muted">{t.consentProofLine(t.consentSource[c.consent.proof.source], c.consent.proof.attestedBy, new Date(c.consent.proof.at).toLocaleDateString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB'))}</p>
+                        <p className="muted">{t.consentProofLine(t.consentSource[c.consent.proof.source], c.consent.proof.attestedBy, dateOnly(c.consent.proof.at, lang))}</p>
                         <blockquote dir="auto">{c.consent.proof.wording}</blockquote>
                       </details>
                     )}

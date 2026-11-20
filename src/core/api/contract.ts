@@ -615,7 +615,13 @@ export const walletDto = z.object({
   lowBalanceThresholdMinor: z.number().int().nonnegative(),
   /** One credit = one AI turn. `low` = available under a tenth of the monthly `allowance` (never under 5 credits, `lowThreshold`). */
   aiCredits: z.object({ balance: z.number().int(), available: z.number().int(), low: z.boolean(), lowThreshold: z.number().int().nonnegative(), allowance: z.number().int().nonnegative() }),
-  plan: z.object({ packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable() }).nullable(),
+  plan: z.object({
+    packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable(),
+    /** Additive (CHAT-QA-13): the Chat package's own name, for a package bought in Chat. */
+    packageName: z.string().optional(),
+    /** Additive (CHAT-QA-13): the Store plan, by the Store's own name, when the running package is the one the Store plan includes. */
+    storePlan: z.object({ code: z.string(), nameAr: z.string(), nameEn: z.string() }).optional(),
+  }).nullable(),
 });
 export type WalletDto = z.infer<typeof walletDto>;
 

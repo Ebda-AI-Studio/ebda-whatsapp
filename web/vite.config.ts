@@ -38,5 +38,10 @@ export default defineConfig({
   // Each brand ships its own static files: mark, favicon and _headers (its CSP names its own sign-in host).
   publicDir: join(brandDir, 'public'),
   resolve: { alias: { '@brand': join(brandDir, 'brand.ts'), '@brand-tokens': join(brandDir, 'tokens.css') } },
-  build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', sourcemap: false },
+  build: {
+    outDir: 'dist', emptyOutDir: true, target: 'es2022', sourcemap: false,
+    // CHAT-QA-8: Vite inlined the small @fontsource subsets as `url(data:font/...)`, and the page CSP says `font-src 'self'`, so the browser's
+    // 6 data: font loads were blocked on every first visit. Fonts are always emitted as files (same origin); other small assets may still inline.
+    assetsInlineLimit: (file) => (/\.(woff2?|ttf|otf|eot)$/i.test(file) ? false : undefined),
+  },
 });
