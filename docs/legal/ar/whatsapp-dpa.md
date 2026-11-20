@@ -2,8 +2,8 @@
 title: اتفاقية معالجة البيانات لابدأ شات
 slug: whatsapp-dpa
 lang: ar
-updated: 2026-11-09
-version: 1.1
+updated: 2026-11-10
+version: 1.2
 ---
 
 النسخة العربية هي الحاكمة.

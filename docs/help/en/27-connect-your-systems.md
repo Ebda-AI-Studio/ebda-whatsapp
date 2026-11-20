@@ -9,7 +9,7 @@ capabilities:
 This guide is for a store owner who has a developer or a system (such as Odoo). Open **Connect systems** in the side rail (owner only). It has two parts: **Agent connectors**, which you set up there yourself, and **Call the API from your server**, which explains the permissions and takes you to your account settings where the token is made. Full technical detail is on the Ebda Chat developer pages (HTTP API, and Webhooks and connectors).
 
 ## 1. The API for your server
-- Available on the **Pro** package (the API feature).
+- Available on the Ebda Chat packages that include the API feature (today the **Pro** package). That is the name of an Ebda Chat package, not your store's plan in Ebda AI Studio: your store plan (for example "Business") shows in the wallet under its own name.
 - It is not live for every store yet: it is switched on for your store before use. To ask for it, write to ahlan@ebda.app.
 - Only the store owner creates an "API client" in the Ebda AI Studio account settings (the **Open account settings** button on the Connect systems screen takes you there) and picks its permissions (read conversations, send messages, read templates, read and change customer tags, read campaigns). Your server uses it to get a token, valid for 10 minutes, from accounts.ebda.app.
 - The server follows new messages by polling for events; there is no permanent connection for this kind of token.

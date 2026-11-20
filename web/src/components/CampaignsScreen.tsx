@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CampaignDto } from '../../../src/core/api/contract';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { dateTime } from '../lib/datetime';
 import { templateTitle } from '../lib/format';
 import type { View } from './Rail';
 import { useFocusOn } from '../lib/useFocusOn';
@@ -14,9 +15,7 @@ import { EmptyState } from './EmptyState';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number; onNavigate?: ((v: View) => void) | undefined };
 
-export function dateTime(at: number, lang: Lang): string {
-  return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Cairo' }).format(at);
-}
+export { dateTime };
 
 export function CampaignsScreen({ t, lang, source, api, now, onNavigate }: Props) {
   const list = useCallback(() => api.list(), [api]);

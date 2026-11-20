@@ -675,3 +675,6 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
 .gate .btn.ghost { color: var(--on-night); border-color: var(--night-line); }
 .gate-account { margin-top: 6px; color: var(--lift); }
 .gate-account-en { color: var(--on-night-2); font-size: 12px; }
+
+/* CHAT-QA-6: the Cairo reading under a datetime-local picker (the picker itself is drawn by the browser). */
+.cairo-when { display: block; margin-block: 2px 8px; font-size: 12px; }

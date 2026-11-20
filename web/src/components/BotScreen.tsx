@@ -5,6 +5,7 @@ import type { BotFunnelDto, BotSettingsDto, CatalogStatusDto } from '../../../sr
 import { hoursSchema, locationSchema, MENU_ANSWER_MAX, MENU_MAX_ITEMS, MENU_TITLE_MAX, menuSchema, HOURS_AWAY_MAX } from '../../../src/core/store-link/bot-settings';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { dateTime } from '../lib/datetime';
 import { BotSwitches } from './BotSwitches';
 import { LoadError } from './LoadError';
 
@@ -98,7 +99,7 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
     }
   };
 
-  const when = (ms: number) => new Date(ms).toLocaleString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
+  const when = (ms: number) => dateTime(ms, lang);
   return (
     <section className="settings" aria-labelledby="bot-catalog-title">
       <h2 id="bot-catalog-title">{t.catTitle}</h2>

@@ -119,7 +119,8 @@ export function createApiSource(o: Opts): LiveSource {
       if (!res.ok) throw new ApiError('invalid_request', res.status);
     },
     async agentSettings() {
-      try { return await call('/agent', agentSettingsDto); } catch (e) { if (e instanceof ApiError && (e.status === 403 || e.status === 404)) return null; throw e; }
+      // Only a 403 means "not yours to read" (staff, an operator session). A 404 (no workspace) or any other failure is a failed load, never a permission message (CHAT-QA-3/12).
+      try { return await call('/agent', agentSettingsDto); } catch (e) { if (e instanceof ApiError && e.status === 403) return null; throw e; }
     },
     async saveAgentSettings(update) {
       return call('/agent', agentSettingsDto, { method: 'PUT', body: JSON.stringify(update) });

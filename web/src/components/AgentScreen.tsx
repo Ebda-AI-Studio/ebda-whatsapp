@@ -25,6 +25,8 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
 
   if (settings === undefined) return <main className="screen"><div className="placeholder">…</div></main>;
   if (settings === 'error') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
+  // The owner is never told "owner only": a refusal for a session that IS the owner means the check and the session disagree, which is a load problem to retry, not a permission message (CHAT-QA-12).
+  if ((settings === null || !draft) && source.role === 'owner') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
   if (settings === null || !draft) return <main className="screen"><div className="placeholder">{t.ownerOnly}</div></main>;
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => { setDraft({ ...draft, [k]: v }); setStatus('idle'); };
