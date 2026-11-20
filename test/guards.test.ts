@@ -56,13 +56,13 @@ it('the Arabic legal files are formal Arabic: no colloquial markers, products na
 // The Store publishes docs/legal on ebda.app from a vendored snapshot and cannot see this repo: a change here must be sent to the
 // Store session (commit id) so it re-imports. Changing a file means updating its pin, which is the reminder.
 const LEGAL_PINS: Record<string, string> = {
-  'docs/legal/README.md': '7a5ce95ec44d49a1e73628e105e2005aa5879d599e6b4043b304720cc45cc7b6',
-  'docs/legal/ar/whatsapp-dpa.md': '03b3d6fd5e963f7e2cce9113ca82e64fe6c33f2e76cec21204cc85745693cefa',
-  'docs/legal/ar/whatsapp-privacy.md': '641b1e66c8b1fc6d325a701bd0bcab574a47b9358c938749fe6c88388e3fd9c1',
-  'docs/legal/ar/whatsapp-terms.md': '40d83da0345e7ab019dcbcb97ccece2063fa100020d7723ff56fb9430ef1da69',
-  'docs/legal/en/whatsapp-dpa.md': '689ae9647baa0bc03d6d22097bb6c61485bbc76aea14f1384acfd70d877f4269',
-  'docs/legal/en/whatsapp-privacy.md': '555ed1b10626550dfaee37d394028de755143ad2daba551fb731497d57c91c7e',
-  'docs/legal/en/whatsapp-terms.md': '0fb1e104a40f8dbbaf48802f42f50614eb5a0894cd49a6ed762e8ec5ac6fd01b',
+  'docs/legal/README.md': '9d70e1c329428f4ba15c2bf0fcbff2e8ae001332912ccb8e44a3684d64559c8f',
+  'docs/legal/ar/whatsapp-dpa.md': 'f094e4603a11de5c9d72ea0f0dca59f8d7921e4e30af6b642c6efe3563d65231',
+  'docs/legal/ar/whatsapp-privacy.md': '31ab82572623b3c2babf14894b46af9df9dc1d5aedc337c90ad1c4519b6f1e61',
+  'docs/legal/ar/whatsapp-terms.md': 'c498024f8cc67030094f6a9c1a1e9b24f8e0aa9944125c5ecdc3ec8c07557f8c',
+  'docs/legal/en/whatsapp-dpa.md': '80c68806be3e678bfb2234b6302b72ce9e0e803e561f005aad0dfee99fee9324',
+  'docs/legal/en/whatsapp-privacy.md': 'db96a6070a6d183cc2b59a031b5ba99c52f6d0c9b5738f9723d0107d9478622e',
+  'docs/legal/en/whatsapp-terms.md': '83163a51b281fc7d9f697bf49ffa9f169bb1a416a4e4bf5ca8945968cbc6ebcd',
 };
 it('legal pages are pinned: a change needs a new pin AND a message to the Store session, which publishes them', async () => {
   const { readFileSync, readdirSync } = await import('node:fs');

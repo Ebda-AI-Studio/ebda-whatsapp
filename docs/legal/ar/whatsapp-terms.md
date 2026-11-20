@@ -2,8 +2,8 @@
 title: شروط خدمة ابدأ شات
 slug: whatsapp-terms
 lang: ar
-updated: 2026-11-09
-version: 1.1
+updated: 2026-11-10
+version: 1.2
 ---
 
 النسخة العربية هي الحاكمة.
