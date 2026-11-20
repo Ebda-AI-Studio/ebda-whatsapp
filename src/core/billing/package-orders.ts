@@ -31,7 +31,7 @@ const SWITCH_KINDS: readonly PurchaseKind[] = ['upgrade', 'queued_switch'];
 const errName = (err: unknown) => (err instanceof Error ? err.name : 'error');
 export const PENDING_EXPIRES_AFTER_MS = 24 * 3_600_000;
 
-export type PackageDto = { id: string; name: string; priceMinor: number; aiCredits: number; maxMembers: number; features: (typeof PACKAGE_FEATURE_KEYS)[number][]; periodMonths: number };
+export type PackageDto = { id: string; name: string; nameAr: string; nameEn: string; priceMinor: number; aiCredits: number; maxMembers: number; features: (typeof PACKAGE_FEATURE_KEYS)[number][]; periodMonths: number };
 export type OrderStatus = 'pending' | 'paid' | 'failed' | 'expired' | 'refunded' | 'charged_back';
 export type PackageOrderRow = {
   order_id: string; workspace_id: string; package_id: string; amount_minor: number; currency: string; status: OrderStatus; created_at: number;
