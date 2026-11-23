@@ -725,4 +725,3 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
 
 /* CHAT-QA-6: the Cairo reading under a datetime-local picker (the picker itself is drawn by the browser). */
 .cairo-when { display: block; margin-block: 2px 8px; font-size: 12px; }
-
