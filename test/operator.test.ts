@@ -293,3 +293,15 @@ describe('state-changing operator routes check the session (fail closed)', () =>
     expect((await operatorCall(OP1, 'PUT', '/numbers/pn-nobody/funding', { funding: 'merchant_card', reason: 'session check' })).status).toBe(404); // past the check, then the normal answer
   });
 });
+
+describe('GET /operator/me (store-independent super-admin check)', () => {
+  it('a super admin with no stores gets 200; no token 401; a store owner 403', async () => {
+    const ok = await operatorCall(OP1, 'GET', '/me');
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ superAdmin: true, userId: OP1 });
+    expect((await operatorCall(null, 'GET', '/me')).status).toBe(401);
+    const owner = await apiFor(W(1001));
+    const { SELF } = await import('cloudflare:test');
+    expect((await SELF.fetch('https://x/api/v1/operator/me', { headers: { authorization: `Bearer ${owner.token}` } })).status).toBe(403);
+  });
+});

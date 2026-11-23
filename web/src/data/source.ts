@@ -137,6 +137,8 @@ export interface InboxSource {
   storeId?: string;
   /** GET /me: this store has NO Chat workspace (Chat was never switched on for it). The app shows its own "not enabled" state and never loads lists (they would all 404). */
   workspaceMissing?: boolean;
+  /** A super admin with no store: boots into the operator console alone (no inbox, no store calls). */
+  operatorOnly?: boolean;
   /** GET /me: the stores this person can open that have a Chat workspace (for the store picker). Undefined = the server did not say (no picker). */
   stores?: { id: string; name: string; role: 'owner' | 'staff' }[];
   /** Opens Chat on another store (a full reload on that store). Absent in sample data. */
