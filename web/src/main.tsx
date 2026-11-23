@@ -6,7 +6,7 @@ import { STRINGS } from './i18n';
 import { NotLinked } from './components/NotLinked';
 import { NoSeat } from './components/NoSeat';
 import { SignInError } from './components/SignInError';
-import { makeAccountsSignOut, makeSignOut } from './signout';
+import { makeAccountsSignOut, makeGateActions, makeSignOut } from './signout';
 import { AccountActions } from './components/AccountActions';
 import { clearAssistantConversations } from './data/assistant';
 import { SignedOutLocally } from './components/SignedOutLocally';
@@ -44,12 +44,14 @@ async function boot(): Promise<void> {
     // The way out of a gate screen: the SAME sign-out the rail uses (makeAccountsSignOut / makeSignOut). Accounts mode ends the shared session
     // (one POST /logout) then `after` runs: reload lands on the sign-in entry, 'use another account' goes straight to the login URL.
     let stopRealtimeNow: () => void = () => undefined;
-    const gateSignOut = (after: () => void): (() => void) => () => {
-      if (oidcSession) { const session = oidcSession; makeSignOut({ stopRealtime: stopRealtimeNow, session, onLocal: () => root.render(<SignedOutLocally onSignIn={() => { void session.startSignIn('/'); }} />) })(); return; }
-      makeAccountsSignOut({ stopRealtime: stopRealtimeNow, accountsUrl: ACCOUNTS_URL!, getToken: () => tokens.getToken(), reload: after })();
-    };
-    const signOutNow = gateSignOut(() => location.reload());
-    const switchAccount = gateSignOut(() => location.assign(accountsTokens ? accountsTokens.loginUrl() : '/'));
+    const { signOutNow, switchAccount } = makeGateActions({
+      stopRealtime: () => stopRealtimeNow(),
+      oidc: () => oidcSession,
+      accounts: () => ({ accountsUrl: ACCOUNTS_URL!, getToken: () => tokens.getToken(), loginUrl: () => (accountsTokens ? accountsTokens.loginUrl() : '/') }),
+      onSignedOutLocally: (signIn) => root.render(<SignedOutLocally onSignIn={signIn} />),
+      reload: () => location.reload(),
+      assign: (url) => location.assign(url),
+    });
     if (mode === 'oidc') {
       const session = createOidcSession({ oidc: BRAND.oidc!, origin: location.origin });
       oidcSession = session; // BEFORE the callback: a refused sign-in renders SignInError, and its sign-out / switch buttons must find the OIDC session (not the accounts path, where `tokens` is still unassigned)
