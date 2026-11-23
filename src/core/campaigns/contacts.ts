@@ -199,7 +199,7 @@ export function listContacts(host: LinkHost, q: ContactQuery): { items: ContactI
   if (q.q) {
     // Same matching as the conversation search: every typed word is a prefix of a name word (contacts_fts, through the shared normaliser, so
     // hamza / taa marbuta / yaa variants and diacritics are insensitive), OR the typed digits (Arabic-Indic folded, 3 or more) occur in wa_id.
-    // The query is only a bound parameter or a quoted letters/digits token (normaliseText leaves nothing else); an unmatchable one finds nothing.
+    // The query is only a bound parameter or a token quoted by ftsMatch (inner quotes doubled); an unmatchable one finds nothing.
     const tokens = searchWords(host.sql, q.q);
     const digits = phoneDigits(q.q);
     const any: string[] = [];

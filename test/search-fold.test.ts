@@ -64,3 +64,29 @@ it('a name written while the flag is on is indexed with the shared fold (index a
   await chat(ws, '201000000021', 'سؤال جديد', 'x');
   expect(await find(api, 'سوال')).toEqual(['201000000021']);
 });
+
+it('v2 MATCH is built from quoted tokens only: quotes, FTS operators and punctuation never throw and match literally', async () => {
+  const ws = W(313);
+  const api = await apiFor(ws);
+  await chat(ws, '201000000021', 'أحمد', 'hello world');
+  await chat(ws, '201000000022', 'Sara', 'NEAR AND OR words');
+  expect(await flip(ws, true)).toBe(true);
+  const hostile = ['"', 'x" OR "y', 'a"b', '*', 'hello*', 'NEAR(', 'NEAR(a b)', 'a:b', 'text:hello', 'AND OR', 'OR', '-hello', '^hello', '(', ')', '""', '" "* OR "'];
+  for (const q of hostile) await find(api, q); // find() asserts status 200: none throws
+  const search = (q: string) => runInDurableObject(workspace(ws), (i) => (i as unknown as { search(q: string, n: number): Promise<unknown[]> }).search(q, 10));
+  for (const q of hostile) await search(q);
+  // literal, not operator: `text:hello` is the words text + hello (no message has "text"), so it finds nothing; `hello*` is the word hello
+  expect(await find(api, 'text:hello')).toEqual([]);
+  expect(await find(api, 'hello*')).toEqual(['201000000021']);
+  expect(await find(api, 'أحمد,')).toEqual(['201000000021']); // trailing punctuation meets the punctuation-stripped index
+  expect(await find(api, 'AND OR')).toEqual(['201000000022']); // literal words AND, OR
+});
+
+it('a re-index that throws on wake is isolated: rolled back, old index serves, no throw', async () => {
+  const ws = W(314);
+  const api = await apiFor(ws);
+  await chat(ws, '201000000031', 'سؤال', 'مرحبا');
+  await expect(runInDurableObject(workspace(ws), (_i, state) => state.storage.transactionSync(() => syncSearchFold(state.storage.sql, true, () => { throw new Error('boom'); })))).rejects.toThrow('boom');
+  expect(await find(api, 'سؤال')).toEqual(['201000000031']); // marker rolled back: legacy index still answers
+  expect(await runInDurableObject(workspace(ws), (_i, state) => state.storage.sql.exec("SELECT 1 FROM store_state WHERE key = 'search_fold'").toArray().length)).toBe(0);
+});

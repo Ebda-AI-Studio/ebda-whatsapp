@@ -29,6 +29,7 @@ const P0_ALERTS = new Set([
   'duplicate_success', 'package_amount_mismatch', 'topup_amount_mismatch', 'credit_pack_amount_mismatch', 'shared_sent_not_recorded', 'number_restricted',
 ]);
 const P1_ALERTS = new Set([
+  'search_fold_rebuild_failed', // SEARCH_FOLD=v2 re-index threw on a workspace wake; rolled back, old index serving, retried next wake
   'proactive_recs_enqueue_failed', // a customer message failed to queue (CHAT-RECS-SWITCH-1); the order is marked failed:enqueue
   'agent_reply_blocked_rate', 'ai_cost_per_1k_over_threshold',
   'send_dlq', 'unhandled_error', 'secret_misconfigured', 'binding_missing', 'entitlement_push_failed', 'entitlement_reconcile_failed', 'entitlement_event_not_queued', 'webhook_reconfirm_failed',
@@ -84,7 +85,8 @@ export function resetAlerts(): void {
   throttle.reset();
 }
 
-const renderFields = (fields: Record<string, unknown>): string[] => renderAlertFields(Object.fromEntries(Object.entries(fields).filter(([k]) => k !== 'severity' && k !== 'workspace')));
+const publicFields = (fields: Record<string, unknown>): Record<string, unknown> => Object.fromEntries(Object.entries(fields).filter(([k]) => k !== 'severity' && k !== 'workspace'));
+const renderFields = (fields: Record<string, unknown>): string[] => renderAlertFields(publicFields(fields));
 /** T25: the incident runbook of ONE alert (docs/runbooks/alerts/<name>.md; test/alert-runbooks.test.ts proves every P0/P1 name has one). Base URL = var RUNBOOK_BASE_URL; unset = the repo-relative path. */
 const runbookUrl = (name: string, env: AlertEnv): string => foundationRunbookUrl(name, typeof env.RUNBOOK_BASE_URL === 'string' ? env.RUNBOOK_BASE_URL : undefined);
 const shortWorkspace = (ws: string): string => (ws.length > 8 ? `${ws.slice(0, 8)}…` : ws);
@@ -116,7 +118,7 @@ export function alert(name: string, fields: AlertFields = {}): void {
       { token: d.env.TELEGRAM_BOT_TOKEN, chatId: d.env.TELEGRAM_ALERT_CHAT_ID, fetch: (u, init) => fetchWithTimeout(u, init, { label: 'telegram.alert', timeoutMs: 5000 }) },
       {
         product: d.env.ALERT_PRODUCT ?? 'WhatsApp', level: sev === 'P0' ? 'p0' : 'p1', scope: workspace ? 'workspace' : 'platform', ...(workspace ? { scopeLine: shortWorkspace(workspace) } : {}),
-        title: name, env: d.env.ENVIRONMENT ?? 'production', runbook: runbookUrl(name, d.env), fields: Object.fromEntries(Object.entries(fields).filter(([k]) => k !== 'severity' && k !== 'workspace')), suppressed: claim.suppressed,
+        title: name, env: d.env.ENVIRONMENT ?? 'production', runbook: runbookUrl(name, d.env), fields: publicFields(fields), suppressed: claim.suppressed,
       },
     ).then(() => undefined, () => undefined);
     try {
