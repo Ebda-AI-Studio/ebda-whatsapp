@@ -140,13 +140,21 @@ export async function acceptInvitation(env: Pick<Env, 'DB' | 'WORKSPACE_DO'>, us
   const seat = await stub.assignSeat(userId, inv.invited_by, [...new Set([...staff, userId])]);
   if (!seat.ok) return 'seat_limit';
   const STILL = "EXISTS (SELECT 1 FROM workspace_invitations WHERE workspace_id = ?1 AND user_id = ?2 AND status = 'pending' AND expires_at > ?3)";
-  const [member] = await env.DB.batch([
+  let member: D1Result | undefined;
+  try {
+    [member] = await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO workspace_members (workspace_id, user_id, role, status, added_by, created_at, updated_at) SELECT ?1, ?2, 'staff', 'active', ?4, ?3, ?3 WHERE ${STILL}
        ON CONFLICT(workspace_id, user_id) DO UPDATE SET status = 'active', added_by = excluded.added_by, updated_at = excluded.updated_at WHERE workspace_members.role = 'staff'`,
     ).bind(ws, userId, now, inv.invited_by),
     env.DB.prepare(`UPDATE workspace_invitations SET status = 'accepted', decided_at = ?3 WHERE workspace_id = ?1 AND user_id = ?2 AND status = 'pending' AND expires_at > ?3`).bind(ws, userId, now),
   ]);
+  } catch (err) {
+    // The seat was taken before this write: a failed write must not leave a seat held by someone who is not a member (unless a concurrent accept already made them one).
+    const already = await env.DB.prepare("SELECT 1 AS x FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND status = 'active'").bind(ws, userId).first().catch(() => null);
+    if (!already) await stub.removeSeat(userId).catch(() => {});
+    throw err;
+  }
   if ((member?.meta.changes ?? 0) === 0) {
     // Either the invitation was withdrawn while we took the seat (give it back), or a concurrent accept of the same invitation already made us a member (keep it).
     const now_member = await env.DB.prepare("SELECT 1 AS x FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND status = 'active'").bind(ws, userId).first();

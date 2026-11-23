@@ -22,7 +22,7 @@ import { mark } from './core/timing';
 import { checkFxStale, fxHealth, runDailyFx } from './core/billing/fx-daily';
 import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/observability';
 import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
-import { requirePerson, requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
+import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
 import { operatorRoutes } from './routes/operator';
 import { workspacesRoutes } from './routes/workspaces';
 import { requirePerson } from './core/identity/person';
@@ -210,7 +210,7 @@ api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
-api.route('/', invitationsRoutes(getVerifier)); // CHAT-SA-4: the invitee's own pending invitations (person token, no workspace)
+api.route('/', invitationsRoutes); // CHAT-SA-4: the invitee's own pending invitations; auth = requirePerson mounted on /workspaces/* above (identity/person.ts)
 registerStarterSet(PACK.templates);
 registerPerStoreTemplate(PACK.perStoreTemplate ?? null);
 api.route('/', templatesRoutes(PACK.templates, PACK.seasonalTemplates ?? {}));

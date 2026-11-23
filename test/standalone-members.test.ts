@@ -235,6 +235,22 @@ describe('accepting (consent, bound to the invited identity)', () => {
     expect((await callPerson(a.stub, id, 'POST', '/workspaces/invitations/sw_short/accept')).status).toBe(404);
     expect((await callPerson(a.stub, id, 'POST', '/workspaces/invitations/00000000-0000-4000-8000-000000009955/accept')).status).toBe(404);
   });
+  it('a failing membership write AFTER the seat was taken gives the seat back (503, no member, no seat, invitation still pending)', async () => {
+    const { ws, owner } = await setup();
+    const a = accountsStub();
+    await call(a.stub, owner, ws, 'POST', '/members/invite', inv('sara@example.com'));
+    const id = a.ids.get('sara@example.com')!;
+    await env.DB.prepare("CREATE TRIGGER boom_members BEFORE INSERT ON workspace_members WHEN NEW.role = 'staff' BEGIN SELECT RAISE(ABORT, 'boom'); END").run();
+    try {
+      expect((await callPerson(a.stub, id, 'POST', `/workspaces/invitations/${ws}/accept`)).status).toBe(503);
+    } finally {
+      await env.DB.prepare('DROP TRIGGER boom_members').run();
+    }
+    expect(await rows(ws, 'SELECT user_id FROM seats')).toEqual([]);
+    expect((await members(ws)).filter((m) => m.role === 'staff')).toEqual([]);
+    expect(await invitation(ws, id)).toMatchObject({ status: 'pending' });
+    expect((await callPerson(a.stub, id, 'POST', `/workspaces/invitations/${ws}/accept`)).status).toBe(200); // and a retry works
+  });
   it('the seat is the authority: a full package at accept time is 409 and the invitation stays pending', async () => {
     const { ws, owner } = await setup('growth');
     const a = accountsStub();
