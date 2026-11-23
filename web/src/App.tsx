@@ -52,7 +52,8 @@ function NoWorkspaceShell({ source, now = Date.now, initialLang = 'ar' }: Props)
   const t = STRINGS[lang];
   // A super admin who opened a store with no workspace still reaches the operator console from the rail.
   const none = { templates: false, campaigns: false, contacts: false, integrations: false, agent: false, bot: false, numbers: false, wallet: false, team: false, operator: source.role === 'super_admin' && !!source.operator };
-  const [view, setView] = useState<View>('inbox');
+  // A super admin never lands on the "not enabled" dead end: the console is the first screen, the store's own page stays one rail click away.
+  const [view, setView] = useState<View>(none.operator ? 'operator' : 'inbox');
   return (
     <div className="app" data-view="screen">
       <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={none} store={source} />
