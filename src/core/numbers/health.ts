@@ -148,6 +148,8 @@ const STANDING_AT_KEY = 'store.standing_at';
 const STANDING_ANCHOR_KEY = 'store.standing_anchor';
 /** The policy switch, copied from the env var by the workspace on every wake so the synchronous gate reads it from its own SQLite. */
 const STANDING_STRICT_KEY = 'store.standing_strict';
+/** Written on every wake for an `sw_` (standalone) id: it has no Store to go silent, so the GATE itself exempts it (a strict row or anchor can never gate it). */
+const STANDALONE_KEY = 'store.standalone';
 /** The Store re-sends standing every 12 h; two missed heartbeats (24 h) is silence, and 24 h is also how long a freshly linked store may wait for its first one. */
 export const STANDING_WINDOW_MS = 24 * 60 * 60 * 1000;
 const stateValue = (sql: SqlStorage, key: string): string | null => sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', key).toArray()[0]?.value ?? null;
@@ -163,23 +165,21 @@ export const standingStrict = (sql: SqlStorage): boolean => stateValue(sql, STAN
  * that has no `store.linked` anchor yet, so enabling never refuses anyone before a full window has passed); anything else turns it off.
  */
 export function syncStandingPolicy(sql: SqlStorage, flag: string | undefined, now: number, workspaceId: string): void {
+  const standalone = isStandaloneId(workspaceId);
+  if (standalone) putStateValue(sql, STANDALONE_KEY, '1'); // before the flag check: the exemption holds even when the switch is unset
   if (flag === undefined) return;
-  if (isStandaloneId(workspaceId)) { // a standalone workspace has no Store to go silent: it is never gated, whatever the switch says (and no stale row can gate it)
-    sql.exec('DELETE FROM store_state WHERE key IN (?, ?)', STANDING_STRICT_KEY, STANDING_ANCHOR_KEY);
-    return;
-  }
+  if (standalone) { sql.exec('DELETE FROM store_state WHERE key IN (?, ?)', STANDING_STRICT_KEY, STANDING_ANCHOR_KEY); return; }
   if (flag.trim() === '1') {
     if (!standingStrict(sql)) putStateValue(sql, STANDING_STRICT_KEY, '1');
-    // Only a LINKED store has a window to anchor: a never-linked one is anchored by its `store.linked` event (noteStoreLinked), never here.
-    if (stateValue(sql, 'linked') === '1' && stateValue(sql, STANDING_ANCHOR_KEY) === null) putStateValue(sql, STANDING_ANCHOR_KEY, String(now));
+    if (stateValue(sql, STANDING_ANCHOR_KEY) === null) putStateValue(sql, STANDING_ANCHOR_KEY, String(now));
   } else sql.exec('DELETE FROM store_state WHERE key = ?', STANDING_STRICT_KEY);
 }
 /**
- * True when the policy is on, the workspace is EXPLICITLY linked (`linked = '1'`; a never-linked one with no row, and an unlinked one with '0', are exempt) and the Store has been silent for more than 24 h: the last standing is older than
+ * True when the policy is on, the workspace is a Store workspace (an `sw_` standalone one is exempt in here) that is not unlinked (`linked = '0'` is exempt; NO row means linked, as every Store workspace is linked by definition: legacy ones predate the row)
  * that, or none ever came and the link (or the policy switch) is older than that. Fail closed on silence, never on a Store that answered.
  */
 export function standingStale(sql: SqlStorage, now: number): boolean {
-  if (!standingStrict(sql) || stateValue(sql, 'linked') !== '1') return false;
+  if (!standingStrict(sql) || stateValue(sql, STANDALONE_KEY) === '1' || stateValue(sql, 'linked') === '0') return false;
   const seen = stateValue(sql, STANDING_AT_KEY) ?? stateValue(sql, STANDING_ANCHOR_KEY);
   return seen !== null && now - Number(seen) > STANDING_WINDOW_MS;
 }

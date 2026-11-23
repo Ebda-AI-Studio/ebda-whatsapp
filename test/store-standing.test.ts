@@ -140,7 +140,7 @@ describe('Store hold vs offboarding (STORE-STANDING-1)', () => {
 describe('STORE-STANDING-2: silence from the Store (default off)', () => {
   const H = 3_600_000;
   const set = (ws: string, key: string, value: string) => exec(ws, 'INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
-  const strictOn = async (ws: string) => { await set(ws, 'store.standing_strict', '1'); await set(ws, 'linked', '1'); }; // the policy applies to an EXPLICITLY linked workspace (`linked = '1'`)
+  const strictOn = (ws: string) => set(ws, 'store.standing_strict', '1');
   const seen = (ws: string, ago: number) => set(ws, 'store.standing_at', String(Date.now() - ago));
   const anchor = (ws: string, ago: number) => set(ws, 'store.standing_anchor', String(Date.now() - ago));
 
@@ -203,27 +203,34 @@ describe('STORE-STANDING-2: silence from the Store (default off)', () => {
     expect(await workspace(ws).suspended()).toBe(false);
   });
 
-  it('flag ON: a workspace with NO linked row (never linked) is exempt, however old its standing / anchor', async () => {
+  it('flag ON: a Store workspace with NO linked row (legacy, predates the row) counts as linked and is gated when stale', async () => {
     const ws = W(1190);
     await setupBilling(ws);
-    await set(ws, 'store.standing_strict', '1');
+    await strictOn(ws);
     await seen(ws, 72 * H);
-    await anchor(ws, 72 * H);
     expect(await rows(ws, "SELECT 1 FROM store_state WHERE key = 'linked'")).toEqual([]);
-    expect(await workspace(ws).suspended()).toBe(false);
+    expect(await workspace(ws).suspended()).toBe(true);
   });
 
   it("flag ON: linked '0' is exempt, linked '1' + stale is refused", async () => {
     const off = W(1191);
     await setupBilling(off);
-    await set(off, 'store.standing_strict', '1'); await set(off, 'linked', '0');
+    await strictOn(off); await set(off, 'linked', '0');
     await seen(off, 72 * H);
     expect(await workspace(off).suspended()).toBe(false);
     const on = W(1192);
     await setupBilling(on);
-    await strictOn(on);
+    await strictOn(on); await set(on, 'linked', '1');
     await seen(on, 72 * H);
     expect(await workspace(on).suspended()).toBe(true);
+  });
+
+  it('flag ON: a standalone sw_ workspace is exempt IN THE GATE even with a hand-written strict row, a linked row and a stale anchor', async () => {
+    const ws = mintStandaloneId();
+    await setupBilling(ws); // the wake wrote the standalone marker
+    await strictOn(ws); await set(ws, 'linked', '1');
+    await anchor(ws, 72 * H); await seen(ws, 72 * H);
+    expect(await workspace(ws).suspended()).toBe(false);
   });
 
   it('flag ON in the env: a standalone sw_ workspace is never given the strict row or an anchor (the wake sync skips it), so it is never gated', async () => {
@@ -237,7 +244,6 @@ describe('STORE-STANDING-2: silence from the Store (default off)', () => {
       expect(await workspace(sw).suspended()).toBe(false);
       // control: a Store-id workspace that is explicitly linked DOES get the strict row + an anchor from the same sync
       const st = W(1193);
-      await set(st, 'linked', '1');
       await setupBilling(st);
       await workspace(st).suspended(); // wake
       expect((await rows(st, "SELECT key FROM store_state WHERE key IN ('store.standing_strict')")).length).toBe(1);
