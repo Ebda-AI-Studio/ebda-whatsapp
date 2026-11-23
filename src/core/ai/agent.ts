@@ -9,7 +9,7 @@ import { WINDOW_MS } from '../dto';
 import { errClass, alert } from '../observability';
 import { turnGone, orderingActive, runBotTurnLocked, serialisedTurn, type BotInput } from '../ordering/bot';
 import type { SendJob } from '../send-queue';
-import { bridgeFor } from '../store-link';
+import { bridgeForWorkspace } from '../store-link';
 import type { LinkHost } from '../store-link/host';
 import { isPlainEnglish } from '../franco';
 import { normaliseText } from '../text-normalise';
@@ -303,7 +303,7 @@ async function converse(host: LinkHost, input: BotInput, provider: LlmProvider, 
   const modelReq = modelFlag ? { model: modelFlag, maxTokens: isFlaggedModel(modelFlag) ? FLAGGED_MAX_TOKENS : AGENT_MAX_TOKENS } : {};
   const trusted = turn.trusted;
   const copy = agentConfig().copy!;
-  const bridge = bridgeFor(host.env);
+  const bridge = bridgeForWorkspace(host.env, host.workspaceId);
   const availability = { catalog: bridge !== null, orders: bridge !== null, ordering: orderingActive(host), recommend: bridge !== null && settings.recommendProducts };
   // Tools of the workspace's enabled connectors (the agent is on, or this turn would not be running); names are `<connector>__<tool>`.
   const connectors = loadConnectors(host);
