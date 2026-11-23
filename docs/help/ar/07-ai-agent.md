@@ -1,6 +1,7 @@
 ---
 capabilities:
   - agent.credits-topup@2
+  - agent.customer-memory@1
   - agent.credits-view@2
   - agent.enable@2
   - agent.faq@1
@@ -11,6 +12,7 @@ capabilities:
   - agent.promises@1
   - agent.recommendations@1
   - agent.provider-byok@1
+  - agent.read-typing-franco@1
   - agent.store-facts@1
   - agent.store-search@1
   - agent.tone@1
@@ -18,6 +20,7 @@ capabilities:
   - inbox.assign-takeover@1
   - inbox.handoff-needs-human@1
   - inbox.voice-note-transcript@1
+  - orders.same-address@1
   - orders.tracking@1
 ---
 
