@@ -34,8 +34,8 @@
     "IDENTITY_ISSUER": "https://accounts.ebda.app",
     "IDENTITY_JWKS_URL": "https://accounts.ebda.app/.well-known/jwks.json",
     "IDENTITY_AUDIENCE": "whatsapp",
-    // CHAT-SA-3: standalone workspaces (Chat without a Store). off | invite | open; stays off until the web (PR-5) is live.
-    "STANDALONE_WORKSPACES": "off",
+    // CHAT-SA-3: standalone workspaces (Chat without a Store). off | invite | open. OPEN since 2026-11-23 (Ahmad): anyone with a verified Ebda account creates a workspace without a code; creation limits, one workspace per person and the CHAT-SA-6 first-payment review still apply.
+    "STANDALONE_WORKSPACES": "open",
     // Shown first in Telegram alerts (one Ebda AI Studio bot serves every product).
     "ALERT_PRODUCT": "Ebda Chat",
     "RUNBOOK_BASE_URL": "https://github.com/Whisky-11/ebda-whatsapp/blob/main/docs/runbooks/alerts",

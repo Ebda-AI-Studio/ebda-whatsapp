@@ -1,3 +1,4 @@
+import { isStandaloneId } from '../workspace-kind';
 /**
  * Number health (W2-META). One small state machine per phone number, fed by Meta's `phone_number_quality_update` and `account_update`
  * webhooks, a rating refresh and the spike guard:
@@ -136,8 +137,51 @@ const DEBT_HOLD_KEY = 'billing.debt_hold';
  * transaction that applies the event, so there is no cache and no staleness window inside the workspace (NEVER-stale class). The two flags
  * are separate so an operator unsuspend never lifts a Store hold and a Store reactivation never lifts an operator suspension.
  */
-export function isSuspended(sql: SqlStorage): boolean {
-  return sql.exec<{ key: string }>('SELECT key FROM store_state WHERE key IN (?, ?, ?)', SUSPENDED_KEY, STORE_HOLD_KEY, DEBT_HOLD_KEY).toArray().length > 0;
+export function isSuspended(sql: SqlStorage, now: number = Date.now()): boolean {
+  return sql.exec<{ key: string }>('SELECT key FROM store_state WHERE key IN (?, ?, ?)', SUSPENDED_KEY, STORE_HOLD_KEY, DEBT_HOLD_KEY).toArray().length > 0 || standingStale(sql, now);
+}
+
+// ---- STORE-STANDING-2: a Store that goes silent stops spend (default OFF: `STORE_STANDING_STALE_REFUSE`) ----------------------------------
+/** Epoch ms the Store's standing (suspended / reactivated / deleted, incl. the 12-hourly re-send) was last RECEIVED; local clock, repeats and older events count. */
+const STANDING_AT_KEY = 'store.standing_at';
+/** Epoch ms of the last `store.linked` (or the moment the policy was switched on, for a workspace that predates it): the start of the missing-standing window. */
+const STANDING_ANCHOR_KEY = 'store.standing_anchor';
+/** The policy switch, copied from the env var by the workspace on every wake so the synchronous gate reads it from its own SQLite. */
+const STANDING_STRICT_KEY = 'store.standing_strict';
+/** Written on every wake for an `sw_` (standalone) id: it has no Store to go silent, so the GATE itself exempts it (a strict row or anchor can never gate it). */
+const STANDALONE_KEY = 'store.standalone';
+/** The Store re-sends standing every 12 h; two missed heartbeats (24 h) is silence, and 24 h is also how long a freshly linked store may wait for its first one. */
+export const STANDING_WINDOW_MS = 24 * 60 * 60 * 1000;
+const stateValue = (sql: SqlStorage, key: string): string | null => sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', key).toArray()[0]?.value ?? null;
+const putStateValue = (sql: SqlStorage, key: string, value: string): void => { sql.exec('INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value); };
+export const noteStandingSeen = (sql: SqlStorage, now: number): void => putStateValue(sql, STANDING_AT_KEY, String(now));
+/** A (re)link restarts the window: a standing from before an unlink says nothing about the new link. */
+export const noteStoreLinked = (sql: SqlStorage, now: number): void => { putStateValue(sql, STANDING_ANCHOR_KEY, String(now)); sql.exec('DELETE FROM store_state WHERE key = ?', STANDING_AT_KEY); };
+/** When the Store's standing last arrived (epoch ms), or null if it never has. */
+export const lastStandingAt = (sql: SqlStorage): number | null => { const v = stateValue(sql, STANDING_AT_KEY); return v === null ? null : Number(v); };
+export const standingStrict = (sql: SqlStorage): boolean => stateValue(sql, STANDING_STRICT_KEY) === '1';
+/**
+ * Copies the env switch into the workspace's own SQLite. Unset leaves it alone; '1' turns it on (anchoring the missing-standing window at `now` for a workspace
+ * that has no `store.linked` anchor yet, so enabling never refuses anyone before a full window has passed); anything else turns it off.
+ */
+export function syncStandingPolicy(sql: SqlStorage, flag: string | undefined, now: number, workspaceId: string): void {
+  const standalone = isStandaloneId(workspaceId);
+  if (standalone) putStateValue(sql, STANDALONE_KEY, '1'); // before the flag check: the exemption holds even when the switch is unset
+  if (flag === undefined) return;
+  if (standalone) { sql.exec('DELETE FROM store_state WHERE key IN (?, ?)', STANDING_STRICT_KEY, STANDING_ANCHOR_KEY); return; }
+  if (flag.trim() === '1') {
+    if (!standingStrict(sql)) putStateValue(sql, STANDING_STRICT_KEY, '1');
+    if (stateValue(sql, STANDING_ANCHOR_KEY) === null) putStateValue(sql, STANDING_ANCHOR_KEY, String(now));
+  } else sql.exec('DELETE FROM store_state WHERE key = ?', STANDING_STRICT_KEY);
+}
+/**
+ * True when the policy is on, the workspace is a Store workspace (an `sw_` standalone one is exempt in here) that is not unlinked (`linked = '0'` is exempt; NO row means linked, as every Store workspace is linked by definition: legacy ones predate the row)
+ * that, or none ever came and the link (or the policy switch) is older than that. Fail closed on silence, never on a Store that answered.
+ */
+export function standingStale(sql: SqlStorage, now: number): boolean {
+  if (!standingStrict(sql) || stateValue(sql, STANDALONE_KEY) === '1' || stateValue(sql, 'linked') === '0') return false;
+  const seen = stateValue(sql, STANDING_AT_KEY) ?? stateValue(sql, STANDING_ANCHOR_KEY);
+  return seen !== null && now - Number(seen) > STANDING_WINDOW_MS;
 }
 export const debtHold = (sql: SqlStorage): boolean => sql.exec('SELECT 1 FROM store_state WHERE key = ?', DEBT_HOLD_KEY).toArray().length > 0;
 export function setDebtHoldFlag(sql: SqlStorage, held: boolean): void {
@@ -147,10 +191,10 @@ export function setDebtHoldFlag(sql: SqlStorage, held: boolean): void {
 /** The operator's suspension reason, or null (the `ops.suspended` flag; its value is the reason). */
 export const operatorSuspension = (sql: SqlStorage): string | null => sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', SUSPENDED_KEY).toArray()[0]?.value ?? null;
 /** Every reason this workspace may not spend, each its own flag (operator reason, Store tag, wallet debt). D1 `suspended_*` is DERIVED from this by `syncSuspendedMirror`. */
-export type SuspensionState = { operator: string | null; store: 'store_suspended' | 'store_deleted' | null; debt: boolean };
+export type SuspensionState = { operator: string | null; store: 'store_suspended' | 'store_deleted' | null; debt: boolean; standingStale?: boolean };
 export function suspensionState(sql: SqlStorage): SuspensionState {
   const hold = storeHold(sql);
-  return { operator: operatorSuspension(sql), store: hold === null ? null : hold === 'store_deleted' ? 'store_deleted' : 'store_suspended', debt: debtHold(sql) };
+  return { operator: operatorSuspension(sql), store: hold === null ? null : hold === 'store_deleted' ? 'store_deleted' : 'store_suspended', debt: debtHold(sql), standingStale: standingStale(sql, Date.now()) };
 }
 /** The Store hold's reason, or null when the Store store is live. */
 export function storeHold(sql: SqlStorage): string | null {

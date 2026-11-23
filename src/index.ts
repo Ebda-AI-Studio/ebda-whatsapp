@@ -139,6 +139,13 @@ app.onError((err, c) => {
 // WA-404-1: the static assets no longer fall back to the inbox shell for every path (that answered 200 on any address). The one real
 // deep link is the sign-in return (web/src/data/oidc.ts CALLBACK_PATH): the Worker hands it the shell; everything else unknown is a real 404.
 app.get('/auth/callback', (c) => c.env.ASSETS.fetch(new Request(new URL('/', c.req.url), c.req.raw)));
+// Each screen of the shell has its own address (web/src/lib/route.ts VIEW_PATHS): a refresh or a shared link to one gets the shell, not a 404.
+// /api/*, /meta/*, /kashier/*, /health and /t/* are never listed here (they run Worker-first and own their paths); test/shell-routes.test.ts keeps both lists equal.
+export const SHELL_PATHS = ['/campaigns', '/templates', '/contacts', '/agent', '/bot', '/numbers', '/integrations', '/wallet', '/team', '/ops', '/chat/:id'] as const;
+// `/inbox` was never a path (the inbox lives at `/`), but people type and link it: send them there, query kept (?store= / ?viewAs=).
+app.get('/inbox', (c) => c.redirect(`/${new URL(c.req.url).search}`, 301));
+const shell = (c: { env: Env; req: { url: string; raw: Request } }) => c.env.ASSETS.fetch(new Request(new URL('/', c.req.url), c.req.raw));
+for (const path of SHELL_PATHS) app.get(path, shell);
 app.notFound((c) => PACK.notFound?.(c.req.raw) ?? c.json({ error: 'not_found' }, 404));
 // Everything the Worker answers itself (API, webhook, health, tracked links) is JSON, text or a redirect: nothing may load or
 // frame it. The page policy lives in web/brands/<brand>/public/_headers (served by static assets, one per brand).

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { instapayCreate } from '../core/api/contract';
-import { MAX_PROOF_BYTES, createInstapayRequest, instapayEnabled, listForWorkspace, markRejectionsSeen, readProof, storeProof } from '../core/billing/instapay';
-import type { InstapayPayee } from '../core/billing/instapay';
+import { instapayContest, instapayCreate } from '../core/api/contract';
+import { MAX_PROOF_BYTES, cancelInstapay, contestInstapay, createInstapayRequest, instapayEnabled, listForWorkspace, markRejectionsSeen, readProof, storeProof } from '../core/billing/instapay';
+import type { InstapayPayee, SelfDecision } from '../core/billing/instapay';
 import { revertNotice } from '../core/billing/instapay-auto';
 import { brandPack } from '../brand';
 import type { Env } from '../env';
@@ -83,6 +83,32 @@ instapayRoutes.put('/stores/:storeId/wallet/instapay/:requestId/proof', async (c
     case 'unavailable': return apiError(c, 503, 'unavailable', r.reason);
     default: return apiError(c, 409, 'invalid_request', r.reason); // already submitted / expired
   }
+});
+
+/** The merchant's own decisions on their own request. Owner only; neither confirms or credits anything (the operator still decides every payment). */
+function selfDecided(c: ApiContext, r: SelfDecision) {
+  if (r.ok) return c.json(r.request);
+  switch (r.reason) {
+    case 'not_found': return apiError(c, 404, 'not_found');
+    case 'session_revoked': return apiError(c, 401, 'unauthorized');
+    case 'unavailable': return apiError(c, 503, 'unavailable', r.reason);
+    case 'offboarding': return apiError(c, 409, 'invalid_request', 'offboarding_pending');
+    default: return apiError(c, 409, 'invalid_request', r.reason);
+  }
+}
+instapayRoutes.post('/stores/:storeId/wallet/instapay/:requestId/cancel', async (c) => {
+  if (!owner(c)) return apiError(c, 403, 'forbidden');
+  if (!instapayEnabled(c.env)) return apiError(c, 404, 'not_found');
+  const p = c.get('principal');
+  return selfDecided(c, await cancelInstapay(c.env, { workspaceId: c.req.param('storeId')!, requestId: c.req.param('requestId')!, sessionId: p.sessionId, userId: p.userId }));
+});
+instapayRoutes.post('/stores/:storeId/wallet/instapay/:requestId/contest', async (c) => {
+  if (!owner(c)) return apiError(c, 403, 'forbidden');
+  if (!instapayEnabled(c.env)) return apiError(c, 404, 'not_found');
+  const body = instapayContest.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) return apiError(c, 400, 'invalid_request');
+  const p = c.get('principal');
+  return selfDecided(c, await contestInstapay(c.env, { workspaceId: c.req.param('storeId')!, requestId: c.req.param('requestId')!, sessionId: p.sessionId, userId: p.userId, note: body.data.note }));
 });
 
 /** The operator's signed, short-lived proof link. The token is the authorisation; it names one request and expires in minutes. */

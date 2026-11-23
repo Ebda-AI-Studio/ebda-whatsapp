@@ -104,6 +104,9 @@ function useList<T>(load: () => Promise<T[]>): { items: T[] | null; error: boole
   return { items, error, reload };
 }
 
+/** "From <date>" for an effective-dated version; a version with no start (the launch seed row stores 0) reads "From the start", never 1 January 1970. */
+const fromLabel = (t: Strings, lang: Lang, at: number | null | undefined) => (typeof at === 'number' && Number.isFinite(at) && at > 0 ? t.opFrom(dateTime(at, lang)) : t.opFromStart);
+
 const pct = (bps: number, lang: Lang) => num(bps / 100, lang);
 
 // ---- Pricing settings ------------------------------------------------------------------------------------------------------
@@ -140,7 +143,7 @@ function PricingPanel({ t, lang, api, now, run, fail }: PanelProps) {
     <ul className="wallet-rows">
       {xs.map((s) => (
         <li key={s.ver}>
-          <span className="wallet-row-main"><b>{t.opVersion(num(s.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(s.effectiveFrom, lang))} • {t.opBy(s.actor)}</span>
+          <span className="wallet-row-main"><b>{t.opVersion(num(s.ver, lang))}</b> <span className="muted">• {fromLabel(t, lang, s.effectiveFrom)} • {t.opBy(s.actor)}</span>
             <span className="op-line">{line(s)}</span><span className="muted op-line" dir="auto">{s.actor === 'system' ? t.opSystemDefault : s.reason}</span></span>
         </li>
       ))}
@@ -204,7 +207,7 @@ function RatesPanel({ t, lang, api, now, run, fail }: PanelProps) {
         {cards.error && <p className="error-text">{t.opLoadError}</p>}
         <ul className="wallet-rows">
           {cards.items?.map((c) => (
-            <li key={c.ver}><span className="wallet-row-main"><b>{t.opVersion(num(c.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(c.effectiveFrom, lang))} • {t.opRatesRows(num(c.rows, lang))} • {t.opBy(c.actor)}</span></span></li>
+            <li key={c.ver}><span className="wallet-row-main"><b>{t.opVersion(num(c.ver, lang))}</b> <span className="muted">• {fromLabel(t, lang, c.effectiveFrom)} • {t.opRatesRows(num(c.rows, lang))} • {t.opBy(c.actor)}</span></span></li>
           ))}
         </ul>
         <p className="muted">{t.opNeverRetro}</p>
@@ -223,7 +226,7 @@ function RatesPanel({ t, lang, api, now, run, fail }: PanelProps) {
         {fxs.error && <p className="error-text">{t.opLoadError}</p>}
         <ul className="wallet-rows">
           {fxs.items?.map((x) => (
-            <li key={x.ver}><span className="wallet-row-main"><b>{t.opVersion(num(x.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(x.effectiveFrom, lang))} • {t.opBy(x.actor)}</span>
+            <li key={x.ver}><span className="wallet-row-main"><b>{t.opVersion(num(x.ver, lang))}</b> <span className="muted">• {fromLabel(t, lang, x.effectiveFrom)} • {t.opBy(x.actor)}</span>
               <span className="op-line">{t.opFxLine(num(x.egpPerUsdMicros / 1_000_000, lang), pct(x.bufferBps, lang))}</span></span></li>
           ))}
         </ul>
@@ -294,7 +297,7 @@ function AccountPanel({ t, lang, api, now, run, fail }: PanelProps) {
         {loaded && (loaded.items.length === 0 ? <p className="muted">{t.opOverrideNone}</p> : (
           <ul className="wallet-rows">
             {loaded.items.map((o) => (
-              <li key={o.ver}><span className="wallet-row-main"><b>{t.opVersion(num(o.ver, lang))}</b> <span className="muted">• {t.opFrom(dateTime(o.effectiveFrom, lang))} • {t.opBy(o.actor)}</span>
+              <li key={o.ver}><span className="wallet-row-main"><b>{t.opVersion(num(o.ver, lang))}</b> <span className="muted">• {fromLabel(t, lang, o.effectiveFrom)} • {t.opBy(o.actor)}</span>
                 <span className="op-line">{t.opMargin} {pct(o.marginBps, lang)}</span><span className="muted op-line" dir="auto">{o.reason}</span></span></li>
             ))}
           </ul>
@@ -686,7 +689,9 @@ function InstapayReview({ t, lang, api, source, run }: PanelProps) {
               <span className="wallet-row-main">
                 <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status="pending">{t.instapayStates[r.state] ?? r.state}</span>
                 <span className="muted op-line"><bdi dir="ltr">{r.workspaceId}</bdi> • {t.opIpLine(t.opIpKinds[r.kind] ?? r.kind, r.reference)} • {r.proofAt ? dateTime(r.proofAt, lang) : ''}</span>
+                {r.aiRead && !r.heldReason && <span className="muted op-line">{t.opIpAiRead(r.aiRead.reference)} <button type="button" className="btn quiet" onClick={() => setRefs({ ...refs, [r.id]: r.aiRead!.reference })}>{t.opIpAiUse}</button></span>}
                 {r.firstApprover && <span className="muted op-line">{t.opIpFirstBy(r.firstApprover)}</span>}
+                {r.contestedAt && <span className="campaign-reason op-line" role="note">{t.opIpContested(dateTime(r.contestedAt, lang))}{r.contestNote ? <> • <span dir="auto">{r.contestNote}</span></> : null}{r.rejectReason ? <> • {t.opIpContestedWas} <span dir="auto">{r.rejectReason}</span></> : null}</span>}
                 {r.heldReason && <span className="error-text op-line" role="note">{t.opIpHeld(t.opIpHeldReasons[r.heldReason] ?? r.heldReason)}{r.heldOf ? <> • <bdi dir="ltr">{t.opIpHeldOf(r.heldOf)}</bdi></> : null}</span>}
                 {notes[r.id] && <span className="campaign-reason">{notes[r.id]}</span>}
               </span>
@@ -807,6 +812,7 @@ function KillSwitchPanel({ t, lang, api, run, fail }: PanelProps) {
         {st && (
           <div className="op-ks-status" aria-live="polite">
             <p><span className={st.status.suspended ? 'flag bad' : 'flag'} data-ok={!st.status.suspended}>{st.status.suspended ? k.stateOn : k.stateOff}</span> <span className="muted">{st.status.evicted ? k.evicted : k.notEvicted}</span></p>
+            <p className="muted small">{st.status.storeStandingAt === null ? k.standingNever : k.standingAt(dateTime(st.status.storeStandingAt, lang))}</p>
             {st.status.integrationsRevokedAt !== null && <p className="muted small">{k.integrationsRevoked(dateTime(st.status.integrationsRevokedAt, lang))}</p>}
             <h3 className="pane-sub">{k.numbers}</h3>
             {st.status.numbers.length === 0 ? <p className="muted">{k.none}</p> : (

@@ -5,6 +5,7 @@ import type { ContactDto, ImportDto, RetentionDto } from '../../../src/core/api/
 import { ApiError } from '../data/api';
 import type { ContactsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { contactsCsv } from '../lib/contacts-csv';
 import { dateOnly } from '../lib/datetime';
 import { relativeTime } from '../lib/format';
 import { useTypeahead } from '../lib/useTypeahead';
@@ -111,6 +112,7 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
         </section>
         <div className="contact-side">
           <CustomerTools t={t} api={api} owner={owner} contact={selected} onRenamed={(name) => { setSelected((c) => (c ? { ...c, name } : c)); setAttemptList((a) => a + 1); }} onMerged={() => { setSelected(null); setAttemptList((a) => a + 1); }} onTagged={(tags) => { setSelected((c) => (c ? { ...c, tags } : c)); setAttemptList((a) => a + 1); }} />
+          {source.role === 'owner' && <ExportAllCard t={t} api={api} />}
           {owner && <RetentionCard t={t} api={api} reloadKey={reloadKey} onLoadFailed={setRetFailed} />}
           {owner && <SegmentsPanel t={t} lang={lang} api={api.segments} now={now} reloadKey={reloadKey} onLoadFailed={setSegFailed} />}
         </div>
@@ -298,6 +300,35 @@ function RetentionCard({ t, api, reloadKey, onLoadFailed }: { t: Strings; api: C
       </label>
       <div className="settings-actions"><button type="button" className="btn primary" disabled={!view} onClick={() => void save()}>{t.rtSave}</button></div>
       {msg && <p role={msg.kind === 'alert' ? 'alert' : 'status'} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
+    </section>
+  );
+}
+
+/** Self-service export of every contact (owner only, audited by the server): a CSV the owner keeps. */
+function ExportAllCard({ t, api }: { t: Strings; api: ContactsApi }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'failed'>('idle');
+  const [count, setCount] = useState(0);
+  const run = async () => {
+    setState('busy');
+    try {
+      const all = await api.exportAllContacts();
+      const url = URL.createObjectURL(new Blob([contactsCsv(all)], { type: 'text/csv;charset=utf-8' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'contacts.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+      setCount(all.length);
+      setState('done');
+    } catch { setState('failed'); }
+  };
+  return (
+    <section className="import-panel" aria-labelledby="cx-title">
+      <h2 id="cx-title">{t.cxTitle}</h2>
+      <p className="muted small">{t.cxHint}</p>
+      <div className="settings-actions"><button type="button" className="btn" disabled={state === 'busy'} onClick={() => void run()}>{state === 'busy' ? t.cxBusy : t.cxButton}</button></div>
+      {state === 'done' && <p role="status" className="wallet-ok">{t.cxDone(count)}</p>}
+      {state === 'failed' && <p role="alert" className="error-text">{t.cxFailed}</p>}
     </section>
   );
 }

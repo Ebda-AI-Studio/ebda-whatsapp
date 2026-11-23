@@ -104,7 +104,7 @@ describe.each<Lang>(['ar', 'en'])('a standalone workspace (%s)', (lang) => {
   });
 
   it('the no-seat page says workspace', () => {
-    render(<NoSeat reason="none" onRetry={vi.fn()} standalone />);
+    render(<NoSeat reason="none" onRetry={vi.fn()} onSignOut={vi.fn()} onSwitch={vi.fn()} standalone />);
     expect(document.body.textContent).not.toMatch(STORE_WORD);
   });
 });

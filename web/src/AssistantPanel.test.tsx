@@ -43,7 +43,7 @@ describe('AssistantPanel', () => {
     mount(fakeApi(), { onNavigate: go });
     await ask();
     const link = await screen.findByRole('link', { name: new RegExp(t.assistantShowMe) });
-    expect(link.getAttribute('href')).toBe('#wallet');
+    expect(link.getAttribute('href')).toBe('/wallet');
     fireEvent.click(link);
     expect(go).toHaveBeenCalledWith('wallet');
   });

@@ -8,9 +8,9 @@ capabilities:
 You do not need a store to use Ebda Chat. You can open a workspace of your own: an inbox, your own number, campaigns to your own lists, one-time codes and the AI agent. Orders, the catalogue and cash-on-delivery confirmations belong to a store, so a workspace without one does not show them.
 
 ## How to start
-1. Ask Ebda AI Studio for an **invite code**. While we are opening this up step by step, a workspace is created with a single-use code.
-2. Sign in with your Ebda AI Studio account (or create one from the Chat sign-in page).
-3. Enter the invite code and a name for your workspace, then open the inbox.
+1. Sign in with your Ebda AI Studio account, or create one from the Chat sign-in page and confirm your email.
+2. Choose **Create a workspace** and give it a name.
+3. Open the inbox.
 
 ## Good to know
 - Each person owns one workspace.

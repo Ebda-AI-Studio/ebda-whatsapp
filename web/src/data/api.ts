@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, assistantActResponse, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, connectorDto, connectorTestResult, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  type ContactDto, agentSettingsDto, apiError, assistantActResponse, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, connectorDto, connectorTestResult, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
   opsStatusDto, proactiveRecsDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, inviteMemberResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest, segmentDto, quickReplyDto, listQuickRepliesResponse, noteDto, conversationDto,
 } from '../../../src/core/api/contract';
@@ -243,6 +243,16 @@ export function createApiSource(o: Opts): LiveSource {
       imports: async () => (await call('/imports', listImportsResponse)).items,
       rejects: async (id) => (await call(`/imports/${encodeURIComponent(id)}/rejects`, importRejectsResponse)).items,
       renameContact: (waId, name) => call(`/contacts/${encodeURIComponent(waId)}`, contactSummaryDto, { method: 'PATCH', body: JSON.stringify({ name }) }),
+      async exportAllContacts() {
+        const all: ContactDto[] = [];
+        let cursor: string | null = null;
+        do {
+          const page: z.infer<typeof listContactsResponse> = await call(`/contacts/export?limit=500${cursor ? `&cursor=${cursor}` : ''}`, listContactsResponse);
+          all.push(...page.items);
+          cursor = page.nextCursor;
+        } while (cursor);
+        return all;
+      },
       async exportContact(waId) {
         const page = z.object({ messages: z.array(z.unknown()), nextAfter: z.number().int().nullable() }).loose();
         let out = await call(`/contacts/${encodeURIComponent(waId)}/export?limit=500`, page);
@@ -303,6 +313,8 @@ export function createApiSource(o: Opts): LiveSource {
         if (!res.ok) throw new ApiError('invalid_request', res.status);
         return instapayRequestDto.parse(await res.json());
       },
+      cancelInstapay: (requestId) => call(`/wallet/instapay/${encodeURIComponent(requestId)}/cancel`, instapayRequestDto, post({})),
+      contestInstapay: (requestId, note) => call(`/wallet/instapay/${encodeURIComponent(requestId)}/contest`, instapayRequestDto, post({ note })),
       refundRequests: async () => (await call('/wallet/refund-requests', items(refundRequestDto))).items,
       requestRefund: (amountMinor, note) => call('/wallet/refund-requests', refundRequestDto, post({ amountMinor, ...(note.trim() ? { note: note.trim() } : {}) })),
       previewNumberFunding: (pn) => call(`/numbers/${encodeURIComponent(pn)}/funding/preview`, numberFundingPreviewDto, post({ funding: 'merchant_card' })),

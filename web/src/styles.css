@@ -725,6 +725,10 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
   .store-menu-panel { inset-inline: 12px; inset-block-end: 72px; width: auto; }
 }
 @media (max-width: 479px) { .rail-store > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
+.account-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 12px; }
+.gate .btn.ghost { color: var(--on-night); border-color: var(--night-line); }
+.gate-account { margin-top: 6px; color: var(--lift); }
+.gate-account-en { color: var(--on-night-2); font-size: 12px; }
 
 /* CHAT-QA-10: on the desktop rail every label is ONE line (the rail is 84 px, items 76 px, so the longest Arabic label, المساعد الذكي, fits at 12 px); a longer one
    in another language is cut with an ellipsis instead of wrapping into two lines that overlap the icon. The phone rail keeps its own rules above. */

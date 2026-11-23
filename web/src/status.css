@@ -24,5 +24,7 @@
 .connect-strip a { flex: none; color: inherit; font-weight: 600; text-underline-offset: 3px; padding: 10px 0; }
 .int-title { display: flex; align-items: center; gap: 10px; }
 .int-mark { flex: none; inline-size: 32px; block-size: 32px; display: inline-grid; place-items: center; border-radius: var(--radius-s); background: var(--night); color: var(--lift); font: 600 13px/1 ui-monospace, 'SF Mono', Menlo, monospace; box-shadow: inset 0 0 0 1px var(--night-line); }
+.int-mark[data-kind='odoo'] { inline-size: 52px; background: #fff; color: inherit; box-shadow: inset 0 0 0 1px var(--sand-2); }
+.int-mark[data-kind='odoo'] img { display: block; inline-size: 40px; block-size: auto; }
 .int-pick { display: flex; align-items: center; gap: 10px; }
 .int-pick .field { flex: 1; min-inline-size: 0; }

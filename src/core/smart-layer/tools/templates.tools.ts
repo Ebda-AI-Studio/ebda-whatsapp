@@ -72,7 +72,7 @@ async function generate(kit: Kit, api: Reader, ctx: TurnCtx, what: string, ask: 
   if (!hold) throw new ToolInputError('unavailable');
   try {
     const names = ((await api.get('/templates')) as { items?: Array<{ name: string; language: string }> }).items ?? [];
-    const out = await writeTemplate({ complete: w.complete, check: (d) => ask_(api, d), taken: (lang) => new Set(names.filter((n) => n.language === lang).map((n) => n.name)) }, ask, prior);
+    const out = await writeTemplate({ complete: w.complete, check: (d) => ask_(api, d), taken: (lang) => new Set(names.filter((n) => n.language === lang).map((n) => n.name)) }, ask, prior, await storeProfile(api, ctx.storeId));
     if (blocking(out).length) throw new ToolInputError('invalid');
     await w.cache.put(key, JSON.stringify({ ...out, hold }));
     return { w: out, hold, fresh: true };
@@ -80,6 +80,24 @@ async function generate(kit: Kit, api: Reader, ctx: TurnCtx, what: string, ask: 
     await w.credits.release(hold).catch(() => undefined); // nothing is charged for a draft that could not be made
     throw e;
   }
+}
+/**
+ * What the writer may know about the store, from data Chat really has (it stores no business category): the store's name and the titles of the service menu the merchant wrote.
+ * Empty when neither is readable: the writer then stays generic. Never throws (a profile is a nicety, not a reason to fail a paid draft).
+ */
+export async function storeProfile(api: Reader, storeId: string): Promise<string> {
+  const lines: string[] = [];
+  try {
+    const me = (await api.get('/me')) as { stores?: Array<{ id: string; name: string }> };
+    const name = me.stores?.find((x) => x.id === storeId)?.name?.trim();
+    if (name) lines.push(`Name: ${name.slice(0, 80)}`);
+  } catch { /* generic */ }
+  try {
+    const st = (await api.get('/store-link/settings')) as { menu?: { items?: Array<{ title?: { ar?: string; en?: string } }> } };
+    const titles = (st.menu?.items ?? []).map((i) => i.title?.ar || i.title?.en || '').filter(Boolean).slice(0, 8);
+    if (titles.length) lines.push(`Service menu: ${titles.join('، ')}`.slice(0, 300));
+  } catch { /* generic */ }
+  return lines.join('\n');
 }
 const ask_ = (api: Reader, d: TemplateDraftInput): Promise<Check> => ask(api, d);
 

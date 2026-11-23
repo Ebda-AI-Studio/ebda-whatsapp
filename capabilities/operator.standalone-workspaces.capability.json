@@ -50,6 +50,6 @@
     "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
   ],
   "gaps": [
-    "operator replaces: none (onboarding is invitation-only while STANDALONE_WORKSPACES=invite)"
+    "operator replaces: none (invite codes matter only if the flag is set back to invite)"
   ]
 }

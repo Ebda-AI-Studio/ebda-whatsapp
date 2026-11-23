@@ -31,23 +31,23 @@
   "questions": {
     "ar": [
       "ازاي افتح Ebda Chat من غير متجر؟",
-      "عندي كود دعوة لـ Chat",
+      "ازاي اعمل مساحة عمل Chat بحسابي؟",
       "عايز اعمل مساحة عمل جديدة"
     ],
     "en": [
       "How do I start Ebda Chat without a store?",
-      "I have an invite code"
+      "Can I create a workspace with my own account?"
     ]
   },
   "steps": [
-    "Sign in with an Ebda account, enter the invite code and a workspace name, then open the inbox"
+    "Sign in with an Ebda AI Studio account (verified email), choose Create a workspace, give it a name, then open the inbox"
   ],
   "edgeCases": [
-    "While the flag is `invite`, creation needs an operator-minted single-use code; one owned workspace per person; the other methods on /workspaces are refused (person-level wildcard mount)",
+    "Creation is open to any verified account (STANDALONE_WORKSPACES=open); one owned workspace per person; at most 3 attempts per person and 10 per network address a day; the other methods on /workspaces are refused (person-level wildcard mount)",
     "Standalone workspaces have no orders, catalogue, COD or recommendations"
   ],
   "gaps": [
-    "Self-serve (flag open) is not on yet; no self-service account deletion in Chat"
+    "No self-service account deletion in Chat"
   ],
-  "assistantNote": "creating a workspace needs an invite code while the flag is invite-only; hand off to Ebda for a code"
+  "assistantNote": "a workspace is created from the sign-in flow; the assistant only exists inside a workspace"
 }

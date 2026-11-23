@@ -4,13 +4,14 @@ import type { ReactNode } from 'react';
 import { num, type Lang, type Strings } from '../i18n';
 import type { InboxSource } from '../data/source';
 import { StoreMenu } from './StoreMenu';
+import { pathFor } from '../lib/route';
 
 // Only sections that exist are listed: settings join the rail when their screen ships.
 export type View = 'inbox' | 'campaigns' | 'templates' | 'contacts' | 'agent' | 'bot' | 'numbers' | 'integrations' | 'wallet' | 'team' | 'operator';
 
 export function Rail({ t, view, onNavigate, show, onSignOut, assistant, store, status, inboxUnread = 0, lang }: { lang?: Lang; status?: ReactNode; inboxUnread?: number; t: Strings; view: View; onNavigate: (v: View) => void; show: Record<Exclude<View, 'inbox'>, boolean>; onSignOut?: (() => void) | undefined; assistant?: { open: boolean; onToggle: () => void } | undefined; store?: Pick<InboxSource, 'stores' | 'storeId' | 'switchStore' | 'signOut'> | undefined }) {
   const item = (v: View, icon: ReactNode, label: string, badge = 0) => (
-    <a href={`#${v}`} aria-current={view === v ? 'page' : undefined} aria-describedby={badge > 0 ? 'rail-unread-desc' : undefined} onClick={(e) => { e.preventDefault(); onNavigate(v); }}>{icon}<span>{label}</span>{badge > 0 && <b className="rail-badge" aria-hidden>{badge > 99 ? '99+' : num(badge, lang ?? 'ar')}</b>}</a>
+    <a href={pathFor(v)} aria-current={view === v ? 'page' : undefined} aria-describedby={badge > 0 ? 'rail-unread-desc' : undefined} onClick={(e) => { e.preventDefault(); onNavigate(v); }}>{icon}<span>{label}</span>{badge > 0 && <b className="rail-badge" aria-hidden>{badge > 99 ? '99+' : num(badge, lang ?? 'ar')}</b>}</a>
   );
   return (
     <nav className="rail" aria-label={t.nav}>
