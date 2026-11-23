@@ -4,6 +4,7 @@ import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { dateTime } from './CampaignsScreen';
 import { LoadError } from './LoadError';
+import { Skeleton } from './Skeleton';
 
 type Key = keyof BotSwitchesDto;
 /** The two switches that message customers or cost money per use: turning them ON asks the server for a confirm token first (SETTINGS-CONFIRM-1). */
@@ -73,7 +74,7 @@ export function BotSwitches({ t, lang, source, readOnly }: { t: Strings; lang: L
       <section className="settings" aria-labelledby="bot-sending-title">
         <h2 id="bot-sending-title">{t.thTitle}</h2>
         <p className="muted">{t.thIntro}</p>
-        {thr === undefined && <p className="muted">…</p>}
+        {thr === undefined && <Skeleton t={t} rows={1} kind="setting" />}
         {thr === 'error' && <LoadError t={t} onRetry={load} />}
         {thr === null && <p className="muted">{t.swNoNumber}</p>}
         {thr && thr !== 'error' && (
@@ -89,7 +90,7 @@ export function BotSwitches({ t, lang, source, readOnly }: { t: Strings; lang: L
       <section className="settings" aria-labelledby="bot-switches-title">
         <h2 id="bot-switches-title">{t.swTitle}</h2>
         <p className="muted">{t.swIntro}</p>
-        {sw === undefined && <p className="muted">…</p>}
+        {sw === undefined && <Skeleton t={t} rows={1} kind="setting" />}
         {sw === 'error' && <LoadError t={t} onRetry={load} />}
         {sw && sw !== 'error' && rows.map((r) => (
           <div key={r.key} className="field">

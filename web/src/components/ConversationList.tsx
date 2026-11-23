@@ -5,6 +5,7 @@ import type { ConversationFilter } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { relativeTime } from '../lib/format';
 import { Highlight } from './Highlight';
+import { Skeleton } from './Skeleton';
 import { SearchBox, optionId, type SearchStatus } from './SearchBox';
 
 type Props = {
@@ -60,7 +61,7 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
         {items.length === 0 && (query.trim() !== ''
           ? searchStatus === 'done' && <li className="empty" role="presentation">{t.noResults}</li> // while searching, the search box above says loading / failed
           : listState === 'ok' ? <li className="empty" role="presentation">{t.noResults}</li>
-          : listState === 'loading' ? <li className="empty" role="presentation" aria-busy="true">…</li>
+          : listState === 'loading' ? <li role="presentation"><Skeleton t={t} rows={4} /></li>
           : <li role="presentation"><LoadError t={t} text={t.loadError} onRetry={() => onRetry?.()} /></li>)}
         {items.map((c, i) => (
           <li key={c.id} role="presentation">
