@@ -199,6 +199,8 @@ A warm-neutral field with one metallic accent and three muted status inks.
 **The Own-Direction Rule.** Customer-authored text uses `dir="auto"` / `unicode-bidi: plaintext` and `text-align: start`; never impose the UI direction on it.
 **The No Letter Motion Rule.** No per-letter animation (breaks Arabic joining).
 
+**The Motion Ladder (MOTION-1).** 150 ms colour and press, 200 ms entrances, 250 ms drawers and progress; one easing; hover then a deeper pressed tint, never a transform; one 2 px focus ring; regions load as a skeleton that holds the final height (`Skeleton`), never a bare ellipsis; large shadows are `--elev-2` / `--elev-3`. Pinned by `test/web-motion.test.ts`.
+
 ## Layout
 
 Desktop (>=1200px): four grid columns: 72px rail, 340px list, fluid chat, 344px orders. Tablet (820-1199px): orders become a drawer from the inline-end edge over a 28% night scrim. Phone (<820px): one pane at a time (list or chat), rail hidden, an order strip above the chat opens the orders as a bottom sheet (max 82vh, 18px top corners). Everything uses logical properties so RTL is the default and LTR mirrors. Spacing is a loose 4/6/8/10/12/16/20px rhythm; thread padding clamps 16-36px. Touch and phone raise chips and search to 44px+.
