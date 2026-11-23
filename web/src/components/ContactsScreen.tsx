@@ -1,8 +1,11 @@
 import { Upload, Users } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { phoneDigits } from '../../../src/core/text-normalise';
 import type { ContactDto, ImportDto, RetentionDto } from '../../../src/core/api/contract';
+import { ApiError } from '../data/api';
 import type { ContactsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { dateOnly } from '../lib/datetime';
 import { relativeTime } from '../lib/format';
 import { useTypeahead } from '../lib/useTypeahead';
 import { Highlight } from './Highlight';
@@ -88,7 +91,7 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
                     {c.consent?.proof && (
                       <details className="consent-proof small">
                         <summary>{t.consentProof}</summary>
-                        <p className="muted">{t.consentProofLine(t.consentSource[c.consent.proof.source], c.consent.proof.attestedBy, new Date(c.consent.proof.at).toLocaleDateString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB'))}</p>
+                        <p className="muted">{t.consentProofLine(t.consentSource[c.consent.proof.source], c.consent.proof.attestedBy, dateOnly(c.consent.proof.at, lang))}</p>
                         <blockquote dir="auto">{c.consent.proof.wording}</blockquote>
                       </details>
                     )}
@@ -194,22 +197,26 @@ function ImportPanel({ t, lang, api, imports, failed, onRetry, onStarted }: { t:
 
 /** What the owner types: any form of an Egyptian or international number, as WhatsApp's id (digits, country code first). */
 export function toWaId(raw: string): string | null {
-  let d = raw.replace(/[^\d]/g, '');
+  let d = phoneDigits(raw);
   if (d.startsWith('00')) d = d.slice(2);
   if (/^01\d{9}$/.test(d)) d = `20${d.slice(1)}`;
   return /^[1-9]\d{7,14}$/.test(d) ? d : null;
 }
 
 function CustomerTools({ t, api, owner, contact, onRenamed, onMerged, onTagged }: { t: Strings; api: ContactsApi; owner: boolean; contact: ContactDto | null; onRenamed: (name: string) => void; onMerged: () => void; onTagged: (tags: string[]) => void }) {
+  const [eraseTyped, setEraseTyped] = useState('');
   const [name, setName] = useState('');
   const [into, setInto] = useState('');
   const [msg, setMsg] = useState<{ kind: 'ok' | 'alert'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setName(contact?.name ?? ''); setInto(''); }, [contact?.waId, contact?.name]);
+  useEffect(() => { setName(contact?.name ?? ''); setInto(''); setEraseTyped(''); }, [contact?.waId, contact?.name]);
   useEffect(() => { if (contact) setMsg(null); }, [contact?.waId]); // a message about the last action stays until another customer is picked
-  const run = async (fn: () => Promise<void>, ok: string) => {
+  const run = async (fn: () => Promise<void>, ok: string, notFound?: string) => {
     setBusy(true); setMsg(null);
-    try { await fn(); setMsg({ kind: 'ok', text: ok }); } catch { setMsg({ kind: 'alert', text: t.cdFailed }); } finally { setBusy(false); }
+    try { await fn(); setMsg({ kind: 'ok', text: ok }); } catch (e) {
+      // The server answers 404 'contact not found' for a customer that is already gone (a second erase); any other failure keeps the generic message.
+      setMsg({ kind: 'alert', text: notFound && e instanceof ApiError && e.status === 404 && e.code === 'contact not found' ? notFound : t.cdFailed });
+    } finally { setBusy(false); }
   };
   const target = toWaId(into);
   const download = async () => {
@@ -241,6 +248,12 @@ function CustomerTools({ t, api, owner, contact, onRenamed, onMerged, onTagged }
               <label className="field"><span>{t.cdMergeInto}</span><input dir="ltr" inputMode="tel" value={into} onChange={(e) => setInto(e.target.value)} /></label>
               <div className="settings-actions">
                 <button type="button" className="btn danger" disabled={busy || !target || target === contact.waId} onClick={() => void run(async () => { await api.mergeContacts(contact.waId, target!); onMerged(); }, t.cdMerged)}>{t.cdMergeGo}</button>
+              </div>
+              <h3 className="pane-sub">{t.cdEraseTitle}</h3>
+              <p className="muted small">{t.cdEraseWarn}</p>
+              <label className="field"><span>{t.cdEraseConfirm}</span><input dir="ltr" inputMode="numeric" value={eraseTyped} onChange={(e) => setEraseTyped(e.target.value)} /></label>
+              <div className="settings-actions">
+                <button type="button" className="btn danger" disabled={busy || toWaId(eraseTyped) !== contact.waId} onClick={() => void run(async () => { await api.eraseContact(contact.waId); onMerged(); }, t.cdErased, t.cdErasedBefore)}>{t.cdEraseGo}</button>
               </div>
             </>
           )}

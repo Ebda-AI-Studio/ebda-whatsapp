@@ -30,8 +30,8 @@ jobs:
     environment: production
     # Ruling CI-UMBRA-ON-1: the production deploy has its OWN switch, EBDA_DEPLOY_RUNS_ON, separate from the PR runners'
     # EBDA_RUNS_ON, so pointing PR jobs at the shared self-hosted VM never also moves the job that holds the production credentials.
-    # Unset = the pinned GitHub-hosted ubuntu-24.04. Durable fix: Cloudflare Workers Builds (WA-DEPLOY-3).
-    runs-on: ${{ fromJSON(vars.EBDA_DEPLOY_RUNS_ON || '"ubuntu-24.04"') }}
+    # Unset = the Mac label ebda-mac-light, never a hosted runner. Durable fix: Cloudflare Workers Builds (WA-DEPLOY-3).
+    runs-on: ${{ fromJSON(vars.EBDA_DEPLOY_RUNS_ON || '["ebda-mac-light"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,7 +42,6 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
       # No lifecycle scripts, and no secret in the environment of anything that runs repo or dependency code except wrangler itself (the Deploy step).
       - run: npm ci --ignore-scripts
       - run: npm run typecheck

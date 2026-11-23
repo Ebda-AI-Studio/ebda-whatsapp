@@ -315,7 +315,7 @@ export class WorkspaceDO extends DurableObject<Env> {
         }
         const wasCodReply = !!m.reply && handleCodReply(this.host(), m, batch.phoneNumberId, now);
         if (wasCodReply) linkWork = true;
-        else if ((ordering || agent || front) && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image' || (agent && (m.type === 'audio' || m.type === 'video' || m.type === 'document')))) {
+        else if ((ordering || agent || front) && !optOut && (m.type === 'text' || m.type === 'interactive' || m.type === 'order' || m.type === 'image' || (agent && (m.type === 'audio' || m.type === 'video' || m.type === 'document' || m.type === 'sticker')) || ((ordering || agent) && m.type === 'location' && !!m.location))) {
           addTask(this.sql, 'bot_turn', now, botInputFrom(m, inserted.id, batch.phoneNumberId));
           linkWork = true;
         }
@@ -2684,6 +2684,9 @@ export class WorkspaceDO extends DurableObject<Env> {
           this.sql.exec(`INSERT INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, ...cols.map((c) => row[c] as SqlStorageValue));
         }
       }
+      // WA-RECS-1: a backup without a recommendProducts row (taken before the ruling) must stay OFF in a fresh, marked-ON workspace. The marker is dropped here;
+      // agent_state is restored EXACTLY as backed up (no extra row), the default comes from workspace_meta, which is not a backed-up table.
+      if (!this.sql.exec("SELECT 1 FROM agent_state WHERE key = 'setting.recommendProducts'").toArray().length) this.sql.exec("DELETE FROM workspace_meta WHERE key = 'recs_default_on'");
     });
     this.rebuildFts();
     return { manifest, erasedSkipped };

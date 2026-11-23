@@ -203,6 +203,10 @@ export const meResponse = z.object({
   storeId: z.string(),
   role: z.enum(['owner', 'staff', 'super_admin']),
   capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional(), assistant: z.boolean().optional() }),
+  /** Whether THIS store has a Chat workspace. false = Chat was never switched on for it (every workspace route answers 404). Additive: absent from older servers. */
+  workspace: z.boolean().optional(),
+  /** The stores this person may act on that DO have a Chat workspace (id, name, role), for the store picker. At most 50. */
+  stores: z.array(z.object({ id: z.string(), name: z.string(), role: z.enum(['owner', 'staff']) })).max(50).optional(),
 });
 export type MeResponse = z.infer<typeof meResponse>;
 
@@ -317,6 +321,8 @@ export const agentSettingsFields = z.object({
   allowFreeDelivery: z.boolean(),
   allowExchange: z.boolean(),
   allowGuarantee: z.boolean(),
+  /** The agent may recommend products from the catalogue (similar items, complements, after an order, budget asks). Proactive (it can message a customer after an order), so Ruling WA-RECS-1: OFF for workspaces that existed before it, ON for new ones; off = it only answers what was asked. */
+  recommendProducts: z.boolean(),
 });
 export const agentSettingsDto = agentSettingsFields.extend({
   hasApiKey: z.boolean(),
@@ -607,7 +613,13 @@ export const walletDto = z.object({
   lowBalanceThresholdMinor: z.number().int().nonnegative(),
   /** One credit = one AI turn. `low` = available under a tenth of the monthly `allowance` (never under 5 credits, `lowThreshold`). */
   aiCredits: z.object({ balance: z.number().int(), available: z.number().int(), low: z.boolean(), lowThreshold: z.number().int().nonnegative(), allowance: z.number().int().nonnegative() }),
-  plan: z.object({ packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable() }).nullable(),
+  plan: z.object({
+    packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable(),
+    /** Additive (CHAT-QA-13): the Chat package's own name, for a package bought in Chat. */
+    packageName: z.string().optional(),
+    /** Additive (CHAT-QA-13): the Store plan, by the Store's own name, when the running package is the one the Store plan includes. */
+    storePlan: z.object({ code: z.string(), nameAr: z.string(), nameEn: z.string() }).optional(),
+  }).nullable(),
 });
 export type WalletDto = z.infer<typeof walletDto>;
 

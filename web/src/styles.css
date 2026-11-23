@@ -650,3 +650,27 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
 .segment-list .order-actions { grid-template-columns: auto auto; }
 .confirm-box { display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
 .segments-panel select { min-height: 44px; border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; background: var(--paper); color: var(--ink); font: inherit; }
+/* Store picker + account menu (rail) */
+.store-menu { margin-block-start: auto; position: relative; }
+.rail-assistant ~ .store-menu { margin-block-start: 0; }
+.rail-store { width: 56px; min-height: 56px; display: grid; place-items: center; gap: 2px; border: 0; background: none; border-radius: 12px; color: var(--on-night-2); font: inherit; font-size: 12px; padding: 6px 2px; cursor: pointer; }
+.rail-store > span { max-width: 52px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-store:hover, .rail-store[aria-expanded='true'] { color: var(--on-night); }
+.store-menu-panel { position: fixed; inset-block-end: 12px; inset-inline-start: calc(var(--rail) + 8px); z-index: 9; width: min(280px, calc(100vw - 24px)); background: var(--night); color: var(--on-night); border: 1px solid var(--night-2); border-radius: 12px; padding: 12px; display: grid; gap: 4px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.35); }
+.store-menu-panel ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 40vh; overflow-y: auto; }
+.store-menu-panel button { width: 100%; text-align: start; border: 0; background: none; color: inherit; font: inherit; padding: 10px; min-height: 44px; border-radius: 8px; cursor: pointer; }
+.store-menu-panel button:hover { background: var(--night-2); color: var(--lift); }
+.store-menu-label { margin: 6px 0 0; font-size: 12px; color: var(--on-night-2); }
+.store-menu-current { margin: 0; font-weight: 500; color: var(--lift); overflow-wrap: anywhere; }
+.store-menu-none { margin: 0; font-size: 13px; color: var(--on-night-2); }
+.store-menu-signout { margin-block-start: 6px; border-block-start: 1px solid var(--night-2) !important; border-radius: 0 0 8px 8px !important; }
+.store-menu-panel :focus-visible { outline-color: var(--focus-on-night); }
+@media (max-width: 819px) {
+  .store-menu { margin: 0; flex: 1 1 0; min-width: 0; max-width: 96px; }
+  .rail-store { width: 100%; min-height: 52px; line-height: 1.2; }
+  .store-menu-panel { inset-inline: 12px; inset-block-end: 72px; width: auto; }
+}
+@media (max-width: 479px) { .rail-store > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
+
+/* CHAT-QA-6: the Cairo reading under a datetime-local picker (the picker itself is drawn by the browser). */
+.cairo-when { display: block; margin-block: 2px 8px; font-size: 12px; }

@@ -142,7 +142,7 @@ export async function pushCodOutcome(host: LinkHost, orderId: string, now = Date
   const outcome = row.outcome as CodOutcome;
   const at = new Date(row.outcome_at ?? now).toISOString();
   if (bridge) {
-    const res = await bridge.recordCodOutcome(host.workspaceId, { orderId, outcome, at, idempotencyKey: row.outcome_idem });
+    const res = await bridge.recordCodOutcome(host.workspaceId, { orderId, ...(row.buyer_key ? { buyerKey: row.buyer_key } : {}), outcome, at, idempotencyKey: row.outcome_idem });
     if (!res.ok && res.reason === 'unavailable') throw new Error(`store unavailable: ${res.message ?? ''}`.slice(0, 120));
     // not_found / not_linked / invalid are answers, not outages: retrying would not change them.
     if (!res.ok) alert('cod_outcome_refused', { workspace: host.workspaceId, reason: res.reason });

@@ -1,0 +1,24 @@
+import { Sparkles } from 'lucide-react';
+import { BRAND } from '@brand';
+import type { Lang, Strings } from '../i18n';
+
+/**
+ * A store with no Chat workspace is its OWN state, not a failed load and not an empty inbox: nothing was loaded because there is nothing to load.
+ * The one action is the store's Settings page in Store admin, where the OWNER connects Chat (Ruling CHAT-ENABLE-1: a workspace exists only because the owner chose it; the Store's
+ * link action registers it here). Enabling creates the workspace only: no charge, no plan change, no message is sent.
+ */
+export function NoWorkspace({ t, lang, storeId, storeName }: { t: Strings; lang: Lang; storeId: string | undefined; storeName: string }) {
+  const product = lang === 'ar' && BRAND.productNameAr ? BRAND.productNameAr : BRAND.productName;
+  const origin = BRAND.storeAdminUrl;
+  const href = origin && storeId ? `${origin.replace(/\/$/, '')}/stores/${encodeURIComponent(storeId)}/settings` : null;
+  return (
+    <main className="screen no-workspace">
+      <div className="state" role="status" aria-label={t.noWsTitle(product)}>
+        <span className="state-icon" aria-hidden><Sparkles size={22} /></span>
+        <p className="state-title">{t.noWsTitle(product)}</p>
+        <p className="state-body">{t.noWsBody(storeName, product)}</p>
+        {href && <a className="btn primary" href={href} target="_blank" rel="noopener">{t.noWsCta(product)}</a>}
+      </div>
+    </main>
+  );
+}

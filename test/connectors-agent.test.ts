@@ -34,7 +34,7 @@ describe('the agent and connectors', () => {
     const m = model([{ tools: [call('AB12')] }, { text: 'حجزك مؤكد' }]);
     const out = await say(ws, pn, text('حجزي AB12؟'), c.graph);
     expect(out.map((s) => s.text)).toEqual(['حجزك مؤكد']);
-    expect(m.calls[0]!.tools.map((t) => t.name)).toEqual(['search_catalog', 'show_products', 'open_catalog', 'order_status', 'start_order', 'handoff_to_human', 'crm__check_booking']);
+    expect(m.calls[0]!.tools.map((t) => t.name)).toEqual(['search_catalog', 'show_products', 'open_catalog', 'recommend_products', 'order_status', 'start_order', 'handoff_to_human', 'crm__check_booking']);
     expect(m.calls[0]!.system).toContain('crm__check_booking');
     expect(c.calls).toHaveLength(1);
     expect(c.calls[0]!.json).toMatchObject({ event: 'tool_call', tool: 'check_booking', args: { reference: 'AB12' }, workspaceId: ws, buyerKey: BUYER_KEY_1, idempotencyKey: expect.stringMatching(/^conn:\d+:0$/) });

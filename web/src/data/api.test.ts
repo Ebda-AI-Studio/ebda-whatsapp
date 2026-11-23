@@ -129,6 +129,19 @@ describe('createApiSource', () => {
     expect(src.role).toBe('staff');
   });
 
+  it('reads workspace:false and the store list from /me (the no-workspace state and the picker)', async () => {
+    const stores = [{ id: 'a', name: 'متجر', role: 'owner' }];
+    const { f } = fetchStub({ '/me': () => ({ status: 200, body: { userId: 'u', storeId: STORE, role: 'owner', capabilities: { codOutcome: false }, workspace: false, stores } }) });
+    const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    await src.loadCapabilities();
+    expect(src.workspaceMissing).toBe(true);
+    expect(src.stores).toEqual(stores);
+    const ok = fetchStub({ '/me': () => ({ status: 200, body: { userId: 'u', storeId: STORE, role: 'owner', capabilities: { codOutcome: false }, workspace: true, stores } }) });
+    const live = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: ok.f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
+    await live.loadCapabilities();
+    expect(live.workspaceMissing).toBeUndefined();
+  });
+
   it('keeps COD outcomes off when /me says nothing or fails', async () => {
     const { f } = fetchStub({ '/me': () => ({ status: 500, body: {} }) });
     const src = createApiSource({ baseUrl: 'https://wa.test', storeId: STORE, getToken: async () => 'tok', fetchImpl: f as unknown as typeof fetch, userNames: {}, currentUserId: 'u' });
