@@ -84,6 +84,12 @@ describe('PKCE (RFC 7636)', () => {
 });
 
 describe('starting sign-in', () => {
+  it('adds prompt only when asked (use another account), never by default', async () => {
+    const h = setup();
+    expect((await signInStart(h)).url.searchParams.get('prompt')).toBeNull();
+    await h.s.startSignIn('/', { prompt: 'select_account' });
+    expect(new URL(h.redirects.at(-1)!).searchParams.get('prompt')).toBe('select_account');
+  });
   it('redirects to the discovered authorization endpoint with code + S256, state, nonce and the exact redirect uri', async () => {
     const h = setup();
     const { url } = await signInStart(h);

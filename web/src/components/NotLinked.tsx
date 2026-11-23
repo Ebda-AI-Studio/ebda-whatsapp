@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { BRAND } from '@brand';
 import { STRINGS } from '../i18n';
 import { maskEmail } from '../data/auth';
+import { AccountActions } from './AccountActions';
 
 /** Shown when the signed-in account belongs to no store: says which account is signed in (masked) so a wrong-account person sees why, and offers the way out. */
 export function NotLinked({ email, onSignOut, onSwitch }: { email: string | null; onSignOut: () => void; onSwitch: () => void }) {
@@ -31,10 +32,7 @@ export function NotLinked({ email, onSignOut, onSwitch }: { email: string | null
             </p>
           )}
         </div>
-        <div className="account-actions" role="group" aria-label={`${ar.signOutAction} / ${en.signOutAction}`}>
-          <button ref={first} type="button" className="btn gold gate-btn" lang="ar" dir="rtl" aria-label={`${ar.useAnotherAccount} / ${en.useAnotherAccount}`} onClick={onSwitch}>{ar.useAnotherAccount}</button>
-          <button type="button" className="btn ghost gate-btn" lang="ar" dir="rtl" aria-label={`${ar.signOutAction} / ${en.signOutAction}`} onClick={onSignOut}>{ar.signOutAction}</button>
-        </div>
+        <AccountActions onSignOut={onSignOut} onSwitch={onSwitch} switchFirst className="btn ghost gate-btn" switchClassName="btn gold gate-btn" switchRef={first} />
       </div>
     </main>
   );

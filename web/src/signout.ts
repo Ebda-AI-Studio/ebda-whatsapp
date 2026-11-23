@@ -31,3 +31,43 @@ export function makeAccountsSignOut(o: { stopRealtime: () => void; accountsUrl: 
     })();
   };
 }
+
+/** What a gate screen needs from the session: the OIDC session when the brand uses OIDC (set BEFORE the callback is handled), else the accounts-service pieces. */
+export type GateDeps = {
+  stopRealtime: () => void;
+  oidc: () => { signOut(): Promise<'redirected' | 'local'>; startSignIn(returnTo: string, opts?: { prompt?: 'select_account' | 'login' }): Promise<void> } | null;
+  accounts: () => { accountsUrl: string; getToken: () => Promise<string>; loginUrl: () => string };
+  /** OIDC sign-out with no provider end-session endpoint: the app is replaced by the signed-out notice (its button signs in again). */
+  onSignedOutLocally: (signIn: () => void) => void;
+  reload: () => void;
+  assign: (url: string) => void;
+  fetchImpl?: typeof fetch;
+};
+
+/**
+ * The two ways out of a gate screen (no store, no seat, refused view-as, a refused sign-in). They are DIFFERENT actions:
+ * - signOut ends the session and lands on the sign-in entry (OIDC: the signed-out notice or the provider's end-session page; accounts: reload).
+ * - switchAccount ends the session and goes straight to a login that lets the person pick another account (OIDC: `prompt=select_account` when the provider
+ *   has no end-session page; accounts: the login URL).
+ * Both work before the sign-in finished: the OIDC session is read at click time, never the unassigned accounts `tokens`.
+ */
+export function makeGateActions(d: GateDeps): { signOutNow: () => void; switchAccount: () => void } {
+  const accounts = (reload: () => void) => { const a = d.accounts(); return makeAccountsSignOut({ stopRealtime: d.stopRealtime, accountsUrl: a.accountsUrl, getToken: a.getToken, reload, ...(d.fetchImpl ? { fetchImpl: d.fetchImpl } : {}) }); };
+  return {
+    signOutNow: () => {
+      const s = d.oidc();
+      if (s) { makeSignOut({ stopRealtime: d.stopRealtime, session: s, onLocal: () => d.onSignedOutLocally(() => { void s.startSignIn('/'); }) })(); return; }
+      accounts(d.reload)();
+    },
+    switchAccount: () => {
+      const s = d.oidc();
+      if (s) {
+        d.stopRealtime();
+        clearAssistantConversations();
+        void s.signOut().then((r) => { if (r === 'local') void s.startSignIn('/', { prompt: 'select_account' }); }); // 'redirected': the provider's end-session page already shows its login
+        return;
+      }
+      accounts(() => d.assign(d.accounts().loginUrl()))();
+    },
+  };
+}
