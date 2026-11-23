@@ -8,6 +8,8 @@ import { SignInError } from './components/SignInError';
 import { makeAccountsSignOut, makeSignOut } from './signout';
 import { SignedOutLocally } from './components/SignedOutLocally';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
+import { CreateWorkspace, NoWorkspaceYet } from './components/CreateWorkspace';
+import { createWorkspace, fetchMine, isStandaloneId } from './data/workspaces';
 import { connectRealtime, createApiSource } from './data/api';
 import { SIGNED_OUT, createTokenProvider, decodeStores, decodeSub } from './data/auth';
 import { SignInGate } from './components/SignInGate';
@@ -72,7 +74,25 @@ async function boot(): Promise<void> {
       document.body.textContent = STRINGS.ar.viewAsNeedsReason;
       return;
     }
-    const storeId = viewAsId ?? pickStore(decodeStores(token), location.search);
+    // CHAT-SA-5: a Store id (the token's `stores`) takes today's path untouched. A `?store=sw_...` names a standalone workspace (the server checks membership on every request);
+    // an identity with no Store at all asks which standalone workspaces it has, and is offered the create screen when it has none.
+    const signOutOnly = ACCOUNTS_URL ? makeAccountsSignOut({ stopRealtime: () => undefined, accountsUrl: ACCOUNTS_URL, getToken: tokens.getToken, reload: () => location.reload() }) : oidcSession ? makeSignOut({ stopRealtime: () => undefined, session: oidcSession, onLocal: () => root.render(<SignedOutLocally onSignIn={() => { void oidcSession!.startSignIn('/'); }} />) }) : undefined;
+    const openWorkspace = (id: string) => { const u = new URL(location.href); u.searchParams.set('store', id); u.searchParams.delete('viewAs'); location.assign(u); };
+    const wantedId = new URLSearchParams(location.search).get('store');
+    const tokenStores = decodeStores(token);
+    let storeId: string | null | undefined = viewAsId ?? (isStandaloneId(wantedId) ? wantedId : pickStore(tokenStores, location.search));
+    if (!storeId && tokenStores.length === 0) {
+      const showMine = async (): Promise<void> => {
+        let mine: Awaited<ReturnType<typeof fetchMine>>;
+        try { mine = await fetchMine(location.origin, tokens.getToken); } catch { root.render(<NoWorkspaceYet failed onRetry={() => void showMine()} onSignOut={signOutOnly} />); return; }
+        const first = mine.items[0];
+        if (first) { openWorkspace(first.id); return; }
+        if (!mine.canCreate && !mine.needsInvite) { root.render(<NoWorkspaceYet failed={false} onRetry={() => void showMine()} onSignOut={signOutOnly} />); return; }
+        root.render(<CreateWorkspace needsInvite={mine.needsInvite} onCreate={(input) => createWorkspace(location.origin, tokens.getToken, input)} onDone={openWorkspace} onSignOut={signOutOnly} />);
+      };
+      await showMine();
+      return;
+    }
     if (!storeId) {
       document.body.textContent = 'حسابك مش مربوط بأي متجر لسه. / Your account is not linked to a store yet.';
       return;
@@ -89,7 +109,7 @@ async function boot(): Promise<void> {
     await api.loadCapabilities();
     if (api.noSeat) { // a member the owner has not seated (or whose seat the package no longer covers): say so, with a retry, instead of an inbox that cannot load
       stopRealtime();
-      root.render(<NoSeat reason={api.noSeat} onRetry={() => location.reload()} />);
+      root.render(<NoSeat reason={api.noSeat} onRetry={() => location.reload()} standalone={isStandaloneId(storeId)} />);
       return;
     }
     if (oidcSession) {

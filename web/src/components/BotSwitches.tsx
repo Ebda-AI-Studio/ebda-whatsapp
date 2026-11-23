@@ -87,6 +87,8 @@ export function BotSwitches({ t, lang, source, readOnly }: { t: Strings; lang: L
           </ul>
         )}
       </section>
+      {/* CHAT-SA-5: every switch here (ordering bot, order confirmations, store-login codes) belongs to a Store, so a standalone workspace has none. */}
+      {!source.standalone && (
       <section className="settings" aria-labelledby="bot-switches-title">
         <h2 id="bot-switches-title">{t.swTitle}</h2>
         <p className="muted">{t.swIntro}</p>
@@ -112,6 +114,7 @@ export function BotSwitches({ t, lang, source, readOnly }: { t: Strings; lang: L
           </div>
         ))}
       </section>
+      )}
     </>
   );
 }

@@ -70,6 +70,8 @@ textarea { caret-color: var(--gold-ink); }
 
 /* Shell */
 .app { display: grid; grid-template-columns: var(--rail) var(--list) minmax(0, 1fr) var(--orders); height: 100%; }
+/* CHAT-SA-5: a standalone workspace has no orders column. */
+@media (min-width: 1200px) { .app[data-nostore='on'] { grid-template-columns: var(--rail) var(--list) minmax(0, 1fr); } }
 .rail { background: var(--night); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 0; }
 .rail-mark { width: 30px; height: 36px; margin-bottom: 18px; }
 .rail a { width: 56px; min-height: 56px; display: grid; place-items: center; gap: 2px; border-radius: 12px; color: var(--on-night-2); text-decoration: none; font-size: 12px; padding: 6px 0; }
@@ -725,3 +727,18 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
 
 /* CHAT-QA-6: the Cairo reading under a datetime-local picker (the picker itself is drawn by the browser). */
 .cairo-when { display: block; margin-block: 2px 8px; font-size: 12px; }
+
+/* CHAT-SA-5: create-workspace screen, on the sign-in entry's night ground (gold accents, no orange). */
+.gate-form { width: min(100%, 460px); justify-items: stretch; text-align: start; }
+.gate-form .gate-lockup, .gate-form .gate-rule, .gate-form h1 { justify-self: center; text-align: center; }
+.gate-lede { margin: 0 0 4px; line-height: 1.8; color: var(--on-night-2); text-align: center; }
+.gate-card .gate-lede { text-align: center; }
+.gate-field { display: grid; gap: 6px; font-size: 14px; color: var(--on-night); margin-top: 8px; }
+.gate-field input { min-height: 46px; border: 1px solid var(--night-line); border-radius: var(--radius-control); padding: 0 14px; background: var(--night-2); color: var(--on-night); font: inherit; outline: 0; }
+.gate-field input::placeholder { color: var(--on-night-2); opacity: 0.8; }
+.gate-field input:focus-visible { border-color: var(--focus-on-night); box-shadow: 0 0 0 3px rgba(203, 168, 115, 0.28); }
+.gate-field input[aria-invalid='true'] { border-color: var(--bad); }
+.gate-field input[readonly] { color: var(--on-night-2); cursor: default; }
+.gate-field small { color: var(--on-night-2); line-height: 1.6; }
+.gate-links { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 480px) { .gate-form { padding: 28px 18px; } }
