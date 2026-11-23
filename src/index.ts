@@ -1,6 +1,7 @@
 import { runDueOffboardings } from './core/ops/offboarding';
 import { offboardingRoutes } from './routes/offboarding';
 import { membersRoutes } from './routes/members';
+import { invitationsRoutes } from './routes/invitations';
 import { auditWrites } from './core/audit';
 import { eraseContactFlow } from './core/contact-erase';
 import { purgeNewCapUsage } from './core/campaigns/new-cap';
@@ -209,6 +210,7 @@ api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
+api.route('/', invitationsRoutes); // CHAT-SA-4: the invitee's own pending invitations; auth = requirePerson mounted on /workspaces/* above (identity/person.ts)
 registerStarterSet(PACK.templates);
 registerPerStoreTemplate(PACK.perStoreTemplate ?? null);
 api.route('/', templatesRoutes(PACK.templates, PACK.seasonalTemplates ?? {}));

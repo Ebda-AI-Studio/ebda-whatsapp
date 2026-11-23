@@ -179,11 +179,11 @@ describe('call sites reach the Store only through bridgeForWorkspace (standalone
     const c = await post(o, ws, '/contacts/201001234567/orders/1001/cod-outcome', { outcome: 'confirmed' });
     expect(c.status).not.toBe(200);
   });
-  it('members route answers store_link_off for a standalone workspace (team arrives with PR-6)', async () => {
+  it('the team of a standalone workspace is its D1 membership, not a Store call (owner sees themselves, canInvite true)', async () => {
     const o = uid(), ws = await standalone(o);
     const r = await get(o, ws, '/members');
-    expect(r.status).toBe(404);
-    expect(await r.json()).toMatchObject({ message: 'store_link_off' });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ items: [{ userId: o, role: 'owner', seat: 'owner' }], canInvite: true });
   });
 });
 

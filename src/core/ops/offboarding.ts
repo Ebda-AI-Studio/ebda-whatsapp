@@ -37,6 +37,7 @@ export const OFFBOARD_TABLES = {
     audit_reasons: 'workspace_id', // operators' free-text reasons (AUDIT-RETENTION-1): deletable on purpose
     instapay_auto_workspace: 'workspace_id', // the per-workspace auto-confirm switch: configuration, nothing to keep
     money_confirmations: 'workspace_id', // single-use money-action tokens (hash only): worthless after the workspace is gone, and they name a user id
+    workspace_invitations: 'workspace_id', invite_attempts: 'workspace_id', // CHAT-SA-4: pending invitations (an email address) and invite reservations go with the workspace, before the registry row (foreign key)
     workspace_members: 'workspace_id', // CHAT-SA: a standalone workspace's team (user ids): deleted with the workspace, before the registry row (foreign key)
     erasure_records: 'workspace_id', // the workspace's backups are erased with it, so nothing is left for a restore to bring back
   } as Record<string, string>,

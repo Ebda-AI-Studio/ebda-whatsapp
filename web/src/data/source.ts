@@ -58,6 +58,12 @@ export interface TeamApi {
   list(): Promise<ListMembersResponse>;
   assign(userId: string): Promise<void>;
   unassign(userId: string): Promise<void>;
+  /** Standalone workspaces only (the list says `canInvite`): invite a staff member by email (the answer is the same whether or not the address had an account); rejects `seat_limit` (409). */
+  invite?(a: { email: string; firstName: string; language: 'ar' | 'en' }): Promise<void>;
+  /** Standalone workspaces only: remove a staff member (their access ends on their next request). */
+  remove?(userId: string): Promise<void>;
+  /** Standalone workspaces only: withdraw a pending invitation (the emailed link stops working). */
+  revokeInvitation?(userId: string): Promise<void>;
 }
 
 /** A merchant's own WhatsApp numbers (Phase 8.1); absent when Embedded Signup is switched off. */
