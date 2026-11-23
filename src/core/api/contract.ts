@@ -616,7 +616,7 @@ export const walletDto = z.object({
   plan: z.object({
     packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable(),
     /** Additive (CHAT-QA-13): the Chat package's own name, for a package bought in Chat. */
-    packageName: z.string().optional(),
+    packageName: z.string().optional(), packageNameAr: z.string().optional(),
     /** Additive (CHAT-QA-13): the Store plan, by the Store's own name, when the running package is the one the Store plan includes. */
     storePlan: z.object({ code: z.string(), nameAr: z.string(), nameEn: z.string() }).optional(),
   }).nullable(),
@@ -666,7 +666,8 @@ export const topupDto = z.object({
 /** Feature keys in display order (shared with marketing and the Store plan comparison). */
 export const PACKAGE_FEATURE_KEYS = ['members', 'shared_inbox', 'order_confirmations', 'templates', 'campaigns', 'order_in_chat', 'api', 'priority_support', 'ai_credits'] as const;
 export const packageDto = z.object({
-  id: z.string(), name: z.string(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative(),
+  /** `name` is the English display name; `nameAr` / `nameEn` are the size-based names (Ahmad 2026-11-19), additive. */
+  id: z.string(), name: z.string(), nameAr: z.string().optional(), nameEn: z.string().optional(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative(),
   maxMembers: z.number().int().min(1), features: z.array(z.enum(PACKAGE_FEATURE_KEYS)), periodMonths: z.number().int().positive(),
 });
 export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired', 'refunded']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
