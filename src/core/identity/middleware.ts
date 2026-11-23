@@ -15,7 +15,11 @@ import { IdentityError, type IdentityVerifier, type Principal } from './verifier
 
 export const integratorTokensEnabled = (env: Partial<Pick<Env, 'INTEGRATOR_TOKENS_ENABLED'>> | undefined): boolean => env?.INTEGRATOR_TOKENS_ENABLED === '1' || env?.INTEGRATOR_TOKENS_ENABLED?.toLowerCase() === 'true';
 
-export type AuthVars = { principal: Principal; storeRole: 'owner' | 'staff' | 'super_admin' };
+export type AuthVars = {
+  principal: Principal; storeRole: 'owner' | 'staff' | 'super_admin';
+  /** A route may set structured facts (ids, before/after values, never free text) for the audit row `auditWrites` writes after it. */
+  auditDetail?: Record<string, string | number | boolean | null>;
+};
 
 /**
  * What a suspended workspace may still do: pay (wallet, packages) and erase a contact (a data-protection right never waits on a suspension).

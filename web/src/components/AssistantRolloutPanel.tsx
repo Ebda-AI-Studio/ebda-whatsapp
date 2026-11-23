@@ -130,7 +130,7 @@ function WorkspaceMode({ t, api, run, fail }: Props) {
       </form>
       {loaded && (
         <>
-          <p aria-live="polite"><bdi dir="ltr">{a.wsCurrent(loaded.id, a.modes[loaded.mode] ?? loaded.mode)}</bdi></p>
+          <p aria-live="polite">{a.wsCurrent(loaded.id, a.modes[loaded.mode] ?? loaded.mode)}</p>
           <div className="wallet-form op-grid">
             <label className="field"><span>{a.wsMode}</span>
               <select value={pick} onChange={(e) => { setPick(e.target.value as AssistantMode); setAsking(false); }}>

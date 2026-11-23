@@ -27,3 +27,13 @@ it('the phone rail label is 12 px, not 11', () => {
   expect(hasRule(phone, '.rail a', /font-size:\s*12px/)).toBe(true);
   expect(hasRule(phone, '.rail a', /font-size:\s*11px/)).toBe(false);
 });
+
+// A later `.btn.danger { color: var(--bad) }` once matched the filled --bad background and hid every destructive confirm label (operator Assistant screen, 2026-11-23).
+it('no plain `.btn.danger` rule sets a text colour other than white; the filled background is --bad', () => {
+  const rules = [...css.matchAll(/(^|\n)\.btn\.danger\s*\{([^}]*)\}/g)].map((m) => m[2]!);
+  expect(rules.some((b) => /background:\s*var\(--bad\)/.test(b))).toBe(true);
+  for (const body of rules) {
+    const c = /(^|;|\s)color:\s*([^;]+)/.exec(body)?.[2]?.trim();
+    if (c) expect(c).toBe('#fff');
+  }
+});

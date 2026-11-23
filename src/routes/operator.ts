@@ -457,13 +457,22 @@ const assistantFlags = z.object({
   killedTools: z.array(z.string().min(1).max(64)).max(100).optional(),
 }).strict();
 operatorRoutes.get('/assistant', async (c) => c.json(await readPlatformFlags(c.env)));
+const toolsList = (xs: string[]) => xs.join(',').slice(0, 500);
 operatorRoutes.put('/assistant/flags', async (c) => {
   const b = assistantFlags.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, b.error.issues[0]?.message);
+  const before = await readPlatformFlags(c.env);
   if (b.data.global) await setPlatformFlag(c.env, FLAG.global, b.data.global, actor(c));
   if (b.data.product) await setPlatformFlag(c.env, FLAG.product, b.data.product, actor(c));
   if (b.data.killedTools) await setPlatformFlag(c.env, FLAG.tools, b.data.killedTools, actor(c));
-  return c.json(await readPlatformFlags(c.env));
+  const after = await readPlatformFlags(c.env);
+  // The audit row (written by auditWrites) carries what changed: before -> after for each switch this call touched.
+  c.set('auditDetail', {
+    ...(b.data.global ? { globalKillFrom: before.global?.kill === true, globalKillTo: after.global?.kill === true, globalModeFrom: before.global?.mode ?? null, globalModeTo: after.global?.mode ?? null, shadowFrom: before.shadow === true, shadowTo: after.shadow === true } : {}),
+    ...(b.data.product ? { chatKillFrom: before.product?.kill === true, chatKillTo: after.product?.kill === true } : {}),
+    ...(b.data.killedTools ? { killedToolsFrom: toolsList(before.killedTools ?? []), killedToolsTo: toolsList(after.killedTools ?? []) } : {}),
+  });
+  return c.json(after);
 });
 // ---- Ruling WA-MODEL-FLAG-1: the Chat agent's platform model (two allowed ids; null = the current default). Super admin only (this whole router), a reason is required and audited. ----
 operatorRoutes.get('/agent/model', async (c) => c.json({ model: await readAgentModelFlag(c.env), default: DEFAULT_WORKERS_AI_MODEL, allowed: AGENT_MODEL_IDS }));
@@ -488,7 +497,9 @@ operatorRoutes.put('/workspaces/:workspaceId/assistant', async (c) => {
   const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(c.req.param('workspaceId')).first();
   if (!known) return c.json({ error: 'not_found' }, 404);
   const ws = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(c.req.param('workspaceId')));
+  const from = await ws.assistantMode();
   await ws.setAssistantMode(b.data.mode);
+  c.set('auditDetail', { modeFrom: from, modeTo: b.data.mode });
   return c.json({ mode: b.data.mode });
 });
 
