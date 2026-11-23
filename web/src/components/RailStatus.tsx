@@ -1,3 +1,4 @@
+import '../status.css';
 import { Gauge, PhoneCall, PhoneOff, PlugZap } from 'lucide-react';
 import { num, type Lang, type Strings } from '../i18n';
 import type { ConnectionStatus, Health } from '../lib/connectionStatus';
