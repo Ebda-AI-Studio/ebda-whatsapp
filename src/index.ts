@@ -141,6 +141,8 @@ app.get('/auth/callback', (c) => c.env.ASSETS.fetch(new Request(new URL('/', c.r
 // Each screen of the shell has its own address (web/src/lib/route.ts VIEW_PATHS): a refresh or a shared link to one gets the shell, not a 404.
 // /api/*, /meta/*, /kashier/*, /health and /t/* are never listed here (they run Worker-first and own their paths); test/shell-routes.test.ts keeps both lists equal.
 export const SHELL_PATHS = ['/campaigns', '/templates', '/contacts', '/agent', '/bot', '/numbers', '/integrations', '/wallet', '/team', '/ops', '/chat/:id'] as const;
+// `/inbox` was never a path (the inbox lives at `/`), but people type and link it: send them there, query kept (?store= / ?viewAs=).
+app.get('/inbox', (c) => c.redirect(`/${new URL(c.req.url).search}`, 301));
 const shell = (c: { env: Env; req: { url: string; raw: Request } }) => c.env.ASSETS.fetch(new Request(new URL('/', c.req.url), c.req.raw));
 for (const path of SHELL_PATHS) app.get(path, shell);
 app.notFound((c) => PACK.notFound?.(c.req.raw) ?? c.json({ error: 'not_found' }, 404));

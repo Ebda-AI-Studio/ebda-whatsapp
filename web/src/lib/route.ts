@@ -22,15 +22,35 @@ export function parsePath(pathname: string): Route {
   return { kind: 'notfound' };
 }
 
+/**
+ * Before real paths, each screen lived at `/#<screen>` (`#wallet`, `#numbers`, ...). Those links are still out there (emails, notifications, help articles,
+ * bookmarks), so a hash that names a screen is mapped to its path. `#operator` was the old key of `/ops`; `#/wallet` (a path in the hash) is accepted too.
+ * Returns null for anything else (an in-page anchor like `#w-credits` is none of our business).
+ */
+export function legacyHashPath(hash: string): string | null {
+  const key = hash.replace(/^#\/?/, '').replace(/\/+$/, '').toLowerCase();
+  if (key === 'operator') return VIEW_PATHS.operator;
+  const hit = (Object.entries(VIEW_PATHS) as [View, string][]).find(([view]) => view === key);
+  return hit ? hit[1] : null;
+}
+
+/** Runs once at boot, before the first route is read: `/#contacts` becomes `/contacts` and `/inbox` becomes `/` (history.replaceState, so Back does not bounce). The query string is kept. */
+export function normaliseLocation(): void {
+  const path = location.pathname.length > 1 ? location.pathname.replace(/\/+$/, '') : location.pathname;
+  const target = path === '/inbox' ? '/' : (path === '/' ? legacyHashPath(location.hash) : null);
+  if (target !== null && (target !== location.pathname || location.hash)) history.replaceState(null, '', target + location.search);
+}
+
 export const pathFor = (view: View, chatId: number | null = null): string => (view === 'inbox' && chatId !== null ? `${CHAT_PREFIX}${chatId}` : VIEW_PATHS[view]);
 
 /** The current route, kept in step with the address bar. `go` pushes a history entry (back/forward work); a popstate re-reads the address. */
 export function useRoute(): { route: Route; go: (view: View, chatId?: number | null) => void } {
-  const [route, setRoute] = useState<Route>(() => parsePath(location.pathname));
+  const [route, setRoute] = useState<Route>(() => { normaliseLocation(); return parsePath(location.pathname); });
   useEffect(() => {
-    const onPop = () => setRoute(parsePath(location.pathname));
+    const onPop = () => { normaliseLocation(); setRoute(parsePath(location.pathname)); }; // popstate also fires for a hand-edited hash on `/`
     window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
+    window.addEventListener('hashchange', onPop); // a legacy `#wallet` link clicked while the app is open
+    return () => { window.removeEventListener('popstate', onPop); window.removeEventListener('hashchange', onPop); };
   }, []);
   const go = useCallback((view: View, chatId: number | null = null) => {
     const next = pathFor(view, chatId);
