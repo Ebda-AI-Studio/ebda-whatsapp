@@ -5,8 +5,8 @@ Rulings CHAT-SA-1..9 (`docs/rulings/CHAT-SA-*.md`). A standalone workspace has a
 ## The flag
 `STANDALONE_WORKSPACES` (wrangler var, default `off`; any other unknown value also means `off`):
 - `off`: nobody can create one (`403 standalone_off`). Existing standalone workspaces keep working.
-- `invite`: creation needs an operator-minted single-use code. This is the launch setting.
-- `open`: no code. Only after the public entry point exists (CHAT-SA-9: no ebda.app CTA until then).
+- `invite`: creation needs an operator-minted single-use code (the fallback if abuse appears).
+- `open`: no code. **Production runs `open` since 2026-11-23 (Ahmad).** Still applied: a verified person token, creation rate limits (below), one owned workspace per person, the new-workspace campaign cap, the first InstaPay payment reviewed by a person. Not enforced any more: an operator vouching for each client, and per-code expiry/revocation. If creation abuse appears, set `invite` (one-line var edit + deploy); existing workspaces keep working.
 Change it with a one-line var edit and a deploy. Keep it `off` until the web app can create a workspace.
 
 ## Invite codes
