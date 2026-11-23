@@ -1,0 +1,5 @@
+# CHAT-SA-2
+
+**Ruling CHAT-SA-2 - Standalone workspaces get their own id space `sw_<26 base32>` with a D1 CHECK `(kind='standalone') = (id LIKE 'sw_%')`; routes keep `/stores/:storeId/...` and treat the param as a workspace id; the middleware branches on the id PREFIX first, so a Store id can never take the standalone path and an `sw_` id can never take the Store path. `bridgeForWorkspace(env,id)` returns null for `sw_`; integrator tokens are refused on `sw_` paths; `ensureWorkspace` and the Store-event consumer refuse any `sw_` id.** Evidence: Store ids are UUIDs (`schema.prisma:195`); adding a `/workspaces/:id` alias would double the scope map (`scopes.ts:176`, every route needs a gate decision) and the web client; the prefix decision needs no extra D1 read for Store traffic. Cost if wrong: the word "stores" stays in standalone URLs (cosmetic; a later rename is a router alias, not a data change).
+
+Source: `docs/plans/2026-11-23-chat-standalone-workspaces.md` (approved by Ahmad, 2026-11-23).

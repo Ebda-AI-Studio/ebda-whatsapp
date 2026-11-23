@@ -11,6 +11,7 @@ import { buildSystemPrompt, computeReleaseId } from '../../foundation/smart-laye
 import type { Mode, TurnCtx } from '../../foundation/smart-layer/types';
 import { alert } from '../core/observability';
 import { chatAdapter } from '../core/smart-layer/adapter';
+import { isStandaloneId } from '../core/workspace-kind';
 import { chatControls } from '../core/smart-layer/controls';
 import type { Env } from '../env';
 import { viewOf, type StoredCap } from '../core/smart-layer/registry';
@@ -81,13 +82,14 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
       const res = await api.request(`/stores/${ctx.storeId}${path}${qs}`, { method: init?.method ?? 'GET', headers: { authorization: auth, ...(init?.body !== undefined ? { 'content-type': 'application/json' } : {}) }, ...(init?.body !== undefined ? { body: JSON.stringify(init.body) } : {}) }, c.env, c.executionCtx);
       return { status: res.status, json: await res.json().catch(() => null) };
     };
-    const adapter = chatAdapter({ env: c.env, ws, callApi, registry: REGISTRY, corpus: CORPUS, assistantCapability: ASSISTANT_CAPABILITY, ...(override.ai ? { ai: override.ai } : {}), ...(override.help ? { help: override.help } : {}) });
+    const adapter = chatAdapter({ env: c.env, ws, workspaceId: storeId, callApi, registry: REGISTRY, corpus: CORPUS, assistantCapability: ASSISTANT_CAPABILITY, ...(override.ai ? { ai: override.ai } : {}), ...(override.help ? { help: override.help } : {}) });
     if (!contractChecked) {
       const problems = checkAdapterContract(adapter);
       if (problems.length) throw new Error(`assistant adapter contract: ${problems.join('; ')}`);
       contractChecked = true;
     }
-    release ??= computeReleaseId({ systemPrompt: buildSystemPrompt('ar'), tools: adapter.tools(), models: adapter.models, budget: BUDGET });
+    // The release id names the FULL tool set (a standalone workspace sees a subset of the same release), so it never depends on which kind of workspace asked first.
+    release ??= computeReleaseId({ systemPrompt: buildSystemPrompt('ar'), tools: isStandaloneId(storeId) ? chatAdapter({ env: c.env, ws, callApi, registry: REGISTRY, corpus: CORPUS, assistantCapability: ASSISTANT_CAPABILITY, ...(override.ai ? { ai: override.ai } : {}), ...(override.help ? { help: override.help } : {}) }).tools() : adapter.tools(), models: adapter.models, budget: BUDGET });
     // The history key carries the CALLER: the engine loads turns by conversation id alone, so a client-chosen id can never open (or plant text in) another member's history.
     const userId = c.get('principal').userId;
     const ctx: TurnCtx = { product: 'chat', storeId, userId, role: c.get('storeRole'), locale, now: Date.now(), conversationId: ownConversation(userId, conversationId), releaseId: await release };

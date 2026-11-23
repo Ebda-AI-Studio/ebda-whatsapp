@@ -23,6 +23,7 @@ import { billingAudit, PLATFORM_WORKSPACE } from '../audit-reason';
 import { announceSubscription } from './subscriptions';
 import { alert } from '../observability';
 import { isOffboarded } from '../ops/offboarded';
+import { isStandaloneId } from '../workspace-kind';
 import { adjustmentThreshold } from './operator';
 import { planPurchase } from './package-orders';
 import { proofReaderAvailable, readProofForAutoConfirm } from './instapay-reader';
@@ -311,7 +312,8 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
     expected: { amountMinor: expected.amountMinor, payeeHandle: payeeHandle(env) ?? '' },
     now, mode, storeEnabled: wsOn, isFirstPayment: first,
     // INSTAPAY-CAP-1: the cap left after what was already auto-confirmed and not yet seen in a sent digest.
-    firstPaymentCapMinor: Math.max(0, firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor }) - history.uncleanAutoMinor),
+    // CHAT-SA-6: the FIRST InstaPay payment of a standalone workspace (no Store behind it, nobody vouching for it) is always a person's: cap 0 = FIRST_PAYMENT_OVER_CAP for any amount.
+    firstPaymentCapMinor: isStandaloneId(r.workspace_id) && first ? 0 : Math.max(0, firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor }) - history.uncleanAutoMinor),
     // The two-approver threshold ALWAYS wins (a threshold of 0 sends a kind a person must review straight to a person).
     dualControlThresholdMinor: expected.reviewKind ? 0 : adjustmentThreshold(env),
     duplicate,
