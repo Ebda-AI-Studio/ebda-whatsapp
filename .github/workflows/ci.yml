@@ -39,6 +39,8 @@ jobs:
       # Foundation drift (register row "Foundation version drift"): the vendored foundation may be one release behind, never two or
       # more for over 7 days. A GitHub read failure warns and passes (an api.github.com outage must not block every merge).
       - name: Foundation drift (vendored tag vs latest foundation tag)
+        # The script bounds every GitHub read (10 s each, 30 s overall) and warns-and-passes on a hang; this is the backstop.
+        timeout-minutes: 2
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/foundation-drift-check.mjs
