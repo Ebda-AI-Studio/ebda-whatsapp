@@ -12,7 +12,7 @@
 import { alert } from '../observability';
 import { plainAmount } from '../ordering/money';
 import { addTask } from '../scheduler';
-import { bridgeFor } from '../store-link';
+import { bridgeForWorkspace } from '../store-link';
 import type { CatalogRow } from '../store-bridge';
 import type { LinkHost } from './host';
 import { queueTemplate, cleanParam } from './outbound';
@@ -109,7 +109,7 @@ export async function runProactiveRecs(host: LinkHost, payload: string | null, n
   const recent = host.sql.exec<{ n: number }>("SELECT count(*) AS n FROM store_orders WHERE wa_id = ? AND recs_outcome = 'sent' AND recs_at > ?", order.wa_id, now - CUSTOMER_CAP_MS).one().n;
   if (recent > 0) return skip('frequency_cap');
 
-  const bridge = bridgeFor(host.env);
+  const bridge = bridgeForWorkspace(host.env, host.workspaceId);
   if (!bridge) return skip('store_not_linked');
   const e164 = `+${order.wa_id}`;
   const res = await bridge.getRecommendations(host.workspaceId, { seedIds: [], orderNumber: order.order_number, buyerKey: order.buyer_key, phoneE164: e164, mode: 'complement', limit: SUGGESTIONS + 3 });

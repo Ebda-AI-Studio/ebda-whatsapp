@@ -66,6 +66,9 @@ operatorRoutes.use('*', async (c, next) => {
 const actor = (c: { get(k: 'principal'): { userId: string } }) => c.get('principal').userId;
 const bad = (c: { json(b: unknown, s: 400): Response }, message?: string) => c.json({ error: 'invalid_request', ...(message ? { message } : {}) }, 400);
 
+/** Who am I, store-independent: the web asks this when the token lists no store, to boot straight into the console. requireSuperAdmin already refused everyone else (403). */
+operatorRoutes.get('/me', (c) => c.json({ superAdmin: true as const, userId: actor(c) }));
+
 operatorRoutes.get('/pricing-settings', async (c) => c.json({ items: await listSettings(c.env) }));
 operatorRoutes.post('/pricing-settings', async (c) => {
   const b = pricingSettingsPublish.safeParse(await c.req.json().catch(() => null));
@@ -469,6 +472,13 @@ operatorRoutes.put('/agent/model', async (c) => {
   if (!b.success) return bad(c, b.error.issues.some((i) => i.path[0] === 'reason') ? 'reason_required' : 'model_not_allowed');
   const r = await setAgentModelFlag(c.env, { model: b.data.model, actor: actor(c), reason: b.data.reason });
   return r.ok ? c.json({ model: r.model }) : bad(c, r.reason);
+});
+// The operator screen reads a workspace's current mode before changing it (an unknown workspace is a 404, never a default "off").
+operatorRoutes.get('/workspaces/:workspaceId/assistant', async (c) => {
+  const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(c.req.param('workspaceId')).first();
+  if (!known) return c.json({ error: 'not_found' }, 404);
+  const ws = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(c.req.param('workspaceId')));
+  return c.json({ mode: await ws.assistantMode() });
 });
 operatorRoutes.put('/workspaces/:workspaceId/assistant', async (c) => {
   const b = z.object({ mode: assistantMode }).strict().safeParse(await c.req.json().catch(() => null));
