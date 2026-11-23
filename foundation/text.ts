@@ -24,19 +24,26 @@ const FOLD = new Map<string, string>();
 const STRIP = /[ً-ٰٟـ]/g;
 // explicit set (NOT \s): Postgres' [[:space:]] is locale-dependent
 const SPACES = /[ \t\n\r ]+/g;
-const EDGE_SPACE = /^ +| +$/g;
+// Linear trim, not /^ +| +$/g: the trailing ` +$` alternative is polynomial on a long run of spaces (CodeQL js/polynomial-redos).
+function trimEdgeSpaces(s: string): string {
+  let a = 0;
+  let b = s.length;
+  while (a < b && s.charCodeAt(a) === 32) a++;
+  while (b > a && s.charCodeAt(b - 1) === 32) b--;
+  return s.slice(a, b);
+}
 
 export function foldArabic(input: string): string {
   if (!input) return '';
   const stripped = input.replace(STRIP, '');
   let out = '';
   for (const ch of stripped) out += FOLD.get(ch) ?? ch;
-  return out.replace(SPACES, ' ').replace(EDGE_SPACE, '');
+  return trimEdgeSpaces(out.replace(SPACES, ' '));
 }
 
 /** `foldArabic`, then every run of non-letter, non-digit characters (punctuation, emoji) becomes one space. For building search-index text. */
 export function indexTokens(input: string): string {
-  return foldArabic(input).replace(/[^\p{L}\p{N}]+/gu, ' ').replace(EDGE_SPACE, '');
+  return trimEdgeSpaces(foldArabic(input).replace(/[^\p{L}\p{N}]+/gu, ' '));
 }
 
 /** Digits only, with Arabic-Indic and Persian digits folded to 0-9: what a typed phone number is compared as against a stored number. */
@@ -76,11 +83,11 @@ export function foldArabicHamza(input: string): string {
   const stripped = input.normalize('NFKC').replace(STRIP_H, '');
   let out = '';
   for (const ch of stripped) out += FOLD_H.get(ch) ?? ch;
-  return out.replace(WAWS, 'و').replace(SPACES, ' ').replace(EDGE_SPACE, '');
+  return trimEdgeSpaces(out.replace(WAWS, 'و').replace(SPACES, ' '));
 }
 /** `indexTokens` under fold A. */
 export function indexTokensHamza(input: string): string {
-  return foldArabicHamza(input).replace(/[^\p{L}\p{N}]+/gu, ' ').replace(EDGE_SPACE, '');
+  return trimEdgeSpaces(foldArabicHamza(input).replace(/[^\p{L}\p{N}]+/gu, ' '));
 }
 /** `searchTokens` under fold A. */
 export function searchTokensHamza(input: string, max = 8): string[] {

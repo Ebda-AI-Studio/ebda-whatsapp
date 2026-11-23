@@ -54,7 +54,18 @@ function normalizeKey(key: string): string {
   } catch {
     k = key;
   }
-  return k.toLowerCase().replace(/\[[^\]]*\]$/, '');
+  return stripArraySuffix(k.toLowerCase());
+}
+
+/**
+ * Removes one trailing `[...]` array suffix (`q[]`, `q[0]`). Linear: the regex it replaces, /\[[^\]]*\]$/, is polynomial on a long run of '['
+ * (CodeQL js/polynomial-redos). Same result: the match starts at the leftmost '[' after the last ']' that precedes the final ']'.
+ */
+function stripArraySuffix(k: string): string {
+  if (!k.endsWith(']')) return k;
+  const afterLastClose = k.lastIndexOf(']', k.length - 2) + 1;
+  const open = k.indexOf('[', afterLastClose);
+  return open !== -1 && open < k.length - 1 ? k.slice(0, open) : k;
 }
 
 function isSensitiveKey(key: string): boolean {
