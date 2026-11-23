@@ -1,7 +1,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureAssistant } from '../../src/routes/assistant';
-import { EMPTY_ANSWER, ENGINE_FALLBACK, NO_STORE_METRICS, STORE_DASHBOARD, isStoreMetricQuestion, questionLocale, TOOL_FAILED, observeTurn, withLowReasoning } from '../../src/routes/assistant-observe';
+import { EMPTY_ANSWER, ENGINE_FALLBACK, NO_STORE_METRICS, STORE_DASHBOARD, isStoreMetricQuestion, questionLocale, TOOL_FAILED, observeTurn, withLowReasoning, CHIP_RULE } from '../../src/routes/assistant-observe';
 import { apiFor, storeId, useApiKey } from '../helpers/api';
 import { workspace } from '../helpers/workspace';
 import { MSG } from '../../foundation/smart-layer/loop';
@@ -192,5 +192,23 @@ describe('isStoreMetricQuestion', () => {
   it('store-wide sales / order-count questions match; a customer-specific or how-to question does not', () => {
     for (const q of ['كام طلب النهارده؟', 'كام طلب جالي النهارده؟', 'إجمالي المبيعات النهارده كام؟', 'What were my sales this week?', 'How many orders did I get today?', 'show me revenue this month', 'مبيعات الاسبوع ده']) expect(isStoreMetricQuestion(q), q).toBe(true);
     for (const q of ['طلبات احمد النهارده', 'ازاي اطلب قالب جديد', 'فين رصيد المحفظة؟', 'what is my plan']) expect(isStoreMetricQuestion(q), q).toBe(false);
+  });
+});
+
+describe('capability chip wording', () => {
+  it('every model request carries the chip rule once (standalone pointer, never a word in a sentence), also on the empty-completion retry', async () => {
+    const systems: string[] = [];
+    const adapter = { ai: { run: async (_m: string, i: Record<string, unknown>) => { systems.push(((i.messages as Array<{ content: string }>)[0]!.content)); return { choices: [{ message: { content: null } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }; } }, models: { answer: 'm', plan: 'm', template: 'm', classify: 'm', judge: 'm', embed: 'm' }, tools: () => [], storage: { appendAudit: async () => undefined } } as unknown as SmartLayerAdapter;
+    const o = observeTurn(adapter, { storeId: 's', log: () => undefined });
+    await o.provider.complete({ system: 'BASE', messages: [{ role: 'user', content: 'q' }], tools: [], maxTokens: 10 });
+    expect(systems.length).toBe(2); // first call + the empty retry
+    for (const s of systems) {
+      expect(s.startsWith('BASE')).toBe(true);
+      expect(s.split(CHIP_RULE).length - 1).toBe(1);
+    }
+    expect(CHIP_RULE).toContain('شوف: [[cap:...]]');
+    expect(CHIP_RULE).toContain('روابط مفيدة:');
+    expect(CHIP_RULE).toContain('See: [[cap:...]]');
+    expect(CHIP_RULE).toMatch(/never use it as a word inside a sentence/i);
   });
 });
