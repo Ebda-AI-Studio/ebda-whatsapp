@@ -22,6 +22,7 @@ import { botTools } from './tools/bot.tools';
 import { explainTools, type ExplainData } from './tools/explain.tools';
 import { campaignTools } from './tools/campaigns.tools';
 import { withKeywords } from './tools/keywords';
+import { toolsForWorkspace } from './store-tools';
 import { WorkersAiProvider } from '../../../foundation/smart-layer/provider';
 import { contactTools } from './tools/contacts.tools';
 import { inboxTools } from './tools/inbox.tools';
@@ -43,6 +44,8 @@ export type ChatAdapterDeps = {
   /** Overrides for tests (a scripted model needs none of them). */
   help?: HelpDeps;
   ai?: AiBinding;
+  /** CHAT-SA-5: the workspace id, so a standalone workspace is offered no Store-coupled tool (`store-tools.ts`). Omitted = every tool (a Store workspace). */
+  workspaceId?: string;
 };
 
 const egp = (minor: number): string => String(Math.round(minor) / 100);
@@ -69,7 +72,7 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
   return {
     product: 'chat',
     registry: () => d.registry,
-    tools: () => tools,
+    tools: () => (d.workspaceId ? toolsForWorkspace(tools, d.workspaceId) : tools),
     helpSearch: searchHelp,
     async bindingSources(): Promise<BindingSource[]> {
       // Typed sources for the binding-claim rail: the packages the Plans screen sells, the free cap, the 24-hour window, and the figures the help guides state.

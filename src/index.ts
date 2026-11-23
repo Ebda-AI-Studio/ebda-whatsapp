@@ -1,6 +1,7 @@
 import { runDueOffboardings } from './core/ops/offboarding';
 import { offboardingRoutes } from './routes/offboarding';
 import { membersRoutes } from './routes/members';
+import { invitationsRoutes } from './routes/invitations';
 import { auditWrites } from './core/audit';
 import { eraseContactFlow } from './core/contact-erase';
 import { purgeNewCapUsage } from './core/campaigns/new-cap';
@@ -23,6 +24,8 @@ import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/ob
 import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
 import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
 import { operatorRoutes } from './routes/operator';
+import { workspacesRoutes } from './routes/workspaces';
+import { requirePerson } from './core/identity/person';
 import { internalInstapayRoutes } from './routes/internal-instapay';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
@@ -172,9 +175,13 @@ const getVerifier = (env: Env): IdentityVerifier => (verifier ??= selectVerifier
 const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
 api.use('/operator/*', requireSuperAdmin(getVerifier));
+api.use('/workspaces', requirePerson(getVerifier)); // CHAT-SA-3: routes of a PERSON, not of one workspace
+api.use('/workspaces/*', requirePerson(getVerifier));
 api.use('*', auditWrites()); // every state-changing call: who, what, which ids (src/core/audit.ts)
 api.use('*', apiContentTypes()); // after auth: 401/403 first, then 415 for a body type the route class does not take
 api.route('/operator', operatorRoutes);
+// ---- CHAT-SA-3: standalone workspace creation (its own block; PR-2 touches the store routes below)
+api.route('/', workspacesRoutes);
 api.get('/stores/:storeId/me', async (c) => {
   const p = c.get('principal');
   const storeId = c.req.param('storeId')!;
@@ -203,6 +210,7 @@ api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
+api.route('/', invitationsRoutes); // CHAT-SA-4: the invitee's own pending invitations; auth = requirePerson mounted on /workspaces/* above (identity/person.ts)
 registerStarterSet(PACK.templates);
 registerPerStoreTemplate(PACK.perStoreTemplate ?? null);
 api.route('/', templatesRoutes(PACK.templates, PACK.seasonalTemplates ?? {}));

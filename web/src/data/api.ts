@@ -1,13 +1,14 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, assistantActResponse, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, connectorDto, connectorTestResult, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, proactiveRecsDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
+  opsStatusDto, proactiveRecsDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, inviteMemberResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest, segmentDto, quickReplyDto, listQuickRepliesResponse, noteDto, conversationDto,
 } from '../../../src/core/api/contract';
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
 import { assistantFlagsDto, assistantModeDto } from './assistant-rollout';
 import type { InboxSource } from './source';
+import { isStandaloneId, markStandalone } from './workspaces';
 
 export class ApiError extends Error {
   /** `detail` = the server's machine reason for a 409 (e.g. `empty_audience`), when it sends one. */
@@ -213,6 +214,15 @@ export function createApiSource(o: Opts): LiveSource {
         const res = await f(`${root}/members/${encodeURIComponent(userId)}/seat`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
         if (!res.ok) throw new ApiError('invalid_request', res.status);
       },
+      invite: async (a) => { await call('/members/invite', inviteMemberResponse, post(a)); },
+      revokeInvitation: async (userId) => {
+        const res = await f(`${root}/members/invitations/${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
+      },
+      remove: async (userId) => {
+        const res = await f(`${root}/members/${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
+      },
     },
     contacts: {
       async list(q, signal) {
@@ -394,12 +404,16 @@ export function createApiSource(o: Opts): LiveSource {
     emit: (e) => listeners.forEach((l) => l(e)),
     reload: () => reloaders.forEach((r) => r()),
     async loadCapabilities() {
+      // CHAT-SA-5: a standalone workspace has no Store, so everything that talks to one is switched off (the routes would only 404). The `sw_` id says so before /me does (and when /me fails).
+      const standAlone = () => markStandalone(source);
+      if (isStandaloneId(o.storeId)) standAlone();
       try {
         const me = await call('/me', meResponse.partial().loose());
         source.capabilities = { codOutcome: me.capabilities?.codOutcome === true, numbers: me.capabilities?.numbers === true, assistant: me.capabilities?.assistant === true };
         if (me.role) source.role = me.role;
         if (me.workspace === false) source.workspaceMissing = true;
         if (me.stores) source.stores = me.stores;
+        if ((me as { kind?: unknown }).kind === 'standalone') standAlone();
       } catch (e) {
         source.capabilities = { codOutcome: false };
         if (e instanceof ApiError && e.status === 403 && e.code === 'no_seat') source.noSeat = e.detail === 'seat_over_limit' ? 'over_limit' : 'none';

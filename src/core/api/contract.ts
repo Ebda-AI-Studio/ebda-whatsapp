@@ -425,7 +425,16 @@ export const retentionDto = z.object({ days: z.number().int().nullable(), effect
  */
 export const memberSeat = z.enum(['owner', 'seated', 'over_limit', 'none']);
 export const memberDto = z.object({ userId: z.string(), displayName: z.string(), role: z.enum(['owner', 'staff']), addedAt: z.string(), seat: memberSeat });
-export const listMembersResponse = z.object({ items: z.array(memberDto), seats: z.object({ limit: z.number().int().min(1), used: z.number().int().min(1), overLimit: z.boolean() }) });
+export const listMembersResponse = z.object({ items: z.array(memberDto), seats: z.object({ limit: z.number().int().min(1), used: z.number().int().min(1), overLimit: z.boolean() }),
+  /** CHAT-SA-4: true when the team is managed in Chat itself (a standalone workspace): the screen then offers invite + remove. Absent for a Store workspace (its team lives in the Store). */
+  canInvite: z.boolean().optional(),
+  /** CHAT-SA-4: invitations the owner sent that nobody accepted yet: ONLY what the owner typed (first name, address). Absent for a Store workspace. */
+  invitations: z.array(z.object({ userId: z.string(), email: z.string(), firstName: z.string(), invitedAt: z.string(), expiresAt: z.string() })).max(100).optional() });
+/** GET /workspaces/invitations (person token): the invitations waiting for the signed-in identity. Accepting = POST /workspaces/invitations/:workspaceId/accept. */
+export const myInvitationsResponse = z.object({ items: z.array(z.object({ workspaceId: z.string(), workspaceName: z.string(), expiresAt: z.string() })).max(20) });
+export type MyInvitationsResponse = z.infer<typeof myInvitationsResponse>;
+/** POST /members/invite (standalone only): 202 answers the same whether or not the address already had an account. */
+export const inviteMemberResponse = z.object({ status: z.literal('invite_sent') });
 export type MemberDto = z.infer<typeof memberDto>;
 export type ListMembersResponse = z.infer<typeof listMembersResponse>;
 export const seatResponse = z.object({ userId: z.string(), seat: z.enum(['seated']) });

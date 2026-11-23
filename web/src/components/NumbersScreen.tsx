@@ -95,7 +95,7 @@ export function NumbersScreen({ t, lang, source, api }: Props) {
   const steps = [
     { label: t.stepNumber, done: anyActive, guide: 'connect-your-own-number' },
     { label: t.stepTemplates, done: checks.templates, guide: 'templates-and-the-24-hour-window' },
-    ...(BRAND.storeName ? [{ label: t.stepStore(BRAND.storeName), done: source.capabilities.codOutcome, guide: 'cod-confirmations' }] : []),
+    ...(BRAND.storeName && !source.standalone ? [{ label: t.stepStore(BRAND.storeName), done: source.capabilities.codOutcome, guide: 'cod-confirmations' }] : []),
     { label: t.stepAgent, done: checks.agent, guide: 'ai-agent' },
   ];
 
