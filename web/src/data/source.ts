@@ -120,6 +120,8 @@ export interface ContactsApi {
   rejects(importId: string): Promise<{ line: number; reason: string }[]>;
   /** A name the merchant gives a contact (null = follow WhatsApp's name again). */
   renameContact(waId: string, name: string | null): Promise<{ waId: string; name: string | null; optedOut: boolean }>;
+  /** Self-service: EVERY contact of the store (name, number, opt-out, consent, tags), all pages joined. Owner only; the server audits each page. */
+  exportAllContacts(): Promise<ContactDto[]>;
   /** B5: all of one contact's data (every page of messages joined). Owner only. */
   exportContact(waId: string): Promise<unknown>;
   /** Data-subject erasure of one contact (owner only). Cannot be undone; financial records stay. */

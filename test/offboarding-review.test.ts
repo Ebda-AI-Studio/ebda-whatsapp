@@ -71,6 +71,18 @@ describe('item 1: a wallet balance that grew during the cooling-off is never era
     expect(await runOffboarding(env, w2, Date.now() + 2000)).toBe('done');
   });
 
+  it('a yearly-refund request that appears after the run started blocks the wipe (moneyHold re-checked right before wipe_do)', async () => {
+    const w = W(14);
+    await open(w);
+    await op(w, OP1, 'POST', '', { reason: REASON, immediate: true });
+    const r = await runOffboarding(env, w, Date.now() + 1000, { beforeStep: async (step) => {
+      if (step === 'wipe_do') await env.DB.prepare("INSERT INTO yearly_refund_requests (id, workspace_id, order_id, unused_months, gross_minor, debt_settled_minor, refund_minor, state, requested_by, created_at) VALUES ('yr-late', ?, 'o1', 3, 3000, 0, 3000, 'pending', 'u1', ?)").bind(w, Date.now()).run();
+    } });
+    expect(r).toBe('held');
+    expect(await state(w)).toMatchObject({ state: 'running', last_error: 'held:open_yearly_refund_request' });
+    expect(await erased(w)).toBe(false);
+  });
+
   it('OFFBOARD-FREEZE-1: once a deletion is pending (or running) top-ups, InstaPay requests and package purchases are refused until the owner cancels', async () => {
     const ws = W(4);
     await open(ws);
