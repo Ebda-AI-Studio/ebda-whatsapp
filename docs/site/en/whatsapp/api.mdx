@@ -56,7 +56,7 @@ grant_type=client_credentials&audience=whatsapp&scope=conversations:read message
 
 The token lives **10 minutes** and there is no refresh token. Ask for a new one when it expires, and a little before is fine.
 
-**3. Use it like any token.** Send `Authorization: Bearer <access_token>` to the endpoints above. `GET /stores/{storeId}/me` works with any server token and returns the store the token belongs to. Any other store answers `403 forbidden`. Server tokens are a Pro feature: on a package without `api` (or a store with no package on record) every route, `GET /me` included, answers `403 plan_feature` with `feature: "api"`.
+**3. Use it like any token.** Send `Authorization: Bearer <access_token>` to the endpoints above. `GET /stores/{storeId}/me` works with any server token and returns the store the token belongs to. Any other store answers `403 forbidden`. Server tokens are a feature of the "Chat 5,000 AI replies" package: on a package without `api` (or a store with no package on record) every route, `GET /me` included, answers `403 plan_feature` with `feature: "api"`.
 
 #### Scopes
 | Scope | Allows |
