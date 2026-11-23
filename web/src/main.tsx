@@ -46,12 +46,13 @@ async function boot(): Promise<void> {
     let stopRealtimeNow: () => void = () => undefined;
     const gateSignOut = (after: () => void): (() => void) => () => {
       if (oidcSession) { const session = oidcSession; makeSignOut({ stopRealtime: stopRealtimeNow, session, onLocal: () => root.render(<SignedOutLocally onSignIn={() => { void session.startSignIn('/'); }} />) })(); return; }
-      makeAccountsSignOut({ stopRealtime: stopRealtimeNow, accountsUrl: ACCOUNTS_URL!, getToken: tokens.getToken, reload: after })();
+      makeAccountsSignOut({ stopRealtime: stopRealtimeNow, accountsUrl: ACCOUNTS_URL!, getToken: () => tokens.getToken(), reload: after })();
     };
     const signOutNow = gateSignOut(() => location.reload());
     const switchAccount = gateSignOut(() => location.assign(accountsTokens ? accountsTokens.loginUrl() : '/'));
     if (mode === 'oidc') {
       const session = createOidcSession({ oidc: BRAND.oidc!, origin: location.origin });
+      oidcSession = session; // BEFORE the callback: a refused sign-in renders SignInError, and its sign-out / switch buttons must find the OIDC session (not the accounts path, where `tokens` is still unassigned)
       if (location.pathname === CALLBACK_PATH) {
         try {
           await session.handleCallback(location.search);
@@ -63,7 +64,6 @@ async function boot(): Promise<void> {
         }
       }
       tokens = session;
-      oidcSession = session;
     } else {
       // Signed out: show the brand's own sign-in entry; its button (not an automatic redirect) goes to the shared sign-in and returns here.
       tokens = accountsTokens = createTokenProvider({
