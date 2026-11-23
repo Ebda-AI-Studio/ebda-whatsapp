@@ -88,7 +88,7 @@ export class Trusted {
     const walk = (v: unknown, key: string, depth: number): void => {
       if (depth > 6 || v === null) return;
       if (typeof v === 'number' && Number.isFinite(v)) { if (PRICE_KEY.test(key)) this.prices.add(v); return; }
-      if (typeof v === 'string') { if (/^(?:link|url|href)$/i.test(key)) this.storeLinks.push(...linksOf(v)); return; }
+      if (typeof v === 'string') { if (/^(?:link|url|href|trackingUrl)$/i.test(key)) this.storeLinks.push(...linksOf(v)); return; }
       if (Array.isArray(v)) { for (const x of v.slice(0, 50)) walk(x, key, depth + 1); return; }
       if (typeof v === 'object') for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 50)) walk(x, k, depth + 1);
     };
@@ -100,19 +100,23 @@ export class Trusted {
 const PROMISES: Record<keyof PromisePolicy, RegExp> = {
   refund: /\brefund|money back|reimburs|استرجاع|استرداد|ارجاع (?:الفلوس|المبلغ|فلوس)|(?:هرجع|هرد|هنرجع|هنرد|ارجع|رجع)(?:لك|لكم|ك|لك)? (?:الفلوس|فلوس|المبلغ)|رجوع الفلوس/u,
   discount: /\bdiscount|% ?off\b|percent off|\bcoupon|promo code|voucher|خصم|تخفيض|كوبون|عرض خاص|كود خصم/u,
-  freeDelivery: /free (?:shipping|delivery|gift|of charge)|شحن مجاني|توصيل مجاني|شحن ببلاش|هديه مجانيه|مجانا|مجاني/u,
+  freeDelivery: /free (?:shipping|delivery|gift|of charge)|\b(?:ships?|shipped|deliver(?:s|ed)?)\s+(?:for\s+)?free\b|شحن مجاني|توصيل مجاني|شحن ببلاش|هديه مجانيه|مجانا|مجاني|ببلاش/u,
   exchange: /\bexchange|\bswap\b|replacement|we(?:'ll| will) replace|استبدال|تبديل|هبدل|هنبدل|بدل(?:ه|ها|ك)? ?لك/u,
   guarantee: /guarantee|warranty|ضمان|مضمون|كفاله/u,
 };
 
 /** Free SHIPPING / delivery only (not a free gift, not "free of charge"). */
-const FREE_SHIPPING = /free (?:shipping|delivery)|شحن مجاني|توصيل مجاني|شحن ببلاش/gu;
+// "ship(s) free" and a shipping word followed, within three plain words, by the free word ("توصل مجانا", "الشحن يبقى مجاني", "شحن ببلاش") are shipping statements too: without them the bare adverb read as "something else free" and a declared
+// threshold was refused (ship-ar-1, twice with two spellings). The window is lazy (it stops at the FIRST free word, so a later "هدية مجانا" stays outside it), may not cross a gift word or a conjunction ("و" prefix, and, &: "الشحن والتغليف مجاني" names a second free thing), and the free word must end there.
+const SHIPS_FREE = String.raw`\b(?:ships?|shipped|deliver(?:s|ed)?)\s+(?:for\s+)?free\b|(?:توصل|يوصل|بيوصل|هيوصل|هتوصل|تتوصل|توصيل|شحن)(?:ك|لك|كم)?\s+(?:(?!هدي|gift|و|and\b|&)\S+\s+){0,3}?(?:مجانا|مجاني|ببلاش)(?![ء-ي])`;
+const FREE_SHIPPING = new RegExp(String.raw`free (?:shipping|delivery)|شحن مجاني|توصيل مجاني|شحن ببلاش|${SHIPS_FREE}`, 'gu');
 /** The money-back part of the refund promise: never allowed by a declared return window. */
 const MONEY_BACK = /\brefund|money back|reimburs|استرداد|ارجاع (?:الفلوس|المبلغ|فلوس)|(?:هرجع|هرد|هنرجع|هنرد|ارجع|رجع)(?:لك|لكم|ك|لك)? (?:الفلوس|فلوس|المبلغ)|رجوع الفلوس|استرجاع (?:الفلوس|المبلغ|فلوس)/u;
 const NO_RETURNS = /مفيش|مش بنقبل|مش بنستقبل|لا يوجد|لا نقبل|لا نستقبل|\bno returns?\b|not accept|n't accept|do not (?:allow|accept)/u;
 
 /** A free-shipping statement is allowed when it carries a threshold the merchant declared (the amount is what makes it checkable). */
 function declaredFreeShipping(said: string, reply: string, d: Declared): boolean {
+  if (/(?:مجانا|مجاني|ببلاش|free(?: shipping| delivery)?)\s+(?:و\S|and\s)/u.test(said) || /(?:free(?: shipping| delivery)?|مجان[اًي]|ببلاش)\s*&/iu.test(reply)) return false; // "free shipping and installation", "الشحن مجاني والتركيب": a second thing joined to the free word is a new promise
   if (PROMISES.freeDelivery.test(said.replace(FREE_SHIPPING, ' '))) return false; // something else free (a gift) is mentioned too
   return pricesIn(reply).some((p) => d.freeOver.has(p));
 }

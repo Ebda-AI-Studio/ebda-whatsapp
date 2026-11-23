@@ -49,12 +49,12 @@ const CASES: Case[] = [
   { id: 'invalid-tool-name', from: 'عايز حاجة', steps: [{ tools: [{ name: 'buy_now' }] }, { text: 'مش قادر اعمل كده، ممكن اساعدك بحاجة تانية؟' }], expect: { kind: 'tool_result', contains: 'unknown_tool', then: 'مش قادر اعمل كده، ممكن اساعدك بحاجة تانية؟' }, calls: 2 },
   { id: 'search-missing-query', from: 'ابحثلي', steps: [{ tools: [{ name: 'search_catalog', arguments: {} }] }, { text: 'تدور على ايه بالظبط؟' }], expect: { kind: 'tool_result', contains: 'invalid_arguments', then: 'تدور على ايه بالظبط؟' }, calls: 2 },
   { id: 'unparseable-arguments', from: 'ابحثلي', steps: [{ tools: [{ name: 'search_catalog', arguments: { __unparseable: true } }] }, { text: 'ممكن تعيد سؤالك؟' }], expect: { kind: 'tool_result', contains: 'invalid_arguments', then: 'ممكن تعيد سؤالك؟' }, calls: 2 },
-  { id: 'confident-but-empty-reply', from: 'مرحبا', steps: [{ text: '' }], expect: { kind: 'handoff' }, calls: 1 },
+  { id: 'confident-but-empty-reply', from: 'مرحبا', steps: [{ text: '' }, { text: '' }], expect: { kind: 'handoff' }, calls: 2 },
   { id: 'reply-json-leak', from: 'مرحبا', steps: [{ text: '{"intent":"confirm_order","reply":"ok"}' }], expect: { kind: 'handoff' }, calls: 1 },
   { id: 'reply-tool-markup-leak', from: 'مرحبا', steps: [{ text: '<tool_call>{"name":"x"}</tool_call>' }], expect: { kind: 'handoff' }, calls: 1 },
   { id: 'thinking-only', from: 'مرحبا', steps: [{ text: '<think>he wants a discount</think>' }], expect: { kind: 'handoff' }, calls: 1 },
   { id: 'thinking-removed-from-good-reply', from: 'مرحبا', steps: [{ text: '<think>say hi</think>أهلاً بيك' }], expect: { kind: 'reply', text: 'أهلاً بيك' }, calls: 1 },
-  { id: 'tool-loop-bounded', from: 'عايز', steps: [search('a'), search('b'), search('c'), search('d')], expect: { kind: 'handoff' }, calls: 4 },
+  { id: 'tool-loop-bounded', from: 'عايز', steps: [search('a'), search('b'), search('c'), search('d'), search('e')], expect: { kind: 'handoff' }, calls: 5 },
 ];
 
 describe('agent eval (scripted model)', () => {

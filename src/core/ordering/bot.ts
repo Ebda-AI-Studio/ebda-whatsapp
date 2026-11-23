@@ -14,10 +14,11 @@ import { featureAllowed } from '../billing/entitlements';
 import { z } from 'zod';
 import { recordFunnel, type FunnelStep } from '../bot-funnel';
 import { buyerKey } from '../buyer-key';
-import type { InboundOrder, InboundReply } from '../meta/webhook-schema';
+import { locationSchema } from '../meta/webhook-schema';
+import type { InboundLocation, InboundMedia, InboundOrder, InboundReply } from '../meta/webhook-schema';
 import { isE164 } from '../phone';
 import type { SendJob } from '../send-queue';
-import { MAX_RETAILER_ID, type Address, type Buyer, type CatalogRow, type ChatPaymentMethod, type OrderLine, type StoreBridge, type StoreProfile } from '../store-bridge';
+import { MAX_RETAILER_ID, type Address, type Buyer, type NewAddress, type CatalogRow, type ChatPaymentMethod, type OrderLine, type StoreBridge, type StoreProfile } from '../store-bridge';
 import { bridgeFor, storeLink } from '../store-link';
 import { dropProfile, loadProfile } from '../ai/context';
 import type { LinkHost } from '../store-link/host';
@@ -49,13 +50,18 @@ export const botInputSchema = z.object({
   type: z.string(),
   text: z.string().nullable(),
   reply: z.object({ kind: z.enum(['button', 'list']), id: z.string(), title: z.string() }).nullable(),
+  /** A location pin (PII: kept only in the task and the session, never logged). Optional so tasks stored before this field still parse. */
+  location: z.object({ latitude: z.number(), longitude: z.number(), name: z.string().optional(), address: z.string().optional() }).nullish(),
+  /** An audio message Meta says is NOT a voice note (an audio file): the agent does not transcribe it. */
+  nonVoice: z.boolean().optional(),
   order: z.object({ catalogId: z.string().optional(), note: z.string().optional(), items: z.array(z.object({ retailerId: z.string(), quantity: z.number().int(), price: z.string(), currency: z.string() })) }).nullable(),
 });
 export type BotInput = z.infer<typeof botInputSchema>;
 
 /** The slice of an inbound message the bot needs, as stored on its scheduled task. */
-export function botInputFrom(m: { wamid: string; from: string; type: string; text?: string; reply?: InboundReply; order?: InboundOrder; profileName?: string }, messageId: number, phoneNumberId: string): BotInput {
-  return { messageId, wamid: m.wamid, from: m.from, phoneNumberId, profileName: m.profileName ?? null, type: m.type, text: m.text ? m.text.slice(0, 1024) : null, reply: m.reply ?? null, order: m.order ?? null };
+export function botInputFrom(m: { wamid: string; from: string; type: string; text?: string; reply?: InboundReply; order?: InboundOrder; location?: InboundLocation; media?: InboundMedia; profileName?: string }, messageId: number, phoneNumberId: string): BotInput {
+  const pin = m.location ? locationSchema.safeParse(m.location) : null;
+  return { messageId, wamid: m.wamid, from: m.from, phoneNumberId, profileName: m.profileName ?? null, type: m.type, text: m.text ? m.text.slice(0, 1024) : null, reply: m.reply ?? null, order: m.order ?? null, ...(pin?.success ? { location: { latitude: pin.data.latitude, longitude: pin.data.longitude, ...(pin.data.name ? { name: pin.data.name.slice(0, 120) } : {}), ...(pin.data.address ? { address: pin.data.address.slice(0, 240) } : {}) } } : {}), ...(m.type === 'audio' && m.media?.voice === false ? { nonVoice: true } : {}) };
 }
 
 type Line = { variantId: string; title: string; priceMinor: number; currency: string; quantity: number };
@@ -69,6 +75,8 @@ const sessionData = z.object({
   orderKey: z.string().nullable().default(null),
   proofOrderId: z.string().nullable().default(null),
   lastMessageId: z.number().int().default(0),
+  /** A delivery pin the customer sent without a label: kept (Chat side only, the Store contract has no coordinates) until the typed address arrives, dropped when the order is placed. */
+  pin: z.object({ latitude: z.number(), longitude: z.number() }).nullable().default(null),
 });
 type Data = z.infer<typeof sessionData>;
 const STATES = ['idle', 'browsing', 'choosing_qty', 'cart', 'choosing_payment', 'choosing_address', 'awaiting_address', 'awaiting_proof'] as const;
@@ -184,6 +192,12 @@ export const ORDERING_STALE_MS = 30 * 60_000;
  * Does the ordering bot own this message? Yes while the customer is mid-order (a recent session that is not idle), for
  * everything that is not free text (list/button taps, a Meta cart, a payment picture) and for its keywords.
  */
+/** Is this customer's recent bot session waiting for the delivery address? (A location pin is the answer only there.) */
+export function awaitingAddress(host: Pick<LinkHost, 'sql'>, from: string, now: number): boolean {
+  const row = host.sql.exec<{ state: string; updated_at: number }>('SELECT state, updated_at FROM bot_sessions WHERE wa_id = ?', from).toArray()[0];
+  return !!row && row.state === 'awaiting_address' && now - row.updated_at < ORDERING_STALE_MS;
+}
+
 export function orderingEngaged(host: Pick<LinkHost, 'sql'>, input: BotInput, now: number): boolean {
   if (input.type !== 'text' || input.reply || input.order) return true;
   const row = host.sql.exec<{ state: string; updated_at: number }>('SELECT state, updated_at FROM bot_sessions WHERE wa_id = ?', input.from).toArray()[0];
@@ -272,6 +286,7 @@ async function dispatch(t: Turn): Promise<void> {
     for (const l of ['ar', 'en'] as const) if (normIn(copy.languageWords[l]).has(word)) { t.session.locale = l; return restart(t); }
   }
   if (i.order) return receiveCart(t);
+  if (i.type === 'location') return receivePin(t);
   if (i.type === 'image') return receiveImage(t);
   const id = i.reply?.id;
   if (id) {
@@ -325,6 +340,7 @@ async function restart(t: Turn): Promise<void> {
   t.session.data.selected = null;
   t.session.data.payment = null;
   t.session.data.orderKey = null;
+  t.session.data.pin = null;
   return browse(t, null, true);
 }
 
@@ -537,7 +553,7 @@ async function choosePayment(t: Turn, id: string): Promise<void> {
 async function askAddress(t: Turn): Promise<void> {
   const buyer = await buyerOf(t);
   if (!buyer) return unavailable(t);
-  const res = await t.bridge.getCustomerAddresses(t.ws, buyer.buyerKey);
+  const res = await t.bridge.getCustomerAddresses(t.ws, buyer.buyerKey, buyer.phoneE164);
   const saved: Address[] = res.ok ? res.value.items.slice(0, 9) : [];
   if (!saved.length) {
     say(t, loc(t, t.copy.t.askAddress));
@@ -572,16 +588,38 @@ async function placeWithText(t: Turn, text: string): Promise<void> {
   const parts = text.split(/[,،]/).map((s) => s.trim()).filter(Boolean);
   const area = cut(parts[0] ?? text, 120);
   const street = cut(parts.slice(1).join(', ') || area, 240);
+  return placeAddress(t, { area, street });
+}
+
+/** Saves the address in the Store's address book (best effort) and orders to it; a failed save still orders with the address inline. */
+async function placeAddress(t: Turn, address: NewAddress): Promise<void> {
   const buyer = await buyerOf(t);
   if (buyer) {
     alive(t);
-    const saved = await t.bridge.saveCustomerAddress(t.ws, buyer.buyerKey, { area, street });
+    const saved = await t.bridge.saveCustomerAddress(t.ws, buyer.buyerKey, address, buyer.phoneE164);
     if (saved.ok) {
       dropProfile(t.host, t.input.from); // the cached customer profile (default address) is stale now
       return placeOrder(t, { addressId: saved.value.address.id });
     }
   }
-  return placeOrder(t, { address: { area, street } });
+  return placeOrder(t, { address });
+}
+
+/**
+ * A WhatsApp location pin in the address step is the delivery address. The Store contract (bridge v1) has no coordinates field, so only the pin's own
+ * label/address text goes to the Store (as the address text) and the coordinates stay in this session (Chat side, dropped when the order is placed).
+ * No reverse geocoding: nothing leaves for an outside service. A pin with no label asks for one line of text; the typed address then completes it.
+ */
+async function receivePin(t: Turn): Promise<void> {
+  const pin = t.input.location;
+  const { pinReceived, pinNeedsText } = t.copy.t;
+  if (t.session.state !== 'awaiting_address' || !pin || !pinReceived || !pinNeedsText) return;
+  t.session.data.pin = { latitude: pin.latitude, longitude: pin.longitude };
+  const shown = pin.name ?? pin.address;
+  if (!shown) return say(t, loc(t, pinNeedsText));
+  say(t, pinReceived(cut(shown, 120), t.session.locale));
+  if (!pin.name) return placeWithText(t, pin.address!);
+  return placeAddress(t, { label: cut(pin.name, 40), area: cut(pin.name, 120), street: cut(pin.address ?? pin.name, 240) });
 }
 
 async function placeOrder(t: Turn, where: { addressId: string } | { address: { area: string; street: string } }): Promise<void> {
@@ -630,6 +668,7 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
   d.selected = null;
   d.orderKey = null;
   d.payment = null;
+  d.pin = null; // the coordinates were never sent anywhere; they go with the order
   t.session.state = 'idle'; // never terminal: the next message starts a new order
   if (method === 'cod') {
     t.out.push({ kind: 'text', text: t.copy.t.codPlaced(o.orderNumber, money(t, total, currency), L) });
@@ -649,9 +688,9 @@ async function placeOrder(t: Turn, where: { addressId: string } | { address: { a
 /** The payment page for a "pay online" order: the order's own link, else the Store's, else a checkout link for the same cart. */
 async function paymentUrl(t: Turn, o: { orderId: string; paymentUrl: string | null }): Promise<string | null> {
   if (o.paymentUrl) return o.paymentUrl;
-  const link = await t.bridge.getPaymentLink(t.ws, o.orderId);
+  const buyer = await buyerOf(t); // the verified sender's key travels as the order proof
+  const link = await t.bridge.getPaymentLink(t.ws, o.orderId, buyer?.buyerKey);
   if (link.ok) return link.value.url;
-  const buyer = await buyerOf(t);
   if (!buyer) return null;
   const checkout = await t.bridge.createCheckoutLink(t.ws, { items: t.session.data.cart.map((l) => ({ variantId: l.variantId, quantity: l.quantity })), buyer });
   return checkout.ok ? checkout.value.checkoutUrl : null;
@@ -663,14 +702,46 @@ async function paymentUrl(t: Turn, o: { orderId: string; paymentUrl: string | nu
  * A picture while an InstaPay order waits for its transfer: forwarded to the Store once (the order stays
  * pending_payment until the Store itself confirms the money). Pictures at any other time are ignored.
  */
+/** The ONE query for "this customer's latest InstaPay order" (the proof step reads it; the router and `receiveImage` both go through it, so they cannot disagree). */
+type ProofOrder = { order_id: string; order_number: string | null; status: string | null; proof_wamid: string | null; proof_deadline_at: number | null };
+function latestInstapayOrder(host: Pick<LinkHost, 'sql'>, from: string): ProofOrder | undefined {
+  return host.sql.exec<ProofOrder>(
+    "SELECT order_id, order_number, status, proof_wamid, proof_deadline_at FROM store_orders WHERE wa_id = ? AND payment_method = 'instapay' ORDER BY updated_at DESC LIMIT 1", from,
+  ).toArray()[0];
+}
+/** The order is over: a picture means nothing for it. */
+const proofClosed = (status: string | null): boolean => ['cancelled', 'refunded', 'returned'].includes(status ?? '');
+/** The money is in (or the goods are): the order no longer waits for a proof. */
+const proofSettled = (status: string | null): boolean => status === 'paid' || status === 'delivered';
+/**
+ * Is this customer's latest InstaPay order waiting for a payment proof? Yes while it is open and not yet paid/delivered; then the ordering bot owns the picture (`receiveImage`).
+ * Anywhere else a picture goes to the agent's throttled media note (one per 10 minutes), never to an unthrottled "proof already received" reply (audit row 25, m2).
+ */
+export function proofExpected(host: Pick<LinkHost, 'sql'>, from: string): boolean {
+  const order = latestInstapayOrder(host, from);
+  return !!order && !proofClosed(order.status) && !proofSettled(order.status);
+}
+
+/** One "proof already received" reply per customer per this long (10 minutes); a customer who resends the screenshot gets nothing more until the gap has passed. */
+export const PROOF_ALREADY_GAP_MS = 10 * 60_000;
+/** The reply is answered once, then quiet: measured from the stored reply itself (same text, same customer), so erasure/retention cover it and there is no new state. */
+function sayProofAlready(t: Turn): void {
+  const text = loc(t, t.copy.t.proofAlready);
+  const recent = t.host.sql.exec<{ n: number }>(
+    `SELECT count(*) AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
+     WHERE ct.wa_id = ? AND m.direction = 'out' AND m.body = ? AND m.created_at > ? AND m.idempotency_key NOT LIKE ?`, // not this turn's own reply: a replayed turn must still re-deliver it
+    t.input.from, text, t.now - PROOF_ALREADY_GAP_MS, `bot:${t.input.messageId}:%`,
+  ).one().n > 0;
+  if (!recent) say(t, text);
+}
+
 async function receiveImage(t: Turn): Promise<void> {
   const { host, input: i } = t;
-  const order = host.sql.exec<{ order_id: string; order_number: string | null; status: string | null; proof_wamid: string | null; proof_deadline_at: number | null }>(
-    "SELECT order_id, order_number, status, proof_wamid, proof_deadline_at FROM store_orders WHERE wa_id = ? AND payment_method = 'instapay' ORDER BY updated_at DESC LIMIT 1", i.from,
-  ).toArray()[0];
-  if (!order || ['cancelled', 'refunded', 'returned'].includes(order.status ?? '')) return;
-  if (order.proof_wamid || order.status === 'paid' || order.status === 'delivered') {
-    say(t, loc(t, t.copy.t.proofAlready));
+  const order = latestInstapayOrder(host, i.from);
+  if (!order || proofClosed(order.status)) return;
+  // Reached with a settled order only when the agent is off (the router sends those pictures to the agent's media note otherwise): the old one-line answer stays for that case.
+  if (order.proof_wamid || proofSettled(order.status)) {
+    sayProofAlready(t);
     return;
   }
   if (order.proof_deadline_at !== null && order.proof_deadline_at < t.now) {
@@ -686,7 +757,7 @@ async function receiveImage(t: Turn): Promise<void> {
   alive(t);
   const claimed = host.sql.exec('UPDATE store_orders SET proof_wamid = ?, proof_at = ? WHERE order_id = ? AND proof_wamid IS NULL', i.wamid, t.now, order.order_id).rowsWritten > 0;
   if (!claimed) {
-    say(t, loc(t, t.copy.t.proofAlready));
+    sayProofAlready(t);
     return;
   }
   const release = () => host.sql.exec('UPDATE store_orders SET proof_wamid = NULL, proof_at = NULL WHERE order_id = ? AND proof_wamid = ?', order.order_id, i.wamid);
@@ -703,7 +774,7 @@ async function receiveImage(t: Turn): Promise<void> {
     release();
     throw e;
   }
-  const res = await t.bridge.attachPaymentProof(t.ws, order.order_id, url);
+  const res = await t.bridge.attachPaymentProof(t.ws, order.order_id, url, (await buyerOf(t))?.buyerKey);
   if (!res.ok) {
     release();
     if (res.reason === 'unavailable') throw new Error('store unavailable');
@@ -720,7 +791,7 @@ async function receiveImage(t: Turn): Promise<void> {
 async function showOrders(t: Turn): Promise<void> {
   const buyer = await buyerOf(t);
   if (!buyer) return unavailable(t);
-  const res = await t.bridge.listCustomerOrders(t.ws, buyer.buyerKey, 5);
+  const res = await t.bridge.listCustomerOrders(t.ws, buyer.buyerKey, 5, buyer.phoneE164);
   if (!res.ok) return unavailable(t);
   if (!res.value.items.length) return say(t, loc(t, t.copy.t.noOrders));
   const lines = res.value.items.map((o) => t.copy.t.orderLine(o.orderNumber, t.copy.t.orderStatusNames[o.status]?.[t.session.locale] ?? o.status, t.session.locale));

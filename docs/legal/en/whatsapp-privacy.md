@@ -2,8 +2,8 @@
 title: Ebda Chat Privacy Policy
 slug: whatsapp-privacy
 lang: en
-updated: 2026-11-09
-version: 1.1
+updated: 2026-11-10
+version: 1.2
 ---
 
 Arabic version prevails.
@@ -15,7 +15,7 @@ This policy explains how Ebda AI Studio ("we", "us") handles personal data in Eb
 ## 1. Who is responsible for what
 
 - **The merchant is the controller** of its customers' data: phone numbers, names, messages, media and order references that pass through the merchant's workspace. The merchant decides why and how that data is used and is responsible for having a lawful basis, including consent for marketing.
-- **Ebda AI Studio is the processor** of that conversation and contact data. We process it only on the merchant's behalf and instructions, under the Data Processing Agreement (https://ebda.app/legal/whatsapp-dpa/).
+- **Ebda AI Studio is the processor** of that conversation and contact data. We process it only on the merchant's behalf and instructions, under the Data Processing Agreement (https://ebda.app/en/legal/whatsapp-dpa/).
 - **Ebda AI Studio is the controller** of the merchant's own account, billing and security data, which we use to run and protect the Service.
 - **Meta Platforms is a separate, independent controller** for WhatsApp. When a customer uses WhatsApp, Meta processes data under its own terms and privacy policy. We do not control that processing.
 
@@ -67,7 +67,7 @@ If we become aware of a personal data breach affecting merchant data, we notify 
 
 ## 9. Rights of data subjects
 
-Customers whose data passes through a merchant's workspace have rights under the PDPL: to know, access, correct, erase, object and restrict, and to withdraw consent. Because the merchant is the controller, a customer should send the request to the merchant. We help the merchant answer. A customer can also opt out of messages at any time by writing STOP. To request deletion of data, see https://ebda.app/legal/data-deletion/.
+Customers whose data passes through a merchant's workspace have rights under the PDPL: to know, access, correct, erase, object and restrict, and to withdraw consent. Because the merchant is the controller, a customer should send the request to the merchant. We help the merchant answer. A customer can also opt out of messages at any time by writing STOP. To request deletion of data, see https://ebda.app/en/legal/data-deletion/.
 
 ## 10. Children
 

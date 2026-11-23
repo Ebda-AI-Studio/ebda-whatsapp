@@ -81,7 +81,6 @@ When you upload a receipt that matches exactly (the amount due, our InstaPay add
 From **Wallet > Statement** choose a month to see every entry (top-up, message, credits, refund) with totals by category, and download it as CSV. Figures are shown as recorded at the time of the entry.
 
 ## Refunds
-*(Subject to the final terms of service.)*
 - The wallet balance is refundable for **12 months** after cancellation, after any debt is settled.
 - Refunds go to the original payment method through Kashier; otherwise by bank transfer or InstaPay after an identity check.
 - **The minimum refund is 50 EGP.**
@@ -96,4 +95,4 @@ To request one, open **Wallet** and press **Request a refund**, enter the amount
 - **I was charged for a message that did not arrive:** we only charge messages Meta counts as billable.
 
 ---
-Last checked: 2026-11-14. Refunds and fees are subject to the final terms of service. Meta's rules change.
+Last checked: 2026-11-14. Refunds and fees follow our terms of service. Meta's rules change.
