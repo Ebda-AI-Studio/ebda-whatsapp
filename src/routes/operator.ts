@@ -469,6 +469,13 @@ operatorRoutes.put('/agent/model', async (c) => {
   const r = await setAgentModelFlag(c.env, { model: b.data.model, actor: actor(c), reason: b.data.reason });
   return r.ok ? c.json({ model: r.model }) : bad(c, r.reason);
 });
+// The operator screen reads a workspace's current mode before changing it (an unknown workspace is a 404, never a default "off").
+operatorRoutes.get('/workspaces/:workspaceId/assistant', async (c) => {
+  const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(c.req.param('workspaceId')).first();
+  if (!known) return c.json({ error: 'not_found' }, 404);
+  const ws = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(c.req.param('workspaceId')));
+  return c.json({ mode: await ws.assistantMode() });
+});
 operatorRoutes.put('/workspaces/:workspaceId/assistant', async (c) => {
   const b = z.object({ mode: assistantMode }).strict().safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, b.error.issues[0]?.message);

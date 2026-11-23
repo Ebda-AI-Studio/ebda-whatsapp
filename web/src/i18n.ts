@@ -20,6 +20,19 @@ type NumberStateKey = 'active' | 'pending' | 'failed' | 'locked' | 'disconnected
 
 
 const ar = {
+  opAssistant: {
+    title: 'مساعد الذكاء', help: 'مفاتيح طرح المساعد. تغيير سقف المنصة أو الإيقاف بيسري على كل الحسابات فورًا من غير نشر.',
+    platformTitle: 'مفاتيح المنصة', loadFailed: 'مقدرناش نقرأ الحالة. حاول تاني.', current: 'الحالة الحالية',
+    killGlobal: 'إيقاف المساعد بالكامل', killProduct: 'إيقاف المساعد في شات إبدأ', shadow: 'وضع الظل (بيسجّل من غير ما يرد)',
+    cap: 'سقف الوضع للمنصة', killedTools: 'أدوات موقوفة (مفصولة بفاصلة)', killedToolsBad: 'اسم أداة غلط: لازم من 1 لـ 64 حرف وبحد أقصى 100 أداة.',
+    on: 'مفعّل', off: 'مقفول', none: 'مفيش', save: 'احفظ مفاتيح المنصة', nothingToSave: 'مفيش تغيير للحفظ.',
+    confirmPlatform: (what: string) => `هتغيّر مفاتيح المساعد على كل الحسابات: ${what}. تأكّد؟`,
+    wsTitle: 'وضع حساب عميل', wsId: 'معرّف حساب العميل', wsLoad: 'اعرض الوضع', wsMode: 'الوضع', wsSet: 'غيّر الوضع', wsSame: 'ده الوضع الحالي أصلًا.',
+    wsCurrent: (id: string, m: string) => `حساب ${id}: الوضع الحالي ${m}`, wsNotFound: 'الحساب ده مش موجود.', wsCapNote: 'الوضع الفعلي بيتحدد بأقل قيمة بين وضع الحساب وسقف المنصة.',
+    confirmWs: (id: string, m: string) => `هتخلّي وضع المساعد في حساب ${id}: ${m}. تأكّد؟`,
+    yes: 'أيوه، نفّذ', no: 'لأ', saved: 'اتحفظ.',
+    modes: { off: 'مقفول', 'answer-only': 'إجابات بس', suggest: 'اقتراحات', act: 'تنفيذ' } as Record<string, string>,
+  },
   ks: {
     title: 'إيقاف طارئ', help: 'بتوقف حساب عميل أو جزء منه فورًا. كل خطوة بتتسجّل باسمك وسببها ومينفعش تتمسح. القراءة بتفضل شغّالة، والعميل يقدر يدفع ويمسح بيانات عميل.',
     workspace: 'معرّف حساب العميل', load: 'اعرض الحالة', reason: 'السبب (5 حروف على الأقل)', reasonShort: 'اكتب السبب (5 حروف على الأقل).',
@@ -300,7 +313,7 @@ const ar = {
   viewAsBanner: 'عرض للقراءة فقط: بتشوف حساب العميل كمشغّل، وكل فتحة بتتسجل.', viewAsPrompt: 'اكتب سبب فتح حساب العميل (10 حروف على الأقل). السبب بيتسجل مع كل طلب.', viewAsNeedsReason: 'مفيش سبب، فمفتحناش حساب العميل.', viewAsTitle: 'اعرض حساب عميل', viewAsHelp: 'بتفتح حساب العميل للقراءة بس، من غير ما تغيّر حاجة. كل صفحة بتفتحها بتتسجل باسمك وبالسبب.', viewAsWorkspace: 'رقم تعريف مساحة العميل', viewAsOpen: 'افتح للقراءة فقط', viewAsNeedsId: 'اكتب رقم تعريف المساحة الأول.',
   opDeletionsTitle: 'طلبات مسح البيانات من ميتا', opDeletionsEmpty: 'مفيش طلبات.', opDeletionState: { queued: 'في الانتظار', done: 'اتنفّذ', nothing_found: 'محتاج مراجعة', failed: 'محتاج مراجعة' }, opDeletionRemoved: (n: string) => `اتمسح ${n} ربط`, opDeletionsHelp: 'الطلب اللي حالته "محتاج مراجعة" لازم حد يكمله بإيده: الخطوات في دليل التنبيه meta_deletion_needs_review.',
   opNav: 'لوحة التشغيل', opTitle: 'لوحة التشغيل', opIntro: 'أسعار المحافظ والمراجعات. كل تغيير بيتسجّل باسمك وبسببه.',
-  opTabs: { pricing: 'التسعير', rates: 'أسعار ميتا والصرف', account: 'حساب عميل', queues: 'الاسترداد والتسويات', log: 'سجل التغييرات', shared: 'قوالب الرقم المشترك', killswitch: 'إيقاف طارئ', offboarding: 'مسح مساحة', audit: 'سجل الإجراءات' } as Record<string, string>,
+  opTabs: { pricing: 'التسعير', rates: 'أسعار ميتا والصرف', account: 'حساب عميل', queues: 'الاسترداد والتسويات', log: 'سجل التغييرات', shared: 'قوالب الرقم المشترك', assistant: 'مساعد الذكاء', killswitch: 'إيقاف طارئ', offboarding: 'مسح مساحة', audit: 'سجل الإجراءات' } as Record<string, string>,
   opSharedTitle: 'قوالب الرقم المشترك', opSharedHelp: 'دي قوالب حساب واتساب بتاع المنصة. المتاجر مبتشوفهاش ومبتعدّلهاش، وبتستخدم منها بس القوالب المعتمدة من نوع خدمي أو تحقق.', opSharedSync: 'تحديث من ميتا',
   opSharedSynced: (up: string, gone: string) => `اتحدّث: ${up} قالب، واتشال ${gone}.`, opSharedEmpty: 'مفيش قوالب لسه. اضغط تحديث من ميتا أو ابعت قالب جديد.',
   opSharedName: 'اسم القالب', opSharedLang: 'اللغة', opSharedCategory: 'النوع', opSharedStatus: 'الحالة', opSharedStores: 'للمتاجر',
@@ -444,6 +457,19 @@ const ar = {
 };
 
 const en: typeof ar = {
+  opAssistant: {
+    title: 'Assistant', help: 'Rollout switches for the assistant. A platform cap or kill change applies to every account at once, with no deploy.',
+    platformTitle: 'Platform switches', loadFailed: 'Could not read the current state. Try again.', current: 'Current state',
+    killGlobal: 'Kill the assistant everywhere', killProduct: 'Kill the assistant in Ebda Chat', shadow: 'Shadow mode (records, never replies)',
+    cap: 'Platform mode cap', killedTools: 'Killed tools (comma separated)', killedToolsBad: 'Bad tool name: each must be 1 to 64 characters, up to 100 tools.',
+    on: 'On', off: 'Off', none: 'None', save: 'Save platform switches', nothingToSave: 'Nothing to save.',
+    confirmPlatform: (what: string) => `You are changing the assistant switches for every account: ${what}. Sure?`,
+    wsTitle: 'One account\'s mode', wsId: 'Customer account id', wsLoad: 'Show mode', wsMode: 'Mode', wsSet: 'Set mode', wsSame: 'That is already the current mode.',
+    wsCurrent: (id: string, m: string) => `Account ${id}: current mode ${m}`, wsNotFound: 'That account does not exist.', wsCapNote: 'The effective mode is the lower of the account mode and the platform cap.',
+    confirmWs: (id: string, m: string) => `You are setting the assistant mode of account ${id} to ${m}. Sure?`,
+    yes: 'Yes, do it', no: 'No', saved: 'Saved.',
+    modes: { off: 'Off', 'answer-only': 'Answer only', suggest: 'Suggest', act: 'Act' } as Record<string, string>,
+  },
   ks: {
     title: 'Kill switch', help: 'Stops a customer account, or part of it, at once. Every step is recorded with your id and the reason, and cannot be edited or removed. Reading stays on, and the customer can still pay and erase a contact.',
     workspace: 'Customer account id', load: 'Show status', reason: 'Reason (at least 5 characters)', reasonShort: 'Write the reason (at least 5 characters).',
@@ -724,7 +750,7 @@ const en: typeof ar = {
   viewAsBanner: 'Read-only view: you are looking at a merchant\'s account as an operator, and every page you open is logged.', viewAsPrompt: 'Why are you opening this merchant\'s account? (at least 10 characters; it is logged with every request)', viewAsNeedsReason: 'No reason given, so the merchant\'s account was not opened.', viewAsTitle: 'View a merchant\'s account', viewAsHelp: 'Opens the merchant\'s account read-only, changing nothing. Every page you open is logged with your name and the reason.', viewAsWorkspace: 'Workspace id', viewAsOpen: 'Open read-only', viewAsNeedsId: 'Enter the workspace id first.',
   opDeletionsTitle: 'Meta data-deletion requests', opDeletionsEmpty: 'No requests.', opDeletionState: { queued: 'Queued', done: 'Done', nothing_found: 'Needs review', failed: 'Needs review' }, opDeletionRemoved: (n: string) => `${n} connections removed`, opDeletionsHelp: 'A request marked "Needs review" must be finished by a person: the steps are in the alert runbook meta_deletion_needs_review.',
   opNav: 'Operations', opTitle: 'Operations', opIntro: 'Wallet pricing and reviews. Every change is recorded under your name with its reason.',
-  opTabs: { pricing: 'Pricing', rates: 'Meta rates and FX', account: 'One account', queues: 'Refunds and adjustments', log: 'Change log', shared: 'Shared number templates', killswitch: 'Kill switch', offboarding: 'Delete a workspace', audit: 'Action log' } as Record<string, string>,
+  opTabs: { pricing: 'Pricing', rates: 'Meta rates and FX', account: 'One account', queues: 'Refunds and adjustments', log: 'Change log', shared: 'Shared number templates', assistant: 'Assistant', killswitch: 'Kill switch', offboarding: 'Delete a workspace', audit: 'Action log' } as Record<string, string>,
   opSharedTitle: 'Shared number templates', opSharedHelp: 'These are the platform WhatsApp account\'s templates. Stores cannot see or change them, and may use only approved utility or authentication ones.', opSharedSync: 'Sync from Meta',
   opSharedSynced: (up: string, gone: string) => `Synced: ${up} templates, ${gone} removed.`, opSharedEmpty: 'No templates yet. Sync from Meta or submit a new one.',
   opSharedName: 'Template name', opSharedLang: 'Language', opSharedCategory: 'Category', opSharedStatus: 'Status', opSharedStores: 'For stores',
