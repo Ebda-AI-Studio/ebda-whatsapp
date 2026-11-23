@@ -31,3 +31,21 @@ describe('operator InstaPay queue shows what the receipt reader saw (suggestion 
     expect(item.bankRef).toBeNull();
   });
 });
+
+describe('queue size', () => {
+  it('150 pending requests (over the D1 100-parameter cap) still list, with the read reference on those that have one', async () => {
+    const ws = storeId(9952);
+    await seedNumber('pn-airead-2', ws);
+    const now = Date.now();
+    const stmts = [];
+    for (let i = 0; i < 150; i++) {
+      stmts.push(env.DB.prepare("INSERT INTO instapay_requests (id, reference, workspace_id, kind, amount_minor, currency, state, created_by, created_at, expires_at, proof_key, proof_mime, proof_at) VALUES (?,?,?,'topup',1000,'EGP','under_review','u1',?,?, 'k','image/png',?)").bind(`big-${i}`, `WA-BIG${String(i).padStart(5, '0')}`, ws, now + i, now + 1e7, now));
+    }
+    stmts.push(env.DB.prepare("INSERT INTO instapay_auto_confirmations (id, request_id, workspace_id, state, idempotency_key, extracted_json, created_at, updated_at) VALUES ('ac-big','big-7',?,'needs_human','k-big',?,?,?)").bind(ws, JSON.stringify({ reference: '111222333444', amountMinor: 1000 }), now, now));
+    await env.DB.batch(stmts);
+    const items = (await listForOperator(env, 'under_review')).filter((i) => i.id.startsWith('big-'));
+    expect(items).toHaveLength(150);
+    expect(items.find((i) => i.id === 'big-7')!.aiRead).toEqual({ reference: '111222333444', amountMinor: 1000 });
+    expect(items.find((i) => i.id === 'big-8')!.aiRead).toBeNull();
+  });
+});

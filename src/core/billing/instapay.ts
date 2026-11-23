@@ -138,15 +138,10 @@ export async function listForWorkspace(env: Env, workspaceId: string): Promise<I
 }
 export async function listForOperator(env: Env, state?: string): Promise<OperatorInstapayDto[]> {
   const ok = state && ['awaiting_proof', 'under_review', 'confirmed', 'rejected', 'expired'].includes(state);
-  const { results } = await env.DB.prepare(`SELECT ${COLS} FROM instapay_requests ${ok ? 'WHERE state = ?' : ''} ORDER BY created_at LIMIT 200`).bind(...(ok ? [state] : [])).all<Row>();
   // A SUGGESTION only: what the receipt reader saw, so the reviewer can compare it with the proof instead of retyping it. Confirming still needs a person's own bankRef.
-  const reads = new Map<string, string | null>();
-  if (results.length > 0) {
-    const ids = results.map((r) => r.id);
-    const { results: autos } = await env.DB.prepare(`SELECT request_id, extracted_json FROM instapay_auto_confirmations WHERE request_id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all<{ request_id: string; extracted_json: string | null }>();
-    for (const a of autos) reads.set(a.request_id, a.extracted_json);
-  }
-  return results.map((r) => ({ ...opDto(r), aiRead: parseAiRead(reads.get(r.id) ?? null) }));
+  // One scalar subquery in the single queue query (request_id is UNIQUE): no IN (...) list, so no D1 100-bound-parameter cap however long the queue is.
+  const { results } = await env.DB.prepare(`SELECT ${COLS}, (SELECT a.extracted_json FROM instapay_auto_confirmations a WHERE a.request_id = instapay_requests.id) AS ai_json FROM instapay_requests ${ok ? 'WHERE state = ?' : ''} ORDER BY created_at LIMIT 200`).bind(...(ok ? [state] : [])).all<Row & { ai_json: string | null }>();
+  return results.map((r) => ({ ...opDto(r), aiRead: parseAiRead(r.ai_json) }));
 }
 
 /** The reference (and amount) the receipt reader saw, from the auto-confirmation row; null when nothing usable was read. */
