@@ -43,10 +43,12 @@ export function createTokenProvider(o: Opts) {
   let cached: { token: string; expiresAt: number } | null = null;
   let inflight: Promise<string> | null = null;
 
+  const loginUrl = () => `${o.accountsUrl}/login?${o.product ? `product=${encodeURIComponent(o.product)}&` : ''}return=${encodeURIComponent(currentUrl())}`;
+
   async function fetchToken(): Promise<string> {
     const res = await f(`${o.accountsUrl}/token?aud=whatsapp`, { credentials: 'include' });
     if (res.status === 401) {
-      redirect(`${o.accountsUrl}/login?${o.product ? `product=${encodeURIComponent(o.product)}&` : ''}return=${encodeURIComponent(currentUrl())}`);
+      redirect(loginUrl());
       throw new Error(SIGNED_OUT);
     }
     if (!res.ok) throw new Error(`token endpoint ${res.status}`);
@@ -62,6 +64,8 @@ export function createTokenProvider(o: Opts) {
       inflight ??= fetchToken().finally(() => { inflight = null; });
       return inflight;
     },
+    /** Where the shared sign-in lives for this product, returning here afterwards. */
+    loginUrl,
   };
 }
 
@@ -78,6 +82,19 @@ function claims(token: string): Record<string, unknown> | null {
 export function decodeSub(token: string): string | null {
   const sub = claims(token)?.sub;
   return typeof sub === 'string' ? sub : null;
+}
+
+/** The signed-in email (display only), or null when the token has none. */
+export function decodeEmail(token: string): string | null {
+  const email = claims(token)?.email;
+  return typeof email === 'string' && email.includes('@') ? email : null;
+}
+
+/** `ahmad@gmail.com` -> `a***@gmail.com`: enough to recognise the account, not enough to read it off a shared screen. */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf('@');
+  if (at < 1) return email;
+  return `${email[0]}***${email.slice(at)}`;
 }
 
 /** Reads the stores claim to choose a store. Display only: the Worker verifies every token. */

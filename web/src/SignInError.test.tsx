@@ -16,10 +16,10 @@ it('every sign-in failure has a message in both languages', () => {
 
 it('shows the reason in Arabic and English and starts over only when the person presses the button', () => {
   const retry = vi.fn();
-  render(<SignInError code="state" onRetry={retry} />);
+  render(<SignInError code="state" onRetry={retry} onSignOut={() => undefined} onSwitch={() => undefined} />);
   expect(screen.getByRole('alert').textContent).toContain(STRINGS.ar.signInErrors.state);
   expect(screen.getByRole('alert').textContent).toContain(STRINGS.en.signInErrors.state);
   expect(retry).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button'));
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(STRINGS.ar.signInTryAgain) }));
   expect(retry).toHaveBeenCalledTimes(1);
 });
