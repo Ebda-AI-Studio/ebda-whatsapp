@@ -126,7 +126,14 @@ export function clientKey(ip: string | null): string {
  */
 export class Buckets {
   private readonly map = new Map<string, { tokens: number; at: number }>();
-  constructor(private readonly ratePerSec: number, private readonly burst: number, private readonly maxKeys = 5_000) {}
+  private readonly ratePerSec: number;
+  private readonly burst: number;
+  private readonly maxKeys: number;
+  constructor(ratePerSec: number, burst: number, maxKeys = 5_000) {
+    this.ratePerSec = ratePerSec;
+    this.burst = burst;
+    this.maxKeys = maxKeys;
+  }
   /** 0 = allowed (one token taken); otherwise the seconds to wait. */
   take(key: string, now = Date.now()): number {
     const b = this.map.get(key) ?? { tokens: this.burst, at: now };
@@ -153,7 +160,12 @@ export type RateVerdict = { allowed: true } | { allowed: false; retryAfterSec: n
  * reads, auth limiters that must not lock everyone out) or `closed` (an outage refuses: money routes and anything abuse-sensitive).
  */
 export class FixedWindowLimiter {
-  constructor(private readonly store: RateLimitStore, private readonly opts: { limit: number; windowMs: number; failMode: FailMode }) {}
+  private readonly store: RateLimitStore;
+  private readonly opts: { limit: number; windowMs: number; failMode: FailMode };
+  constructor(store: RateLimitStore, opts: { limit: number; windowMs: number; failMode: FailMode }) {
+    this.store = store;
+    this.opts = opts;
+  }
   async check(key: string, now = Date.now()): Promise<RateVerdict> {
     let r: { count: number; resetAtMs: number };
     try { r = await this.store.hit(key, this.opts.windowMs); } catch {

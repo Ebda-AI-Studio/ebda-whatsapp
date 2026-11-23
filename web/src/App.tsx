@@ -22,7 +22,8 @@ import { TeamScreen } from './components/TeamScreen';
 import { WalletScreen } from './components/WalletScreen';
 import type { WalletDto } from './data/billing';
 import type { ConversationFilter, InboxSource } from './data/source';
-import { STRINGS, type Lang } from './i18n';
+import { type Lang } from './i18n';
+import { stringsFor, withWorkspacePicker } from './i18n-workspace';
 
 import { formatMoney } from './lib/format';
 import { useTypeahead } from './lib/useTypeahead';
@@ -37,7 +38,7 @@ export function App(props: Props) {
 /** A super admin with no store: the operator console alone (the rail's one item), no inbox and no store-scoped call. The console's "view a merchant's account" form is the way into a store, read-only and with a reason. */
 function OperatorShell({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const [lang] = useState<Lang>(initialLang);
-  const t = STRINGS[lang];
+  const t = stringsFor(lang, source.standalone);
   const only = { templates: false, campaigns: false, contacts: false, integrations: false, agent: false, bot: false, numbers: false, wallet: false, team: false, operator: true };
   return (
     <div className="app" data-view="screen">
@@ -49,16 +50,17 @@ function OperatorShell({ source, now = Date.now, initialLang = 'ar' }: Props) {
 
 function NoWorkspaceShell({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const [lang] = useState<Lang>(initialLang);
-  const t = STRINGS[lang];
+  const t = stringsFor(lang, source.standalone);
   // A super admin who opened a store with no workspace still reaches the operator console from the rail.
   const none = { templates: false, campaigns: false, contacts: false, integrations: false, agent: false, bot: false, numbers: false, wallet: false, team: false, operator: source.role === 'super_admin' && !!source.operator };
-  const [view, setView] = useState<View>('inbox');
+  // A super admin never lands on the "not enabled" dead end: the console is the first screen, the store's own page stays one rail click away.
+  const [view, setView] = useState<View>(none.operator ? 'operator' : 'inbox');
   return (
     <div className="app" data-view="screen">
       <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={none} store={source} />
       {view === 'operator' && none.operator && source.operator
         ? <OperatorScreen t={t} lang={lang} source={source} api={source.operator} now={now} />
-        : <NoWorkspace t={t} lang={lang} storeId={source.storeId} storeName={activeStoreName(source, t.storeUnnamed)} />}
+        : <NoWorkspace t={t} lang={lang} storeId={source.standalone ? undefined : source.storeId} storeName={activeStoreName(source, t.storeUnnamed)} />}
     </div>
   );
 }
@@ -82,7 +84,7 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
   }, [assistantOn]);
   const [view, setView] = useState<View>(initialView);
   const connection = useConnectionStatus(source, view);
-  const t = STRINGS[lang];
+  const t = stringsFor(lang, source.standalone);
   const [filter, setFilter] = useState<ConversationFilter>('all');
   const [reloadTick, setReloadTick] = useState(0);
   const [items, setItems] = useState<ConversationDto[]>([]);
@@ -188,7 +190,7 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
     [...pending.current.keys()].forEach((k) => flushRef.current(k)); // a decision on the previous chat is sent, never lost
     // Messages, read receipt and orders load in parallel and independently: one failing never blanks the others.
     void source.markRead(id).catch(() => undefined);
-    if (conv) void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrdersFailed(true));
+    if (conv && !source.standalone) void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrdersFailed(true));
     try {
       setMessages([...(await source.getMessages(id))]);
     } catch {
@@ -302,9 +304,9 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
   };
 
   return (
-    <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
+    <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'} data-nostore={source.standalone ? 'on' : undefined}>
       {source.viewAs && <p className="view-as-banner" role="status" aria-label={t.viewAsBanner}>{t.viewAsBanner}</p>}
-      <Rail t={t} lang={lang} inboxUnread={totalUnread} status={<RailStatus t={t} lang={lang} status={connection} onNavigate={setView} />} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} store={source} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, integrations: canIntegrations, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
+      <Rail t={withWorkspacePicker(t, lang, source)} lang={lang} inboxUnread={totalUnread} status={<RailStatus t={t} lang={lang} status={connection} onNavigate={setView} />} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} store={source} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, integrations: canIntegrations, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'integrations' && source.connectors ? (canIntegrations ? <IntegrationsScreen t={t} lang={lang} source={source} readOnly={source.role !== 'owner'} /> : <p className="view-denied" role="alert">{t.notAllowed}</p>)
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
@@ -321,9 +323,9 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
         {!online && <p className="notice offline" role="status">{t.offline}</p>}
         {error && items.length > 0 && <p className="notice offline" role="alert">{t.loadError} <button type="button" className="btn ghost" onClick={() => void refresh()}>{t.retry}</button></p>}
         {templatesFailed && <p className="notice offline" role="alert">{t.dataLoadError} <button type="button" className="btn ghost" onClick={loadTemplates}>{t.retry}</button></p>}
-        <ChatPane t={t} lang={lang} now={now()} conversation={selected} source={source} userNames={source.userNames} currentOrder={orders?.[0] ?? null} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onSendMedia={sendMedia} onRetry={retry} onBack={() => setSelectedId(null)} onShowOrders={() => setOrdersOpen(true)} onTakeOver={source.assign ? () => void takeOver() : undefined} />
+        <ChatPane t={t} lang={lang} now={now()} conversation={selected} source={source} userNames={source.userNames} currentOrder={source.standalone ? null : orders?.[0] ?? null} messages={messages} templates={templates} onSendText={sendText} onSendTemplate={sendTemplate} onSendMedia={sendMedia} onRetry={retry} onBack={() => setSelectedId(null)} onShowOrders={() => setOrdersOpen(true)} onTakeOver={source.assign ? () => void takeOver() : undefined} />
       </div>
-      <OrderPane key={selectedId ?? 'none'} t={t} lang={lang} orders={selected ? orders : null} failed={ordersFailed} onRetry={() => { const conv = shown.find((c) => c.id === selectedId) ?? items.find((c) => c.id === selectedId); if (!conv) return; setOrdersFailed(false); void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrdersFailed(true)); }} hasChat={!!selected} canDecide={source.capabilities.codOutcome} onConfirm={(o) => recordOutcome(o, 'confirmed')} onRefuse={(o) => recordOutcome(o, 'refused')} onClose={() => setOrdersOpen(false)} />
+      {!source.standalone && <OrderPane key={selectedId ?? 'none'} t={t} lang={lang} orders={selected ? orders : null} failed={ordersFailed} onRetry={() => { const conv = shown.find((c) => c.id === selectedId) ?? items.find((c) => c.id === selectedId); if (!conv) return; setOrdersFailed(false); void source.orders(conv.contact.waId).then((o) => setOrders(o.items), () => setOrdersFailed(true)); }} hasChat={!!selected} canDecide={source.capabilities.codOutcome} onConfirm={(o) => recordOutcome(o, 'confirmed')} onRefuse={(o) => recordOutcome(o, 'refused')} onClose={() => setOrdersOpen(false)} />}
         </>
       )}
       {toast && (

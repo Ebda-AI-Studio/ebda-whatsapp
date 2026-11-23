@@ -142,9 +142,10 @@ export function IntegrationsScreen({ t, source, readOnly = false }: { t: Strings
         {!readOnly && draft && (
           <form onSubmit={(e) => { e.preventDefault(); if (body) setAsking(true); }}>
             <label className="field"><span>{t.connId}</span><input dir="ltr" maxLength={16} value={draft.id} readOnly={draft.existing} onChange={(e) => set({ id: e.target.value })} /></label>
-            <label className="field"><span>{t.connKind}</span>
-              <select value={draft.kind} disabled={draft.existing} onChange={(e) => set({ kind: e.target.value as Draft['kind'] })}><option value="webhook">Webhook</option><option value="odoo">Odoo</option></select>
-            </label>
+            <div className="int-pick"><IntegrationMark kind={draft.kind} />
+              <label className="field"><span>{t.connKind}</span>
+                <select value={draft.kind} disabled={draft.existing} onChange={(e) => set({ kind: e.target.value as Draft['kind'] })}><option value="webhook">Webhook</option><option value="odoo">Odoo</option></select>
+              </label></div>
             <div className="setting-row">
               <span id="conn-enabled-label">{t.connEnabled}</span>
               <button type="button" role="switch" aria-checked={draft.enabled} aria-labelledby="conn-enabled-label" className="switch" onClick={() => set({ enabled: !draft.enabled })}><span /></button>

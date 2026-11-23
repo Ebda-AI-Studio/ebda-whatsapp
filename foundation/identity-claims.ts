@@ -15,8 +15,10 @@ export type Principal = {
 };
 
 export class IdentityError extends Error {
-  constructor(public readonly status: 401 | 403, message: string) {
+  readonly status: 401 | 403;
+  constructor(status: 401 | 403, message: string) {
     super(message);
+    this.status = status;
   }
 }
 

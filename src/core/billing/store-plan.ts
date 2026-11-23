@@ -12,6 +12,7 @@ import type { Env } from '../../env';
 import type { WalletDto } from '../api/contract';
 import type { StoreEvent } from '../api/store-events';
 import { alert } from '../observability';
+import { isStandaloneId } from '../workspace-kind';
 import { chatPackageName } from './package-names';
 import { storePlanNames } from './store-plan-names';
 import { STORE_INCLUDED, cancelSubscription, setSubscription, type WriteOpts } from './subscriptions';
@@ -21,6 +22,7 @@ type PlanEvent = Extract<StoreEvent, { type: 'store.plan_changed' }>;
 
 export async function applyStorePlan(env: Env, event: PlanEvent, now = Date.now()): Promise<'applied' | 'ignored' | 'kept'> {
   const ws = event.storeId;
+  if (isStandaloneId(ws)) { alert('standalone_store_plan_event', { workspace: ws }); return 'ignored'; } // CHAT-SA-6: a Store plan can never write to a standalone workspace
   const eff = Date.parse(event.data.effectiveAt);
   const includes = event.data.includesWhatsApp;
   // D3: access is never GRANTED on a guess. The contract keeps `status` and `periodEnd` optional so an old Store event still parses, but an event
