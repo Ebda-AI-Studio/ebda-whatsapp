@@ -298,24 +298,69 @@ describe('handoff counts in the bot results', () => {
 });
 
 describe('handoff vs erasure in the bot results', () => {
-  it('a customer erased while the handoff turn runs leaves no marker behind', async () => {
+  // Deterministic, and independent of WHO runs the due turn. The first version armed its spy after the webhook and ran the turn itself, so under load the
+  // DO's own alarm could claim the turn first (the lease makes the test's runner skip it): the spy then saw one HMAC instead of two and the test failed
+  // (seen once in a full-suite run, 0/30 in isolation and 0/30 under load afterwards). Here the spy is armed BEFORE the webhook and counts only the
+  // funnel tokens (an HMAC over the customer's wa id: the conversation step, then the handoff step), so the erasure lands between the handoff turn's
+  // token and its marker write whichever runner executes the turn.
+  it('a customer erased while the handoff turn runs leaves no marker behind (whichever runner executes the turn)', async () => {
     const ws = W(71);
     const pn = await agentWorkspace(ws, { language: 'auto' });
     await grant(ws);
     model([]);
     stubGraph();
-    expect((await postWebhook(SELF, rawMessagePayload(pn, text('I want to talk to a human')))).status).toBe(200);
+    const message = text('I want to talk to a human');
+    const waId = String(message.from ?? '201001234567');
+    let storage!: DurableObjectState['storage'];
+    await runInDurableObject(workspace(ws), async (_inst, state) => { storage = state.storage; });
     const real = crypto.subtle.sign.bind(crypto.subtle);
-    let calls = 0;
-    // Run the due turn inside the DO. 1st token = the conversation step, 2nd = the handoff step: the customer is erased while it is computed.
-    await runInDurableObject(workspace(ws), async (inst, state) => {
-      const spy = vi.spyOn(crypto.subtle, 'sign').mockImplementation(async (...a: Parameters<typeof real>) => {
-        if (++calls === 2) state.storage.sql.exec('DELETE FROM messages');
-        return real(...a);
-      });
-      try { await (inst as unknown as { runDueTasks(): Promise<unknown> }).runDueTasks(); } finally { spy.mockRestore(); }
+    let tokens = 0;
+    const spy = vi.spyOn(crypto.subtle, 'sign').mockImplementation(async (...a: Parameters<typeof real>) => {
+      const data = a[2] as BufferSource;
+      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      if (new TextDecoder().decode(bytes) === waId && ++tokens === 2) storage.sql.exec('DELETE FROM messages'); // the customer is erased while the handoff token is computed
+      return real(...a);
     });
-    expect(calls).toBe(2);
+    try {
+      expect((await postWebhook(SELF, rawMessagePayload(pn, message))).status).toBe(200);
+      await workspace(ws).runDueTasks(); // also waits for an alarm run already in flight
+    } finally { spy.mockRestore(); }
+    expect(tokens).toBe(2);
     expect(await rows(ws, 'SELECT step FROM bot_funnel_markers ORDER BY step')).toEqual([{ step: 'conversation' }]);
+  });
+});
+
+describe('handoff safety net (Ruling CHAT-EVAL-1b)', () => {
+  it.each([
+    ['تمام، هحوّلك لحد من فريقنا يكمّل معاك.', 'ar'],
+    ['Sure, I am handing you over to a member of our team.', 'en'],
+    ['A team member will get back to you shortly.', 'en'],
+  ])('a reply that promises a person ("%s") without the tool opens a real handoff instead of leaving the customer waiting', async (words) => {
+    const ws = W(91 + seq++ % 3);
+    const pn = await agentWorkspace(ws, { language: 'auto' });
+    await grant(ws);
+    model([{ text: words }]);
+    await say(ws, pn, text('ينفع ارجع المنتج؟'), stubGraph());
+    expect((await rows(ws, 'SELECT reason FROM agent_handoffs'))[0]).toEqual({ reason: 'model' });
+    expect(await tags(ws)).toContain('needs_human');
+  });
+
+  it('an ordinary answer that merely mentions a team or a transfer is not a handoff', async () => {
+    const ws = W(94);
+    const pn = await agentWorkspace(ws, { language: 'auto' });
+    await grant(ws);
+    model([{ text: 'أيوه، تقدر ترجّع المنتج خلال 14 يوم.' }]);
+    await say(ws, pn, text('ينفع ارجع المنتج؟'), stubGraph());
+    expect(await rows(ws, 'SELECT reason FROM agent_handoffs')).toEqual([]);
+  });
+
+  it('two rounds in a row of made-up tools hand the customer to a person at once (bad_output), not after the round cap', async () => {
+    const ws = W(95);
+    const pn = await agentWorkspace(ws, { language: 'auto' });
+    await grant(ws);
+    const m = model([{ tools: [{ name: 'does_not_exist' }] }, { tools: [{ name: 'also_made_up' }] }]);
+    await say(ws, pn, text('عايز فستان'), stubGraph());
+    expect(m.callCount).toBe(2);
+    expect((await rows(ws, 'SELECT reason FROM agent_handoffs'))[0]).toEqual({ reason: 'bad_output' });
   });
 });

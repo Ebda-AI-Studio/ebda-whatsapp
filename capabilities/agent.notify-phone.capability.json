@@ -1,7 +1,6 @@
 {
   "id": "agent.notify-phone",
-  "status": "in-pr",
-  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "status": "live",
   "area": "agent",
   "version": 1,
   "versionDate": "2026-11-14",
@@ -13,7 +12,7 @@
     "/agent"
   ],
   "api": [
-    "PUT /stores/:storeId/agent {notifyPhone E.164|null}"
+    "PUT /stores/:storeId/agent"
   ],
   "mcpTool": null,
   "planGate": null,

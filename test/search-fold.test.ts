@@ -1,0 +1,92 @@
+import { runInDurableObject } from 'cloudflare:test';
+import { expect, it } from 'vitest';
+import { listConversationsResponse } from '../src/core/api/contract';
+import { syncSearchFold } from '../src/core/search-fold';
+import { apiFor, storeId as W, useApiKey } from './helpers/api';
+import { rows, workspace } from './helpers/workspace';
+
+useApiKey();
+const nowS = () => Math.floor(Date.now() / 1000);
+
+async function chat(ws: string, from: string, name: string, text: string) {
+  const ts = nowS() - 100;
+  await workspace(ws).ingest({ phoneNumberId: 'pn', inbound: [{ wamid: `${ws}.${from}.${ts}`, from, ts, type: 'text', text, profileName: name }], statuses: [], receivedAt: 1 });
+}
+async function find(api: Awaited<ReturnType<typeof apiFor>>, q: string) {
+  const r = await api.call('GET', `/conversations?q=${encodeURIComponent(q)}`);
+  expect(r.status).toBe(200);
+  return listConversationsResponse.parse(await r.json()).items.map((c) => c.contact.waId);
+}
+/** What the DO constructor does when env.SEARCH_FOLD changes: marker + full rebuild in one transaction. */
+const flip = (ws: string, on: boolean) =>
+  runInDurableObject(workspace(ws), (i, state) => state.storage.transactionSync(() => syncSearchFold(state.storage.sql, on, () => (i as unknown as { rebuildFts(): void }).rebuildFts())));
+
+it('FDN-SEARCH-1: flag off = legacy fold; flipping on re-indexes names AND messages; flipping off restores legacy', async () => {
+  const ws = W(310);
+  const api = await apiFor(ws);
+  await chat(ws, '201000000011', 'سؤال', 'مرحبا');
+  await chat(ws, '201000000012', 'کوتشی', 'عايز كوتشي ابيض');
+  await chat(ws, '201000000013', 'ﻻ', 'hello');
+  await chat(ws, '201000000014', 'مسئول', 'x4');
+  await chat(ws, '201000000015', 'سائل', 'x5');
+  // legacy: ؤ and Persian ک/ی are NOT folded; NFKC IS applied (the lam-alef presentation form U+FEFB becomes لا)
+  expect(await find(api, 'سوال')).toEqual([]);
+  expect(await find(api, 'كوتشي')).toEqual(['201000000012']); // via the MESSAGE text "كوتشي"
+  expect(await find(api, 'لا')).toEqual(['201000000013']);
+  expect(await find(api, 'مسؤول')).toEqual([]); // ؤ and ئ are not unified by the legacy fold
+  expect(await find(api, 'سايل')).toEqual([]);
+
+  expect(await flip(ws, true)).toBe(true);
+  expect(await flip(ws, true)).toBe(false); // already there: no second rebuild
+  expect(await rows(ws, "SELECT value FROM store_state WHERE key = 'search_fold'")).toEqual([{ value: 'v2' }]);
+  expect(await find(api, 'سوال')).toEqual(['201000000011']); // ؤ -> و
+  expect(await find(api, 'كوتشي')).toContain('201000000012'); // Persian name and the message both match now
+  expect(await find(api, 'كوت')).toContain('201000000012'); // name prefix
+  expect(await find(api, 'لا')).toEqual(['201000000013']); // F7-HAMZA-1: the shared fold runs NFKC too, so the pasted ligature still meets the typed letters
+  expect(await find(api, 'مسؤول')).toEqual(['201000000014']); // hamza seats unified: مسئول = مسؤول
+  expect(await find(api, 'سئوال')).toEqual(['201000000011']); // سؤال = سوال = سئوال
+  expect(await find(api, 'سايل')).toEqual(['201000000015']); // F7-HAMZA-2: typed ي for ئ still works (fold B), and the hamza fold did not take it away
+  expect(await find(api, 'مسيول')).toEqual(['201000000014']); // مسيول ~ مسئول (B) but not ~ مسؤول (non-transitive)
+  expect(await find(api, 'سال')).toEqual([]); // سائل is not سال under either fold
+
+  expect(await flip(ws, false)).toBe(true);
+  expect(await rows(ws, "SELECT value FROM store_state WHERE key = 'search_fold'")).toEqual([]);
+  expect(await find(api, 'سوال')).toEqual([]);
+  expect(await find(api, 'مسؤول')).toEqual([]);
+  expect(await find(api, 'سايل')).toEqual([]);
+  expect(await find(api, 'لا')).toEqual(['201000000013']);
+});
+
+it('a name written while the flag is on is indexed with the shared fold (index and query always agree)', async () => {
+  const ws = W(311);
+  const api = await apiFor(ws);
+  await flip(ws, true);
+  await chat(ws, '201000000021', 'سؤال جديد', 'x');
+  expect(await find(api, 'سوال')).toEqual(['201000000021']);
+});
+
+it('v2 MATCH is built from quoted tokens only: quotes, FTS operators and punctuation never throw and match literally', async () => {
+  const ws = W(313);
+  const api = await apiFor(ws);
+  await chat(ws, '201000000021', 'أحمد', 'hello world');
+  await chat(ws, '201000000022', 'Sara', 'NEAR AND OR words');
+  expect(await flip(ws, true)).toBe(true);
+  const hostile = ['"', 'x" OR "y', 'a"b', '*', 'hello*', 'NEAR(', 'NEAR(a b)', 'a:b', 'text:hello', 'AND OR', 'OR', '-hello', '^hello', '(', ')', '""', '" "* OR "'];
+  for (const q of hostile) await find(api, q); // find() asserts status 200: none throws
+  const search = (q: string) => runInDurableObject(workspace(ws), (i) => (i as unknown as { search(q: string, n: number): Promise<unknown[]> }).search(q, 10));
+  for (const q of hostile) await search(q);
+  // literal, not operator: `text:hello` is the words text + hello (no message has "text"), so it finds nothing; `hello*` is the word hello
+  expect(await find(api, 'text:hello')).toEqual([]);
+  expect(await find(api, 'hello*')).toEqual(['201000000021']);
+  expect(await find(api, 'أحمد,')).toEqual(['201000000021']); // trailing punctuation meets the punctuation-stripped index
+  expect(await find(api, 'AND OR')).toEqual(['201000000022']); // literal words AND, OR
+});
+
+it('a re-index that throws on wake is isolated: rolled back, old index serves, no throw', async () => {
+  const ws = W(314);
+  const api = await apiFor(ws);
+  await chat(ws, '201000000031', 'سؤال', 'مرحبا');
+  await expect(runInDurableObject(workspace(ws), (_i, state) => state.storage.transactionSync(() => syncSearchFold(state.storage.sql, true, () => { throw new Error('boom'); })))).rejects.toThrow('boom');
+  expect(await find(api, 'سؤال')).toEqual(['201000000031']); // marker rolled back: legacy index still answers
+  expect(await runInDurableObject(workspace(ws), (_i, state) => state.storage.sql.exec("SELECT 1 FROM store_state WHERE key = 'search_fold'").toArray().length)).toBe(0);
+});

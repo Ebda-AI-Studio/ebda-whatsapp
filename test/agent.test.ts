@@ -35,7 +35,7 @@ describe('the agent answers', () => {
     expect(req.system).toContain('انت مساعد متجر الورد');
     expect(req.system).toContain('search_catalog');
     expect(req.messages).toEqual([{ role: 'user', content: '<customer_message>مساء الخير</customer_message>' }]);
-    expect(req.tools.map((t) => t.name)).toEqual(['search_catalog', 'show_products', 'open_catalog', 'order_status', 'start_order', 'handoff_to_human']);
+    expect(req.tools.map((t) => t.name)).toEqual(['search_catalog', 'show_products', 'open_catalog', 'recommend_products', 'order_status', 'start_order', 'handoff_to_human']);
     expect(req.maxTokens).toBeGreaterThan(0);
   });
 
@@ -79,8 +79,22 @@ describe('tools', () => {
     const pn = await agentWs(ws);
     const m = model([{ tools: [{ name: 'order_status', arguments: { orderNumber: '1001', buyerKey: 'x'.repeat(64), phone: '+201111111111' } }] }, { text: 'طلبك في الطريق' }]);
     await say(ws, pn, text('فين طلبي 1001'), stubGraph());
-    expect(link.fake.lastCall('getOrderStatus')).toEqual([ws, '1001', BUYER_KEY_1]);
+    expect(link.fake.lastCall('getOrderStatus')).toEqual([ws, '1001', BUYER_KEY_1, `+${WA_1}`]); // the verified sender's phone is the proof, not the model's `phone` argument
     expect((m.calls[1]!.messages.at(-1) as { content: string }).content).toContain('order_not_found');
+  });
+
+  it('order_status with no number lists the customer\'s orders with the sender\'s phone as the proof (tools.ts listCustomerOrders)', async () => {
+    const ws = W(30);
+    const pn = await agentWs(ws);
+    // an order of this customer exists in the Store (key from the sender's phone), so a call WITHOUT the proof would be refused by the strict fake
+    await link.fake.createOrderFromChat(ws, { items: [{ variantId: 'v2', quantity: 1 }], buyer: { buyerKey: BUYER_KEY_1, phoneE164: `+${WA_1}`, name: null, locale: 'ar' }, address: { area: 'a', street: 's' }, paymentMethod: 'cod', idempotencyKey: 'example-idem-tools-1' } as never);
+    const m = model([{ tools: [{ name: 'order_status', arguments: { buyerKey: 'x'.repeat(64), phone: '+201111111111' } }] }, { text: 'دي طلباتك' }]);
+    await say(ws, pn, text('فين طلبي'), stubGraph());
+    // the tool's own call (limit 3), proof included; another path may also have listed orders with a different limit
+    expect(link.fake.calls.filter((c) => c.method === 'listCustomerOrders').map((c) => c.args)).toContainEqual([ws, BUYER_KEY_1, 3, `+${WA_1}`]);
+    const answer = (m.calls[1]!.messages.at(-1) as { content: string }).content;
+    expect(answer).not.toContain('store_unavailable');
+    expect(answer).toContain('orders');
   });
 
   it('invalid arguments and unknown tools come back to the model as errors, not as crashes', async () => {
@@ -97,10 +111,10 @@ describe('tools', () => {
     const ws = W(7);
     const pn = await agentWs(ws);
     const again = { tools: [{ name: 'search_catalog', arguments: { query: 'item' } }] };
-    const m = model([again, again, again, again]);
+    const m = model([again, again, again, again, again]);
     const out = await say(ws, pn, text('عايز حاجة'), stubGraph());
-    expect(m.callCount).toBe(4);
-    expect(m.calls.map((c) => c.tools.length > 0)).toEqual([true, true, true, false]);
+    expect(m.callCount).toBe(5); // 3 tool rounds, the tools-off answer (empty: it asked for a tool again), and the ONE nudge (also empty)
+    expect(m.calls.map((c) => c.tools.length > 0)).toEqual([true, true, true, false, false]);
     expect(out.map((s) => s.text)).toEqual([EBDA_AGENT_COPY.t.handoffAck.ar]);
     expect((await rows(ws, "SELECT outcome FROM agent_turns"))[0]).toEqual({ outcome: 'handoff:no_answer' });
   });
@@ -338,12 +352,12 @@ describe('failures end in a handoff, never silence', () => {
     expect((await rows(ws, 'SELECT reason FROM agent_handoffs'))[0]).toEqual({ reason: 'misconfigured' });
   });
 
-  it('videos and files get one short "text only" note (a voice note is transcribed instead: test/voice-note.test.ts)', async () => {
+  it('videos get one short media note (a voice note is transcribed instead: test/voice-note.test.ts; the other types: test/agent-inbound-media.test.ts)', async () => {
     const ws = W(42);
     const pn = await agentWs(ws);
     const m = model([]);
     const out = await say(ws, pn, { ...audio(), type: 'video', video: { id: 'media-a', mime_type: 'video/mp4' } }, stubGraph());
-    expect(out.map((s) => s.text)).toEqual([EBDA_AGENT_COPY.t.textOnly.ar]);
+    expect(out.map((s) => s.text)).toEqual([EBDA_AGENT_COPY.t.mediaNote.ar]);
     expect(m.callCount).toBe(0);
   });
 });

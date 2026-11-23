@@ -16,6 +16,7 @@ type Phase = { k: 'idle' } | { k: 'working' } | { k: 'applied'; appliedId: strin
 export function PreviewCard({ t, lang, card: first, api }: { t: Strings; lang: Lang; card: AssistantPreviewCard; api: AssistantApi }) {
   const [card, setCard] = useState(first);
   const [phase, setPhase] = useState<Phase>({ k: 'idle' });
+  const [undoNote, setUndoNote] = useState<string | null>(null);
   const [inverse, setInverse] = useState<{ card: AssistantPreviewCard; approval: AssistantApproval } | null>(null);
   const settled = phase.k === 'applied' || phase.k === 'undoing' || phase.k === 'undone';
 
@@ -37,6 +38,7 @@ export function PreviewCard({ t, lang, card: first, api }: { t: Strings; lang: L
     try {
       const r = await api.undo(appliedId);
       if (r.status === 'undone') setPhase({ k: 'undone' });
+      else if (r.status === 'failed') { setPhase({ k: 'applied', appliedId }); setUndoNote(t.assistantUndoFailed); }
       else if (r.status === 'stale' && r.card) { setCard(r.card); setPhase({ k: 'note', text: t.assistantUndoStale }); }
       else if (r.status === 'needs_confirm' && r.card && r.approvals?.[0]) { setInverse({ card: r.card, approval: r.approvals[0] }); setPhase({ k: 'applied', appliedId }); }
       else setPhase({ k: 'applied', appliedId });
@@ -64,6 +66,7 @@ export function PreviewCard({ t, lang, card: first, api }: { t: Strings; lang: L
               : <button type="button" className="btn gold" disabled={phase.k === 'working'} onClick={() => void apply()}>{t.assistantApply}</button>}
       </div>
       {phase.k === 'note' && <p className="as-note-inline" role="status">{phase.text}</p>}
+      {phase.k === 'applied' && undoNote && <p className="as-note-inline" role="status">{undoNote}</p>}
       {inverse && <ConfirmCard t={t} lang={lang} card={inverse.card} approval={inverse.approval} api={api} />}
     </section>
   );

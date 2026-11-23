@@ -7,7 +7,7 @@ import { EBDA_OTP_POLICY } from './otp-policy';
 import { createServiceBindingBridge } from './store-bridge';
 import { EBDA_ORDERING_COPY } from './store-copy';
 import { createStoreEventSink } from './store-events';
-import { EBDA_DEFAULT_TEMPLATES } from './templates';
+import { COD_V2_NAME, codConfirmationV2Seed, EBDA_DEFAULT_TEMPLATES, EBDA_SEASONAL_TEMPLATES } from './templates';
 
 const clean = (v: string | undefined, max: number): string => (v ?? '').trim().slice(0, max);
 /** Ebda AI Studio's single InstaPay account: the same values Ebda Store uses (EBDA_INSTAPAY_HANDLE is a secret, the QR url a public var). Unset handle = not offered. */
@@ -31,6 +31,8 @@ export const EBDA_PACK: BrandPack = {
   autoReply: EBDA_COPY.spikeAutoReply,
   optInKeywords: EBDA_OPT_IN_KEYWORDS,
   templates: EBDA_DEFAULT_TEMPLATES,
+  seasonalTemplates: EBDA_SEASONAL_TEMPLATES,
+  perStoreTemplate: { name: COD_V2_NAME, language: 'ar', build: codConfirmationV2Seed },
   agentCopy: EBDA_AGENT_COPY,
   sharedNumber: { pickBody: EBDA_COPY.sharedPickBody, pickButton: EBDA_COPY.sharedPickButton, pickFooter: EBDA_COPY.sharedPickFooter, noRoute: EBDA_COPY.sharedNoRoute },
   instapayPayee: ebdaInstapayPayee,

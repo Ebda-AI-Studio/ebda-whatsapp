@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import { confirmToken, costEstimateQuery, creditOrderDto, creditPackBuy, creditPackPick, digestSettings, numberFundingChoice, numberFundingConfirm, refundRequestCreate, statementQuery, topupRequest, yearlyRefundPreviewDto, yearlyRefundViewDto, type WalletDto } from '../core/api/contract';
 import { statementCsv } from '../core/billing/statement';
+import { namePlan } from '../core/billing/store-plan';
 import { cardCheckoutReady, topupsEnabled } from '../core/billing/payments';
-import { rejectionNotice } from '../core/billing/instapay';
+import { instapayEnabled, rejectionNotice } from '../core/billing/instapay';
+import { payeeFor } from './instapay';
 import { getTopup, startTopup } from '../core/billing/topups';
 import { createRefundRequest, listRefundRequests } from '../core/billing/refunds';
 import { issueConfirmation, consumeConfirmation, type Consumed } from '../core/billing/confirmation';
@@ -10,7 +12,7 @@ import { creditCheckoutOn, creditPacks, getCreditOrder, packPayload, startCredit
 import { ownNumberFunding, setOwnNumberCard } from '../core/billing/funding';
 import { frozenForOffboarding } from '../core/ops/offboarded';
 import { createYearlyRefundRequest, latestRequest, merchantQuote, quotePayload, requestDto } from '../core/billing/yearly-refund-request';
-import { apiError, senderNumber, workspaceStub, type ApiContext, type ApiEnv } from './shared';
+import { apiError, managesStore, senderNumber, workspaceStub, type ApiContext, type ApiEnv } from './shared';
 
 export const walletRoutes = new Hono<ApiEnv>();
 const owner = (c: ApiContext) => c.get('storeRole') === 'owner';
@@ -29,10 +31,11 @@ walletRoutes.get('/stores/:storeId/wallet', async (c) => {
       SELECT sn.phone_number_id, sn.display_phone, nf.funding, 1, sn.rowid FROM shared_number_members m JOIN shared_numbers sn ON sn.phone_number_id = m.phone_number_id LEFT JOIN number_funding nf ON nf.phone_number_id = sn.phone_number_id WHERE m.workspace_id = ?1 AND m.status = 'active'
     ) ORDER BY grp, ord`)
     .bind(c.req.param('storeId')!).all<{ phone_number_id: string; display_phone: string | null; funding: 'merchant_card' | 'platform_line' | null }>();
+  const namedPlan = await namePlan(c.env, c.req.param('storeId')!, v.plan as WalletDto['plan']);
   const dto: WalletDto = {
     balanceMinor: v.balanceMinor, heldMinor: v.heldMinor, availableMinor: v.availableMinor, debtMinor: v.debtMinor, creditLimitMinor: v.creditLimitMinor, currency: 'EGP',
     funding: results.map((r) => ({ phoneNumberId: r.phone_number_id, displayPhone: r.display_phone, funding: r.funding ?? 'unknown' })),
-    topupsEnabled: topupsEnabled(c.env), cardCheckout: cardCheckoutReady(c.env), lowBalance: v.lowBalance, lowBalanceThresholdMinor: v.lowBalanceThresholdMinor, aiCredits: v.aiCredits, plan: v.plan as WalletDto['plan'],
+    topupsEnabled: topupsEnabled(c.env), cardCheckout: cardCheckoutReady(c.env), instapayAvailable: instapayEnabled(c.env) && payeeFor(c.env) !== null, lowBalance: v.lowBalance, lowBalanceThresholdMinor: v.lowBalanceThresholdMinor, aiCredits: v.aiCredits, plan: namedPlan,
     ...(owner(c) ? { instapayNotice: await rejectionNotice(c.env, c.req.param('storeId')!) } : {}),
   };
   return c.json(dto);
@@ -40,7 +43,7 @@ walletRoutes.get('/stores/:storeId/wallet', async (c) => {
 
 // Financial history: the owner's (and the operator's), not staff's.
 walletRoutes.get('/stores/:storeId/wallet/statement', async (c) => {
-  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  if (!managesStore(c)) return apiError(c, 403, 'forbidden');
   const q = statementQuery.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
   if (!q.success) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);

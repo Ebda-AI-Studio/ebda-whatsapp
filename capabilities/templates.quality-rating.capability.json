@@ -1,7 +1,6 @@
 {
   "id": "templates.quality-rating",
-  "status": "planned",
-  "plan": "none yet",
+  "status": "live",
   "area": "templates",
   "version": 1,
   "versionDate": "2026-11-14",
@@ -19,7 +18,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/template-review-and-rejections",
   "questions": {
     "ar": [
       "القالب جودته وطت",
@@ -31,12 +30,16 @@
     ]
   },
   "steps": [
-    "Meta rates each template and may pause or disable it; not tracked by Ebda Chat today"
+    "Meta's message_template_quality_update webhook stores the rating (green / yellow / red / unknown) on the template; the Templates API returns it as `quality` and the assistant states it",
+    "No rating yet = shown as no rating, never as green"
   ],
   "edgeCases": [
-    "Paused template makes campaigns pause with template_unavailable once status syncs"
+    "The payload field names follow Meta's documentation and have not been seen on live traffic yet (an unfamiliar score is stored as UNKNOWN)",
+    "A rating drop can lead Meta to pause the template: the status webhook then marks it PAUSED"
   ],
   "gaps": [
-    "No quality field, webhook handler (template quality update) or UI"
-  ]
+    "No quality badge on the Templates screen yet: the assistant and the API show it",
+    "Only the webhook sets the rating: a sync from Meta does not backfill it"
+  ],
+  "assistantNote": "Say 'no rating yet' when quality is null; never claim a template is healthy because it has no rating"
 }

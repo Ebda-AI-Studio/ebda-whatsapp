@@ -62,7 +62,7 @@ When you upload a receipt that matches exactly (the amount due, our InstaPay add
 
 **Changing a yearly package.** With a yearly package running you can move **up** to a higher yearly package: you pay only the difference (new yearly price / 12 minus your current one / 12) for the months that are left, **this month included**, rounded down to a whole pound; the new package starts at once and ends on the same date, and this month's AI credits are topped up to the new amount (what you already used stays used). Moving to a **lower** yearly package, or to any **monthly** package, starts when your current package ends, with no refund. If a renewal is already queued behind your package, you cannot switch: write to us at ahlan@ebda.app.
 
-**Yearly packages** (Starter, Growth and Pro "yearly") cost 9 times the monthly price and run for **12 months**. They have the same features and the same AI credits per month as the monthly package; the credits are added **every month**, not all at once, and a month's unused credits end when the next month's arrive.
+**Yearly packages** ("Chat 300 AI replies (yearly)", "Chat 1,500 AI replies (yearly)" and "Chat 5,000 AI replies (yearly)") cost 9 times the monthly price and run for **12 months**. They have the same features and the same AI credits per month as the monthly package; the credits are added **every month**, not all at once, and a month's unused credits end when the next month's arrive.
 
 **There is no free plan.** Without a package in good standing you can still sign in, read your inbox, see the packages and buy one, but you cannot send any message (replies, order and COD confirmations and one-time codes included), use the AI agent, or connect a number. The app tells you "a package is required". If a renewal fails your package becomes **past due**: replies and confirmations keep working for up to **7 days** (or until the package period ends, whichever comes first), marketing campaigns stop at once, and then sending stops until you pay.
 
@@ -81,7 +81,6 @@ When you upload a receipt that matches exactly (the amount due, our InstaPay add
 From **Wallet > Statement** choose a month to see every entry (top-up, message, credits, refund) with totals by category, and download it as CSV. Figures are shown as recorded at the time of the entry.
 
 ## Refunds
-*(Subject to the final terms of service.)*
 - The wallet balance is refundable for **12 months** after cancellation, after any debt is settled.
 - Refunds go to the original payment method through Kashier; otherwise by bank transfer or InstaPay after an identity check.
 - **The minimum refund is 50 EGP.**
@@ -96,4 +95,4 @@ To request one, open **Wallet** and press **Request a refund**, enter the amount
 - **I was charged for a message that did not arrive:** we only charge messages Meta counts as billable.
 
 ---
-Last checked: 2026-11-14. Refunds and fees are subject to the final terms of service. Meta's rules change.
+Last checked: 2026-11-14. Refunds and fees follow our terms of service. Meta's rules change.

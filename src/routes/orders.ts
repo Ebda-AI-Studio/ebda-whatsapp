@@ -5,10 +5,10 @@ import { needsConfirm, payloadHash, SWITCH_KEYS } from '../core/settings-confirm
 import { buyerKey } from '../core/buyer-key';
 import { normaliseE164 } from '../core/phone';
 import type { BridgeOrderSummary } from '../core/store-bridge';
-import { bridgeFor, storeLink } from '../core/store-link';
+import { bridgeForWorkspace, storeLink } from '../core/store-link';
 import { catalogBelongsToWaba } from '../core/store-link/catalog';
 import { provisionRequest } from '../core/store-link/catalog-provision';
-import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
+import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 
 export const ordersRoutes = new Hono<ApiEnv>();
 
@@ -28,12 +28,12 @@ async function customer(c: ApiContext): Promise<{ waId: string; key: string } | 
 
 ordersRoutes.get('/stores/:storeId/contacts/:waId/orders', async (c) => {
   if (!(await workspaceStub(c))) return apiError(c, 404, 'not_found');
-  const bridge = bridgeFor(c.env);
+  const bridge = bridgeForWorkspace(c.env, c.req.param('storeId')!);
   // No Store bound: the UI keeps showing its labelled sample.
   if (!bridge) return c.json({ items: [], source: 'sample' as const });
   const who = await customer(c);
   if (who instanceof Response) return who;
-  const res = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 10);
+  const res = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 10, `+${who.waId}`);
   if (!res.ok) return res.reason === 'not_found' || res.reason === 'not_linked' ? c.json({ items: [], source: 'store' as const }) : apiError(c, 503, 'rate_limited', 'store_unavailable');
   return c.json({ items: res.value.items.map(toSummary), source: 'store' as const });
 });
@@ -44,7 +44,7 @@ ordersRoutes.post('/stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outco
   if (!body.success || !/^[\w-]{1,40}$/.test(orderNumber)) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
-  const bridge = bridgeFor(c.env);
+  const bridge = bridgeForWorkspace(c.env, c.req.param('storeId')!);
   if (!bridge) return apiError(c, 503, 'rate_limited', 'store_link_off');
   const who = await customer(c);
   if (who instanceof Response) return who;
@@ -52,7 +52,7 @@ ordersRoutes.post('/stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outco
   let res = await ws.merchantCodOutcome(args);
   if (!res.ok && res.reason === 'unknown_order') {
     // An order the Store created that this workspace has not heard of: ask the Store which order that number is.
-    const orders = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 20);
+    const orders = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 20, `+${who.waId}`);
     if (!orders.ok) return orders.reason === 'unavailable' ? apiError(c, 503, 'rate_limited', 'store_unavailable') : apiError(c, 404, 'not_found');
     const hit = orders.value.items.find((o) => o.orderNumber === orderNumber && o.paymentMethod === 'cod');
     if (!hit) return apiError(c, 404, 'not_found');
@@ -75,7 +75,7 @@ ordersRoutes.get('/stores/:storeId/store-link/catalog', async (c) => {
 
 /** Starts a fresh full pass of the catalogue sync (owner only). */
 ordersRoutes.post('/stores/:storeId/store-link/catalog/resync', async (c) => {
-  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  if (!managesStore(c)) return apiError(c, 403, 'forbidden');
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
   const res = await ws.resyncCatalog();
@@ -84,7 +84,7 @@ ordersRoutes.post('/stores/:storeId/store-link/catalog/resync', async (c) => {
 
 /** Turns the shop button and the cart on the number on or off (owner only). */
 ordersRoutes.put('/stores/:storeId/store-link/catalog/commerce', async (c) => {
-  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  if (!managesStore(c)) return apiError(c, 403, 'forbidden');
   const body = catalogCommerceRequest.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
@@ -109,7 +109,7 @@ ordersRoutes.get('/stores/:storeId/bot/funnel', async (c) => {
  * helping a merchant), same body the PATCH will carry. SETTINGS-CONFIRM-1 in core/settings-confirm.ts.
  */
 ordersRoutes.post('/stores/:storeId/store-link/settings/preview', async (c) => {
-  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  if (!managesStore(c)) return apiError(c, 403, 'forbidden');
   const patch = storeLinkSettingsPatch.safeParse(await c.req.json().catch(() => null));
   if (!patch.success || !needsConfirm(patch.data)) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
@@ -120,7 +120,7 @@ ordersRoutes.post('/stores/:storeId/store-link/settings/preview', async (c) => {
 
 // Owner only; a super admin keeps the override (operator helping a merchant). Staff are refused. The owner switches are audited by name (A31-A33).
 ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
-  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  if (!managesStore(c)) return apiError(c, 403, 'forbidden');
   const raw = await c.req.json().catch(() => null);
   const patch = storeLinkSettingsPatch.safeParse(raw);
   const tokenField = confirmTokenField.safeParse(raw);
@@ -157,7 +157,7 @@ ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
 
 /** Creates a Meta catalog for a merchant who has none and connects it to their WhatsApp Business Account (owner only). */
 ordersRoutes.post('/stores/:storeId/store-link/catalog/provision', async (c) => {
-  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  if (!managesStore(c)) return apiError(c, 403, 'forbidden');
   const body = provisionRequest.safeParse(await c.req.json().catch(() => ({})));
   if (!body.success) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);

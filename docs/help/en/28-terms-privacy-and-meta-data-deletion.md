@@ -13,7 +13,7 @@ They are on the Ebda AI Studio site, in Arabic and English (the Arabic version p
 - **Data processing agreement:** ebda.app/legal/whatsapp-dpa/
 - **Data deletion:** ebda.app/legal/data-deletion/
 
-There is no link to them inside the Ebda Chat app itself today, so save these addresses. Some clauses (such as refunds and VAT) are still under legal review, as the [wallet and refunds guide](09-wallet-top-ups-and-refunds.md) says.
+There is no link to them inside the Ebda Chat app itself today, so save these addresses.
 
 ## Your customers' data
 - How long messages are kept, downloading a customer's data, erasing it: [customer data guide](13-your-customers-data.md).

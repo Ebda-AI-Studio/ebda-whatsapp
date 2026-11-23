@@ -35,6 +35,11 @@ import { subjectHash } from '../core/erasure';
 import { waIdParam } from './contacts';
 import { decideRefund, listRefundRequests, markManualPaid } from '../core/billing/refunds';
 import { FLAG, readPlatformFlags, setPlatformFlag } from '../core/smart-layer/controls';
+import { AGENT_MODEL_IDS, readAgentModelFlag, setAgentModelFlag } from '../core/ai/model-flag';
+import { readAgentHealth } from '../core/ai/health';
+import { DEFAULT_WORKERS_AI_MODEL } from '../core/ai/config';
+import { isStandaloneId } from '../core/workspace-kind';
+import { INVITE_DEFAULT_DAYS, INVITE_MAX_DAYS, listInvites, mintInvite, revokeInvite } from '../core/standalone/invites';
 
 type E = { Bindings: Env; Variables: AuthVars };
 /** /api/v1/operator/*, mounted behind requireSuperAdmin. Errors are {error, message?}. */
@@ -61,6 +66,9 @@ operatorRoutes.use('*', async (c, next) => {
 });
 const actor = (c: { get(k: 'principal'): { userId: string } }) => c.get('principal').userId;
 const bad = (c: { json(b: unknown, s: 400): Response }, message?: string) => c.json({ error: 'invalid_request', ...(message ? { message } : {}) }, 400);
+
+/** Who am I, store-independent: the web asks this when the token lists no store, to boot straight into the console. requireSuperAdmin already refused everyone else (403). */
+operatorRoutes.get('/me', (c) => c.json({ superAdmin: true as const, userId: actor(c) }));
 
 operatorRoutes.get('/pricing-settings', async (c) => c.json({ items: await listSettings(c.env) }));
 operatorRoutes.post('/pricing-settings', async (c) => {
@@ -239,6 +247,7 @@ operatorRoutes.put('/workspaces/:workspaceId/subscription', async (c) => {
   if (!ws || !pkg) return c.json({ error: 'not_found' }, 404);
   // WA-NOFREE-1: the free package belongs to the Store plan alone; an operator assigns a paid package (a deal or a goodwill extension of one).
   if (b.data.packageId === STORE_INCLUDED) return bad(c, 'store_included_is_store_plan_only');
+  if (isStandaloneId(workspaceId!) && b.data.status === 'trialing') return bad(c, 'standalone_no_trial'); // CHAT-SA-6 (CHAT-ENABLE-1): a Chat-only workspace has no trial clock
   // An in-effect status needs a future end: the workspace would deny it anyway (WA-CANCEL-1), so refuse the contradiction instead of storing it.
   if ((b.data.status === 'active' || b.data.status === 'trialing') && b.data.periodEnd <= Date.now()) return bad(c, 'period_end_in_the_past');
   const r = await setSubscription(c.env, { workspaceId, packageId: b.data.packageId, status: b.data.status, periodStart: Date.now(), periodEnd: b.data.periodEnd, source: 'operator', ref: actor(c), reason: b.data.reason });
@@ -448,13 +457,39 @@ const assistantFlags = z.object({
   killedTools: z.array(z.string().min(1).max(64)).max(100).optional(),
 }).strict();
 operatorRoutes.get('/assistant', async (c) => c.json(await readPlatformFlags(c.env)));
+const toolsList = (xs: string[]) => xs.join(',').slice(0, 500);
 operatorRoutes.put('/assistant/flags', async (c) => {
   const b = assistantFlags.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return bad(c, b.error.issues[0]?.message);
+  const before = await readPlatformFlags(c.env);
   if (b.data.global) await setPlatformFlag(c.env, FLAG.global, b.data.global, actor(c));
   if (b.data.product) await setPlatformFlag(c.env, FLAG.product, b.data.product, actor(c));
   if (b.data.killedTools) await setPlatformFlag(c.env, FLAG.tools, b.data.killedTools, actor(c));
-  return c.json(await readPlatformFlags(c.env));
+  const after = await readPlatformFlags(c.env);
+  // The audit row (written by auditWrites) carries what changed: before -> after for each switch this call touched.
+  c.set('auditDetail', {
+    ...(b.data.global ? { globalKillFrom: before.global?.kill === true, globalKillTo: after.global?.kill === true, globalModeFrom: before.global?.mode ?? null, globalModeTo: after.global?.mode ?? null, shadowFrom: before.shadow === true, shadowTo: after.shadow === true } : {}),
+    ...(b.data.product ? { chatKillFrom: before.product?.kill === true, chatKillTo: after.product?.kill === true } : {}),
+    ...(b.data.killedTools ? { killedToolsFrom: toolsList(before.killedTools ?? []), killedToolsTo: toolsList(after.killedTools ?? []) } : {}),
+  });
+  return c.json(after);
+});
+// ---- Ruling WA-MODEL-FLAG-1: the Chat agent's platform model (two allowed ids; null = the current default). Super admin only (this whole router), a reason is required and audited. ----
+operatorRoutes.get('/agent/model', async (c) => c.json({ model: await readAgentModelFlag(c.env), default: DEFAULT_WORKERS_AI_MODEL, allowed: AGENT_MODEL_IDS }));
+// AGENT-HEALTH-1: the live hour and day counters behind the blocked-rate and cost-per-1k alerts (read-only; used for the 24 h watch after a model switch).
+operatorRoutes.get('/agent/health', async (c) => c.json(await readAgentHealth(c.env)));
+operatorRoutes.put('/agent/model', async (c) => {
+  const b = z.object({ model: z.enum(AGENT_MODEL_IDS).nullable(), reason: z.string().trim().min(5).max(300) }).strict().safeParse(await c.req.json().catch(() => null));
+  if (!b.success) return bad(c, b.error.issues.some((i) => i.path[0] === 'reason') ? 'reason_required' : 'model_not_allowed');
+  const r = await setAgentModelFlag(c.env, { model: b.data.model, actor: actor(c), reason: b.data.reason });
+  return r.ok ? c.json({ model: r.model }) : bad(c, r.reason);
+});
+// The operator screen reads a workspace's current mode before changing it (an unknown workspace is a 404, never a default "off").
+operatorRoutes.get('/workspaces/:workspaceId/assistant', async (c) => {
+  const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(c.req.param('workspaceId')).first();
+  if (!known) return c.json({ error: 'not_found' }, 404);
+  const ws = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(c.req.param('workspaceId')));
+  return c.json({ mode: await ws.assistantMode() });
 });
 operatorRoutes.put('/workspaces/:workspaceId/assistant', async (c) => {
   const b = z.object({ mode: assistantMode }).strict().safeParse(await c.req.json().catch(() => null));
@@ -462,7 +497,9 @@ operatorRoutes.put('/workspaces/:workspaceId/assistant', async (c) => {
   const known = await c.env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(c.req.param('workspaceId')).first();
   if (!known) return c.json({ error: 'not_found' }, 404);
   const ws = c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(c.req.param('workspaceId')));
+  const from = await ws.assistantMode();
   await ws.setAssistantMode(b.data.mode);
+  c.set('auditDetail', { modeFrom: from, modeTo: b.data.mode });
   return c.json({ mode: b.data.mode });
 });
 
@@ -503,4 +540,50 @@ operatorRoutes.get('/view-log', async (c) => {
 operatorRoutes.get('/meta-deletions', async (c) => {
   const { results } = await c.env.DB.prepare('SELECT code, state, received_at AS receivedAt, removed_connections AS removedConnections, finished_at AS finishedAt FROM meta_deletion_requests ORDER BY received_at DESC LIMIT 50').all();
   return c.json({ items: results });
+});
+
+// ---- CHAT-SA-7: standalone workspaces (Chat without a Store). A LIST (suspend / unsuspend / offboard / view-as reuse the :workspaceId routes above) and the single-use invite codes.
+const cursorOf = (at: number, id: string) => btoa(`${at}|${id}`);
+function readCursor(raw: string | undefined): { at: number; id: string } | null | 'bad' {
+  if (!raw) return null;
+  try {
+    const [at, ...rest] = atob(raw).split('|');
+    const id = rest.join('|');
+    return /^\d{1,15}$/.test(at ?? '') && id.length > 0 && id.length <= 64 ? { at: Number(at), id } : 'bad';
+  } catch { return 'bad'; }
+}
+operatorRoutes.get('/workspaces', async (c) => {
+  const kind = c.req.query('kind');
+  if (kind !== undefined && kind !== 'store' && kind !== 'standalone') return bad(c, 'kind');
+  const cur = readCursor(c.req.query('cursor'));
+  if (cur === 'bad') return bad(c, 'cursor');
+  const where = [kind ? 'w.kind = ?' : null, cur ? '(w.created_at < ? OR (w.created_at = ? AND w.id > ?))' : null].filter(Boolean).join(' AND ');
+  const binds: (string | number)[] = [...(kind ? [kind] : []), ...(cur ? [cur.at, cur.at, cur.id] : [])];
+  const { results } = await c.env.DB.prepare(
+    `SELECT w.id AS id, w.name AS name, w.kind AS kind, w.country AS country, w.created_at AS created_at, w.suspended_at AS suspended_at, o.owner_user_id AS owner_user_id FROM workspaces w LEFT JOIN workspace_owners o ON o.workspace_id = w.id ${where ? `WHERE ${where}` : ''} ORDER BY w.created_at DESC, w.id LIMIT 51`,
+  ).bind(...binds).all<{ id: string; name: string; kind: string; country: string; created_at: number; suspended_at: number | null; owner_user_id: string | null }>();
+  const page = results.slice(0, 50);
+  const last = page[page.length - 1];
+  return c.json({
+    items: page.map((r) => ({ id: r.id, name: r.name, kind: r.kind, country: r.country, createdAt: r.created_at, suspendedAt: r.suspended_at, ownerUserId: r.owner_user_id })),
+    nextCursor: results.length > 50 && last ? cursorOf(last.created_at, last.id) : null,
+  });
+});
+const inviteMint = z.object({ note: z.string().trim().max(200).optional(), days: z.number().int().min(1).max(INVITE_MAX_DAYS).default(INVITE_DEFAULT_DAYS) }).strict();
+operatorRoutes.post('/standalone-invites', async (c) => {
+  const b = inviteMint.safeParse(await c.req.json().catch(() => ({})));
+  if (!b.success) return bad(c, b.error.issues[0]?.path.join('.') || 'body');
+  const r = await mintInvite(c.env, { actor: actor(c), note: b.data.note || null, days: b.data.days });
+  if (!r) return c.json({ error: 'unavailable', message: 'invite_unavailable' }, 503);
+  await recordAudit(c.env, { workspaceId: PLATFORM_WORKSPACE, actor: actor(c), role: 'operator', action: 'invite.minted', targetType: 'invite', targetId: r.codeHash, detail: { days: b.data.days }, status: 201 });
+  c.header('cache-control', 'no-store'); // the plain code is shown once; nothing may keep a copy
+  return c.json({ code: r.code, codeHash: r.codeHash, expiresAt: r.expiresAt }, 201);
+});
+operatorRoutes.get('/standalone-invites', async (c) => c.json({ items: await listInvites(c.env) }));
+operatorRoutes.post('/standalone-invites/:hash/revoke', async (c) => {
+  const hash = c.req.param('hash')!;
+  if (!/^[0-9a-f]{32}$/.test(hash)) return bad(c, 'hash');
+  if (!(await revokeInvite(c.env, hash))) return c.json({ error: 'not_found' }, 404);
+  await recordAudit(c.env, { workspaceId: PLATFORM_WORKSPACE, actor: actor(c), role: 'operator', action: 'invite.revoked', targetType: 'invite', targetId: hash, status: 200 });
+  return c.json({ ok: true });
 });

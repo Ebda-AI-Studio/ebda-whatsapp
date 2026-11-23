@@ -607,6 +607,30 @@ export const DO_MIGRATIONS: readonly string[] = [
    CREATE INDEX sl_cache_at ON sl_cache (at);`,
   // v45 (Chat agent, review I2): when the owner was told about this handoff. Lives on the row (erased by wa_id with the contact), not as a phone-keyed agent_state key.
   `ALTER TABLE agent_handoffs ADD COLUMN notified_at INTEGER;`,
+  // v46 (self-service inbox tools, A25): the merchant's own quick replies for the composer. Text is unique; the API caps the list at 20.
+  `CREATE TABLE quick_replies (
+     id INTEGER PRIMARY KEY,
+     text TEXT NOT NULL,
+     position INTEGER NOT NULL,
+     created_by TEXT,
+     created_at INTEGER NOT NULL
+   );
+   CREATE UNIQUE INDEX quick_replies_text ON quick_replies (text);`,
+  // v47 (Ruling WA-RECS-1): post-order product recommendations are proactive messages to customers, so they are OFF for a workspace that existed before this deploy and
+  // ON for one created after it. The marker lives in workspace_meta, a table that is NOT in BACKUP_TABLES (agent_state is, and a restore needs every backed-up table empty,
+  // so migrate() must never write into one). migrate() inserts the marker only when no migration had ever run (a brand-new workspace); no row = OFF.
+  `CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // v48 (inbox tools follow-up): conversation tags are lower-cased at write time since A27, so older mixed-case rows ('VIP' next to 'vip') are folded once. The lower-case twin is
+  // inserted first with OR IGNORE (the primary key merges a duplicate into the row that is already there, and the conversation link is kept), then the mixed-case originals go.
+  // The table has no per-row attribution to keep. SQLite lower() folds ASCII only, which is all a Latin-script tag has to fold (Arabic has no case).
+  `INSERT OR IGNORE INTO conversation_tags (conversation_id, tag) SELECT conversation_id, lower(trim(tag)) FROM conversation_tags WHERE tag <> lower(trim(tag)) AND lower(trim(tag)) <> '';
+   DELETE FROM conversation_tags WHERE tag <> lower(trim(tag));`,
+  // v49 (Ruling CHAT-RECS-SWITCH-1; follows #136's v48 tag fold, so rebase after it merges and keep this entry LAST): what the proactive post-order suggestion did for this order ('sent', 'skipped:<reason>', 'failed:enqueue'); NULL = not decided yet. It is the
+  // idempotency claim (one decision per order) and the customer frequency cap. Lives on store_orders, so it is erased with the customer (by wa_id) and backed up with the order.
+  `ALTER TABLE store_orders ADD COLUMN recs_outcome TEXT;
+   ALTER TABLE store_orders ADD COLUMN recs_at INTEGER;`,
+  // v50 once #136 (v48) and #168 (v49) are in (merge order #136, #168, #169, #170, #171; the version is the array position, so this stays the LAST entry) (capability templates.quality-rating): Meta's quality score of a template (GREEN / YELLOW / RED / UNKNOWN) from the message_template_quality_update webhook; null = Meta never sent one.
+  `ALTER TABLE templates ADD COLUMN quality TEXT;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
@@ -618,5 +642,7 @@ export function migrate(storage: DurableObjectStorage): void {
       sql.exec(DO_MIGRATIONS[v - 1]!);
       sql.exec('INSERT INTO _migrations (version, applied_at) VALUES (?, ?)', v, Date.now());
     }
+    // Ruling WA-RECS-1: a brand-new workspace (no migration had ever run) is marked ON; every older one has no marker and reads OFF. Never agent_state (backed up, restore needs it empty).
+    if (done === 0) sql.exec("INSERT OR IGNORE INTO workspace_meta (key, value) VALUES ('recs_default_on', '1')");
   });
 }

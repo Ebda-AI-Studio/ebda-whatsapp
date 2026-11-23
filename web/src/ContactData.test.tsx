@@ -60,6 +60,8 @@ describe('customer data tools', () => {
     expect(within(card).getByText(t.cdMergeWarn)).toBeTruthy();
     const go = within(card).getByRole('button', { name: t.cdMergeGo }) as HTMLButtonElement;
     expect(go.disabled).toBe(true);
+    fireEvent.change(within(card).getByLabelText(t.cdMergeInto), { target: { value: '+٢٠ ١٠٠ ٠٠٠ ٠٠٠١' } }); // Arabic-Indic digits are the same number
+    expect(go.disabled).toBe(false);
     fireEvent.change(within(card).getByLabelText(t.cdMergeInto), { target: { value: '+20 100 000 0001' } });
     expect(go.disabled).toBe(false);
     await act(async () => fireEvent.click(go));
@@ -67,6 +69,56 @@ describe('customer data tools', () => {
     expect((await within(card).findByRole('alert')).textContent).toBe(t.cdFailed);
     await act(async () => fireEvent.click(go));
     expect(await within(card).findByText(t.cdMerged)).toBeTruthy();
+  });
+});
+
+describe('erase a customer (owner, data-subject request)', () => {
+  it('needs the FULL number typed (Latin or Arabic digits), calls erase once, and clears the selection', async () => {
+    const erase = vi.fn().mockResolvedValue(undefined);
+    open('owner', { eraseContact: erase });
+    const card = await pick('نورا حسن');
+    const go = within(card).getByRole('button', { name: t.cdEraseGo }) as HTMLButtonElement;
+    expect(within(card).getByText(t.cdEraseWarn)).toBeTruthy();
+    expect(go.disabled).toBe(true);
+    const field = within(card).getByLabelText(t.cdEraseConfirm);
+    fireEvent.change(field, { target: { value: '0000' } });
+    expect(go.disabled).toBe(true);
+    fireEvent.change(field, { target: { value: '8899' } }); // the last 4 shown on screen is not enough
+    expect(go.disabled).toBe(true);
+    fireEvent.change(field, { target: { value: '٠١٠٠٧٧٧٨٨٩٨' } }); // a different number in Arabic digits
+    expect(go.disabled).toBe(true);
+    fireEvent.change(field, { target: { value: '٢٠١٠٠٧٧٧٨٨٩٩' } }); // the full number, Arabic-Indic digits
+    expect(go.disabled).toBe(false);
+    fireEvent.change(field, { target: { value: '+20 100 777 8899' } }); // and Latin digits
+    expect(go.disabled).toBe(false);
+    await act(async () => fireEvent.click(go));
+    expect(erase).toHaveBeenCalledTimes(1);
+    expect(erase).toHaveBeenCalledWith('201007778899');
+    expect((await screen.findByRole('region', { name: t.cdTitle })).textContent).toContain(t.cdSelect);
+  });
+
+  it('says plainly when erasing fails and keeps the customer selected', async () => {
+    const erase = vi.fn().mockRejectedValue(new ApiError('workspace not found', 404));
+    open('owner', { eraseContact: erase });
+    const card = await pick('نورا حسن');
+    fireEvent.change(within(card).getByLabelText(t.cdEraseConfirm), { target: { value: '201007778899' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.cdEraseGo })));
+    expect((await within(card).findByRole('alert')).textContent).toBe(t.cdFailed);
+  });
+
+  it('says the customer was already erased when the server answers contact not found', async () => {
+    const erase = vi.fn().mockRejectedValue(new ApiError('contact not found', 404));
+    open('owner', { eraseContact: erase });
+    const card = await pick('نورا حسن');
+    fireEvent.change(within(card).getByLabelText(t.cdEraseConfirm), { target: { value: '201007778899' } });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.cdEraseGo })));
+    expect((await within(card).findByRole('alert')).textContent).toBe(t.cdErasedBefore);
+  });
+
+  it('is hidden from staff', async () => {
+    open('staff');
+    const card = await pick('نورا حسن');
+    expect(within(card).queryByRole('button', { name: t.cdEraseGo })).toBeNull();
   });
 });
 

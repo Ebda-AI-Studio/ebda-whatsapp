@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { installSeasonalRequest } from '../core/api/contract';
 import { checkTemplateResponse, createTemplateResponse, editTemplateResponse, listTemplatesResponse, templateDraftRequest, type TemplateDto } from '../core/api/contract';
 import { listSharedRequestsResponse, listSharedTemplatesResponse, sharedRequestCreate } from '../core/api/contract';
 import { createRequest, listRequests, sharedNumberOf, sharedTemplatesFor } from '../core/shared/shared-template-requests';
 import type { TemplateDraft } from '../core/template-draft';
 import { checkOnly, createTemplate, deleteTemplate, editTemplate, installDefaults, syncTemplates, type Failure, type TemplatesCtx } from '../core/templates-service';
 import { componentsSchema } from '../core/templates';
+import { submitCodV2 } from '../core/cod-v2';
 import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 
 /** A starter-set entry (Meta components as they are) and the operator's platform-template submission. A merchant POST /templates takes the draft shape only. */
@@ -48,7 +50,7 @@ function failed(c: ApiContext, f: Failure): Response {
 const hasHash = (raw: unknown): boolean => typeof raw === 'object' && raw !== null && typeof (raw as { expectedHash?: unknown }).expectedHash === 'string' && /^[0-9a-f]{64}$/.test((raw as { expectedHash: string }).expectedHash);
 
 /** Template routes. `defaults` is the product's starter set (supplied by an addon, never imported here). */
-export function templatesRoutes(defaults: readonly TemplateSeed[]) {
+export function templatesRoutes(defaults: readonly TemplateSeed[], seasonal: Readonly<Record<string, readonly TemplateSeed[]>> = {}) {
   const r = new Hono<ApiEnv>();
 
   r.get('/stores/:storeId/templates', async (c) => {
@@ -72,6 +74,28 @@ export function templatesRoutes(defaults: readonly TemplateSeed[]) {
     const res = await installDefaults(ctx, defaults); // each entry is validated in the service: a bad one is reported in `failed`, never a 500
     if (res.ok && res.failed.length === 0) await ctx.ws.markStarterInstalled(ctx.number.wabaId);
     return res.ok ? c.json({ submitted: res.submitted, skipped: res.skipped, failed: res.failed }) : failed(c, res);
+  });
+
+  // A seasonal pack (campaigns.seasonal-ramadan): submitted on request only, same service and same Meta review as the starter set. Unknown pack = 400.
+  r.post('/stores/:storeId/templates/install-seasonal', async (c) => {
+    if (!canManage(c)) return apiError(c, 403, 'forbidden');
+    const body = installSeasonalRequest.safeParse(await c.req.json().catch(() => null));
+    const pack = body.success ? seasonal[body.data.pack] : undefined;
+    if (!body.success || !pack) return apiError(c, 400, 'invalid_request');
+    const ctx = await context(c);
+    if (isResponse(ctx)) return ctx;
+    const res = await installDefaults(ctx, pack);
+    return res.ok ? c.json({ submitted: res.submitted, skipped: res.skipped, failed: res.failed }) : failed(c, res);
+  });
+
+  // The per-store COD v2 template (Ruling WA-COD-V2-2): submit it if it is missing, or replace a REJECTED one. Owner/staff who manage the store only.
+  r.post('/stores/:storeId/templates/cod-v2/resubmit', async (c) => {
+    if (!canManage(c)) return apiError(c, 403, 'forbidden');
+    const ctx = await context(c);
+    if (isResponse(ctx)) return ctx;
+    const status = await submitCodV2(ctx, { resubmit: true });
+    if (status === 'no_origin') return apiError(c, 409, 'invalid_request', 'store_origin_unknown');
+    return status === 'failed' ? apiError(c, 503, 'rate_limited', 'meta_unavailable') : c.json({ status });
   });
 
   // Free: Meta's rules against a draft. No Meta call, so staff may use it.

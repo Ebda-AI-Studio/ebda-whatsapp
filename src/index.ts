@@ -1,6 +1,7 @@
 import { runDueOffboardings } from './core/ops/offboarding';
 import { offboardingRoutes } from './routes/offboarding';
 import { membersRoutes } from './routes/members';
+import { invitationsRoutes } from './routes/invitations';
 import { auditWrites } from './core/audit';
 import { eraseContactFlow } from './core/contact-erase';
 import { purgeNewCapUsage } from './core/campaigns/new-cap';
@@ -15,7 +16,7 @@ import { configureAgent } from './core/ai/config';
 import { signupEnabled } from './core/numbers/numbers';
 import { verifyMetaSignature } from './core/meta/signature';
 import { parseSignedRequest, processRequest, recordRequest, requestStatus, statusPage, sweepDeletionRequests } from './core/meta/data-deletion';
-import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
+import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateQualityUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
 import { checkFxStale, fxHealth, runDailyFx } from './core/billing/fx-daily';
@@ -23,6 +24,8 @@ import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/ob
 import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
 import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
 import { operatorRoutes } from './routes/operator';
+import { workspacesRoutes } from './routes/workspaces';
+import { requirePerson } from './core/identity/person';
 import { internalInstapayRoutes } from './routes/internal-instapay';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
@@ -36,27 +39,32 @@ import { templatesRoutes } from './routes/templates';
 import { assistantRoutes } from './routes/assistant';
 import { assistantEnabled } from './core/smart-layer/controls';
 import { registerStarterSet } from './core/starter-templates';
+import { registerPerStoreTemplate } from './core/cod-v2';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
 import { sendOtp, type OtpResult } from './core/otp';
 import { sendPlatformOtp, type PlatformOtpResult } from './core/platform-otp';
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { bridgeFor } from './core/store-link';
+import { bridgeForWorkspace } from './core/store-link';
+import { isStandaloneId } from './core/workspace-kind';
 import { ordersRoutes } from './routes/orders';
 import { proofRoutes } from './routes/proof';
 import { agentRoutes } from './routes/agent';
 import { connectorRoutes } from './routes/connectors';
 import { contactsRoutes } from './routes/contacts';
 import { retentionRoutes } from './routes/retention';
+import { proactiveRecsRoutes } from './routes/proactive-recs';
 import { importsRoutes } from './routes/imports';
+import { quickRepliesRoutes } from './routes/quick-replies';
 import { segmentsRoutes } from './routes/segments';
 import { campaignsRoutes } from './routes/campaigns';
+import { auditTrailRoutes } from './routes/audit-trail';
 import { trackRoutes } from './routes/track';
 import { numbersRoutes } from './routes/numbers';
 import { reconcileEntitlements } from './core/billing/subscriptions';
 import { repairPackageOrders } from './core/billing/package-orders';
 import { reconcileCardRefunds, sweepAbandonedRefunds } from './core/billing/card-refunds';
-import { instapayAutoReady, sweepAutoConfirm } from './core/billing/instapay-auto';
+import { checkAutoReadiness, instapayAutoReady, sweepAutoConfirm } from './core/billing/instapay-auto';
 import { runInstapayDigest } from './core/billing/instapay-notify';
 import { expireInstapay, overdueInstapay, purgeInstapayProofs, repairInstapay } from './core/billing/instapay';
 import { paymentProvider } from './core/billing/payments';
@@ -82,6 +90,8 @@ configureAgent({ copy: PACK.agentCopy });
 const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 const SEND_DLQ_QUEUE = 'ebda-wa-send-dlq';
 
+import { pruneAgentHealth } from './core/ai/health';
+import { pruneWorkspaceCreations } from './core/workspace-registry';
 import { WorkspaceDO as WorkspaceDOBase } from './core/workspace-do';
 /** The workspace Durable Object, wrapped so its fetch / alarm / RPC errors reach Sentry (iceberg E2). Same class name and methods for the bindings. */
 export const WorkspaceDO = Sentry.instrumentDurableObjectWithSentry(
@@ -165,12 +175,27 @@ const getVerifier = (env: Env): IdentityVerifier => (verifier ??= selectVerifier
 const api = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 api.use('/stores/:storeId/*', requireStoreAccess(getVerifier));
 api.use('/operator/*', requireSuperAdmin(getVerifier));
+api.use('/workspaces', requirePerson(getVerifier)); // CHAT-SA-3: routes of a PERSON, not of one workspace
+api.use('/workspaces/*', requirePerson(getVerifier));
 api.use('*', auditWrites()); // every state-changing call: who, what, which ids (src/core/audit.ts)
 api.use('*', apiContentTypes()); // after auth: 401/403 first, then 415 for a body type the route class does not take
 api.route('/operator', operatorRoutes);
+// ---- CHAT-SA-3: standalone workspace creation (its own block; PR-2 touches the store routes below)
+api.route('/', workspacesRoutes);
 api.get('/stores/:storeId/me', async (c) => {
   const p = c.get('principal');
-  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env), assistant: await assistantEnabled(c.env, c.req.param('storeId')!) } });
+  const storeId = c.req.param('storeId')!;
+  // The picker lists only stores that have a Chat workspace (a store without one has nothing to open); the active store's own row also answers `workspace`.
+  const memberships = p.stores.slice(0, 50);
+  const ids = [...new Set([storeId, ...memberships.map((m) => m.id)])].slice(0, 51);
+  const rows = (await c.env.DB.prepare(`SELECT id, name FROM workspaces WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all<{ id: string; name: string }>()).results ?? [];
+  const names = new Map(rows.map((r) => [r.id, r.name]));
+  const storeItems = memberships.filter((m) => names.has(m.id)).map((m) => ({ id: m.id, name: names.get(m.id)!, role: m.role, kind: 'store' as const }));
+  // CHAT-SA-2: standalone memberships come from D1 (live), never from the token. The token's own list can never name an sw_ workspace here: only UUID-shaped ids are kept from it.
+  // A failure here (or a Worker deployed before migration 0042) must never break a Store merchant's /me: log and show no standalone workspaces.
+  const standaloneRows = await c.env.DB.prepare("SELECT w.id AS id, w.name AS name, m.role AS role FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ? AND m.status = 'active' AND w.kind = 'standalone' ORDER BY w.created_at LIMIT 50").bind(p.userId).all<{ id: string; name: string; role: 'owner' | 'staff' }>().then((r) => r.results ?? [], (err) => { console.warn(JSON.stringify({ warn: 'me_standalone_picker_unavailable', error: errClass(err) })); return [] as { id: string; name: string; role: 'owner' | 'staff' }[]; });
+  const stores = [...storeItems.filter((m) => !isStandaloneId(m.id)), ...standaloneRows.map((r) => ({ ...r, kind: 'standalone' as const }))].slice(0, 50);
+  return c.json({ userId: p.userId, storeId, role: c.get('storeRole'), kind: isStandaloneId(storeId) ? 'standalone' : 'store', capabilities: { codOutcome: bridgeForWorkspace(c.env, storeId) !== null, store: bridgeForWorkspace(c.env, storeId) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env), assistant: await assistantEnabled(c.env, storeId) }, workspace: names.has(storeId), stores });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   // The member's own right to erase (STORE-ROUTES-OWNER-1): the owner, or a super admin who is a MEMBER of the store (requireStoreAccess already refused a non-member's write; that operator uses the operator route, which needs a stated reason).
@@ -185,16 +210,21 @@ api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
+api.route('/', invitationsRoutes); // CHAT-SA-4: the invitee's own pending invitations; auth = requirePerson mounted on /workspaces/* above (identity/person.ts)
 registerStarterSet(PACK.templates);
-api.route('/', templatesRoutes(PACK.templates));
+registerPerStoreTemplate(PACK.perStoreTemplate ?? null);
+api.route('/', templatesRoutes(PACK.templates, PACK.seasonalTemplates ?? {}));
 api.route('/', proofRoutes);
 api.route('/', agentRoutes);
 api.route('/', connectorRoutes);
 api.route('/', contactsRoutes);
 api.route('/', retentionRoutes);
+api.route('/', proactiveRecsRoutes);
 api.route('/', importsRoutes);
 api.route('/', segmentsRoutes);
+api.route('/', quickRepliesRoutes);
 api.route('/', campaignsRoutes);
+api.route('/', auditTrailRoutes);
 api.route('/', numbersRoutes);
 api.route('/', walletRoutes);
 api.route('/', instapayRoutes);
@@ -301,6 +331,11 @@ app.post('/meta/webhook', async (c) => {
       await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateCategory(t.name, t.language, t.newCategory);
     }
   }
+  for (const t of extractTemplateQualityUpdates(payload)) {
+    for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
+      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateQuality(t.name, t.language, t.score);
+    }
+  }
   for (const u of extractTierUpdates(payload)) {
     const tier = TIER_LIMITS[u.currentLimit];
     const number = tier === undefined ? null : await numberForDisplayPhone(c.env.DB, u.wabaId, u.displayPhone);
@@ -380,6 +415,7 @@ export async function dailyBilling(env: Env): Promise<void> {
   await purgeInstapayProofs(env).catch((err) => alert('instapay_proof_purge_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairInstapay(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await sweepAutoConfirm(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error', what: 'auto_confirm_sweep' }));
+  await checkAutoReadiness(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error', what: 'auto_readiness' }));
   await runInstapayDigest(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error', what: 'auto_confirm_digest' }));
   await overdueInstapay(env).catch((err) => alert('instapay_overdue_check_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairPackageOrders(env).catch((err) => alert('package_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
@@ -406,6 +442,8 @@ export default Sentry.withSentry((env: Env) => {
     // The log line is the proof of a real tick (the cron can't be waited on): see docs/runbooks/rollback.md.
     // The FX pull is its own task (not inside dailyBilling, which tests drive directly): a failure in either never skips the other.
     ctx.waitUntil(runDailyFx(env));
+    ctx.waitUntil(pruneAgentHealth(env)); // AGENT-HEALTH-1 counters older than 8 days
+    ctx.waitUntil(pruneWorkspaceCreations(env)); // CHAT-SA-3 creation-attempt log older than 2 days
     ctx.waitUntil(dailyBilling(env).then(() => console.log(JSON.stringify({ cron: 'daily_billing', done: true }))));
   },
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {

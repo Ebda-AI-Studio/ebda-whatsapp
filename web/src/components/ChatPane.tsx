@@ -4,7 +4,9 @@ import type { ConversationDto, MessageDto, OrderSummaryDto, TemplateDto } from '
 import type { Lang, Strings } from '../i18n';
 import { clockTime, formatMoney, templateTitle, windowLeft } from '../lib/format';
 import { initials } from './ConversationList';
+import { ConversationTools } from './ConversationTools';
 import { MediaView } from './MediaView';
+import { QuickReplies } from './QuickReplies';
 import type { InboxSource } from '../data/source';
 
 type Props = {
@@ -31,10 +33,11 @@ export function ChatPane({ t, lang, now, conversation, source, userNames, curren
   const [picker, setPicker] = useState(false);
   const [fullText, setFullText] = useState<Record<number, string>>({});
   const fileInput = useRef<HTMLInputElement>(null);
+  const [tools, setTools] = useState(false);
   const [filling, setFilling] = useState<{ tpl: TemplateDto; params: string[] } | null>(null);
   const thread = useRef<HTMLDivElement>(null);
   useEffect(() => { thread.current?.scrollTo?.({ top: thread.current.scrollHeight }); }, [messages.length, conversation?.id]);
-  useEffect(() => { setDraft(''); setPicker(false); setFilling(null); }, [conversation?.id]);
+  useEffect(() => { setDraft(''); setPicker(false); setFilling(null); setTools(false); }, [conversation?.id]);
 
   if (!conversation) return <main className="chat"><div className="placeholder">{t.pickChat}</div></main>;
 
@@ -55,9 +58,11 @@ export function ChatPane({ t, lang, now, conversation, source, userNames, curren
           <span className="win" data-state={win.state}>{win.label}</span>
         </div>
         <div className="head-actions">
+          {source.inboxTools && <button type="button" className="chip" aria-expanded={tools} onClick={() => setTools((v) => !v)}>{t.itNotesToggle}</button>}
           <span className="tag assignee">{conversation.assigneeUserId ? `${t.assignedTo}: ${userNames[conversation.assigneeUserId] ?? conversation.assigneeUserId.slice(0, 8)}` : t.unassignedLabel}</span>
         </div>
       </header>
+      {tools && <ConversationTools t={t} source={source} conversation={conversation} />}
       {currentOrder && (
         <button type="button" className="order-strip" onClick={onShowOrders}>
           <b><bdi>{currentOrder.orderNumber}</bdi></b>
@@ -99,11 +104,7 @@ export function ChatPane({ t, lang, now, conversation, source, userNames, curren
       </div>
       {closed && <p className="closed-note" role="status">{t.windowClosedHelp}</p>}
       {!closed && (
-        <div className="quick" role="group" aria-label={t.quickReplies}>
-          {t.quickReplyTexts.map((q) => (
-            <button key={q} type="button" className="chip" onClick={() => setDraft(q)}>{q}</button>
-          ))}
-        </div>
+        <QuickReplies t={t} source={source} onPick={setDraft} />
       )}
       <div className="composer" data-closed={closed}>
         {filling && (

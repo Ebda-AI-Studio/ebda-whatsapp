@@ -26,11 +26,11 @@ Content for help.ebda.app (plan task 8.5). One file per topic, same slug in `ar/
 | 20 | read-a-conversation-and-live-updates | Reading a thread, long messages, media, live updates |
 | 21 | send-files-in-chat | Sending images, video, audio and PDFs, real size limits |
 | 22 | failed-messages-and-sending-limits | Try again, Meta error codes, daily conversation limit, throughput |
-| 23 | notes-tags-and-quick-replies | What exists today for notes, tags and quick replies (several have no screen) |
+| 23 | notes-tags-and-quick-replies | Quick replies (editable), internal notes, conversation and customer tags, saved segments (self-service A25-A27, A29, A30) |
 | 24 | weekly-summary | The Wallet "This week" card |
 | 25 | alerts-and-notices | In-app alerts (no e-mail or push) and the removed-app notice |
 | 26 | verification-codes-on-whatsapp | OTP on WhatsApp from your own number, limits |
-| 27 | connect-your-systems | API tokens (Pro) and the AI agent connectors |
+| 27 | connect-your-systems | API tokens and the AI agent connectors |
 | 28 | terms-privacy-and-meta-data-deletion | Legal pages and Meta's data-deletion request |
 | 29 | all-ebda-chat-guides | Index of every guide |
 | 30 | bot-switches-and-sending-speed | Ordering bot, order confirmation messages and store-login codes switches (confirm before turning sending on), sending speed and tier use |
@@ -52,7 +52,7 @@ capabilities:
 - Guides 04, 16 and 17 (and every guide the capability help guard knows) start with front matter: a `capabilities:` block list of `<id>@<version>` and an `appPath`. The Store import (`import-wa-help.mjs`) must drop it before publishing.
 - Each guide ends with "Last checked" (2026-10-25). Re-check every guide against Meta's current screens before launch and when Meta changes its flows; update the date.
 - Copy rules: product name "Ebda Chat", company "Ebda AI Studio"; no infrastructure provider names. Undecided values (package prices, add-on price) are deliberately left to "set by the Ebda AI Studio team".
-- Guide 09 refund text is marked "subject to final terms of service": align it with the terms before launch (legal check pending). Margin is stated as 0% "for now" (WA-MARGIN-1 is operator-editable); update guides 03 and 10 if it changes.
+- Guide 09 refund text no longer says "subject to final terms" (counsel approved, 2026-11-19). Margin is stated as 0% "for now" (WA-MARGIN-1 is operator-editable); update guides 03 and 10 if it changes.
 - No screenshots are included (none of this product's screens are final); add them in the help app once the onboarding UI is audited.
 | 16 | write-and-submit-a-template | Create a template on the Templates page: type, variables with examples, header/footer/buttons, Meta's limits, the irreversible confirm, shared-number request |
 | 17 | template-review-and-rejections | Statuses, reading a rejection in plain words, edit and resubmit (24 h / 10 per 30 days), delete (30-day name rule), recategorisation |

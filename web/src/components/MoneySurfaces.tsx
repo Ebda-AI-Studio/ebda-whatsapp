@@ -1,3 +1,4 @@
+import { LoadError } from './LoadError';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../data/api';
 import type { ConfirmToken, CreditPack, WalletApi, YearlyRefundPreview, YearlyRefundView } from '../data/billing';
@@ -133,7 +134,7 @@ const writePending = (p: PendingCredits | null) => {
 
 /** Buy AI credits by card. The page leaves for the card form; the credits are added by the server when the provider confirms, and this card waits for that. */
 export function CreditPacksCard({ t, lang, api, now, go, onCredited }: Props & { now: () => number; go: (url: string) => void; onCredited: () => void }) {
-  const [packs, setPacks] = useState<{ items: CreditPack[]; enabled: boolean } | null>(null);
+  const [packs, setPacks] = useState<{ items: CreditPack[]; enabled: boolean } | 'error' | null>(null);
   const [chosen, setChosen] = useState<{ pack: CreditPack; confirm: ConfirmToken } | null>(null);
   const [pending, setPending] = useState<PendingCredits | null>(() => readPending(now()));
   const [note, setNote] = useState<{ kind: 'arrived'; credits: number } | { kind: 'failed' } | null>(null);
@@ -145,7 +146,8 @@ export function CreditPacksCard({ t, lang, api, now, go, onCredited }: Props & {
   pendingRef.current = pending;
   const money = (m: number) => formatMoney(m, 'EGP', lang);
 
-  useEffect(() => { void api.creditPacks().then(setPacks, () => setPacks(null)); }, [api]);
+  const loadPacks = useCallback(() => { void api.creditPacks().then(setPacks, () => setPacks('error')); }, [api]);
+  useEffect(loadPacks, [loadPacks]);
   // The order's own state decides: `paid` means the server already added the credits.
   const check = useCallback(async () => {
     const p = pendingRef.current;
@@ -167,6 +169,7 @@ export function CreditPacksCard({ t, lang, api, now, go, onCredited }: Props & {
   }, [pending, check]);
 
   if (!packs) return null;
+  if (packs === 'error') return <section className="wallet-card" id="w-credits" aria-labelledby="w-credits-title"><h2 id="w-credits-title">{t.wCrTitle}</h2><LoadError t={t} onRetry={loadPacks} /></section>;
   const pick = async (pack: CreditPack) => {
     setBusy(true); setMsg(null); setNote(null);
     try { setChosen({ pack, confirm: (await api.previewCreditPack(pack.id)).confirm }); } catch { setMsg({ kind: 'alert', text: t.opFailed }); } finally { setBusy(false); }

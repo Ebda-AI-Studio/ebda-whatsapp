@@ -9,8 +9,12 @@
  * The marker also remembers what the Store plan says (`includes_whatsapp`, status, end), so a bought package that lapses falls back to it.
  */
 import type { Env } from '../../env';
+import type { WalletDto } from '../api/contract';
 import type { StoreEvent } from '../api/store-events';
 import { alert } from '../observability';
+import { isStandaloneId } from '../workspace-kind';
+import { chatPackageName } from './package-names';
+import { storePlanNames } from './store-plan-names';
 import { STORE_INCLUDED, cancelSubscription, setSubscription, type WriteOpts } from './subscriptions';
 
 export { STORE_INCLUDED };
@@ -18,6 +22,7 @@ type PlanEvent = Extract<StoreEvent, { type: 'store.plan_changed' }>;
 
 export async function applyStorePlan(env: Env, event: PlanEvent, now = Date.now()): Promise<'applied' | 'ignored' | 'kept'> {
   const ws = event.storeId;
+  if (isStandaloneId(ws)) { alert('standalone_store_plan_event', { workspace: ws }); return 'ignored'; } // CHAT-SA-6: a Store plan can never write to a standalone workspace
   const eff = Date.parse(event.data.effectiveAt);
   const includes = event.data.includesWhatsApp;
   // D3: access is never GRANTED on a guess. The contract keeps `status` and `periodEnd` optional so an old Store event still parses, but an event
@@ -41,11 +46,11 @@ export async function applyStorePlan(env: Env, event: PlanEvent, now = Date.now(
     : null;
   const periodStart = samePeriod ? Math.min(samePeriod.period_start, eff) : eff;
   const claim = env.DB.prepare(
-    `INSERT INTO store_plan_applied (workspace_id, effective_at, event_id, includes_whatsapp, status, period_end, claimed) VALUES (?, ?, ?, ?, ?, ?, 1)
+    `INSERT INTO store_plan_applied (workspace_id, effective_at, event_id, includes_whatsapp, status, period_end, claimed, plan_code) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
      ON CONFLICT(workspace_id) DO UPDATE SET effective_at = excluded.effective_at, event_id = excluded.event_id, includes_whatsapp = excluded.includes_whatsapp,
-       status = excluded.status, period_end = excluded.period_end, claimed = 1
+       status = excluded.status, period_end = excluded.period_end, claimed = 1, plan_code = excluded.plan_code
      WHERE excluded.effective_at >= store_plan_applied.effective_at AND store_plan_applied.event_id != excluded.event_id`,
-  ).bind(ws, eff, event.id, includes ? 1 : 0, status, periodEnd);
+  ).bind(ws, eff, event.id, includes ? 1 : 0, status, periodEnd, event.data.planCode);
   const release = env.DB.prepare('UPDATE store_plan_applied SET claimed = 0 WHERE workspace_id = ? AND event_id = ?').bind(ws, event.id);
   const claimed: WriteOpts['only'] = { sql: 'EXISTS (SELECT 1 FROM store_plan_applied WHERE workspace_id = ? AND event_id = ? AND claimed = 1)', binds: [ws, event.id] };
   // Not a package someone paid for or an operator set, unless that one has ended or is not running.
@@ -58,4 +63,20 @@ export async function applyStorePlan(env: Env, event: PlanEvent, now = Date.now(
     });
   if (r.pre[0] === 0) return 'ignored';
   return r.written ? 'applied' : 'kept';
+}
+
+/**
+ * CHAT-QA-13: name the running plan the way the merchant knows it. The package the Store plan includes is the Store plan (its own name, from the code kept with the applied event);
+ * any other package was bought in Chat and carries its Chat package name. Tenant-scoped: both reads are keyed by this workspace / this package.
+ */
+export async function namePlan(env: Env, workspaceId: string, plan: WalletDto['plan']): Promise<WalletDto['plan']> {
+  if (!plan) return plan;
+  if (plan.packageId === STORE_INCLUDED) {
+    const row = await env.DB.prepare('SELECT plan_code FROM store_plan_applied WHERE workspace_id = ?').bind(workspaceId).first<{ plan_code: string | null }>();
+    return row?.plan_code ? { ...plan, storePlan: storePlanNames(row.plan_code) } : plan;
+  }
+  const row = await env.DB.prepare('SELECT ai_credits, period_months FROM packages WHERE id = ?').bind(plan.packageId).first<{ ai_credits: number; period_months: number }>();
+  if (!row) return plan;
+  const n = chatPackageName(row.ai_credits, row.period_months);
+  return { ...plan, packageName: n.nameEn, packageNameAr: n.nameAr };
 }

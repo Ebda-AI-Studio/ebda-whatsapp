@@ -113,6 +113,8 @@ export const templateDto = z.object({
   rejectedReason: z.string().nullable(),
   // additive (merchant template self-service): the merchant's own title, Meta's components, last change, and whether Meta still lets this one be edited
   label: z.string().nullable().optional(),
+  /** Meta's quality rating of the template (from its webhook), or null when Meta has not sent one. */
+  quality: z.enum(['GREEN', 'YELLOW', 'RED', 'UNKNOWN']).nullable().optional(),
   components: z.array(z.record(z.string(), z.any())).optional(),
   updatedAt: z.number().int().optional(),
   editAllowance: templateEditAllowance.optional(),
@@ -163,9 +165,10 @@ export type SharedRequestDto = z.infer<typeof sharedRequestDto>;
 export const listTemplatesResponse = z.object({ items: z.array(templateDto), /** the brand's starter set is in place for the connected number (the screen installs it once when this is false and the list is empty) */ starterInstalled: z.boolean().optional() });
 
 export const noteDto = z.object({ id: z.number().int(), authorUserId: z.string(), text: z.string(), at: z.number().int() });
-export const addNoteRequest = z.object({ text: z.string().min(1).max(2000) });
+export const addNoteRequest = z.object({ text: z.string().trim().min(1).max(2000) }).strict();
 export const assignRequest = z.object({ userId: z.string().nullable() });
-export const setTagsRequest = z.object({ tags: z.array(z.string().min(1).max(32)).max(10) });
+/** PUT /conversations/:id/tags: the whole tag list (trimmed, lower-cased and de-duplicated by the server, like a contact's tags). */
+export const setTagsRequest = z.object({ tags: z.array(z.string().trim().min(1).max(32)).max(10) }).strict();
 export const searchQuery = z.object({ q: z.string().min(1).max(100), limit: z.coerce.number().int().min(1).max(50).default(20) });
 export const searchResponse = z.object({ items: z.array(z.object({ conversationId: z.number().int(), messageId: z.number().int(), snippet: z.string(), at: z.number().int() })) });
 
@@ -201,7 +204,13 @@ export const meResponse = z.object({
   userId: z.string(),
   storeId: z.string(),
   role: z.enum(['owner', 'staff', 'super_admin']),
-  capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional(), assistant: z.boolean().optional() }),
+  capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional(), assistant: z.boolean().optional(), /** false = no Store behind this workspace (standalone): orders, catalogue, COD and recommendations are off. Additive. */ store: z.boolean().optional() }),
+  /** CHAT-SA-2: which kind of workspace this is. Additive: absent from older servers (= 'store'). */
+  kind: z.enum(['store', 'standalone']).optional(),
+  /** Whether THIS store has a Chat workspace. false = Chat was never switched on for it (every workspace route answers 404). Additive: absent from older servers. */
+  workspace: z.boolean().optional(),
+  /** The stores this person may act on that DO have a Chat workspace (id, name, role), for the store picker. At most 50. */
+  stores: z.array(z.object({ id: z.string(), name: z.string(), role: z.enum(['owner', 'staff']), kind: z.enum(['store', 'standalone']).optional() })).max(50).optional(),
 });
 export type MeResponse = z.infer<typeof meResponse>;
 
@@ -316,6 +325,8 @@ export const agentSettingsFields = z.object({
   allowFreeDelivery: z.boolean(),
   allowExchange: z.boolean(),
   allowGuarantee: z.boolean(),
+  /** The agent may recommend products from the catalogue (similar items, complements, after an order, budget asks). Proactive (it can message a customer after an order), so Ruling WA-RECS-1: OFF for workspaces that existed before it, ON for new ones; off = it only answers what was asked. */
+  recommendProducts: z.boolean(),
 });
 export const agentSettingsDto = agentSettingsFields.extend({
   hasApiKey: z.boolean(),
@@ -403,6 +414,10 @@ export const mergeContactsRequest = z.object({ fromWaId: z.string().regex(/^[1-9
 export const exportContactQuery = z.object({ after: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(1000).default(500) });
 /** PUT /retention (B4): the owner's message window in days; null = the platform default. */
 export const retentionRequest = z.object({ days: z.number().int().min(30).max(3650).nullable() }).strict();
+/** PUT /proactive-recs (CHAT-RECS-SWITCH-1): the owner's switch (default OFF) and the name of the APPROVED marketing template. Turning it on needs a name. */
+export const proactiveRecsRequest = z.object({ enabled: z.boolean().optional(), templateName: z.string().regex(/^[a-z0-9_]{1,512}$/).nullable().optional() }).strict().refine((v) => v.enabled !== undefined || v.templateName !== undefined);
+export const proactiveRecsDto = z.object({ enabled: z.boolean(), templateName: z.string().nullable(), suggestions: z.number().int(), capDays: z.number().int(), quietFrom: z.number().int(), quietTo: z.number().int() });
+export type ProactiveRecsDto = z.infer<typeof proactiveRecsDto>;
 export const retentionDto = z.object({ days: z.number().int().nullable(), effectiveDays: z.number().int(), defaultDays: z.number().int(), minDays: z.number().int(), maxDays: z.number().int() });
 /**
  * GET /members (WA-SEATS-1): the team as the Store knows it, with each person's seat here. `seat` is 'owner' (always works, counts as one), 'seated',
@@ -410,7 +425,16 @@ export const retentionDto = z.object({ days: z.number().int().nullable(), effect
  */
 export const memberSeat = z.enum(['owner', 'seated', 'over_limit', 'none']);
 export const memberDto = z.object({ userId: z.string(), displayName: z.string(), role: z.enum(['owner', 'staff']), addedAt: z.string(), seat: memberSeat });
-export const listMembersResponse = z.object({ items: z.array(memberDto), seats: z.object({ limit: z.number().int().min(1), used: z.number().int().min(1), overLimit: z.boolean() }) });
+export const listMembersResponse = z.object({ items: z.array(memberDto), seats: z.object({ limit: z.number().int().min(1), used: z.number().int().min(1), overLimit: z.boolean() }),
+  /** CHAT-SA-4: true when the team is managed in Chat itself (a standalone workspace): the screen then offers invite + remove. Absent for a Store workspace (its team lives in the Store). */
+  canInvite: z.boolean().optional(),
+  /** CHAT-SA-4: invitations the owner sent that nobody accepted yet: ONLY what the owner typed (first name, address). Absent for a Store workspace. */
+  invitations: z.array(z.object({ userId: z.string(), email: z.string(), firstName: z.string(), invitedAt: z.string(), expiresAt: z.string() })).max(100).optional() });
+/** GET /workspaces/invitations (person token): the invitations waiting for the signed-in identity. Accepting = POST /workspaces/invitations/:workspaceId/accept. */
+export const myInvitationsResponse = z.object({ items: z.array(z.object({ workspaceId: z.string(), workspaceName: z.string(), expiresAt: z.string() })).max(20) });
+export type MyInvitationsResponse = z.infer<typeof myInvitationsResponse>;
+/** POST /members/invite (standalone only): 202 answers the same whether or not the address already had an account. */
+export const inviteMemberResponse = z.object({ status: z.literal('invite_sent') });
 export type MemberDto = z.infer<typeof memberDto>;
 export type ListMembersResponse = z.infer<typeof listMembersResponse>;
 export const seatResponse = z.object({ userId: z.string(), seat: z.enum(['seated']) });
@@ -460,6 +484,14 @@ export const updateSegmentRequest = createSegmentRequest.partial().refine((p) =>
 export const segmentPreviewRequest = z.object({ criteria: segmentCriteria });
 /** `count` = people who would receive a marketing send; `excluded` = people the filter matches but who cannot be messaged, and why. */
 export const segmentPreviewDto = z.object({ count: z.number().int().nonnegative(), excluded: z.object({ optedOut: z.number().int().nonnegative(), noConsent: z.number().int().nonnegative() }) });
+/** A canned reply the merchant keeps for the inbox composer (A25). At most MAX_QUICK_REPLIES per workspace; the text is unique. */
+export const MAX_QUICK_REPLIES = 20;
+export const quickReplyText = z.string().trim().min(1).max(500);
+export const quickReplyDto = z.object({ id: z.number().int(), text: quickReplyText, position: z.number().int(), createdAt: z.number().int() });
+export const createQuickReplyRequest = z.object({ text: quickReplyText }).strict();
+export const updateQuickReplyRequest = z.object({ text: quickReplyText }).strict();
+export const listQuickRepliesResponse = z.object({ items: z.array(quickReplyDto) });
+export type QuickReplyDto = z.infer<typeof quickReplyDto>;
 export const listSegmentsResponse = z.object({ items: z.array(segmentDto) });
 export type SegmentDto = z.infer<typeof segmentDto>;
 export type SegmentPreviewDto = z.infer<typeof segmentPreviewDto>;
@@ -558,6 +590,13 @@ export const listCampaignsQuery = z.object({
   cursor: z.string().regex(/^\d{1,15}$/).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
+/** A seasonal template pack the merchant asks to install (the brand supplies the packs; an id it does not have is refused). */
+export const installSeasonalRequest = z.object({ pack: z.enum(['ramadan']) }).strict();
+export const campaignReportQuery = z.object({ format: z.enum(['json', 'csv']).default('json') });
+/** Owner-only compliance evidence: one page of the per-contact consent / opt-out record (after = the last contact id of the previous page). */
+export const consentEvidenceQuery = z.object({ after: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0), limit: z.coerce.number().int().min(1).max(500).default(200), format: z.enum(['json', 'csv']).default('json') });
+/** The merchant's own audit trail (owner only): who did what, when. Ids and counts, never a phone number or a message. */
+export const auditTrailQuery = z.object({ before: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
 export const listCampaignsResponse = z.object({ items: z.array(campaignDto), nextCursor: z.string().nullable() });
 export type CampaignDto = z.infer<typeof campaignDto>;
 export type CampaignParam = z.infer<typeof campaignParam>;
@@ -593,12 +632,20 @@ export const walletDto = z.object({
   topupsEnabled: z.boolean(),
   /** Additive: false while no card provider can confirm its webhooks (Kashier not configured). The screen then offers InstaPay only, never a card button that would answer 503 (Ruling WA-INSTAPAY-LAUNCH-1). Absent = an older server. */
   cardCheckout: z.boolean().optional(),
+  /** Additive: false when the InstaPay card cannot be offered (switch off or no payee). The "top up by InstaPay" copy is then never shown, so it never points to a card that is not on the screen. */
+  instapayAvailable: z.boolean().optional(),
   lowBalance: z.boolean(),
   /** The wallet is low under this many minor units: max(20 EGP, 3 days of the last week's average Meta spend). */
   lowBalanceThresholdMinor: z.number().int().nonnegative(),
   /** One credit = one AI turn. `low` = available under a tenth of the monthly `allowance` (never under 5 credits, `lowThreshold`). */
   aiCredits: z.object({ balance: z.number().int(), available: z.number().int(), low: z.boolean(), lowThreshold: z.number().int().nonnegative(), allowance: z.number().int().nonnegative() }),
-  plan: z.object({ packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable() }).nullable(),
+  plan: z.object({
+    packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable(),
+    /** Additive (CHAT-QA-13): the Chat package's own name, for a package bought in Chat. */
+    packageName: z.string().optional(), packageNameAr: z.string().optional(),
+    /** Additive (CHAT-QA-13): the Store plan, by the Store's own name, when the running package is the one the Store plan includes. */
+    storePlan: z.object({ code: z.string(), nameAr: z.string(), nameEn: z.string() }).optional(),
+  }).nullable(),
 });
 export type WalletDto = z.infer<typeof walletDto>;
 
@@ -645,7 +692,8 @@ export const topupDto = z.object({
 /** Feature keys in display order (shared with marketing and the Store plan comparison). */
 export const PACKAGE_FEATURE_KEYS = ['members', 'shared_inbox', 'order_confirmations', 'templates', 'campaigns', 'order_in_chat', 'api', 'priority_support', 'ai_credits'] as const;
 export const packageDto = z.object({
-  id: z.string(), name: z.string(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative(),
+  /** `name` is the English display name; `nameAr` / `nameEn` are the size-based names (Ahmad 2026-11-19), additive. */
+  id: z.string(), name: z.string(), nameAr: z.string().optional(), nameEn: z.string().optional(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative(),
   maxMembers: z.number().int().min(1), features: z.array(z.enum(PACKAGE_FEATURE_KEYS)), periodMonths: z.number().int().positive(),
 });
 export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired', 'refunded']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
@@ -777,6 +825,8 @@ export const ROUTES = {
   connectorTest: 'POST /connectors/:connectorId/test',
   contacts: 'GET /contacts',
   contactTags: 'PUT /contacts/:waId/tags',
+  quickReplies: 'GET|POST /quick-replies',
+  quickReply: 'PUT|DELETE /quick-replies/:quickReplyId',
   imports: 'GET|POST /imports',
   import: 'GET /imports/:importId',
   importRejects: 'GET /imports/:importId/rejects',

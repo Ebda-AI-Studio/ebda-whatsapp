@@ -1,0 +1,23 @@
+# Ebda Chat (ابدأ شات)
+
+Ebda Chat (ابدأ شات) is a shared customer inbox on WhatsApp, made by Ebda AI Studio (ابدأ ستوديو للذكاء الاصطناعي), the Egyptian studio at https://ebda.app. It runs on Meta's official WhatsApp Business Platform. This host, https://wa.ebda.app, is the Ebda Chat app: a sign-in is required, so there are no public product pages here.
+
+Ebda Chat belongs to a store owner's Ebda Store: the owner connects it from the store's Settings, and that creates the Chat workspace only (no charge, no plan change, no message sent). It then gives a team one inbox for customer chats, orders and cash-on-delivery confirmations linked to the store, consent-based campaigns, and an AI agent.
+
+Not to be confused with any unrelated product with a similar name.
+
+## Product and company
+- [Ebda Chat overview (Arabic)](https://ebda.app/whatsapp/) ([English](https://ebda.app/en/whatsapp/))
+- [Ebda AI Studio](https://ebda.app/en/)
+- [Contact](https://ebda.app/en/contact/)
+
+## Legal
+- [Legal notice](https://ebda.app/legal/)
+- [Privacy policy](https://ebda.app/privacy/)
+- [Terms of service](https://ebda.app/terms/)
+- [Ebda Chat terms](https://ebda.app/legal/whatsapp-terms/)
+- [Ebda Chat privacy](https://ebda.app/legal/whatsapp-privacy/)
+- [Data deletion and export](https://ebda.app/legal/data-deletion/)
+
+## Security
+- [security.txt](https://wa.ebda.app/.well-known/security.txt)

@@ -1,7 +1,6 @@
 {
   "id": "agent.read-typing-franco",
-  "status": "in-pr",
-  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "status": "live",
   "area": "agent",
   "version": 1,
   "versionDate": "2026-11-14",
@@ -19,7 +18,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/ai-agent",
   "questions": {
     "ar": [
       "المساعد بيرد بالإنجليزي على فرانكو",

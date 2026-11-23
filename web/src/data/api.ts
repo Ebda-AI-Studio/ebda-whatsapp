@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, assistantActResponse, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
-  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
+  agentSettingsDto, apiError, assistantActResponse, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, connectorDto, connectorTestResult, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  opsStatusDto, proactiveRecsDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, inviteMemberResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
+  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest, segmentDto, quickReplyDto, listQuickRepliesResponse, noteDto, conversationDto,
 } from '../../../src/core/api/contract';
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
+import { assistantFlagsDto, assistantModeDto } from './assistant-rollout';
 import type { InboxSource } from './source';
+import { isStandaloneId, markStandalone } from './workspaces';
 
 export class ApiError extends Error {
   /** `detail` = the server's machine reason for a 409 (e.g. `empty_audience`), when it sends one. */
@@ -108,6 +110,7 @@ export function createApiSource(o: Opts): LiveSource {
         requests: async () => (await call('/templates/shared-requests', listSharedRequestsResponse)).items,
         request: (r) => call('/templates/shared-requests', sharedRequestDto, post(r)),
       },
+      resubmitCodV2: () => call('/templates/cod-v2/resubmit', z.object({ status: z.string() }), post({})),
       installDefaults: () => call('/templates/install-defaults', z.object({ submitted: z.array(z.string()), skipped: z.array(z.string()), failed: z.array(z.string()) }), post({})),
     },
     async recordCodOutcome(waId, orderNumber, outcome) {
@@ -118,7 +121,8 @@ export function createApiSource(o: Opts): LiveSource {
       if (!res.ok) throw new ApiError('invalid_request', res.status);
     },
     async agentSettings() {
-      try { return await call('/agent', agentSettingsDto); } catch (e) { if (e instanceof ApiError && (e.status === 403 || e.status === 404)) return null; throw e; }
+      // Only a 403 means "not yours to read" (staff, an operator session). A 404 (no workspace) or any other failure is a failed load, never a permission message (CHAT-QA-3/12).
+      try { return await call('/agent', agentSettingsDto); } catch (e) { if (e instanceof ApiError && e.status === 403) return null; throw e; }
     },
     async saveAgentSettings(update) {
       return call('/agent', agentSettingsDto, { method: 'PUT', body: JSON.stringify(update) });
@@ -137,6 +141,10 @@ export function createApiSource(o: Opts): LiveSource {
         try { return await call('/throttle', throttleReportDto); } catch (e) { if (e instanceof ApiError && e.status === 404) return null; throw e; }
       },
     },
+    proactiveRecs: {
+      get: () => call('/proactive-recs', proactiveRecsDto),
+      save: (change) => call('/proactive-recs', proactiveRecsDto, { method: 'PUT', body: JSON.stringify(change) }),
+    },
     async botFunnel(days) {
       const day = (ms: number) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(ms).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
       const now = Date.now();
@@ -147,6 +155,13 @@ export function createApiSource(o: Opts): LiveSource {
       provision: (name) => call('/store-link/catalog/provision', provisionCatalogResponse, post(name ? { name } : {})),
       resync: () => call('/store-link/catalog/resync', catalogResyncResponse, post({})),
       setCommerce: (v) => call('/store-link/catalog/commerce', catalogCommerceRequest, { method: 'PUT', body: JSON.stringify(v) }),
+      linkExisting: async (catalogId) => { await call('/store-link/settings', botSettingsDto, { method: 'PATCH', body: JSON.stringify({ catalogId }) }); },
+    },
+    connectors: {
+      list: () => call('/connectors', z.array(connectorDto)),
+      save: (id, body) => call(`/connectors/${encodeURIComponent(id)}`, connectorDto, { method: 'PUT', body: JSON.stringify(body) }),
+      remove: async (id) => { await call(`/connectors/${encodeURIComponent(id)}`, done, { method: 'DELETE' }); },
+      test: (id) => call(`/connectors/${encodeURIComponent(id)}/test`, connectorTestResult, post({})),
     },
     async assign(id, userId) {
       await call(`/conversations/${id}/assign`, z.unknown(), { method: 'POST', body: JSON.stringify({ userId }) });
@@ -199,6 +214,15 @@ export function createApiSource(o: Opts): LiveSource {
         const res = await f(`${root}/members/${encodeURIComponent(userId)}/seat`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
         if (!res.ok) throw new ApiError('invalid_request', res.status);
       },
+      invite: async (a) => { await call('/members/invite', inviteMemberResponse, post(a)); },
+      revokeInvitation: async (userId) => {
+        const res = await f(`${root}/members/invitations/${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
+      },
+      remove: async (userId) => {
+        const res = await f(`${root}/members/${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
+      },
     },
     contacts: {
       async list(q, signal) {
@@ -229,9 +253,29 @@ export function createApiSource(o: Opts): LiveSource {
         }
         return { ...out, messages, nextAfter: null };
       },
+      eraseContact: async (waId) => { await call(`/contacts/${encodeURIComponent(waId)}`, z.unknown(), { method: 'DELETE' }); },
       mergeContacts: async (fromWaId, intoWaId) => { await call('/contacts/merge', z.unknown(), post({ fromWaId, intoWaId })); },
       retention: () => call('/retention', retentionDto),
       setRetention: (days) => call('/retention', retentionDto, { method: 'PUT', body: JSON.stringify({ days }) }),
+      setContactTags: (waId, tags) => call(`/contacts/${encodeURIComponent(waId)}/tags`, z.object({ tags: z.array(z.string()) }).loose(), { method: 'PUT', body: JSON.stringify({ tags }) }),
+      segments: {
+        list: async () => (await call('/segments', listSegmentsResponse)).items,
+        create: (name, criteria) => call('/segments', segmentDto, post({ name, criteria })),
+        update: (id, patch) => call(`/segments/${id}`, segmentDto, { method: 'PUT', body: JSON.stringify(patch) }),
+        remove: async (id) => { await call(`/segments/${id}`, done, { method: 'DELETE' }); },
+        preview: (criteria) => call('/segments/preview', segmentPreviewDto, post({ criteria })),
+      },
+    },
+    inboxTools: {
+      quickReplies: {
+        list: async () => (await call('/quick-replies', listQuickRepliesResponse)).items,
+        create: (text) => call('/quick-replies', quickReplyDto, post({ text })),
+        update: (id, text) => call(`/quick-replies/${id}`, quickReplyDto, { method: 'PUT', body: JSON.stringify({ text }) }),
+        remove: async (id) => { await call(`/quick-replies/${id}`, done, { method: 'DELETE' }); },
+      },
+      notes: async (id) => (await call(`/conversations/${id}/notes`, items(noteDto))).items,
+      addNote: (id, text) => call(`/conversations/${id}/notes`, noteDto, post({ text })),
+      setTags: (id, tags) => call(`/conversations/${id}/tags`, conversationDto, { method: 'PUT', body: JSON.stringify({ tags }) }),
     },
     wallet: {
       wallet: () => call('/wallet', walletDto),
@@ -327,6 +371,12 @@ export function createApiSource(o: Opts): LiveSource {
       submit: (input) => op('/shared-templates', z.object({ status: z.string() }).loose(), post(input)),
       requests: async () => (await op('/shared-template-requests', z.object({ items: z.array(sharedRequestDto.extend({ workspaceId: z.string() })) }))).items,
     },
+    assistantRollout: {
+      platform: () => op('/assistant', assistantFlagsDto),
+      setPlatform: (patch) => op('/assistant/flags', assistantFlagsDto, { method: 'PUT', body: JSON.stringify(patch) }),
+      workspaceMode: async (ws) => (await op(`/workspaces/${encodeURIComponent(ws)}/assistant`, assistantModeDto)).mode,
+      setWorkspaceMode: async (ws, mode) => (await op(`/workspaces/${encodeURIComponent(ws)}/assistant`, assistantModeDto, { method: 'PUT', body: JSON.stringify({ mode }) })).mode,
+    },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });
       if (!res.ok) throw new ApiError('not_found', res.status);
@@ -354,10 +404,16 @@ export function createApiSource(o: Opts): LiveSource {
     emit: (e) => listeners.forEach((l) => l(e)),
     reload: () => reloaders.forEach((r) => r()),
     async loadCapabilities() {
+      // CHAT-SA-5: a standalone workspace has no Store, so everything that talks to one is switched off (the routes would only 404). The `sw_` id says so before /me does (and when /me fails).
+      const standAlone = () => markStandalone(source);
+      if (isStandaloneId(o.storeId)) standAlone();
       try {
         const me = await call('/me', meResponse.partial().loose());
         source.capabilities = { codOutcome: me.capabilities?.codOutcome === true, numbers: me.capabilities?.numbers === true, assistant: me.capabilities?.assistant === true };
         if (me.role) source.role = me.role;
+        if (me.workspace === false) source.workspaceMissing = true;
+        if (me.stores) source.stores = me.stores;
+        if ((me as { kind?: unknown }).kind === 'standalone') standAlone();
       } catch (e) {
         source.capabilities = { codOutcome: false };
         if (e instanceof ApiError && e.status === 403 && e.code === 'no_seat') source.noSeat = e.detail === 'seat_over_limit' ? 'over_limit' : 'none';
@@ -365,6 +421,16 @@ export function createApiSource(o: Opts): LiveSource {
     },
   };
   return source;
+}
+
+/** Store-independent super-admin check (GET /operator/me): 200 only for a super admin, 401/403 for everyone else. Any failure reads as "not an operator". */
+export async function isOperator(baseUrl: string, getToken: () => Promise<string>, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`${baseUrl}/api/v1/operator/me`, { headers: { authorization: `Bearer ${await getToken()}` } });
+    return res.ok && ((await res.json().catch(() => null)) as { superAdmin?: unknown } | null)?.superAdmin === true;
+  } catch {
+    return false;
+  }
 }
 
 export interface SocketLike {

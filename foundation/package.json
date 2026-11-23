@@ -1,7 +1,7 @@
 {
   "name": "@ebda/foundation",
-  "version": "0.3.2",
-  "foundationCommit": "3ef654b3689e7835299e691c42c599626ad5aee5",
+  "version": "0.4.2",
+  "foundationCommit": "2ef4f9fffca083b341159b85d3839214ab82592a",
   "private": true,
   "license": "UNLICENSED",
   "exports": {
@@ -10,21 +10,31 @@
     "./capability": "./capability.ts",
     "./capability-coverage": "./capability-coverage.ts",
     "./capability-registry": "./capability-registry.ts",
+    "./contracts/wa-v1": "./contracts/wa-v1.ts",
+    "./contracts/wa-v1-verify": "./contracts/wa-v1-verify.ts",
+    "./erasure": "./erasure.ts",
     "./help-article": "./help-article.ts",
+    "./identity-claims": "./identity-claims.ts",
     "./instapay-decision": "./instapay-decision.ts",
     "./instapay-dedupe": "./instapay-dedupe.ts",
     "./instapay-digest": "./instapay-digest.ts",
     "./instapay-extract": "./instapay-extract.ts",
     "./instapay-state": "./instapay-state.ts",
+    "./observe": "./observe/index.ts",
+    "./observe/mask": "./observe/mask.ts",
+    "./observe/url-scrub": "./observe/url-scrub.ts",
     "./phone": "./phone.ts",
     "./ratchet": "./ratchet.ts",
+    "./request-guard": "./request-guard.ts",
     "./self-service-routes": "./self-service-routes.ts",
     "./slugs": "./slugs.ts",
+    "./studio-pages": "./studio-pages.ts",
     "./smart-layer": "./smart-layer/index.ts",
     "./smart-layer-bypass": "./smart-layer-bypass.ts",
     "./text": "./text.ts",
     "./tokens": "./tokens.ts",
-    "./tokens.css": "./tokens.css"
+    "./tokens.css": "./tokens.css",
+    "./web/search": "./web/search/index.ts"
   },
   "peerDependencies": {
     "zod": "4.6.7"

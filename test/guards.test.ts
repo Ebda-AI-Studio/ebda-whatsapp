@@ -16,13 +16,6 @@ it('core never names the Ebda brand', () => {
   expect(findMatches(/ebda|إبدأ|ابدأ/i, 'src/core')).toEqual([]);
 });
 
-it('pins the Store event contract file: change it only together with the Store repo copy', async () => {
-  const { readFileSync } = await import('node:fs');
-  const { createHash } = await import('node:crypto');
-  const file = readFileSync(new URL('../src/core/api/store-events.ts', import.meta.url));
-  expect(createHash('sha256').update(file).digest('hex')).toBe('abf04536b60312801a34aa759ae9ed138030af46a00345ccc2cc10ebd863ecac'); // contract v1.6 = Store apps/api/src/contracts/wa-v1.ts (Store #839, STORE-STANDING-1)
-});
-
 it('shared web code names no brand: names, marks, hosts and colours come from web/brands/<brand>', () => {
   expect(findMatches(/ebda|إبدا/i, 'web/src').filter((m) => !/\.test\.tsx?:/.test(m))).toEqual([]);
 });
@@ -53,24 +46,24 @@ it('the Arabic legal files are formal Arabic: no colloquial markers, products na
   }
 });
 
-// The Store publishes docs/legal on ebda.app from a vendored snapshot and cannot see this repo: a change here must be sent to the
-// Store session (commit id) so it re-imports. Changing a file means updating its pin, which is the reminder.
-const LEGAL_PINS: Record<string, string> = {
-  'docs/legal/README.md': 'fb7d75eebe8a3110a65e6bc5856fcb74e703282864c74704e52ddedf966d8980',
-  'docs/legal/ar/whatsapp-dpa.md': '03b3d6fd5e963f7e2cce9113ca82e64fe6c33f2e76cec21204cc85745693cefa',
-  'docs/legal/ar/whatsapp-privacy.md': '641b1e66c8b1fc6d325a701bd0bcab574a47b9358c938749fe6c88388e3fd9c1',
-  'docs/legal/ar/whatsapp-terms.md': 'adf8c6cefb1566f5bbe276f550a9fb3344674b2cb787cdc1de34ae9ad9fac052',
-  'docs/legal/en/whatsapp-dpa.md': '689ae9647baa0bc03d6d22097bb6c61485bbc76aea14f1384acfd70d877f4269',
-  'docs/legal/en/whatsapp-privacy.md': '555ed1b10626550dfaee37d394028de755143ad2daba551fb731497d57c91c7e',
-  'docs/legal/en/whatsapp-terms.md': '64cc8c9fd48f1d626ca2ad9536c3842a3590777f1f3f2bbab54284f4fcacff0d',
-};
-it('legal pages are pinned: a change needs a new pin AND a message to the Store session, which publishes them', async () => {
+// The Store publishes docs/legal on ebda.app from a vendored snapshot and cannot see this repo. The counsel-approved texts now live in
+// ebda-foundation (legal/whatsapp/{ar,en}, Ruling FDN-LEGAL-1), byte for byte, and foundation.lock.json pins each one (sha256) -- that lock replaced the
+// hand-kept LEGAL_PINS here. docs/legal stays the published source: every file must equal its lock-pinned foundation copy, so a text can only change
+// by a foundation tag + a re-vendor (and counsel), never by a local edit. (The publishing README is not counsel text and is not pinned.)
+it('legal pages equal the foundation lock pins: a change needs a foundation release, not a local edit', async () => {
   const { readFileSync, readdirSync } = await import('node:fs');
   const { createHash } = await import('node:crypto');
   const root = new URL('../', import.meta.url);
-  const files = ['docs/legal/README.md', ...['ar', 'en'].flatMap((l) => readdirSync(new URL(`docs/legal/${l}/`, root)).map((f) => `docs/legal/${l}/${f}`))];
-  expect(files.sort()).toEqual(Object.keys(LEGAL_PINS).sort());
-  for (const f of files) expect(createHash('sha256').update(readFileSync(new URL(f, root))).digest('hex'), f).toBe(LEGAL_PINS[f]);
+  const lock = JSON.parse(readFileSync(new URL('foundation.lock.json', root), 'utf8')) as { dir: string; files: Record<string, string> };
+  const pins = Object.fromEntries(
+    Object.entries(lock.files)
+      .filter(([f]) => f.startsWith(`${lock.dir}/legal/whatsapp/`))
+      .map(([f, sha]) => [f.slice(`${lock.dir}/legal/whatsapp/`.length), sha]),
+  );
+  const files = ['ar', 'en'].flatMap((l) => readdirSync(new URL(`docs/legal/${l}/`, root)).map((f) => `${l}/${f}`));
+  expect(files.sort()).toEqual(Object.keys(pins).sort());
+  expect(files.length).toBe(6);
+  for (const f of files) expect(createHash('sha256').update(readFileSync(new URL(`docs/legal/${f}`, root))).digest('hex'), f).toBe(pins[f]);
 });
 
 // Role checks are positive allow-lists. A negative check (`storeRole !== 'staff'`) would grant owner powers to any role added later
@@ -90,7 +83,7 @@ it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / IN
   const sets = { P0: setOf('P0_ALERTS'), P1: setOf('P1_ALERTS'), INFO: setOf('INFO_ALERTS') };
   expect(sets.P0.size).toBeGreaterThan(5);
   expect(sets.P1.size).toBeGreaterThan(40);
-  expect(sets.INFO.size).toBe(38); // + assistant_handoff, assistant_help_index_failed, assistant_status_failed (Smart Layer assistant) + 6 for the Chat agent context (agent_policies_unavailable, agent_profile_unavailable, agent_faq_not_indexed, handoff_owner_unreachable, handoff_owner_notice_failed, handoff_digest_failed) + instapay_auto_error (InstaPay auto-confirm: the request waits for a person); 20 + starter_templates_failed (template self-service: the screen retries) + catalog_items_rejected (WhatsApp catalogue) + P1b: seats_over_limit + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
+  expect(sets.INFO.size).toBe(40); // + agent_model_timeout (a model call abandoned after 25 s) + agent_model_flag_unreadable (WA-MODEL-FLAG-1) + assistant_handoff, assistant_help_index_failed, assistant_status_failed (Smart Layer assistant) + 6 for the Chat agent context (agent_policies_unavailable, agent_profile_unavailable, agent_faq_not_indexed, handoff_owner_unreachable, handoff_owner_notice_failed, handoff_digest_failed) + instapay_auto_error (InstaPay auto-confirm: the request waits for a person); 20 + starter_templates_failed (template self-service: the screen retries) + catalog_items_rejected (WhatsApp catalogue) + P1b: seats_over_limit + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
   const used = new Set<string>();
   for (const hit of findMatches(/\balert\(/, 'src')) {
     const [file, line] = hit.split(':') as [string, string];
@@ -282,4 +275,11 @@ it('the product is never called Ebda WhatsApp (banned spellings, WA-COPY-1)', ()
   const banned = /Ebda WhatsApp|ابدأ واتساب|Ebda for WhatsApp|WhatsApp by Ebda|\bEbda WA\b|شريك واتساب الرسمي/;
   const hits = findMatches(banned).filter((m) => !/^(docs\/rulings|graphify-out)\//.test(m) && !/^docs\/plans\//.test(m));
   expect(hits).toEqual([]);
+});
+
+it('"is a payment proof expected" has ONE source: the InstaPay-order query exists once, and both the router predicate (proofExpected) and receiveImage go through it (review of #152, m1)', () => {
+  const src = readFileSync(join(process.cwd(), 'src/core/ordering/bot.ts'), 'utf8');
+  expect(src.match(/FROM store_orders WHERE wa_id = \? AND payment_method = 'instapay'/g)).toHaveLength(1);
+  expect(src).toMatch(/export function proofExpected[\s\S]*?latestInstapayOrder\(host, from\)/);
+  expect(src).toMatch(/async function receiveImage[\s\S]*?latestInstapayOrder\(host, i\.from\)/);
 });

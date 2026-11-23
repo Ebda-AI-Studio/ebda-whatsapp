@@ -1,13 +1,18 @@
 ---
 capabilities:
   - agent.credits-topup@2
+  - agent.customer-memory@1
   - agent.credits-view@2
   - agent.enable@2
   - agent.faq@1
+  - agent.location-pin@1
+  - agent.inbound-media@1
   - agent.notify-phone@1
   - agent.persona-language@1
   - agent.promises@1
+  - agent.recommendations@1
   - agent.provider-byok@1
+  - agent.read-typing-franco@1
   - agent.store-facts@1
   - agent.store-search@1
   - agent.tone@1
@@ -15,6 +20,7 @@ capabilities:
   - inbox.assign-takeover@1
   - inbox.handoff-needs-human@1
   - inbox.voice-note-transcript@1
+  - orders.same-address@1
   - orders.tracking@1
 ---
 
@@ -53,6 +59,20 @@ Only the store owner can change these settings. Your AI credit balance shows at 
 - The agent replies **only inside the 24-hour window**. Outside it you need a template ([guide 4](04-templates-and-the-24-hour-window.md)).
 - Every reply uses AI credits. When credits run out the agent stops and hands the conversation to staff.
 - The agent does not change prices or add discounts. Orders, prices and stock come from Ebda Store.
+
+## Product recommendations
+The agent suggests products from your catalog as picture cards: items similar to one the customer liked, something that goes with it, ideas after an order, or a pick within a budget ("هدية تحت 300 جنيه", "3ayez 7aga ta7t 500"). It only suggests products that are active, public and **in stock**, and the price on the card is always read from your store at that moment.
+- It does not push products: it suggests when the customer asks (or once after an order), at most **3 suggestions per customer per day**, and never the same product twice in a day.
+- It follows your **persona** (tone) when it introduces the cards.
+- **Default (Ruling WA-RECS-1):** a suggestion after an order is a message your store starts, so it is **off for stores that existed before 2026-11-17** until you turn on **Agent recommends products** in Settings > AI agent, and **on for new stores**. The budget ceiling is at most 1,000,000.
+- To switch it off, turn off **Agent recommends products** in Settings > AI agent. Your automatic recommendations on the storefront are a separate switch in Ebda Store.
+- The agent itself only suggests inside the 24-hour window.
+- **Automatic suggestion after an order (off by default, owner only):** in Settings > Bot > Product suggestions after an order you can let your store send one message from a Meta-approved marketing template with up to 3 products. It is charged to your wallet and it is only sent when the template is approved, the customer explicitly agreed to marketing messages and has not stopped them, it is outside 9 pm to 9 am shop time, and the customer has not had one in the last 14 days. While Meta has not approved the template, nothing is sent.
+
+## Location pins
+When a customer sends a **location pin** while the agent is asking for the delivery address, the pin's name or address text becomes the delivery address and the agent shows it back. A pin with no text makes the agent ask for one line (area, street, building). Anywhere else, the agent just asks what the customer needs and offers to start an order. The coordinates are kept in the chat only until the order is placed and are never sent to the Store or to any outside service.
+## Pictures, files and stickers
+The agent reads text and voice notes only. When a customer sends a picture, document, video, audio file or sticker, the agent answers once with a short note asking them to write what they need, or to say they want a person (and then hands over). It does not call the AI model or use a credit, and the file stays in your inbox. It never repeats the note for the same customer within 10 minutes. A payment screenshot for an InstaPay order is still handled by the ordering flow.
 
 ## Voice notes
 When a customer sends a **voice note**, the agent listens to it, and the text appears under the voice note in your inbox (marked "Voice note transcript"). It then answers like it would a typed message. Voice notes longer than 2 minutes, or beyond your store's daily limit, get a polite request to type instead. If a voice note could not be understood, the inbox shows **Voice note (not transcribed)**: listen to it and reply yourself.

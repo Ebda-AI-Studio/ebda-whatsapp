@@ -66,3 +66,6 @@ Steps are idempotent and recorded in `offboarding.steps_done`; a failed run resu
 
 ## Not covered here
 The Store's own account deletion drives the owner path (it calls the same endpoint through the owner's session); there is no Store-to-WhatsApp event for it yet. Cloudflare's own copy (R2 versions do not exist; D1 Time Travel keeps 30 days of history and cannot be edited) is covered in the data-residency note in `docs/data-protection.md` once W2-RETENTION lands.
+
+## Standalone workspaces (CHAT-SA)
+The same flow deletes a standalone workspace (`sw_...`) with the Store steps skipped (it has no Store). New tables: `workspace_members` (its team, user ids) is deleted with the workspace before the registry row; `standalone_invites` keeps the used code as an audit record of who used it but its `used_workspace_id` is nulled; `workspace_creations` (rate-limit attempts, hashed IP) is pruned by the daily cron and is not workspace-keyed. A Chat-only person's identity is erased through accounts, see `docs/runbooks/standalone-workspaces.md`.

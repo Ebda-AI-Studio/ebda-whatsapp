@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { LoadError } from './LoadError';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { ConversationDto } from '../../../src/core/api/contract';
 import type { ConversationFilter } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { relativeTime } from '../lib/format';
 import { Highlight } from './Highlight';
+import { Skeleton } from './Skeleton';
 import { SearchBox, optionId, type SearchStatus } from './SearchBox';
 
 type Props = {
@@ -11,9 +13,14 @@ type Props = {
   items: ConversationDto[]; selectedId: number | null; filter: ConversationFilter; query: string; totalUnread: number;
   /** State of the search that produced `items` (idle when the box is empty). */
   searchStatus: SearchStatus;
+  /** The plain list's load: only 'ok' may say "no conversations"; loading shows a wait mark and a failed load shows the error with Retry (unknown is never empty). */
+  listState?: 'loading' | 'ok' | 'error';
+  onRetry?: () => void;
   onFilter: (f: ConversationFilter) => void; onQuery: (q: string) => void; onOpen: (id: number) => void; onToggleLang: () => void;
   /** Calm wallet notices (low balance, debt, marketing paused); empty = nothing to say. */
   notice?: string[]; onOpenWallet?: () => void;
+  /** Number-connection strip (only rendered when the number needs a person). */
+  status?: ReactNode;
 };
 
 const FILTERS: ConversationFilter[] = ['all', 'unread', 'mine', 'unassigned'];
@@ -24,7 +31,7 @@ export function initials(name: string | null): string {
 
 const LIST_ID = 'conversation-results';
 
-export function ConversationList({ t, lang, now, items, selectedId, filter, query, totalUnread, searchStatus, onFilter, onQuery, onOpen, onToggleLang, notice = [], onOpenWallet }: Props) {
+export function ConversationList({ t, lang, now, items, selectedId, filter, query, totalUnread, searchStatus, listState = 'ok', onRetry, onFilter, onQuery, onOpen, onToggleLang, notice = [], onOpenWallet, status }: Props) {
   // The keyboard-active row (-1 = none); a new result list starts with none active.
   const [active, setActive] = useState(-1);
   useEffect(() => setActive(-1), [items]);
@@ -46,6 +53,7 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
         </div>
         <SearchBox t={t} lang={lang} label={t.search} query={query} onQuery={onQuery} status={searchStatus} count={items.length} listId={LIST_ID} activeIndex={active} onActiveIndex={setActive} onPick={(i) => { const c = items[i]; if (c) onOpen(c.id); }} />
       </div>
+      {status}
       {notice.length > 0 && (
         <div className="wallet-banner" data-banner="wallet" role="status">
           <span>{notice.map((line) => <span key={line} className="wallet-banner-line">{line}</span>)}</span>
@@ -53,7 +61,11 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
         </div>
       )}
       <ul className="rows" id={LIST_ID} role="listbox" aria-label={t.conversations}>
-        {items.length === 0 && <li className="empty" role="presentation">{t.noResults}</li>}
+        {items.length === 0 && (query.trim() !== ''
+          ? searchStatus === 'done' && <li className="empty" role="presentation">{t.noResults}</li> // while searching, the search box above says loading / failed
+          : listState === 'ok' ? <li className="empty" role="presentation">{t.noResults}</li>
+          : listState === 'loading' ? <li role="presentation"><Skeleton t={t} rows={4} /></li>
+          : <li role="presentation"><LoadError t={t} text={t.loadError} onRetry={() => onRetry?.()} /></li>)}
         {items.map((c, i) => (
           <li key={c.id} role="presentation">
             <button type="button" role="option" id={optionId(LIST_ID, i)} className="row" aria-selected={i === active} data-active={i === active} aria-current={c.id === selectedId} onClick={() => onOpen(c.id)}>

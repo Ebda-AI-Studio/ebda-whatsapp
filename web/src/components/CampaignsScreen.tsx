@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CampaignDto } from '../../../src/core/api/contract';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { dateTime } from '../lib/datetime';
 import { templateTitle } from '../lib/format';
 import type { View } from './Rail';
 import { useFocusOn } from '../lib/useFocusOn';
@@ -11,12 +12,11 @@ import { useLoad } from '../lib/useLoad';
 import { CampaignForm } from './CampaignForm';
 import { LoadError } from './LoadError';
 import { EmptyState } from './EmptyState';
+import { Skeleton } from './Skeleton';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number; onNavigate?: ((v: View) => void) | undefined };
 
-export function dateTime(at: number, lang: Lang): string {
-  return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Cairo' }).format(at);
-}
+export { dateTime };
 
 export function CampaignsScreen({ t, lang, source, api, now, onNavigate }: Props) {
   const list = useCallback(() => api.list(), [api]);
@@ -34,7 +34,7 @@ export function CampaignsScreen({ t, lang, source, api, now, onNavigate }: Props
   }, [items, load]);
 
   if (mode === 'new') {
-    return <CampaignForm t={t} lang={lang} source={source} api={api} now={now} onClose={() => { setMode('list'); load(); }} onOpenTemplates={onNavigate ? () => onNavigate('templates') : undefined} />;
+    return <CampaignForm t={t} lang={lang} source={source} api={api} now={now} onClose={() => { setMode('list'); load(); }} onOpenTemplates={onNavigate && source.templatesApi ? () => onNavigate('templates') : undefined} onOpenNumbers={onNavigate && source.numbers ? () => onNavigate('numbers') : undefined} />;
   }
 
   const replace = (c: CampaignDto) => setItems((xs) => xs?.map((x) => (x.id === c.id ? c : x)) ?? null);
@@ -48,7 +48,7 @@ export function CampaignsScreen({ t, lang, source, api, now, onNavigate }: Props
       </header>
       <div className="settings wide">
         {loadFailed ? <LoadError t={t} onRetry={load} />
-          : items === null ? <div className="placeholder">…</div>
+          : items === null ? <Skeleton t={t} kind="campaign" />
           : items.length === 0 ? <EmptyState icon={<Megaphone size={22} />} title={t.campaignsEmptyTitle} body={t.campaignsEmpty} />
           : items.map((c) => <CampaignRow key={c.id} c={c} title={titles[`${c.template.name}|${c.template.language}`]} t={t} lang={lang} owner={owner} api={api} onChange={replace} onRemoved={load} />)}
       </div>

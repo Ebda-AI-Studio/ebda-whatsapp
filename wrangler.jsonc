@@ -3,6 +3,8 @@
   "name": "ebda-wa",
   "account_id": "69188202efc4df480140dd76545aa3ab",
   "main": "src/index.ts",
+  // The assistant assets (assistant/*.generated.json) are built here, not committed: a branch can never carry a stale copy (Ruling WA-GEN-1).
+  "build": { "command": "node scripts/build-help-corpus.mjs" },
   "compatibility_date": "2026-10-24",
   "compatibility_flags": ["nodejs_compat"],
   // Production host (LAUNCH-SUITE-1). workers.dev stays on until wa.ebda.app is verified live, then goes off (one surface).
@@ -32,6 +34,8 @@
     "IDENTITY_ISSUER": "https://accounts.ebda.app",
     "IDENTITY_JWKS_URL": "https://accounts.ebda.app/.well-known/jwks.json",
     "IDENTITY_AUDIENCE": "whatsapp",
+    // CHAT-SA-3: standalone workspaces (Chat without a Store). off | invite | open; stays off until the web (PR-5) is live.
+    "STANDALONE_WORKSPACES": "off",
     // Shown first in Telegram alerts (one Ebda AI Studio bot serves every product).
     "ALERT_PRODUCT": "Ebda Chat",
     "RUNBOOK_BASE_URL": "https://github.com/Whisky-11/ebda-whatsapp/blob/main/docs/runbooks/alerts",
@@ -50,11 +54,17 @@
     "PACKAGE_CHECKOUT_ENABLED": "true",
     "INSTAPAY_BILLING_ENABLED": "true",
     "EBDA_INSTAPAY_QR_URL": "https://media.ebda.app/platform/instapay-qr.jpg",
+    // InstaPay auto-confirm notifications go to the brain (src/core/billing/instapay-notify.ts); must be a plain https URL.
+    "BRAIN_BRIDGE_URL": "https://os-brain.mypovonai.com/api/instapay/notify",
     "REQUIRED_SECRETS": "TOKEN_ENC_KEY,AGENT_SECRETS_KEY,PROOF_URL_SECRET,SUITE_BUYER_KEY_SECRET,ERASURE_HMAC_KEY,BACKUP_HMAC_KEY"
   },
   "durable_objects": { "bindings": [{ "name": "WORKSPACE_DO", "class_name": "WorkspaceDO" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceDO"] }],
-  "d1_databases": [{ "binding": "DB", "database_name": "ebda-wa-platform", "database_id": "80c011f6-b03c-4289-b20a-102aa3ca79ef", "migrations_dir": "migrations/d1" }],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "ebda-wa-platform", "database_id": "80c011f6-b03c-4289-b20a-102aa3ca79ef", "migrations_dir": "migrations/d1" },
+    // Shared InstaPay duplicate index (docs/rulings/INSTAPAY-AUTO-1.md ruling 1.10). Created 2026-11-17 on the personal Cloudflare account (schema = DEDUPE_SCHEMA_SQL, applied). Auto-confirm still needs INSTAPAY_BRIDGE_SECRET (secret) and the brain secret of the same value, and stays mode off until an operator sets shadow.
+    { "binding": "INSTAPAY_DEDUPE_DB", "database_name": "ebda-instapay-dedupe", "database_id": "2b86d92e-f14a-4270-a646-225d8b2766f6" }
+  ],
   "r2_buckets": [
     { "binding": "MEDIA", "bucket_name": "ebda-wa-media" },
     { "binding": "BACKUPS", "bucket_name": "ebda-wa-backups" }
@@ -102,7 +112,7 @@
   // ---- AI agent (Phase 5). The knowledge base and the catalog search use the Vectorize index below (1024 dimensions = @cf/baai/bge-m3, cosine; Ruling WA-VECTORIZE-1).
   // The binding is live: the index MUST exist before the deploy (a binding to a missing index fails the deploy), and /health answers 503 if the binding is absent at runtime.
   // Create it once, on this account, before deploying: `npx wrangler vectorize create ebda-wa-kb --dimensions=1024 --metric=cosine`
-  // Secrets: AGENT_SECRETS_KEY (base64, 32 random bytes; encrypts merchants' own model keys). Var AGENT_MODEL overrides the default Workers AI model.
+  // Secrets: AGENT_SECRETS_KEY (base64, 32 random bytes; encrypts merchants' own model keys). Var AGENT_MODEL overrides the default Workers AI model; the operator flag agent.model (WA-MODEL-FLAG-1) picks between the two allowed ids at runtime, and AI_PRICE_*_GPT_OSS price the second one.
   // ---- Own number (Phase 8.1, docs/numbers.md). Var EMBEDDED_SIGNUP_ENABLED="1" turns the /numbers routes on; secrets TOKEN_ENC_KEY (base64, 32 random bytes) and
   // META_APP_ID are then required (a request answers 503 naming the missing key). META_APP_SECRET and META_SYSTEM_TOKEN are already secrets.
   // ---- Store link (Phase 4): ON (Ruling WA-LINK-ON-1). Bindings are in services / queues above; PROOF_URL_SECRET (secret) and PUBLIC_BASE_URL (var) are set.

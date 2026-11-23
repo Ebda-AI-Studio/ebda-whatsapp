@@ -5,7 +5,7 @@ import { plainAmount } from '../ordering/money';
 import { buyerKey } from '../buyer-key';
 import { isE164 } from '../phone';
 import { addTask } from '../scheduler';
-import { bridgeFor, storeLink } from '../store-link';
+import { bridgeForWorkspace, storeLink } from '../store-link';
 import type { LinkHost } from './host';
 import { queueFreeText, queueTemplate, setTag, cleanParam, type QueueResult } from './outbound';
 import { ensureCatalogReconcile } from './catalog';
@@ -15,6 +15,7 @@ import { applyConsentChanged, forgetBuyer, recordCheckoutConsent, recordWithdraw
 import { alert } from '../observability';
 import { funnelOnce } from '../funnel';
 import { setStoreHoldFlag } from '../numbers/health';
+import { scheduleProactiveRecs } from './proactive-recs';
 
 export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
 
@@ -32,12 +33,37 @@ function displayName(host: LinkHost, waId: string, loc: Locale): string {
   return cleanParam(row?.profile_name, copy.customerName[loc]);
 }
 
+/**
+ * Parameters for the richer COD template, or null when it cannot be used (no v2 name, not APPROVED here, a field missing, or the
+ * Store's order link does not sit under the template's fixed URL base). Null means: send the plain template. Order is header,
+ * body, URL button, as renderTemplate counts them. Never logs the address.
+ */
+function codV2Params(host: LinkHost, name: string | undefined, loc: Locale, d: { storeName?: string; shippingAddressLine?: string; itemCount?: number; orderUrlSuffix?: string; storefrontOrigin?: string }, base: { customer: string; orderNumber: string; totalMinor: number }): string[] | null {
+  if (!name || !d.storeName || !d.shippingAddressLine || !d.itemCount || !d.orderUrlSuffix || !d.storefrontOrigin) return null;
+  let components: string | undefined;
+  for (const language of [loc, 'ar']) {
+    components = host.sql.exec<{ components: string }>("SELECT components FROM templates WHERE name = ? AND language = ? AND status = 'APPROVED'", name, language).toArray()[0]?.components;
+    if (components) break;
+  }
+  if (!components) return null;
+  let urlTemplate: string | undefined;
+  try {
+    const parsed = JSON.parse(components) as { type?: string; buttons?: { type?: string; url?: string }[] }[];
+    urlTemplate = parsed.find((c) => c.type?.toUpperCase() === 'BUTTONS')?.buttons?.find((b) => b.type?.toUpperCase() === 'URL')?.url;
+  } catch { return null; }
+  if (!urlTemplate?.endsWith('{{1}}')) return null;
+  const prefix = urlTemplate.slice(0, -5);
+  const link = `${d.storefrontOrigin.replace(/\/+$/, '')}/${d.orderUrlSuffix.replace(/^\/+/, '')}`;
+  if (!link.startsWith(prefix) || link.length === prefix.length) return null;
+  return [cleanParam(d.storeName, d.storeName, 60), base.customer, cleanParam(base.orderNumber, base.orderNumber, 40), cleanParam(d.shippingAddressLine, d.shippingAddressLine, 300), String(d.itemCount), plainAmount(base.totalMinor), link.slice(prefix.length)];
+}
+
 /** The order a COD request is about, when neither the event nor an earlier event named its number and total. */
 type LookedUp = { orderNumber: string; totalMinor: number; currency: string };
-async function lookupOrder(host: LinkHost, buyerKeyHex: string, orderId: string): Promise<LookedUp | 'retry' | null> {
-  const bridge = bridgeFor(host.env);
+async function lookupOrder(host: LinkHost, buyerKeyHex: string, phoneE164: string, orderId: string): Promise<LookedUp | 'retry' | null> {
+  const bridge = bridgeForWorkspace(host.env, host.workspaceId);
   if (!bridge) return null;
-  const res = await bridge.listCustomerOrders(host.workspaceId, buyerKeyHex, 20);
+  const res = await bridge.listCustomerOrders(host.workspaceId, buyerKeyHex, 20, phoneE164);
   if (!res.ok) return res.reason === 'unavailable' ? 'retry' : null;
   const hit = res.value.items.find((o) => o.orderId === orderId);
   return hit ? { orderNumber: hit.orderNumber, totalMinor: hit.totalMinor, currency: hit.currency } : null;
@@ -79,7 +105,7 @@ export async function applyStoreEvent(host: LinkHost, event: StoreEvent, opts: {
     const d = event.data;
     const have = orderRow(host, d.orderId);
     if (!d.orderNumber && !have?.order_number) {
-      codLookup = await lookupOrder(host, d.buyerKey, d.orderId);
+      codLookup = await lookupOrder(host, d.buyerKey, d.phoneE164, d.orderId);
       if (codLookup === 'retry') return { status: 'retry', detail: 'store_unavailable' };
     }
   } else if (event.type === 'customer.erased') {
@@ -131,6 +157,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       if (!acceptVersion(host, 'store:link', at(event.occurredAt))) return { status: 'stale' };
       putState(host, 'linked', event.type === 'store.linked' ? '1' : '0');
       if (event.type === 'store.linked') {
+        if (event.data.storefrontOrigin) putState(host, 'storefront_origin', event.data.storefrontOrigin);
         funnelOnce(host, 'linked');
         schedulePendingPushes(host, now);
         ensureCatalogReconcile(host, now);
@@ -181,6 +208,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       const d = event.data;
       const waId = d.phoneE164.slice(1);
       upsertOrder(host, { orderId: d.orderId, orderNumber: d.orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: d.paymentMethod, status: 'created', totalMinor: d.totalMinor, currency: d.currency, locale: locale(d.locale) }, now);
+      scheduleProactiveRecs(host, { orderId: d.orderId, phoneNumberId: opts.phoneNumberId, now }); // CHAT-RECS-SWITCH-1: nothing unless the owner switched it on
       // COD orders are confirmed through the COD request; orders placed in this chat were already confirmed in the chat.
       if (d.paymentMethod === 'cod' || d.channel === 'whatsapp') return { status: 'applied' };
       if (!readSettings(host).orderConfirmations) return { status: 'skipped', detail: 'disabled' };
@@ -210,11 +238,19 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       if (!copy || !opts.phoneNumberId) return { status: 'skipped', detail: copy ? 'no_number' : 'no_copy' };
       const loc = locale(d.locale);
       const quick = (index: number, answer: 'y' | 'n') => ({ type: 'button' as const, sub_type: 'quick_reply', index: String(index), parameters: [{ type: 'payload', payload: `cod:${answer}:${d.orderId}` }] });
-      const r = queueTemplate(host, {
-        waId, phoneNumberId: opts.phoneNumberId, name: copy.templates.codConfirmation, language: loc, fallbackLanguage: 'ar',
-        params: [displayName(host, waId, loc), cleanParam(orderNumber, orderNumber, 40), plainAmount(totalMinor)],
-        idempotencyKey: `cod:${d.orderId}`, orderRef: d.orderId, extraComponents: [quick(0, 'y'), quick(1, 'n')], now,
-      });
+      const customer = displayName(host, waId, loc);
+      const v2 = codV2Params(host, copy.templates.codConfirmationV2, loc, d, { customer, orderNumber, totalMinor });
+      // v2 has the order-page URL button first, so its quick replies sit at index 1 and 2; v1 keeps 0 and 1. Payloads are identical.
+      const r = v2
+        ? queueTemplate(host, {
+          waId, phoneNumberId: opts.phoneNumberId, name: copy.templates.codConfirmationV2!, language: loc, fallbackLanguage: 'ar',
+          params: v2, idempotencyKey: `cod:${d.orderId}`, orderRef: d.orderId, extraComponents: [quick(1, 'y'), quick(2, 'n')], now,
+        })
+        : queueTemplate(host, {
+          waId, phoneNumberId: opts.phoneNumberId, name: copy.templates.codConfirmation, language: loc, fallbackLanguage: 'ar',
+          params: [customer, cleanParam(orderNumber, orderNumber, 40), plainAmount(totalMinor)],
+          idempotencyKey: `cod:${d.orderId}`, orderRef: d.orderId, extraComponents: [quick(0, 'y'), quick(1, 'n')], now,
+        });
       if (!r.ok) return sendOutcome(host, r, 'cod_confirmation');
       upsertOrder(host, { orderId: d.orderId, orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: 'cod', totalMinor, currency, codState: 'pending', codRequestedAt: now, locale: loc }, now);
       rememberBuyerKey(host, waId, d.buyerKey);

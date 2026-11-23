@@ -1,11 +1,12 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
-  ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, ConnectorDto, ConnectorPut, BotSettingsDto, BotSwitchesDto, ProactiveRecsDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto,
+  MessageDto, OrderSummaryDto, ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto, NoteDto, QuickReplyDto,
 } from '../../../src/core/api/contract';
 
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import type { TemplateDraft } from '../../../src/core/template-draft';
 import type { OperatorApi, WalletApi } from './billing';
+import type { AssistantRolloutApi } from './assistant-rollout';
 import type { SharedTemplatesApi } from './shared-templates';
 import type { AssistantApi } from './assistant';
 
@@ -41,6 +42,8 @@ export interface TemplatesApi {
   remove(name: string, language: string): Promise<void>;
   sync(): Promise<{ upserted: number; removed: number }>;
   installDefaults(): Promise<{ submitted: string[]; skipped: string[]; failed: string[] }>;
+  /** Owner/staff-manager: replaces a REJECTED `cod_confirmation_v2` with a fresh submission for this store (Ruling WA-COD-V2-2). */
+  resubmitCodV2?(): Promise<{ status: string }>;
   /** A store on the SHARED number (no own number): the platform's sendable templates and its asks for new utility ones. `list` rejects with 404 for a store that is not on the shared number. */
   shared?: {
     list(): Promise<SharedTemplateDto[]>;
@@ -55,6 +58,12 @@ export interface TeamApi {
   list(): Promise<ListMembersResponse>;
   assign(userId: string): Promise<void>;
   unassign(userId: string): Promise<void>;
+  /** Standalone workspaces only (the list says `canInvite`): invite a staff member by email (the answer is the same whether or not the address had an account); rejects `seat_limit` (409). */
+  invite?(a: { email: string; firstName: string; language: 'ar' | 'en' }): Promise<void>;
+  /** Standalone workspaces only: remove a staff member (their access ends on their next request). */
+  remove?(userId: string): Promise<void>;
+  /** Standalone workspaces only: withdraw a pending invitation (the emailed link stops working). */
+  revokeInvitation?(userId: string): Promise<void>;
 }
 
 /** A merchant's own WhatsApp numbers (Phase 8.1); absent when Embedded Signup is switched off. */
@@ -78,6 +87,29 @@ export interface NumbersApi {
   launch?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<{ code: string; event: ConnectNumberRequest['event']; wabaId: string; phoneNumberId: string; businessId?: string }>;
 }
 
+/** The merchant's saved segments (A30). Owner only for every write; the server answers 403 to staff and 404 for an id from another workspace. */
+export interface SegmentsApi {
+  list(): Promise<SegmentDto[]>;
+  create(name: string, criteria: SegmentCriteria): Promise<SegmentDto>;
+  update(id: number, patch: { name?: string; criteria?: SegmentCriteria }): Promise<SegmentDto>;
+  remove(id: number): Promise<void>;
+  preview(criteria: SegmentCriteria): Promise<SegmentPreviewDto>;
+}
+
+/** Inbox helpers on a conversation (A25-A27): the team's quick replies, internal notes and tags. Owner and staff may use all of them. */
+export interface InboxToolsApi {
+  quickReplies: {
+    list(): Promise<QuickReplyDto[]>;
+    create(text: string): Promise<QuickReplyDto>;
+    update(id: number, text: string): Promise<QuickReplyDto>;
+    remove(id: number): Promise<void>;
+  };
+  notes(conversationId: number): Promise<NoteDto[]>;
+  addNote(conversationId: number, text: string): Promise<NoteDto>;
+  /** Replaces the whole tag list; the server trims, lower-cases and de-duplicates and answers with the conversation. */
+  setTags(conversationId: number, tags: string[]): Promise<ConversationDto>;
+}
+
 export type ContactsQuery = { q?: string; tag?: string; optedOut?: boolean; cursor?: string | null };
 
 export interface ContactsApi {
@@ -90,11 +122,16 @@ export interface ContactsApi {
   renameContact(waId: string, name: string | null): Promise<{ waId: string; name: string | null; optedOut: boolean }>;
   /** B5: all of one contact's data (every page of messages joined). Owner only. */
   exportContact(waId: string): Promise<unknown>;
+  /** Data-subject erasure of one contact (owner only). Cannot be undone; financial records stay. */
+  eraseContact(waId: string): Promise<void>;
   /** M-175: the same person on a new number. Owner only; cannot be undone. */
   mergeContacts(fromWaId: string, intoWaId: string): Promise<void>;
   /** B4: how long messages are kept (owner only). `days: null` = the platform default. */
   retention(): Promise<RetentionDto>;
   setRetention(days: number | null): Promise<RetentionDto>;
+  /** A29: replaces the contact's tags (the server lower-cases and de-duplicates). */
+  setContactTags(waId: string, tags: string[]): Promise<{ tags: string[] }>;
+  segments: SegmentsApi;
 }
 
 /** Where the inbox reads from: the live API (contract.ts) or labelled sample data. */
@@ -105,6 +142,16 @@ export interface InboxSource {
   currentUserId: string;
   /** The store this session is for (the upgrade card builds the Store billing link from it). */
   storeId?: string;
+  /** GET /me: this store has NO Chat workspace (Chat was never switched on for it). The app shows its own "not enabled" state and never loads lists (they would all 404). */
+  workspaceMissing?: boolean;
+  /** A super admin with no store: boots into the operator console alone (no inbox, no store calls). */
+  operatorOnly?: boolean;
+  /** GET /me: the stores this person can open that have a Chat workspace (for the store picker). Undefined = the server did not say (no picker). */
+  stores?: { id: string; name: string; role: 'owner' | 'staff'; kind?: 'store' | 'standalone' }[];
+  /** GET /me `kind === 'standalone'` (CHAT-SA-5): a workspace with no Store behind it. Every store-coupled surface is hidden and the copy says "workspace". Absent/false = a Store workspace, exactly as before. */
+  standalone?: boolean;
+  /** Opens Chat on another store (a full reload on that store). Absent in sample data. */
+  switchStore?(storeId: string): void;
   /** The signed-in user's role in this store (GET /me); `staff` hides spending actions. */
   role: Role;
   /** Display names of staff for assignee labels. */
@@ -140,6 +187,15 @@ export interface InboxSource {
     resync(): Promise<{ started: boolean }>;
     /** Turns the shop button and the cart on the number on or off (owner). Rejects with `detail` = missing_permission | catalog_not_set | meta_error. */
     setCommerce(v: { catalogVisible: boolean; cartEnabled: boolean }): Promise<{ catalogVisible: boolean; cartEnabled: boolean }>;
+    /** Links a catalogue the merchant already has on Meta (owner). Rejects with `detail` = catalog_not_linked (not on this WhatsApp account) | meta_unavailable (503). */
+    linkExisting(catalogId: string): Promise<void>;
+  };
+  /** The agent's connectors to the owner's own systems (owner only; the server refuses staff). A secret goes in on `save` and never comes back: the list carries `hasSecret` only. `save` rejects with `detail` = invalid_url | secret_required | secrets_unavailable | kind_mismatch | too_many_connectors; `test` answers `ok:false` with a code. */
+  connectors?: {
+    list(): Promise<ConnectorDto[]>;
+    save(id: string, body: ConnectorPut): Promise<ConnectorDto>;
+    remove(id: string): Promise<void>;
+    test(id: string): Promise<{ ok: boolean; error?: string; detail?: string }>;
   };
   /**
    * The owner switches (ordering bot, order confirmations, store-login codes over WhatsApp) and the sending-speed report. Turning confirmations or codes ON takes
@@ -150,6 +206,11 @@ export interface InboxSource {
     preview(change: Partial<BotSwitchesDto>): Promise<{ confirmToken: string }>;
     save(change: Partial<BotSwitchesDto>, confirmToken?: string): Promise<BotSwitchesDto>;
     throttle(): Promise<ThrottleReportDto | null>;
+  };
+  /** Proactive post-order product suggestions (owner only; the server refuses staff). OFF by default; ON needs a template name. `save` rejects when the template name is missing or invalid. */
+  proactiveRecs?: {
+    get(): Promise<ProactiveRecsDto>;
+    save(change: { enabled?: boolean; templateName?: string | null }): Promise<ProactiveRecsDto>;
   };
   /** Bot results: customers per step over the last 7, 30 or 90 days (Cairo calendar days, today included). Counts only; owner and staff read. */
   botFunnel?(days: 7 | 30 | 90): Promise<BotFunnelDto>;
@@ -164,6 +225,7 @@ export interface InboxSource {
   /** The team and its seats; offered to the owner only. */
   team?: TeamApi;
   contacts?: ContactsApi;
+  inboxTools?: InboxToolsApi;
   /** Wallet, statement, top-ups and refunds (Phase 7). */
   wallet?: WalletApi;
   /** Super-admin console; only offered when `role` is super_admin. */
@@ -172,6 +234,8 @@ export interface InboxSource {
   signOut?(): void;
   /** The platform WABA's templates (super admin only, with `operator`). */
   sharedTemplates?: SharedTemplatesApi;
+  /** Smart Layer rollout switches (super admin only, with `operator`). */
+  assistantRollout?: AssistantRolloutApi;
   /** Called when events were missed beyond repair; the app reloads its list and open chat. */
   onReload?(cb: () => void): () => void;
   /** Realtime events; returns an unsubscribe function. */

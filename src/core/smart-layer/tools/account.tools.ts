@@ -67,12 +67,27 @@ export function accountReadTools(kit: Kit): ToolSpec[] {
     read(kit, { name: 'wallet_statement', capabilityId: 'wallet.statement', resultTrust: 'typed-source', description: 'The wallet statement for one month (YYYY-MM): what was spent and topped up. Owner only.',
       args: z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) }).strict(),
       run: async (ctx, a) => api(ctx).get('/wallet/statement', { month: a.month, format: 'json' }) }),
+    read(kit, { name: 'campaign_report', capabilityId: 'campaigns.report-export', resultTrust: 'store-data', description: 'The compliance report of one campaign (owner only): how many people it reached, delivered, read, failed and skipped, why recipients were skipped, and that only customers with a consent on record were messaged. Counts only, no phone numbers. Give the campaign name.',
+      args: z.object({ campaign: z.string().trim().min(1).max(100).describe('the campaign name as the merchant wrote it') }).strict(),
+      run: async (ctx, a) => {
+        const list = (await api(ctx).get('/campaigns', { limit: '50' })) as { items?: Array<{ id: string; name: string }> };
+        const c = pickByName(list.items ?? [], (x) => x.name, a.campaign);
+        const r = (await api(ctx).get(`/campaigns/${c.id}/report`)) as { campaign: { name: string; status: string; template: { name: string }; category: string; startedAt: number | null; finishedAt: number | null }; consentGated: boolean; totals: Record<string, number>; clicks: { unique: number; total: number }; skippedByReason: Record<string, number> };
+        return { campaign: r.campaign.name, status: r.campaign.status, template: r.campaign.template.name, category: r.campaign.category, startedAt: iso(r.campaign.startedAt), finishedAt: iso(r.campaign.finishedAt), onlyConsentedCustomersMessaged: r.consentGated, totals: r.totals, linkClicks: r.clicks, skippedByReason: r.skippedByReason, csv: 'the owner can download it as a file from the report route with format=csv' };
+      } }),
+    read(kit, { name: 'consent_evidence_summary', capabilityId: 'compliance.opt-out-evidence', resultTrust: 'typed-source', description: 'How many customers have a consent on record (by how it was given), how many have a consent proof with the wording they agreed to, and how many opted out (owner only). Counts only: the per-customer list contains phone numbers, so it is the owner\'s file download, never read into the chat.', args: none,
+      run: async (ctx) => { const r = (await api(ctx).get('/contacts/consent-evidence', { limit: '1' })) as { summary: Record<string, unknown> }; return { ...r.summary, download: 'the owner can download the per-customer record as a file (format=csv), 200 customers per page' }; } }),
+    read(kit, { name: 'audit_trail_view', capabilityId: 'compliance.audit-trail', resultTrust: 'store-data', description: 'The latest changes made in this workspace, newest first (owner only): the action, who did it (role and user id), when, and whether it went through. Never a message or a phone number.',
+      args: z.object({ limit: z.number().int().min(1).max(30).default(15) }).strict(),
+      run: async (ctx, a) => { const r = (await api(ctx).get('/audit', { limit: String(a.limit) })) as { items?: Array<{ at: number; role: string; action: string; status: number }> }; return { changes: (r.items ?? []).map((x) => ({ at: iso(x.at), by: x.role, action: x.action, ok: x.status < 400 })) }; } }),
   ];
 }
 
 const agentFlags = z.object({ allowRefund: z.boolean().optional(), allowDiscount: z.boolean().optional(), allowFreeDelivery: z.boolean().optional(), allowExchange: z.boolean().optional(), allowGuarantee: z.boolean().optional() }).strict().refine((a) => Object.keys(a).length > 0, 'nothing to change');
 const KEYS = ['allowRefund', 'allowDiscount', 'allowFreeDelivery', 'allowExchange', 'allowGuarantee'] as const;
 const KEY_AR: Record<(typeof KEYS)[number], string> = { allowRefund: 'يوعد باسترجاع', allowDiscount: 'يوعد بخصم', allowFreeDelivery: 'يوعد بتوصيل مجاني', allowExchange: 'يوعد باستبدال', allowGuarantee: 'يوعد بضمان' };
+
+const TONE_AR = { warm: 'دافية وودودة', professional: 'رسمية ومختصرة', playful: 'مرحة وخفيفة' } as const;
 
 export function accountWriteTools(kit: Kit): ToolSpec[] {
   return [
@@ -100,6 +115,39 @@ export function accountWriteTools(kit: Kit): ToolSpec[] {
           request: { method: 'PUT', path: '/agent', body: Object.fromEntries(changed.map((k) => [k, a[k]])) },
           restore: Object.fromEntries(changed.map((k) => [k, s[k]])),
         };
+      },
+    }, kit),
+    writeTool({
+      name: 'agent_tone_set', capabilityId: 'agent.tone', policy: 'preview', undo: 'reversible',
+      description: 'Choose how the AI agent sounds to customers: warm, professional or playful. Only the style changes, never what it may promise.',
+      args: z.object({ tone: z.enum(['warm', 'professional', 'playful']) }).strict(),
+      read: async (api) => ({ tone: ((await api.get('/agent')) as { tone: 'warm' | 'professional' | 'playful' }).tone }),
+      plan: (a, s) => {
+        if (s.tone === a.tone) throw new ToolInputError('no_change');
+        return { summary: { ar: 'تغيير نبرة الموظف الذكي', en: 'Change the AI agent tone' }, rows: [row('النبرة', 'Tone', TONE_AR[s.tone], TONE_AR[a.tone])], request: { method: 'PUT', path: '/agent', body: { tone: a.tone } }, restore: { tone: s.tone } };
+      },
+    }, kit),
+    writeTool({
+      name: 'agent_notify_phone_set', capabilityId: 'agent.notify-phone', policy: 'preview', undo: 'reversible',
+      description: 'Set (or remove, with null) the WhatsApp number where the owner is told a customer needs a person. International format, for example +201012345678.',
+      args: z.object({ phone: z.string().regex(/^\+[1-9]\d{7,14}$/).nullable() }).strict(),
+      read: async (api) => ({ phone: ((await api.get('/agent')) as { notifyPhone: string | null }).notifyPhone }),
+      // A phone number is personal data: the card shows the last 3 digits only and the stored draft carries no body (apply re-plans from the arguments).
+      fingerprint: (s) => ({ set: s.phone !== null, last3: s.phone ? s.phone.slice(-3) : null }),
+      plan: (a, s) => {
+        if (s.phone === a.phone) throw new ToolInputError('no_change');
+        const mask = (p: string | null) => (p ? `…${p.slice(-3)}` : 'مفيش / none');
+        return { summary: { ar: a.phone ? 'تحديد رقم تنبيه تحويل العميل لموظف' : 'إلغاء رقم التنبيه', en: a.phone ? 'Set the handoff alert number' : 'Remove the handoff alert number' }, rows: [row('رقم التنبيه', 'Alert number', mask(s.phone), mask(a.phone))], request: { method: 'PUT', path: '/agent', body: { notifyPhone: a.phone } }, hideBody: true, restore: { phone: s.phone } };
+      },
+    }, kit),
+    writeTool({
+      name: 'agent_recommendations_toggle', capabilityId: 'agent.recommendations', policy: 'confirm', undo: 'reversible', messagesCustomers: true,
+      description: 'Turn on or off the AI agent suggesting products from the catalogue (ideas, alternatives, a gift within a budget, and once after an order). Turning it on can message a customer after an order, so the merchant confirms.',
+      args: z.object({ enabled: z.boolean() }).strict(),
+      read: async (api) => ({ on: ((await api.get('/agent')) as { recommendProducts: boolean }).recommendProducts === true }),
+      plan: (a, s) => {
+        if (s.on === a.enabled) throw new ToolInputError('no_change');
+        return { summary: { ar: `${a.enabled ? 'تشغيل' : 'إيقاف'} اقتراح المنتجات من الموظف الذكي`, en: `${a.enabled ? 'Turn on' : 'Turn off'} product suggestions by the AI agent` }, rows: [row('اقتراح المنتجات', 'Product suggestions', onOff(s.on), onOff(a.enabled))], request: { method: 'PUT', path: '/agent', body: { recommendProducts: a.enabled } }, restore: { enabled: s.on } };
       },
     }, kit),
     writeTool({

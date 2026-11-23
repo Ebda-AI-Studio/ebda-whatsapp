@@ -3,9 +3,17 @@
 # Meta's Embedded Signup (numbers screen): the SDK script from connect.facebook.net; its frames and calls on *.facebook.com.
 # Visit counts: the edge adds the analytics beacon script (static.cloudflareinsights.com) to the page; it reports to this origin (/cdn-cgi/rum), so connect-src gains nothing.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://connect.facebook.net https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' blob: data: https://*.facebook.com https://*.fbcdn.net; font-src 'self'; connect-src 'self' https://accounts.ebda.app https://*.facebook.com; frame-src https://*.facebook.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://connect.facebook.net https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' blob: data: https://media.ebda.app https://*.facebook.com https://*.fbcdn.net; font-src 'self'; connect-src 'self' https://accounts.ebda.app https://*.facebook.com; frame-src https://*.facebook.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
   Strict-Transport-Security: max-age=63072000; includeSubDomains
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+# Discovery files (CHAT-QA-14): explicit type + charset so Arabic reads correctly; no framing/CSP concerns for plain text.
+/.well-known/security.txt
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=3600
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=3600

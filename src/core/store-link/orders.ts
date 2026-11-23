@@ -1,7 +1,7 @@
 import { outboundStoreEventSchema, type OutboundStoreEvent } from '../api/store-events';
 import type { InboundMessage } from '../meta/webhook-schema';
 import { addTask } from '../scheduler';
-import { bridgeFor, storeLink } from '../store-link';
+import { bridgeForWorkspace, storeLink } from '../store-link';
 import { normaliseText } from '../text-normalise';
 import type { CodOutcome } from '../store-bridge';
 import type { LinkHost } from './host';
@@ -136,13 +136,13 @@ export async function pushCodOutcome(host: LinkHost, orderId: string, now = Date
     'SELECT outcome, outcome_at, outcome_idem, outcome_pushed_at, buyer_key FROM store_orders WHERE order_id = ?', orderId,
   ).toArray()[0];
   if (!row?.outcome || !row.outcome_idem || row.outcome_pushed_at !== null) return { pushed: false, reason: 'nothing_to_push' };
-  const bridge = bridgeFor(host.env);
+  const bridge = bridgeForWorkspace(host.env, host.workspaceId);
   const sink = storeLink().events(host.env);
   if (!bridge && !sink) return { pushed: false, reason: 'link_off' };
   const outcome = row.outcome as CodOutcome;
   const at = new Date(row.outcome_at ?? now).toISOString();
   if (bridge) {
-    const res = await bridge.recordCodOutcome(host.workspaceId, { orderId, outcome, at, idempotencyKey: row.outcome_idem });
+    const res = await bridge.recordCodOutcome(host.workspaceId, { orderId, ...(row.buyer_key ? { buyerKey: row.buyer_key } : {}), outcome, at, idempotencyKey: row.outcome_idem });
     if (!res.ok && res.reason === 'unavailable') throw new Error(`store unavailable: ${res.message ?? ''}`.slice(0, 120));
     // not_found / not_linked / invalid are answers, not outages: retrying would not change them.
     if (!res.ok) alert('cod_outcome_refused', { workspace: host.workspaceId, reason: res.reason });
