@@ -1,8 +1,9 @@
 import { STRINGS } from '../i18n';
+import { AccountActions } from './AccountActions';
 import { stringsFor } from '../i18n-workspace';
 
 /** Shown when the server refused this person for want of a seat (WA-SEATS-1): they are a member of the store but the owner has not seated them (or the package now allows fewer). */
-export function NoSeat({ reason, onRetry, standalone }: { reason: 'none' | 'over_limit'; onRetry: () => void; standalone?: boolean }) {
+export function NoSeat({ reason, onRetry, onSignOut, onSwitch, standalone }: { reason: 'none' | 'over_limit'; onRetry: () => void; onSignOut: () => void; onSwitch: () => void; standalone?: boolean }) {
   const ar = stringsFor('ar', standalone); const en = stringsFor('en', standalone);
   return (
     <main className="screen">
@@ -12,6 +13,7 @@ export function NoSeat({ reason, onRetry, standalone }: { reason: 'none' | 'over
         <h2 lang="en" dir="ltr">{en.noSeatTitle}</h2>
         <p lang="en" dir="ltr">{reason === 'over_limit' ? en.noSeatOver : en.noSeatBody}</p>
         <button type="button" className="btn primary" onClick={onRetry}>{STRINGS.ar.noSeatRetry} / {STRINGS.en.noSeatRetry}</button>
+        <AccountActions onSignOut={onSignOut} onSwitch={onSwitch} />
       </div>
     </main>
   );

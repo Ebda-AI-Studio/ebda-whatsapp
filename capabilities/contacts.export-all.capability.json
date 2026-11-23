@@ -1,0 +1,49 @@
+{
+  "id": "contacts.export-all",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-19",
+  "titleAr": "تصدير كل جهات الاتصال",
+  "titleEn": "Export all my contacts",
+  "screens": [
+    "ContactsScreen export card",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
+  "api": [
+    "GET /stores/:storeId/contacts/export"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/your-customers-data",
+  "questions": {
+    "ar": [
+      "ازاي انزّل كل العملاء بتوعي؟",
+      "عايز ملف بكل أرقام عملائي",
+      "صدّر جهات الاتصال",
+      "ينفع اصدّر العملاء CSV؟"
+    ],
+    "en": [
+      "How do I download all my contacts?",
+      "Can I export my customers to a CSV?"
+    ]
+  },
+  "steps": [
+    "Open Contacts, press Download the contacts file",
+    "The file has number, name, opted-out, marketing consent, tags and the last customer message time"
+  ],
+  "edgeCases": [
+    "Store owner only; staff and an operator session are refused",
+    "Every page read is audited (count only, no numbers or names)",
+    "Names that look like spreadsheet formulas are defused in the CSV"
+  ],
+  "gaps": []
+}

@@ -170,3 +170,11 @@ it('has the Store link on (WA-LINK-ON-1): bridge to ebda-api, one events consume
   // The DLQ of the events queue is not consumed here (no handler would ack it); the send DLQ is.
   expect(cfg.queues.consumers.some((c: { queue: string }) => c.queue === 'ebda-wa-events-dlq')).toBe(false);
 });
+
+it('the Worker serves the shell for exactly the screens the web router knows (SHELL_PATHS in src/index.ts = VIEW_PATHS in web/src/lib/route.ts)', () => {
+  const read = (f: string) => readFileSync(join(import.meta.dirname, '..', f), 'utf8');
+  const view = [...(/VIEW_PATHS[^=]*= \{([^}]*)\}/.exec(read('web/src/lib/route.ts'))?.[1] ?? '').matchAll(/'(\/[a-z]+)'/g)].map((m) => m[1]).sort();
+  const shell = [...(/SHELL_PATHS = \[([^\]]*)\]/.exec(read('src/index.ts'))?.[1] ?? '').matchAll(/'(\/[a-z]+)'/g)].map((m) => m[1]).sort();
+  expect(view.length).toBeGreaterThan(5);
+  expect(shell).toEqual(view); // '/' (inbox) is the asset index itself; '/chat/:id' is checked by the Worker test
+});

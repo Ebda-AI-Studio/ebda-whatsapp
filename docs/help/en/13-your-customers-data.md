@@ -2,6 +2,7 @@
 capabilities:
   - contacts.erase@2
   - contacts.export@1
+  - contacts.export-all@1
   - contacts.list@1
   - contacts.merge@1
   - contacts.rename@1
@@ -17,6 +18,9 @@ Under "How long messages are kept" the store owner picks the period: 90 days, 6 
 
 ## Download one customer's data
 Pick the customer in the list and choose **Download the customer's data** (store owner only). You get a JSON file with their messages, your notes, their tags and orders. Use it when a customer asks what you hold about them. Every download is recorded in the action log.
+
+## Download all your contacts
+On the **Contacts** screen press **Download the contacts file** (store owner only). You get a CSV with every customer: number, name, whether they opted out of marketing, marketing consent and its source, tags, and the time of their last message. Open it in Excel or Google Sheets. Every export is written to the audit log (the count only, no numbers or names).
 
 ## Tag a customer
 Pick the customer and use **Customer's tags**: type a tag and choose **Add the tag**, or press the x on a tag to remove it. Owner and staff can both do it. See [Quick replies, notes and tags](23-notes-tags-and-quick-replies.md).

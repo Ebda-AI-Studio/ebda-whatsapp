@@ -436,6 +436,7 @@ export function createSampleSource(): InboxSource {
         if (name !== null) c.name = name;
         return { waId, name: c.name, optedOut: c.optedOut };
       },
+      async exportAllContacts() { return contacts.map((c) => ({ ...c })); },
       async exportContact(waId) {
         if (!contacts.some((x) => x.waId === waId)) throw new ApiError('not_found', 404);
         return { version: 1, subject: { waId }, messages: [], nextAfter: null };

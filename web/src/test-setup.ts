@@ -6,3 +6,7 @@ import { configure } from '@testing-library/react';
 // The web project has no Node types: read the CI override through globalThis instead of `process`.
 const ciTimeout = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.VITEST_ASYNC_TIMEOUT;
 configure({ asyncUtilTimeout: Number(ciTimeout ?? 5_000) });
+
+// The shell keeps its screen in the address bar: every test starts back at "/" so one test's navigation never leaks into the next.
+import { afterEach } from 'vitest';
+afterEach(() => { try { history.replaceState(null, '', '/'); } catch { /* not a DOM test */ } });
