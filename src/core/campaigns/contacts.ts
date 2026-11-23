@@ -4,7 +4,7 @@ import type { ColumnMap, ImportRejectReason } from './csv';
 import { MAX_TAGS_PER_CONTACT } from './csv';
 import { indexContactName } from '../contact-index';
 import { phoneDigits } from '../text-normalise';
-import { searchWords } from '../search-fold';
+import { ftsMatch, searchWords } from '../search-fold';
 
 /** Hard limits of one import: file size is checked at the edge, rows here. */
 export const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
@@ -203,7 +203,7 @@ export function listContacts(host: LinkHost, q: ContactQuery): { items: ContactI
     const tokens = searchWords(host.sql, q.q);
     const digits = phoneDigits(q.q);
     const any: string[] = [];
-    if (tokens.length) { any.push('c.id IN (SELECT rowid FROM contacts_fts WHERE contacts_fts MATCH ?)'); params.push(tokens.map((t) => `"${t}"*`).join(' ')); }
+    if (tokens.length) { any.push('c.id IN (SELECT rowid FROM contacts_fts WHERE contacts_fts MATCH ?)'); params.push(ftsMatch(tokens)); }
     if (digits.length >= 3) { any.push('instr(c.wa_id, ?) > 0'); params.push(digits); }
     where.push(any.length ? `(${any.join(' OR ')})` : '0');
   }

@@ -84,7 +84,7 @@ import type { WalletPosted } from './billing/engine';
 import { PRICING_MAX_AGE_MS, applyPricing, copyCursor, fundingOf, pullPricing } from './billing/pricing';
 import { parentHoldRef } from './campaigns/campaigns';
 import { indexContactName, rebuildContactIndex } from './contact-index';
-import { searchFoldOf, searchWords, syncSearchFold } from './search-fold';
+import { ftsMatch, searchFoldOf, searchWords, syncSearchFold } from './search-fold';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
 import { bridgeFor } from './store-link';
@@ -2211,7 +2211,7 @@ export class WorkspaceDO extends DurableObject<Env> {
   async searchConversations(q: string, filter: 'all' | 'unread' | 'mine' | 'unassigned', limit: number, userId: string, now = Date.now()): Promise<ConversationDto[]> {
     const tokens = searchWords(this.sql, q);
     const digits = phoneDigits(q);
-    const match = tokens.map((t) => `"${t}"*`).join(' ');
+    const match = ftsMatch(tokens);
     const any: string[] = [];
     const params: SqlStorageValue[] = [];
     if (tokens.length) {
@@ -2342,7 +2342,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     const tokens = searchWords(this.sql, q);
     if (!tokens.length) return [];
     // Tokens are letters/digits only after normalisation, so quoting them cannot be broken out of.
-    const match = tokens.map((t) => `"${t}"*`).join(' ');
+    const match = ftsMatch(tokens);
     return this.sql
       .exec<{ id: number; conversation_id: number; preview: string | null; created_at: number }>(
         'SELECT m.id, m.conversation_id, m.preview, m.created_at FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?',

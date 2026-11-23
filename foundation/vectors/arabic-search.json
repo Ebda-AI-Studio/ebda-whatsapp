@@ -1,5 +1,5 @@
 {
- "comment": "F7 shared search vectors: does `query` find `text` when both go through the shared fold? A query matches when every searchTokens(query) word is a PREFIX of some word of indexTokens(text) (the FTS5 `\"tok\"*` rule Chat uses and the LIKE-prefix rule the Store uses). Real Egyptian catalogue / contact / message samples. `match:false` rows pin words the fold must NOT merge (and the prefix rule: a query is a prefix of a word, not a substring). Hamza carriers fold together (Ruling F7-HAMZA-1).",
+ "comment": "F7-HAMZA-2: does `query` find `text`? Each query word is tried in its fold-B form against the B-folded index text and in its fold-A form against the A-folded index text; the word matches if EITHER is a PREFIX of some word (the FTS5 `\"tok\"*` rule Chat uses and the LIKE rule the Store uses). `match:false` rows pin words the folds must NOT merge (and the prefix rule: a query is a prefix of a word, not a substring). Real Egyptian catalogue / contact / message samples.",
  "cases": [
   {
    "q": "شنطه",
@@ -92,11 +92,6 @@
    "match": true
   },
   {
-   "q": "سؤال",
-   "text": "سوال",
-   "match": true
-  },
-  {
    "q": "مسئول",
    "text": "مسؤول",
    "match": true
@@ -122,19 +117,39 @@
    "match": false
   },
   {
+   "q": "لا",
+   "text": "ﻻ تنسى",
+   "match": true
+  },
+  {
+   "q": "محمد",
+   "text": "ﻣﺤﻤﺪ علي",
+   "match": true
+  },
+  {
+   "q": "123",
+   "text": "رقم １２٣",
+   "match": true
+  },
+  {
    "q": "مسؤول",
    "text": "مسئول الحسابات",
    "match": true
   },
   {
    "q": "مسئول",
-   "text": "المسؤول عن الطلب",
-   "match": false
-  },
-  {
-   "q": "مسئول",
    "text": "مسؤول الحسابات",
    "match": true
+  },
+  {
+   "q": "مسيول",
+   "text": "مسئول الحسابات",
+   "match": true
+  },
+  {
+   "q": "مسيول",
+   "text": "مسؤول الحسابات",
+   "match": false
   },
   {
    "q": "سوال",
@@ -162,6 +177,26 @@
    "match": true
   },
   {
+   "q": "سايل",
+   "text": "سائل منوي",
+   "match": true
+  },
+  {
+   "q": "رايع",
+   "text": "منتج رائع",
+   "match": true
+  },
+  {
+   "q": "رائع",
+   "text": "منتج رايع",
+   "match": true
+  },
+  {
+   "q": "سال",
+   "text": "سائل منوي",
+   "match": false
+  },
+  {
    "q": "مسئول",
    "text": "مسلول",
    "match": false
@@ -184,21 +219,11 @@
   {
    "q": "ريس",
    "text": "رئيس الشركة",
-   "match": true
+   "match": false
   },
   {
-   "q": "لا",
-   "text": "ﻻ تنسى",
-   "match": true
-  },
-  {
-   "q": "محمد",
-   "text": "ﻣﺤﻤﺪ علي",
-   "match": true
-  },
-  {
-   "q": "123",
-   "text": "رقم １２٣",
+   "q": "رييس",
+   "text": "رئيس الشركة",
    "match": true
   }
  ]

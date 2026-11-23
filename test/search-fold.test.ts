@@ -28,11 +28,13 @@ it('FDN-SEARCH-1: flag off = legacy fold; flipping on re-indexes names AND messa
   await chat(ws, '201000000012', 'کوتشی', 'عايز كوتشي ابيض');
   await chat(ws, '201000000013', 'ﻻ', 'hello');
   await chat(ws, '201000000014', 'مسئول', 'x4');
+  await chat(ws, '201000000015', 'سائل', 'x5');
   // legacy: ؤ and Persian ک/ی are NOT folded; NFKC IS applied (the lam-alef presentation form U+FEFB becomes لا)
   expect(await find(api, 'سوال')).toEqual([]);
   expect(await find(api, 'كوتشي')).toEqual(['201000000012']); // via the MESSAGE text "كوتشي"
   expect(await find(api, 'لا')).toEqual(['201000000013']);
   expect(await find(api, 'مسؤول')).toEqual([]); // ؤ and ئ are not unified by the legacy fold
+  expect(await find(api, 'سايل')).toEqual([]);
 
   expect(await flip(ws, true)).toBe(true);
   expect(await flip(ws, true)).toBe(false); // already there: no second rebuild
@@ -43,11 +45,15 @@ it('FDN-SEARCH-1: flag off = legacy fold; flipping on re-indexes names AND messa
   expect(await find(api, 'لا')).toEqual(['201000000013']); // F7-HAMZA-1: the shared fold runs NFKC too, so the pasted ligature still meets the typed letters
   expect(await find(api, 'مسؤول')).toEqual(['201000000014']); // hamza seats unified: مسئول = مسؤول
   expect(await find(api, 'سئوال')).toEqual(['201000000011']); // سؤال = سوال = سئوال
+  expect(await find(api, 'سايل')).toEqual(['201000000015']); // F7-HAMZA-2: typed ي for ئ still works (fold B), and the hamza fold did not take it away
+  expect(await find(api, 'مسيول')).toEqual(['201000000014']); // مسيول ~ مسئول (B) but not ~ مسؤول (non-transitive)
+  expect(await find(api, 'سال')).toEqual([]); // سائل is not سال under either fold
 
   expect(await flip(ws, false)).toBe(true);
   expect(await rows(ws, "SELECT value FROM store_state WHERE key = 'search_fold'")).toEqual([]);
   expect(await find(api, 'سوال')).toEqual([]);
   expect(await find(api, 'مسؤول')).toEqual([]);
+  expect(await find(api, 'سايل')).toEqual([]);
   expect(await find(api, 'لا')).toEqual(['201000000013']);
 });
 

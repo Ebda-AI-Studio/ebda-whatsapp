@@ -1,11 +1,11 @@
-import { indexTokens } from '../../foundation/text';
+import { indexTextBoth, searchWordPairs } from '../../foundation/text';
 import { normaliseText } from './text-normalise';
 
 /**
  * Which fold builds and queries the full-text indexes (`contacts_fts`, `messages_fts`) of ONE workspace (Ruling FDN-SEARCH-1,
  * docs/standard/arabic-search.md in the foundation). Index and query MUST use the same fold, so both read the same marker:
- * `store_state.search_fold` = 'v2' means the indexes were built with the shared foundation fold (`indexTokens`: the Store's fold, which also
- * folds ئ ؤ ک ی); no marker means the legacy `normaliseText`. The marker flips only inside `syncSearchFold`, in the same transaction as the
+ * `store_state.search_fold` = 'v2' means the indexes were built with the shared foundation folds (`indexTextBoth`: fold B = the original Store fold,
+ * then fold A = the hamza fold, Ruling F7-HAMZA-2) and a word matches under EITHER; no marker means the legacy `normaliseText`. The marker flips only inside `syncSearchFold`, in the same transaction as the
  * rebuild, so a workspace is never half-way.
  *
  * Driven by the platform flag `env.SEARCH_FOLD` ('v2' = on, anything else = off). OFF IS THE DEFAULT: nothing changes until it is set.
@@ -21,12 +21,21 @@ export function isSearchFoldV2(sql: SqlStorage): boolean {
 
 /** The fold this workspace's index was built with. */
 export function searchFoldOf(sql: SqlStorage): Fold {
-  return isSearchFoldV2(sql) ? indexTokens : normaliseText;
+  return isSearchFoldV2(sql) ? indexTextBoth : normaliseText;
 }
 
-/** The (at most 8) query words, folded exactly like the index: what `"<word>"*` is matched against. */
-export function searchWords(sql: SqlStorage, q: string): string[] {
-  return searchFoldOf(sql)(q).split(' ').filter(Boolean).slice(0, 8);
+/**
+ * The (at most 8) query words, each as its alternatives: ONE form under the legacy fold; under v2 the fold-B form and the fold-A form (one when
+ * they agree). The index text holds both folds, so a word matches when ANY of its forms is a prefix of an indexed word.
+ */
+export function searchWords(sql: SqlStorage, q: string): string[][] {
+  if (isSearchFoldV2(sql)) return searchWordPairs(q);
+  return normaliseText(q).split(' ').filter(Boolean).slice(0, 8).map((t) => [t]);
+}
+
+/** The FTS5 MATCH expression of `searchWords`: `("b"* OR "a"*) AND "c"*`. Forms are letters/digits only, so quoting them cannot be broken out of. */
+export function ftsMatch(words: string[][]): string {
+  return words.map((alts) => (alts.length === 1 ? `"${alts[0]}"*` : `(${alts.map((t) => `"${t}"*`).join(' OR ')})`)).join(' AND ');
 }
 
 /**
