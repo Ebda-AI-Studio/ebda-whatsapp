@@ -1,6 +1,6 @@
 {
-  "tag": "v0.3.3",
-  "commit": "1689afe5e29425008a81fcc623343ed562d8cda1",
+  "tag": "v0.3.4",
+  "commit": "d155fe576b2a0ef02fdd2d63234e3147b2e24a5e",
   "dir": "foundation",
   "parity": "test/foundation-parity.test.ts",
   "files": {
@@ -15,8 +15,8 @@
     "foundation/instapay-dedupe.ts": "12d4a82665d53479558bb2da9531e673740b76b271014dba889e78878c0e3ab1",
     "foundation/instapay-digest.ts": "af5d0ff2a9f126c03681eb44e82136f50954d6aeaa5fcdeb7cc59e3dcd338b5f",
     "foundation/instapay-extract.ts": "82af206b9fac70738257274ca80cd622e543fd4b1208268dec2b9702ce11ca88",
-    "foundation/instapay-state.ts": "ecbebbd1f5c081b4eef178d789cee425b775f064a5b63b1b6a79c4a2a302d88a",
-    "foundation/package.json": "4a984fd91679fe1064857e7d125141b497238bffe7b24695cb30a39d9acb93e7",
+    "foundation/instapay-state.ts": "96eec3e820bf4a096e003f60adcd2328c54cd207740e85e68bff4e630ecb18b7",
+    "foundation/package.json": "d6aff73e3c4a12d303f6f6f699f5559525d300d45eeed03d588290b399440eed",
     "foundation/phone.ts": "30d8982b7094b392d00795685fd7cb5d4f0b482d6ff564c7aec40d6eb67f5f97",
     "foundation/ratchet.ts": "3c5d4bf29c9ccefdc5b876dc2722031eedf1af74c90bada61674f9d449f13ecb",
     "foundation/self-service-routes.ts": "d02168fd4f8132ea9562a356994f6104f96262a2285b1bdccf423c0b3d92ad99",
@@ -46,7 +46,7 @@
     "foundation/smart-layer/models.ts": "c6fa3f1f13867e710f632ee55794cceeae3195dded2d4904dc07c7b8d6496242",
     "foundation/smart-layer/plan/budget.ts": "c5db4b104ceb6f77d33ab0979c2313c00e9c1970951174bfc59ac0c8a507778c",
     "foundation/smart-layer/plan/select-tools.ts": "d12447984c2706b74a185feb53dac75989ce218ae9127a23ab324445afd1fb77",
-    "foundation/smart-layer/provider.ts": "440bfeaac2b6094e8bb3ec295e8d205c4bd8a5846b54277dc0c482fbc54d01e6",
+    "foundation/smart-layer/provider.ts": "11668bb70b10a2e65295997580a26cc1d32ed5ad5ffbf463da5dee6ab2e94a62",
     "foundation/smart-layer/rails/binding-claims.ts": "f9b8e99806f86b6e851daffb3e32b462eea6e7e5f976d350b0acb8ab3b334ccd",
     "foundation/smart-layer/rails/fence.ts": "3639b65faa2fccb063c8c40745d105b3f192adab86e677abb39726e8ac2b026a",
     "foundation/smart-layer/rails/franco.ts": "fa956fa2355c7db9f2ed15ac06af464364d59c05623eef2023bbdbe93244bcf4",
