@@ -57,7 +57,7 @@ export type InstapayRequestDto = {
   /** InstaPay auto-confirm: confirmed by the system / being checked now / reverted ("not received") with the end of its grace. */
   autoConfirmed: boolean; revertedAt: number | null; checking?: boolean; graceUntil?: number | null;
 };
-export type OperatorInstapayDto = InstapayRequestDto & { workspaceId: string; createdBy: string; proofAt: number | null; firstApprover: string | null; decidedBy: string | null; proofMime: string | null; heldReason: Row['held_reason']; heldOf: string | null; bankRef: string | null };
+export type OperatorInstapayDto = InstapayRequestDto & { workspaceId: string; createdBy: string; proofAt: number | null; firstApprover: string | null; decidedBy: string | null; proofMime: string | null; heldReason: Row['held_reason']; heldOf: string | null; bankRef: string | null; aiRead?: { reference: string; amountMinor: number | null } | null };
 const dto = (r: Row): InstapayRequestDto => ({
   id: r.id, reference: r.reference, kind: r.kind, packageId: r.package_id, amountMinor: r.amount_minor, currency: r.currency, state: r.state, createdAt: r.created_at, expiresAt: r.expires_at,
   hasProof: r.proof_key !== null, rejectReason: r.reject_reason, decidedAt: r.decided_at,
@@ -139,7 +139,25 @@ export async function listForWorkspace(env: Env, workspaceId: string): Promise<I
 export async function listForOperator(env: Env, state?: string): Promise<OperatorInstapayDto[]> {
   const ok = state && ['awaiting_proof', 'under_review', 'confirmed', 'rejected', 'expired'].includes(state);
   const { results } = await env.DB.prepare(`SELECT ${COLS} FROM instapay_requests ${ok ? 'WHERE state = ?' : ''} ORDER BY created_at LIMIT 200`).bind(...(ok ? [state] : [])).all<Row>();
-  return results.map(opDto);
+  // A SUGGESTION only: what the receipt reader saw, so the reviewer can compare it with the proof instead of retyping it. Confirming still needs a person's own bankRef.
+  const reads = new Map<string, string | null>();
+  if (results.length > 0) {
+    const ids = results.map((r) => r.id);
+    const { results: autos } = await env.DB.prepare(`SELECT request_id, extracted_json FROM instapay_auto_confirmations WHERE request_id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all<{ request_id: string; extracted_json: string | null }>();
+    for (const a of autos) reads.set(a.request_id, a.extracted_json);
+  }
+  return results.map((r) => ({ ...opDto(r), aiRead: parseAiRead(reads.get(r.id) ?? null) }));
+}
+
+/** The reference (and amount) the receipt reader saw, from the auto-confirmation row; null when nothing usable was read. */
+export function parseAiRead(json: string | null): { reference: string; amountMinor: number | null } | null {
+  if (!json) return null;
+  try {
+    const o = JSON.parse(json) as { reference?: unknown; amountMinor?: unknown };
+    const reference = typeof o.reference === 'string' ? o.reference.trim().slice(0, 60) : '';
+    if (!reference) return null;
+    return { reference, amountMinor: typeof o.amountMinor === 'number' && Number.isInteger(o.amountMinor) ? o.amountMinor : null };
+  } catch { return null; }
 }
 
 // ---- the proof -------------------------------------------------------------------------------------------------------------------

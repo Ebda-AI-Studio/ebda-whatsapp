@@ -686,6 +686,7 @@ function InstapayReview({ t, lang, api, source, run }: PanelProps) {
               <span className="wallet-row-main">
                 <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status="pending">{t.instapayStates[r.state] ?? r.state}</span>
                 <span className="muted op-line"><bdi dir="ltr">{r.workspaceId}</bdi> • {t.opIpLine(t.opIpKinds[r.kind] ?? r.kind, r.reference)} • {r.proofAt ? dateTime(r.proofAt, lang) : ''}</span>
+                {r.aiRead && !r.heldReason && <span className="muted op-line">{t.opIpAiRead(r.aiRead.reference)} <button type="button" className="btn quiet" onClick={() => setRefs({ ...refs, [r.id]: r.aiRead!.reference })}>{t.opIpAiUse}</button></span>}
                 {r.firstApprover && <span className="muted op-line">{t.opIpFirstBy(r.firstApprover)}</span>}
                 {r.heldReason && <span className="error-text op-line" role="note">{t.opIpHeld(t.opIpHeldReasons[r.heldReason] ?? r.heldReason)}{r.heldOf ? <> • <bdi dir="ltr">{t.opIpHeldOf(r.heldOf)}</bdi></> : null}</span>}
                 {notes[r.id] && <span className="campaign-reason">{notes[r.id]}</span>}
