@@ -223,6 +223,21 @@ describe('wallet: no card provider (Ruling WA-INSTAPAY-LAUNCH-1)', () => {
     expect(screen.queryByRole('button', { name: t.wPackageBuy })).toBeNull();
     expect(await screen.findByRole('region', { name: t.wIpTitle })).toBeTruthy();
   });
+  it('the InstaPay pointer is a link that jumps to the InstaPay card, which is on screen', async () => {
+    await openWallet(withWallet({ cardCheckout: false, instapayAvailable: true }));
+    const topup = screen.getByRole('region', { name: t.wTopupTitle });
+    const link = within(topup).getByRole('link', { name: t.wTopupInstapayLink });
+    const ip = await screen.findByRole('region', { name: t.wIpTitle });
+    fireEvent.click(link);
+    expect(document.activeElement).toBe(within(ip).getByRole('heading', { name: t.wIpTitle }));
+  });
+  it('InstaPay not available on the server: the copy does not point to a card that is not there', async () => {
+    await openWallet(withWallet({ cardCheckout: false, instapayAvailable: false }));
+    const topup = screen.getByRole('region', { name: t.wTopupTitle });
+    expect(within(topup).getByText(t.wTopupOff)).toBeTruthy();
+    expect(within(topup).queryByText(t.wTopupViaInstapay)).toBeNull();
+    expect(within(topup).queryByRole('link')).toBeNull();
+  });
   it('cardCheckout true or absent: the card top-up and the card package list are shown as before', async () => {
     await openWallet(withWallet({ cardCheckout: true }));
     expect(within(screen.getByRole('region', { name: t.wTopupTitle })).getByRole('button', { name: t.wTopupContinue })).toBeTruthy();

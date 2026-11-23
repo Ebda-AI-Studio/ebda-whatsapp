@@ -3,7 +3,8 @@ import { confirmToken, costEstimateQuery, creditOrderDto, creditPackBuy, creditP
 import { statementCsv } from '../core/billing/statement';
 import { namePlan } from '../core/billing/store-plan';
 import { cardCheckoutReady, topupsEnabled } from '../core/billing/payments';
-import { rejectionNotice } from '../core/billing/instapay';
+import { instapayEnabled, rejectionNotice } from '../core/billing/instapay';
+import { payeeFor } from './instapay';
 import { getTopup, startTopup } from '../core/billing/topups';
 import { createRefundRequest, listRefundRequests } from '../core/billing/refunds';
 import { issueConfirmation, consumeConfirmation, type Consumed } from '../core/billing/confirmation';
@@ -31,7 +32,7 @@ walletRoutes.get('/stores/:storeId/wallet', async (c) => {
   const dto: WalletDto = {
     balanceMinor: v.balanceMinor, heldMinor: v.heldMinor, availableMinor: v.availableMinor, debtMinor: v.debtMinor, creditLimitMinor: v.creditLimitMinor, currency: 'EGP',
     funding: results.map((r) => ({ phoneNumberId: r.phone_number_id, displayPhone: r.display_phone, funding: r.funding ?? 'unknown' })),
-    topupsEnabled: topupsEnabled(c.env), cardCheckout: cardCheckoutReady(c.env), lowBalance: v.lowBalance, lowBalanceThresholdMinor: v.lowBalanceThresholdMinor, aiCredits: v.aiCredits, plan: namedPlan,
+    topupsEnabled: topupsEnabled(c.env), cardCheckout: cardCheckoutReady(c.env), instapayAvailable: instapayEnabled(c.env) && payeeFor(c.env) !== null, lowBalance: v.lowBalance, lowBalanceThresholdMinor: v.lowBalanceThresholdMinor, aiCredits: v.aiCredits, plan: namedPlan,
     ...(owner(c) ? { instapayNotice: await rejectionNotice(c.env, c.req.param('storeId')!) } : {}),
   };
   return c.json(dto);

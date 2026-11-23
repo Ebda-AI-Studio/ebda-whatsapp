@@ -612,6 +612,8 @@ export const walletDto = z.object({
   topupsEnabled: z.boolean(),
   /** Additive: false while no card provider can confirm its webhooks (Kashier not configured). The screen then offers InstaPay only, never a card button that would answer 503 (Ruling WA-INSTAPAY-LAUNCH-1). Absent = an older server. */
   cardCheckout: z.boolean().optional(),
+  /** Additive: false when the InstaPay card cannot be offered (switch off or no payee). The "top up by InstaPay" copy is then never shown, so it never points to a card that is not on the screen. */
+  instapayAvailable: z.boolean().optional(),
   lowBalance: z.boolean(),
   /** The wallet is low under this many minor units: max(20 EGP, 3 days of the last week's average Meta spend). */
   lowBalanceThresholdMinor: z.number().int().nonnegative(),
