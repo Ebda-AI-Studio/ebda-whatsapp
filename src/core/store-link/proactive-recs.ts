@@ -2,7 +2,7 @@
  * Proactive post-order product suggestions (register row 309, Ruling CHAT-RECS-SWITCH-1, docs/rulings/CHAT-RECS-SWITCH-1.md).
  *
  * After `order.created` arrives over the Store bridge, ONE approved MARKETING template may go to the buyer with up to `SUGGESTIONS` products from the
- * Store's own recommendation engine. This is a message Ebda Chat starts, outside the 24 h window, and it spends wallet credit, so nothing is sent unless
+ * Store's own recommendation engine. This is a message the store starts, outside the 24 h window, and it spends wallet credit, so nothing is sent unless
  * EVERY gate below is true, and the switch is OFF by default:
  *   1 switch ON (owner-set, workspace)        2 an approved template name is configured      3 explicit marketing consent on the contact, no opt-out
  *   4 not in quiet hours (deferred, not dropped)  5 per-customer frequency cap            6 something in stock to suggest.

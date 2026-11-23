@@ -4,7 +4,7 @@ import { apiError, workspaceStub, type ApiEnv } from './shared';
 
 /**
  * /api/v1/stores/:storeId/proactive-recs (CHAT-RECS-SWITCH-1): the switch for post-order product suggestions sent as an approved template.
- * Owner only, both ways: it makes Ebda Chat start messages to customers and spend wallet credit. OFF until the owner turns it on.
+ * Owner only, both ways: it makes the store start messages to customers and spend wallet credit. OFF until the owner turns it on.
  */
 export const proactiveRecsRoutes = new Hono<ApiEnv>();
 const ownerOnly = (role: string) => role === 'owner' || role === 'super_admin';

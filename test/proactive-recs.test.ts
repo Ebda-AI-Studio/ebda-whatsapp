@@ -84,7 +84,7 @@ describe('the gates', () => {
   it('no template configured: nothing is sent (recorded no_template)', async () => {
     const ws = W(10);
     await shop(ws, { template: null });
-    await exec(ws, "INSERT INTO store_state (key, value) VALUES ('proactive_recs.enabled', '1')"); // forced on without a name: the task still refuses
+    await exec(ws, "INSERT INTO store_state (key, value) VALUES ('proactive_recs.enabled', '1')"); // set on without a name: the task still refuses
     await deliver([created(ws, 'o1')]);
     await runAt(ws, noonAfter(Date.now()));
     expect(await recsJobs(ws)).toEqual([]);

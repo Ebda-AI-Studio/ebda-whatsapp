@@ -3,6 +3,7 @@ import type { ProactiveRecsDto } from '../../../src/core/api/contract';
 import type { InboxSource } from '../data/source';
 import type { Strings } from '../i18n';
 import { LoadError } from './LoadError';
+import { Skeleton } from './Skeleton';
 
 /** CHAT-RECS-SWITCH-1: the owner's switch for post-order product suggestions. Off by default; honest about the approved template, the consent and the wallet charge. */
 export function ProactiveRecs({ t, source }: { t: Strings; source: InboxSource }) {
@@ -34,7 +35,7 @@ export function ProactiveRecs({ t, source }: { t: Strings; source: InboxSource }
       <h2 id="proactive-recs-title">{t.prTitle}</h2>
       <p className="muted">{t.prIntro}</p>
       <p className="muted">{t.prNeeds}</p>
-      {view === undefined && <p className="muted">…</p>}
+      {view === undefined && <Skeleton t={t} rows={2} kind="setting" />}
       {view === 'error' && <LoadError t={t} onRetry={load} />}
       {view && view !== 'error' && (
         <>
