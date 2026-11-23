@@ -8,7 +8,7 @@ import { destructiveStatements } from './helpers/additive';
 // A genuinely destructive step needs an entry in ALLOWED below with a reason (and a human decision).
 const ALLOWED: { where: string; reason: string }[] = [
   // Asked for by the controller with the A27 follow-up (wa#92 review): the fold needs the mixed-case twin deleted once its lower-case copy exists. A Worker rolled back across it reads lower-case tags, which it already writes.
-  { where: 'DO v47: DELETE FROM conversation_tags WHERE tag <> lower(trim(tag))', reason: 'folds mixed-case conversation tags into their lower-case twin; no conversation link is lost (the INSERT OR IGNORE before it keeps it)' },
+  { where: 'DO v48: DELETE FROM conversation_tags WHERE tag <> lower(trim(tag))', reason: 'folds mixed-case conversation tags into their lower-case twin; no conversation link is lost (the INSERT OR IGNORE before it keeps it)' },
 ];
 
 it('the checker flags what rollback cannot survive and passes what it can (fixtures)', () => {

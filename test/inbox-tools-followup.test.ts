@@ -3,11 +3,11 @@ import { expect, it } from 'vitest';
 import { DO_MIGRATIONS } from '../src/core/do-migrations';
 import { exec, openChat, rows, workspace } from './helpers/workspace';
 
-// The v47 fold (wa#92 review follow-up): conversation tags have been lower-cased at write time since A27; rows written before that are folded once.
+// The v48 fold (wa#92 review follow-up): conversation tags have been lower-cased at write time since A27; rows written before that are folded once.
 // Found by content, not by number: the number moves when another branch's migration lands first (the guard in guards.test.ts keeps the numbering contiguous).
 const fold = DO_MIGRATIONS.find((sql) => sql.includes('INSERT OR IGNORE INTO conversation_tags'));
 
-it('migration v47 folds mixed-case conversation tags into one lower-case row and keeps every conversation link', async () => {
+it('migration v48 folds mixed-case conversation tags into one lower-case row and keeps every conversation link', async () => {
   expect(fold).toBeTruthy();
   const ws = 'ws-fold1';
   const a = await openChat(ws, '201001234501', { text: 'a' });
