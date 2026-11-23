@@ -1,6 +1,6 @@
 {
   "tag": "v0.3.4",
-  "commit": "d155fe576b2a0ef02fdd2d63234e3147b2e24a5e",
+  "commit": "e1d0bf2a0087c88858acab43c5dbb0524dbbda8e",
   "dir": "foundation",
   "parity": "test/foundation-parity.test.ts",
   "files": {
@@ -16,7 +16,7 @@
     "foundation/instapay-digest.ts": "af5d0ff2a9f126c03681eb44e82136f50954d6aeaa5fcdeb7cc59e3dcd338b5f",
     "foundation/instapay-extract.ts": "82af206b9fac70738257274ca80cd622e543fd4b1208268dec2b9702ce11ca88",
     "foundation/instapay-state.ts": "96eec3e820bf4a096e003f60adcd2328c54cd207740e85e68bff4e630ecb18b7",
-    "foundation/package.json": "d6aff73e3c4a12d303f6f6f699f5559525d300d45eeed03d588290b399440eed",
+    "foundation/package.json": "fb559061c9b55e25cce55d41d177b95cfbb00968fcea4d0906c01f9c8ed18929",
     "foundation/phone.ts": "30d8982b7094b392d00795685fd7cb5d4f0b482d6ff564c7aec40d6eb67f5f97",
     "foundation/ratchet.ts": "3c5d4bf29c9ccefdc5b876dc2722031eedf1af74c90bada61674f9d449f13ecb",
     "foundation/self-service-routes.ts": "d02168fd4f8132ea9562a356994f6104f96262a2285b1bdccf423c0b3d92ad99",
