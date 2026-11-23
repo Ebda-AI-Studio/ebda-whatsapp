@@ -1,6 +1,6 @@
 {
   "tag": "v0.3.4",
-  "commit": "25d9a5792b9e0cc7c0c1ac3ce6a969a86e9cba14",
+  "commit": "931f55d4895559a6956e10efd4f8d0211483a546",
   "dir": "foundation",
   "parity": "test/foundation-parity.test.ts",
   "opsDir": "scripts/foundation",
@@ -24,7 +24,7 @@
     "foundation/legal/whatsapp/en/whatsapp-dpa.md": "80c68806be3e678bfb2234b6302b72ce9e0e803e561f005aad0dfee99fee9324",
     "foundation/legal/whatsapp/en/whatsapp-privacy.md": "db96a6070a6d183cc2b59a031b5ba99c52f6d0c9b5738f9723d0107d9478622e",
     "foundation/legal/whatsapp/en/whatsapp-terms.md": "83163a51b281fc7d9f697bf49ffa9f169bb1a416a4e4bf5ca8945968cbc6ebcd",
-    "foundation/package.json": "c2f8587df9a9feea642541affe9ecc97b7d0ada4c7c5d0233312ba6add09f387",
+    "foundation/package.json": "1691674d4acb5c525299e72f60c86493eae960166f0828a03f4d2d8782d89ea1",
     "foundation/phone.ts": "30d8982b7094b392d00795685fd7cb5d4f0b482d6ff564c7aec40d6eb67f5f97",
     "foundation/ratchet.ts": "3c5d4bf29c9ccefdc5b876dc2722031eedf1af74c90bada61674f9d449f13ecb",
     "foundation/self-service-routes.ts": "d02168fd4f8132ea9562a356994f6104f96262a2285b1bdccf423c0b3d92ad99",
