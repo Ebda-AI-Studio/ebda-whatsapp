@@ -36,6 +36,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           # Remote Actions cache only on hosted runners; on Umbra ~/.npm is already local.
+      # Foundation drift (register row "Foundation version drift"): the vendored foundation may be one release behind, never two or
+      # more for over 7 days. A GitHub read failure warns and passes (an api.github.com outage must not block every merge).
+      - name: Foundation drift (vendored tag vs latest foundation tag)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/foundation-drift-check.mjs
       - run: npm ci
       - run: npm run typecheck
       # CI-only: 2 workers (the shared 4.9 GB VM ran out of memory and time with the default pool); local runs keep the default.
