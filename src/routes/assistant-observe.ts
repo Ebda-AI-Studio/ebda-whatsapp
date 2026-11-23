@@ -40,6 +40,12 @@ export const withLowReasoning = (ai: SmartLayerAdapter['ai']): SmartLayerAdapter
   run: (model, inputs) => ai.run(model, /glm/i.test(model) && inputs.reasoning_effort === undefined ? { ...inputs, reasoning_effort: 'low' } : inputs),
 });
 
+/**
+ * A [[cap:...]] / [[help:...]] marker is drawn as a button that carries its OWN title, right where the marker stands. Written inside a sentence it reads as a broken one
+ * ("... تفاصيل النقل [نقل الرقم أو تغييره]", live 2026-11-24). The engine prompt (vendored) does not say how to place it, so Chat appends this rule to every model request.
+ */
+export const CHIP_RULE = '- A [[cap:...]] or [[help:...]] marker is shown to the merchant as a button with its own title. Put it as a standalone pointer: end a line with "شوف: [[cap:...]]" (English: "See: [[cap:...]]"), or list pointers at the end under "روابط مفيدة:" ("Useful links:"). Never use it as a word inside a sentence, and never repeat its title in your own words next to it.';
+
 export type TurnObserver = {
   requestId: string;
   adapter: SmartLayerAdapter;
@@ -69,6 +75,7 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; lo
           throw err;
         }
       };
+      req = { ...req, system: req.system.includes(CHIP_RULE) ? req.system : `${req.system}\n${CHIP_RULE}` };
       let res = await run(req);
       const empty = (x: LlmResponse) => !x.text && !x.toolCalls?.length;
       if (empty(res)) {
