@@ -799,6 +799,7 @@ export const storeTopProductsDto = z.object({
   currency: z.string().length(3), period: z.enum(['today', '7d', '30d']), from: z.number().int(), to: z.number().int(),
   items: z.array(z.object({ name: z.string(), nameAr: z.string().nullable(), units: z.number().int().nonnegative(), revenueMinor: z.number().int().nonnegative() })).max(10),
 });
+export const storeOrdersSummaryQuery = z.object({ period: z.enum(['today', 'yesterday', 'this_week', 'last_7_days', 'this_month']).default('today') }).strict();
 export const storeCouponRequest = z.object({
   code: z.string().trim().min(3).max(24).regex(/^[A-Za-z0-9_-]+$/),
   type: z.enum(['percentage', 'fixed']),
@@ -843,6 +844,7 @@ export const ROUTES = {
   botFunnel: 'GET /bot/funnel',
   storeTopProducts: 'GET /store/top-products',
   storeCoupons: 'POST /store/coupons',
+  storeOrdersSummary: 'GET /store/orders-summary',
   agent: 'GET|PUT /agent',
   connectors: 'GET /connectors',
   connector: 'PUT|DELETE /connectors/:connectorId',

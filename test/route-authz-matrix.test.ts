@@ -41,7 +41,7 @@ const R: Record<string, Role> = {
   'GET /imports': 'member', 'GET /imports/:importId': 'member', 'GET /imports/:importId/rejects': 'member', 'POST /imports': 'manager',
   // store link, bot, catalog
   // owner assistant over the Store (CHAT-ASSIST-1): best sellers are read by owner and staff, a coupon is the owner's alone (and never an operator's session)
-  'GET /store/top-products': 'member', 'POST /store/coupons': 'owner',
+  'GET /store/top-products': 'member', 'GET /store/orders-summary': 'owner', 'POST /store/coupons': 'owner',
   'GET /store-link/settings': 'member', 'GET /store-link/catalog': 'member', 'GET /bot/funnel': 'member',
   'PATCH /store-link/settings': 'manager', 'POST /store-link/settings/preview': 'manager', 'POST /store-link/catalog/provision': 'manager',
   'POST /store-link/catalog/resync': 'manager', 'PUT /store-link/catalog/commerce': 'manager',

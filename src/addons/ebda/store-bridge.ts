@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Env } from '../../env';
 import {
   addressSchema, bridgeResultSchema, memberRoleSchema, storeMembersSchema, catalogPageSchema, checkoutLinkSchema, codOutcomeAckSchema, customerOrdersSchema, orderCreatedSchema, orderStatusSchema, paymentLinkSchema, productsSchema, searchResultSchema,
-  storeProfileSchema, storePoliciesSchema, customerProfileSchema, topProductsSchema, couponCreatedSchema, type BridgeResult, type StoreBridge,
+  storeProfileSchema, storePoliciesSchema, customerProfileSchema, topProductsSchema, couponCreatedSchema, ordersSummarySchema, type BridgeResult, type StoreBridge,
 } from '../../core/store-bridge';
 
 /** The methods the Store's `WhatsAppBridge` entrypoint exposes over the Service Binding (contract section 5). */
@@ -76,6 +76,7 @@ export function createServiceBindingBridge(env: Pick<Env, 'STORE_BRIDGE'>): Stor
     getOrderStatus: (s, n, key, phone) => call('getOrderStatus', orderStatusSchema, s, n, key, ...(phone ? [phone] : [])),
     listCustomerOrders: (s, key, limit, phone) => call('listCustomerOrders', customerOrdersSchema, s, key, limit, ...(phone ? [phone] : [])),
     getTopProducts: (s, asUserId, req) => call('getTopProducts', topProductsSchema, s, asUserId, req),
+    getOrdersSummary: (s, asUserId, req) => call('getOrdersSummary', ordersSummarySchema, s, asUserId, req),
     createCoupon: (s, asUserId, req) => call('createCoupon', couponCreatedSchema, s, asUserId, req),
     getRecommendations: (s, req) => call('getRecommendations', productsSchema, s, req),
     listStoreMembers: (s, asUserId) => callBare('listStoreMembers', storeMembersSchema, s, asUserId),

@@ -38,7 +38,7 @@
   "edgeCases": [
     "No store bound (standalone workspace): the tool is not offered",
     "Store unreachable: the assistant says it could not read the store data, it never guesses a number",
-    "Orders-today and total-sales questions are NOT answered by this tool (the assistant points to the store dashboard)"
+    "Orders and sales totals are answered by store.orders-summary, not by this tool"
   ],
   "gaps": [
     "No screen yet: the assistant reads it, or the route"

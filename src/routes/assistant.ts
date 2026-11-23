@@ -12,6 +12,7 @@ import type { Mode, TurnCtx } from '../../foundation/smart-layer/types';
 import { alert } from '../core/observability';
 import { chatAdapter } from '../core/smart-layer/adapter';
 import { isStandaloneId } from '../core/workspace-kind';
+import { bridgeForWorkspace } from '../core/store-link';
 import { chatControls } from '../core/smart-layer/controls';
 import type { Env } from '../env';
 import { viewOf, type StoredCap } from '../core/smart-layer/registry';
@@ -109,7 +110,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     }
     // The confirm token leaves the engine through this callback only: into THIS response for the merchant's own button, nowhere else.
     const approvals: ApprovalToken[] = [];
-    const obs = observeTurn(s.adapter, { storeId: s.ctx.storeId });
+    const obs = observeTurn(s.adapter, { storeId: s.ctx.storeId, storeLinked: bridgeForWorkspace(c.env, s.ctx.storeId) !== null });
     const raw = await runTurn(obs.adapter, s.ctx, { text: body.data.text }, { onApprovalToken: (t) => approvals.push(t), provider: obs.deterministic(body.data.text, body.data.locale) ?? obs.provider });
     const res = obs.refine(raw, body.data.locale, body.data.text);
     c.header('cache-control', 'no-store');
