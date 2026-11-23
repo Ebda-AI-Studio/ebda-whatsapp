@@ -1,0 +1,48 @@
+{
+  "id": "store.coupon-create",
+  "status": "live",
+  "area": "orders",
+  "version": 1,
+  "versionDate": "2026-11-23",
+  "titleAr": "إنشاء كوبون خصم من المساعد",
+  "titleEn": "Create a discount coupon from the assistant",
+  "screens": [],
+  "api": [
+    "POST /stores/:storeId/store/coupons"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible",
+    "note": "The store has no delete call for the assistant; the owner switches the coupon off in the store admin"
+  },
+  "helpArticle": "whatsapp/ebda-assistant",
+  "questions": {
+    "ar": [
+      "اعمل كوبون خصم 10% لمدة يوم",
+      "عايز كود خصم 50 جنيه لمدة أسبوع",
+      "e3mel koboun khasm 10% le modet yom"
+    ],
+    "en": [
+      "Create a 10% discount coupon for one day"
+    ]
+  },
+  "steps": [
+    "Ask the assistant for a percentage (1 to 90) or fixed amount coupon, how long it lasts (max 90 days) and optionally a usage limit and a code",
+    "A card shows the code, discount, window and limit; nothing is created until you press confirm",
+    "On confirm the store creates the coupon through its own coupon service; a code is generated when you gave none"
+  ],
+  "edgeCases": [
+    "Percent above 90, a fixed amount above 50,000, a window over 90 days or an end before the start: no card is built",
+    "A code that already exists with different terms: refused, ask for another code (the same card pressed twice creates one coupon)",
+    "Coupons switched off in the store: refused with a clear reason",
+    "Staff and platform super-admin sessions: no card (owner only)"
+  ],
+  "gaps": [
+    "No screen yet: the assistant card is the flow, or the route"
+  ]
+}

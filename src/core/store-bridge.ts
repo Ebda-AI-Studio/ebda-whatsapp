@@ -156,6 +156,30 @@ export type StoreMember = z.infer<typeof storeMemberSchema>;
 export const storeMembersSchema = z.object({ items: z.array(storeMemberSchema) });
 export const memberRoleAnswerSchema = z.object({ role: memberRoleSchema.nullable() });
 
+/**
+ * Owner-assistant RPC (Store ruling CHAT-ASSIST-1): best sellers and coupon creation, authorised by the CALLING user against the live membership.
+ * Money is integer minor units. A refusal is `invalid` with a typed `code` (FORBIDDEN, FEATURE_DISABLED, PERCENT_RANGE, FIXED_TOO_LARGE, WINDOW_*, DUPLICATE_CODE, INVALID_ARGS).
+ */
+export const TOP_PERIODS = ['today', '7d', '30d'] as const;
+export type TopPeriod = (typeof TOP_PERIODS)[number];
+export const topProductsSchema = z.object({
+  currency: z.string().length(3),
+  period: z.enum(TOP_PERIODS),
+  fromMs: z.number().int(),
+  toMs: z.number().int(),
+  items: z.array(z.object({ name: z.string(), nameAr: z.string().nullable(), units: z.number().int().nonnegative(), revenueMinor: z.number().int().nonnegative() })).max(10),
+});
+export type TopProducts = z.infer<typeof topProductsSchema>;
+/** The limits the Store applies too (owner-tools.ts); mirrored here so a preview never promises what the Store will refuse. */
+export const COUPON_LIMITS = { percentMax: 90, fixedMaxMinor: 5_000_000, windowDaysMax: 90, usageLimitMax: 100_000 } as const;
+export type CouponCreateRequest = {
+  code: string; type: 'percentage' | 'fixed'; value: number; startsAt?: string; endsAt?: string; durationDays?: number; usageLimit?: number; idempotencyKey: string;
+};
+export const couponCreatedSchema = z.object({
+  couponId: z.string(), code: z.string(), type: z.enum(['percentage', 'fixed']), value: z.number().int(), startsAt: z.string().nullable(), expiresAt: z.string(), usageLimit: z.number().int().nullable(), replayed: z.boolean(),
+});
+export type CouponCreated = z.infer<typeof couponCreatedSchema>;
+
 export interface StoreBridge {
   getStoreProfile(storeId: string): Promise<BridgeResult<StoreProfile>>;
   listCatalog(storeId: string, cursor: string | null, limit: number): Promise<BridgeResult<CatalogPage>>;
@@ -180,6 +204,10 @@ export interface StoreBridge {
   getOrderStatus(storeId: string, orderNumber: string, buyerKey: string, phoneE164?: string): Promise<BridgeResult<OrderStatusInfo>>;
   listCustomerOrders(storeId: string, buyerKey: string, limit: number, phoneE164?: string): Promise<BridgeResult<{ items: BridgeOrderSummary[] }>>;
   getRecommendations(storeId: string, req: RecommendationRequest): Promise<BridgeResult<{ items: CatalogRow[] }>>;
+  /** Best sellers of a period, owner or active staff (live role). Numbers are the Store's analytics, in minor units. */
+  getTopProducts(storeId: string, asUserId: string, req: { period: TopPeriod; limit: number }): Promise<BridgeResult<TopProducts>>;
+  /** Creates a coupon through the Store's own coupon service. OWNER only (live role), replay-safe on code + terms. Chat calls it only after the merchant's confirm press. */
+  createCoupon(storeId: string, asUserId: string, req: CouponCreateRequest): Promise<BridgeResult<CouponCreated>>;
   /** Owner + active staff. `invalid` (message FORBIDDEN) = the asker is not the owner; `unavailable` = the Store could not answer (never read as "no members"). */
   listStoreMembers(storeId: string, asUserId: string): Promise<BridgeResult<{ items: StoreMember[] }>>;
   /** The live role of a user on the store; `{ role: null }` = not (or no longer) a member. `unavailable` = could not be read: callers fail closed. */

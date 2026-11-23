@@ -48,6 +48,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { bridgeForWorkspace } from './core/store-link';
 import { isStandaloneId } from './core/workspace-kind';
 import { ordersRoutes } from './routes/orders';
+import { storeAssistRoutes } from './routes/store-assist';
 import { proofRoutes } from './routes/proof';
 import { agentRoutes } from './routes/agent';
 import { connectorRoutes } from './routes/connectors';
@@ -217,6 +218,7 @@ api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
+api.route('/', storeAssistRoutes);
 api.route('/', invitationsRoutes); // CHAT-SA-4: the invitee's own pending invitations; auth = requirePerson mounted on /workspaces/* above (identity/person.ts)
 registerStarterSet(PACK.templates);
 registerPerStoreTemplate(PACK.perStoreTemplate ?? null);

@@ -1,0 +1,46 @@
+{
+  "id": "store.top-products",
+  "status": "live",
+  "area": "orders",
+  "version": 1,
+  "versionDate": "2026-11-23",
+  "titleAr": "أكتر المنتجات مبيعًا",
+  "titleEn": "Best-selling products",
+  "screens": [],
+  "api": [
+    "GET /stores/:storeId/store/top-products"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ebda-assistant",
+  "questions": {
+    "ar": [
+      "إيه أكتر منتج بيتباع؟",
+      "أكتر 3 منتجات مبيعًا الأسبوع ده",
+      "eh akter montag byetba3"
+    ],
+    "en": [
+      "What is my best-selling product?"
+    ]
+  },
+  "steps": [
+    "Ask the assistant for the best sellers of today, the last 7 days or the last 30 days (default 30); it returns name, units sold and revenue for the top 1 to 10",
+    "The figures are the store's own analytics, read live; the assistant quotes them as returned and never estimates"
+  ],
+  "edgeCases": [
+    "No store bound (standalone workspace): the tool is not offered",
+    "Store unreachable: the assistant says it could not read the store data, it never guesses a number",
+    "Orders-today and total-sales questions are NOT answered by this tool (the assistant points to the store dashboard)"
+  ],
+  "gaps": [
+    "No screen yet: the assistant reads it, or the route"
+  ]
+}

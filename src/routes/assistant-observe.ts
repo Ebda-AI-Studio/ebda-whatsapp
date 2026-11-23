@@ -14,17 +14,22 @@ export const ENGINE_FALLBACK: L = { ar: 'مقدرتش أرد دلوقتي. جر�
 export const TOOL_FAILED: L = { ar: 'مقدرتش أقرا بيانات متجرك دلوقتي. جرّب تاني بعد لحظة.', en: 'I could not read your store data right now. Please try again in a moment.' };
 export const EMPTY_ANSWER: L = { ar: 'الرد جه فاضي من المساعد. جرّب تسأل بصيغة تانية أو ابعت السؤال تاني.', en: 'The assistant came back with an empty answer. Try rephrasing, or send the question again.' };
 
-/** Chat has no store-wide orders / sales / revenue tool (those live in the store's own dashboard). Asking for them must never produce a number the model made up. */
+/** Chat has no store-wide orders-count / sales-total / revenue tool (those live in the store's own dashboard); best sellers ARE a tool (`store_top_products`). Asking for the missing ones must never produce a number the model made up. */
 export const NO_STORE_METRICS: L = { ar: 'مفيش عندي أداة لسه بتجيب عدد الطلبات أو المبيعات للمتجر كله. شوف الأرقام دي من لوحة تحكم المتجر.', en: 'I do not have a tool yet that reads your store-wide orders or sales. Please check those numbers in your store dashboard.' };
 const METRIC = /(طلب|طلبات|اوردر|مبيع|ايراد|ارباح|ربح|orders?|sales|revenue|income|profit)/i;
 const PERIOD = /(النهارد|اليوم|امبارح|الاسبوع|الشهر|السنه|today|yesterday|this week|this month|this year|last week|last month)/i;
 const COUNT = /(كام|عدد|اجمال|مجموع|how many|how much|total|number of)/i;
-/** "How many orders / how much in sales ... today": a store-wide figure Chat has no tool for. (A question naming a customer is the customer-orders tool's, and has no count word.) */
-export const isStoreMetricQuestion = (q: string): boolean => { const f = foldArabic(q); return METRIC.test(f) && PERIOD.test(f) && COUNT.test(f); };
+/** "Which product sells most / the top sellers ...": answered by `store_top_products`, so it is NOT a question without a tool (a superlative on products or on what sells; "how many orders" has none). */
+const TOP_SELLERS = /(اكتر|اكثر|اعلي|افضل|top|best|most)[^.?!]{0,30}(منتج|صنف|بيتباع|بتتباع|اتباع|مبيعا|seller|selling|products?|items?|sold)|(بيتباع|بتتباع|best.?sell|top.?sell)/i;
+export const isTopSellersQuestion = (q: string): boolean => TOP_SELLERS.test(foldArabic(q));
+/** "How many orders / how much in sales ... today": a store-wide figure Chat has no tool for. (A question naming a customer is the customer-orders tool's, and has no count word; a best-sellers question has its own tool.) */
+export const isStoreMetricQuestion = (q: string): boolean => { const f = foldArabic(q); return METRIC.test(f) && PERIOD.test(f) && COUNT.test(f) && !isTopSellersQuestion(q); };
 
 // Arabic-Indic (U+0660-0669) and Persian (U+06F0-06F9) digits are written as escapes (DIGITS-1): this is the INPUT side, it must recognise what a model may print.
 const DIGITS = /[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[.,][0-9\u0660-\u0669\u06F0-\u06F9]+)?/g;
 const ASCII_DIGITS = (x: string): string => x.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) & 0xf));
+/** "5,400" and "5400" are the same figure: a thousands separator (a comma before exactly three digits) never makes a returned number look invented. */
+const PLAIN = (x: string): string => x.replace(/(?<=\d),(?=\d{3}(?!\d))/g, '');
 
 /**
  * GLM-5.3 cannot switch reasoning off (levels max | high | low, default max). Live 2026-11-23: with 15 tools offered the model spent the whole 700-token output budget on reasoning
@@ -115,8 +120,8 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; lo
       // A store-wide orders / sales question with a reply that states a figure no tool returned: the figure is invented, so the honest answer replaces it.
       if (question && METRIC.test(question) && PERIOD.test(question)) {
         const said = res.segments.map((x) => (x.kind === 'text' ? x.text : '')).join(' ');
-        const real = ASCII_DIGITS(state.toolOut.join(' '));
-        const invented = (said.match(DIGITS) ?? []).map(ASCII_DIGITS).filter((n) => !real.includes(n));
+        const real = PLAIN(ASCII_DIGITS(state.toolOut.join(' ')));
+        const invented = (said.match(DIGITS) ?? []).map((n) => PLAIN(ASCII_DIGITS(n))).filter((n) => !real.includes(n));
         if (invented.length) {
           emit('assistant_invented_figure_removed', { count: invented.length });
           return { ...res, status: 'answered', segments: [{ kind: 'text', text: NO_STORE_METRICS[locale] }] };
