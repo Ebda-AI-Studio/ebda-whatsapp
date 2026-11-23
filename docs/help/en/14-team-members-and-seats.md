@@ -8,7 +8,7 @@ capabilities:
 
 # Your team and seats in Ebda Chat
 
-Your package says how many people can work in Ebda Chat, **you included**: Starter and Store-included 2, Growth 5, Pro 15. You decide who gets the seats.
+Your package says how many people can work in Ebda Chat, **you included**: "Chat 300 AI replies" and Store-included 2, "Chat 1,500 AI replies" 5, "Chat 5,000 AI replies" 15. You decide who gets the seats.
 
 ## How it works
 1. Add the person as staff on your store (in Ebda Store). Adding them there does not give them access to WhatsApp yet.

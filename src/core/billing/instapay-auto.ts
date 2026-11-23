@@ -84,6 +84,17 @@ export function instapayAutoReady(env: Env): { ready: boolean; missing: string[]
   return { ready: missing.length === 0, missing };
 }
 
+/**
+ * The daily pass: an operator switched auto-confirm to shadow or live but a binding or secret is missing, so every payment still needs a person
+ * and nobody was told (prod 2026-11-17: /health said ready:false, the feature was silently off). Mode `off` is a decision, not a fault, so it stays quiet.
+ */
+export async function checkAutoReadiness(env: Env): Promise<void> {
+  const mode = await getAutoMode(env);
+  if (mode === 'off') return;
+  const r = instapayAutoReady(env);
+  if (!r.ready) alert('instapay_auto_not_ready', { mode, missing: r.missing });
+}
+
 export const getDuplicateIndex = (env: Env): DuplicateIndex | null => (env.INSTAPAY_DEDUPE_DB ? new D1DuplicateIndex(env.INSTAPAY_DEDUPE_DB as unknown as D1Like) : null);
 
 // ---- rows ---------------------------------------------------------------------------------------------------------------------------------------------------

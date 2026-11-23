@@ -620,6 +620,15 @@ export const DO_MIGRATIONS: readonly string[] = [
   // ON for one created after it. The marker lives in workspace_meta, a table that is NOT in BACKUP_TABLES (agent_state is, and a restore needs every backed-up table empty,
   // so migrate() must never write into one). migrate() inserts the marker only when no migration had ever run (a brand-new workspace); no row = OFF.
   `CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // v48 (inbox tools follow-up): conversation tags are lower-cased at write time since A27, so older mixed-case rows ('VIP' next to 'vip') are folded once. The lower-case twin is
+  // inserted first with OR IGNORE (the primary key merges a duplicate into the row that is already there, and the conversation link is kept), then the mixed-case originals go.
+  // The table has no per-row attribution to keep. SQLite lower() folds ASCII only, which is all a Latin-script tag has to fold (Arabic has no case).
+  `INSERT OR IGNORE INTO conversation_tags (conversation_id, tag) SELECT conversation_id, lower(trim(tag)) FROM conversation_tags WHERE tag <> lower(trim(tag)) AND lower(trim(tag)) <> '';
+   DELETE FROM conversation_tags WHERE tag <> lower(trim(tag));`,
+  // v49 (Ruling CHAT-RECS-SWITCH-1; follows #136's v48 tag fold, so rebase after it merges and keep this entry LAST): what the proactive post-order suggestion did for this order ('sent', 'skipped:<reason>', 'failed:enqueue'); NULL = not decided yet. It is the
+  // idempotency claim (one decision per order) and the customer frequency cap. Lives on store_orders, so it is erased with the customer (by wa_id) and backed up with the order.
+  `ALTER TABLE store_orders ADD COLUMN recs_outcome TEXT;
+   ALTER TABLE store_orders ADD COLUMN recs_at INTEGER;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

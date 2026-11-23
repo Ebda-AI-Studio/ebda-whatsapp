@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { InboxSource } from '../data/source';
 import type { Lang, Strings } from '../i18n';
 import { LoadError } from './LoadError';
+import { Skeleton } from './Skeleton';
 
 type Connectors = NonNullable<InboxSource['connectors']>;
 type Draft = { id: string; kind: 'webhook' | 'odoo'; enabled: boolean; url: string; tools: string; database: string; login: string; secret: string; existing: boolean };
@@ -112,7 +113,7 @@ export function IntegrationsScreen({ t, source, readOnly = false }: { t: Strings
         <h2 id="conn-title">{t.connTitle}</h2>
         <p className="muted">{t.connIntro}</p>
         {readOnly && <p className="muted" role="note">{t.connReadOnly}</p>}
-        {list === undefined && <p className="muted">…</p>}
+        {list === undefined && <Skeleton t={t} rows={3} />}
         {list === 'error' && <LoadError t={t} onRetry={load} />}
         {Array.isArray(list) && list.length === 0 && !draft && <p className="muted">{t.connNone}</p>}
         {Array.isArray(list) && list.map((c) => (

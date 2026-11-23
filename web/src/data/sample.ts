@@ -122,6 +122,7 @@ export function createSampleSource(): InboxSource {
     windowOpenUntil: s.windowH === null ? null : BASE + s.windowH * H,
   }));
   let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', tone: 'warm', notifyPhone: null, provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, recommendProducts: true, hasApiKey: false, credits: 500, knowledgeReady: false };
+  let recs = { enabled: false, templateName: null as string | null, suggestions: 3, capDays: 14, quietFrom: 21, quietTo: 9 };
   let switches: BotSwitchesDto = { orderingBot: true, orderConfirmations: false, otpViaWhatsApp: false };
   const pendingConfirms = new Set<string>();
   let bot: BotSettingsDto = {
@@ -219,6 +220,15 @@ export function createSampleSource(): InboxSource {
     async saveBotSettings(update) {
       bot = structuredClone(update);
       return structuredClone(bot);
+    },
+    proactiveRecs: {
+      async get() { return { ...recs }; },
+      async save(change) {
+        const name = change.templateName === undefined ? recs.templateName : change.templateName;
+        if ((change.enabled ?? recs.enabled) && !name) throw Object.assign(new Error('template_required'), { detail: 'template_required' });
+        recs = { ...recs, enabled: change.enabled ?? recs.enabled, templateName: name };
+        return { ...recs };
+      },
     },
     switches: {
       async get() { return { ...switches }; },

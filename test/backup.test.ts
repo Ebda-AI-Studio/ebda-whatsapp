@@ -28,6 +28,17 @@ it('import into an empty workspace reproduces counts and hashes', async () => {
   expect(await rows('ws-b2-restore', 'SELECT preview FROM messages ORDER BY id LIMIT 1')).toEqual([{ preview: 'رسالة 0 👋' }]);
 });
 
+it('a backup carries the merchant\'s quick replies and restore brings them back in order', async () => {
+  await seed('ws-bq1', 2);
+  await exec('ws-bq1', "INSERT INTO quick_replies (text, position, created_by, created_at) VALUES ('اهلا بيك', 1, 'u1', 10), ('تم الشحن', 2, NULL, 20)");
+  const m = await workspace('ws-bq1').exportSnapshot('2026-10-24');
+  expect(m.tables.quick_replies!.rows).toBe(2);
+  expect(await workspace('ws-bq1-restore').importSnapshot('backups/ws-bq1/2026-10-24/')).toEqual({ ok: true, manifest: m });
+  expect(await rows('ws-bq1-restore', 'SELECT text, position, created_by, created_at FROM quick_replies ORDER BY position')).toEqual([
+    { text: 'اهلا بيك', position: 1, created_by: 'u1', created_at: 10 }, { text: 'تم الشحن', position: 2, created_by: null, created_at: 20 },
+  ]);
+});
+
 it('import refuses a tampered file', async () => {
   await seed('ws-b3', 3);
   await workspace('ws-b3').exportSnapshot('2026-10-24');

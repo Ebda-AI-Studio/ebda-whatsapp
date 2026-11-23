@@ -29,7 +29,7 @@
   "questions": {
     "ar": [
       "الباقات بكام؟",
-      "عايز اشترك في Growth",
+      "عايز اشترك في شات 1500 رد ذكي",
       "ازاي اجدد الباقة؟",
       "el baqat bekam",
       "aghayyar el baqa"
@@ -40,7 +40,7 @@
     ]
   },
   "steps": [
-    "Wallet > Packages; Starter 690 EGP/mo (2 members, 300 credits), Growth 1,490 (5 members, campaigns, order in chat, 1500 credits), Pro 3,490 (15 members, API, priority support, 5000 credits); yearly = 9x monthly for 12 months",
+    "Wallet > Packages; Chat 300 AI replies 690 EGP/mo (2 members), Chat 1,500 AI replies 1,490 (5 members, campaigns, order in chat), Chat 5,000 AI replies 3,490 (15 members, API, priority support); the size is the monthly AI replies; yearly = 9x monthly for 12 months",
     "Pay on Kashier; package turns on when Kashier confirms",
     "Runs one month and does NOT auto-renew; reminder a week before"
   ],

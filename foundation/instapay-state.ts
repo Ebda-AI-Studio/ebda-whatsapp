@@ -27,9 +27,14 @@ export function revertGraceUntil(now: number): number {
   return now + REVERT_GRACE_MS;
 }
 
-/** First auto-confirmed payment is capped at ONE month of the chosen plan (Chat top-up: the Chat plan's monthly price). No plan price -> 0 -> always human. */
+/** INSTAPAY-CAP-2: a FREE package (monthly price exactly 0, incl. `store-included`) has no month price to cap by, so its first auto-confirmed payment is this fixed 500 EGP (piastres). */
+export const FREE_PLAN_FIRST_PAYMENT_CAP_MINOR = 50000;
+
+/** First auto-confirmed payment is capped at ONE month of the chosen plan (Chat top-up: the Chat plan's monthly price). A free plan (price exactly 0) gets
+ *  FREE_PLAN_FIRST_PAYMENT_CAP_MINOR (INSTAPAY-CAP-2). No plan price (null / missing / invalid) -> 0 -> always human (no plan = no automatic credit). */
 export function firstPaymentCapMinor(a: { monthlyPriceMinor: number | null }): number {
   const p = a?.monthlyPriceMinor;
+  if (p === 0) return FREE_PLAN_FIRST_PAYMENT_CAP_MINOR;
   return typeof p === 'number' && Number.isSafeInteger(p) && p > 0 ? p : 0;
 }
 

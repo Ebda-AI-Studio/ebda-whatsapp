@@ -410,6 +410,10 @@ export const mergeContactsRequest = z.object({ fromWaId: z.string().regex(/^[1-9
 export const exportContactQuery = z.object({ after: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(1000).default(500) });
 /** PUT /retention (B4): the owner's message window in days; null = the platform default. */
 export const retentionRequest = z.object({ days: z.number().int().min(30).max(3650).nullable() }).strict();
+/** PUT /proactive-recs (CHAT-RECS-SWITCH-1): the owner's switch (default OFF) and the name of the APPROVED marketing template. Turning it on needs a name. */
+export const proactiveRecsRequest = z.object({ enabled: z.boolean().optional(), templateName: z.string().regex(/^[a-z0-9_]{1,512}$/).nullable().optional() }).strict().refine((v) => v.enabled !== undefined || v.templateName !== undefined);
+export const proactiveRecsDto = z.object({ enabled: z.boolean(), templateName: z.string().nullable(), suggestions: z.number().int(), capDays: z.number().int(), quietFrom: z.number().int(), quietTo: z.number().int() });
+export type ProactiveRecsDto = z.infer<typeof proactiveRecsDto>;
 export const retentionDto = z.object({ days: z.number().int().nullable(), effectiveDays: z.number().int(), defaultDays: z.number().int(), minDays: z.number().int(), maxDays: z.number().int() });
 /**
  * GET /members (WA-SEATS-1): the team as the Store knows it, with each person's seat here. `seat` is 'owner' (always works, counts as one), 'seated',
@@ -616,7 +620,7 @@ export const walletDto = z.object({
   plan: z.object({
     packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable(),
     /** Additive (CHAT-QA-13): the Chat package's own name, for a package bought in Chat. */
-    packageName: z.string().optional(),
+    packageName: z.string().optional(), packageNameAr: z.string().optional(),
     /** Additive (CHAT-QA-13): the Store plan, by the Store's own name, when the running package is the one the Store plan includes. */
     storePlan: z.object({ code: z.string(), nameAr: z.string(), nameEn: z.string() }).optional(),
   }).nullable(),
@@ -666,7 +670,8 @@ export const topupDto = z.object({
 /** Feature keys in display order (shared with marketing and the Store plan comparison). */
 export const PACKAGE_FEATURE_KEYS = ['members', 'shared_inbox', 'order_confirmations', 'templates', 'campaigns', 'order_in_chat', 'api', 'priority_support', 'ai_credits'] as const;
 export const packageDto = z.object({
-  id: z.string(), name: z.string(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative(),
+  /** `name` is the English display name; `nameAr` / `nameEn` are the size-based names (Ahmad 2026-11-19), additive. */
+  id: z.string(), name: z.string(), nameAr: z.string().optional(), nameEn: z.string().optional(), priceMinor: z.number().int().positive(), aiCredits: z.number().int().nonnegative(),
   maxMembers: z.number().int().min(1), features: z.array(z.enum(PACKAGE_FEATURE_KEYS)), periodMonths: z.number().int().positive(),
 });
 export const packageOrderDto = z.object({ orderId: z.string(), state: z.enum(['pending', 'paid', 'failed', 'expired', 'refunded']), packageId: z.string(), amountMinor: z.number().int(), checkoutUrl: z.string().url().optional() });
