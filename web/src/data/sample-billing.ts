@@ -93,8 +93,8 @@ export function createSampleWallet(): WalletApi {
     },
     topupState: async (orderId) => ({ orderId, state: 'pending', amountMinor: 0, feeMinor: 0, totalMinor: 0 }),
     packages: async () => [
-      { id: 'basic', name: 'Basic', priceMinor: 25000, aiCredits: 100, maxMembers: 2, features: ['members', 'shared_inbox', 'order_confirmations', 'templates', 'ai_credits'], periodMonths: 1 },
-      { id: 'gold', name: 'Gold', priceMinor: 50000, aiCredits: 300, maxMembers: 5, features: ['members', 'shared_inbox', 'order_confirmations', 'templates', 'campaigns', 'order_in_chat', 'ai_credits'], periodMonths: 1 },
+      { id: 'basic', name: 'Chat 100 AI replies', nameAr: 'شات 100 رد ذكي', nameEn: 'Chat 100 AI replies', priceMinor: 25000, aiCredits: 100, maxMembers: 2, features: ['members', 'shared_inbox', 'order_confirmations', 'templates', 'ai_credits'], periodMonths: 1 },
+      { id: 'gold', name: 'Chat 300 AI replies', nameAr: 'شات 300 رد ذكي', nameEn: 'Chat 300 AI replies', priceMinor: 50000, aiCredits: 300, maxMembers: 5, features: ['members', 'shared_inbox', 'order_confirmations', 'templates', 'campaigns', 'order_in_chat', 'ai_credits'], periodMonths: 1 },
     ],
     async buyPackage(packageId) {
       const id = nextId++;

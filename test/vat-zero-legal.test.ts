@@ -5,13 +5,16 @@ import { expect, it } from 'vitest';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
-// The suite's single VAT-0 clause (business/ebda/legal/VAT-0-clause.md), vendored byte for byte; the store product publishes the same text.
-const CLAUSE_SHA = '9e308d934800b655673aa0491ec88f822811e79bc01793d7ca43067fd22c50a0';
-const clause = read('vendor/legal/VAT-0-clause.md');
+// The suite's single VAT-0 clause lives in ebda-foundation (legal/clauses/VAT-0-clause.md, Ruling FDN-LEGAL-1), vendored byte for byte; the Store
+// publishes the same text. foundation.lock.json (sha256) is the pin that replaced the hand-kept CLAUSE_SHA.
+const CLAUSE_PATH = 'foundation/legal/clauses/VAT-0-clause.md';
+const clause = read(CLAUSE_PATH);
 const section = (h: string) => clause.split(`## ${h}\n`)[1]!.split('\n## ')[0]!.trim();
 
-it('the vendored VAT-0 clause is the pinned suite text', () => {
-  expect(createHash('sha256').update(clause).digest('hex')).toBe(CLAUSE_SHA);
+it('the vendored VAT-0 clause is the pinned suite text (the foundation lock pins it)', () => {
+  const lock = JSON.parse(read('foundation.lock.json')) as { files: Record<string, string> };
+  expect(lock.files[CLAUSE_PATH]).toMatch(/^[0-9a-f]{64}$/);
+  expect(createHash('sha256').update(clause).digest('hex')).toBe(lock.files[CLAUSE_PATH]);
 });
 
 it('terms 6.6 carry the VAT-0 paragraph verbatim, in both languages, and nothing else says VAT is added', () => {

@@ -1,0 +1,230 @@
+{
+ "comment": "F7-HAMZA-2: does `query` find `text`? Each query word is tried in its fold-B form against the B-folded index text and in its fold-A form against the A-folded index text; the word matches if EITHER is a PREFIX of some word (the FTS5 `\"tok\"*` rule Chat uses and the LIKE rule the Store uses). `match:false` rows pin words the folds must NOT merge (and the prefix rule: a query is a prefix of a word, not a substring). Real Egyptian catalogue / contact / message samples.",
+ "cases": [
+  {
+   "q": "شنطه",
+   "text": "شنطة جلد حريمي",
+   "match": true
+  },
+  {
+   "q": "شنطة",
+   "text": "شنطه جلد",
+   "match": true
+  },
+  {
+   "q": "احذيه",
+   "text": "أحذية رياضية",
+   "match": true
+  },
+  {
+   "q": "أحذية",
+   "text": "احذيه رياضيه",
+   "match": true
+  },
+  {
+   "q": "اسدال",
+   "text": "إسدال صلاة",
+   "match": true
+  },
+  {
+   "q": "ايس كريم",
+   "text": "آيس كريم فانيليا",
+   "match": true
+  },
+  {
+   "q": "جزمة",
+   "text": "جَزْمَة شتوي",
+   "match": true
+  },
+  {
+   "q": "عباية",
+   "text": "عبـــاية سوداء",
+   "match": true
+  },
+  {
+   "q": "مقاس 42",
+   "text": "مقاس ٤٢ أسود",
+   "match": true
+  },
+  {
+   "q": "مقاس ٤٢",
+   "text": "مقاس 42",
+   "match": true
+  },
+  {
+   "q": "مستشفي",
+   "text": "مستشفى الدمرداش",
+   "match": true
+  },
+  {
+   "q": "كوتشي",
+   "text": "کوتشی ابيض",
+   "match": true
+  },
+  {
+   "q": "مح",
+   "text": "محمد علي حسن",
+   "match": true
+  },
+  {
+   "q": "محمد حس",
+   "text": "محمد علي حسن",
+   "match": true
+  },
+  {
+   "q": "ابو",
+   "text": "أبو العلا",
+   "match": true
+  },
+  {
+   "q": "SHOES",
+   "text": "Running shoes",
+   "match": true
+  },
+  {
+   "q": "3abaya",
+   "text": "3ABAYA black",
+   "match": true
+  },
+  {
+   "q": "ايفون ١٥",
+   "text": "ايفون 15 برو",
+   "match": true
+  },
+  {
+   "q": "مسئول",
+   "text": "مسؤول",
+   "match": true
+  },
+  {
+   "q": "حذاء",
+   "text": "حذائي",
+   "match": true
+  },
+  {
+   "q": "حذاء",
+   "text": "حذاءان",
+   "match": true
+  },
+  {
+   "q": "ورد",
+   "text": "وردة حمراء",
+   "match": true
+  },
+  {
+   "q": "برد",
+   "text": "شتاء بارد",
+   "match": false
+  },
+  {
+   "q": "لا",
+   "text": "ﻻ تنسى",
+   "match": true
+  },
+  {
+   "q": "محمد",
+   "text": "ﻣﺤﻤﺪ علي",
+   "match": true
+  },
+  {
+   "q": "123",
+   "text": "رقم １２٣",
+   "match": true
+  },
+  {
+   "q": "مسؤول",
+   "text": "مسئول الحسابات",
+   "match": true
+  },
+  {
+   "q": "مسئول",
+   "text": "مسؤول الحسابات",
+   "match": true
+  },
+  {
+   "q": "مسيول",
+   "text": "مسئول الحسابات",
+   "match": true
+  },
+  {
+   "q": "مسيول",
+   "text": "مسؤول الحسابات",
+   "match": false
+  },
+  {
+   "q": "سوال",
+   "text": "سؤال عن الشحن",
+   "match": true
+  },
+  {
+   "q": "سئوال",
+   "text": "سؤال عن الشحن",
+   "match": true
+  },
+  {
+   "q": "سؤال",
+   "text": "سوال",
+   "match": true
+  },
+  {
+   "q": "سائل",
+   "text": "ساءل",
+   "match": true
+  },
+  {
+   "q": "ساءل",
+   "text": "سائل منوي",
+   "match": true
+  },
+  {
+   "q": "سايل",
+   "text": "سائل منوي",
+   "match": true
+  },
+  {
+   "q": "رايع",
+   "text": "منتج رائع",
+   "match": true
+  },
+  {
+   "q": "رائع",
+   "text": "منتج رايع",
+   "match": true
+  },
+  {
+   "q": "سال",
+   "text": "سائل منوي",
+   "match": false
+  },
+  {
+   "q": "مسئول",
+   "text": "مسلول",
+   "match": false
+  },
+  {
+   "q": "سؤال",
+   "text": "سلال",
+   "match": false
+  },
+  {
+   "q": "رئيس",
+   "text": "رسيس",
+   "match": false
+  },
+  {
+   "q": "رئيس",
+   "text": "الرئيس التنفيذي",
+   "match": false
+  },
+  {
+   "q": "ريس",
+   "text": "رئيس الشركة",
+   "match": false
+  },
+  {
+   "q": "رييس",
+   "text": "رئيس الشركة",
+   "match": true
+  }
+ ]
+}

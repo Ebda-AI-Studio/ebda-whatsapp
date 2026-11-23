@@ -11,6 +11,7 @@ import { buildSystemPrompt, computeReleaseId } from '../../foundation/smart-laye
 import type { Mode, TurnCtx } from '../../foundation/smart-layer/types';
 import { alert } from '../core/observability';
 import { chatAdapter } from '../core/smart-layer/adapter';
+import { isStandaloneId } from '../core/workspace-kind';
 import { chatControls } from '../core/smart-layer/controls';
 import type { Env } from '../env';
 import { viewOf, type StoredCap } from '../core/smart-layer/registry';
@@ -20,6 +21,7 @@ import registryJson from '../../assistant/registry.generated.json';
 import corpusJson from '../../assistant/help-corpus.generated.json';
 import { ensureHelpIndex, helpDeps } from '../core/smart-layer/help-index';
 import type { CallApi } from '../core/smart-layer/tools/read.tools';
+import { observeTurn } from './assistant-observe';
 import { apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
 
 const turnBody = z.object({ conversationId: z.string().uuid(), text: z.string().min(1).max(BUDGET.inputChars), locale: z.enum(['ar', 'en']) });
@@ -81,13 +83,14 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
       const res = await api.request(`/stores/${ctx.storeId}${path}${qs}`, { method: init?.method ?? 'GET', headers: { authorization: auth, ...(init?.body !== undefined ? { 'content-type': 'application/json' } : {}) }, ...(init?.body !== undefined ? { body: JSON.stringify(init.body) } : {}) }, c.env, c.executionCtx);
       return { status: res.status, json: await res.json().catch(() => null) };
     };
-    const adapter = chatAdapter({ env: c.env, ws, callApi, registry: REGISTRY, corpus: CORPUS, assistantCapability: ASSISTANT_CAPABILITY, ...(override.ai ? { ai: override.ai } : {}), ...(override.help ? { help: override.help } : {}) });
+    const adapter = chatAdapter({ env: c.env, ws, workspaceId: storeId, callApi, registry: REGISTRY, corpus: CORPUS, assistantCapability: ASSISTANT_CAPABILITY, ...(override.ai ? { ai: override.ai } : {}), ...(override.help ? { help: override.help } : {}) });
     if (!contractChecked) {
       const problems = checkAdapterContract(adapter);
       if (problems.length) throw new Error(`assistant adapter contract: ${problems.join('; ')}`);
       contractChecked = true;
     }
-    release ??= computeReleaseId({ systemPrompt: buildSystemPrompt('ar'), tools: adapter.tools(), models: adapter.models, budget: BUDGET });
+    // The release id names the FULL tool set (a standalone workspace sees a subset of the same release), so it never depends on which kind of workspace asked first.
+    release ??= computeReleaseId({ systemPrompt: buildSystemPrompt('ar'), tools: isStandaloneId(storeId) ? chatAdapter({ env: c.env, ws, callApi, registry: REGISTRY, corpus: CORPUS, assistantCapability: ASSISTANT_CAPABILITY, ...(override.ai ? { ai: override.ai } : {}), ...(override.help ? { help: override.help } : {}) }).tools() : adapter.tools(), models: adapter.models, budget: BUDGET });
     // The history key carries the CALLER: the engine loads turns by conversation id alone, so a client-chosen id can never open (or plant text in) another member's history.
     const userId = c.get('principal').userId;
     const ctx: TurnCtx = { product: 'chat', storeId, userId, role: c.get('storeRole'), locale, now: Date.now(), conversationId: ownConversation(userId, conversationId), releaseId: await release };
@@ -106,8 +109,11 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     }
     // The confirm token leaves the engine through this callback only: into THIS response for the merchant's own button, nowhere else.
     const approvals: ApprovalToken[] = [];
-    const res = await runTurn(s.adapter, s.ctx, { text: body.data.text }, { onApprovalToken: (t) => approvals.push(t) });
+    const obs = observeTurn(s.adapter, { storeId: s.ctx.storeId });
+    const raw = await runTurn(obs.adapter, s.ctx, { text: body.data.text }, { onApprovalToken: (t) => approvals.push(t), provider: obs.deterministic(body.data.text, body.data.locale) ?? obs.provider });
+    const res = obs.refine(raw, body.data.locale, body.data.text);
     c.header('cache-control', 'no-store');
+    c.header('x-request-id', obs.requestId);
     return c.json({ status: res.status, segments: res.segments, previews: res.previews, ...(approvals.length ? { approvals } : {}), turnId: res.turnId });
   });
 

@@ -1,25 +1,25 @@
 {
   "id": "campaigns.report-export",
-  "status": "planned",
-  "plan": "none yet (future)",
+  "status": "live",
   "area": "campaigns",
   "version": 1,
   "versionDate": "2026-11-14",
   "titleAr": "تقرير الحملة وتصديره",
   "titleEn": "Campaign report / compliance export",
   "screens": [],
-  "api": [],
+  "api": [
+    "GET /stores/:storeId/campaigns/:campaignId/report"
+  ],
   "mcpTool": null,
   "planGate": null,
   "roles": [
-    "owner",
-    "staff"
+    "owner"
   ],
   "policy": "free",
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
   "questions": {
     "ar": [
       "عايز تقرير الحملة",
@@ -31,11 +31,12 @@
     ]
   },
   "steps": [
-    "Not built"
+    "Owner downloads a campaign report: totals, why recipients were skipped, consent-gated statement; counts only, no phone numbers",
+    "JSON, or CSV with ?format=csv"
   ],
   "edgeCases": [],
   "gaps": [
-    "No API, UI or help; only on-screen counts"
+    "No button on the Campaigns screen yet: the report is reached by the assistant or the route"
   ],
-  "assistantNote": "Assistant should say it is not available yet and offer the Statement CSV for costs"
+  "assistantNote": "Counts only. The assistant reads the report back; it never lists customers."
 }

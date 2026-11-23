@@ -17,7 +17,7 @@ import { TEMPLATE_WRITE_CREDITS, writeTemplate, type Written } from '../template
 import { ToolInputError, row, schemaOf, writeTool, type Kit, type Reader } from './write';
 
 type Check = { issues: RuleIssue[]; payloadHash: string };
-type Stored = { name: string; language: string; category: string; status: string; bodyText: string; rejectedReason: string | null; advice?: { ar: string; en: string }; editAllowance?: { allowed: true } | { allowed: false; reason: string; retryAt: number | null } };
+type Stored = { name: string; language: string; category: string; status: string; quality?: 'GREEN' | 'YELLOW' | 'RED' | 'UNKNOWN' | null; bodyText: string; rejectedReason: string | null; advice?: { ar: string; en: string }; editAllowance?: { allowed: true } | { allowed: false; reason: string; retryAt: number | null } };
 const ref = z.object({ name: z.string().min(1).max(512), language: z.string().regex(/^[a-z]{2}(_[A-Z]{2})?$/) }).strict();
 const cairo = (ms: number, lang: 'ar' | 'en') => new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { timeZone: 'Africa/Cairo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ms));
 const asDraft = (a: TemplateDraftInput): TemplateDraftInput => a;
@@ -112,7 +112,7 @@ export function templateTools(kit: Kit): ToolSpec[] {
         const used = await campaignsUsing(api, a);
         const allow = t.editAllowance;
         return {
-          name: t.name, language: t.language, category: t.category, status: t.status, rejectedReason: t.rejectedReason, advice: t.advice ?? null,
+          name: t.name, language: t.language, category: t.category, status: t.status, quality: t.quality ?? null, rejectedReason: t.rejectedReason, advice: t.advice ?? null,
           canEdit: allow ? allow.allowed : null,
           ...(allow && !allow.allowed ? { editBlockedBy: allow.reason, ...(allow.retryAt ? { editUnlocksAt: cairo(allow.retryAt, ctx.locale) } : {}) } : {}),
           usedByCampaigns: used,
@@ -228,6 +228,21 @@ export function templateTools(kit: Kit): ToolSpec[] {
         rows: [row('قوالب موجودة عندك دلوقتي', 'Templates you already have', undefined, String(s.names.length)), row('اللي هيحصل', 'What happens', undefined, 'القوالب الناقصة بتتبعت لـ Meta للمراجعة / the missing ones are sent to Meta for review')],
         request: { method: 'POST', path: '/templates/install-defaults' },
       }),
+    }, kit),
+    writeTool({
+      name: 'templates_install_seasonal', capabilityId: 'campaigns.seasonal-ramadan', policy: 'confirm', undo: 'irreversible',
+      description: 'Submit the Ramadan message templates (a greeting, an offer, opening hours) to Meta for approval. Each one is sent to Meta and cannot be taken back, so the merchant confirms with the button. They are only submitted, never sent to customers.',
+      args: z.object({ pack: z.literal('ramadan').default('ramadan') }).strict(),
+      read: async (api) => ({ names: ((await api.get('/templates')) as { items?: Array<{ name: string; language: string }> }).items?.map((t) => `${t.name}/${t.language}`).sort() ?? [] }),
+      plan: (_a, s) => {
+        const have = ['ramadan_greeting', 'ramadan_offer', 'ramadan_hours'].filter((n) => s.names.includes(`${n}/ar`));
+        if (have.length === 3) throw new ToolInputError('no_change');
+        return {
+          summary: { ar: 'تقديم قوالب رمضان لـ Meta', en: 'Submit the Ramadan templates to Meta' },
+          rows: [row('قوالب رمضان الموجودة عندك', 'Ramadan templates you already have', undefined, String(have.length)), row('اللي هيحصل', 'What happens', undefined, 'القوالب الناقصة بتتبعت لـ Meta للمراجعة، ومفيش رسالة بتروح لعميل / the missing ones are sent to Meta for review, nothing is sent to a customer')],
+          request: { method: 'POST', path: '/templates/install-seasonal', body: { pack: 'ramadan' } },
+        };
+      },
     }, kit),
   ];
 }

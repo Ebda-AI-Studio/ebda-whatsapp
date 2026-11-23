@@ -7,14 +7,19 @@ import { integrationState } from './integration';
 import { writeSessionState } from './session';
 import { routePath } from 'hono/route';
 import { subjectHash } from '../erasure';
-import { bridgeFor } from '../store-link';
+import { bridgeForWorkspace } from '../store-link';
+import { isStandaloneId, isStoreId } from '../workspace-kind';
 import { phoneDigits } from '../text-normalise';
 import { SESSION_CHECKED_READS, gateForRoute } from './scopes';
 import { IdentityError, type IdentityVerifier, type Principal } from './verifier';
 
 export const integratorTokensEnabled = (env: Partial<Pick<Env, 'INTEGRATOR_TOKENS_ENABLED'>> | undefined): boolean => env?.INTEGRATOR_TOKENS_ENABLED === '1' || env?.INTEGRATOR_TOKENS_ENABLED?.toLowerCase() === 'true';
 
-export type AuthVars = { principal: Principal; storeRole: 'owner' | 'staff' | 'super_admin' };
+export type AuthVars = {
+  principal: Principal; storeRole: 'owner' | 'staff' | 'super_admin';
+  /** A route may set structured facts (ids, before/after values, never free text) for the audit row `auditWrites` writes after it. */
+  auditDetail?: Record<string, string | number | boolean | null>;
+};
 
 /**
  * What a suspended workspace may still do: pay (wallet, packages) and erase a contact (a data-protection right never waits on a suspension).
@@ -47,7 +52,12 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
       return c.json({ error: status === 403 ? 'forbidden' : 'unauthorized' }, status);
     }
     const storeId = c.req.param('storeId');
-    const membership = principal.stores.find((s) => s.id === storeId);
+    // CHAT-SA-2: the id SHAPE decides the path before anything else. A UUID takes today's Store path (token `stores` claim + live Store bridge, no new read); an `sw_` id takes the
+    // standalone path (membership ONLY from D1, the token claim ignored); anything else is not a workspace.
+    const standalone = storeId !== undefined && isStandaloneId(storeId);
+    if (storeId !== undefined && !standalone && !isStoreId(storeId)) return c.json({ error: 'not_found' }, 404);
+    let membership: { id: string; role: 'owner' | 'staff' } | undefined = standalone ? undefined : principal.stores.find((s) => s.id === storeId);
+    let standaloneFlags: { suspended_at: number | null; integrations_revoked_at: number | null } | undefined;
     const write = c.req.method !== 'GET' && c.req.method !== 'HEAD';
     const routed = routePath(c, -1).replace(/^\/api\/v1/, ''); // the pattern of the handler that WILL answer; every decision below uses it
     // A write refused HERE never reaches `auditWrites` (it is mounted after this guard), so the refusal is recorded now: who, the routed pattern, the status; never a body (review item 13).
@@ -58,6 +68,27 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
       }
       return c.json({ error, ...extra }, status);
     };
+    if (standalone) {
+      // An integrator token is never valid on a standalone workspace (accounts clients are Store-scoped).
+      if (principal.integration) return refuse('forbidden', 403);
+      // ONE live read (a membership is never-stale: no cache, read on every request; the removed member is refused on the very next one). Fail closed.
+      type Row = { kind: string; suspended_at: number | null; integrations_revoked_at: number | null; role: 'owner' | 'staff' | null; status: string | null };
+      let row: Row | null;
+      try {
+        row = await c.env.DB.prepare(
+          'SELECT w.kind AS kind, w.suspended_at AS suspended_at, w.integrations_revoked_at AS integrations_revoked_at, m.role AS role, m.status AS status FROM workspaces w LEFT JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = ? WHERE w.id = ?',
+        ).bind(principal.userId, storeId).first<Row>();
+      } catch {
+        return c.json({ error: 'unavailable', message: 'membership_unavailable' }, 503);
+      }
+      if (!row) return c.json({ error: 'not_found' }, 404);
+      if (row.kind !== 'standalone') {
+        console.error(JSON.stringify({ alert: 'standalone_kind_mismatch', workspaceId: storeId })); // impossible by the D1 trigger: loud, and never served
+        return c.json({ error: 'internal' }, 500);
+      }
+      standaloneFlags = { suspended_at: row.suspended_at, integrations_revoked_at: row.integrations_revoked_at };
+      if (row.status === 'active' && row.role) membership = { id: storeId!, role: row.role };
+    }
     if (!membership && !principal.superAdmin) return refuse('forbidden', 403);
     // I3: a platform super admin who is NOT a member reads a store only AS an operator looking at a merchant's workspace: the view-as header and a reason (audited below), on EVERY store
     // route. Without them the read is refused and nothing is served or logged. (A write keeps its own refusal further down: operator_route_required.) Members are unaffected.
@@ -111,7 +142,7 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     // The operator kill switch (W2-OPS), read from D1 on every request that needs it (a NEVER-stale gate, no cache): every integrator token is refused
     // while `integrations_revoked_at` is set, and a suspended workspace takes no writes except paying, and erasing a contact.
     if (storeId && (write || principal.integration)) {
-      const flags = await c.env.DB.prepare('SELECT suspended_at, integrations_revoked_at FROM workspaces WHERE id = ?').bind(storeId).first<{ suspended_at: number | null; integrations_revoked_at: number | null }>();
+      const flags = standaloneFlags ?? await c.env.DB.prepare('SELECT suspended_at, integrations_revoked_at FROM workspaces WHERE id = ?').bind(storeId).first<{ suspended_at: number | null; integrations_revoked_at: number | null }>();
       if (principal.integration && flags?.integrations_revoked_at != null) return c.json({ error: 'unauthorized' }, 401); // the operator revoked this store's integrations: EVERY server token is refused (a client re-mints every few minutes, so an issue-time cut-off would not hold) until the operator restores them
       if (write && flags?.suspended_at != null && !principal.superAdmin && !allowedWhileSuspended(c.req.method, routed)) return refuse('forbidden', 403, { message: 'workspace_suspended' });
     }
@@ -132,8 +163,15 @@ export function requireStoreAccess(getVerifier: (env: Env) => IdentityVerifier):
     // can be 15 minutes behind). Staff must also hold a seat the owner assigned, inside the package's limit. No Store answer = 503 (fail closed), never "allowed". This runs before the
     // rate limit so a removed member's requests never spend the workspace's allowance. Without a Store link (a white-label deploy, no binding) there is no membership source and no seats.
     let effectiveRole: 'owner' | 'staff' | undefined;
-    if (storeId && membership && !principal.superAdmin && !principal.integration) {
-      const bridge = c.env ? bridgeFor(c.env) : null; // a unit test mounting this middleware alone has no env; the Worker always has one
+    if (storeId && standalone && membership && !principal.superAdmin) {
+      // Standalone: membership came from D1 a few lines up (live). No Store, no bridge. Staff still need a seat the owner assigned.
+      effectiveRole = membership.role;
+      if (effectiveRole === 'staff') {
+        const seat = await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(storeId)).seatOf(principal.userId);
+        if (seat !== 'seated') return refuse('no_seat', 403, { message: seat === 'over_limit' ? 'seat_over_limit' : 'no_seat' });
+      }
+    } else if (storeId && membership && !principal.superAdmin && !principal.integration) {
+      const bridge = c.env ? bridgeForWorkspace(c.env, storeId) : null; // a unit test mounting this middleware alone has no env; the Worker always has one
       if (bridge) {
         const live = await bridge.memberRole(storeId, principal.userId);
         if (!live.ok) return c.json({ error: 'unavailable', message: 'membership_unavailable' }, 503);

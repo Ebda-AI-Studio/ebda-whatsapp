@@ -1,4 +1,4 @@
-import { Store } from 'lucide-react';
+import { Briefcase, Store } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Strings } from '../i18n';
 import type { InboxSource } from '../data/source';
@@ -12,7 +12,7 @@ export function activeStoreName(source: Pick<InboxSource, 'stores' | 'storeId'>,
  * Store picker + account menu in the rail: shows the active store, lists the stores that have Chat (switching reloads Chat on that store),
  * and signs out. Opens on press, closes on Escape / outside press.
  */
-export function StoreMenu({ t, source }: { t: Strings; source: Pick<InboxSource, 'stores' | 'storeId' | 'switchStore' | 'signOut'> }) {
+export function StoreMenu({ t, source }: { t: Strings; source: Pick<InboxSource, 'stores' | 'storeId' | 'switchStore' | 'signOut' | 'standalone'> }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -28,7 +28,7 @@ export function StoreMenu({ t, source }: { t: Strings; source: Pick<InboxSource,
   return (
     <div className="store-menu" ref={box}>
       <button type="button" className="rail-store" aria-haspopup="dialog" aria-expanded={open} aria-controls="store-menu-panel" aria-label={`${t.storeMenu}: ${name}`} onClick={() => setOpen((o) => !o)}>
-        <Store size={20} aria-hidden /><span>{name}</span>
+        {source.standalone ? <Briefcase size={20} aria-hidden /> : <Store size={20} aria-hidden />}<span>{name}</span>
       </button>
       {open && (
         <div id="store-menu-panel" className="store-menu-panel" role="dialog" aria-label={t.storeMenu}>

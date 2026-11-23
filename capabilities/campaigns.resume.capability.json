@@ -15,7 +15,7 @@
     "POST /stores/:storeId/campaigns/:id/resume"
   ],
   "mcpTool": null,
-  "planGate": "feat_campaigns (Growth, Pro; not Starter / store-included)",
+  "planGate": "feat_campaigns (Chat 1,500 and 5,000 AI replies packages; not Chat 300 / store-included)",
   "roles": [
     "owner"
   ],

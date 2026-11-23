@@ -15,6 +15,7 @@ import { eraseSharedFor } from './shared/shared-number';
 import { dropErased } from './erasure';
 import { deleteTargets } from './erasure-targets';
 import { exportContact, mergeContacts, renameContact } from './contact-data';
+import { proactiveRecsView, runProactiveRecs, writeProactiveRecs } from './store-link/proactive-recs';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptOutMessage, matchOptIn } from './consent';
@@ -24,7 +25,7 @@ import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/he
 import { writeSessionState } from './identity/session';
 import { DAILY_KINDS, addTask, dailyHour, retryDelayMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
-import { normaliseText, phoneDigits } from './text-normalise';
+import { phoneDigits } from './text-normalise';
 import { conversationDto, type ConversationRow } from './dto';
 import type { ConversationDto, NoteDto } from './api/contract';
 import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './throttle';
@@ -45,6 +46,7 @@ import { commerceAuth, ensureCommerce, type CommerceState } from './store-link/c
 import { catalogStatus } from './store-link/catalog-status';
 import { errClass, safeMessage, alert, bindAlerts } from './observability';
 import { recordClick } from './campaigns/campaigns';
+import { campaignReport, consentEvidence } from './campaigns/report';
 import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, cancelCampaign, createCampaign, deleteDraft, endInstance, gateFor, getCampaign, launchCampaign, listCampaigns, pauseCampaign, resumeCampaign, sendCampaign, settleWallet, sweepCampaigns, type CreateArgs } from './campaigns/campaigns';
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
 import { MAX_QUICK_REPLIES, type QuickReplyDto, type SegmentCriteria } from './api/contract';
@@ -84,9 +86,11 @@ import type { WalletPosted } from './billing/engine';
 import { PRICING_MAX_AGE_MS, applyPricing, copyCursor, fundingOf, pullPricing } from './billing/pricing';
 import { parentHoldRef } from './campaigns/campaigns';
 import { indexContactName, rebuildContactIndex } from './contact-index';
+import { ftsMatch, searchFoldOf, searchWords, syncSearchFold } from './search-fold';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
-import { bridgeFor } from './store-link';
+import { bridgeForWorkspace } from './store-link';
+import { isStandaloneId } from './workspace-kind';
 import { assignSeat, listSeats, pruneSeats, removeSeat, seatState, seatsOverLimit, type AssignResult, type SeatRow, type SeatState } from './seats';
 import { applyEntitlement, expireSubscription, runCreditMonth, featureAllowed, marketingBlocked, memberLimit, readEntitlement, serviceAllowed, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
@@ -119,8 +123,8 @@ export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; st
 export type CoexBatch = { phoneNumberId: string; echoes: CoexMessage[]; history: CoexMessage[]; contacts: SyncedContact[] };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
-const TEMPLATE_COLS = 'name, language, category, status, components, rejected_reason, updated_at, meta_id, label';
-type TemplateRowSql = { name: string; language: string; category: string; status: string; components: string; rejected_reason: string | null; updated_at: number; meta_id: string | null; label: string | null };
+const TEMPLATE_COLS = 'name, language, category, status, components, rejected_reason, updated_at, meta_id, label, quality';
+type TemplateRowSql = { name: string; language: string; category: string; status: string; components: string; rejected_reason: string | null; updated_at: number; meta_id: string | null; label: string | null; quality: string | null };
 const TEMPLATE_EDIT_DAY_MS = 86_400_000;
 const TEMPLATE_EDIT_MONTH_MS = 30 * 86_400_000;
 const TEMPLATE_EDITS_PER_MONTH = 10;
@@ -183,6 +187,13 @@ export class WorkspaceDO extends DurableObject<Env> {
       syncStandingPolicy(this.sql, env.STORE_STANDING_STALE_REFUSE, Date.now()); // STORE-STANDING-2 (default off)
       this.reindexIfEmpty();
       this.reindexContactsIfEmpty();
+      // Platform flag SEARCH_FOLD ('v2' = shared foundation fold). Off by default; flipping it re-indexes this workspace once, in one transaction.
+      // Failure-isolated: a throw rolls the whole transaction back (marker + index), the old index keeps serving, an alert fires, and the next wake retries. It must never fail construction.
+      try {
+        this.ctx.storage.transactionSync(() => syncSearchFold(this.sql, env.SEARCH_FOLD === 'v2', () => this.rebuildFts()));
+      } catch (err) {
+        alert('search_fold_rebuild_failed', { workspace: this.workspaceId, error: errClass(err) });
+      }
       this.lastBroadcast = this.sql.exec<{ s: number | null }>('SELECT max(seq) AS s FROM events').one().s ?? 0;
     });
   }
@@ -933,7 +944,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     return {
       name: t.name, language: t.language, category: t.category as TemplateDto['category'], status: t.status as TemplateDto['status'],
       bodyText: bodyTextOf(parts), paramCount: paramCount(parts, t.category), rejectedReason: t.rejected_reason,
-      label: t.label, components: parts, updatedAt: t.updated_at, editAllowance: this.editAllowanceOf(t.name, t.language, t.status, now),
+      label: t.label, quality: (t.quality as TemplateDto['quality']) ?? null, components: parts, updatedAt: t.updated_at, editAllowance: this.editAllowanceOf(t.name, t.language, t.status, now),
       ...(rejectionAdvice(t.rejected_reason, t.status) ? { advice: rejectionAdvice(t.rejected_reason, t.status)! } : {}),
     };
   }
@@ -1074,6 +1085,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     // The real set of rejection codes is not in Meta's docs: an unfamiliar enum is logged (code only, never free text) so it can be added to the advice and the fixture.
     if (clean && status === 'REJECTED' && !knownReason(clean) && isEnumLikeReason(clean)) console.log(JSON.stringify({ event: 'template_reason_unmapped', code: clean }));
     const r = this.sql.exec('UPDATE templates SET status = ?, rejected_reason = ?, meta_id = COALESCE(?, meta_id), updated_at = ? WHERE name = ? AND language = ?', status, clean, metaId, Date.now(), name, language);
+    return { applied: r.rowsWritten > 0 };
+  }
+
+  /** Meta rated a template (green / yellow / red / unknown). Only the rating column changes: not the status, not the edit clock. Redelivery is harmless (same value). */
+  async applyTemplateQuality(name: string, language: string, score: 'GREEN' | 'YELLOW' | 'RED' | 'UNKNOWN'): Promise<{ applied: boolean }> {
+    const r = this.sql.exec('UPDATE templates SET quality = ? WHERE name = ? AND language = ?', score, name, language);
     return { applied: r.rowsWritten > 0 };
   }
 
@@ -1564,6 +1581,14 @@ export class WorkspaceDO extends DurableObject<Env> {
     return getCampaign(this.host(), id);
   }
 
+  async getCampaignReport(id: string) {
+    return campaignReport(this.host(), id);
+  }
+
+  async getConsentEvidence(after: number, limit: number) {
+    return consentEvidence(this.sql, after, limit);
+  }
+
   async listCampaigns(q: { status?: Parameters<typeof listCampaigns>[1]['status']; cursor?: number; limit: number }) {
     return listCampaigns(this.host(), q);
   }
@@ -2005,7 +2030,8 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   private closeUnseatedSockets(sockets: WebSocket[]): WebSocket[] {
     if (!sockets.some((ws) => (ws.deserializeAttachment() as SocketAttachment | null)?.role === 'staff')) return sockets;
-    if (!bridgeFor(this.env)) return sockets;
+    // A Store workspace without a Store link has no seats. A STANDALONE workspace never has a bridge but always has seats (CHAT-SA-4): its staff sockets are seat-checked regardless.
+    if (!bridgeForWorkspace(this.env, this.workspaceId) && !isStandaloneId(this.workspaceId)) return sockets;
     const seated = new Set(listSeats(this.sql).seats.filter((x) => x.state === 'seated').map((x) => x.userId));
     return sockets.filter((ws) => {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
@@ -2022,12 +2048,22 @@ export class WorkspaceDO extends DurableObject<Env> {
    * is revoked, closes 4403; a changed role is re-read and applied (downgrade). A check that cannot be answered (Store or accounts down) leaves the socket for the next sweep: the lifetime cap bounds that window.
    */
   private async sweepSockets(nowS: number): Promise<void> {
-    const bridge = bridgeFor(this.env);
+    const bridge = bridgeForWorkspace(this.env, this.workspaceId);
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
       const close = (code: number, why: string) => { try { ws.close(code, why); } catch { /* already closed */ } };
       if (!att || att.exp <= nowS) { close(WS_CLOSE_TOKEN_EXPIRED, 'token expired'); continue; }
       if (att.sessionId && (await writeSessionState(this.env, att.sessionId)) === 'revoked') { close(WS_CLOSE_NO_SEAT, 'session revoked'); continue; }
+      if (isStandaloneId(this.workspaceId) && att.userId && (att.role === 'owner' || att.role === 'staff')) {
+        // CHAT-SA-2: membership of a standalone workspace is the live D1 row (no Store to ask). Not an active member = closed on this sweep; a changed role is rewritten.
+        // A D1 error leaves the socket for the next sweep (the lifetime cap bounds it); the seat check (closeUnseatedSockets) runs at every push and on every seat change.
+        try {
+          const row = await this.env.DB.prepare('SELECT role, status FROM workspace_members WHERE workspace_id = ? AND user_id = ?').bind(this.workspaceId, att.userId).first<{ role: 'owner' | 'staff'; status: string }>();
+          if (!row || row.status !== 'active') { close(WS_CLOSE_NO_SEAT, 'not a member'); continue; }
+          if (row.role !== att.role) ws.serializeAttachment({ ...att, role: row.role } satisfies SocketAttachment);
+        } catch { /* next sweep */ }
+        continue;
+      }
       if (bridge && att.userId && (att.role === 'owner' || att.role === 'staff')) {
         const live = await bridge.memberRole(this.workspaceId, att.userId);
         if (live.ok && live.value.role === null) close(WS_CLOSE_NO_SEAT, 'not a member');
@@ -2142,8 +2178,8 @@ export class WorkspaceDO extends DurableObject<Env> {
   // ---- search index ----------------------------------------------------------------------------------------------
 
   /** Adds one message to the full-text index. Text is normalised here and at query time with the same function. */
-  private indexMessage(messageId: number, preview: string | null): void {
-    const t = preview ? normaliseText(preview) : '';
+  private indexMessage(messageId: number, preview: string | null, fold: (t: string) => string = searchFoldOf(this.sql)): void {
+    const t = preview ? fold(preview) : '';
     if (t) this.sql.exec('INSERT INTO messages_fts (rowid, text) VALUES (?, ?)', messageId, t);
   }
 
@@ -2152,7 +2188,8 @@ export class WorkspaceDO extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       rebuildContactIndex(this.sql);
       this.sql.exec('DELETE FROM messages_fts');
-      for (const m of this.sql.exec<{ id: number; preview: string }>('SELECT id, preview FROM messages WHERE preview IS NOT NULL').toArray()) this.indexMessage(m.id, m.preview);
+      const fold = searchFoldOf(this.sql); // read the marker once for the whole rebuild
+      for (const m of this.sql.exec<{ id: number; preview: string }>('SELECT id, preview FROM messages WHERE preview IS NOT NULL').toArray()) this.indexMessage(m.id, m.preview, fold);
     });
   }
 
@@ -2218,12 +2255,12 @@ export class WorkspaceDO extends DurableObject<Env> {
   /**
    * Typeahead over conversations: the contact's name (every typed word is a prefix of a name word), the number (`wa_id` contains the typed digits,
    * only from 3 digits so one or two digits never scan), or a message (messages_fts). Newest activity first, at most `limit`, same DTO as the list.
-   * The query is only ever a bound parameter or a quoted letters/digits token; it is never logged.
+   * The query is only ever a bound parameter or a token quoted by ftsMatch (inner quotes doubled); it is never logged.
    */
   async searchConversations(q: string, filter: 'all' | 'unread' | 'mine' | 'unassigned', limit: number, userId: string, now = Date.now()): Promise<ConversationDto[]> {
-    const tokens = normaliseText(q).split(' ').filter(Boolean).slice(0, 8);
+    const tokens = searchWords(this.sql, q);
     const digits = phoneDigits(q);
-    const match = tokens.map((t) => `"${t}"*`).join(' ');
+    const match = ftsMatch(tokens);
     const any: string[] = [];
     const params: SqlStorageValue[] = [];
     if (tokens.length) {
@@ -2351,10 +2388,10 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Full-text search over message previews: every word is a prefix match, both sides normalised the same way. */
   async search(q: string, limit: number): Promise<{ conversationId: number; messageId: number; snippet: string; at: number }[]> {
-    const tokens = normaliseText(q).split(' ').filter(Boolean).slice(0, 8);
+    const tokens = searchWords(this.sql, q);
     if (!tokens.length) return [];
-    // Tokens are letters/digits only after normalisation, so quoting them cannot be broken out of.
-    const match = tokens.map((t) => `"${t}"*`).join(' ');
+    // ftsMatch quotes every token and doubles any inner quote, so no typed text reaches the FTS5 grammar.
+    const match = ftsMatch(tokens);
     return this.sql
       .exec<{ id: number; conversation_id: number; preview: string | null; created_at: number }>(
         'SELECT m.id, m.conversation_id, m.preview, m.created_at FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?',
@@ -2551,6 +2588,8 @@ export class WorkspaceDO extends DurableObject<Env> {
         return runKbIndex(this.host(), now);
       case 'catalog_embed':
         return runCatalogEmbed(this.host(), now);
+      case 'proactive_recs':
+        return runProactiveRecs(this.host(), payload, now, attempts);
       case 'catalog_sync':
         return runCatalogSync(this.host(), now);
       case 'catalog_reconcile':
@@ -2826,6 +2865,15 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------
+
+  /** Proactive post-order suggestions (CHAT-RECS-SWITCH-1): the owner's switch and template name. Role is checked by the route. */
+  async getProactiveRecs() {
+    return proactiveRecsView(this.host());
+  }
+
+  async setProactiveRecs(patch: { enabled?: boolean; templateName?: string | null }) {
+    return this.ctx.storage.transactionSync(() => writeProactiveRecs(this.host(), patch));
+  }
 
   async getRetention() {
     return retentionView(this.sql);

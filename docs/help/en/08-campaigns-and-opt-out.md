@@ -10,10 +10,12 @@ capabilities:
   - campaigns.list@1
   - campaigns.new-workspace-cap@1
   - campaigns.pause@1
+  - campaigns.report-export@1
   - campaigns.resume@1
   - campaigns.schedule@1
   - campaigns.send-now@1
   - campaigns.tracked-links@1
+  - compliance.opt-out-evidence@1
   - contacts.consent-proof@1
   - contacts.import-csv@1
   - contacts.opt-in-keyword@1
@@ -73,6 +75,10 @@ A campaign that is still a draft (not sent and not scheduled) can be deleted: op
 
 ## Error 131049 (frequency cap), in plain words
 Sometimes Meta does not deliver a marketing message to a particular customer, so that person is not flooded with marketing from many businesses. This error does **not** mean your number or template has a problem, and it does not mean the customer blocked you. We retry after 24 hours, twice, and if it still does not deliver we leave it. Do not resend the same message by hand.
+
+## Campaign report and consent evidence (store owner)
+- **Campaign report.** For any campaign, the store owner can download a report: how many people it reached, delivered, read, failed and skipped, why recipients were skipped, and a statement that only customers with a consent on record were messaged. It contains counts only, no phone numbers. Ask the assistant for "the report of campaign X", or open `/stores/<store>/campaigns/<id>/report` (add `?format=csv` for a file).
+- **Consent and opt-out record.** The store owner can list, per customer, when and how consent was given (import, keyword, store checkout) with the wording they agreed to, and when someone opted out. Use it when Meta or a customer asks you to prove consent. It is paged, 200 customers at a time (add `?format=csv` for a file), and every download is written to your audit trail.
 
 ## Tips
 - Send to people who are genuinely interested; fewer, sharper messages protect your quality.

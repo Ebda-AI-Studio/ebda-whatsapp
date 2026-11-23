@@ -91,6 +91,31 @@ describe('C3: decide and confirm', () => {
     expect(await autoConfirmInstapay(aiEnv(goodAnswer(60_000)), big2.id)).toEqual({ state: 'auto_confirmed', reasons: [] });
   });
 
+  it('INSTAPAY-CAP-2: a free package (store-included, price 0) caps the first payment at 500 EGP: 10 EGP auto-confirms, 600 EGP waits, 300 + 300 waits at the second; a paid plan is unchanged', async () => {
+    await env.DB.prepare("INSERT OR IGNORE INTO packages (id, name, price_minor, ai_credits, active, created_at) VALUES ('store-included', 'Store included', 0, 100, 1, 1)").run();
+    await setMode('live');
+    const small = W(21);
+    await seedSub(small, 'store-included');
+    const r10 = await request(small, 'topup', { amountMinor: 1_000 });
+    expect(await autoConfirmInstapay(aiEnv(goodAnswer(1_000)), r10.id)).toEqual({ state: 'auto_confirmed', reasons: [] }); // 10 EGP: not FIRST_PAYMENT_OVER_CAP
+    const big = W(22);
+    await seedSub(big, 'store-included');
+    const r600 = await request(big, 'topup', { amountMinor: 60_000 });
+    expect(await autoConfirmInstapay(aiEnv(goodAnswer(60_000)), r600.id)).toEqual({ state: 'needs_human', reasons: ['FIRST_PAYMENT_OVER_CAP'] });
+    const two = W(23);
+    await seedSub(two, 'store-included');
+    const a = await request(two, 'topup', { amountMinor: 30_000 });
+    expect(await autoConfirmInstapay(aiEnv(goodAnswer(30_000)), a.id)).toEqual({ state: 'auto_confirmed', reasons: [] });
+    const b = await request(two, 'topup', { amountMinor: 30_000 });
+    expect(await autoConfirmInstapay(aiEnv(goodAnswer(30_000)), b.id)).toEqual({ state: 'needs_human', reasons: ['FIRST_PAYMENT_OVER_CAP'] }); // cumulative 600 > 500
+    const paid = W(24);
+    await seedSub(paid); // gold, 500 EGP a month: 600 EGP still waits, 200 EGP still confirms
+    const p600 = await request(paid, 'topup', { amountMinor: 60_000 });
+    expect(await autoConfirmInstapay(aiEnv(goodAnswer(60_000)), p600.id)).toEqual({ state: 'needs_human', reasons: ['FIRST_PAYMENT_OVER_CAP'] });
+    const p200 = await request(paid, 'topup', { amountMinor: 20_000 });
+    expect(await autoConfirmInstapay(aiEnv(goodAnswer(20_000)), p200.id)).toEqual({ state: 'auto_confirmed', reasons: [] });
+  });
+
   it('INSTAPAY-CLEAN-1: an auto-confirmed payment is NOT clean until a digest was SENT, so the next large payment still waits; after the stamp it does not', async () => {
     const ws = W(8);
     await seedSub(ws);

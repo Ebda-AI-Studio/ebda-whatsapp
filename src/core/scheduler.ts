@@ -2,7 +2,7 @@
  * Deferred work for one workspace. A DO has a single alarm, so every delayed thing (nightly backup, owed R2 deletes,
  * throttled sends, later campaign steps) is a row in scheduled_tasks and the alarm is always armed for the earliest one.
  */
-export type TaskKind = 'backup' | 'r2_drain' | 'send_release' | 'campaign_step' | 'media_fetch' | 'catalog_sync' | 'catalog_reconcile' | 'cod_no_reply' | 'cod_outcome_push' | 'opt_out_push' | 'bot_turn' | 'erased_order_notify' | 'kb_index' | 'catalog_embed' | 'subscription_expire' | 'wallet_wait' | 'wallet_sweep' | 'ledger_drain' | 'shared_number_trueup' | 'funnel_rollup' | 'instapay_overdue' | 'credit_month' | 'retention_purge' | 'ws_sweep' | 'template_refresh' | 'handoff_digest' | 'wallet_debt_sync';
+export type TaskKind = 'backup' | 'r2_drain' | 'send_release' | 'campaign_step' | 'media_fetch' | 'catalog_sync' | 'catalog_reconcile' | 'cod_no_reply' | 'cod_outcome_push' | 'opt_out_push' | 'bot_turn' | 'erased_order_notify' | 'kb_index' | 'catalog_embed' | 'subscription_expire' | 'wallet_wait' | 'wallet_sweep' | 'ledger_drain' | 'shared_number_trueup' | 'funnel_rollup' | 'instapay_overdue' | 'credit_month' | 'retention_purge' | 'ws_sweep' | 'template_refresh' | 'handoff_digest' | 'wallet_debt_sync' | 'proactive_recs';
 /** One pending row at most: scheduling again keeps the earlier due time. */
 const SINGLETONS: ReadonlySet<TaskKind> = new Set(['backup', 'r2_drain', 'catalog_sync', 'catalog_reconcile', 'kb_index', 'catalog_embed', 'campaign_step', 'wallet_sweep', 'ledger_drain', 'funnel_rollup', 'credit_month', 'retention_purge', 'ws_sweep', 'template_refresh', 'handoff_digest', 'wallet_debt_sync']);
 export const DAILY_KINDS = ['backup', 'r2_drain', 'retention_purge'] as const;

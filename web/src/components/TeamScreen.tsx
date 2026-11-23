@@ -1,12 +1,13 @@
 import { UsersRound } from 'lucide-react';
 import { BRAND } from '@brand';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { ListMembersResponse, MemberDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
 import type { InboxSource, TeamApi } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { LoadError } from './LoadError';
 import { UpgradeCard, billingUrl } from './UpgradeCard';
+import { Skeleton } from './Skeleton';
 
 type Note = { kind: 'alert' | 'status'; text: string };
 
@@ -17,6 +18,8 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<Note | null>(null);
   const [seatLimit, setSeatLimit] = useState(false);
+  const [email, setEmail] = useState('');
+  const [firstName, setFirstName] = useState('');
 
   const load = useCallback(() => {
     setData(undefined);
@@ -24,7 +27,7 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
   }, [api]);
   useEffect(load, [load]);
 
-  if (data === undefined) return <main className="screen"><div className="placeholder">…</div></main>;
+  if (data === undefined) return <Skeleton t={t} screen kind="team" />;
   if (data === 'error') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
   if (data === null || source.role !== 'owner') return <main className="screen"><div className="placeholder">{t.ownerOnly}</div></main>;
 
@@ -44,6 +47,50 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
     }
   };
   const staff = data.items.filter((m) => m.role === 'staff');
+  const manage = data.canInvite === true && api.invite !== undefined && api.remove !== undefined;
+  const invite = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy('invite');
+    setNote(null);
+    setSeatLimit(false);
+    try {
+      await api.invite!({ email: email.trim(), firstName: firstName.trim(), language: lang });
+      setNote({ kind: 'status', text: t.teamInviteSent });
+      setEmail('');
+      setFirstName('');
+      setData(await api.list());
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'seat_limit') setSeatLimit(true);
+      else if (err instanceof ApiError && err.status === 503) setNote({ kind: 'alert', text: t.teamUnavailable });
+      else setNote({ kind: 'alert', text: t.teamFailed });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const revoke = async (userId: string) => {
+    setBusy(userId);
+    setNote(null);
+    try {
+      await api.revokeInvitation!(userId);
+      setData(await api.list());
+    } catch {
+      setNote({ kind: 'alert', text: t.teamFailed });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const remove = async (m: MemberDto) => {
+    setBusy(m.userId);
+    setNote(null);
+    try {
+      await api.remove!(m.userId);
+      setData(await api.list());
+    } catch {
+      setNote({ kind: 'alert', text: t.teamFailed });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <main className="screen" aria-labelledby="team-title">
@@ -53,12 +100,36 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
         <span className="muted">{t.teamUsage(num(data.seats.used, lang), num(data.seats.limit, lang))}</span>
       </header>
       <section className="settings">
-        <p className="muted">{t.teamIntro}{BRAND.helpUrl && <> <a href={BRAND.helpUrl(lang, 'team-members-and-seats')} target="_blank" rel="noopener">{t.howTo}</a></>}</p>
+        <p className="muted">{t.teamIntro}{BRAND.helpUrl && <> <a className="howto" href={BRAND.helpUrl(lang, 'team-members-and-seats')} target="_blank" rel="noopener">{t.howTo}</a></>}</p>
         {/* The status region is always in the page; the card is inserted into it, so a screen reader announces "no seats left" (polite) after the click. */}
         <div role="status" aria-live="polite" className="live-region">
           {(data.seats.overLimit || seatLimit) && <UpgradeCard title={t.upgradeTeamTitle} body={data.seats.overLimit ? t.teamOverLimit : t.teamSeatLimit(num(data.seats.limit, lang))} cta={t.upgradeCta} href={billingUrl(source.storeId)} />}
         </div>
         {note && <p role={note.kind} className={note.kind === 'alert' ? 'error-text' : 'muted'}>{note.text}</p>}
+        {manage && (
+          <form className="team-invite" onSubmit={(e) => void invite(e)} aria-labelledby="team-invite-title">
+            <h2 id="team-invite-title">{t.teamInviteTitle}</h2>
+            <label>{t.teamInviteName}<input value={firstName} onChange={(e) => setFirstName(e.target.value)} required maxLength={100} autoComplete="off" dir="auto" /></label>
+            <label>{t.teamInviteEmail}<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required maxLength={254} autoComplete="off" dir="ltr" /></label>
+            <button type="submit" className="btn primary" disabled={busy !== null}>{t.teamInviteSend}</button>
+          </form>
+        )}
+        {manage && (data.invitations?.length ?? 0) > 0 && (
+          <section aria-labelledby="team-pending-title">
+            <h2 id="team-pending-title">{t.teamPendingTitle}</h2>
+            <ul className="team-list">
+              {data.invitations!.map((i) => (
+                <li key={i.userId} className="team-row">
+                  <div>
+                    <strong dir="auto">{i.firstName}</strong> <span className="muted" dir="ltr">{i.email}</span>
+                    <div className="muted">{t.teamPendingUntil(new Date(i.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB'))}</div>
+                  </div>
+                  {api.revokeInvitation && <button type="button" className="btn" disabled={busy !== null} aria-label={t.teamRevokeFor(i.firstName)} onClick={() => void revoke(i.userId)}>{t.teamRevoke}</button>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         <ul className="team-list">
           {data.items.map((m) => (
             <li key={m.userId} className="team-row" data-seat={m.seat}>
@@ -70,10 +141,11 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
               {m.role === 'staff' && (m.seat === 'none'
                 ? <button type="button" className="btn primary" disabled={busy !== null} aria-label={t.teamAssignFor(m.displayName)} onClick={() => void change(m, true)}>{t.teamAssign}</button>
                 : <button type="button" className="btn" disabled={busy !== null} aria-label={t.teamUnassignFor(m.displayName)} onClick={() => void change(m, false)}>{t.teamUnassign}</button>)}
+              {manage && m.role === 'staff' && <button type="button" className="btn" disabled={busy !== null} aria-label={t.teamRemoveFor(m.displayName)} onClick={() => void remove(m)}>{t.teamRemove}</button>}
             </li>
           ))}
         </ul>
-        {staff.length === 0 && <p className="muted">{t.teamEmpty}</p>}
+        {staff.length === 0 && <p className="muted">{manage ? t.teamEmptyOwn : t.teamEmpty}</p>}
       </section>
     </main>
   );

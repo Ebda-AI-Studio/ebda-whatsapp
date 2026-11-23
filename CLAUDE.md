@@ -1,6 +1,6 @@
 # Ebda Chat: repo rules
 
-Plan: `docs/plans/2026-10-24-ebda-whatsapp.md` (Global Constraints there are binding). Workspace rules: `../../CLAUDE.md` (Ebda AI Studio).
+Plan: `docs/plans/done/2026-10-24-ebda-whatsapp.md` (Global Constraints there are binding). Workspace rules: `../../CLAUDE.md` (Ebda AI Studio).
 
 - Product name is always "Ebda Chat" under Ebda AI Studio; never bare "Ebda".
 - No legacy strings anywhere: force, fwb, wbs, forcemediakw (guard: `test/guards.test.ts`).
