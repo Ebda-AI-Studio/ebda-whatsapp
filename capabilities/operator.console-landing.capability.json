@@ -1,0 +1,52 @@
+{
+  "id": "operator.console-landing",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "دخول لوحة التشغيل",
+  "titleEn": "Operator console landing (store-less super admin)",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/me"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "platform-wide console entry, no merchant data",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيدخل لوحة التشغيل؟",
+      "ليه مش شايف لوحة التشغيل؟",
+      "عايز أدخل لوحة التشغيل اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not open the operator console myself?",
+      "Who runs the operator console at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; the web asks GET /operator/me when the token lists no store and boots straight into the console"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none (platform-wide)"
+  ]
+}

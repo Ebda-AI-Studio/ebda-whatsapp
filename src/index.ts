@@ -42,7 +42,8 @@ import { consumeStoreEvents } from './core/store-events';
 import { sendOtp, type OtpResult } from './core/otp';
 import { sendPlatformOtp, type PlatformOtpResult } from './core/platform-otp';
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { bridgeFor } from './core/store-link';
+import { bridgeForWorkspace } from './core/store-link';
+import { isStandaloneId } from './core/workspace-kind';
 import { ordersRoutes } from './routes/orders';
 import { proofRoutes } from './routes/proof';
 import { agentRoutes } from './routes/agent';
@@ -87,6 +88,7 @@ const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 const SEND_DLQ_QUEUE = 'ebda-wa-send-dlq';
 
 import { pruneAgentHealth } from './core/ai/health';
+import { pruneWorkspaceCreations } from './core/workspace-registry';
 import { WorkspaceDO as WorkspaceDOBase } from './core/workspace-do';
 /** The workspace Durable Object, wrapped so its fetch / alarm / RPC errors reach Sentry (iceberg E2). Same class name and methods for the bindings. */
 export const WorkspaceDO = Sentry.instrumentDurableObjectWithSentry(
@@ -181,8 +183,12 @@ api.get('/stores/:storeId/me', async (c) => {
   const ids = [...new Set([storeId, ...memberships.map((m) => m.id)])].slice(0, 51);
   const rows = (await c.env.DB.prepare(`SELECT id, name FROM workspaces WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all<{ id: string; name: string }>()).results ?? [];
   const names = new Map(rows.map((r) => [r.id, r.name]));
-  const stores = memberships.filter((m) => names.has(m.id)).map((m) => ({ id: m.id, name: names.get(m.id)!, role: m.role }));
-  return c.json({ userId: p.userId, storeId, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env), assistant: await assistantEnabled(c.env, storeId) }, workspace: names.has(storeId), stores });
+  const storeItems = memberships.filter((m) => names.has(m.id)).map((m) => ({ id: m.id, name: names.get(m.id)!, role: m.role, kind: 'store' as const }));
+  // CHAT-SA-2: standalone memberships come from D1 (live), never from the token. The token's own list can never name an sw_ workspace here: only UUID-shaped ids are kept from it.
+  // A failure here (or a Worker deployed before migration 0042) must never break a Store merchant's /me: log and show no standalone workspaces.
+  const standaloneRows = await c.env.DB.prepare("SELECT w.id AS id, w.name AS name, m.role AS role FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ? AND m.status = 'active' AND w.kind = 'standalone' ORDER BY w.created_at LIMIT 50").bind(p.userId).all<{ id: string; name: string; role: 'owner' | 'staff' }>().then((r) => r.results ?? [], (err) => { console.warn(JSON.stringify({ warn: 'me_standalone_picker_unavailable', error: errClass(err) })); return [] as { id: string; name: string; role: 'owner' | 'staff' }[]; });
+  const stores = [...storeItems.filter((m) => !isStandaloneId(m.id)), ...standaloneRows.map((r) => ({ ...r, kind: 'standalone' as const }))].slice(0, 50);
+  return c.json({ userId: p.userId, storeId, role: c.get('storeRole'), kind: isStandaloneId(storeId) ? 'standalone' : 'store', capabilities: { codOutcome: bridgeForWorkspace(c.env, storeId) !== null, store: bridgeForWorkspace(c.env, storeId) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env), assistant: await assistantEnabled(c.env, storeId) }, workspace: names.has(storeId), stores });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   // The member's own right to erase (STORE-ROUTES-OWNER-1): the owner, or a super admin who is a MEMBER of the store (requireStoreAccess already refused a non-member's write; that operator uses the operator route, which needs a stated reason).
@@ -429,6 +435,7 @@ export default Sentry.withSentry((env: Env) => {
     // The FX pull is its own task (not inside dailyBilling, which tests drive directly): a failure in either never skips the other.
     ctx.waitUntil(runDailyFx(env));
     ctx.waitUntil(pruneAgentHealth(env)); // AGENT-HEALTH-1 counters older than 8 days
+    ctx.waitUntil(pruneWorkspaceCreations(env)); // CHAT-SA-3 creation-attempt log older than 2 days
     ctx.waitUntil(dailyBilling(env).then(() => console.log(JSON.stringify({ cron: 'daily_billing', done: true }))));
   },
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {

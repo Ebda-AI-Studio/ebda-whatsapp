@@ -8,6 +8,7 @@ import { syncSuspendedMirror } from './ops/suspension-mirror';
 import { senderNumberFor } from './shared/shared-number';
 import { bridgeFor } from './store-link';
 import { ensureWorkspace } from './workspace-registry';
+import { isStoreId } from './workspace-kind';
 
 const MAX_RETRY_DELAY_S = 300;
 /** STORE-STANDING-1: the Store's standing events (suspend / reactivate / delete). */
@@ -62,6 +63,12 @@ export async function consumeStoreEvents(batch: MessageBatch<unknown>, env: Env)
     }
     const event = parsed.event;
     try {
+      // CHAT-SA-2: a Store's ids are UUIDs. An event naming anything else (an `sw_` standalone id, or garbage) can never be a Store workspace: acknowledge and log, touch nothing.
+      if (!isStoreId(event.storeId)) {
+        console.warn(JSON.stringify({ warn: 'store_event_non_store_id', type: event.type }));
+        msg.ack();
+        continue;
+      }
       // The workspace id is the store id. Ruling CHAT-ENABLE-1: a workspace is registered ONLY by the owner's own "connect Chat" action in Store admin, which is what emits
       // `store.linked` (its owner/admin check and plan entitlement happen there). That event registers the store here, after the Store confirms the owner; no other event does.
       let known = await env.DB.prepare('SELECT 1 FROM workspaces WHERE id = ?').bind(event.storeId).first();

@@ -5,7 +5,7 @@ import { needsConfirm, payloadHash, SWITCH_KEYS } from '../core/settings-confirm
 import { buyerKey } from '../core/buyer-key';
 import { normaliseE164 } from '../core/phone';
 import type { BridgeOrderSummary } from '../core/store-bridge';
-import { bridgeFor, storeLink } from '../core/store-link';
+import { bridgeForWorkspace, storeLink } from '../core/store-link';
 import { catalogBelongsToWaba } from '../core/store-link/catalog';
 import { provisionRequest } from '../core/store-link/catalog-provision';
 import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
@@ -28,7 +28,7 @@ async function customer(c: ApiContext): Promise<{ waId: string; key: string } | 
 
 ordersRoutes.get('/stores/:storeId/contacts/:waId/orders', async (c) => {
   if (!(await workspaceStub(c))) return apiError(c, 404, 'not_found');
-  const bridge = bridgeFor(c.env);
+  const bridge = bridgeForWorkspace(c.env, c.req.param('storeId')!);
   // No Store bound: the UI keeps showing its labelled sample.
   if (!bridge) return c.json({ items: [], source: 'sample' as const });
   const who = await customer(c);
@@ -44,7 +44,7 @@ ordersRoutes.post('/stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outco
   if (!body.success || !/^[\w-]{1,40}$/.test(orderNumber)) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
-  const bridge = bridgeFor(c.env);
+  const bridge = bridgeForWorkspace(c.env, c.req.param('storeId')!);
   if (!bridge) return apiError(c, 503, 'rate_limited', 'store_link_off');
   const who = await customer(c);
   if (who instanceof Response) return who;

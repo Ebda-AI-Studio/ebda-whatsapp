@@ -10,7 +10,7 @@ import { SignedOutLocally } from './components/SignedOutLocally';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
 import { CreateWorkspace, Invitations, NoWorkspaceYet } from './components/CreateWorkspace';
 import { acceptInvitation, createWorkspace, fetchInvitations, fetchMine, isStandaloneId } from './data/workspaces';
-import { connectRealtime, createApiSource } from './data/api';
+import { connectRealtime, createApiSource, isOperator } from './data/api';
 import { SIGNED_OUT, createTokenProvider, decodeStores, decodeSub } from './data/auth';
 import { SignInGate } from './components/SignInGate';
 import { CALLBACK_PATH, OidcSignInError, createOidcSession } from './data/oidc';
@@ -80,8 +80,10 @@ async function boot(): Promise<void> {
     const openWorkspace = (id: string) => { const u = new URL(location.href); u.searchParams.set('store', id); u.searchParams.delete('viewAs'); location.assign(u); };
     const wantedId = new URLSearchParams(location.search).get('store');
     const tokenStores = decodeStores(token);
-    let storeId: string | null | undefined = viewAsId ?? (isStandaloneId(wantedId) ? wantedId : pickStore(tokenStores, location.search));
-    if (!storeId && tokenStores.length === 0) {
+    const pickedStore = viewAsId ?? (isStandaloneId(wantedId) ? wantedId : pickStore(tokenStores, location.search));
+    // A super admin has no store membership: ask the store-independent operator endpoint and boot straight into the console (no store calls, no socket), before any workspace question.
+    const operatorOnly = !pickedStore && await isOperator(location.origin, tokens.getToken);
+    if (!pickedStore && !operatorOnly && tokenStores.length === 0) {
       const showMine = async (): Promise<void> => {
         let mine: Awaited<ReturnType<typeof fetchMine>>;
         try { mine = await fetchMine(location.origin, tokens.getToken); } catch { root.render(<NoWorkspaceYet failed onRetry={() => void showMine()} onSignOut={signOutOnly} />); return; }
@@ -97,20 +99,21 @@ async function boot(): Promise<void> {
       await showMine();
       return;
     }
-    if (!storeId) {
+    if (!pickedStore && !operatorOnly) {
       document.body.textContent = 'حسابك مش مربوط بأي متجر لسه. / Your account is not linked to a store yet.';
       return;
     }
+    const storeId = pickedStore ?? '';
     const api = createApiSource({ baseUrl: location.origin, storeId, getToken: tokens.getToken, userNames: {}, currentUserId: decodeSub(token) ?? '', ...(viewAsId ? { viewAs: { reason } } : {}) });
     // A live socket would outlive the audit of one request, so a view-as session has none (the server refuses it).
-    const stopRealtime = viewAsId ? () => undefined : connectRealtime({
+    const stopRealtime = viewAsId || operatorOnly ? () => undefined : connectRealtime({
       url: `${location.origin.replace(/^http/, 'ws')}/api/v1/stores/${storeId}/ws`,
       getToken: tokens.getToken,
       onEvent: api.emit,
       onReload: api.reload,
       fetchEvents: api.fetchEvents,
     });
-    await api.loadCapabilities();
+    if (operatorOnly) { api.role = 'super_admin'; api.operatorOnly = true; } else await api.loadCapabilities();
     if (api.noSeat) { // a member the owner has not seated (or whose seat the package no longer covers): say so, with a retry, instead of an inbox that cannot load
       stopRealtime();
       root.render(<NoSeat reason={api.noSeat} onRetry={() => location.reload()} standalone={isStandaloneId(storeId)} />);

@@ -5,7 +5,7 @@ import { plainAmount } from '../ordering/money';
 import { buyerKey } from '../buyer-key';
 import { isE164 } from '../phone';
 import { addTask } from '../scheduler';
-import { bridgeFor, storeLink } from '../store-link';
+import { bridgeForWorkspace, storeLink } from '../store-link';
 import type { LinkHost } from './host';
 import { queueFreeText, queueTemplate, setTag, cleanParam, type QueueResult } from './outbound';
 import { ensureCatalogReconcile } from './catalog';
@@ -61,7 +61,7 @@ function codV2Params(host: LinkHost, name: string | undefined, loc: Locale, d: {
 /** The order a COD request is about, when neither the event nor an earlier event named its number and total. */
 type LookedUp = { orderNumber: string; totalMinor: number; currency: string };
 async function lookupOrder(host: LinkHost, buyerKeyHex: string, phoneE164: string, orderId: string): Promise<LookedUp | 'retry' | null> {
-  const bridge = bridgeFor(host.env);
+  const bridge = bridgeForWorkspace(host.env, host.workspaceId);
   if (!bridge) return null;
   const res = await bridge.listCustomerOrders(host.workspaceId, buyerKeyHex, 20, phoneE164);
   if (!res.ok) return res.reason === 'unavailable' ? 'retry' : null;

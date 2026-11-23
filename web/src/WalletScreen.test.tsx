@@ -81,7 +81,7 @@ describe('wallet: balance and who pays Meta', () => {
 
   it('shows the AI credits', async () => {
     await openWallet();
-    expect(screen.getByText(/٤٨٠|480/)).toBeTruthy();
+    expect(within(screen.getByRole('main')).getByText(/٤٨٠|480/)).toBeTruthy();
   });
 });
 

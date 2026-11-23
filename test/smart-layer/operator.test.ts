@@ -26,6 +26,15 @@ describe('operator assistant controls', () => {
     expect((await chatControls(env, workspace(s))).mode).toBe('answer-only');
   });
 
+  it('an operator can read a workspace mode back (404 for an unknown workspace)', async () => {
+    const s = storeId(7105);
+    await apiFor(s);
+    expect(await (await operatorCall(OP1, 'GET', `/workspaces/${s}/assistant`)).json()).toEqual({ mode: 'off' });
+    await operatorCall(OP1, 'PUT', `/workspaces/${s}/assistant`, { mode: 'suggest' });
+    expect(await (await operatorCall(OP1, 'GET', `/workspaces/${s}/assistant`)).json()).toEqual({ mode: 'suggest' });
+    expect((await operatorCall(OP1, 'GET', `/workspaces/${storeId(7198)}/assistant`)).status).toBe(404);
+  });
+
   it('refuses an unknown mode, an unknown field and an unknown workspace', async () => {
     const s = storeId(7102);
     await apiFor(s);
