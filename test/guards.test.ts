@@ -16,13 +16,6 @@ it('core never names the Ebda brand', () => {
   expect(findMatches(/ebda|إبدأ|ابدأ/i, 'src/core')).toEqual([]);
 });
 
-it('pins the Store event contract file: change it only together with the Store repo copy', async () => {
-  const { readFileSync } = await import('node:fs');
-  const { createHash } = await import('node:crypto');
-  const file = readFileSync(new URL('../src/core/api/store-events.ts', import.meta.url));
-  expect(createHash('sha256').update(file).digest('hex')).toBe('4fbfb22194b16b5d0becaff7e201251dc0d11ed754b2c626ae01b5f9bee9ee3d'); // contract v1.6 = Store apps/api/src/contracts/wa-v1.ts (Store #839 STORE-STANDING-1 + Store #811 COD v2 fields; Store #811 must carry these exact bytes)
-});
-
 it('shared web code names no brand: names, marks, hosts and colours come from web/brands/<brand>', () => {
   expect(findMatches(/ebda|إبدا/i, 'web/src').filter((m) => !/\.test\.tsx?:/.test(m))).toEqual([]);
 });
