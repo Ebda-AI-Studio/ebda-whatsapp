@@ -2,7 +2,7 @@
  * The Store's plan names, one name per plan (CHAT-QA-13). The Store sells these plans (the Store repo, packages/shared/src/schemas/plan-limits.ts) and sends
  * only the `planCode` in `store.plan_changed`; Chat shows the plan by the Store's own name and never invents its own. A code this table does not know
  * is shown as the code itself (never a guessed name), and `test/store-plan-names.test.ts` pins the codes the Store sells today.
- * Chat's own paid packages (Starter / Growth / Pro, bought in Chat) are a different thing and are always labelled "Chat package".
+ * Chat's own paid packages are named by size (`package-names.ts`), never with these plan names.
  */
 export const STORE_PLAN_NAMES: Readonly<Record<string, { ar: string; en: string }>> = {
   free: { ar: 'مجاني', en: 'Free' },

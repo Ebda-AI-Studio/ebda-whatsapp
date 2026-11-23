@@ -22,6 +22,7 @@ import { botTools } from './tools/bot.tools';
 import { explainTools, type ExplainData } from './tools/explain.tools';
 import { campaignTools } from './tools/campaigns.tools';
 import { withKeywords } from './tools/keywords';
+import { toolsForWorkspace } from './store-tools';
 import { WorkersAiProvider } from '../../../foundation/smart-layer/provider';
 import { contactTools } from './tools/contacts.tools';
 import { inboxTools } from './tools/inbox.tools';
@@ -30,6 +31,7 @@ import type { Kit } from './tools/write';
 import { contactReadTools, inboxReadTools } from './tools/reads.tools';
 import { segmentTools } from './tools/segments.tools';
 import { templateTools } from './tools/templates.tools';
+import { chatPackageName } from '../billing/package-names';
 
 export type ChatAdapterDeps = {
   env: Env;
@@ -42,6 +44,8 @@ export type ChatAdapterDeps = {
   /** Overrides for tests (a scripted model needs none of them). */
   help?: HelpDeps;
   ai?: AiBinding;
+  /** CHAT-SA-5: the workspace id, so a standalone workspace is offered no Store-coupled tool (`store-tools.ts`). Omitted = every tool (a Store workspace). */
+  workspaceId?: string;
 };
 
 const egp = (minor: number): string => String(Math.round(minor) / 100);
@@ -68,13 +72,13 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
   return {
     product: 'chat',
     registry: () => d.registry,
-    tools: () => tools,
+    tools: () => (d.workspaceId ? toolsForWorkspace(tools, d.workspaceId) : tools),
     helpSearch: searchHelp,
     async bindingSources(): Promise<BindingSource[]> {
       // Typed sources for the binding-claim rail: the packages the Plans screen sells, the free cap, the 24-hour window, and the figures the help guides state.
-      const pk = await d.env.DB.prepare('SELECT id, name, price_minor, ai_credits FROM packages WHERE active = 1').all<{ id: string; name: string; price_minor: number; ai_credits: number }>();
+      const pk = await d.env.DB.prepare('SELECT id, price_minor, ai_credits, period_months FROM packages WHERE active = 1').all<{ id: string; price_minor: number; ai_credits: number; period_months: number }>();
       return [
-        ...pk.results.map((p): BindingSource => ({ kind: 'plan', key: p.id, text: { ar: p.name, en: p.name }, values: [p.name, egp(p.price_minor), String(p.ai_credits)] })),
+        ...pk.results.map((p): BindingSource => { const n = chatPackageName(p.ai_credits, p.period_months); return { kind: 'plan', key: p.id, text: { ar: n.nameAr, en: n.nameEn }, values: [n.nameEn, n.nameAr, egp(p.price_minor), String(p.ai_credits)] }; }),
         { kind: 'limit', key: 'assistant-free-turns', text: { ar: 'رسايل المساعد المجانية في اليوم', en: 'Free assistant messages per day' }, values: [String(BUDGET.freeTurnsPerStorePerDay)] },
         { kind: 'limit', key: 'reply-window', text: { ar: 'نافذة الرد 24 ساعة', en: '24-hour reply window' }, values: ['24'] },
         ...helpFigureSources(d.corpus),

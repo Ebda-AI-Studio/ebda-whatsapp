@@ -12,6 +12,7 @@
  * in which money is taken, the order says paid and nothing was granted; a retried webhook finds `granted_at` and only re-announces.
  * The daily `repairPackageOrders` grants any `paid` + `granted_at IS NULL` row anyway and alerts. No card fee is added to a package price.
  */
+import { chatPackageName } from './package-names';
 import type { Env } from '../../env';
 import { PACKAGE_FEATURE_KEYS } from '../api/contract';
 import { addMonthsUtc, monthsStarted, partialRefundCut, periodLengthMonths, upgradePriceMinor, yearlyRefundQuote, type YearlyRefundQuote } from './yearly';
@@ -30,7 +31,7 @@ const SWITCH_KINDS: readonly PurchaseKind[] = ['upgrade', 'queued_switch'];
 const errName = (err: unknown) => (err instanceof Error ? err.name : 'error');
 export const PENDING_EXPIRES_AFTER_MS = 24 * 3_600_000;
 
-export type PackageDto = { id: string; name: string; priceMinor: number; aiCredits: number; maxMembers: number; features: (typeof PACKAGE_FEATURE_KEYS)[number][]; periodMonths: number };
+export type PackageDto = { id: string; name: string; nameAr: string; nameEn: string; priceMinor: number; aiCredits: number; maxMembers: number; features: (typeof PACKAGE_FEATURE_KEYS)[number][]; periodMonths: number };
 export type OrderStatus = 'pending' | 'paid' | 'failed' | 'expired' | 'refunded' | 'charged_back';
 export type PackageOrderRow = {
   order_id: string; workspace_id: string; package_id: string; amount_minor: number; currency: string; status: OrderStatus; created_at: number;
@@ -50,7 +51,8 @@ export async function listPackages(env: Env): Promise<PackageDto[]> {
       members: true, shared_inbox: true, order_confirmations: true, templates: true, campaigns: r.feat_campaigns === 1, order_in_chat: r.feat_order_in_chat === 1,
       api: r.feat_api === 1, priority_support: r.priority_support === 1, ai_credits: r.ai_credits > 0,
     };
-    return { id: r.id, name: r.name, priceMinor: r.price_minor, aiCredits: r.ai_credits, maxMembers: r.max_members, features: PACKAGE_FEATURE_KEYS.filter((k) => on[k]), periodMonths: r.period_months };
+    const names = chatPackageName(r.ai_credits, r.period_months);
+    return { id: r.id, name: names.nameEn, nameAr: names.nameAr, nameEn: names.nameEn, priceMinor: r.price_minor, aiCredits: r.ai_credits, maxMembers: r.max_members, features: PACKAGE_FEATURE_KEYS.filter((k) => on[k]), periodMonths: r.period_months };
   });
 }
 

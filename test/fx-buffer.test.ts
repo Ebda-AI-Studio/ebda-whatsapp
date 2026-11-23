@@ -89,7 +89,7 @@ describe('FX buffer', () => {
     expect(r.volBps).not.toBeNull();
   });
 
-  it('calibration on the real series (calendar-day replay) matches the table in docs/plans/2026-11-12-daily-fx-rate.md', () => {
+  it('calibration on the real series (calendar-day replay) matches the table in docs/plans/done/2026-11-12-daily-fx-rate.md', () => {
     const o = replay();
     expect(o.length).toBe(363);
     const short = o.filter((x) => x.mode === 'short_history');

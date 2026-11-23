@@ -1,0 +1,131 @@
+{
+ "comment": "F6 shared observe vectors. maskPhones/redactEmails/scrubRequestUrl/safeMessage: [input, expected]. Egyptian numbers, Arabic names and every digit script on purpose. Changing an expectation here changes behaviour in BOTH products.",
+ "maskPhones": [
+  [
+   "01012345678",
+   "[phone]"
+  ],
+  [
+   "+201012345678",
+   "[phone]"
+  ],
+  [
+   "+20 101 234 5678",
+   "[phone]"
+  ],
+  [
+   "0101-234-5678",
+   "[phone]"
+  ],
+  [
+   "(010) 1234 5678",
+   "[phone]"
+  ],
+  [
+   "٠١٠١٢٣٤٥٦٧٨",
+   "[phone]"
+  ],
+  [
+   "۰۱۰۱۲۳۴۵۶۷۸",
+   "[phone]"
+  ],
+  [
+   "+٢٠ ١٠١ ٢٣٤ ٥٦٧٨",
+   "[phone]"
+  ],
+  [
+   "+‎20‎ 101‎ 234 5678",
+   "[phone]"
+  ],
+  [
+   "كلم محمد على 01112223334 ضروري",
+   "كلم محمد على [phone] ضروري"
+  ],
+  [
+   "الأستاذة منى 0100 555 6677 و 01234567890",
+   "الأستاذة منى [phone] و [phone]"
+  ],
+  [
+   "ORD-20260930-001",
+   "ORD-[phone]"
+  ],
+  [
+   "حجز 2026-09-30",
+   "حجز [phone]"
+  ],
+  [
+   "طلب رقم 12345 مقاس ٤٢ عدد ٣ قطع",
+   "طلب رقم 12345 مقاس ٤٢ عدد ٣ قطع"
+  ],
+  [
+   "قاهرة 1234567",
+   "قاهرة 1234567"
+  ],
+  [
+   "",
+   ""
+  ]
+ ],
+ "redactEmails": [
+  [
+   "failed for jane.doe@gmail.com now",
+   "failed for [email] now"
+  ],
+  [
+   "to <jane.doe@gmail.com>, cc bob@x.io",
+   "to [email] cc [email]"
+  ],
+  [
+   "jane.doe @ gmail.com",
+   "[email]"
+  ],
+  [
+   "jane%40gmail.com",
+   "[email]"
+  ],
+  [
+   "jane＠gmail.com",
+   "[email]"
+  ],
+  [
+   "رفض: مُنى.علي@مثال.مصر لأن",
+   "رفض: [email] لأن"
+  ],
+  [
+   "no address here, limit=40 items",
+   "no address here, limit=40 items"
+  ]
+ ],
+ "scrubRequestUrl": [
+  [
+   "https://chat.ebda.app/api/contacts/201012345678/messages?q=01012345678#x",
+   "https://chat.ebda.app/api/contacts/[phone]/messages"
+  ],
+  [
+   "https://chat.ebda.app/api/contacts/%D9%A0%D9%A1%D9%A0%D9%A1%D9%A2%D9%A3%D9%A4%D9%A5%D9%A6%D9%A7%D9%A8",
+   "https://chat.ebda.app/api/contacts/[phone]"
+  ],
+  [
+   "https://x.ebda.app/search?search=%D8%A3%D8%AD%D8%B0%D9%8A%D8%A9",
+   "https://x.ebda.app/search"
+  ],
+  [
+   "https://x.ebda.app/o/abc123token",
+   "https://x.ebda.app/o/[Filtered]"
+  ],
+  [
+   "not a url",
+   null
+  ]
+ ],
+ "safeMessage": [
+  [
+   "Error: cannot reach 01012345678 or ahmed@example.com",
+   "Error: cannot reach [phone] or [email]"
+  ],
+  [
+   "فشل إرسال الرسالة إلى +201112223334",
+   "فشل إرسال الرسالة إلى [phone]"
+  ]
+ ]
+}

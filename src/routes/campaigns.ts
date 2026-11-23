@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import { campaignCreate, listCampaignsQuery, sendCampaignRequest } from '../core/api/contract';
+import { campaignCreate, campaignReportQuery, listCampaignsQuery, sendCampaignRequest } from '../core/api/contract';
+import { campaignReportCsv } from '../core/campaigns/report';
 import { activeNumber, apiError, workspaceStub, type ApiContext, type ApiEnv, managesStore } from './shared';
 
 export const campaignsRoutes = new Hono<ApiEnv>();
@@ -51,6 +52,20 @@ campaignsRoutes.get('/stores/:storeId/campaigns/:campaignId', async (c) => {
   const ws = await workspaceStub(c);
   const camp = id && ws && (await ws.getCampaign(id));
   return camp ? c.json(camp) : apiError(c, 404, 'not_found');
+});
+
+/** The campaign's compliance report (counts and skip reasons, no phone numbers), as JSON or a CSV file. Owner only: it is the proof for Meta, not a staff screen. */
+campaignsRoutes.get('/stores/:storeId/campaigns/:campaignId/report', async (c) => {
+  if (!owner(c)) return apiError(c, 403, 'forbidden');
+  const q = campaignReportQuery.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
+  const id = idOf(c);
+  if (!q.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  const report = id && ws && (await ws.getCampaignReport(id));
+  if (!report) return apiError(c, 404, 'not_found');
+  c.header('cache-control', 'no-store');
+  if (q.data.format === 'csv') return new Response(campaignReportCsv(report), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="campaign-report-${report.campaign.id.slice(0, 8)}.csv"`, 'cache-control': 'no-store' } });
+  return c.json(report);
 });
 
 campaignsRoutes.delete('/stores/:storeId/campaigns/:campaignId', async (c) => {

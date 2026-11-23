@@ -17,6 +17,7 @@ export function ConfirmCard({ t, lang, card: first, approval: firstApproval, api
   const [card, setCard] = useState(first);
   const [approval, setApproval] = useState(firstApproval);
   const [phase, setPhase] = useState<Phase>({ k: 'idle' });
+  const [undoNote, setUndoNote] = useState<string | null>(null);
 
   const confirm = async () => {
     setPhase({ k: 'working' });
@@ -42,6 +43,7 @@ export function ConfirmCard({ t, lang, card: first, approval: firstApproval, api
     setPhase({ k: 'working' });
     try {
       const r = await api.undo(appliedId);
+      setUndoNote(r.status === 'failed' ? t.assistantUndoFailed : null);
       setPhase(r.status === 'undone' ? { k: 'undone' } : { k: 'done', appliedId });
     } catch {
       setPhase({ k: 'done', appliedId });
@@ -69,6 +71,7 @@ export function ConfirmCard({ t, lang, card: first, approval: firstApproval, api
         {phase.k === 'rejected' && <span className="as-done" role="status">{t.assistantConfirmRejected}</span>}
       </div>
       {phase.k === 'note' && <p className="as-note-inline" role="status">{phase.text}</p>}
+      {phase.k === 'done' && undoNote && <p className="as-note-inline" role="status">{undoNote}</p>}
     </section>
   );
 }

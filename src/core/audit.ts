@@ -62,7 +62,7 @@ export function auditWrites(): MiddlewareHandler<{ Bindings: Env; Variables: Aut
     const target = Object.entries(params).find(([k]) => k !== 'storeId' && k !== 'workspaceId');
     let targetId = target?.[1] ?? null;
     if (target && (target[0] === 'waId' || PHONE_LIKE.test(target[1]))) targetId = workspaceId ? await subjectHash(c.env, workspaceId, target[1].replace(/^\+/, '')) : null;
-    await recordAudit(c.env, { workspaceId, actor: principal.integration ? `client:${principal.integration.clientId}` : principal.userId, role, action, targetType: target?.[0] ?? null, targetId, status }, Date.now());
+    await recordAudit(c.env, { workspaceId, actor: principal.integration ? `client:${principal.integration.clientId}` : principal.userId, role, action, targetType: target?.[0] ?? null, targetId, status, ...(c.get('auditDetail') ? { detail: c.get('auditDetail')! } : {}) }, Date.now());
   };
 }
 

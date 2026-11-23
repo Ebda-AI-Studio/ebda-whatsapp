@@ -1,11 +1,12 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, ConnectorDto, ConnectorPut, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, ConnectorDto, ConnectorPut, BotSettingsDto, BotSwitchesDto, ProactiveRecsDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto,
   MessageDto, OrderSummaryDto, ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto, NoteDto, QuickReplyDto,
 } from '../../../src/core/api/contract';
 
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import type { TemplateDraft } from '../../../src/core/template-draft';
 import type { OperatorApi, WalletApi } from './billing';
+import type { AssistantRolloutApi } from './assistant-rollout';
 import type { SharedTemplatesApi } from './shared-templates';
 import type { AssistantApi } from './assistant';
 
@@ -57,6 +58,12 @@ export interface TeamApi {
   list(): Promise<ListMembersResponse>;
   assign(userId: string): Promise<void>;
   unassign(userId: string): Promise<void>;
+  /** Standalone workspaces only (the list says `canInvite`): invite a staff member by email (the answer is the same whether or not the address had an account); rejects `seat_limit` (409). */
+  invite?(a: { email: string; firstName: string; language: 'ar' | 'en' }): Promise<void>;
+  /** Standalone workspaces only: remove a staff member (their access ends on their next request). */
+  remove?(userId: string): Promise<void>;
+  /** Standalone workspaces only: withdraw a pending invitation (the emailed link stops working). */
+  revokeInvitation?(userId: string): Promise<void>;
 }
 
 /** A merchant's own WhatsApp numbers (Phase 8.1); absent when Embedded Signup is switched off. */
@@ -139,8 +146,12 @@ export interface InboxSource {
   storeId?: string;
   /** GET /me: this store has NO Chat workspace (Chat was never switched on for it). The app shows its own "not enabled" state and never loads lists (they would all 404). */
   workspaceMissing?: boolean;
+  /** A super admin with no store: boots into the operator console alone (no inbox, no store calls). */
+  operatorOnly?: boolean;
   /** GET /me: the stores this person can open that have a Chat workspace (for the store picker). Undefined = the server did not say (no picker). */
-  stores?: { id: string; name: string; role: 'owner' | 'staff' }[];
+  stores?: { id: string; name: string; role: 'owner' | 'staff'; kind?: 'store' | 'standalone' }[];
+  /** GET /me `kind === 'standalone'` (CHAT-SA-5): a workspace with no Store behind it. Every store-coupled surface is hidden and the copy says "workspace". Absent/false = a Store workspace, exactly as before. */
+  standalone?: boolean;
   /** Opens Chat on another store (a full reload on that store). Absent in sample data. */
   switchStore?(storeId: string): void;
   /** The signed-in user's role in this store (GET /me); `staff` hides spending actions. */
@@ -198,6 +209,11 @@ export interface InboxSource {
     save(change: Partial<BotSwitchesDto>, confirmToken?: string): Promise<BotSwitchesDto>;
     throttle(): Promise<ThrottleReportDto | null>;
   };
+  /** Proactive post-order product suggestions (owner only; the server refuses staff). OFF by default; ON needs a template name. `save` rejects when the template name is missing or invalid. */
+  proactiveRecs?: {
+    get(): Promise<ProactiveRecsDto>;
+    save(change: { enabled?: boolean; templateName?: string | null }): Promise<ProactiveRecsDto>;
+  };
   /** Bot results: customers per step over the last 7, 30 or 90 days (Cairo calendar days, today included). Counts only; owner and staff read. */
   botFunnel?(days: 7 | 30 | 90): Promise<BotFunnelDto>;
   /** Assign a conversation (null = unassign). */
@@ -220,6 +236,8 @@ export interface InboxSource {
   signOut?(): void;
   /** The platform WABA's templates (super admin only, with `operator`). */
   sharedTemplates?: SharedTemplatesApi;
+  /** Smart Layer rollout switches (super admin only, with `operator`). */
+  assistantRollout?: AssistantRolloutApi;
   /** Called when events were missed beyond repair; the app reloads its list and open chat. */
   onReload?(cb: () => void): () => void;
   /** Realtime events; returns an unsubscribe function. */

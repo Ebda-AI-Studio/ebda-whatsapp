@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BRAND } from '@brand';
 import { STRINGS } from '../i18n';
 
@@ -10,44 +10,38 @@ import { STRINGS } from '../i18n';
 export function SignInGate({ kind, onContinue }: { kind: 'signedOut' | 'unreachable'; onContinue: () => void }) {
   const btn = useRef<HTMLButtonElement>(null);
   useEffect(() => { btn.current?.focus(); }, []);
-  const ar = STRINGS.ar;
-  const en = STRINGS.en;
+  // One language at a time, Arabic first; English is a toggle, never a second line under every Arabic one (UI audit #13 / foundation auth rule).
+  const [lang, setLang] = useState<'ar' | 'en'>('ar');
+  const t = STRINGS[lang];
+  const dir = lang === 'ar' ? 'rtl' : 'ltr';
   const lock = BRAND.gate;
   const failed = kind === 'unreachable';
   return (
-    <main className="gate">
+    <main className="gate" lang={lang} dir={dir}>
       <div className="gate-card">
-        <div className="gate-lockup" lang="ar" dir="rtl">
+        <div className="gate-lockup">
           <img src={BRAND.mark.src} alt="" width={BRAND.mark.width} height={BRAND.mark.height} />
-          <span className="gate-studio">{lock?.studio.ar}</span>
-          <span className="gate-studio-en" lang="en" dir="ltr">{lock?.studio.en}</span>
+          <span className="gate-studio">{lock?.studio[lang]}</span>
         </div>
         <hr className="gate-rule" />
-        <h1 lang="ar" dir="rtl">{lock?.product.ar}</h1>
-        <p className="gate-product-en" lang="en" dir="ltr">{lock?.product.en}</p>
+        <h1>{lock?.product[lang]}</h1>
         {failed ? (
-          <div role="alert" className="gate-error">
-            <p lang="ar" dir="rtl">{ar.gateUnreachable}</p>
-            <p lang="en" dir="ltr">{en.gateUnreachable}</p>
-          </div>
+          <div role="alert" className="gate-error"><p>{t.gateUnreachable}</p></div>
         ) : (
-          <div className="gate-body">
-            <p lang="ar" dir="rtl">{ar.gateBody}</p>
-            <p lang="en" dir="ltr">{en.gateBody}</p>
-          </div>
+          <div className="gate-body"><p>{t.gateBody}</p></div>
         )}
-        {/* UI audit 2026-11-11: the label is Arabic only (a Latin string inside an Arabic button flipped the bidi
-            order and put English first). The English stays in the accessible name, which still contains the visible label. */}
+        {/* The label follows the chosen language; the accessible name keeps both so a screen reader user in either language finds it. */}
         <button
           ref={btn}
           type="button"
           className="btn gold gate-btn"
-          lang="ar"
-          dir="rtl"
-          aria-label={failed ? `${ar.gateRetry} / ${en.gateRetry}` : `${ar.gateSignIn} / ${en.gateSignIn}`}
+          aria-label={failed ? `${STRINGS.ar.gateRetry} / ${STRINGS.en.gateRetry}` : `${STRINGS.ar.gateSignIn} / ${STRINGS.en.gateSignIn}`}
           onClick={onContinue}
         >
-          {failed ? ar.gateRetry : ar.gateSignIn}
+          {failed ? t.gateRetry : t.gateSignIn}
+        </button>
+        <button type="button" className="btn quiet gate-lang" lang={lang === 'ar' ? 'en' : 'ar'} onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}>
+          {lang === 'ar' ? 'English' : 'العربية'}
         </button>
       </div>
     </main>

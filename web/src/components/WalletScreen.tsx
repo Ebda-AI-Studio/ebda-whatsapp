@@ -6,11 +6,12 @@ import { ApiError } from '../data/api';
 import type { InstapayCreated, InstapayRequest, InstapayView, PackageDto, RefundRequest, DigestDto, TopupDto, WalletApi, WalletDto, OffboardingView } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
-import { formatMoney, formatSigned } from '../lib/format';
+import { formatMoney, formatSigned, packageLabel } from '../lib/format';
 import { useFocusOn } from '../lib/useFocusOn';
 import { useLoad } from '../lib/useLoad';
 import { dateTime } from './CampaignsScreen';
 import { LoadError } from './LoadError';
+import { Skeleton } from './Skeleton';
 import { CreditPacksCard, NumberFundingAction, YearlyRefundCard } from './MoneySurfaces';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: WalletApi; now: () => number; go?: (url: string) => void };
@@ -96,7 +97,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
     return () => { clearInterval(id); window.removeEventListener('focus', on); document.removeEventListener('visibilitychange', on); };
   }, [pending, check]);
 
-  if (wallet === null) return <main className="screen"><div className="placeholder">…</div></main>;
+  if (wallet === null) return <Skeleton t={t} screen kind="wallet" rows={2} />;
   if (wallet === 'error') return <main className="screen"><div className="placeholder"><p role="alert">{t.walletLoadError} <button type="button" className="btn ghost" onClick={() => void check()}>{t.retry}</button></p></div></main>;
 
   const cardOnly = wallet.funding.length > 0 && wallet.funding.every((f) => f.funding === 'merchant_card');
@@ -152,7 +153,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
             <h2 id="w-plan-title">{t.wPlanTitle}</h2>
             {wallet.plan === null ? <p className="muted">{t.wPlanNone}</p> : (
               <>
-                <p><b>{wallet.plan.storePlan ? t.wPlanStore(lang === 'ar' ? wallet.plan.storePlan.nameAr : wallet.plan.storePlan.nameEn) : t.wPlanName(wallet.plan.packageName ?? wallet.plan.packageId)}</b> <span className="status-chip" data-status={wallet.plan.status === 'active' ? 'running' : wallet.plan.status === 'trialing' ? 'scheduled' : wallet.plan.status === 'past_due' ? 'paused' : 'cancelled'}>{t.planStatus[wallet.plan.status]}</span></p>
+                <p><b>{wallet.plan.storePlan ? t.wPlanStore(lang === 'ar' ? wallet.plan.storePlan.nameAr : wallet.plan.storePlan.nameEn) : (lang === 'ar' ? wallet.plan.packageNameAr : wallet.plan.packageName) ?? wallet.plan.packageId}</b> <span className="status-chip" data-status={wallet.plan.status === 'active' ? 'running' : wallet.plan.status === 'trialing' ? 'scheduled' : wallet.plan.status === 'past_due' ? 'paused' : 'cancelled'}>{t.planStatus[wallet.plan.status]}</span></p>
                 <p className="muted">{t.wPlanEnds(dateTime(wallet.plan.periodEnd, lang))}</p>
                 {wallet.plan.status === 'past_due' && <p className="campaign-reason">{t.wPlanPastDue}</p>}
               </>
@@ -192,8 +193,16 @@ function TopupCard({ t, lang, api, wallet, pending, note, go, now, onStarted, ca
     return <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2><p className="muted">{t.wTopupOff}</p></section>;
   }
   // No card provider (Kashier not configured): the card form would only answer 503. InstaPay is the way to top up (Ruling WA-INSTAPAY-LAUNCH-1).
+  // The copy points to the InstaPay card only when that card can be shown (the server says so); otherwise it says plainly that top-ups are off.
   if (wallet.cardCheckout === false) {
-    return <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2><p className="muted">{t.wTopupViaInstapay}</p></section>;
+    if (wallet.instapayAvailable === false) {
+      return <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2><p className="muted">{t.wTopupOff}</p></section>;
+    }
+    return (
+      <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2>
+        <p className="muted">{t.wTopupViaInstapay} <a href="#w-instapay" onClick={(e) => { e.preventDefault(); const h = document.getElementById('w-ip-title'); h?.scrollIntoView?.({ block: 'start' }); h?.focus(); }}>{t.wTopupInstapayLink}</a></p>
+      </section>
+    );
   }
 
   const start = async (e: FormEvent) => {
@@ -316,13 +325,13 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
       <h2 id="w-packages-title">{t.wPackagesTitle}</h2>
       <p className="muted">{t.wPackagesIntro}</p>
       <p className="muted">{t.wYearlyUpgradeNote}</p>
-      {list === 'loading' ? <p className="muted">…</p>
+      {list === 'loading' ? <Skeleton t={t} rows={2} kind="package" />
         : list === 'error' ? <p role="alert" className="error-text">{t.wPackagesError} <button type="button" className="btn ghost" onClick={load}>{t.retry}</button></p>
         : list.length === 0 ? <p className="muted">{t.wPackagesEmpty}</p> : (
           <ul className="wallet-list">
             {list.map((p) => (
               <li key={p.id}>
-                <b dir="auto">{p.name}</b> <span>{money(p.priceMinor)}</span>
+                <b dir="auto">{packageLabel(p, lang)}</b> <span>{money(p.priceMinor)}</span>
                 <p className="muted">{t.wPackageCredits(num(p.aiCredits, lang))}</p>
                 <p className="muted">{t.wPackageMembers(num(p.maxMembers, lang))}</p>
                 {p.periodMonths > 1 && <p className="muted">{t.wPackageYearly(num(p.periodMonths, lang))}</p>}
@@ -385,7 +394,7 @@ function StatementCard({ t, lang, api, now }: { t: Strings; lang: Lang; api: Wal
         <button type="button" className="btn" onClick={() => void download()}><Download size={16} aria-hidden />{t.wCsv}</button>
       </div>
       {csvError && <p role="alert" className="error-text">{t.wCsvError}</p>}
-      {st === null ? <p className="muted">…</p> : st === 'error' ? <p role="alert" className="error-text">{t.wStatementError}</p> : (
+      {st === null ? <Skeleton t={t} rows={2} /> : st === 'error' ? <p role="alert" className="error-text">{t.wStatementError}</p> : (
         <>
           <dl className="wallet-figures">
             <div><dt>{t.wOpening}</dt><dd>{money(st.openingMinor)}</dd></div>
@@ -469,7 +478,7 @@ function RefundCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }
       {msg && <p ref={msgRef} tabIndex={-1} role={msg.kind} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
       <h3 className="pane-sub">{t.wRefundPast}</h3>
       {loadFailed ? <LoadError t={t} onRetry={reload} />
-        : items === null ? <p className="muted">…</p> : items.length === 0 ? <p className="muted">{t.wRefundEmpty}</p> : (
+        : items === null ? <Skeleton t={t} rows={2} /> : items.length === 0 ? <p className="muted">{t.wRefundEmpty}</p> : (
         <ul className="wallet-rows" aria-label={t.wRefundPast}>
           {items.map((r) => (
             <li key={r.id}>
@@ -507,9 +516,10 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
   useEffect(load, [load]);
   useEffect(() => { api.packages().then((p) => { setPackages(p); setPackageId((cur) => cur || p[0]?.id || ''); }, () => setPackages([])); }, [api]);
 
-  if (view === 'loading' || view === 'off') return null;
-  if (view === 'error') return <section className="wallet-card" aria-labelledby="w-ip-title"><h2 id="w-ip-title">{t.wIpTitle}</h2><p role="alert" className="error-text">{t.wIpError}</p></section>;
-  if (!view.payee) return <section className="wallet-card" aria-labelledby="w-ip-title"><h2 id="w-ip-title">{t.wIpTitle}</h2><p className="muted">{t.wIpUnavailable}</p></section>;
+  if (view === 'off') return null;
+  if (view === 'loading') return <section className="wallet-card" id="w-instapay" aria-labelledby="w-ip-title"><h2 id="w-ip-title" tabIndex={-1}>{t.wIpTitle}</h2><Skeleton t={t} rows={2} kind="package" /></section>;
+  if (view === 'error') return <section className="wallet-card" id="w-instapay" aria-labelledby="w-ip-title"><h2 id="w-ip-title" tabIndex={-1}>{t.wIpTitle}</h2><p role="alert" className="error-text">{t.wIpError}</p></section>;
+  if (!view.payee) return <section className="wallet-card" id="w-instapay" aria-labelledby="w-ip-title"><h2 id="w-ip-title" tabIndex={-1}>{t.wIpTitle}</h2><p className="muted">{t.wIpUnavailable}</p></section>;
 
   const start = async (e: FormEvent) => {
     e.preventDefault();
@@ -551,8 +561,8 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
   const safeQr = (() => { try { return payee.qrUrl && new URL(payee.qrUrl).protocol === 'https:' ? payee.qrUrl : null; } catch { return null; } })();
 
   return (
-    <section className="wallet-card" aria-labelledby="w-ip-title">
-      <h2 id="w-ip-title">{t.wIpTitle}</h2>
+    <section className="wallet-card" id="w-instapay" aria-labelledby="w-ip-title">
+      <h2 id="w-ip-title" tabIndex={-1}>{t.wIpTitle}</h2>
       <p className="muted">{t.wIpIntro}</p>
       {!created && (
         <form className="wallet-form" onSubmit={(e) => void start(e)} noValidate>
@@ -562,7 +572,7 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
           </div>
           {kind === 'package' ? (
             <label className="field"><span>{t.wIpPickPackage}</span>
-              <select value={packageId} onChange={(e) => setPackageId(e.target.value)}>{packages.map((p) => <option key={p.id} value={p.id}>{p.name} • {money(p.priceMinor)}</option>)}</select>
+              <select value={packageId} onChange={(e) => setPackageId(e.target.value)}>{packages.map((p) => <option key={p.id} value={p.id}>{packageLabel(p, lang)} • {money(p.priceMinor)}</option>)}</select>
             </label>
           ) : (
             <label className="field"><span>{t.wIpAmount}</span><input inputMode="decimal" dir="ltr" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
@@ -574,7 +584,7 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
         <>
           <div className="wallet-summary">
             <p><b>{t.wIpPayTo}</b> <bdi dir="ltr">{payee.handle}</bdi> • {t.wIpPayee(payee.name)}</p>
-            {safeQr && <img src={safeQr} alt={t.wIpQrAlt} width={160} height={160} loading="lazy" />}
+            {safeQr && <PayeeQr src={safeQr} alt={t.wIpQrAlt} />}
             <p>{t.wIpExact}: <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(created.amountMinor)}</bdi></b></p>
             <p>{t.wIpReference}: <b><bdi dir="ltr">{created.reference}</bdi></b></p>
             <p className="muted">{t.wIpExpires(dateTime(created.expiresAt, lang))}</p>
@@ -626,6 +636,14 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
       )}
     </section>
   );
+}
+
+/** The payee QR: if the image fails to load (missing object, blocked by CSP), the box disappears; the handle above it stays the way to pay. */
+function PayeeQr({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (failed) return null;
+  return <img src={src} alt={alt} width={160} height={160} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 /** The weekly usage digest (T13): counts and amounts only, in the app; the owner can switch it off. */

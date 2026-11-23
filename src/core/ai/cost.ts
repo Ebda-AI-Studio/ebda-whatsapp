@@ -9,7 +9,7 @@ import { fxAt } from '../billing/pricing';
 import { readEntitlement } from '../billing/entitlements';
 import { isFlaggedModel } from './model-flag';
 
-/** 50% of break-even per credit, from WA-PRICE-1 (break-even: Starter 2.0, Growth 0.90, Pro 0.67 EGP): Starter 1.00, Growth 0.45, Pro 0.33 EGP. */
+/** 50% of break-even per credit, from WA-PRICE-1 (break-even: the 300-reply package 2.0, 1,500 0.90, 5,000 0.67 EGP): 1.00, 0.45, 0.33 EGP (ids `starter`, `growth`, `pro` are internal codes). */
 export const AI_COST_ALERT_EGP_MICROS: Readonly<Record<string, number>> = {
   starter: 1_000_000, growth: 450_000, pro: 330_000,
   'starter-yearly': 1_000_000, 'growth-yearly': 450_000, 'pro-yearly': 330_000, // same credits per month as their monthly twin

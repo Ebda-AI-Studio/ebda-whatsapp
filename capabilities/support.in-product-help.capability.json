@@ -1,13 +1,14 @@
 {
   "id": "support.in-product-help",
-  "status": "planned",
-  "plan": "audit #12 + spec section 6",
+  "status": "live",
   "area": "support",
   "version": 1,
   "versionDate": "2026-11-14",
   "titleAr": "مساعدة ودعم جوه ابدأ شات",
   "titleEn": "Help and support channel inside Ebda Chat",
-  "screens": [],
+  "screens": [
+    "AssistantPanel (support mailbox line in the empty panel)"
+  ],
   "api": [],
   "mcpTool": null,
   "planGate": null,
@@ -19,7 +20,7 @@
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/ebda-assistant",
   "helpGap": "docs/help/README.md",
   "questions": {
     "ar": [
@@ -34,11 +35,14 @@
     ]
   },
   "steps": [
-    "Help articles are published at help.ebda.app/whatsapp/<slug>/ (ar default, /en/); support e-mail shown in some messages; no in-app help button or ticket flow (self-service gap #12)"
+    "The assistant answers first; the empty assistant panel shows the support mailbox (a mailto link, the brand address) for a question it cannot answer",
+    "The guide lists what to write (store, what happened and when, an order reference, never a password / token / card / full customer number)"
   ],
-  "edgeCases": [],
+  "edgeCases": [
+    "A brand with no support address shows no line (the Store brand has one)"
+  ],
   "gaps": [
-    "No in-product help link/widget or support form",
-    "support.md exists (docs/support.md) but not surfaced"
-  ]
+    "Email only: there is no in-app support form or ticket list (Ruling WA-SUPPORT-1: one mailbox, one thread per problem)"
+  ],
+  "assistantNote": "Give the support address and the checklist; never promise a reply time or ask for a password, token, card or full customer number"
 }

@@ -89,20 +89,21 @@ export function readTools(d: ToolDeps): ToolSpec[] {
     }),
     t({
       name: 'plan_status', capabilityId: 'packages.plan-status', policy: 'free', undo: 'none', resultTrust: 'typed-source',
-      description: 'The workspace\'s package: its id, status (trialing, active, past_due, cancelled, expired) and when the period ends.',
+      description: 'The workspace\'s package: its display name (say THIS, never the id), status (trialing, active, past_due, cancelled, expired) and when the period ends.',
       args: none, jsonSchema: NO_ARGS,
       read: async (ctx) => {
-        const p = ((await ok(d.callApi(ctx, '/wallet'))) as { plan: { packageId: string; status: string; periodEnd: number; cancelledAt: number | null } | null }).plan;
-        return p ? { package: p.packageId, status: p.status, periodEnd: new Date(p.periodEnd).toISOString().slice(0, 10), cancelled: p.cancelledAt !== null } : { package: null };
+        const p = ((await ok(d.callApi(ctx, '/wallet'))) as { plan: { packageId: string; status: string; periodEnd: number; cancelledAt: number | null; packageName?: string; storePlan?: { nameEn: string } } | null }).plan;
+        // The id is an internal code ('growth' is not a tier name any more): the assistant says the display name, a size for a Chat package or the Store plan's own name.
+        return p ? { package: p.packageId, name: p.packageName ?? p.storePlan?.nameEn ?? null, status: p.status, periodEnd: new Date(p.periodEnd).toISOString().slice(0, 10), cancelled: p.cancelledAt !== null } : { package: null };
       },
     }),
     t({
       name: 'templates_list', capabilityId: 'templates.list', policy: 'free', undo: 'none', resultTrust: 'store-data',
-      description: 'The merchant\'s WhatsApp message templates with their category and approval status.',
+      description: 'The merchant\'s WhatsApp message templates with their category, approval status and Meta\'s quality rating (GREEN high, YELLOW medium, RED low, null = Meta has not rated it yet).',
       args: none, jsonSchema: NO_ARGS,
       read: async (ctx) => {
         const r = (await ok(d.callApi(ctx, '/templates'))) as { items?: Array<Record<string, unknown>> };
-        return { items: (r.items ?? []).slice(0, 20).map((x) => ({ name: x.name, language: x.language, category: x.category, status: x.status, rejectedReason: x.rejectedReason ?? null })) };
+        return { items: (r.items ?? []).slice(0, 20).map((x) => ({ name: x.name, language: x.language, category: x.category, status: x.status, quality: x.quality ?? null, rejectedReason: x.rejectedReason ?? null })) };
       },
     }),
     t({

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
-import { exportContactQuery, exportContactsQuery, listContactsQuery, mergeContactsRequest, renameContactRequest, setContactTagsRequest } from '../core/api/contract';
+import { consentEvidenceQuery, exportContactQuery, exportContactsQuery, listContactsQuery, mergeContactsRequest, renameContactRequest, setContactTagsRequest } from '../core/api/contract';
 import { recordAudit } from '../core/audit';
+import { consentEvidenceCsv } from '../core/campaigns/report';
 import { subjectHash } from '../core/erasure';
 import { normaliseE164 } from '../core/phone';
 import { apiError, workspaceStub, type ApiEnv } from './shared';
@@ -63,6 +64,20 @@ contactsRoutes.get('/stores/:storeId/contacts/:waId/export', async (c) => {
   if (!out) return apiError(c, 404, 'not_found');
   const storeId = c.req.param('storeId')!;
   await recordAudit(c.env, { workspaceId: storeId, actor: c.get('principal').userId, role: 'owner', action: 'contact.export', targetType: 'waId', targetId: await subjectHash(c.env, storeId, waId), detail: { messages: out.messages.length, after: q.data.after } });
+  c.header('cache-control', 'no-store');
+  return c.json(out);
+});
+
+/** The consent / opt-out record of every customer, for Meta or for the owner's own files (compliance.opt-out-evidence). Owner only, paged, audited by count (never by number). */
+contactsRoutes.get('/stores/:storeId/contacts/consent-evidence', async (c) => {
+  if (c.get('storeRole') !== 'owner') return apiError(c, 403, 'forbidden');
+  const q = consentEvidenceQuery.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
+  if (!q.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const out = await ws.getConsentEvidence(q.data.after, q.data.limit);
+  await recordAudit(c.env, { workspaceId: c.req.param('storeId')!, actor: c.get('principal').userId, role: 'owner', action: 'contacts.consent-evidence', detail: { rows: out.items.length, after: q.data.after } });
+  if (q.data.format === 'csv') return new Response(consentEvidenceCsv(out), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="consent-evidence.csv"', 'cache-control': 'no-store', ...(out.nextAfter !== null ? { 'x-next-after': String(out.nextAfter) } : {}) } });
   c.header('cache-control', 'no-store');
   return c.json(out);
 });

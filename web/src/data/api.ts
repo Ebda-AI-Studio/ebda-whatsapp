@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import {
   type ContactDto, agentSettingsDto, apiError, assistantActResponse, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, connectorDto, connectorTestResult, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
+  opsStatusDto, proactiveRecsDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, inviteMemberResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest, segmentDto, quickReplyDto, listQuickRepliesResponse, noteDto, conversationDto,
 } from '../../../src/core/api/contract';
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
+import { assistantFlagsDto, assistantModeDto } from './assistant-rollout';
 import type { InboxSource } from './source';
+import { isStandaloneId, markStandalone } from './workspaces';
 
 export class ApiError extends Error {
   /** `detail` = the server's machine reason for a 409 (e.g. `empty_audience`), when it sends one. */
@@ -139,6 +141,10 @@ export function createApiSource(o: Opts): LiveSource {
         try { return await call('/throttle', throttleReportDto); } catch (e) { if (e instanceof ApiError && e.status === 404) return null; throw e; }
       },
     },
+    proactiveRecs: {
+      get: () => call('/proactive-recs', proactiveRecsDto),
+      save: (change) => call('/proactive-recs', proactiveRecsDto, { method: 'PUT', body: JSON.stringify(change) }),
+    },
     async botFunnel(days) {
       const day = (ms: number) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(ms).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
       const now = Date.now();
@@ -206,6 +212,15 @@ export function createApiSource(o: Opts): LiveSource {
       assign: async (userId) => { await call(`/members/${encodeURIComponent(userId)}/seat`, seatResponse, { method: 'PUT' }); },
       unassign: async (userId) => {
         const res = await f(`${root}/members/${encodeURIComponent(userId)}/seat`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
+      },
+      invite: async (a) => { await call('/members/invite', inviteMemberResponse, post(a)); },
+      revokeInvitation: async (userId) => {
+        const res = await f(`${root}/members/invitations/${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
+      },
+      remove: async (userId) => {
+        const res = await f(`${root}/members/${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
         if (!res.ok) throw new ApiError('invalid_request', res.status);
       },
     },
@@ -368,6 +383,12 @@ export function createApiSource(o: Opts): LiveSource {
       submit: (input) => op('/shared-templates', z.object({ status: z.string() }).loose(), post(input)),
       requests: async () => (await op('/shared-template-requests', z.object({ items: z.array(sharedRequestDto.extend({ workspaceId: z.string() })) }))).items,
     },
+    assistantRollout: {
+      platform: () => op('/assistant', assistantFlagsDto),
+      setPlatform: (patch) => op('/assistant/flags', assistantFlagsDto, { method: 'PUT', body: JSON.stringify(patch) }),
+      workspaceMode: async (ws) => (await op(`/workspaces/${encodeURIComponent(ws)}/assistant`, assistantModeDto)).mode,
+      setWorkspaceMode: async (ws, mode) => (await op(`/workspaces/${encodeURIComponent(ws)}/assistant`, assistantModeDto, { method: 'PUT', body: JSON.stringify({ mode }) })).mode,
+    },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });
       if (!res.ok) throw new ApiError('not_found', res.status);
@@ -395,12 +416,16 @@ export function createApiSource(o: Opts): LiveSource {
     emit: (e) => listeners.forEach((l) => l(e)),
     reload: () => reloaders.forEach((r) => r()),
     async loadCapabilities() {
+      // CHAT-SA-5: a standalone workspace has no Store, so everything that talks to one is switched off (the routes would only 404). The `sw_` id says so before /me does (and when /me fails).
+      const standAlone = () => markStandalone(source);
+      if (isStandaloneId(o.storeId)) standAlone();
       try {
         const me = await call('/me', meResponse.partial().loose());
         source.capabilities = { codOutcome: me.capabilities?.codOutcome === true, numbers: me.capabilities?.numbers === true, assistant: me.capabilities?.assistant === true };
         if (me.role) source.role = me.role;
         if (me.workspace === false) source.workspaceMissing = true;
         if (me.stores) source.stores = me.stores;
+        if ((me as { kind?: unknown }).kind === 'standalone') standAlone();
       } catch (e) {
         source.capabilities = { codOutcome: false };
         if (e instanceof ApiError && e.status === 403 && e.code === 'no_seat') source.noSeat = e.detail === 'seat_over_limit' ? 'over_limit' : 'none';
@@ -408,6 +433,16 @@ export function createApiSource(o: Opts): LiveSource {
     },
   };
   return source;
+}
+
+/** Store-independent super-admin check (GET /operator/me): 200 only for a super admin, 401/403 for everyone else. Any failure reads as "not an operator". */
+export async function isOperator(baseUrl: string, getToken: () => Promise<string>, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`${baseUrl}/api/v1/operator/me`, { headers: { authorization: `Bearer ${await getToken()}` } });
+    return res.ok && ((await res.json().catch(() => null)) as { superAdmin?: unknown } | null)?.superAdmin === true;
+  } catch {
+    return false;
+  }
 }
 
 export interface SocketLike {
