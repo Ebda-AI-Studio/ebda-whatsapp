@@ -516,7 +516,7 @@ export async function cancelInstapay(env: Env, a: { workspaceId: string; request
     env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE order_id = ?1 AND workspace_id = ?2 AND provider = 'instapay' AND status = 'pending' AND EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?1 AND state = 'expired' AND cancelled_at = ?3)").bind(a.requestId, a.workspaceId, now),
     env.DB.prepare("UPDATE topups SET state = 'expired' WHERE order_id = ?1 AND workspace_id = ?2 AND provider = 'instapay' AND state = 'pending' AND EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?1 AND state = 'expired' AND cancelled_at = ?3)").bind(a.requestId, a.workspaceId, now),
   ]);
-  if (res[0]!.meta.changes !== 1) return { ok: false, reason: 'bad_state' }; // exactly one row or nothing: raced with a proof upload / expiry / another cancel
+  if (!(res[0]!.meta.changes > 0)) return { ok: false, reason: 'bad_state' }; // exactly one row or nothing: raced with a proof upload / expiry / another cancel
   await audit(env, { at: now, actor: a.userId, action: 'instapay_cancelled_by_owner', workspaceId: a.workspaceId, after: { id: a.requestId, kind: g.r.kind, amountMinor: g.r.amount_minor } });
   return { ok: true, request: dto((await get(env, a.requestId))!) };
 }
@@ -544,7 +544,7 @@ export async function contestInstapay(env: Env, a: { workspaceId: string; reques
     env.DB.prepare("UPDATE package_orders SET status = 'pending' WHERE order_id = ?1 AND workspace_id = ?2 AND provider = 'instapay' AND status = 'failed' AND EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?1 AND state = 'under_review' AND contested_at = ?3)").bind(a.requestId, a.workspaceId, now),
     env.DB.prepare("UPDATE topups SET state = 'pending' WHERE order_id = ?1 AND workspace_id = ?2 AND provider = 'instapay' AND state = 'failed' AND EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?1 AND state = 'under_review' AND contested_at = ?3)").bind(a.requestId, a.workspaceId, now),
   ]);
-  if (res[0]!.meta.changes !== 1) {
+  if (!(res[0]!.meta.changes > 0)) {
     const cur = await get(env, a.requestId);
     const open = (await env.DB.prepare("SELECT count(*) AS n FROM instapay_requests WHERE workspace_id = ? AND state IN ('awaiting_proof', 'under_review')").bind(a.workspaceId).first<{ n: number }>())?.n ?? 0;
     if (cur?.state === 'rejected' && cur.contested_at === null && open >= MAX_OPEN_PER_WORKSPACE) return { ok: false, reason: 'too_many_open' };
