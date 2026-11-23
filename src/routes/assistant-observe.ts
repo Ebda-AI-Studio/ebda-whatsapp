@@ -13,21 +13,26 @@ export const ENGINE_FALLBACK: L = { ar: 'مقدرتش أرد دلوقتي. جر�
 export const TOOL_FAILED: L = { ar: 'مقدرتش أقرا بيانات متجرك دلوقتي. جرّب تاني بعد لحظة.', en: 'I could not read your store data right now. Please try again in a moment.' };
 export const EMPTY_ANSWER: L = { ar: 'الرد جه فاضي من المساعد. جرّب تسأل بصيغة تانية أو ابعت السؤال تاني.', en: 'The assistant came back with an empty answer. Try rephrasing, or send the question again.' };
 
-const NUDGE = 'Write the final answer to the merchant now, in plain text, using the data above. Do not call any tool.';
+/** Chat has no store-wide orders / sales / revenue tool (those live in the store's own dashboard). Asking for them must never produce a number the model made up. */
+export const NO_STORE_METRICS: L = { ar: 'مفيش عندي أداة لسه بتجيب عدد الطلبات أو المبيعات للمتجر كله. شوف الأرقام دي من لوحة تحكم المتجر.', en: 'I do not have a tool yet that reads your store-wide orders or sales. Please check those numbers in your store dashboard.' };
+const METRIC = /(طلب|طلبات|اوردر|مبيع|ايراد|ارباح|ربح|orders?|sales|revenue|income|profit)/i;
+const PERIOD = /(النهارد|اليوم|امبارح|الاسبوع|الشهر|السنه|today|yesterday|this week|this month|this year|last week|last month)/i;
+const DIGITS = /[0-9٠-٩]+(?:[.,][0-9٠-٩]+)?/g;
+const ASCII_DIGITS = (x: string): string => x.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
 
 export type TurnObserver = {
   requestId: string;
   adapter: SmartLayerAdapter;
   provider: LlmProvider;
   /** Swaps the engine's generic fallback for the specific reason, when there is one. */
-  refine<T extends { status: string; segments: Segment[] }>(res: T, locale: 'ar' | 'en'): T;
+  refine<T extends { status: string; segments: Segment[] }>(res: T, locale: 'ar' | 'en', question?: string): T;
 };
 
 export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; log?: (line: Record<string, unknown>) => void }): TurnObserver {
   const requestId = crypto.randomUUID();
   const log = o.log ?? ((line) => console.log(JSON.stringify(line)));
   const emit = (event: string, f: Record<string, unknown>) => log({ event, requestId, storeId: o.storeId, ...f });
-  const state = { toolFailed: false, emptyFinal: false };
+  const state = { toolFailed: false, emptyFinal: false, toolOut: [] as string[] };
 
   const inner = new WorkersAiProvider(adapter.ai, adapter.models.answer);
   const provider: LlmProvider = {
@@ -45,9 +50,10 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; lo
       let res = await run(req);
       const empty = (x: LlmResponse) => !x.text && !x.toolCalls?.length;
       if (empty(res)) {
-        // A reasoning model can spend the whole output budget on thinking and return no content. One retry, tools off, a bigger budget.
+        // A reasoning model can spend the whole output budget on thinking and return no content. One retry with the SAME request (same tools, so it can still read real data and
+        // never has to guess a figure) and a bigger output budget.
         emit('assistant_model_empty', { model: req.model ?? adapter.models.answer, outputTokens: res.usage.outputTokens, maxTokens: req.maxTokens, ms: Date.now() - t0 });
-        const again = await run({ ...req, tools: [], maxTokens: Math.min(req.maxTokens * 2, 4096), messages: [...req.messages, { role: 'user', content: NUDGE }] });
+        const again = await run({ ...req, maxTokens: Math.min(req.maxTokens * 2, 4096) });
         res = { ...again, usage: { inputTokens: res.usage.inputTokens + again.usage.inputTokens, outputTokens: res.usage.outputTokens + again.usage.outputTokens } };
         if (empty(res)) { state.emptyFinal = true; emit('assistant_model_empty_after_retry', { ms: Date.now() - t0 }); }
       }
@@ -61,7 +67,9 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; lo
     return { ...t, read: async (ctx, args) => {
       const t0 = Date.now();
       try {
-        return await read(ctx, args);
+        const out = await read(ctx, args);
+        state.toolOut.push(JSON.stringify(out) ?? '');
+        return out;
       } catch (err) {
         state.toolFailed = true;
         emit('assistant_tool_failed', { tool: t.name, error: err instanceof Error ? err.name : 'unknown', upstreamStatus: (err as { status?: number })?.status, ms: Date.now() - t0 });
@@ -81,7 +89,17 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; lo
 
   return {
     requestId, adapter: wrapped, provider,
-    refine(res, locale) {
+    refine(res, locale, question) {
+      // A store-wide orders / sales question with a reply that states a figure no tool returned: the figure is invented, so the honest answer replaces it.
+      if (question && METRIC.test(question) && PERIOD.test(question)) {
+        const said = res.segments.map((x) => (x.kind === 'text' ? x.text : '')).join(' ');
+        const real = ASCII_DIGITS(state.toolOut.join(' '));
+        const invented = (said.match(DIGITS) ?? []).map(ASCII_DIGITS).filter((n) => !real.includes(n));
+        if (invented.length) {
+          emit('assistant_invented_figure_removed', { count: invented.length });
+          return { ...res, status: 'answered', segments: [{ kind: 'text', text: NO_STORE_METRICS[locale] }] };
+        }
+      }
       const only = res.segments.length === 1 && res.segments[0]!.kind === 'text' ? res.segments[0]!.text : null;
       if (only !== ENGINE_FALLBACK[locale]) return res;
       const m = state.toolFailed ? TOOL_FAILED : state.emptyFinal ? EMPTY_ANSWER : null;

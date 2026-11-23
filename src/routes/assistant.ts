@@ -109,7 +109,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     const approvals: ApprovalToken[] = [];
     const obs = observeTurn(s.adapter, { storeId: s.ctx.storeId });
     const raw = await runTurn(obs.adapter, s.ctx, { text: body.data.text }, { onApprovalToken: (t) => approvals.push(t), provider: obs.provider });
-    const res = obs.refine(raw, body.data.locale);
+    const res = obs.refine(raw, body.data.locale, body.data.text);
     c.header('cache-control', 'no-store');
     c.header('x-request-id', obs.requestId);
     return c.json({ status: res.status, segments: res.segments, previews: res.previews, ...(approvals.length ? { approvals } : {}), turnId: res.turnId });

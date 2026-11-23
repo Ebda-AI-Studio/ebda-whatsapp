@@ -1,7 +1,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureAssistant } from '../../src/routes/assistant';
-import { EMPTY_ANSWER, ENGINE_FALLBACK, TOOL_FAILED, observeTurn } from '../../src/routes/assistant-observe';
+import { EMPTY_ANSWER, ENGINE_FALLBACK, NO_STORE_METRICS, TOOL_FAILED, observeTurn } from '../../src/routes/assistant-observe';
 import { apiFor, storeId, useApiKey } from '../helpers/api';
 import { workspace } from '../helpers/workspace';
 import type { SmartLayerAdapter, ToolSpec } from '../../foundation/smart-layer/types';
@@ -13,12 +13,15 @@ useApiKey();
 type Msg = { content?: string };
 const emptyAi = () => {
   let modelCalls = 0;
+  const requests: Array<{ tools: unknown; max_tokens: unknown }> = [];
   return {
+    requests,
     calls: () => modelCalls,
     ai: { run: async (_m: string, inputs: Record<string, unknown>) => {
       const system = ((inputs.messages as Msg[])[0]?.content ?? '') as string;
       if (system.includes('Classify the merchant message')) return { choices: [{ message: { content: '{"inScope":true,"abuse":false,"injection":false}' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
       modelCalls++;
+      requests.push({ tools: inputs.tools, max_tokens: inputs.max_tokens });
       return { choices: [{ message: { content: null } }], usage: { prompt_tokens: 10, completion_tokens: 900 } };
     } },
   };
@@ -27,7 +30,7 @@ beforeEach(async () => { await env.DB.prepare("INSERT INTO platform_flags (key, 
 afterEach(() => { configureAssistant({}); vi.restoreAllMocks(); });
 
 describe('assistant route: a model that returns nothing', () => {
-  it('is retried once, logged with a request id, and told to the merchant as an empty answer (not the generic "could not answer")', async () => {
+  it('is retried once with the SAME tools and a bigger budget, logged with a request id, and told to the merchant as an empty answer (not the generic "could not answer")', async () => {
     const s = storeId(7101);
     const { token } = await apiFor(s);
     await workspace(s).setAssistantMode('answer-only');
@@ -42,6 +45,8 @@ describe('assistant route: a model that returns nothing', () => {
     expect(body.segments[0]!.text).not.toBe(ENGINE_FALLBACK.ar);
     expect(body.status).toBe('limited');
     expect(m.calls()).toBe(2); // first completion + one retry
+    expect(m.requests[1]!.tools).toEqual(m.requests[0]!.tools); // never tools-off: it could then invent a figure
+    expect(m.requests[1]!.max_tokens).toBeGreaterThan(m.requests[0]!.max_tokens as number);
     const rid = res.headers.get('x-request-id')!;
     expect(rid).toMatch(/[0-9a-f-]{36}/);
     const parsed = lines.filter((l) => l.startsWith('{')).map((l) => JSON.parse(l) as { event: string; requestId: string });
@@ -72,5 +77,32 @@ describe('observeTurn: seams', () => {
     expect(lines[0]).toMatchObject({ event: 'assistant_model_error', kind: 'timeout' });
     const ok = { status: 'answered', segments: [{ kind: 'text' as const, text: 'جالك 5 طلبات' }] };
     expect(o.refine(ok, 'ar')).toBe(ok);
+  });
+});
+
+describe('observeTurn: store-wide metrics questions', () => {
+  const adapter = (): SmartLayerAdapter => ({ ai: { run: async () => ({}) }, models: { answer: 'm', plan: 'm', template: 'm', classify: 'm', judge: 'm', embed: 'm' }, tools: () => [], storage: { appendAudit: async () => undefined } } as unknown as SmartLayerAdapter);
+  const say = (text: string) => ({ status: 'answered', segments: [{ kind: 'text' as const, text }] });
+  const digits = (r: { segments: Array<{ kind: string; text?: string }> }) => r.segments.map((s) => s.text ?? '').join('').match(/[0-9٠-٩]+/g);
+
+  it('orders today with no matching tool: an invented number never reaches the merchant (AR digits, Latin digits, English)', () => {
+    const o = observeTurn(adapter(), { storeId: 's', log: () => undefined });
+    for (const [q, lang, a] of [['كام طلب جالي النهارده؟', 'ar', 'النهاردة جالك 12 طلب'], ['كام طلب جالي النهارده؟', 'ar', 'جالك ١٢ طلب النهاردة'], ['How many orders did I get today?', 'en', 'You got 12 orders today.'], ['كام مبيعاتي النهارده', 'ar', 'مبيعاتك 4,500 جنيه']] as const) {
+      const r = o.refine(say(a), lang, q);
+      expect(digits(r)).toBeNull();
+      expect(r.segments[0]).toEqual({ kind: 'text', text: NO_STORE_METRICS[lang] });
+    }
+  });
+
+  it('keeps an honest answer without figures, and keeps a figure a tool really returned', async () => {
+    const tool = { name: 'x', policy: 'free', read: async () => ({ ordersToday: 7 }) } as unknown as ToolSpec;
+    const o = observeTurn({ ...adapter(), tools: () => [tool] }, { storeId: 's', log: () => undefined });
+    const honest = say('مفيش عندي أرقام الطلبات، شوفها من لوحة المتجر');
+    expect(o.refine(honest, 'ar', 'كام طلب جالي النهارده؟')).toBe(honest);
+    await o.adapter.tools()[0]!.read!({} as never, {});
+    const real = say('جالك 7 طلبات');
+    expect(o.refine(real, 'ar', 'كام طلب جالي النهارده؟')).toBe(real);
+    const other = say('جالك 12 طلب');
+    expect(digits(o.refine(other, 'ar', 'كام طلب جالي النهارده؟'))).toBeNull();
   });
 });
