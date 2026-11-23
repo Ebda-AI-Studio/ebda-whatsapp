@@ -17,7 +17,7 @@ export const EXPLAIN_IDS: readonly string[] = [
   'contacts.opt-in-keyword', 'contacts.opt-out',
   // access, numbers, orders, catalogue, billing behaviours (E7)
   'access.language', 'access.sign-out', 'agent.voice-notes', 'agent.location-pin', 'agent.inbound-media', 'catalogue.google-feeds-clash', 'compliance.privacy-terms', 'inbox.realtime', 'notifications.alerts',
-  'numbers.coexistence', 'numbers.migrate', 'numbers.display-name', 'numbers.history-contacts-sync', 'numbers.meta-payment-method', 'numbers.meta-verification',
+  'numbers.coexistence', 'numbers.migrate', 'templates.quality-rating', 'support.in-product-help', 'numbers.display-name', 'numbers.history-contacts-sync', 'numbers.meta-payment-method', 'numbers.meta-verification',
   'orders.cart-to-order', 'orders.cod-confirmation', 'orders.instapay-in-chat', 'orders.tracking',
   'templates.shared-number-marketing', 'templates.starter-on-connect', 'wallet.instapay-auto-confirm', 'catalogue.product-cards',
   // behaviour capabilities of the AI agent and the ordering bot

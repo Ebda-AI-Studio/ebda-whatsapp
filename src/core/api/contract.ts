@@ -113,6 +113,8 @@ export const templateDto = z.object({
   rejectedReason: z.string().nullable(),
   // additive (merchant template self-service): the merchant's own title, Meta's components, last change, and whether Meta still lets this one be edited
   label: z.string().nullable().optional(),
+  /** Meta's quality rating of the template (from its webhook), or null when Meta has not sent one. */
+  quality: z.enum(['GREEN', 'YELLOW', 'RED', 'UNKNOWN']).nullable().optional(),
   components: z.array(z.record(z.string(), z.any())).optional(),
   updatedAt: z.number().int().optional(),
   editAllowance: templateEditAllowance.optional(),
@@ -577,6 +579,8 @@ export const listCampaignsQuery = z.object({
   cursor: z.string().regex(/^\d{1,15}$/).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
+/** A seasonal template pack the merchant asks to install (the brand supplies the packs; an id it does not have is refused). */
+export const installSeasonalRequest = z.object({ pack: z.enum(['ramadan']) }).strict();
 export const campaignReportQuery = z.object({ format: z.enum(['json', 'csv']).default('json') });
 /** Owner-only compliance evidence: one page of the per-contact consent / opt-out record (after = the last contact id of the previous page). */
 export const consentEvidenceQuery = z.object({ after: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0), limit: z.coerce.number().int().min(1).max(500).default(200), format: z.enum(['json', 'csv']).default('json') });
