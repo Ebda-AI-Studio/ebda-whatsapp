@@ -147,7 +147,9 @@ export interface InboxSource {
   /** A super admin with no store: boots into the operator console alone (no inbox, no store calls). */
   operatorOnly?: boolean;
   /** GET /me: the stores this person can open that have a Chat workspace (for the store picker). Undefined = the server did not say (no picker). */
-  stores?: { id: string; name: string; role: 'owner' | 'staff' }[];
+  stores?: { id: string; name: string; role: 'owner' | 'staff'; kind?: 'store' | 'standalone' }[];
+  /** GET /me `kind === 'standalone'` (CHAT-SA-5): a workspace with no Store behind it. Every store-coupled surface is hidden and the copy says "workspace". Absent/false = a Store workspace, exactly as before. */
+  standalone?: boolean;
   /** Opens Chat on another store (a full reload on that store). Absent in sample data. */
   switchStore?(storeId: string): void;
   /** The signed-in user's role in this store (GET /me); `staff` hides spending actions. */
