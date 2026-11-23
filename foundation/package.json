@@ -1,7 +1,7 @@
 {
   "name": "@ebda/foundation",
   "version": "0.3.4",
-  "foundationCommit": "931f55d4895559a6956e10efd4f8d0211483a546",
+  "foundationCommit": "2fa31a1d622acf3db8c458171b6b25c879f09c84",
   "private": true,
   "license": "UNLICENSED",
   "exports": {
@@ -10,7 +10,11 @@
     "./capability": "./capability.ts",
     "./capability-coverage": "./capability-coverage.ts",
     "./capability-registry": "./capability-registry.ts",
+    "./contracts/wa-v1": "./contracts/wa-v1.ts",
+    "./contracts/wa-v1-verify": "./contracts/wa-v1-verify.ts",
+    "./erasure": "./erasure.ts",
     "./help-article": "./help-article.ts",
+    "./identity-claims": "./identity-claims.ts",
     "./instapay-decision": "./instapay-decision.ts",
     "./instapay-dedupe": "./instapay-dedupe.ts",
     "./instapay-digest": "./instapay-digest.ts",
@@ -18,6 +22,7 @@
     "./instapay-state": "./instapay-state.ts",
     "./phone": "./phone.ts",
     "./ratchet": "./ratchet.ts",
+    "./request-guard": "./request-guard.ts",
     "./self-service-routes": "./self-service-routes.ts",
     "./slugs": "./slugs.ts",
     "./studio-pages": "./studio-pages.ts",

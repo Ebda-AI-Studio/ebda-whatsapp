@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Proves a Cloudflare Worker deploy from the OUTSIDE, with the four checks that a green merge never implies (docs/standard/deploy-verify, rule F):
-//   1. deploy job green   every GitHub Actions run for the commit whose workflow matches --workflow is COMPLETED + SUCCESS (a cancelled run is a deploy that did not happen)
+//   1. deploy job green   every GitHub Actions run for the commit whose workflow contains --workflow is COMPLETED + SUCCESS (a cancelled run is a deploy that did not happen)
 //   2. health commit      GET <base>/health answers ok and its `commit` is the commit under test (retried while the edge still serves the previous version)
 //   3. live schedules     the Worker's schedules on Cloudflare equal the crons in --wrangler / --cron (the API, never the config file, is the evidence)
 //   4. one tick seen      Cloudflare recorded a scheduled invocation of the Worker within --tick-window-min
-// usage: node deploy-verify.mjs --base https://host --expect <commit> --repo OWNER/NAME --workflow <name-regex> --worker <name> --wrangler <file> [--cron "<expr>" ...] [--tick-window-min 60] [--strict]
+// usage: node deploy-verify.mjs --base https://host --expect <commit> --repo OWNER/NAME --workflow <name-or-path-substring> --worker <name> --wrangler <file> [--cron "<expr>" ...] [--tick-window-min 60] [--strict]
 //   secrets from the environment only: GH_TOKEN (check 1), CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID (checks 3-4).
 // A check that cannot run is SKIP with its reason, never PASS; --strict turns every SKIP into a failure. Exit 0 = nothing failed, 1 = a check failed (or skipped under --strict), 2 = usage.
 // Nothing is written to production: GETs and one read-only GraphQL query. Plain Node >= 20, no dependencies.
@@ -25,19 +25,23 @@ export async function runChecks({ base, expectCommit, repo, workflow, worker, cr
   };
 
   // 1. deploy job green
-  if (!expectCommit || !repo || !workflow) add('deploy job green', null, 'skipped: pass --expect <commit>, --repo OWNER/NAME and --workflow <name-regex>');
+  // argv shapes are validated up front: they end up in a URL and a comparison, never in a pattern
+  if (expectCommit && !/^[0-9a-f]{7,40}$/.test(expectCommit)) throw new Error('--expect must be a 7-40 character lowercase hex commit');
+  if (repo && !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('--repo must look like OWNER/NAME');
+  if (!expectCommit || !repo || !workflow) add('deploy job green', null, 'skipped: pass --expect <commit>, --repo OWNER/NAME and --workflow <name-or-path-substring>');
   else if (!ghToken) add('deploy job green', null, 'skipped: set GH_TOKEN (read access to the repo\'s Actions)');
   else {
     try {
       const { res, body } = await json(`${GH}/repos/${repo}/actions/runs?head_sha=${encodeURIComponent(expectCommit)}&per_page=100`, { headers: { authorization: `Bearer ${ghToken}`, accept: 'application/vnd.github+json' } });
-      const re = new RegExp(workflow, 'i');
-      const runs = (body?.workflow_runs ?? []).filter((r) => re.test(r.name ?? '') || re.test(r.path ?? ''));
+      // plain case-insensitive substring match: --workflow is never compiled into a RegExp (regex injection / ReDoS from argv)
+      const needle = workflow.toLowerCase();
+      const runs = (body?.workflow_runs ?? []).filter((r) => String(r.name ?? '').toLowerCase().includes(needle) || String(r.path ?? '').toLowerCase().includes(needle));
       // the latest run of each workflow decides (a cancelled run followed by a green re-run is green)
       const latest = new Map();
       for (const r of runs) if (!latest.has(r.workflow_id) || r.run_number > latest.get(r.workflow_id).run_number) latest.set(r.workflow_id, r);
       const bad = [...latest.values()].filter((r) => r.status !== 'completed' || r.conclusion !== 'success');
       if (!res.ok) add('deploy job green', false, `could not read the runs (status ${res.status})`);
-      else if (latest.size === 0) add('deploy job green', false, `no workflow run matching /${workflow}/ for ${expectCommit.slice(0, 9)}: the deploy never started`);
+      else if (latest.size === 0) add('deploy job green', false, `no workflow run whose name or path contains "${workflow}" for ${expectCommit.slice(0, 9)}: the deploy never started`);
       else if (bad.length) add('deploy job green', false, bad.map((r) => `${r.name}: ${r.status}/${r.conclusion ?? 'none'}`).join('; '));
       else add('deploy job green', true, `${latest.size} run(s) completed + success: ${[...latest.values()].map((r) => r.name).join(', ')}`);
     } catch (e) {
@@ -129,7 +133,7 @@ if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
   const all = (k) => argv.flatMap((a, i) => (a === k ? [argv[i + 1]] : []));
   const base = arg('--base');
   if (base && !/^https:\/\//.test(base)) {
-    console.error('usage: node deploy-verify.mjs --base https://<host> --expect <commit> --repo OWNER/NAME --workflow <name-regex> --worker <name> --wrangler <file> [--cron "<expr>" ...] [--tick-window-min 60] [--strict]');
+    console.error('usage: node deploy-verify.mjs --base https://<host> --expect <commit> --repo OWNER/NAME --workflow <name-or-path-substring> --worker <name> --wrangler <file> [--cron "<expr>" ...] [--tick-window-min 60] [--strict]');
     process.exit(2);
   }
   const wrangler = arg('--wrangler');
