@@ -75,5 +75,8 @@ export async function createStandaloneWorkspace(
 export async function pruneWorkspaceCreations(env: Pick<Env, 'DB'>, now = Date.now()): Promise<void> {
   try {
     await env.DB.prepare('DELETE FROM workspace_creations WHERE at < ?').bind(now - 2 * 86_400_000).run();
+    await env.DB.prepare('DELETE FROM invite_attempts WHERE at < ?').bind(now - 2 * 86_400_000).run(); // the invite caps look back one day
+    await env.DB.prepare("DELETE FROM workspace_invitations WHERE status <> 'pending' AND decided_at < ?").bind(now - 30 * 86_400_000).run();
+    await env.DB.prepare("DELETE FROM workspace_invitations WHERE status = 'pending' AND expires_at < ?").bind(now - 30 * 86_400_000).run();
   } catch { /* best-effort */ }
 }

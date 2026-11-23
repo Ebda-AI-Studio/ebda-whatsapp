@@ -213,6 +213,10 @@ export function createApiSource(o: Opts): LiveSource {
         if (!res.ok) throw new ApiError('invalid_request', res.status);
       },
       invite: async (a) => { await call('/members/invite', inviteMemberResponse, post(a)); },
+      revokeInvitation: async (userId) => {
+        const res = await f(`${root}/members/invitations/${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
+      },
       remove: async (userId) => {
         const res = await f(`${root}/members/${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
         if (!res.ok) throw new ApiError('invalid_request', res.status);

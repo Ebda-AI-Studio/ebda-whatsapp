@@ -219,3 +219,28 @@ export function requireSuperAdmin(getVerifier: (env: Env) => IdentityVerifier): 
     await next();
   };
 }
+
+/**
+ * Routes that belong to a PERSON, not to a workspace (a pending invitation addressed to the signed-in identity): a valid person token, never an integrator token, with the same
+ * every-request session check a write gets (fail closed). It grants nothing about any workspace; the handler keys everything on `principal.userId`.
+ */
+export function requirePerson(getVerifier: (env: Env) => IdentityVerifier): MiddlewareHandler<{ Bindings: Env; Variables: AuthVars }> {
+  return async (c, next) => {
+    const header = c.req.header('authorization') ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!token) return c.json({ error: 'unauthorized' }, 401);
+    let principal: Principal;
+    try {
+      principal = await getVerifier(c.env).verify(token, { integratorTokens: integratorTokensEnabled(c.env) });
+    } catch (e) {
+      const status = e instanceof IdentityError ? e.status : 401;
+      return c.json({ error: status === 403 ? 'forbidden' : 'unauthorized' }, status);
+    }
+    if (principal.integration) return c.json({ error: 'forbidden' }, 403);
+    const s = await writeSessionState(c.env, principal.sessionId);
+    if (s === 'revoked') return c.json({ error: 'forbidden', message: 'session_revoked' }, 403);
+    if (s === 'unavailable') return c.json({ error: 'unavailable', message: 'session_check_unavailable' }, 503);
+    c.set('principal', principal);
+    await next();
+  };
+}

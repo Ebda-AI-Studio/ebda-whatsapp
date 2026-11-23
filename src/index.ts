@@ -1,6 +1,7 @@
 import { runDueOffboardings } from './core/ops/offboarding';
 import { offboardingRoutes } from './routes/offboarding';
 import { membersRoutes } from './routes/members';
+import { invitationsRoutes } from './routes/invitations';
 import { auditWrites } from './core/audit';
 import { eraseContactFlow } from './core/contact-erase';
 import { purgeNewCapUsage } from './core/campaigns/new-cap';
@@ -21,7 +22,7 @@ import { mark } from './core/timing';
 import { checkFxStale, fxHealth, runDailyFx } from './core/billing/fx-daily';
 import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/observability';
 import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
-import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
+import { requirePerson, requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
 import { operatorRoutes } from './routes/operator';
 import { internalInstapayRoutes } from './routes/internal-instapay';
 import type { IdentityVerifier } from './core/identity/verifier';
@@ -203,6 +204,7 @@ api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
+api.route('/', invitationsRoutes(getVerifier)); // CHAT-SA-4: the invitee's own pending invitations (person token, no workspace)
 registerStarterSet(PACK.templates);
 registerPerStoreTemplate(PACK.perStoreTemplate ?? null);
 api.route('/', templatesRoutes(PACK.templates, PACK.seasonalTemplates ?? {}));

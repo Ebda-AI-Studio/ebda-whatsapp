@@ -61,6 +61,8 @@ export interface TeamApi {
   invite?(a: { email: string; firstName: string; language: 'ar' | 'en' }): Promise<void>;
   /** Standalone workspaces only: remove a staff member (their access ends on their next request). */
   remove?(userId: string): Promise<void>;
+  /** Standalone workspaces only: withdraw a pending invitation (the emailed link stops working). */
+  revokeInvitation?(userId: string): Promise<void>;
 }
 
 /** A merchant's own WhatsApp numbers (Phase 8.1); absent when Embedded Signup is switched off. */

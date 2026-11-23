@@ -67,6 +67,18 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
       setBusy(null);
     }
   };
+  const revoke = async (userId: string) => {
+    setBusy(userId);
+    setNote(null);
+    try {
+      await api.revokeInvitation!(userId);
+      setData(await api.list());
+    } catch {
+      setNote({ kind: 'alert', text: t.teamFailed });
+    } finally {
+      setBusy(null);
+    }
+  };
   const remove = async (m: MemberDto) => {
     setBusy(m.userId);
     setNote(null);
@@ -101,6 +113,22 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
             <label>{t.teamInviteEmail}<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required maxLength={254} autoComplete="off" dir="ltr" /></label>
             <button type="submit" className="btn primary" disabled={busy !== null}>{t.teamInviteSend}</button>
           </form>
+        )}
+        {manage && (data.invitations?.length ?? 0) > 0 && (
+          <section aria-labelledby="team-pending-title">
+            <h2 id="team-pending-title">{t.teamPendingTitle}</h2>
+            <ul className="team-list">
+              {data.invitations!.map((i) => (
+                <li key={i.userId} className="team-row">
+                  <div>
+                    <strong dir="auto">{i.firstName}</strong> <span className="muted" dir="ltr">{i.email}</span>
+                    <div className="muted">{t.teamPendingUntil(new Date(i.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB'))}</div>
+                  </div>
+                  {api.revokeInvitation && <button type="button" className="btn" disabled={busy !== null} aria-label={t.teamRevokeFor(i.firstName)} onClick={() => void revoke(i.userId)}>{t.teamRevoke}</button>}
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
         <ul className="team-list">
           {data.items.map((m) => (

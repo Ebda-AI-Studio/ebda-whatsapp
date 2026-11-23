@@ -13,7 +13,10 @@
   ],
   "api": [
     "POST /stores/:storeId/members/invite",
-    "DELETE /stores/:storeId/members/:userId"
+    "DELETE /stores/:storeId/members/:userId",
+    "DELETE /stores/:storeId/members/invitations/:userId",
+    "GET /workspaces/invitations",
+    "POST /workspaces/invitations/:workspaceId/accept"
   ],
   "mcpTool": null,
   "planGate": null,
@@ -37,16 +40,18 @@
     ]
   },
   "steps": [
-    "Team > Invite a teammate (first name + email) > Send invite",
-    "Team > Remove from team"
+    "Team > Invite a teammate (first name + email) > Send invite; the person accepts the invitation after signing in",
+    "Team > Cancel invitation / Remove from team"
   ],
   "edgeCases": [
     "Standalone workspaces only: a Store workspace's team is managed in Ebda Store",
-    "The answer is the same whether or not the address already has an account",
-    "The package's member limit applies; the owner cannot be removed; removal ends access on the person's next request"
+    "An invitation is not access: the person gets a seat only after they accept, signed in as the invited identity; it expires after 7 days and can be cancelled",
+    "The owner sees only the name and address they typed until the person accepts; the answer to an invite is the same whether or not the address already has an account",
+    "The package's member limit applies; the owner cannot be removed; removal ends access on the person's next request",
+    "At most 20 invitations a day per workspace and 30 per owner"
   ],
   "gaps": [
     "No custom roles"
   ],
-  "assistantNote": "invite sends a sign-in link by email; removal is immediate, re-invite to undo"
+  "assistantNote": "an invite emails a link; access starts only when the person accepts; cancel the invitation or remove the person to undo"
 }

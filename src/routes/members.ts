@@ -4,7 +4,7 @@ import type { ListMembersResponse } from '../core/api/contract';
 import { bridgeForWorkspace } from '../core/store-link';
 import type { StoreMember } from '../core/store-bridge';
 import type { Env } from '../env';
-import { inviteRequest, inviteStandaloneMember, listStandaloneMembers, removeStandaloneMember } from '../core/standalone-members';
+import { inviteRequest, inviteStandaloneMember, listPendingInvitations, listStandaloneMembers, removeStandaloneMember, revokeInvitation } from '../core/standalone-members';
 import { isStandaloneId } from '../core/workspace-kind';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -44,7 +44,7 @@ membersRoutes.get('/stores/:storeId/members', async (c) => {
   const byUser = new Map(seats.map((s) => [s.userId, s.state]));
   const items: ListMembersResponse['items'] = t.items.map((m) => ({ ...m, seat: m.role === 'owner' ? 'owner' : (byUser.get(m.userId) ?? 'none') }));
   const staffSeats = seats.length;
-  const body: ListMembersResponse = { items, seats: { limit, used: 1 + staffSeats, overLimit: seats.some((s) => s.state === 'over_limit') }, ...(isStandaloneId(storeId) ? { canInvite: true } : {}) };
+  const body: ListMembersResponse = { items, seats: { limit, used: 1 + staffSeats, overLimit: seats.some((s) => s.state === 'over_limit') }, ...(isStandaloneId(storeId) ? { canInvite: true, invitations: await listPendingInvitations(c.env, storeId).catch(() => []) } : {}) };
   return c.json(body);
 });
 
@@ -104,4 +104,16 @@ membersRoutes.delete('/stores/:storeId/members/:userId', async (c) => {
   if (r === 'not_found') return c.json({ error: 'not_found', message: 'not_a_member' }, 404);
   if (r === 'is_owner') return c.json({ error: 'invalid_request', message: 'owner_cannot_be_removed' }, 400);
   return c.body(null, 204);
+});
+
+/** DELETE /members/invitations/:userId (standalone only, owner only): withdraws a pending invitation; the emailed link stops working. */
+membersRoutes.delete('/stores/:storeId/members/invitations/:userId', async (c) => {
+  const storeId = c.req.param('storeId');
+  if (!isStandaloneId(storeId)) return c.json({ error: 'not_found' }, 404);
+  if (c.get('storeRole') !== 'owner') return c.json({ error: 'forbidden' }, 403);
+  const userId = c.req.param('userId');
+  if (!USER_ID.test(userId)) return c.json({ error: 'invalid_request', message: 'invalid_user' }, 400);
+  let ok;
+  try { ok = await revokeInvitation(c.env, storeId, c.get('principal').userId, userId); } catch { return c.json({ error: 'unavailable', message: 'members_unavailable' }, 503); }
+  return ok ? c.body(null, 204) : c.json({ error: 'not_found', message: 'no_pending_invitation' }, 404);
 });

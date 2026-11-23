@@ -113,18 +113,20 @@ describe('no seat page', () => {
 describe('standalone team (invite and remove in Chat)', () => {
   const standaloneTeam = (over: Partial<NonNullable<InboxSource['team']>> = {}) => {
     const items = [{ userId: 'u-me', displayName: 'ليلى', role: 'owner' as const, addedAt: '2026-09-01T00:00:00.000Z', seat: 'owner' as const }];
+    const invitations: { userId: string; email: string; firstName: string; invitedAt: string; expiresAt: string }[] = [];
     const team = {
-      list: vi.fn(async () => ({ items: [...items], seats: { limit: 3, used: items.length, overLimit: false }, canInvite: true })),
+      list: vi.fn(async () => ({ items: [...items], seats: { limit: 3, used: items.length, overLimit: false }, canInvite: true, invitations: [...invitations] })),
       assign: vi.fn(async () => {}),
       unassign: vi.fn(async () => {}),
-      invite: vi.fn(async () => { items.push({ userId: 'u-9', displayName: 'سارة', role: 'staff' as never, addedAt: '2026-09-02T00:00:00.000Z', seat: 'seated' as never }); }),
-      remove: vi.fn(async () => { items.pop(); }),
+      invite: vi.fn(async (a: { email: string; firstName: string }) => { invitations.push({ userId: 'u-9', email: a.email, firstName: a.firstName, invitedAt: '2026-09-02T00:00:00.000Z', expiresAt: '2026-09-09T00:00:00.000Z' }); }),
+      revokeInvitation: vi.fn(async () => { invitations.pop(); }),
+      remove: vi.fn(async () => {}),
       ...over,
     };
     return team;
   };
 
-  it('shows the invite form, sends an invite, shows the same confirmation and the new member, then removes them', async () => {
+  it('shows the invite form; an invite appears as PENDING (what the owner typed), then can be cancelled', async () => {
     const team = standaloneTeam();
     const { open } = await openTeam('owner', (s) => { s.team = team; });
     await open();
@@ -134,9 +136,11 @@ describe('standalone team (invite and remove in Chat)', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: t.teamInviteSend })));
     expect(team.invite).toHaveBeenCalledWith({ email: 'sara@example.com', firstName: 'سارة', language: 'ar' });
     expect(await screen.findByText(t.teamInviteSent)).toBeTruthy();
-    await act(async () => fireEvent.click(await screen.findByRole('button', { name: t.teamRemoveFor('سارة') })));
-    expect(team.remove).toHaveBeenCalledWith('u-9');
-    expect(screen.queryByRole('button', { name: t.teamRemoveFor('سارة') })).toBeNull();
+    expect(await screen.findByRole('heading', { name: t.teamPendingTitle })).toBeTruthy();
+    expect(screen.getByText('sara@example.com')).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: t.teamRevokeFor('سارة') })));
+    expect(team.revokeInvitation).toHaveBeenCalledWith('u-9');
+    expect(screen.queryByRole('heading', { name: t.teamPendingTitle })).toBeNull();
   });
 
   it('a full package shows the upgrade card, not a failure', async () => {
