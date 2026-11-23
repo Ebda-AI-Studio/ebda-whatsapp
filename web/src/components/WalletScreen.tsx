@@ -6,7 +6,7 @@ import { ApiError } from '../data/api';
 import type { InstapayCreated, InstapayRequest, InstapayView, PackageDto, RefundRequest, DigestDto, TopupDto, WalletApi, WalletDto, OffboardingView } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
-import { formatMoney, formatSigned } from '../lib/format';
+import { formatMoney, formatSigned, packageLabel } from '../lib/format';
 import { useFocusOn } from '../lib/useFocusOn';
 import { useLoad } from '../lib/useLoad';
 import { dateTime } from './CampaignsScreen';
@@ -152,7 +152,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
             <h2 id="w-plan-title">{t.wPlanTitle}</h2>
             {wallet.plan === null ? <p className="muted">{t.wPlanNone}</p> : (
               <>
-                <p><b>{wallet.plan.storePlan ? t.wPlanStore(lang === 'ar' ? wallet.plan.storePlan.nameAr : wallet.plan.storePlan.nameEn) : t.wPlanName(wallet.plan.packageName ?? wallet.plan.packageId)}</b> <span className="status-chip" data-status={wallet.plan.status === 'active' ? 'running' : wallet.plan.status === 'trialing' ? 'scheduled' : wallet.plan.status === 'past_due' ? 'paused' : 'cancelled'}>{t.planStatus[wallet.plan.status]}</span></p>
+                <p><b>{wallet.plan.storePlan ? t.wPlanStore(lang === 'ar' ? wallet.plan.storePlan.nameAr : wallet.plan.storePlan.nameEn) : (lang === 'ar' ? wallet.plan.packageNameAr : wallet.plan.packageName) ?? wallet.plan.packageId}</b> <span className="status-chip" data-status={wallet.plan.status === 'active' ? 'running' : wallet.plan.status === 'trialing' ? 'scheduled' : wallet.plan.status === 'past_due' ? 'paused' : 'cancelled'}>{t.planStatus[wallet.plan.status]}</span></p>
                 <p className="muted">{t.wPlanEnds(dateTime(wallet.plan.periodEnd, lang))}</p>
                 {wallet.plan.status === 'past_due' && <p className="campaign-reason">{t.wPlanPastDue}</p>}
               </>
@@ -322,7 +322,7 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
           <ul className="wallet-list">
             {list.map((p) => (
               <li key={p.id}>
-                <b dir="auto">{p.name}</b> <span>{money(p.priceMinor)}</span>
+                <b dir="auto">{packageLabel(p, lang)}</b> <span>{money(p.priceMinor)}</span>
                 <p className="muted">{t.wPackageCredits(num(p.aiCredits, lang))}</p>
                 <p className="muted">{t.wPackageMembers(num(p.maxMembers, lang))}</p>
                 {p.periodMonths > 1 && <p className="muted">{t.wPackageYearly(num(p.periodMonths, lang))}</p>}
@@ -551,7 +551,7 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
           </div>
           {kind === 'package' ? (
             <label className="field"><span>{t.wIpPickPackage}</span>
-              <select value={packageId} onChange={(e) => setPackageId(e.target.value)}>{packages.map((p) => <option key={p.id} value={p.id}>{p.name} • {money(p.priceMinor)}</option>)}</select>
+              <select value={packageId} onChange={(e) => setPackageId(e.target.value)}>{packages.map((p) => <option key={p.id} value={p.id}>{packageLabel(p, lang)} • {money(p.priceMinor)}</option>)}</select>
             </label>
           ) : (
             <label className="field"><span>{t.wIpAmount}</span><input inputMode="decimal" dir="ltr" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
