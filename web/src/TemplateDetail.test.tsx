@@ -21,6 +21,24 @@ const open = async (template: TemplateDto, api: TemplatesApi = fakeApi({ detail:
 };
 const REJECTED = tpl({ name: 'late_t', status: 'REJECTED', rejectedReason: 'INVALID_FORMAT', advice: { kind: 'format', ar: 'ميتا رفضت القالب بسبب شكل المتغيّرات.', en: 'x' } });
 
+describe('cod_confirmation_v2 resubmit', () => {
+  const COD2 = tpl({ name: 'cod_confirmation_v2', status: 'REJECTED', rejectedReason: 'INVALID_FORMAT' });
+  it('a rejected v2 offers a resubmit that calls the API; other rejected templates and staff do not', async () => {
+    const resubmitCodV2 = vi.fn(async () => ({ status: 'submitted' }));
+    await open(COD2, fakeApi({ detail: vi.fn(async () => COD2), resubmitCodV2 }));
+    fireEvent.click(screen.getByText(t.tplResubmitCod));
+    await act(async () => undefined);
+    expect(resubmitCodV2).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(t.tplResubmitCodDone)).toBeTruthy();
+    cleanup();
+    await open(REJECTED, fakeApi({ detail: vi.fn(async () => REJECTED), resubmitCodV2 }));
+    expect(screen.queryByText(t.tplResubmitCod)).toBeNull();
+    cleanup();
+    await open(COD2, fakeApi({ detail: vi.fn(async () => COD2), resubmitCodV2 }), false);
+    expect(screen.queryByText(t.tplResubmitCod)).toBeNull();
+  });
+});
+
 describe('rejected', () => {
   it('shows the advice, the raw code in a details, and an edit-and-resubmit button that opens the editor', async () => {
     await open(REJECTED);

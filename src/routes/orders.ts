@@ -33,7 +33,7 @@ ordersRoutes.get('/stores/:storeId/contacts/:waId/orders', async (c) => {
   if (!bridge) return c.json({ items: [], source: 'sample' as const });
   const who = await customer(c);
   if (who instanceof Response) return who;
-  const res = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 10);
+  const res = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 10, `+${who.waId}`);
   if (!res.ok) return res.reason === 'not_found' || res.reason === 'not_linked' ? c.json({ items: [], source: 'store' as const }) : apiError(c, 503, 'rate_limited', 'store_unavailable');
   return c.json({ items: res.value.items.map(toSummary), source: 'store' as const });
 });
@@ -52,7 +52,7 @@ ordersRoutes.post('/stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outco
   let res = await ws.merchantCodOutcome(args);
   if (!res.ok && res.reason === 'unknown_order') {
     // An order the Store created that this workspace has not heard of: ask the Store which order that number is.
-    const orders = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 20);
+    const orders = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 20, `+${who.waId}`);
     if (!orders.ok) return orders.reason === 'unavailable' ? apiError(c, 503, 'rate_limited', 'store_unavailable') : apiError(c, 404, 'not_found');
     const hit = orders.value.items.find((o) => o.orderNumber === orderNumber && o.paymentMethod === 'cod');
     if (!hit) return apiError(c, 404, 'not_found');

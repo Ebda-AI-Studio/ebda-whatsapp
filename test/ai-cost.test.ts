@@ -8,7 +8,7 @@ import { stubGraph } from './helpers/graph';
 import { useStoreLink } from './helpers/store-link';
 import { exec, rows, workspace } from './helpers/workspace';
 
-// M-084: the credit is one AI turn, a turn makes at most 4 model calls, the platform's cost per credit is logged per workspace, and a plan alerts at 50% of its break-even.
+// M-084: the credit is one AI turn, a turn makes at most 5 model calls (3 tool rounds, the answer, one corrective call), the platform's cost per credit is logged per workspace, and a plan alerts at 50% of its break-even.
 useStoreLink();
 const agent = useAgent();
 const W = (n: number) => `00000000-0000-4000-8000-0000000094${String(n).padStart(2, '0')}`;
@@ -79,9 +79,9 @@ describe('the alert fires when a plan\'s cost per credit passes half its break-e
   });
 });
 
-describe('the cap: one credit buys at most 4 model calls', () => {
+describe('the cap: one credit buys at most 5 model calls', () => {
   it('a model that asks for tools forever is cut at MAX_MODEL_CALLS_PER_CREDIT, hands over, and costs exactly one credit', async () => {
-    expect(MAX_MODEL_CALLS_PER_CREDIT).toBe(4);
+    expect(MAX_MODEL_CALLS_PER_CREDIT).toBe(5); // 3 tool rounds + the answer + at most one corrective call
     const ws = W(6);
     const pn = await proWorkspace(ws);
     const again = { tools: [{ name: 'search_catalog', arguments: { query: 'x' } }] };
