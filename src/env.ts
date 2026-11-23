@@ -1,6 +1,8 @@
 import type { WorkspaceDO } from './core/workspace-do';
 
 export type Env = {
+  /** Platform flag: 'v2' = contact/message search indexes use the shared foundation fold (Ruling FDN-SEARCH-1). Unset/anything else = legacy `normaliseText`. */
+  SEARCH_FOLD?: string;
   WORKSPACE_DO: DurableObjectNamespace<WorkspaceDO>;
   DB: D1Database;
   /** Static assets (the inbox SPA). `not_found_handling` is "none": an unknown path reaches the Worker, which answers the 404 page (WA-404-1). */
@@ -82,7 +84,13 @@ export type Env = {
   KASHIER_FEE_BPS?: string;
   KASHIER_FEE_FIXED_MINOR?: string;
   /** Service binding to the accounts service: `isRevoked(sessionId)`. A top-up session is refused (fail closed) when it is unbound. */
-  ACCOUNTS?: { isRevoked(sessionId: string): Promise<boolean> };
+  ACCOUNTS?: {
+    isRevoked(sessionId: string): Promise<boolean>;
+    /** CHAT-SA-4: creates or resolves the identity for a staff invitation and mails it; the answer never says whether the identity pre-existed. Throws INVITE_REFUSED for an inactive/erased identity. */
+    inviteChatMember?(a: { email: string; firstName: string; language: 'ar' | 'en'; workspaceName: string }): Promise<{ userId: string }>;
+    /** Display names for a batch of user ids (unknown ids absent). */
+    getAccountsBrief?(userIds: string[]): Promise<Array<{ id: string; email: string; firstName: string; lastName: string }>>;
+  };
   /** An operator adjustment above this many piasters waits for a second super admin. Default 100000 (1,000 EGP). */
   ADJUSTMENT_APPROVAL_MINOR?: string;
   /** Most adjustments one operator may approve for themselves in a rolling day. Default 20. */
@@ -106,6 +114,8 @@ export type Env = {
   TOKEN_ENC_KEY?: string;
   /** ERASURE-KEY-1: HMAC key (secret, at least 32 characters) for the erasure subject hash, the offboarding pseudonym, the audit target ids and the view-as record hashes. NEVER rotated (a rotation would orphan every erasure record); independent of TOKEN_ENC_KEY. */
   ERASURE_HMAC_KEY?: string;
+  /** CHAT-SA-3: who may create a standalone workspace (Chat without a Store): off (default, and any other value) | invite (an operator code) | open. */
+  STANDALONE_WORKSPACES?: 'off' | 'invite' | 'open' | string;
   /** M-174: HMAC key (secret, at least 32 characters) that signs backup manifests; PREVIOUS only verifies older backups during a key change. */
   BACKUP_HMAC_KEY?: string;
   BACKUP_HMAC_KEY_PREVIOUS?: string;

@@ -1,10 +1,11 @@
 ---
 capabilities:
+  - campaigns.seasonal-ramadan@1
   - inbox.send-template@1
-  - templates.ai-writer@1
-  - templates.check-draft@1
   - inbox.send-text@1
   - inbox.window-status@1
+  - templates.ai-writer@1
+  - templates.check-draft@1
   - templates.install-defaults@2
   - templates.list@2
   - templates.shared-list@1
@@ -46,6 +47,9 @@ When you connect your own number, Ebda Chat reads the templates you already have
 7. Meta reviews it, which takes up to 24 hours. The status on the page changes by itself: **Live**, **In Meta review**, **Rejected**, **Paused**, **Disabled**.
 
 Limits Meta sets (the page applies them for you): the text is up to 1024 characters; a header up to 60 characters with at most one variable; a footer up to 60 characters with no variable; up to 10 buttons, up to 2 link buttons and 1 call button, each button label up to 25 characters; verification-code templates have fixed wording, no links and no emojis, and the code is valid from 1 to 90 minutes. Text headers only for now; for a picture header create the template once in WhatsApp Manager and press **Sync with Meta**.
+
+## Ramadan templates
+For Ramadan you can submit three ready-made templates to Meta: a greeting, an offer and an opening-hours notice (store owner only). Ask the assistant "install the Ramadan templates" and confirm the card, or call `POST /stores/<store>/templates/install-seasonal` with `{"pack":"ramadan"}`. They are only **submitted for Meta's review**: nothing is sent to a customer. Once approved, use them in a normal campaign, so the consent, content and frequency rules still apply. The opening-hours template has no time written in it: you type your Ramadan hours when you send. The bot's own away message uses the hours in **Bot > hours** ([guide 11](11-service-menu-hours-and-location.md)).
 
 ## Tips
 - Write clearly without exaggeration, and avoid odd shortened links.

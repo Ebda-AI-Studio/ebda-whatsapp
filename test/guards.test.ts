@@ -16,13 +16,6 @@ it('core never names the Ebda brand', () => {
   expect(findMatches(/ebda|إبدأ|ابدأ/i, 'src/core')).toEqual([]);
 });
 
-it('pins the Store event contract file: change it only together with the Store repo copy', async () => {
-  const { readFileSync } = await import('node:fs');
-  const { createHash } = await import('node:crypto');
-  const file = readFileSync(new URL('../src/core/api/store-events.ts', import.meta.url));
-  expect(createHash('sha256').update(file).digest('hex')).toBe('4fbfb22194b16b5d0becaff7e201251dc0d11ed754b2c626ae01b5f9bee9ee3d'); // contract v1.6 = Store apps/api/src/contracts/wa-v1.ts (Store #839 STORE-STANDING-1 + Store #811 COD v2 fields; Store #811 must carry these exact bytes)
-});
-
 it('shared web code names no brand: names, marks, hosts and colours come from web/brands/<brand>', () => {
   expect(findMatches(/ebda|إبدا/i, 'web/src').filter((m) => !/\.test\.tsx?:/.test(m))).toEqual([]);
 });
@@ -53,24 +46,24 @@ it('the Arabic legal files are formal Arabic: no colloquial markers, products na
   }
 });
 
-// The Store publishes docs/legal on ebda.app from a vendored snapshot and cannot see this repo: a change here must be sent to the
-// Store session (commit id) so it re-imports. Changing a file means updating its pin, which is the reminder.
-const LEGAL_PINS: Record<string, string> = {
-  'docs/legal/README.md': '9d70e1c329428f4ba15c2bf0fcbff2e8ae001332912ccb8e44a3684d64559c8f',
-  'docs/legal/ar/whatsapp-dpa.md': 'f094e4603a11de5c9d72ea0f0dca59f8d7921e4e30af6b642c6efe3563d65231',
-  'docs/legal/ar/whatsapp-privacy.md': '31ab82572623b3c2babf14894b46af9df9dc1d5aedc337c90ad1c4519b6f1e61',
-  'docs/legal/ar/whatsapp-terms.md': 'c498024f8cc67030094f6a9c1a1e9b24f8e0aa9944125c5ecdc3ec8c07557f8c',
-  'docs/legal/en/whatsapp-dpa.md': '80c68806be3e678bfb2234b6302b72ce9e0e803e561f005aad0dfee99fee9324',
-  'docs/legal/en/whatsapp-privacy.md': 'db96a6070a6d183cc2b59a031b5ba99c52f6d0c9b5738f9723d0107d9478622e',
-  'docs/legal/en/whatsapp-terms.md': '83163a51b281fc7d9f697bf49ffa9f169bb1a416a4e4bf5ca8945968cbc6ebcd',
-};
-it('legal pages are pinned: a change needs a new pin AND a message to the Store session, which publishes them', async () => {
+// The Store publishes docs/legal on ebda.app from a vendored snapshot and cannot see this repo. The counsel-approved texts now live in
+// ebda-foundation (legal/whatsapp/{ar,en}, Ruling FDN-LEGAL-1), byte for byte, and foundation.lock.json pins each one (sha256) -- that lock replaced the
+// hand-kept LEGAL_PINS here. docs/legal stays the published source: every file must equal its lock-pinned foundation copy, so a text can only change
+// by a foundation tag + a re-vendor (and counsel), never by a local edit. (The publishing README is not counsel text and is not pinned.)
+it('legal pages equal the foundation lock pins: a change needs a foundation release, not a local edit', async () => {
   const { readFileSync, readdirSync } = await import('node:fs');
   const { createHash } = await import('node:crypto');
   const root = new URL('../', import.meta.url);
-  const files = ['docs/legal/README.md', ...['ar', 'en'].flatMap((l) => readdirSync(new URL(`docs/legal/${l}/`, root)).map((f) => `docs/legal/${l}/${f}`))];
-  expect(files.sort()).toEqual(Object.keys(LEGAL_PINS).sort());
-  for (const f of files) expect(createHash('sha256').update(readFileSync(new URL(f, root))).digest('hex'), f).toBe(LEGAL_PINS[f]);
+  const lock = JSON.parse(readFileSync(new URL('foundation.lock.json', root), 'utf8')) as { dir: string; files: Record<string, string> };
+  const pins = Object.fromEntries(
+    Object.entries(lock.files)
+      .filter(([f]) => f.startsWith(`${lock.dir}/legal/whatsapp/`))
+      .map(([f, sha]) => [f.slice(`${lock.dir}/legal/whatsapp/`.length), sha]),
+  );
+  const files = ['ar', 'en'].flatMap((l) => readdirSync(new URL(`docs/legal/${l}/`, root)).map((f) => `${l}/${f}`));
+  expect(files.sort()).toEqual(Object.keys(pins).sort());
+  expect(files.length).toBe(6);
+  for (const f of files) expect(createHash('sha256').update(readFileSync(new URL(`docs/legal/${f}`, root))).digest('hex'), f).toBe(pins[f]);
 });
 
 // Role checks are positive allow-lists. A negative check (`storeRole !== 'staff'`) would grant owner powers to any role added later

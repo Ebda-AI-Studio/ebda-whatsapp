@@ -9,7 +9,7 @@ import { errClass, alert } from '../observability';
 import { serviceOpen } from './gates'; // a package AND not suspended / Store-held (STORE-STANDING-1)
 import { addTask } from '../scheduler';
 import type { CatalogRow } from '../store-bridge';
-import { bridgeFor } from '../store-link';
+import { bridgeForWorkspace } from '../store-link';
 import type { LinkHost } from '../store-link/host';
 import { agentConfig } from './config';
 import { maskForModel } from './mask';
@@ -162,7 +162,7 @@ export async function runCatalogEmbed(host: LinkHost, now: number): Promise<numb
   const cfg = agentConfig();
   const store = cfg.vectors(host.env);
   const embed = cfg.embedder(host.env);
-  const bridge = bridgeFor(host.env);
+  const bridge = bridgeForWorkspace(host.env, host.workspaceId);
   if (!store || !embed || !bridge) return undefined;
   const rows: CatalogRow[] = [];
   let cursor: string | null = null;

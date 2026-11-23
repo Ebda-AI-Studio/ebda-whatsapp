@@ -81,7 +81,6 @@
     "route-uncovered|POST /stores/:storeId/packages",
     "route-uncovered|POST /stores/:storeId/shared-number",
     "route-uncovered|POST /stores/:storeId/store-link/catalog/provision",
-    "route-uncovered|PUT /stores/:storeId/agent",
     "route-uncovered|PUT /stores/:storeId/digest",
     "route-uncovered|PUT /stores/:storeId/numbers",
     "route-uncovered|PUT /stores/:storeId/packages",

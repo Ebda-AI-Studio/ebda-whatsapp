@@ -1,25 +1,25 @@
 {
   "id": "compliance.opt-out-evidence",
-  "status": "planned",
-  "plan": "future (campaign compliance)",
+  "status": "live",
   "area": "compliance",
   "version": 1,
   "versionDate": "2026-11-14",
   "titleAr": "إثبات الموافقة وقايمة المستبعدين",
   "titleEn": "Proof of opt-in for a customer / opt-out list export",
   "screens": [],
-  "api": [],
+  "api": [
+    "GET /stores/:storeId/contacts/consent-evidence"
+  ],
   "mcpTool": null,
   "planGate": null,
   "roles": [
-    "owner",
-    "staff"
+    "owner"
   ],
   "policy": "free",
   "undo": {
     "class": "none"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
   "questions": {
     "ar": [
       "ميتا طلبت إثبات موافقة",
@@ -31,10 +31,12 @@
     ]
   },
   "steps": [
-    "Per-contact proof is visible on screen; no bulk export of consent or opt-out lists"
+    "Owner lists per customer when and how consent was given (with the wording) and when someone opted out",
+    "Paged 200 at a time, CSV with ?format=csv; every download is audited by count"
   ],
   "edgeCases": [],
   "gaps": [
-    "No bulk consent/opt-out export"
-  ]
+    "No download button on the Contacts screen yet: the assistant answers the counts; the file is the route with ?format=csv"
+  ],
+  "assistantNote": "The assistant answers the counts only; the per-customer list (phone numbers) is the owner download, never read into the chat."
 }

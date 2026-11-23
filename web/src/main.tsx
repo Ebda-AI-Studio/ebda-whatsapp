@@ -8,7 +8,9 @@ import { SignInError } from './components/SignInError';
 import { makeAccountsSignOut, makeSignOut } from './signout';
 import { SignedOutLocally } from './components/SignedOutLocally';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
-import { connectRealtime, createApiSource } from './data/api';
+import { CreateWorkspace, Invitations, NoWorkspaceYet } from './components/CreateWorkspace';
+import { acceptInvitation, createWorkspace, fetchInvitations, fetchMine, isStandaloneId } from './data/workspaces';
+import { connectRealtime, createApiSource, isOperator } from './data/api';
 import { SIGNED_OUT, createTokenProvider, decodeStores, decodeSub } from './data/auth';
 import { SignInGate } from './components/SignInGate';
 import { CALLBACK_PATH, OidcSignInError, createOidcSession } from './data/oidc';
@@ -72,24 +74,49 @@ async function boot(): Promise<void> {
       document.body.textContent = STRINGS.ar.viewAsNeedsReason;
       return;
     }
-    const storeId = viewAsId ?? pickStore(decodeStores(token), location.search);
-    if (!storeId) {
+    // CHAT-SA-5: a Store id (the token's `stores`) takes today's path untouched. A `?store=sw_...` names a standalone workspace (the server checks membership on every request);
+    // an identity with no Store at all asks which standalone workspaces it has, and is offered the create screen when it has none.
+    const signOutOnly = ACCOUNTS_URL ? makeAccountsSignOut({ stopRealtime: () => undefined, accountsUrl: ACCOUNTS_URL, getToken: tokens.getToken, reload: () => location.reload() }) : oidcSession ? makeSignOut({ stopRealtime: () => undefined, session: oidcSession, onLocal: () => root.render(<SignedOutLocally onSignIn={() => { void oidcSession!.startSignIn('/'); }} />) }) : undefined;
+    const openWorkspace = (id: string) => { const u = new URL(location.href); u.searchParams.set('store', id); u.searchParams.delete('viewAs'); location.assign(u); };
+    const wantedId = new URLSearchParams(location.search).get('store');
+    const tokenStores = decodeStores(token);
+    const pickedStore = viewAsId ?? (isStandaloneId(wantedId) ? wantedId : pickStore(tokenStores, location.search));
+    // A super admin has no store membership: ask the store-independent operator endpoint and boot straight into the console (no store calls, no socket), before any workspace question.
+    const operatorOnly = !pickedStore && await isOperator(location.origin, tokens.getToken);
+    if (!pickedStore && !operatorOnly && tokenStores.length === 0) {
+      const showMine = async (): Promise<void> => {
+        let mine: Awaited<ReturnType<typeof fetchMine>>;
+        try { mine = await fetchMine(location.origin, tokens.getToken); } catch { root.render(<NoWorkspaceYet failed onRetry={() => void showMine()} onSignOut={signOutOnly} />); return; }
+        const first = mine.items[0];
+        if (first) { openWorkspace(first.id); return; }
+        const create = () => root.render(<CreateWorkspace needsInvite={mine.needsInvite} onCreate={(input) => createWorkspace(location.origin, tokens.getToken, input)} onDone={openWorkspace} onSignOut={signOutOnly} />);
+        // A pending invitation comes first: that person has no workspace YET, but accepting is one press and creating a second one is not what they came for.
+        const invites = await fetchInvitations(location.origin, tokens.getToken).catch(() => []);
+        if (invites.length > 0) { root.render(<Invitations items={invites} onAccept={(id) => acceptInvitation(location.origin, tokens.getToken, id)} onAccepted={() => void showMine()} onCreate={mine.canCreate ? create : undefined} onSignOut={signOutOnly} />); return; }
+        if (!mine.canCreate && !mine.needsInvite) { root.render(<NoWorkspaceYet failed={false} onRetry={() => void showMine()} onSignOut={signOutOnly} />); return; }
+        create();
+      };
+      await showMine();
+      return;
+    }
+    if (!pickedStore && !operatorOnly) {
       document.body.textContent = 'حسابك مش مربوط بأي متجر لسه. / Your account is not linked to a store yet.';
       return;
     }
+    const storeId = pickedStore ?? '';
     const api = createApiSource({ baseUrl: location.origin, storeId, getToken: tokens.getToken, userNames: {}, currentUserId: decodeSub(token) ?? '', ...(viewAsId ? { viewAs: { reason } } : {}) });
     // A live socket would outlive the audit of one request, so a view-as session has none (the server refuses it).
-    const stopRealtime = viewAsId ? () => undefined : connectRealtime({
+    const stopRealtime = viewAsId || operatorOnly ? () => undefined : connectRealtime({
       url: `${location.origin.replace(/^http/, 'ws')}/api/v1/stores/${storeId}/ws`,
       getToken: tokens.getToken,
       onEvent: api.emit,
       onReload: api.reload,
       fetchEvents: api.fetchEvents,
     });
-    await api.loadCapabilities();
+    if (operatorOnly) { api.role = 'super_admin'; api.operatorOnly = true; } else await api.loadCapabilities();
     if (api.noSeat) { // a member the owner has not seated (or whose seat the package no longer covers): say so, with a retry, instead of an inbox that cannot load
       stopRealtime();
-      root.render(<NoSeat reason={api.noSeat} onRetry={() => location.reload()} />);
+      root.render(<NoSeat reason={api.noSeat} onRetry={() => location.reload()} standalone={isStandaloneId(storeId)} />);
       return;
     }
     if (oidcSession) {

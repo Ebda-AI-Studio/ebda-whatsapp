@@ -2,6 +2,7 @@
 capabilities:
   - assistant.ebda-assistant@1
   - assistant.apply-changes@1
+  - support.in-product-help@1
 ---
 
 # The Ebda Chat assistant: ask how to do anything
@@ -39,3 +40,10 @@ The assistant answers your questions about Ebda Chat in plain language and shows
 
 ## If you do not see the assistant
 It is switched on store by store, in stages. If the button is missing, it is not on for your account yet; it appears by itself when it is.
+
+## When you need a person
+The assistant is the first stop and the guides are the second. If neither answers, write to **ahlan@ebda.app**: the address is also shown at the bottom of the empty assistant panel. One email per problem helps us find it fast. Please include:
+1. Your store name and the email you sign in with.
+2. What you were doing, what you expected, what happened and roughly when (Cairo time).
+3. For a payment: the order reference from the screen or the receipt. For a message: the first 4 and last 4 digits of the customer's number, never the whole number.
+Never send a password, a Meta token, a card number, a customer's full phone number or an export of chats, and keep customers' names and numbers out of screenshots.

@@ -5,7 +5,7 @@ import { plainAmount } from '../ordering/money';
 import { buyerKey } from '../buyer-key';
 import { isE164 } from '../phone';
 import { addTask } from '../scheduler';
-import { bridgeFor, storeLink } from '../store-link';
+import { bridgeForWorkspace, storeLink } from '../store-link';
 import type { LinkHost } from './host';
 import { queueFreeText, queueTemplate, setTag, cleanParam, type QueueResult } from './outbound';
 import { ensureCatalogReconcile } from './catalog';
@@ -15,6 +15,7 @@ import { applyConsentChanged, forgetBuyer, recordCheckoutConsent, recordWithdraw
 import { alert } from '../observability';
 import { funnelOnce } from '../funnel';
 import { setStoreHoldFlag } from '../numbers/health';
+import { scheduleProactiveRecs } from './proactive-recs';
 
 export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
 
@@ -60,7 +61,7 @@ function codV2Params(host: LinkHost, name: string | undefined, loc: Locale, d: {
 /** The order a COD request is about, when neither the event nor an earlier event named its number and total. */
 type LookedUp = { orderNumber: string; totalMinor: number; currency: string };
 async function lookupOrder(host: LinkHost, buyerKeyHex: string, phoneE164: string, orderId: string): Promise<LookedUp | 'retry' | null> {
-  const bridge = bridgeFor(host.env);
+  const bridge = bridgeForWorkspace(host.env, host.workspaceId);
   if (!bridge) return null;
   const res = await bridge.listCustomerOrders(host.workspaceId, buyerKeyHex, 20, phoneE164);
   if (!res.ok) return res.reason === 'unavailable' ? 'retry' : null;
@@ -207,6 +208,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       const d = event.data;
       const waId = d.phoneE164.slice(1);
       upsertOrder(host, { orderId: d.orderId, orderNumber: d.orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: d.paymentMethod, status: 'created', totalMinor: d.totalMinor, currency: d.currency, locale: locale(d.locale) }, now);
+      scheduleProactiveRecs(host, { orderId: d.orderId, phoneNumberId: opts.phoneNumberId, now }); // CHAT-RECS-SWITCH-1: nothing unless the owner switched it on
       // COD orders are confirmed through the COD request; orders placed in this chat were already confirmed in the chat.
       if (d.paymentMethod === 'cod' || d.channel === 'whatsapp') return { status: 'applied' };
       if (!readSettings(host).orderConfirmations) return { status: 'skipped', detail: 'disabled' };

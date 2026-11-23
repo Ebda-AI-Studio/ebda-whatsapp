@@ -1,25 +1,26 @@
 {
   "id": "campaigns.seasonal-ramadan",
-  "status": "planned",
-  "plan": "future (assistant skill)",
+  "status": "live",
   "area": "campaigns",
   "version": 1,
   "versionDate": "2026-11-14",
   "titleAr": "حملات رمضان والعيد",
   "titleEn": "Seasonal campaigns (Ramadan, Eid, White Friday) playbook",
   "screens": [],
-  "api": [],
+  "api": [
+    "POST /stores/:storeId/templates/install-seasonal"
+  ],
   "mcpTool": null,
   "planGate": null,
   "roles": [
-    "owner",
-    "staff"
+    "owner"
   ],
-  "policy": "free",
+  "policy": "confirm",
   "undo": {
-    "class": "none"
+    "class": "irreversible",
+    "note": "each template is submitted to Meta"
   },
-  "helpArticle": null,
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
   "questions": {
     "ar": [
       "عايز اعمل حملة رمضان",
@@ -31,14 +32,15 @@
     ]
   },
   "steps": [
-    "Planned: assistant playbook using campaigns + templates + hours override"
+    "The owner (or the assistant, after the confirm button) submits the three Ramadan templates (greeting, offer, opening hours) to Meta for approval",
+    "Nothing is sent to a customer: the templates are used afterwards through a normal campaign, with the consent, content and frequency gates"
   ],
   "edgeCases": [
-    "Volume spikes hit tier limits and quality rating",
-    "Seasonal templates need approval lead time (hours to a day)",
-    "Special opening hours not supported by Bot hours"
+    "Names that already exist are skipped; Meta may reject a template, see the rejection guide",
+    "Holiday opening hours for the bot are the existing hours setting (Bot > hours): the pack never states a time of its own"
   ],
   "gaps": [
-    "No seasonal template pack, no holiday hours"
-  ]
+    "No button on the Templates screen yet: the assistant (confirm card) or the route"
+  ],
+  "assistantNote": "submits templates to Meta; irreversible; sends nothing to customers"
 }
