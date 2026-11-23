@@ -20,6 +20,8 @@ export const EXPLAIN_IDS: readonly string[] = [
   'numbers.coexistence', 'numbers.display-name', 'numbers.history-contacts-sync', 'numbers.meta-payment-method', 'numbers.meta-verification',
   'orders.cart-to-order', 'orders.cod-confirmation', 'orders.instapay-in-chat', 'orders.tracking',
   'templates.shared-number-marketing', 'templates.starter-on-connect', 'wallet.instapay-auto-confirm', 'catalogue.product-cards',
+  // behaviour capabilities of the AI agent and the ordering bot
+  'agent.customer-memory', 'agent.read-typing-franco', 'agent.store-search', 'agent.store-facts', 'orders.same-address',
   'campaigns.auto-pause', 'campaigns.consent-gating', 'campaigns.content-guard', 'campaigns.freq-cap-131049', 'campaigns.new-workspace-cap', 'campaigns.tracked-links',
 ];
 
