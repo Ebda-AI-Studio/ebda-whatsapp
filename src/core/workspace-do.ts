@@ -184,7 +184,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       if (await ctx.storage.get('offboarded')) { this.offboarded = true; return; }
       migrate(ctx.storage);
-      syncStandingPolicy(this.sql, env.STORE_STANDING_STALE_REFUSE, Date.now()); // STORE-STANDING-2 (default off)
+      syncStandingPolicy(this.sql, env.STORE_STANDING_STALE_REFUSE, Date.now(), this.workspaceId); // STORE-STANDING-2 (default off)
       this.reindexIfEmpty();
       this.reindexContactsIfEmpty();
       // Platform flag SEARCH_FOLD ('v2' = shared foundation fold). Off by default; flipping it re-indexes this workspace once, in one transaction.
