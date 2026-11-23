@@ -23,7 +23,7 @@ const ar = {
   opAssistant: {
     title: 'مساعد الذكاء', help: 'مفاتيح طرح المساعد. تغيير سقف المنصة أو الإيقاف بيسري على كل الحسابات فورًا من غير نشر.',
     platformTitle: 'مفاتيح المنصة', loadFailed: 'مقدرناش نقرأ الحالة. حاول تاني.', current: 'الحالة الحالية',
-    killGlobal: 'إيقاف المساعد بالكامل', killProduct: 'إيقاف المساعد في شات إبدأ', shadow: 'وضع الظل (بيسجّل من غير ما يرد)',
+    killGlobal: 'إيقاف المساعد بالكامل', killProduct: 'إيقاف المساعد في الشات', shadow: 'وضع الظل (بيسجّل من غير ما يرد)',
     cap: 'سقف الوضع للمنصة', killedTools: 'أدوات موقوفة (مفصولة بفاصلة)', killedToolsBad: 'اسم أداة غلط: لازم من 1 لـ 64 حرف وبحد أقصى 100 أداة.',
     on: 'مفعّل', off: 'مقفول', none: 'مفيش', save: 'احفظ مفاتيح المنصة', nothingToSave: 'مفيش تغيير للحفظ.',
     confirmPlatform: (what: string) => `هتغيّر مفاتيح المساعد على كل الحسابات: ${what}. تأكّد؟`,
@@ -460,7 +460,7 @@ const en: typeof ar = {
   opAssistant: {
     title: 'Assistant', help: 'Rollout switches for the assistant. A platform cap or kill change applies to every account at once, with no deploy.',
     platformTitle: 'Platform switches', loadFailed: 'Could not read the current state. Try again.', current: 'Current state',
-    killGlobal: 'Kill the assistant everywhere', killProduct: 'Kill the assistant in Ebda Chat', shadow: 'Shadow mode (records, never replies)',
+    killGlobal: 'Kill the assistant everywhere', killProduct: 'Kill the assistant in Chat', shadow: 'Shadow mode (records, never replies)',
     cap: 'Platform mode cap', killedTools: 'Killed tools (comma separated)', killedToolsBad: 'Bad tool name: each must be 1 to 64 characters, up to 100 tools.',
     on: 'On', off: 'Off', none: 'None', save: 'Save platform switches', nothingToSave: 'Nothing to save.',
     confirmPlatform: (what: string) => `You are changing the assistant switches for every account: ${what}. Sure?`,
