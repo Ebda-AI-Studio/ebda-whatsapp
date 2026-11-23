@@ -23,6 +23,7 @@ import { alert, bindAlerts, captureError, errClass, scrubEvent } from './core/ob
 import { consumeSendBatch, consumeSendDlq, type SendJob } from './core/send-queue';
 import { requireStoreAccess, requireSuperAdmin, type AuthVars } from './core/identity/middleware';
 import { operatorRoutes } from './routes/operator';
+import { internalInstapayRoutes } from './routes/internal-instapay';
 import type { IdentityVerifier } from './core/identity/verifier';
 import { normaliseE164 } from './core/phone';
 import { TIER_LIMITS } from './core/throttle';
@@ -32,6 +33,10 @@ import { conversationsRoutes } from './routes/conversations';
 import { mediaRoutes } from './routes/media';
 import { realtimeRoutes } from './routes/ws';
 import { templatesRoutes } from './routes/templates';
+import { assistantRoutes } from './routes/assistant';
+import { assistantEnabled } from './core/smart-layer/controls';
+import { registerStarterSet } from './core/starter-templates';
+import { registerPerStoreTemplate } from './core/cod-v2';
 import { configureStoreLink } from './core/store-link';
 import { consumeStoreEvents } from './core/store-events';
 import { sendOtp, type OtpResult } from './core/otp';
@@ -45,6 +50,7 @@ import { connectorRoutes } from './routes/connectors';
 import { contactsRoutes } from './routes/contacts';
 import { retentionRoutes } from './routes/retention';
 import { importsRoutes } from './routes/imports';
+import { quickRepliesRoutes } from './routes/quick-replies';
 import { segmentsRoutes } from './routes/segments';
 import { campaignsRoutes } from './routes/campaigns';
 import { trackRoutes } from './routes/track';
@@ -52,9 +58,12 @@ import { numbersRoutes } from './routes/numbers';
 import { reconcileEntitlements } from './core/billing/subscriptions';
 import { repairPackageOrders } from './core/billing/package-orders';
 import { reconcileCardRefunds, sweepAbandonedRefunds } from './core/billing/card-refunds';
+import { instapayAutoReady, sweepAutoConfirm } from './core/billing/instapay-auto';
+import { runInstapayDigest } from './core/billing/instapay-notify';
 import { expireInstapay, overdueInstapay, purgeInstapayProofs, repairInstapay } from './core/billing/instapay';
 import { paymentProvider } from './core/billing/payments';
 import { handleProviderWebhook, reconfirmUnconfirmed, repairTopups } from './core/billing/topups';
+import { repairCreditOrders } from './core/billing/credit-packs';
 import { packageRoutes } from './routes/packages';
 import { walletRoutes } from './routes/wallet';
 import { instapayProofRoutes, instapayRoutes } from './routes/instapay';
@@ -75,6 +84,7 @@ configureAgent({ copy: PACK.agentCopy });
 const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 const SEND_DLQ_QUEUE = 'ebda-wa-send-dlq';
 
+import { pruneAgentHealth } from './core/ai/health';
 import { WorkspaceDO as WorkspaceDOBase } from './core/workspace-do';
 /** The workspace Durable Object, wrapped so its fetch / alarm / RPC errors reach Sentry (iceberg E2). Same class name and methods for the bindings. */
 export const WorkspaceDO = Sentry.instrumentDurableObjectWithSentry(
@@ -161,9 +171,16 @@ api.use('/operator/*', requireSuperAdmin(getVerifier));
 api.use('*', auditWrites()); // every state-changing call: who, what, which ids (src/core/audit.ts)
 api.use('*', apiContentTypes()); // after auth: 401/403 first, then 415 for a body type the route class does not take
 api.route('/operator', operatorRoutes);
-api.get('/stores/:storeId/me', (c) => {
+api.get('/stores/:storeId/me', async (c) => {
   const p = c.get('principal');
-  return c.json({ userId: p.userId, storeId: c.req.param('storeId')!, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env) } });
+  const storeId = c.req.param('storeId')!;
+  // The picker lists only stores that have a Chat workspace (a store without one has nothing to open); the active store's own row also answers `workspace`.
+  const memberships = p.stores.slice(0, 50);
+  const ids = [...new Set([storeId, ...memberships.map((m) => m.id)])].slice(0, 51);
+  const rows = (await c.env.DB.prepare(`SELECT id, name FROM workspaces WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all<{ id: string; name: string }>()).results ?? [];
+  const names = new Map(rows.map((r) => [r.id, r.name]));
+  const stores = memberships.filter((m) => names.has(m.id)).map((m) => ({ id: m.id, name: names.get(m.id)!, role: m.role }));
+  return c.json({ userId: p.userId, storeId, role: c.get('storeRole'), capabilities: { codOutcome: bridgeFor(c.env) !== null, numbers: signupEnabled(c.env), sharedNumber: sharedEnabled(c.env), assistant: await assistantEnabled(c.env, storeId) }, workspace: names.has(storeId), stores });
 });
 api.delete('/stores/:storeId/contacts/:waId', async (c) => {
   // The member's own right to erase (STORE-ROUTES-OWNER-1): the owner, or a super admin who is a MEMBER of the store (requireStoreAccess already refused a non-member's write; that operator uses the operator route, which needs a stated reason).
@@ -178,6 +195,8 @@ api.route('/', conversationsRoutes);
 api.route('/', realtimeRoutes);
 api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
+registerStarterSet(PACK.templates);
+registerPerStoreTemplate(PACK.perStoreTemplate ?? null);
 api.route('/', templatesRoutes(PACK.templates));
 api.route('/', proofRoutes);
 api.route('/', agentRoutes);
@@ -186,6 +205,7 @@ api.route('/', contactsRoutes);
 api.route('/', retentionRoutes);
 api.route('/', importsRoutes);
 api.route('/', segmentsRoutes);
+api.route('/', quickRepliesRoutes);
 api.route('/', campaignsRoutes);
 api.route('/', numbersRoutes);
 api.route('/', walletRoutes);
@@ -195,7 +215,9 @@ api.route('/', packageRoutes);
 api.route('/', sharedNumberRoutes);
 api.route('/', offboardingRoutes);
 api.route('/', membersRoutes);
+api.route('/', assistantRoutes(api));
 app.route('/api/v1', api);
+app.route('/internal', internalInstapayRoutes);
 /** The /api/v1 routes, exported so a test can walk them (every store route needs a scope decision in core/identity/scopes.ts). */
 export const apiRoutes = api;
 
@@ -229,7 +251,7 @@ app.get('/health', async (c) => {
   // D4: a value DERIVED from SUITE_BUYER_KEY_SECRET (16 hex of an HMAC over a fixed non-phone string, see buyer-key.ts), so scripts/verify-prod.mjs can prove it equals Ebda Store's
   // without the secret leaving either Worker. Absent when the secret is unset or shorter than MIN_PROBE_SECRET_LENGTH.
   const secret = c.env.SUITE_BUYER_KEY_SECRET;
-  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, ...(await fxHealth(c.env)), ...(await buyerKeyProbe(secret ?? '').then((buyerKeyVector) => ({ buyerKeyVector }), () => ({}))) });
+  return c.json({ ok: true, status: 'ok', service: PACK.service, commit, instapayAuto: instapayAutoReady(c.env), ...(await fxHealth(c.env)), ...(await buyerKeyProbe(secret ?? '').then((buyerKeyVector) => ({ buyerKeyVector }), () => ({}))) });
 });
 
 // B9: Meta's data-deletion callback and its status page (public; the signed request is the authentication).
@@ -282,7 +304,7 @@ app.post('/meta/webhook', async (c) => {
   for (const t of extractTemplateStatuses(payload)) {
     await applySharedTemplateEvent(c.env, t.wabaId, t.name, t.language, { status: t.status, reason: t.reason }); // the platform WABA's own catalog (no workspace owns it)
     for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
-      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason);
+      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateStatus(t.name, t.language, t.status, t.reason, t.templateId);
     }
   }
   for (const t of extractTemplateCategoryUpdates(payload)) {
@@ -362,12 +384,15 @@ export async function dailyBilling(env: Env): Promise<void> {
   await checkFxStale(env).catch((err) => alert('fx_fetch_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileEntitlements(env).catch((err) => alert('entitlement_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairTopups(env).catch((err) => alert('topup_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await repairCreditOrders(env).catch((err) => alert('credit_pack_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconfirmUnconfirmed(env).catch((err) => alert('webhook_reconfirm_failed', { error: err instanceof Error ? err.name : 'error' }));
   await reconcileCardRefunds(env, paymentProvider(env)).catch((err) => alert('card_refund_reconcile_failed', { error: err instanceof Error ? err.name : 'error' }));
   await sweepAbandonedRefunds(env).catch((err) => alert('refund_abandon_sweep_failed', { error: err instanceof Error ? err.name : 'error' }));
   await expireInstapay(env).catch((err) => alert('instapay_expiry_failed', { error: err instanceof Error ? err.name : 'error' }));
   await purgeInstapayProofs(env).catch((err) => alert('instapay_proof_purge_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairInstapay(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
+  await sweepAutoConfirm(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error', what: 'auto_confirm_sweep' }));
+  await runInstapayDigest(env).catch((err) => alert('instapay_repair_failed', { error: err instanceof Error ? err.name : 'error', what: 'auto_confirm_digest' }));
   await overdueInstapay(env).catch((err) => alert('instapay_overdue_check_failed', { error: err instanceof Error ? err.name : 'error' }));
   await repairPackageOrders(env).catch((err) => alert('package_repair_failed', { error: err instanceof Error ? err.name : 'error' }));
   await runDueOffboardings(env).catch((err) => alert('offboarding_failed', { error: err instanceof Error ? err.name : 'error' }));
@@ -393,6 +418,7 @@ export default Sentry.withSentry((env: Env) => {
     // The log line is the proof of a real tick (the cron can't be waited on): see docs/runbooks/rollback.md.
     // The FX pull is its own task (not inside dailyBilling, which tests drive directly): a failure in either never skips the other.
     ctx.waitUntil(runDailyFx(env));
+    ctx.waitUntil(pruneAgentHealth(env)); // AGENT-HEALTH-1 counters older than 8 days
     ctx.waitUntil(dailyBilling(env).then(() => console.log(JSON.stringify({ cron: 'daily_billing', done: true }))));
   },
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {

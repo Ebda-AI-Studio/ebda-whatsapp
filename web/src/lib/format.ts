@@ -1,5 +1,5 @@
 import type { OrderSummaryDto } from '../../../src/core/api/contract';
-import { STRINGS, num, type Lang } from '../i18n';
+import { STRINGS, num, type Lang, type Strings } from '../i18n';
 
 export function formatMoney(minor: number, currency: string, lang: Lang): string {
   const digits = minor % 100 === 0 ? 0 : 2; // whole pounds stay clean; piasters are never rounded away
@@ -16,6 +16,11 @@ export function relativeTime(at: number, now: number, lang: Lang): string {
   if (h < 24) return lang === 'ar' ? `${num(h, lang)} ${t.hoursShort}` : `${h}${t.hoursShort}`;
   if (h < 48) return t.yesterday;
   return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'short' }).format(at);
+}
+
+/** A Chat package's display name in the UI language: size-based (Ahmad 2026-11-19), from the server's `nameAr` / `nameEn`, falling back to the stored `name`. */
+export function packageLabel(p: { name: string; nameAr?: string | undefined; nameEn?: string | undefined }, lang: Lang): string {
+  return (lang === 'ar' ? p.nameAr : p.nameEn) ?? p.name;
 }
 
 export function clockTime(at: number, lang: Lang): string {
@@ -45,4 +50,9 @@ export function orderStops(status: OrderSummaryDto['status']): Stop[] {
 /** Money with an explicit minus (U+2212) up front, so a negative amount reads the same in Arabic and English runs. */
 export function formatSigned(minor: number, lang: Lang): string {
   return (minor < 0 ? '−' : '') + formatMoney(Math.abs(minor), 'EGP', lang);
+}
+
+/** The name a template is shown by: the merchant's own title, else the shipped Arabic name of a starter template, else the raw name. */
+export function templateTitle(t: Strings, x: { name: string; label?: string | null }): string {
+  return x.label?.trim() || t.templateNames[x.name] || x.name;
 }

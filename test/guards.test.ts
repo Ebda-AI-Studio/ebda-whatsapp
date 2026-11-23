@@ -20,7 +20,7 @@ it('pins the Store event contract file: change it only together with the Store r
   const { readFileSync } = await import('node:fs');
   const { createHash } = await import('node:crypto');
   const file = readFileSync(new URL('../src/core/api/store-events.ts', import.meta.url));
-  expect(createHash('sha256').update(file).digest('hex')).toBe('3c24ed64267e9d051bce1b1959a7d0c2dd2f28cec1bab03d8a47147b375fc4af'); // contract v1.5 = Store apps/api/src/contracts/wa-v1.ts (Store #285)
+  expect(createHash('sha256').update(file).digest('hex')).toBe('4fbfb22194b16b5d0becaff7e201251dc0d11ed754b2c626ae01b5f9bee9ee3d'); // contract v1.6 = Store apps/api/src/contracts/wa-v1.ts (Store #839 STORE-STANDING-1 + Store #811 COD v2 fields; Store #811 must carry these exact bytes)
 });
 
 it('shared web code names no brand: names, marks, hosts and colours come from web/brands/<brand>', () => {
@@ -56,13 +56,13 @@ it('the Arabic legal files are formal Arabic: no colloquial markers, products na
 // The Store publishes docs/legal on ebda.app from a vendored snapshot and cannot see this repo: a change here must be sent to the
 // Store session (commit id) so it re-imports. Changing a file means updating its pin, which is the reminder.
 const LEGAL_PINS: Record<string, string> = {
-  'docs/legal/README.md': 'fb7d75eebe8a3110a65e6bc5856fcb74e703282864c74704e52ddedf966d8980',
-  'docs/legal/ar/whatsapp-dpa.md': '03b3d6fd5e963f7e2cce9113ca82e64fe6c33f2e76cec21204cc85745693cefa',
-  'docs/legal/ar/whatsapp-privacy.md': '641b1e66c8b1fc6d325a701bd0bcab574a47b9358c938749fe6c88388e3fd9c1',
-  'docs/legal/ar/whatsapp-terms.md': 'adf8c6cefb1566f5bbe276f550a9fb3344674b2cb787cdc1de34ae9ad9fac052',
-  'docs/legal/en/whatsapp-dpa.md': '689ae9647baa0bc03d6d22097bb6c61485bbc76aea14f1384acfd70d877f4269',
-  'docs/legal/en/whatsapp-privacy.md': '555ed1b10626550dfaee37d394028de755143ad2daba551fb731497d57c91c7e',
-  'docs/legal/en/whatsapp-terms.md': '64cc8c9fd48f1d626ca2ad9536c3842a3590777f1f3f2bbab54284f4fcacff0d',
+  'docs/legal/README.md': '9d70e1c329428f4ba15c2bf0fcbff2e8ae001332912ccb8e44a3684d64559c8f',
+  'docs/legal/ar/whatsapp-dpa.md': 'f094e4603a11de5c9d72ea0f0dca59f8d7921e4e30af6b642c6efe3563d65231',
+  'docs/legal/ar/whatsapp-privacy.md': '31ab82572623b3c2babf14894b46af9df9dc1d5aedc337c90ad1c4519b6f1e61',
+  'docs/legal/ar/whatsapp-terms.md': 'c498024f8cc67030094f6a9c1a1e9b24f8e0aa9944125c5ecdc3ec8c07557f8c',
+  'docs/legal/en/whatsapp-dpa.md': '80c68806be3e678bfb2234b6302b72ce9e0e803e561f005aad0dfee99fee9324',
+  'docs/legal/en/whatsapp-privacy.md': 'db96a6070a6d183cc2b59a031b5ba99c52f6d0c9b5738f9723d0107d9478622e',
+  'docs/legal/en/whatsapp-terms.md': '83163a51b281fc7d9f697bf49ffa9f169bb1a416a4e4bf5ca8945968cbc6ebcd',
 };
 it('legal pages are pinned: a change needs a new pin AND a message to the Store session, which publishes them', async () => {
   const { readFileSync, readdirSync } = await import('node:fs');
@@ -90,7 +90,7 @@ it('every alert name used in src is in exactly one of P0_ALERTS / P1_ALERTS / IN
   const sets = { P0: setOf('P0_ALERTS'), P1: setOf('P1_ALERTS'), INFO: setOf('INFO_ALERTS') };
   expect(sets.P0.size).toBeGreaterThan(5);
   expect(sets.P1.size).toBeGreaterThan(40);
-  expect(sets.INFO.size).toBe(27); // 20 + catalog_items_rejected (WhatsApp catalogue) + P1b: seats_over_limit + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
+  expect(sets.INFO.size).toBe(40); // + agent_model_timeout (a model call abandoned after 25 s) + agent_model_flag_unreadable (WA-MODEL-FLAG-1) + assistant_handoff, assistant_help_index_failed, assistant_status_failed (Smart Layer assistant) + 6 for the Chat agent context (agent_policies_unavailable, agent_profile_unavailable, agent_faq_not_indexed, handoff_owner_unreachable, handoff_owner_notice_failed, handoff_digest_failed) + instapay_auto_error (InstaPay auto-confirm: the request waits for a person); 20 + starter_templates_failed (template self-service: the screen retries) + catalog_items_rejected (WhatsApp catalogue) + P1b: seats_over_limit + W2-ABUSE: agent_turn_cap, agent_reply_blocked, campaign_content_blocked + W2-GROWTH: ai_credits_low + instapay_no_reference (DUP-REF-REQUIRED-1)
   const used = new Set<string>();
   for (const hit of findMatches(/\balert\(/, 'src')) {
     const [file, line] = hit.split(':') as [string, string];
@@ -282,4 +282,11 @@ it('the product is never called Ebda WhatsApp (banned spellings, WA-COPY-1)', ()
   const banned = /Ebda WhatsApp|ابدأ واتساب|Ebda for WhatsApp|WhatsApp by Ebda|\bEbda WA\b|شريك واتساب الرسمي/;
   const hits = findMatches(banned).filter((m) => !/^(docs\/rulings|graphify-out)\//.test(m) && !/^docs\/plans\//.test(m));
   expect(hits).toEqual([]);
+});
+
+it('"is a payment proof expected" has ONE source: the InstaPay-order query exists once, and both the router predicate (proofExpected) and receiveImage go through it (review of #152, m1)', () => {
+  const src = readFileSync(join(process.cwd(), 'src/core/ordering/bot.ts'), 'utf8');
+  expect(src.match(/FROM store_orders WHERE wa_id = \? AND payment_method = 'instapay'/g)).toHaveLength(1);
+  expect(src).toMatch(/export function proofExpected[\s\S]*?latestInstapayOrder\(host, from\)/);
+  expect(src).toMatch(/async function receiveImage[\s\S]*?latestInstapayOrder\(host, i\.from\)/);
 });

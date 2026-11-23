@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { Env } from '../../env';
 import {
-  addressSchema, bridgeResultSchema, memberRoleSchema, storeMembersSchema, catalogPageSchema, checkoutLinkSchema, codOutcomeAckSchema, customerOrdersSchema, orderCreatedSchema, orderStatusSchema, paymentLinkSchema, productsSchema,
-  storeProfileSchema, type BridgeResult, type StoreBridge,
+  addressSchema, bridgeResultSchema, memberRoleSchema, storeMembersSchema, catalogPageSchema, checkoutLinkSchema, codOutcomeAckSchema, customerOrdersSchema, orderCreatedSchema, orderStatusSchema, paymentLinkSchema, productsSchema, searchResultSchema,
+  storeProfileSchema, storePoliciesSchema, customerProfileSchema, type BridgeResult, type StoreBridge,
 } from '../../core/store-bridge';
 
 /** The methods the Store's `WhatsAppBridge` entrypoint exposes over the Service Binding (contract section 5). */
@@ -63,15 +63,19 @@ export function createServiceBindingBridge(env: Pick<Env, 'STORE_BRIDGE'>): Stor
     getStoreProfile: (s) => call('getStoreProfile', storeProfileSchema, s),
     listCatalog: (s, cursor, limit) => call('listCatalog', catalogPageSchema, s, cursor, limit),
     getProducts: (s, ids) => call('getProducts', productsSchema, s, ids),
+    searchProducts: (s, query, opts) => call('searchProducts', searchResultSchema, s, query, opts),
+    getStorePolicies: (s) => call('getStorePolicies', storePoliciesSchema, s),
+    getCustomerProfile: (s, phone) => call('getCustomerProfile', customerProfileSchema, s, phone),
     createCheckoutLink: (s, req) => call('createCheckoutLink', checkoutLinkSchema, s, req),
     createOrderFromChat: (s, req) => call('createOrderFromChat', orderCreatedSchema, s, req),
-    getPaymentLink: (s, orderId) => call('getPaymentLink', paymentLinkSchema, s, orderId),
+    getPaymentLink: (s, orderId, key) => call('getPaymentLink', paymentLinkSchema, s, orderId, ...(key ? [key] : [])),
     recordCodOutcome: (s, req) => call('recordCodOutcome', codOutcomeAckSchema, s, req),
-    attachPaymentProof: (s, orderId, mediaUrl) => call('attachPaymentProof', z.object({}), s, orderId, mediaUrl) as Promise<BridgeResult<Record<string, never>>>,
-    getCustomerAddresses: (s, key) => call('getCustomerAddresses', z.object({ items: z.array(addressSchema) }), s, key),
-    saveCustomerAddress: (s, key, address) => call('saveCustomerAddress', z.object({ address: addressSchema }), s, key, address),
-    getOrderStatus: (s, n, key) => call('getOrderStatus', orderStatusSchema, s, n, key),
-    listCustomerOrders: (s, key, limit) => call('listCustomerOrders', customerOrdersSchema, s, key, limit),
+    attachPaymentProof: (s, orderId, mediaUrl, key) => call('attachPaymentProof', z.object({}), s, orderId, mediaUrl, ...(key ? [key] : [])) as Promise<BridgeResult<Record<string, never>>>,
+    getCustomerAddresses: (s, key, phone) => call('getCustomerAddresses', z.object({ items: z.array(addressSchema) }), s, key, ...(phone ? [phone] : [])),
+    saveCustomerAddress: (s, key, address, phone) => call('saveCustomerAddress', z.object({ address: addressSchema }), s, key, address, ...(phone ? [phone] : [])),
+    getOrderStatus: (s, n, key, phone) => call('getOrderStatus', orderStatusSchema, s, n, key, ...(phone ? [phone] : [])),
+    listCustomerOrders: (s, key, limit, phone) => call('listCustomerOrders', customerOrdersSchema, s, key, limit, ...(phone ? [phone] : [])),
+    getRecommendations: (s, req) => call('getRecommendations', productsSchema, s, req),
     listStoreMembers: (s, asUserId) => callBare('listStoreMembers', storeMembersSchema, s, asUserId),
     memberRole: async (s, userId) => {
       const r = await callBare('memberRole', memberRoleSchema.nullable(), s, userId);

@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
-import { botFunnelQuery, catalogCommerceRequest, codOutcomeRequest, storeLinkSettingsPatch, type OrderSummaryDto } from '../core/api/contract';
+import { botFunnelQuery, catalogCommerceRequest, codOutcomeRequest, confirmTokenField, storeLinkSettingsPatch, type OrderSummaryDto } from '../core/api/contract';
+import { recordAudit } from '../core/audit';
+import { needsConfirm, payloadHash, SWITCH_KEYS } from '../core/settings-confirm';
 import { buyerKey } from '../core/buyer-key';
 import { normaliseE164 } from '../core/phone';
 import type { BridgeOrderSummary } from '../core/store-bridge';
@@ -31,7 +33,7 @@ ordersRoutes.get('/stores/:storeId/contacts/:waId/orders', async (c) => {
   if (!bridge) return c.json({ items: [], source: 'sample' as const });
   const who = await customer(c);
   if (who instanceof Response) return who;
-  const res = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 10);
+  const res = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 10, `+${who.waId}`);
   if (!res.ok) return res.reason === 'not_found' || res.reason === 'not_linked' ? c.json({ items: [], source: 'store' as const }) : apiError(c, 503, 'rate_limited', 'store_unavailable');
   return c.json({ items: res.value.items.map(toSummary), source: 'store' as const });
 });
@@ -50,7 +52,7 @@ ordersRoutes.post('/stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outco
   let res = await ws.merchantCodOutcome(args);
   if (!res.ok && res.reason === 'unknown_order') {
     // An order the Store created that this workspace has not heard of: ask the Store which order that number is.
-    const orders = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 20);
+    const orders = await bridge.listCustomerOrders(c.req.param('storeId')!, who.key, 20, `+${who.waId}`);
     if (!orders.ok) return orders.reason === 'unavailable' ? apiError(c, 503, 'rate_limited', 'store_unavailable') : apiError(c, 404, 'not_found');
     const hit = orders.value.items.find((o) => o.orderNumber === orderNumber && o.paymentMethod === 'cod');
     if (!hit) return apiError(c, 404, 'not_found');
@@ -102,12 +104,37 @@ ordersRoutes.get('/stores/:storeId/bot/funnel', async (c) => {
   return ws ? c.json(await ws.getBotFunnel(q.data.from, q.data.to)) : apiError(c, 404, 'not_found');
 });
 
-ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
+/**
+ * Step one of turning ON a switch that messages customers or costs money per use (A32, A33): owner only (super admin keeps the override, an operator
+ * helping a merchant), same body the PATCH will carry. SETTINGS-CONFIRM-1 in core/settings-confirm.ts.
+ */
+ordersRoutes.post('/stores/:storeId/store-link/settings/preview', async (c) => {
   if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
   const patch = storeLinkSettingsPatch.safeParse(await c.req.json().catch(() => null));
-  if (!patch.success) return apiError(c, 400, 'invalid_request');
+  if (!patch.success || !needsConfirm(patch.data)) return apiError(c, 400, 'invalid_request');
   const ws = await workspaceStub(c);
   if (!ws) return apiError(c, 404, 'not_found');
+  const { token, expiresAt } = await ws.issueSettingsConfirm(c.get('principal').userId, await payloadHash(patch.data));
+  return c.json({ confirmToken: token, expiresAt });
+});
+
+// Owner only; a super admin keeps the override (operator helping a merchant). Staff are refused. The owner switches are audited by name (A31-A33).
+ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
+  if (c.get('storeRole') === 'staff') return apiError(c, 403, 'forbidden');
+  const raw = await c.req.json().catch(() => null);
+  const patch = storeLinkSettingsPatch.safeParse(raw);
+  const tokenField = confirmTokenField.safeParse(raw);
+  if (!patch.success || !tokenField.success) return apiError(c, 400, 'invalid_request');
+  const ws = await workspaceStub(c);
+  if (!ws) return apiError(c, 404, 'not_found');
+  const actor = c.get('principal').userId;
+  const confirmed = needsConfirm(patch.data);
+  if (confirmed) {
+    if (!tokenField.data.confirmToken) return apiError(c, 409, 'invalid_request', 'confirm_required');
+    const outcome = await ws.consumeSettingsConfirm(tokenField.data.confirmToken, actor, await payloadHash(patch.data));
+    if (outcome !== 'ok') return apiError(c, 409, 'invalid_request', outcome === 'expired' ? 'confirm_expired' : 'confirm_invalid');
+  }
+  const before = await ws.getStoreLinkSettings();
   let catalogWabaId: string | undefined;
   if (patch.data.catalogId) {
     // The platform token can write to any catalog it can see: only accept one that is connected to THIS workspace's WABA.
@@ -119,7 +146,13 @@ ordersRoutes.patch('/stores/:storeId/store-link/settings', async (c) => {
     catalogWabaId = number.wabaId;
   }
   const res = await ws.setStoreLinkSettings(patch.data, catalogWabaId ? { catalogWabaId } : {});
-  return res.ok ? c.json(res.settings) : apiError(c, 400, 'invalid_request', 'catalog_not_linked');
+  if (!res.ok) return apiError(c, 400, 'invalid_request', 'catalog_not_linked');
+  for (const k of SWITCH_KEYS) {
+    const v = patch.data[k];
+    if (v === undefined) continue;
+    await recordAudit(c.env, { workspaceId: c.req.param('storeId')!, actor, role: c.get('storeRole') === 'owner' ? 'owner' : 'operator', action: 'store_link.toggle', targetType: 'setting', targetId: k, detail: { value: v, changed: before[k] !== v, confirmed } });
+  }
+  return c.json(res.settings);
 });
 
 /** Creates a Meta catalog for a merchant who has none and connects it to their WhatsApp Business Account (owner only). */

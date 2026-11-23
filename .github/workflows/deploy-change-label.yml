@@ -16,11 +16,10 @@ concurrency:
 jobs:
   deploy-label:
     name: Deploy workflow changes need the deploy-change label
-    # Ruling CI-UMBRA-ON-1 (Ahmad 2026-11-03, "only Umbra"): Umbra when EBDA_RUNS_ON is set, else GitHub-hosted. A label
-    # check pinned to GitHub-hosted fails in 2 s once the org has no hosted minutes, blocking every PR (PR #52).
-    # A fork's PR never runs on the self-hosted runner: it gets GitHub-hosted, and the gate is never skipped (a skipped
-    # required check would pass).
-    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-24.04"') || 'ubuntu-24.04' }}
+    # Mac pool (never a hosted runner, Ahmad 2026-11-16; a label check pinned to hosted failed in 2 s once the org had no hosted minutes, PR #52).
+    # A fork's PR never runs on the self-hosted runner AND there is no hosted one: it asks for a label no runner has, so the job queues and the
+    # required check never reports (fail closed: the PR cannot merge, fork code never runs here). A skipped required check would pass.
+    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '["ebda-mac-light"]') || 'fork-pr-no-runner' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

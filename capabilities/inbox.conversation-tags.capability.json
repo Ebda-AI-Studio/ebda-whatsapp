@@ -1,0 +1,46 @@
+{
+  "id": "inbox.conversation-tags",
+  "status": "live",
+  "area": "inbox",
+  "version": 2,
+  "versionDate": "2026-11-14",
+  "titleAr": "وضع تاج على المحادثة",
+  "titleEn": "Tag a conversation",
+  "screens": [
+    "ChatPane notes and tags panel",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [
+    "PUT /stores/:storeId/conversations/:id/tags"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/notes-tags-and-quick-replies",
+  "questions": {
+    "ar": [
+      "ازاي اعمل تاج للعميل؟",
+      "عايز اصنف المحادثات",
+      "ازاي وضع تاج على المحادثة؟"
+    ],
+    "en": [
+      "How do I tag a conversation?"
+    ]
+  },
+  "steps": [
+    "Open a chat, press Notes and tags, type a tag, press Add the tag; the x on a tag removes it",
+    "System tags (cod_pending, needs_human) are shown without a remove button and are kept on every save"
+  ],
+  "edgeCases": [
+    "Tags are trimmed, lower-cased and de-duplicated by the server; at most 10 tags of 32 characters"
+  ],
+  "gaps": []
+}

@@ -1,0 +1,51 @@
+{
+  "id": "operator.funding",
+  "status": "live",
+  "area": "operator",
+  "version": 2,
+  "versionDate": "2026-11-14",
+  "titleAr": "تحديد مين بيدفع لميتا للرقم",
+  "titleEn": "Set who pays Meta for a number (platform line)",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "PUT /operator/numbers/:phoneNumberId/funding"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "the platform line (the shared number) is the platform's own billing decision and moves the platform's money; a merchant sets their OWN number's payer themselves (wallet.funding)",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل تحديد مين بيدفع لميتا للرقم؟",
+      "ليه مش لاقي تحديد مين بيدفع لميتا للرقم عندي؟",
+      "عايز تحديد مين بيدفع لميتا للرقم اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Set who pays Meta for a number?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason",
+    "Needed for the platform line, and to move a number off it; a merchant sets their own number to the card themselves"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": []
+}

@@ -1,3 +1,28 @@
+---
+capabilities:
+  - campaigns.auto-pause@1
+  - campaigns.cancel@1
+  - campaigns.consent-gating@1
+  - campaigns.content-guard@1
+  - campaigns.create@1
+  - campaigns.delete-draft@1
+  - campaigns.freq-cap-131049@1
+  - campaigns.list@1
+  - campaigns.new-workspace-cap@1
+  - campaigns.pause@1
+  - campaigns.resume@1
+  - campaigns.schedule@1
+  - campaigns.send-now@1
+  - campaigns.tracked-links@1
+  - contacts.consent-proof@1
+  - contacts.import-csv@1
+  - contacts.opt-in-keyword@1
+  - contacts.opt-out@1
+  - numbers.tier-limit@1
+  - segments.manage@2
+  - segments.preview@1
+---
+
 # Campaigns and opt-out
 
 A campaign is a marketing message sent with an approved template to a group of your customers. The customer must have agreed to receive messages from you.
@@ -7,13 +32,18 @@ A campaign is a marketing message sent with an approved template to a group of y
 - Contacts who **opted in**, with the source of their consent recorded.
 - Enough balance if you use the shared number ([Wallet](09-wallet-top-ups-and-refunds.md)). On your own number, Meta bills your card directly.
 
+On the shared number you cannot run campaigns: **New campaign** shows a note, "Campaigns need your own number", and a button to connect your own WhatsApp number. Marketing is never sent from the shared number, whatever the template says.
+
 ## Steps
 1. **Contacts:** upload a CSV (up to 10 MB) with phone, name and tags. We normalize phone formats, remove duplicates and tell you which rows were rejected.
-2. **Segment:** choose a group (for example a tag, or customers who wrote recently). People who opted out are always removed.
+2. **Segment:** choose a saved group, or a tag. You make segments yourself on **Contacts > Customer segments** (store owner only): see [Quick replies, notes and tags](23-notes-tags-and-quick-replies.md). People who opted out are always removed.
 3. Choose the **template** and fill in the variables.
 4. Check the **estimated cost** before confirming.
 5. Send now or **schedule** a time.
 6. Follow progress on the Campaigns screen. You can pause, resume or cancel.
+
+## Delete a draft
+A campaign that is still a draft (not sent and not scheduled) can be deleted: open it and press **Delete draft**. Store owner only. A campaign in any other state cannot be deleted (cancel it if it has not finished); the answer is "bad state".
 
 ## Consent when you import
 - On the **Contacts** screen, under the file upload, there is a box: "These customers agreed to receive offers from me on WhatsApp, and I can prove it."

@@ -1,0 +1,60 @@
+{
+  "id": "packages.list-checkout",
+  "status": "live",
+  "area": "billing",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "اشتراك أو تجديد باقة",
+  "titleEn": "Buy or renew a package by card",
+  "screens": [
+    "WalletScreen Packages",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "GET /stores/:storeId/packages",
+    "POST /stores/:storeId/packages/:id/checkout",
+    "GET /stores/:storeId/packages/orders/:orderId"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/wallet-top-ups-and-refunds",
+  "questions": {
+    "ar": [
+      "الباقات بكام؟",
+      "عايز اشترك في شات 1500 رد ذكي",
+      "ازاي اجدد الباقة؟",
+      "el baqat bekam",
+      "aghayyar el baqa"
+    ],
+    "en": [
+      "What packages are there and what do they cost?",
+      "How do I renew?"
+    ]
+  },
+  "steps": [
+    "Wallet > Packages; Chat 300 AI replies 690 EGP/mo (2 members), Chat 1,500 AI replies 1,490 (5 members, campaigns, order in chat), Chat 5,000 AI replies 3,490 (15 members, API, priority support); the size is the monthly AI replies; yearly = 9x monthly for 12 months",
+    "Pay on Kashier; package turns on when Kashier confirms",
+    "Runs one month and does NOT auto-renew; reminder a week before"
+  ],
+  "edgeCases": [
+    "Prices are DB seed values and may differ in prod (operator-editable? verify)",
+    "Early renewal starts the day the current ends",
+    "Package purchase switched off per account: not shown",
+    "Failed renewal -> past_due (7 days grace then marketing+replies pause)",
+    "Deletion pending freezes purchases",
+    "No free plan (WA-NOFREE-1); store-included gives 2 members, no paid features"
+  ],
+  "gaps": [
+    "No auto-renewal / saved card",
+    "Plan comparison page for pre-sales not in product"
+  ],
+  "assistantNote": "money; payment is completed by the merchant on Kashier"
+}

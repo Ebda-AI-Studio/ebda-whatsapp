@@ -1,6 +1,6 @@
 import { mintedKey, mintedRoles } from './issuer';
 import type {
-  Address, BridgeFailure, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, StoreBridge, StoreProfile,
+  Address, BridgeFailure, CustomerProfile, SearchOptions, StorePolicies, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, RecommendationRequest, StoreBridge, StoreProfile,
 } from '../../src/core/store-bridge';
 
 type Order = {
@@ -23,8 +23,16 @@ export type FakeStoreOptions = { linked?: boolean; paymentMethods?: ChatPaymentM
  * `pending_payment`, and a COD outcome is applied once. `calls` records every method call (arguments included).
  */
 export class FakeStore implements StoreBridge {
+  /**
+   * Like the Store with WA_BRIDGE_REQUIRE_BUYER_PROOF=1 (Store rulings WA-BRIDGE-BIND-1/2): the four key-only calls need a well-formed
+   * `phoneE164`, the three order calls need the `buyerKey` stored on the order. A call without it is refused, so every flow test proves
+   * Chat sends the proof. Set false to model the relaxed rollout window.
+   */
+  requireProof = true;
   readonly calls: { method: string; args: unknown[] }[] = [];
   readonly orders = new Map<string, Order>();
+  /** Shipments by order number, as the bridge carries them today: a status and a tracking link only (no courier, no estimate). */
+  readonly shipments = new Map<string, { status: string; trackingUrl: string | null }>();
   readonly addresses = new Map<string, Address[]>();
   readonly byKey = new Map<string, string>();
   catalog: CatalogRow[];
@@ -46,6 +54,28 @@ export class FakeStore implements StoreBridge {
     this.catalog = opts.catalog ?? Array.from({ length: 23 }, (_, i) => row(`v${i + 1}`, `p${i + 1}`, `Item ${i + 1}`, 10_000 + i * 500));
     this.stock = opts.stock ?? Object.fromEntries(this.catalog.map((c) => [c.retailerId, 50]));
   }
+
+  /** `degraded` on the search answer: the Store skipped the meaning leg (Store ruling CHAT-AGENT-6). */
+  searchDegraded = false;
+  /** What `searchProducts` answers (the Store's ranked search): default = rows whose title contains a query word, in catalogue order, cheaper than the ceiling. A test may replace it (meaning search, Franco). */
+  searchImpl: (query: string, opts: SearchOptions) => CatalogRow[] = (query, opts) => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = (c: CatalogRow) => {
+      const hay = `${c.title} ${c.titleAr ?? ''}`.toLowerCase();
+      const tokens = hay.split(/\s+/);
+      return words.length > 0 && words.every((w) => tokens.includes(w) || (w.length > 3 && hay.includes(w)));
+    };
+    return this.catalog.filter(hit).filter((c) => opts.maxPriceMinor === undefined || c.priceMinor <= opts.maxPriceMinor).slice(0, opts.limit);
+  };
+  /** The merchant's declared policies (a test sets `null` fields or empty shipping to prove the agent does not invent). */
+  policies: StorePolicies = {
+    name: 'متجر الاختبار', nameAr: 'متجر الاختبار', currency: 'EGP', locale: 'ar', paymentMethods: ['cod', 'link', 'instapay'], instapay: true,
+    cod: { available: true, fixedFeeMinor: 2500, percentBps: null },
+    shipping: { zones: [{ name: 'Cairo', nameAr: 'القاهرة', areas: ['Maadi'], feeMinor: 6000, freeOverMinor: 100_000, etaDaysMin: 1, etaDaysMax: 2 }], governorates: [{ governorate: 'Giza', governorateAr: 'الجيزة', feeMinor: 7000, feeMaxMinor: 7000, freeOverMinor: null }] },
+    returns: { windowDays: 14, feesPaidBy: 'customer' }, hours: 'السبت للخميس 10ص - 10م', location: { address: '9 Road 233, Maadi', addressAr: null, mapsUrl: null },
+  };
+  /** Customer profiles by E.164 phone (the proof). An absent phone answers `null`, like the Store. */
+  readonly profiles = new Map<string, CustomerProfile>();
 
   /** Store membership by store id: userId -> member. Tests set it with `setMembers`; an unknown store has no members. */
   readonly members = new Map<string, Map<string, StoreMember>>();
@@ -115,6 +145,36 @@ export class FakeStore implements StoreBridge {
     return this.gate('getProducts', storeId, [storeId, productIds], () => productIds.some((id) => id.length > 64) ? { ok: false, reason: 'invalid' } : ({ ok: true, value: { items: this.catalog.filter((c) => productIds.includes(c.retailerId)).map((c) => ({ ...c, availability: (this.stock[c.retailerId] ?? 0) > 0 ? ('in_stock' as const) : ('out_of_stock' as const) })) } }));
   }
 
+  searchProducts(storeId: string, query: string, opts: SearchOptions) {
+    return this.gate('searchProducts', storeId, [storeId, query, opts], () => ({ ok: true, value: { items: this.searchImpl(query, opts).map((c) => ({ ...c, availability: (this.stock[c.retailerId] ?? 0) > 0 ? ('in_stock' as const) : ('out_of_stock' as const) })), degraded: this.searchDegraded } }));
+  }
+
+  getStorePolicies(storeId: string) {
+    return this.gate<StorePolicies>('getStorePolicies', storeId, [storeId], () => ({ ok: true, value: this.policies }));
+  }
+
+  getCustomerProfile(storeId: string, phoneE164: string) {
+    return this.gate<CustomerProfile | null>('getCustomerProfile', storeId, [storeId, phoneE164], () => ({ ok: true, value: this.profiles.get(phoneE164) ?? null }));
+  }
+
+  /** Recommendation seeds -> retailer ids the engine would return (set by a test). `hidden` = inactive / non-public / other-store products the real Store re-read drops. */
+  recs: Record<string, string[]> = {};
+  hidden = new Set<string>();
+  /** Like the Store: re-read live, so out-of-stock, hidden and over-budget rows never come back; an unknown order or a wrong buyer key is `not_found`. */
+  getRecommendations(storeId: string, req: RecommendationRequest) {
+    return this.gate('getRecommendations', storeId, [storeId, req], () => {
+      let seeds = req.seedIds;
+      if (req.orderNumber !== undefined) {
+        const o = [...this.orders.values()].find((x) => x.orderNumber === req.orderNumber && x.buyerKey === req.buyerKey);
+        if (!o) return { ok: false, reason: 'not_found' };
+        seeds = o.lines.map((l) => l.variantId);
+      }
+      const ids = [...new Set(seeds.flatMap((s) => this.recs[s] ?? []))].filter((id) => !seeds.includes(id) && !this.hidden.has(id));
+      const items = ids.map((id) => this.catalog.find((c) => c.retailerId === id)).filter((c): c is CatalogRow => !!c && (this.stock[c.retailerId] ?? 0) > 0 && (req.maxPriceMinor === undefined || c.priceMinor <= req.maxPriceMinor));
+      return { ok: true, value: { items: items.slice(0, req.limit).map((c) => ({ ...c, availability: 'in_stock' as const })) } };
+    });
+  }
+
   createCheckoutLink(storeId: string, req: { items: OrderLine[]; buyer: Buyer }) {
     return this.gate('createCheckoutLink', storeId, [storeId, req], () => {
       const total = this.price(req.items);
@@ -163,12 +223,24 @@ export class FakeStore implements StoreBridge {
     };
   }
 
-  getPaymentLink(storeId: string, orderId: string) {
-    return this.gate('getPaymentLink', storeId, [storeId, orderId], () => (this.orders.has(orderId) ? { ok: true, value: { url: `https://pay.example/${orderId}`, expiresAt: '2099-01-01T00:00:00.000Z' } } : { ok: false, reason: 'not_found' }));
+  private noPhone(phone?: string): BridgeResult<never> | null {
+    return this.requireProof && !/^\+[1-9]\d{7,14}$/.test(phone ?? '') ? { ok: false, reason: 'invalid', message: 'buyer proof required' } : null;
+  }
+  private orderProof(orderId: string, buyerKey?: string): BridgeResult<never> | null {
+    if (!this.requireProof) return null;
+    const o = this.orders.get(orderId);
+    if (!buyerKey) return { ok: false, reason: 'invalid', message: 'buyer proof required' };
+    return o && o.buyerKey !== buyerKey ? { ok: false, reason: 'not_found' } : null;
   }
 
-  recordCodOutcome(storeId: string, req: { orderId: string; outcome: CodOutcome; at: string; idempotencyKey: string }) {
+  getPaymentLink(storeId: string, orderId: string, buyerKey?: string) {
+    return this.gate('getPaymentLink', storeId, [storeId, orderId, ...(buyerKey ? [buyerKey] : [])], () => this.orderProof(orderId, buyerKey) ?? (this.orders.has(orderId) ? { ok: true, value: { url: `https://pay.example/${orderId}`, expiresAt: '2099-01-01T00:00:00.000Z' } } : { ok: false, reason: 'not_found' }));
+  }
+
+  recordCodOutcome(storeId: string, req: { orderId: string; buyerKey?: string; outcome: CodOutcome; at: string; idempotencyKey: string }) {
     return this.gate('recordCodOutcome', storeId, [storeId, req], () => {
+      const bad = this.orderProof(req.orderId, req.buyerKey);
+      if (bad) return bad;
       const o = this.orders.get(req.orderId);
       if (!o) return { ok: false, reason: 'not_found' };
       if (o.codOutcome === null) {
@@ -180,8 +252,10 @@ export class FakeStore implements StoreBridge {
     });
   }
 
-  attachPaymentProof(storeId: string, orderId: string, mediaUrl: string) {
-    return this.gate<Record<string, never>>('attachPaymentProof', storeId, [storeId, orderId, mediaUrl], () => {
+  attachPaymentProof(storeId: string, orderId: string, mediaUrl: string, buyerKey?: string) {
+    return this.gate<Record<string, never>>('attachPaymentProof', storeId, [storeId, orderId, mediaUrl, ...(buyerKey ? [buyerKey] : [])], () => {
+      const bad = this.orderProof(orderId, buyerKey);
+      if (bad) return bad;
       const o = this.orders.get(orderId);
       if (!o) return { ok: false, reason: 'not_found' };
       o.proofs.push(mediaUrl); // the order stays pending_payment: only the Store flips it
@@ -189,27 +263,31 @@ export class FakeStore implements StoreBridge {
     });
   }
 
-  getCustomerAddresses(storeId: string, buyerKey: string) {
-    return this.gate('getCustomerAddresses', storeId, [storeId, buyerKey], () => ({ ok: true, value: { items: this.addresses.get(buyerKey) ?? [] } }));
+  getCustomerAddresses(storeId: string, buyerKey: string, phoneE164?: string) {
+    return this.gate('getCustomerAddresses', storeId, [storeId, buyerKey, ...(phoneE164 ? [phoneE164] : [])], () => this.noPhone(phoneE164) ?? ({ ok: true, value: { items: this.addresses.get(buyerKey) ?? [] } }));
   }
 
-  saveCustomerAddress(storeId: string, buyerKey: string, address: NewAddress) {
-    return this.gate('saveCustomerAddress', storeId, [storeId, buyerKey, address], () => {
+  saveCustomerAddress(storeId: string, buyerKey: string, address: NewAddress, phoneE164?: string) {
+    return this.gate('saveCustomerAddress', storeId, [storeId, buyerKey, address, ...(phoneE164 ? [phoneE164] : [])], () => {
+      const bad = this.noPhone(phoneE164);
+      if (bad) return bad;
       const a: Address = { id: `addr-${(this.addresses.get(buyerKey)?.length ?? 0) + 1}`, label: address.label ?? null, area: address.area, street: address.street };
       this.addresses.set(buyerKey, [...(this.addresses.get(buyerKey) ?? []), a]);
       return { ok: true, value: { address: a } };
     });
   }
 
-  getOrderStatus(storeId: string, orderNumber: string, buyerKey: string) {
-    return this.gate('getOrderStatus', storeId, [storeId, orderNumber, buyerKey], () => {
+  getOrderStatus(storeId: string, orderNumber: string, buyerKey: string, phoneE164?: string) {
+    return this.gate('getOrderStatus', storeId, [storeId, orderNumber, buyerKey, ...(phoneE164 ? [phoneE164] : [])], () => {
+      const bad = this.noPhone(phoneE164);
+      if (bad) return bad;
       const o = [...this.orders.values()].find((x) => x.orderNumber === orderNumber && x.buyerKey === buyerKey);
-      return o ? { ok: true, value: { orderNumber, status: o.status, paymentMethod: o.paymentMethod, shipment: null } } : { ok: false, reason: 'not_found' };
+      return o ? { ok: true, value: { orderNumber, status: o.status, paymentMethod: o.paymentMethod, shipment: this.shipments.get(orderNumber) ?? null } } : { ok: false, reason: 'not_found' };
     });
   }
 
-  listCustomerOrders(storeId: string, buyerKey: string, limit: number) {
-    return this.gate('listCustomerOrders', storeId, [storeId, buyerKey, limit], () => ({
+  listCustomerOrders(storeId: string, buyerKey: string, limit: number, phoneE164?: string) {
+    return this.gate('listCustomerOrders', storeId, [storeId, buyerKey, limit, ...(phoneE164 ? [phoneE164] : [])], () => this.noPhone(phoneE164) ?? ({
       ok: true,
       value: {
         items: [...this.orders.values()].filter((o) => o.buyerKey === buyerKey).sort((a, b) => b.at - a.at).slice(0, limit).map((o) => ({

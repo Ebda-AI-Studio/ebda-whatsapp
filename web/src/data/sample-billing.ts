@@ -93,8 +93,8 @@ export function createSampleWallet(): WalletApi {
     },
     topupState: async (orderId) => ({ orderId, state: 'pending', amountMinor: 0, feeMinor: 0, totalMinor: 0 }),
     packages: async () => [
-      { id: 'basic', name: 'Basic', priceMinor: 25000, aiCredits: 100, maxMembers: 2, features: ['members', 'shared_inbox', 'order_confirmations', 'templates', 'ai_credits'], periodMonths: 1 },
-      { id: 'gold', name: 'Gold', priceMinor: 50000, aiCredits: 300, maxMembers: 5, features: ['members', 'shared_inbox', 'order_confirmations', 'templates', 'campaigns', 'order_in_chat', 'ai_credits'], periodMonths: 1 },
+      { id: 'basic', name: 'Chat 100 AI replies', nameAr: 'شات 100 رد ذكي', nameEn: 'Chat 100 AI replies', priceMinor: 25000, aiCredits: 100, maxMembers: 2, features: ['members', 'shared_inbox', 'order_confirmations', 'templates', 'ai_credits'], periodMonths: 1 },
+      { id: 'gold', name: 'Chat 300 AI replies', nameAr: 'شات 300 رد ذكي', nameEn: 'Chat 300 AI replies', priceMinor: 50000, aiCredits: 300, maxMembers: 5, features: ['members', 'shared_inbox', 'order_confirmations', 'templates', 'campaigns', 'order_in_chat', 'ai_credits'], periodMonths: 1 },
     ],
     async buyPackage(packageId) {
       const id = nextId++;
@@ -123,6 +123,32 @@ export function createSampleWallet(): WalletApi {
       refunds.push(r);
       return { ...r };
     },
+    async previewNumberFunding(phoneNumberId) {
+      const f = wallet.funding.find((x) => x.phoneNumberId === phoneNumberId);
+      if (!f) throw new ApiError('not_found', 404);
+      if (f.funding === 'platform_line') throw new ApiError('invalid_request', 409, 'operator_funded');
+      return { phoneNumberId, current: f.funding, funding: 'merchant_card', confirm: { confirmId: crypto.randomUUID(), token: 'a'.repeat(64), expiresAt: Date.now() + 15 * 60_000 } };
+    },
+    async confirmNumberFunding(phoneNumberId) {
+      const f = wallet.funding.find((x) => x.phoneNumberId === phoneNumberId);
+      if (!f) throw new ApiError('not_found', 404);
+      f.funding = 'merchant_card';
+    },
+    async yearlyRefund() { return { quote: null, reason: 'not_yearly', request: null }; },
+    async previewYearlyRefund() { throw new ApiError('invalid_request', 409, 'not_yearly'); },
+    async requestYearlyRefund() { throw new ApiError('invalid_request', 409, 'not_yearly'); },
+    creditPacks: async () => ({ enabled: true, items: [{ id: 'credits-100', credits: 100, priceMinor: 23000 }, { id: 'credits-500', credits: 500, priceMinor: 115000 }, { id: 'credits-1000', credits: 1000, priceMinor: 230000 }] }),
+    async previewCreditPack(packId) {
+      const pack = [{ id: 'credits-100', credits: 100, priceMinor: 23000 }, { id: 'credits-500', credits: 500, priceMinor: 115000 }, { id: 'credits-1000', credits: 1000, priceMinor: 230000 }].find((p) => p.id === packId);
+      if (!pack) throw new ApiError('not_found', 404);
+      return { pack, confirm: { confirmId: crypto.randomUUID(), token: 'b'.repeat(64), expiresAt: Date.now() + 15 * 60_000 } };
+    },
+    async buyCreditPack(packId) {
+      const id = nextId++;
+      const credits = Number(packId.replace('credits-', '')) || 100;
+      return { orderId: `cp_${id}`, state: 'pending', credits, amountMinor: credits * 230, checkoutUrl: `https://pay.example.test/checkout/cp_${id}` };
+    },
+    creditOrderState: async (orderId) => ({ orderId, state: 'pending', credits: 0, amountMinor: 0 }),
     offboarding: async () => ({ ...off }),
     async requestOffboarding(opts) {
       if (wallet.balanceMinor > 0 && !opts.acceptWriteOff) throw new ApiError('invalid_request', 409, 'wallet_balance_remains');
@@ -222,6 +248,13 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
     },
     async linkDashboardRefund(id, _refundId, amountMinor) { const r = find(refunds, id); Object.assign(r, { cardRefundedMinor: r.cardRefundedMinor + amountMinor, manualMinor: Math.max(0, r.manualMinor - amountMinor), state: r.manualMinor - amountMinor > 0 ? 'manual_payout' : 'paid' }); },
     instapayQueue: async () => [{ id: 'ip-op-1', reference: 'WA-H4N8T2PC', kind: 'topup', packageId: null, amountMinor: 20000, currency: 'EGP', state: 'under_review', createdAt: BASE - D, expiresAt: BASE + D, hasProof: true, rejectReason: null, decidedAt: null, workspaceId: 'ws-sample', createdBy: 'u-merchant', proofAt: BASE - D, firstApprover: null, decidedBy: null, proofMime: 'image/png' }],
+    autoConfirmations: async () => ({ mode: 'off' as const, ready: { ready: true, missing: [] }, items: [
+      { requestId: 'ip-auto-1', workspaceId: 'ws-sample', workspaceName: 'Sample store', kind: 'topup' as const, state: 'auto_confirmed' as const, verdict: 'auto_confirm', reasons: [], amountMinor: 20000, expectedAmountMinor: 20000, isFirstPayment: true, confirmedAt: BASE - D / 2, digestSentAt: null, revertedAt: null, graceUntil: null, creditsRemovedMinor: null, creditsUsedMinor: null, aiCreditsRemoved: null, aiCreditsUsed: null, createdAt: BASE - D / 2 },
+      { requestId: 'ip-auto-2', workspaceId: 'ws-sample', workspaceName: 'Sample store', kind: 'package' as const, state: 'needs_human' as const, verdict: 'needs_human', reasons: ['FIRST_PAYMENT_OVER_CAP'], amountMinor: 500000, expectedAmountMinor: 500000, isFirstPayment: true, confirmedAt: null, digestSentAt: null, revertedAt: null, graceUntil: null, creditsRemovedMinor: null, creditsUsedMinor: null, aiCreditsRemoved: null, aiCreditsUsed: null, createdAt: BASE - D },
+    ] }),
+    async revertAutoConfirmed() { /* sample: nothing to revert */ },
+    async setAutoMode() { /* sample */ },
+    async setWorkspaceAuto() { /* sample */ },
     instapayProofLink: async () => ({ url: '/api/v1/instapay-proof/sample', expiresAt: Date.now() + 120_000 }),
     async confirmInstapay(id) { return { id, reference: 'WA-H4N8T2PC', kind: 'topup', packageId: null, amountMinor: 20000, currency: 'EGP', state: 'confirmed', createdAt: BASE - D, expiresAt: BASE + D, hasProof: true, rejectReason: null, decidedAt: Date.now(), workspaceId: 'ws-sample', createdBy: 'u-merchant', proofAt: BASE - D, firstApprover: null, decidedBy: currentUserId, proofMime: 'image/png' }; },
     async releaseInstapay(id) { return { id, reference: 'WA-H4N8T2PC', kind: 'topup', packageId: null, amountMinor: 20000, currency: 'EGP', state: 'under_review', createdAt: BASE - D, expiresAt: BASE + D, hasProof: true, rejectReason: null, decidedAt: null, workspaceId: 'ws-sample', createdBy: 'u-merchant', proofAt: BASE - D, firstApprover: null, decidedBy: null, proofMime: 'image/png', heldReason: null, heldOf: null }; },
@@ -289,6 +322,7 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
       if (!/^yearly-/.test(orderId)) throw new ApiError('not_found', 404);
       return { orderId, packageId: 'growth-yearly', periodMonths: 12, monthlyMinor: 111750, unusedMonths: 11, grossMinor: 1229250, debtMinor: 100000, debtSettledMinor: 100000, refundMinor: 1129250 };
     },
+    yearlyRefundRequests: async () => [],
     async yearlyRefundExecute(orderId, reason) {
       if (!/^yearly-/.test(orderId)) throw new ApiError('not_found', 404);
       record('yearly_refund', null, null, { orderId, shortenedMonths: 11 }, reason);

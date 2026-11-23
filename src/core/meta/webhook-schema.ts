@@ -3,12 +3,15 @@ import { z } from 'zod';
 export const MESSAGE_TYPES = ['text', 'interactive', 'image', 'audio', 'video', 'document', 'sticker', 'location', 'order'] as const;
 export type MessageType = (typeof MESSAGE_TYPES)[number] | 'unsupported';
 
-export type InboundMedia = { id: string; mime: string; filename?: string };
+/** `voice`: Meta's flag on an audio message (true = recorded voice note, false = an audio file); absent = treated as a voice note. */
+export type InboundMedia = { id: string; mime: string; filename?: string; voice?: boolean };
 /** A tap on a button, a list row or a template quick-reply. `id` is what we set when we sent it (a template button without a payload echoes its title). */
 export type InboundReply = { kind: 'button' | 'list'; id: string; title: string };
 /** A cart sent from Meta's catalog. Prices stay the decimal strings Meta sent (no float arithmetic on money). */
 export type InboundOrder = { catalogId?: string; note?: string; items: { retailerId: string; quantity: number; price: string; currency: string }[] };
-export type InboundMessage = { wamid: string; from: string; ts: number; type: MessageType; text?: string; caption?: string; media?: InboundMedia; profileName?: string; reply?: InboundReply; order?: InboundOrder };
+/** A WhatsApp location pin. Coordinates are personal data: never logged, never shown in the inbox text, never sent anywhere (no reverse geocoding). */
+export type InboundLocation = { latitude: number; longitude: number; name?: string; address?: string };
+export type InboundMessage = { wamid: string; from: string; ts: number; type: MessageType; text?: string; caption?: string; media?: InboundMedia; profileName?: string; reply?: InboundReply; order?: InboundOrder; location?: InboundLocation };
 export const MEDIA_MESSAGE_TYPES = ['image', 'audio', 'video', 'document', 'sticker'] as const;
 const replySchema = z.object({
   type: z.enum(['button_reply', 'list_reply']),
@@ -21,7 +24,11 @@ const orderSchema = z.object({
   text: z.string().optional(),
   product_items: z.array(z.object({ product_retailer_id: z.string().min(1), quantity: z.union([z.number(), z.string()]), item_price: z.union([z.number(), z.string()]), currency: z.string() }).loose()).default([]),
 }).loose();
-const mediaBodySchema = z.object({ id: z.string().min(1), mime_type: z.string().optional(), caption: z.string().optional(), filename: z.string().optional() }).loose();
+export const locationSchema = z.object({
+  latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180),
+  name: z.string().optional(), address: z.string().optional(),
+}).loose();
+const mediaBodySchema = z.object({ id: z.string().min(1), mime_type: z.string().optional(), caption: z.string().optional(), filename: z.string().optional(), voice: z.boolean().optional() }).loose();
 /** Meta's `pricing` object on a status: whether the message is billable, under which model and category. Absent fields stay null. */
 export type StatusPricing = { billable: boolean | null; pricingModel: string | null; category: string | null; type: string | null };
 export type StatusEvent = { wamid: string; status: 'sent' | 'delivered' | 'read' | 'failed'; ts: number; errorCode?: number; pricing?: StatusPricing };
@@ -91,6 +98,7 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
         const raw = m as Record<string, unknown>;
         let reply: InboundReply | undefined;
         let order: InboundOrder | undefined;
+        let location: InboundLocation | undefined;
         let type = toType(m.type);
         if (m.type === 'interactive') {
           const r = replySchema.safeParse(raw.interactive);
@@ -113,6 +121,10 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
             };
           }
         }
+        if (m.type === 'location') {
+          const l = locationSchema.safeParse(raw.location);
+          if (l.success) location = { latitude: l.data.latitude, longitude: l.data.longitude, ...(l.data.name?.trim() ? { name: l.data.name.trim().slice(0, 120) } : {}), ...(l.data.address?.trim() ? { address: l.data.address.trim().slice(0, 240) } : {}) };
+        }
         const media = (MEDIA_MESSAGE_TYPES as readonly string[]).includes(type) ? mediaBodySchema.safeParse((m as Record<string, unknown>)[m.type]) : null;
         ev.inbound.push({
           wamid: m.id,
@@ -122,7 +134,9 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
           ...(m.text ? { text: m.text.body } : {}),
           ...(reply ? { text: reply.title, reply } : {}),
           ...(order ? { order, text: `🛒 ${order.items.reduce((n, i) => n + i.quantity, 0)}` } : {}),
-          ...(media?.success ? { media: { id: media.data.id, mime: media.data.mime_type ?? 'application/octet-stream', ...(media.data.filename ? { filename: media.data.filename } : {}) }, ...(media.data.caption ? { caption: media.data.caption } : {}) } : {}),
+          // The inbox shows the pin's own label only (never the coordinates).
+          ...(location ? { location, text: `📍 ${location.name ?? location.address ?? ''}`.trim() } : {}),
+          ...(media?.success ? { media: { id: media.data.id, mime: media.data.mime_type ?? 'application/octet-stream', ...(media.data.filename ? { filename: media.data.filename } : {}), ...(media.data.voice !== undefined ? { voice: media.data.voice } : {}) }, ...(media.data.caption ? { caption: media.data.caption } : {}) } : {}),
           ...(names.get(m.from) ? { profileName: names.get(m.from) } : {}),
         });
       }
@@ -146,12 +160,12 @@ export function extractEvents(payload: unknown): WebhookEvents[] | null {
   return [...byNumber.values()];
 }
 
-export type TemplateStatusEvent = { wabaId: string; name: string; language: string; status: 'APPROVED' | 'REJECTED' | 'PENDING' | 'PAUSED' | 'DISABLED'; reason: string | null };
-const TEMPLATE_STATUS: Record<string, TemplateStatusEvent['status']> = { APPROVED: 'APPROVED', REJECTED: 'REJECTED', PENDING: 'PENDING', IN_APPEAL: 'PENDING', PAUSED: 'PAUSED', DISABLED: 'DISABLED' };
+export type TemplateStatusEvent = { wabaId: string; name: string; language: string; status: 'APPROVED' | 'REJECTED' | 'PENDING' | 'PAUSED' | 'DISABLED' | 'PENDING_DELETION'; reason: string | null; templateId: string | null };
+const TEMPLATE_STATUS: Record<string, TemplateStatusEvent['status']> = { APPROVED: 'APPROVED', REJECTED: 'REJECTED', PENDING: 'PENDING', IN_APPEAL: 'PENDING', PAUSED: 'PAUSED', DISABLED: 'DISABLED', PENDING_DELETION: 'PENDING_DELETION' };
 
 const templateChangeSchema = z.object({
   field: z.literal('message_template_status_update'),
-  value: z.object({ event: z.string(), message_template_name: z.string(), message_template_language: z.string(), reason: z.string().nullish() }).loose(),
+  value: z.object({ event: z.string(), message_template_name: z.string(), message_template_language: z.string(), message_template_id: z.union([z.string(), z.number()]).optional(), reason: z.string().nullish() }).loose(),
 }).loose();
 
 /** `message_template_status_update` changes, per WABA. Events we do not model (FLAGGED, …) are skipped. */
@@ -165,7 +179,7 @@ export function extractTemplateStatuses(payload: unknown): TemplateStatusEvent[]
       const status = c.success ? TEMPLATE_STATUS[c.data.value.event] : undefined;
       if (!c.success || !status) continue;
       const reason = c.data.value.reason && c.data.value.reason !== 'NONE' ? c.data.value.reason : null;
-      out.push({ wabaId: entry.id, name: c.data.value.message_template_name, language: c.data.value.message_template_language, status, reason });
+      out.push({ wabaId: entry.id, name: c.data.value.message_template_name, language: c.data.value.message_template_language, status, reason, templateId: c.data.value.message_template_id === undefined ? null : String(c.data.value.message_template_id) });
     }
   }
   return out;

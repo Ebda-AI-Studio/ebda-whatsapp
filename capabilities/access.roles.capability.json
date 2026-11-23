@@ -1,0 +1,48 @@
+{
+  "id": "access.roles",
+  "status": "live",
+  "area": "access",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "الأدوار: صاحب المتجر، موظف",
+  "titleEn": "Roles: owner, staff, super admin",
+  "screens": [],
+  "api": [
+    "GET /stores/:storeId/me"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/team-members-and-seats",
+  "questions": {
+    "ar": [
+      "إيه الفرق بين الأونر والموظف؟",
+      "الموظف ميقدرش يعمل إيه؟",
+      "ليه الزر ده مش ظاهر عندي؟",
+      "el mowazzaf yeqdar y3mel eh?"
+    ],
+    "en": [
+      "What can staff do versus the owner?",
+      "Why can I not see a button?"
+    ]
+  },
+  "steps": [
+    "Owner: everything for the store incl. money, settings, campaigns, team",
+    "Staff (needs a seat): inbox, notes, pause/cancel campaigns, read bot settings and funnel",
+    "Super admin: Ebda employees only (operator console)"
+  ],
+  "edgeCases": [
+    "Staff without a seat sees the NoSeat page",
+    "Seat paused when package shrinks (over_limit)"
+  ],
+  "gaps": [
+    "No single help article listing role permissions (only guide 14 on seats)"
+  ]
+}

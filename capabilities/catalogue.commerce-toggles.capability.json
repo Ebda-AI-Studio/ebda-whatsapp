@@ -1,0 +1,45 @@
+{
+  "id": "catalogue.commerce-toggles",
+  "status": "live",
+  "area": "catalogue",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "زرار المتجر والسلة",
+  "titleEn": "Shop button and cart on/off",
+  "screens": [
+    "BotScreen How the shop looks on WhatsApp",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "PUT /stores/:storeId/store-link/catalog/commerce {catalogVisible,cartEnabled}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/your-products-on-whatsapp",
+  "questions": {
+    "ar": [
+      "عايز اشيل زرار المتجر",
+      "العميل مايبعتش سلة",
+      "اقفل الكارت"
+    ],
+    "en": [
+      "How do I hide the shop button or disable the cart?"
+    ]
+  },
+  "steps": [
+    "Toggle both switches; set from this screen only, not WhatsApp Manager (a Meta-only change is put back within two days)"
+  ],
+  "edgeCases": [
+    "missing_permission 403",
+    "meta_error 503 retryable"
+  ],
+  "gaps": []
+}

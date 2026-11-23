@@ -1,0 +1,38 @@
+{
+  "id": "agent.read-typing-franco",
+  "status": "in-pr",
+  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "علامة القراءة والكتابة وفهم الفرانكو",
+  "titleEn": "Read receipt, typing indicator, Franco detection, scope rule",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "المساعد بيرد بالإنجليزي على فرانكو",
+      "ليه المساعد رفض يرد على سؤال خارج المتجر؟",
+      "ازاي علامة القراءة والكتابة وفهم الفرانكو؟"
+    ],
+    "en": [
+      "The agent answers Franco in English"
+    ]
+  },
+  "steps": [
+    "Best-effort read + typing indicator; only answers about this store"
+  ],
+  "edgeCases": [],
+  "gaps": []
+}

@@ -5,10 +5,16 @@ import type { WalletDto } from '../data/billing';
 import { ApiError } from '../data/api';
 import type { CampaignsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
-import { formatMoney } from '../lib/format';
+import { formatMoney, templateTitle } from '../lib/format';
+import { CairoWhen } from './CairoWhen';
 import { LoadError } from './LoadError';
 
-type Props = { t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number; onClose: () => void };
+type Props = {
+  t: Strings; lang: Lang; source: InboxSource; api: CampaignsApi; now: () => number; onClose: () => void;
+  /** goes to the Templates screen (the empty state points there) */
+  onOpenTemplates?: (() => void) | undefined;
+  /** goes to the Numbers screen (the shared-number notice points there) */
+  onOpenNumbers?: (() => void) | undefined };
 type AudienceMode = 'segment' | 'tags' | 'everyone';
 type ParamDraft = { kind: 'text' | 'name' | 'link'; value: string };
 
@@ -26,7 +32,7 @@ function previewText(body: string, params: ParamDraft[], lang: Lang): string {
   });
 }
 
-export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
+export function CampaignForm({ t, lang, source, api, now, onClose, onOpenTemplates, onOpenNumbers }: Props) {
   const [name, setName] = useState('');
   const [mode, setMode] = useState<AudienceMode>('segment');
   const [segments, setSegments] = useState<SegmentDto[]>([]);
@@ -51,7 +57,8 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
   // Campaigns are marketing: only approved marketing templates (utility messages go out per order, not as broadcasts).
   const loadTemplates = useCallback(() => {
     setTemplatesFailed(false);
-    void source.templates().then((all) => setTemplates(all.filter((x) => x.status === 'APPROVED' && x.category === 'MARKETING')), () => setTemplatesFailed(true));
+    // Paused and pending marketing templates stay in the list, greyed with the reason, so a merchant sees why one cannot be picked instead of it vanishing.
+    void source.templates().then((all) => setTemplates(all.filter((x) => x.category === 'MARKETING' && ['APPROVED', 'PAUSED', 'PENDING'].includes(x.status))), () => setTemplatesFailed(true));
   }, [source]);
   useEffect(loadTemplates, [loadTemplates]);
 
@@ -70,10 +77,11 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
     return () => { stale = true; clearTimeout(id); };
   }, [api, criteria]);
 
-  const template = templates.find((x) => `${x.name}|${x.language}` === tplKey) ?? null;
+  const usable = templates.filter((x) => x.status === 'APPROVED');
+  const template = usable.find((x) => `${x.name}|${x.language}` === tplKey) ?? null;
   const pickTemplate = (key: string) => {
     setTplKey(key);
-    const tpl = templates.find((x) => `${x.name}|${x.language}` === key);
+    const tpl = usable.find((x) => `${x.name}|${x.language}` === key);
     setParams(Array.from({ length: tpl?.paramCount ?? 0 }, () => ({ kind: 'text', value: '' })));
   };
   const setParam = (i: number, p: Partial<ParamDraft>) => setParams((ps) => ps.map((x, j) => (j === i ? { ...x, ...p } : x)));
@@ -85,6 +93,14 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
     && (!needsLink || HTTPS.test(linkUrl.trim()))
     && (timing === 'now' || (scheduledAt !== undefined && Number.isFinite(scheduledAt) && scheduledAt > now()))
     && (dailyLimit === '' || Number(dailyLimit) >= 1);
+
+  // WA-SHARED-NOCAMP-1: a store with no own number but a seat on the shared number can never send marketing; say so instead of showing a form that cannot work.
+  const [sharedOnly, setSharedOnly] = useState(false);
+  useEffect(() => {
+    const numbers = source.numbers;
+    if (!numbers?.shared) return;
+    void Promise.all([numbers.list(), numbers.shared.status()]).then(([own, shared]) => setSharedOnly(shared.member && !own.some((x) => x.kind === 'own' && x.status === 'active')), () => undefined);
+  }, [source]);
 
   const [funding, setFunding] = useState<{ funding: WalletDto['funding'][number]['funding'] }[] | null>(null);
   useEffect(() => {
@@ -147,6 +163,24 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
   // A zero price is "Meta bills the merchant's card" only when every active number says so; anything unknown stays "not ready".
   const cardBilled = !!funding && funding.length > 0 && funding.every((f) => f.funding === 'merchant_card');
 
+  if (sharedOnly) {
+    return (
+      <main className="screen" aria-labelledby="new-campaign-title">
+        <header className="screen-head">
+          <button type="button" className="icon-btn" onClick={onClose} aria-label={t.backToCampaigns}><ArrowRight size={20} aria-hidden className="dir-icon" /></button>
+          <h1 id="new-campaign-title">{t.newCampaign}</h1>
+        </header>
+        <div className="settings">
+          <section className="notice" role="note" aria-labelledby="camp-shared-title">
+            <h2 id="camp-shared-title">{t.campSharedTitle}</h2>
+            <p>{t.campSharedBody}</p>
+            {onOpenNumbers && <button type="button" className="btn primary" onClick={onOpenNumbers}>{t.tplSharedGoNumbers}</button>}
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="screen" aria-labelledby="new-campaign-title">
       <header className="screen-head">
@@ -190,12 +224,17 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
         <fieldset className="step">
           <legend>{t.stepMessage}</legend>
           {templatesFailed ? <LoadError t={t} onRetry={loadTemplates} />
-            : templates.length === 0 ? <p className="muted">{t.noTemplates}</p> : (
+            : usable.length === 0 ? (
+              <>
+                <p className="muted">{t.noTemplates}</p>
+                {onOpenTemplates && <button type="button" className="btn" onClick={onOpenTemplates}>{t.tplCampaignGoTemplates}</button>}
+              </>
+            ) : (
             <label className="field">
               <span>{t.pickApproved}</span>
               <select value={tplKey} onChange={(e) => pickTemplate(e.target.value)}>
                 <option value="" disabled>—</option>
-                {templates.map((x) => <option key={`${x.name}|${x.language}`} value={`${x.name}|${x.language}`}>{t.templateNames[x.name] ?? x.name}</option>)}
+                {templates.map((x) => <option key={`${x.name}|${x.language}`} value={`${x.name}|${x.language}`} disabled={x.status !== 'APPROVED'}>{x.status === 'APPROVED' ? templateTitle(t, x) : t.tplUnavailableOption(templateTitle(t, x), t.tplStatuses[x.status] ?? x.status)}</option>)}
               </select>
             </label>
           )}
@@ -239,7 +278,7 @@ export function CampaignForm({ t, lang, source, api, now, onClose }: Props) {
           <legend>{t.stepTiming}</legend>
           <label className="radio"><input type="radio" name="when" checked={timing === 'now'} onChange={() => setTiming('now')} />{t.sendNow}</label>
           <label className="radio"><input type="radio" name="when" checked={timing === 'later'} onChange={() => setTiming('later')} />{t.sendLater}</label>
-          {timing === 'later' && <label className="field inset"><span>{t.sendAt}</span><input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} /></label>}
+          {timing === 'later' && <><label className="field inset"><span>{t.sendAt}</span><input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} /></label><CairoWhen t={t} lang={lang} value={at} /></>}
           <div className="field">
             <label htmlFor="camp-limit">{t.dailyLimit}</label>
             <input id="camp-limit" type="number" min={1} inputMode="numeric" value={dailyLimit} aria-describedby="camp-limit-hint" onChange={(e) => setDailyLimit(e.target.value.replace(/\D/g, ''))} />

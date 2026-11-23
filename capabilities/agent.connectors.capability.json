@@ -1,0 +1,53 @@
+{
+  "id": "agent.connectors",
+  "status": "live",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "ربط المساعد بسيستم الشركة",
+  "titleEn": "Connect the agent to your own systems (webhook / Odoo)",
+  "screens": [
+    "IntegrationsScreen Agent connectors",
+    "view:IntegrationsScreen",
+    "/integrations"
+  ],
+  "api": [
+    "GET /stores/:storeId/connectors",
+    "PUT /stores/:storeId/connectors/:id",
+    "DELETE /stores/:storeId/connectors/:id",
+    "POST /stores/:storeId/connectors/:id/test"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/connect-your-systems",
+  "questions": {
+    "ar": [
+      "ينفع المساعد يشوف الحجوزات بتاعتي؟",
+      "عايز اربطه بـ Odoo",
+      "webhook للسيستم بتاعي"
+    ],
+    "en": [
+      "Can the agent call my own system or Odoo?"
+    ]
+  },
+  "steps": [
+    "Connect systems > Agent connectors > Add a connector",
+    "Webhook (https:443, tools as JSON) or Odoo (url, database, login, API key); secret is write-only and encrypted with AGENT_SECRETS_KEY, a GET returns hasSecret only; secret minimum 16 (webhook) / 8 (odoo); a super admin member reads status only, never writes",
+    "Save asks for an explicit confirm naming the host and the tools the agent will be able to call",
+    "Test the connection (one per 5 s); delete asks first"
+  ],
+  "edgeCases": [
+    "SSRF rules on every call",
+    "Erased/STOP customers make no connector call",
+    "10 tools, 10 params per tool"
+  ],
+  "gaps": [],
+  "assistantNote": "gives the agent tool access to external systems"
+}

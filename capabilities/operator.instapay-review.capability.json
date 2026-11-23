@@ -1,0 +1,57 @@
+{
+  "id": "operator.instapay-review",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مراجعة إيصالات انستاباي",
+  "titleEn": "Review InstaPay proofs (view, confirm, release hold, reject)",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/instapay",
+    "GET /operator/instapay/:id/proof-link",
+    "POST /operator/instapay/:id/confirm",
+    "POST /operator/instapay/:id/release",
+    "POST /operator/instapay/:id/reject"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": null,
+    "text": "BLOCKER #4: confirmation should become AI auto-confirm when the receipt matches (spec 7.4), human only on flags; duplicate/hold release stays human (fraud)",
+    "validUnderRule": false
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "مين بيعمل مراجعة إيصالات انستاباي؟",
+      "ليه مش لاقي مراجعة إيصالات انستاباي عندي؟",
+      "عايز مراجعة إيصالات انستاباي اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Review InstaPay proofs (view, confirm, release hold, reject)?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "Self-service gap: BLOCKER #4: confirmation should become AI auto-confirm when the receipt matches (spec 7.4), human only on flags; duplicate/hold release stays human (fraud)",
+    "operator replaces: wallet.instapay (activation waits for staff)"
+  ]
+}

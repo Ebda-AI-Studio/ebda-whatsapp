@@ -1,0 +1,52 @@
+{
+  "id": "inbox.quick-replies",
+  "status": "live",
+  "area": "inbox",
+  "version": 2,
+  "versionDate": "2026-11-14",
+  "titleAr": "الردود السريعة",
+  "titleEn": "Quick replies",
+  "screens": [
+    "ChatPane quick replies chips and editor",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [
+    "GET /stores/:storeId/quick-replies",
+    "POST /stores/:storeId/quick-replies",
+    "PUT /stores/:storeId/quick-replies/:quickReplyId",
+    "DELETE /stores/:storeId/quick-replies/:quickReplyId"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/notes-tags-and-quick-replies",
+  "questions": {
+    "ar": [
+      "ازاي اضيف رد سريع بتاعي؟",
+      "عايز ردود جاهزة",
+      "ينفع اعدل الردود السريعة؟"
+    ],
+    "en": [
+      "Can I add my own quick replies?"
+    ]
+  },
+  "steps": [
+    "Open a chat, press Edit quick replies above the message box, write the reply, press Add the reply",
+    "Edit a reply in its box and press Save the reply, or press Delete the reply; the chips above the box follow at once",
+    "With no replies of your own, the four starter replies show"
+  ],
+  "edgeCases": [
+    "At most 20 replies per workspace and no duplicate text (409)",
+    "Owner and staff may both edit; every change is in the action log without the text",
+    "Arabic/RTL: phone numbers, URLs and API keys stay LTR inside RTL text"
+  ],
+  "gaps": []
+}

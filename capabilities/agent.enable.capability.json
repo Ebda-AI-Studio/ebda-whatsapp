@@ -1,0 +1,58 @@
+{
+  "id": "agent.enable",
+  "status": "live",
+  "area": "agent",
+  "version": 2,
+  "versionDate": "2026-11-14",
+  "titleAr": "تشغيل المساعد الذكي",
+  "titleEn": "Turn the AI agent on or off",
+  "screens": [
+    "AgentScreen",
+    "view:AgentScreen",
+    "/agent"
+  ],
+  "api": [
+    "GET /stores/:storeId/agent",
+    "PUT /stores/:storeId/agent {enabled}"
+  ],
+  "mcpTool": null,
+  "planGate": "package + AI credits + number; blocked without plan",
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "عايز المساعد الذكي يرد على العملاء",
+      "ازاي اشغل الـ AI؟",
+      "المساعد مش بيرد",
+      "sha8al el AI agent"
+    ],
+    "en": [
+      "How do I turn on the AI agent?",
+      "The agent is silent"
+    ]
+  },
+  "steps": [
+    "AI agent > Turn on",
+    "Choose persona, language, FAQ, promises, handoff time",
+    "Save and test from your phone"
+  ],
+  "edgeCases": [
+    "AI credits run out: the agent stops and hands the chat to staff",
+    "24-hour window closed: free text blocked (Meta 131047), only an approved template can be sent",
+    "Silent during an open handoff",
+    "No usable model / provider error = handoff (never silence or raw output)",
+    "Without a catalogue/Store it cannot search products",
+    "No active package: sends, agent and number connect answer 403 plan_required (no free plan, WA-NOFREE-1); a past_due package keeps replies/confirmations up to 7 days",
+    "Agent reports itself inactive if copy not configured (deploy issue)"
+  ],
+  "gaps": [
+    "Rail label \"AI agent\" vs help \"Settings\""
+  ],
+  "assistantNote": "the agent then messages customers by itself"
+}

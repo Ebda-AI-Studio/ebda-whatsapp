@@ -1,0 +1,61 @@
+{
+  "id": "campaigns.create",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "عمل حملة جديدة وتقدير التكلفة",
+  "titleEn": "Create a campaign draft with cost estimate",
+  "screens": [
+    "CampaignForm (audience, message, timing, review)",
+    "view:CampaignForm",
+    "/campaigns"
+  ],
+  "api": [
+    "POST /stores/:storeId/campaigns"
+  ],
+  "mcpTool": null,
+  "planGate": "feat_campaigns (Chat 1,500 and 5,000 AI replies packages; not Chat 300 / store-included)",
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "عايز ابعت عرض لعملائي",
+      "ازاي اعمل حملة؟",
+      "التكلفة هتبقى كام؟",
+      "a3mel campaign ezay",
+      "عايز ابعت عرض رمضان"
+    ],
+    "en": [
+      "How do I send an offer to my customers?",
+      "How much will a campaign cost?"
+    ]
+  },
+  "steps": [
+    "Campaigns > New campaign",
+    "Name (private), audience: saved segment / tag / everyone who agreed",
+    "Pick an approved MARKETING template and fill variables (fixed text, customer name with fallback, tracked link)",
+    "Optional daily limit",
+    "Review cost then Send now or Schedule"
+  ],
+  "edgeCases": [
+    "No active number: 409 no_active_number",
+    "Plan lacks campaigns: 403 plan_feature",
+    "Template not approved: 409 template_not_approved",
+    "Empty audience: nobody can receive",
+    "Number quality drops to YELLOW/RED or WhatsApp restricts the account: campaigns auto-pause, no new templates until recovered; campaigns never restart by themselves",
+    "On the shared platform number: marketing templates are refused, templates come from the platform catalogue, wallet pays Meta",
+    "Content guard refusals",
+    "New-workspace cap"
+  ],
+  "gaps": [
+    "Approved marketing template list is empty for own-number merchants until a Templates screen exists"
+  ],
+  "assistantNote": "a draft sends nothing; deleting it is free"
+}

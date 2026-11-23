@@ -1,3 +1,10 @@
+---
+capabilities:
+  - numbers.meta-payment-method@1
+  - wallet.cost-estimate@1
+  - wallet.funding@2
+---
+
 # Meta fees, explained simply
 
 Meta charges for messages by **message type**, not by word count. Prices differ by the country you send to and change from time to time.
@@ -13,6 +20,8 @@ Meta charges for messages by **message type**, not by word count. Prices differ 
 |---|---|---|
 | **Your own number** | **Meta bills your own card directly** | We show Meta's cost for information, without deducting from the wallet |
 | **The shared number** | **The wallet**, at Meta's price | Every entry in the statement |
+
+**Your own number shows "not ready yet"?** That means nobody has said who pays Meta for it, so sending from it is not ready. The owner opens **Wallet > Who pays WhatsApp?**, presses **Let Meta bill my card** on that number and then **Yes, confirm**. From then on Meta charges the card on your Meta account, and the wallet does not pay for that number (make sure a card is added to your Meta account first). Only the card is offered to you: the shared number's line is the platform's and only our team changes it, and a number our team put on that line is changed by us too.
 
 Ebda AI Studio adds no margin to Meta's fees right now (**0%**). This may change, with notice first.
 
@@ -34,4 +43,4 @@ Ebda AI Studio adds no margin to Meta's fees right now (**0%**). This may change
 Current prices and the country list: see the WhatsApp Business pricing page on Meta's website.
 
 ---
-Last checked: 2026-10-25. Meta's prices and rules change; the official prices are the ones on Meta's website.
+Last checked: 2026-11-14. Meta's prices and rules change; the official prices are the ones on Meta's website.

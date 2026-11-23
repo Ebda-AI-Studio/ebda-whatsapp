@@ -1,0 +1,42 @@
+{
+  "id": "wallet.cost-estimate",
+  "status": "live",
+  "area": "billing",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تقدير تكلفة الرسايل",
+  "titleEn": "Estimate what messages will cost",
+  "screens": [],
+  "api": [
+    "GET /stores/:storeId/wallet/estimate?category=&count="
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/meta-fees-explained",
+  "questions": {
+    "ar": [
+      "الرسالة بكام؟",
+      "الحملة هتكلف كام؟",
+      "سعر رسالة التسويق"
+    ],
+    "en": [
+      "How much does a message cost?"
+    ]
+  },
+  "steps": [
+    "Campaign review shows an estimate; Meta price by country and category plus margin (currently 0%) and FX"
+  ],
+  "edgeCases": [
+    "Estimate only; delivered billable messages charged",
+    "Cost pending until wallet active"
+  ],
+  "gaps": []
+}

@@ -98,7 +98,7 @@ describe('I8 end to end', () => {
   });
   it('a KB question with a phone number: the embedder never receives it', async () => {
     const ws = '00000000-0000-4000-8000-0000000094ab';
-    const pn = await agentWorkspace(ws, { faqText: 'الشحن مجاني لأي طلب فوق 500 جنيه والتوصيل خلال يومين.' });
+    const pn = await agentWorkspace(ws, { faqText: `${'الشحن مجاني لأي طلب فوق 500 جنيه والتوصيل خلال يومين.'}\n\n${'ملحوظة داخلية للمتجر لا علاقة لها بالسؤال. '.repeat(90)}` /* over the 3 KB inline limit: this test is about the index */ });
     await workspace(ws).grantAiCredits({ periodStart: 1, packageId: 't', credits: 100 });
     await workspace(ws).runDueTasks();
     await until(async () => (await workspace(ws).getAgentSettings()).knowledgeReady);

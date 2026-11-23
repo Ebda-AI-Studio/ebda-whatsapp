@@ -1,0 +1,52 @@
+{
+  "id": "wallet.refund-request",
+  "status": "live",
+  "area": "billing",
+  "version": 2,
+  "versionDate": "2026-11-14",
+  "titleAr": "طلب استرداد رصيد المحفظة",
+  "titleEn": "Request a refund of the wallet balance",
+  "screens": [
+    "WalletScreen Request a refund",
+    "view:WalletScreen",
+    "/wallet"
+  ],
+  "api": [
+    "GET /stores/:storeId/wallet/refund-requests",
+    "POST /stores/:storeId/wallet/refund-requests"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/wallet-top-ups-and-refunds",
+  "questions": {
+    "ar": [
+      "عايز فلوسي ترجع",
+      "ازاي اطلب استرداد؟",
+      "الاسترداد اترفض ليه؟",
+      "a2dar asterged"
+    ],
+    "en": [
+      "How do I request a refund?",
+      "Why was it rejected?"
+    ]
+  },
+  "steps": [
+    "After the plan ends or is cancelled, within 12 months, 50 EGP minimum, up to available balance; add a note; the team reviews"
+  ],
+  "edgeCases": [
+    "Reasons: plan_still_active, period_not_ended, window_passed, below_minimum, exceeds_refundable",
+    "Not refundable: card fees, package AI credits, current period, used/old purchased credits",
+    "States: pending, rejected, processing, paid, manual payout, failed, abandoned",
+    "Help text \"subject to final terms\" (legal check pending)"
+  ],
+  "gaps": [
+    "Decision is operator-only (see operator.refund-decision); no SLA shown"
+  ]
+}

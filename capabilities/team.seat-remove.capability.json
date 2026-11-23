@@ -1,0 +1,45 @@
+{
+  "id": "team.seat-remove",
+  "status": "live",
+  "area": "team",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "سحب مقعد موظف",
+  "titleEn": "Remove a staff seat",
+  "screens": [
+    "TeamScreen Remove seat",
+    "view:TeamScreen",
+    "/team"
+  ],
+  "api": [
+    "DELETE /stores/:storeId/members/:userId/seat"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/team-members-and-seats",
+  "questions": {
+    "ar": [
+      "عايز اشيل صلاحية موظف",
+      "موظف سابنا",
+      "sheel el seat"
+    ],
+    "en": [
+      "How do I remove an employee's access?"
+    ]
+  },
+  "steps": [
+    "Team > Remove seat"
+  ],
+  "edgeCases": [
+    "Frees the seat immediately; staff stay on the store"
+  ],
+  "gaps": [],
+  "assistantNote": "removes someone's access at once; re-give the seat to undo"
+}

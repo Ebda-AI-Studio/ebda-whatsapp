@@ -1,0 +1,43 @@
+{
+  "id": "contacts.consent-proof",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إثبات موافقة العميل على الرسايل التسويقية",
+  "titleEn": "See proof of consent for a contact",
+  "screens": [
+    "ContactsScreen consent proof line",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "العميل موافق ولا لا؟",
+      "عندي إثبات إنه وافق؟",
+      "law 7ad se2el 3ala el consent"
+    ],
+    "en": [
+      "Do I have proof this customer agreed to marketing?"
+    ]
+  },
+  "steps": [
+    "Consent source: file import, customer reply on WhatsApp, link/checkout at the store, with date and wording"
+  ],
+  "edgeCases": [
+    "No consent on record = excluded from every campaign"
+  ],
+  "gaps": []
+}

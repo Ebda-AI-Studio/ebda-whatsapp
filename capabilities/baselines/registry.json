@@ -1,0 +1,30 @@
+{
+  "ids": [
+    "operator-reason|operator.audit-log",
+    "operator-reason|operator.change-log",
+    "operator-reason|operator.contact-export-erase",
+    "operator-reason|operator.instapay-review",
+    "operator-reason|operator.pricing-overrides",
+    "operator-reason|operator.subscription-set",
+    "operator-reason|operator.workspace-wallet",
+    "policy-free-writes|agent.provider-byok",
+    "policy-free-writes|inbox.mark-read",
+    "policy-free-writes|numbers.connect",
+    "policy-free-writes|numbers.display-name",
+    "policy-free-writes|numbers.history-contacts-sync",
+    "policy-free-writes|numbers.refresh",
+    "policy-free-writes|numbers.tier-limit",
+    "policy-free-writes|segments.preview",
+    "policy-irreversible|catalogue.resync",
+    "policy-irreversible|inbox.mark-read",
+    "policy-irreversible|inbox.notes",
+    "policy-irreversible|numbers.display-name",
+    "policy-irreversible|numbers.history-contacts-sync",
+    "policy-irreversible|numbers.refresh",
+    "policy-irreversible|numbers.removed-app-notice",
+    "policy-irreversible|numbers.tier-limit",
+    "policy-irreversible|segments.preview",
+    "policy-must-confirm|campaigns.create",
+    "policy-must-confirm|segments.manage"
+  ]
+}

@@ -11,4 +11,4 @@ Read the alert fields, then follow the steps under Fix.
 ## Verify it is resolved
 A new row, and no further `fx_rate_stale`.
 ## Related
-docs/billing.md#daily-fx-rate-wa-fx-daily-1, docs/plans/2026-11-12-daily-fx-rate.md
+docs/billing.md#daily-fx-rate-wa-fx-daily-1, docs/plans/done/2026-11-12-daily-fx-rate.md

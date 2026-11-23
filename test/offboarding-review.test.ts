@@ -6,7 +6,7 @@ import { configureSessionCheck } from '../src/core/identity/session';
 import { COOLING_OFF_MS, pseudonymFor, runDueOffboardings, runOffboarding } from '../src/core/ops/offboarding';
 import { OP1, OP2, adminToken, apiFor, operatorCall, storeId as W0, useApiKey } from './helpers/api';
 import { fund } from './helpers/billing';
-import { own, rows } from './helpers/workspace';
+import { own, rows, workspace } from './helpers/workspace';
 
 useApiKey();
 beforeEach(() => { configureSessionCheck(async () => false); });
@@ -199,6 +199,24 @@ describe('item 9: only the owner cancels through the store route', () => {
   });
 });
 
+describe('WA-DEBT-1: a debt survives the erasure', () => {
+  it('a workspace in debt is erased (data), the debt is preserved in the log and the kept ledger, a P1 fires, and nothing is written off', async () => {
+    const spy = vi.spyOn(console, 'error');
+    const ws = W(90);
+    await open(ws);
+    await workspace(ws).postWallet({ kind: 'meta_adjust', netMinor: -5000, ref: 'adj:off-debt', actor: 'meta', note: 'category change' });
+    await workspace(ws).drainLedger();
+    await op(ws, OP1, 'POST', '', { reason: REASON, immediate: true });
+    expect(await runOffboarding(env, ws, Date.now() + 1000)).toBe('done');
+    expect(await erased(ws)).toBe(true); // the data erasure itself is not blocked
+    expect(await d1<{ detail: string }>("SELECT detail FROM offboarding_log WHERE workspace_id = ? AND action = 'debt_preserved'", ws)).toEqual([{ detail: 'debt_minor=5000' }]);
+    expect(await d1("SELECT 1 FROM offboarding_log WHERE workspace_id = ? AND action = 'write_off_accepted'", ws)).toEqual([]);
+    expect((await state(ws)).write_off_minor).toBe(0);
+    expect(await d1<{ balance_after: number }>("SELECT balance_after FROM ledger_mirror WHERE workspace_id = ? AND ledger = 'wallet' ORDER BY at DESC LIMIT 1", ws)).toEqual([{ balance_after: -5000 }]);
+    expect(alertsOf(spy).filter((a) => a.alert === 'offboarding_debt_outstanding')).toHaveLength(1);
+  });
+});
+
 describe('item 11: a workspace suspended for abuse keeps its evidence', () => {
   it('holds with suspended_abuse (P1) until an operator releases it with a reason', async () => {
     const spy = vi.spyOn(console, 'error');
@@ -214,6 +232,14 @@ describe('item 11: a workspace suspended for abuse keeps its evidence', () => {
     expect((await op(ws, OP2, 'POST', '/release-hold', { reason: 'case 4411 closed, evidence exported' })).status).toBe(200);
     expect((await d1<{ action: string; actor: string }>("SELECT action, actor FROM offboarding_log WHERE workspace_id = ? AND action = 'abuse_hold_released'", ws))).toEqual([{ action: 'abuse_hold_released', actor: OP2 }]);
     expect(await runOffboarding(env, ws, Date.now() + 2000)).toBe('done');
+  });
+
+  it('a wallet_debt suspension (WA-DEBT-1) is a money block, not abuse evidence: it does not hold the deletion', async () => {
+    const ws = W(42);
+    await open(ws);
+    await env.DB.prepare("UPDATE workspaces SET suspended_at = 1, suspended_reason = 'wallet_debt' WHERE id = ?").bind(ws).run();
+    await op(ws, OP1, 'POST', '', { reason: REASON, immediate: true });
+    expect(await runOffboarding(env, ws, Date.now() + 1000)).toBe('done');
   });
 
   it('a suspension that the deletion itself made (reason offboarding) does not hold a resumed run', async () => {

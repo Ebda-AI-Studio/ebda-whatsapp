@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import type { TemplateDto } from '../../../src/core/api/contract';
+import type { SharedRequestDto, TemplateDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
 import { usableByStores, type SharedTemplatesApi } from '../data/shared-templates';
 import { num, type Lang, type Strings } from '../i18n';
@@ -14,6 +14,8 @@ const NAME = /^[a-z0-9_]{1,512}$/;
 /** Operator console, "Shared number templates": the platform WABA's catalog. Stores cannot see or change it. */
 export function SharedTemplatesPanel({ t, lang, api, run, fail }: Props) {
   const [items, setItems] = useState<TemplateDto[] | null>(null);
+  const [asks, setAsks] = useState<(SharedRequestDto & { workspaceId: string })[]>([]);
+  const [asksFailed, setAsksFailed] = useState(false); // a failed read of the asks is unknown, never "no asks"
   const [state, setState] = useState<'ok' | 'unavailable' | 'error'>('ok');
   const [form, setForm] = useState({ name: '', language: 'ar', category: 'UTILITY', body: '' });
 
@@ -21,6 +23,7 @@ export function SharedTemplatesPanel({ t, lang, api, run, fail }: Props) {
     try {
       setItems(await api.list());
       setState('ok');
+      if (api.requests) { setAsksFailed(false); try { setAsks(await api.requests()); } catch { setAsksFailed(true); } }
     } catch (e) {
       setState(e instanceof ApiError && e.status === 404 ? 'unavailable' : 'error');
     }
@@ -62,6 +65,22 @@ export function SharedTemplatesPanel({ t, lang, api, run, fail }: Props) {
           </table>
         )}
       </section>
+      {api.requests && (
+        <section className="wallet-card" aria-labelledby="op-shared-asks">
+          <h2 id="op-shared-asks">{t.opSharedRequestsTitle}</h2>
+          <p className="muted">{t.opSharedReqHelp}</p>
+          {asksFailed ? <p className="error-text" role="alert">{t.opLoadError} <button type="button" className="btn ghost" onClick={() => void reload()}>{t.retry}</button></p> : asks.length === 0 ? <p className="muted">{t.opSharedRequestsEmpty}</p> : (
+            <table className="op-table">
+              <thead><tr><th scope="col">{t.opSharedReqStore}</th><th scope="col">{t.opSharedName}</th><th scope="col">{t.opSharedCategory}</th><th scope="col">{t.opSharedStatus}</th><th scope="col">{t.opSharedReqText}</th></tr></thead>
+              <tbody>
+                {asks.map((a) => (
+                  <tr key={a.id}><td dir="ltr">{a.workspaceId}</td><td dir="ltr">{a.name}</td><td>{a.category}</td><td>{t.tplSharedStatuses[a.status] ?? a.status}</td><td dir="auto">{a.body}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
       <section className="wallet-card" aria-labelledby="op-shared-submit">
         <h2 id="op-shared-submit">{t.opSharedSubmitTitle}</h2>
         <p className="muted">{t.opSharedNoMarketing}</p>

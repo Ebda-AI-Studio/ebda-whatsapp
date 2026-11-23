@@ -1,0 +1,45 @@
+{
+  "status": "live",
+  "area": "templates",
+  "versionDate": "2026-11-14",
+  "mcpTool": null,
+  "id": "templates.shared-number-marketing",
+  "version": 1,
+  "titleAr": "ليه الرسائل التسويقية محتاجة رقمك الخاص",
+  "titleEn": "Why marketing needs your own number (shared-number stores)",
+  "screens": [
+    "view:templates",
+    "/templates",
+    "view:CampaignForm",
+    "/campaigns"
+  ],
+  "api": [],
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/templates-and-the-24-hour-window",
+  "questions": {
+    "ar": [
+      "ليه مينفعش اعمل حملة على الرقم المشترك؟",
+      "ليه مفيش قوالب تسويق عندي؟",
+      "عايز ابعت عروض"
+    ],
+    "en": [
+      "Why can I not send marketing on the shared number?"
+    ]
+  },
+  "steps": [
+    "The Templates screen and the New campaign screen of a shared-number store explain that marketing messages and campaigns need its own number, with a button to connect one (rule WA-SHARED-NOCAMP-1); the campaign form is replaced by the notice, so there is no submit"
+  ],
+  "edgeCases": [
+    "Marketing is never sendable from the shared number, whatever a store's own copy of a template says"
+  ],
+  "gaps": [],
+  "assistantNote": "explanation only: point the merchant to connecting their own number"
+}

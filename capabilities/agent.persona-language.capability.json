@@ -1,0 +1,45 @@
+{
+  "id": "agent.persona-language",
+  "status": "live",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "أسلوب الرد واللغة",
+  "titleEn": "Reply style and language",
+  "screens": [
+    "AgentScreen",
+    "view:AgentScreen",
+    "/agent"
+  ],
+  "api": [
+    "PUT /stores/:storeId/agent {persona,language}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "عايز المساعد يتكلم باللهجة المصرية",
+      "ازاي اخليه رسمي؟",
+      "يرد بالإنجليزي؟",
+      "khalli el AI yetkallem masry"
+    ],
+    "en": [
+      "How do I make the agent formal or English?"
+    ]
+  },
+  "steps": [
+    "Reply style up to 1000 chars; language Arabic / English / same as customer"
+  ],
+  "edgeCases": [
+    "Franco-Arabic counts as Arabic (pr 79)"
+  ],
+  "gaps": []
+}

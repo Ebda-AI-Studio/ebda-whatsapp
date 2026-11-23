@@ -1,0 +1,48 @@
+{
+  "id": "numbers.overview",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "شاشة رقم الواتساب وقايمة البدء",
+  "titleEn": "WhatsApp number screen and getting-started checklist",
+  "screens": [
+    "NumbersScreen (checklist: number, template, store link, agent)",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [
+    "GET /stores/:storeId/numbers"
+  ],
+  "mcpTool": null,
+  "planGate": "EMBEDDED_SIGNUP_ENABLED (404 when off)",
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "ابدأ منين؟",
+      "إيه الخطوات عشان اشتغل؟",
+      "رقمي ظاهر ولا لا؟",
+      "ebda mnein"
+    ],
+    "en": [
+      "Where do I start?",
+      "What are the setup steps?"
+    ]
+  },
+  "steps": [
+    "Open WhatsApp number",
+    "Checklist: connect number, one approved template, link store, optional AI agent"
+  ],
+  "edgeCases": [
+    "Whole Numbers API answers 404 until signup is enabled on the server"
+  ],
+  "gaps": []
+}

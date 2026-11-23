@@ -1,0 +1,45 @@
+{
+  "id": "numbers.refresh",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تحديث حالة الرقم",
+  "titleEn": "Refresh a number's status",
+  "screens": [
+    "NumbersScreen Refresh status",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [
+    "POST /stores/:storeId/numbers/:phoneNumberId/refresh"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "الرقم بيظهر Disconnected",
+      "حدث حالة الرقم",
+      "refresh el ra2am"
+    ],
+    "en": [
+      "The number shows Disconnected, what now?"
+    ]
+  },
+  "steps": [
+    "Press Refresh status"
+  ],
+  "edgeCases": [
+    "Meta unreachable or rate-limited: 503 rate_limited, retry shortly; nothing is lost"
+  ],
+  "gaps": []
+}

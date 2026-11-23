@@ -1,0 +1,48 @@
+{
+  "id": "campaigns.tracked-links",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "لينكات متتبعة في الحملة",
+  "titleEn": "Tracked links in campaigns",
+  "screens": [
+    "CampaignForm (Tracked link variable)",
+    "view:CampaignForm",
+    "/campaigns"
+  ],
+  "api": [
+    "GET /t/:code (public redirect)"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "ازاي اعرف مين فتح اللينك؟",
+      "اللينك لازم يبقى https ليه؟",
+      "ينفع استخدم bit.ly؟"
+    ],
+    "en": [
+      "How do I see who opened my link?",
+      "Can I use bit.ly?"
+    ]
+  },
+  "steps": [
+    "Choose Tracked link for a variable; each customer gets their own link to your https page"
+  ],
+  "edgeCases": [
+    "Shorteners (bit.ly, tinyurl, t.co ...), IP hosts, punycode/look-alike hosts and http links are refused by the content guard",
+    "Referrer is not sent",
+    "WhatsApp link previews are not counted"
+  ],
+  "gaps": []
+}

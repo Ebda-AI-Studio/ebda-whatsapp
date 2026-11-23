@@ -1,0 +1,43 @@
+name: capability ratchet
+
+# Capability baselines (capabilities/baselines/*.json) may only shrink. The judge runs from the BASE branch checkout, so a PR cannot edit it
+# (foundation Ruling PRQ-3). The adoption PR has no judge on the base yet: nothing to compare.
+on:
+  pull_request:
+
+concurrency:
+  group: capability-ratchet-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  capability-ratchet:
+    name: Capability baselines
+    runs-on: ${{ fromJSON(vars.EBDA_LIGHT_RUNS_ON || vars.EBDA_RUNS_ON || '["ebda-mac-light"]') }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Capability baselines may only shrink (judged against the base branch)
+        run: |
+          if [ -f base/.github/pr-quality/capability-ratchet.mjs ]; then
+            node base/.github/pr-quality/capability-ratchet.mjs --base base --pr pr
+          else
+            echo "::notice::capability-ratchet.mjs is not on the base branch yet (adoption PR): nothing to compare"
+          fi
+      - name: Remove the checkouts (a shared runner keeps its workspace between jobs)
+        if: always()
+        run: rm -rf "$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/base"

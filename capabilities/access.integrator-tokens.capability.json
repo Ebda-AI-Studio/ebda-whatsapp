@@ -1,0 +1,57 @@
+{
+  "id": "access.integrator-tokens",
+  "status": "live",
+  "area": "access",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "ربط سيرفرك بالـ API بتوكن مخصص",
+  "titleEn": "Call the API from your own server (integration tokens, scopes)",
+  "screens": [
+    "IntegrationsScreen API access panel",
+    "view:IntegrationsScreen",
+    "/integrations"
+  ],
+  "api": [
+    "all GET routes scoped via ROUTE_SCOPES",
+    "POST /stores/:storeId/conversations/:id/messages (messages:send)",
+    "PUT .../contacts/:waId/tags (contacts:write)",
+    "GET .../events (polling)"
+  ],
+  "mcpTool": null,
+  "planGate": "feat_api (the Chat 5,000 AI replies package and its yearly twin)",
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/connect-your-systems",
+  "questions": {
+    "ar": [
+      "عايز اربط السيستم بتاعي بالواتساب",
+      "فين الـ API key؟",
+      "ينفع اعمل توكن لسيرفري؟",
+      "api token fein?"
+    ],
+    "en": [
+      "Can I connect my own server to Ebda Chat?",
+      "Where do I get an API token?"
+    ]
+  },
+  "steps": [
+    "Package must include API (Chat 5,000 AI replies)",
+    "Connect systems > Call the API from your server explains the scopes and opens the account settings",
+    "The API client (token issuer) is created, rotated and revoked by the store owner in the account settings; the account service is the only mint (identity contract v1.3, ID-12)",
+    "Poll /events with `after`; no websocket for tokens"
+  ],
+  "edgeCases": [
+    "Unlisted route = 403 (default deny)",
+    "Revoked integration (kill switch) = 403",
+    "Rate limits per API route class"
+  ],
+  "gaps": [
+    "Create/revoke is not built in Chat on purpose: Ebda Chat stores and shows no token (the account service mints and revokes; Chat only verifies). Chat shows the scopes and links to the account settings"
+  ],
+  "assistantNote": "Assistant may explain and deep-link to the account settings; issuing or revoking a token is a confirm action in the account service, never exposed from Chat"
+}

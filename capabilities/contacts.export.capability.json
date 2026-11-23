@@ -1,0 +1,47 @@
+{
+  "id": "contacts.export",
+  "status": "live",
+  "area": "contacts",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "تحميل بيانات عميل واحد",
+  "titleEn": "Download one customer's data",
+  "screens": [
+    "ContactsScreen",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
+  "api": [
+    "GET /stores/:storeId/contacts/:waId/export?limit=&after="
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/your-customers-data",
+  "questions": {
+    "ar": [
+      "عميل طلب يعرف إنتو عندكم إيه عنه",
+      "ازاي احمل كل رسايل العميل؟",
+      "عايز نسخة من بيانات عميل"
+    ],
+    "en": [
+      "A customer asked what data we hold, how do I export it?"
+    ]
+  },
+  "steps": [
+    "Pick the customer",
+    "Download the customer's data (JSON incl. messages, notes, tags, orders)",
+    "Download is audited"
+  ],
+  "edgeCases": [
+    "Paged 500 messages at a time",
+    "Session re-checked like a write"
+  ],
+  "gaps": []
+}

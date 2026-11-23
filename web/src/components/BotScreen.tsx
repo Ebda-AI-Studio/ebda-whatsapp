@@ -5,7 +5,10 @@ import type { BotFunnelDto, BotSettingsDto, CatalogStatusDto } from '../../../sr
 import { hoursSchema, locationSchema, MENU_ANSWER_MAX, MENU_MAX_ITEMS, MENU_TITLE_MAX, menuSchema, HOURS_AWAY_MAX } from '../../../src/core/store-link/bot-settings';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { dateTime } from '../lib/datetime';
+import { BotSwitches } from './BotSwitches';
 import { LoadError } from './LoadError';
+import { Skeleton } from './Skeleton';
 
 type Menu = BotSettingsDto['menu'];
 type Hours = BotSettingsDto['hours'];
@@ -32,6 +35,7 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState(false);
   const [resynced, setResynced] = useState(false);
+  const [linkId, setLinkId] = useState('');
   const load = useCallback(() => { setCat(undefined); void api.status().then(setCat, () => setCat('error')); }, [api]);
   useEffect(load, [load]);
 
@@ -46,6 +50,24 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
       const detail = (e as { detail?: string }).detail;
       if (detail === 'catalog_already_set') load();
       else setError(detail === 'missing_permission' ? t.catErrPermission : detail === 'no_business' || detail === 'business_mismatch' ? t.catErrReconnect : detail === 'meta_error' ? t.catErrMeta : t.catErrGeneric);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const linkIdOk = /^\d{5,25}$/.test(linkId.trim());
+  const link = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.linkExisting(linkId.trim());
+      setLinkId('');
+      load();
+      setCreated(false);
+      setResynced(false);
+    } catch (e) {
+      const detail = (e as { detail?: string }).detail;
+      setError(detail === 'catalog_not_linked' ? t.catLinkNotYours : detail === 'meta_unavailable' ? t.catErrMeta : t.catErrGeneric);
     } finally {
       setBusy(false);
     }
@@ -78,11 +100,11 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
     }
   };
 
-  const when = (ms: number) => new Date(ms).toLocaleString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
+  const when = (ms: number) => dateTime(ms, lang);
   return (
     <section className="settings" aria-labelledby="bot-catalog-title">
       <h2 id="bot-catalog-title">{t.catTitle}</h2>
-      {cat === undefined && <p className="muted">…</p>}
+      {cat === undefined && <Skeleton t={t} rows={2} kind="setting" />}
       {cat === 'error' && <LoadError t={t} onRetry={load} />}
       {cat && cat !== 'error' && (cat.catalogId
         ? (
@@ -120,7 +142,19 @@ function CatalogSection({ t, lang, source, readOnly }: { t: Strings; lang: Lang;
             <p className="muted">{t.catNone}</p>
             {readOnly
               ? <p className="notice" role="note">{t.catOwnerOnly}</p>
-              : <div className="settings-actions"><button type="button" className="btn primary" disabled={busy} onClick={() => void create()}>{t.catCreate}</button></div>}
+              : (
+                <>
+                  <div className="settings-actions"><button type="button" className="btn primary" disabled={busy} onClick={() => void create()}>{t.catCreate}</button></div>
+                  <h3>{t.catLinkTitle}</h3>
+                  <label className="field">
+                    <span>{t.catLinkLabel}</span>
+                    <input dir="ltr" inputMode="numeric" value={linkId} aria-describedby="cat-link-hint" aria-invalid={linkId !== '' && !linkIdOk} onChange={(e) => setLinkId(e.target.value)} />
+                  </label>
+                  <small id="cat-link-hint" className="muted">{t.catLinkHint}</small>
+                  {linkId !== '' && !linkIdOk && <small className="error-text">{t.catLinkBad}</small>}
+                  <div className="settings-actions"><button type="button" className="btn" disabled={busy || !linkIdOk} onClick={() => void link()}>{t.catLinkBtn}</button></div>
+                </>
+              )}
           </>
         ))}
       {busy && <p role="status" className="muted">{t.catCreating}</p>}
@@ -157,7 +191,7 @@ function FunnelSection({ t, lang, source }: { t: Strings; lang: Lang; source: In
       <div role="group" aria-label={t.fnRange} className="settings-actions">
         {RANGES.map((d) => <button key={d} type="button" className={d === days ? 'btn primary' : 'btn'} aria-pressed={d === days} onClick={() => setDays(d)}>{t.fnDays(num(d, lang))}</button>)}
       </div>
-      {data === undefined && <p role="status" aria-label={t.fnLoading} className="muted">…</p>}
+      {data === undefined && <Skeleton t={t} rows={4} kind="funnel" label={t.fnLoading} />}
       {data === 'error' && <LoadError t={t} onRetry={load} />}
       {empty && <p className="muted">{t.fnEmpty}</p>}
       {data && data !== 'error' && !empty && (
@@ -200,7 +234,7 @@ export function BotScreen({ t, lang, source }: { t: Strings; lang: Lang; source:
   }, [source]);
   useEffect(load, [load]);
 
-  if (draft === undefined) return <main className="screen"><div className="placeholder">…</div></main>;
+  if (draft === undefined) return <Skeleton t={t} screen kind="setting" rows={4} />;
   if (draft === 'error') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
 
   const change = (next: Draft) => { setDraft(next); setStatus('idle'); };
@@ -262,6 +296,7 @@ export function BotScreen({ t, lang, source }: { t: Strings; lang: Lang; source:
         <h1 id="bot-title">{t.botTitle}</h1>
         {guide && <a className="muted" href={guide} target="_blank" rel="noopener">{t.botGuide}</a>}
       </header>
+      {source.switches && <BotSwitches t={t} lang={lang} source={source} readOnly={readOnly} />}
       {source.botFunnel && <FunnelSection t={t} lang={lang} source={source} />}
       {source.catalog && <CatalogSection t={t} lang={lang} source={source} readOnly={readOnly} />}
       <form className="settings" onSubmit={(e) => { e.preventDefault(); void save(); }}>

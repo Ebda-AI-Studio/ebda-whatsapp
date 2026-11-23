@@ -6,11 +6,13 @@ import { ApiError } from '../data/api';
 import type { InstapayCreated, InstapayRequest, InstapayView, PackageDto, RefundRequest, DigestDto, TopupDto, WalletApi, WalletDto, OffboardingView } from '../data/billing';
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
-import { formatMoney, formatSigned } from '../lib/format';
+import { formatMoney, formatSigned, packageLabel } from '../lib/format';
 import { useFocusOn } from '../lib/useFocusOn';
 import { useLoad } from '../lib/useLoad';
 import { dateTime } from './CampaignsScreen';
 import { LoadError } from './LoadError';
+import { Skeleton } from './Skeleton';
+import { CreditPacksCard, NumberFundingAction, YearlyRefundCard } from './MoneySurfaces';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: WalletApi; now: () => number; go?: (url: string) => void };
 
@@ -95,7 +97,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
     return () => { clearInterval(id); window.removeEventListener('focus', on); document.removeEventListener('visibilitychange', on); };
   }, [pending, check]);
 
-  if (wallet === null) return <main className="screen"><div className="placeholder">…</div></main>;
+  if (wallet === null) return <Skeleton t={t} screen kind="wallet" rows={2} />;
   if (wallet === 'error') return <main className="screen"><div className="placeholder"><p role="alert">{t.walletLoadError} <button type="button" className="btn ghost" onClick={() => void check()}>{t.retry}</button></p></div></main>;
 
   const cardOnly = wallet.funding.length > 0 && wallet.funding.every((f) => f.funding === 'merchant_card');
@@ -119,7 +121,11 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
             <div><dt>{t.wHeld}</dt><dd>{money(wallet.heldMinor)}</dd></div>
             <div><dt>{t.wAiCredits}</dt><dd>{num(wallet.aiCredits.available, lang)}</dd></div>
           </dl>
-          {wallet.aiCredits.low && <p className="wallet-debt" role="status">{t.wAiCreditsLow(num(wallet.aiCredits.available, lang), num(wallet.aiCredits.lowThreshold, lang))}</p>}
+          {wallet.aiCredits.low && (
+            <p className="wallet-debt" role="status">{t.wAiCreditsLow(num(wallet.aiCredits.available, lang), num(wallet.aiCredits.lowThreshold, lang))}
+              {owner && <> <a href="#w-credits" onClick={(e) => { e.preventDefault(); const h = document.getElementById('w-credits-title'); h?.scrollIntoView?.({ block: 'start' }); h?.focus(); }}>{t.wCrBuyLink}</a></>}
+            </p>
+          )}
           <p className="muted">{t.wAiCreditDefinition}</p>
           {wallet.debtMinor > 0 && <p className="wallet-debt">{t.wDebtLine(money(wallet.debtMinor))}</p>}
           {paused && <p className="wallet-debt">{t.wMarketingPaused}</p>}
@@ -136,6 +142,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
                     <b><bdi dir="ltr">{f.displayPhone ?? f.phoneNumberId}</bdi></b>
                     <span className="flag" data-ok={f.funding === 'merchant_card'}>{f.funding === 'merchant_card' ? t.opFundingCard : f.funding === 'unknown' ? t.opFundingUnknown : t.opFundingWallet}</span>
                     <p className="muted">{f.funding === 'merchant_card' ? t.wFundingCard : f.funding === 'unknown' ? t.wFundingUnknown : t.wFundingWallet}</p>
+                    {owner && f.funding === 'unknown' && <NumberFundingAction t={t} api={api} phoneNumberId={f.phoneNumberId} onDone={() => void api.wallet().then(setWallet, () => undefined)} />}
                   </li>
                 ))}
               </ul>
@@ -146,7 +153,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
             <h2 id="w-plan-title">{t.wPlanTitle}</h2>
             {wallet.plan === null ? <p className="muted">{t.wPlanNone}</p> : (
               <>
-                <p><b><bdi dir="ltr">{wallet.plan.packageId}</bdi></b> <span className="status-chip" data-status={wallet.plan.status === 'active' ? 'running' : wallet.plan.status === 'trialing' ? 'scheduled' : wallet.plan.status === 'past_due' ? 'paused' : 'cancelled'}>{t.planStatus[wallet.plan.status]}</span></p>
+                <p><b>{wallet.plan.storePlan ? t.wPlanStore(lang === 'ar' ? wallet.plan.storePlan.nameAr : wallet.plan.storePlan.nameEn) : (lang === 'ar' ? wallet.plan.packageNameAr : wallet.plan.packageName) ?? wallet.plan.packageId}</b> <span className="status-chip" data-status={wallet.plan.status === 'active' ? 'running' : wallet.plan.status === 'trialing' ? 'scheduled' : wallet.plan.status === 'past_due' ? 'paused' : 'cancelled'}>{t.planStatus[wallet.plan.status]}</span></p>
                 <p className="muted">{t.wPlanEnds(dateTime(wallet.plan.periodEnd, lang))}</p>
                 {wallet.plan.status === 'past_due' && <p className="campaign-reason">{t.wPlanPastDue}</p>}
               </>
@@ -158,6 +165,8 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
           <TopupCard t={t} lang={lang} api={api} wallet={wallet} pending={pending} note={topupNote} go={go} now={now}
             onStarted={(p) => { writePending(p); setPending(p); setTopupNote('waiting'); }} cardOnly={cardOnly} />
         )}
+        {owner && <CreditPacksCard t={t} lang={lang} api={api} now={now} go={go} onCredited={() => void api.wallet().then(setWallet, () => undefined)} />}
+        {owner && <YearlyRefundCard t={t} lang={lang} api={api} />}
         {owner && wallet.cardCheckout !== false && <PackagesCard t={t} lang={lang} api={api} go={go} now={now} onActivated={() => void api.wallet().then(setWallet, () => undefined)} />}
         {owner && <InstapayCard t={t} lang={lang} api={api} />}
         <DigestCard t={t} lang={lang} api={api} owner={owner} />
@@ -308,13 +317,13 @@ function PackagesCard({ t, lang, api, go, now, onActivated }: { t: Strings; lang
       <h2 id="w-packages-title">{t.wPackagesTitle}</h2>
       <p className="muted">{t.wPackagesIntro}</p>
       <p className="muted">{t.wYearlyUpgradeNote}</p>
-      {list === 'loading' ? <p className="muted">…</p>
+      {list === 'loading' ? <Skeleton t={t} rows={2} kind="package" />
         : list === 'error' ? <p role="alert" className="error-text">{t.wPackagesError} <button type="button" className="btn ghost" onClick={load}>{t.retry}</button></p>
         : list.length === 0 ? <p className="muted">{t.wPackagesEmpty}</p> : (
           <ul className="wallet-list">
             {list.map((p) => (
               <li key={p.id}>
-                <b dir="auto">{p.name}</b> <span>{money(p.priceMinor)}</span>
+                <b dir="auto">{packageLabel(p, lang)}</b> <span>{money(p.priceMinor)}</span>
                 <p className="muted">{t.wPackageCredits(num(p.aiCredits, lang))}</p>
                 <p className="muted">{t.wPackageMembers(num(p.maxMembers, lang))}</p>
                 {p.periodMonths > 1 && <p className="muted">{t.wPackageYearly(num(p.periodMonths, lang))}</p>}
@@ -377,7 +386,7 @@ function StatementCard({ t, lang, api, now }: { t: Strings; lang: Lang; api: Wal
         <button type="button" className="btn" onClick={() => void download()}><Download size={16} aria-hidden />{t.wCsv}</button>
       </div>
       {csvError && <p role="alert" className="error-text">{t.wCsvError}</p>}
-      {st === null ? <p className="muted">…</p> : st === 'error' ? <p role="alert" className="error-text">{t.wStatementError}</p> : (
+      {st === null ? <Skeleton t={t} rows={2} /> : st === 'error' ? <p role="alert" className="error-text">{t.wStatementError}</p> : (
         <>
           <dl className="wallet-figures">
             <div><dt>{t.wOpening}</dt><dd>{money(st.openingMinor)}</dd></div>
@@ -461,7 +470,7 @@ function RefundCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi }
       {msg && <p ref={msgRef} tabIndex={-1} role={msg.kind} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
       <h3 className="pane-sub">{t.wRefundPast}</h3>
       {loadFailed ? <LoadError t={t} onRetry={reload} />
-        : items === null ? <p className="muted">…</p> : items.length === 0 ? <p className="muted">{t.wRefundEmpty}</p> : (
+        : items === null ? <Skeleton t={t} rows={2} /> : items.length === 0 ? <p className="muted">{t.wRefundEmpty}</p> : (
         <ul className="wallet-rows" aria-label={t.wRefundPast}>
           {items.map((r) => (
             <li key={r.id}>
@@ -543,7 +552,7 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
           </div>
           {kind === 'package' ? (
             <label className="field"><span>{t.wIpPickPackage}</span>
-              <select value={packageId} onChange={(e) => setPackageId(e.target.value)}>{packages.map((p) => <option key={p.id} value={p.id}>{p.name} • {money(p.priceMinor)}</option>)}</select>
+              <select value={packageId} onChange={(e) => setPackageId(e.target.value)}>{packages.map((p) => <option key={p.id} value={p.id}>{packageLabel(p, lang)} • {money(p.priceMinor)}</option>)}</select>
             </label>
           ) : (
             <label className="field"><span>{t.wIpAmount}</span><input inputMode="decimal" dir="ltr" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
@@ -565,6 +574,15 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
         </>
       )}
       {msg && <p role={msg.kind === 'alert' ? 'alert' : 'status'} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
+      {view.revert && Date.now() < view.revert.graceUntil && (
+        <div role="alert" className="error-text" data-testid="ip-revert-banner">
+          <p>{t.wIpAuto.revertBanner(dateTime(view.revert.graceUntil, lang))}</p>
+          <div className="campaign-actions">
+            <button type="button" className="btn primary" onClick={() => setKind(view.revert!.kind)}>{t.wIpAuto.upload}</button>
+            <a className="btn" href="#w-topup-title">{t.wIpAuto.card}</a>
+          </div>
+        </div>
+      )}
       <h3 className="pane-sub">{t.wIpPast}</h3>
       {view.items.length === 0 ? <p className="muted">{t.wIpNone}</p> : (
         <ul className="wallet-rows" aria-label={t.wIpPast}>
@@ -573,6 +591,9 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
               <span className="wallet-row-main">
                 <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(r.amountMinor)}</bdi></b> <span className="status-chip" data-status={r.state === 'confirmed' ? 'done' : r.state === 'rejected' || r.state === 'expired' ? 'failed' : 'pending'}>{t.instapayStates[r.state] ?? r.state}</span>
                 <span className="muted op-line"><bdi dir="ltr">{r.reference}</bdi> • {dateTime(r.createdAt, lang)}</span>
+                {r.checking && <span className="muted op-line">{t.wIpAuto.checking}</span>}
+                {r.autoConfirmed && !r.revertedAt && <span className="muted op-line">{t.wIpAuto.done}</span>}
+                {r.state === 'under_review' && !r.checking && <span className="muted op-line">{t.wIpAuto.waiting}</span>}
                 {r.state === 'rejected' && r.rejectReason && <span className="op-line" dir="auto">{t.wIpRejectedLine(r.rejectReason)}</span>}
               </span>
               {r.state === 'awaiting_proof' && Date.now() < r.expiresAt && <button type="button" className="btn" onClick={() => setCreated({ ...r, payee: view.payee! })}>{t.wIpOpen}</button>}

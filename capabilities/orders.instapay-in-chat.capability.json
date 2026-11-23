@@ -1,0 +1,42 @@
+{
+  "id": "orders.instapay-in-chat",
+  "status": "live",
+  "area": "orders",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "طلب بانستاباي داخل الشات",
+  "titleEn": "InstaPay order inside WhatsApp (customer receipt)",
+  "screens": [],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/instapay-orders-in-whatsapp",
+  "questions": {
+    "ar": [
+      "العميل دفع انستاباي ومحتاج اتأكد",
+      "الأوردر لسه مستني الدفع",
+      "instapay order msh etaked"
+    ],
+    "en": [
+      "The customer paid by InstaPay and the order is still pending"
+    ]
+  },
+  "steps": [
+    "Customer gets IPA, amount, reference; sends receipt photo within 48h; forwarded once; the merchant confirms in Ebda Store"
+  ],
+  "edgeCases": [
+    "Never auto-confirmed from the picture",
+    "Second photo not forwarded",
+    "24-hour window closed: free text blocked (Meta 131047), only an approved template can be sent",
+    "Out-of-stock item named and removed"
+  ],
+  "gaps": []
+}

@@ -1,0 +1,51 @@
+{
+  "id": "numbers.health",
+  "status": "live",
+  "area": "numbers",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "جودة الرقم وتحذيرات واتساب",
+  "titleEn": "Number health and quality warnings",
+  "screens": [
+    "NumbersScreen quality badge + numberHealthHelp",
+    "view:NumbersScreen",
+    "/numbers"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "رقمي اتحظر؟",
+      "جودة الرقم نزلت ليه؟",
+      "إيه معنى Quality medium؟",
+      "el ra2am etma3 3alamet 7amra"
+    ],
+    "en": [
+      "Was my number banned?",
+      "Why did number quality drop?"
+    ]
+  },
+  "steps": [
+    "Badge: Healthy, Quality dropped (yellow), poor (red), Restricted",
+    "Yellow: campaigns auto-paused; red: no new templates; recover by sending fewer, wanted messages"
+  ],
+  "edgeCases": [
+    "Number quality drops to YELLOW/RED or WhatsApp restricts the account: campaigns auto-pause, no new templates until recovered; campaigns never restart by themselves",
+    "Number flagged/banned/restricted by WhatsApp: Numbers shows a badge + explanation; Meta (not Ebda) decides the appeal",
+    "Campaigns never restart automatically; resume manually",
+    "Older health signals retried later are dropped (ordered by Meta time)"
+  ],
+  "gaps": [
+    "No guided recovery checklist; no appeal flow (Meta-side)"
+  ]
+}

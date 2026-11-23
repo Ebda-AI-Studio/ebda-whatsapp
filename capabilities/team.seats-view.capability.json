@@ -1,0 +1,45 @@
+{
+  "id": "team.seats-view",
+  "status": "live",
+  "area": "team",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "الفريق والمقاعد",
+  "titleEn": "See the team and seats",
+  "screens": [
+    "TeamScreen",
+    "view:TeamScreen",
+    "/team"
+  ],
+  "api": [
+    "GET /stores/:storeId/members"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/team-members-and-seats",
+  "questions": {
+    "ar": [
+      "مين معاه صلاحية؟",
+      "كام مقعد فاضل؟",
+      "el team feen"
+    ],
+    "en": [
+      "Who has access?",
+      "How many seats are left?"
+    ]
+  },
+  "steps": [
+    "Team page: \"N of M seats\" counting the owner; names only"
+  ],
+  "edgeCases": [
+    "Team list unreachable: page says so and changes nothing"
+  ],
+  "gaps": []
+}

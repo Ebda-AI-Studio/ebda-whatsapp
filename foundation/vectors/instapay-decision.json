@@ -1,0 +1,492 @@
+{
+  "base": {
+    "extract": {
+      "amountMinor": 120000,
+      "recipientHandle": "ebda@instapay",
+      "transferredAt": 1781089200000,
+      "reference": "123456789012"
+    },
+    "expected": {
+      "amountMinor": 120000,
+      "payeeHandle": "ebda@instapay"
+    },
+    "now": 1781092800000,
+    "mode": "live",
+    "storeEnabled": true,
+    "isFirstPayment": false,
+    "firstPaymentCapMinor": 120000,
+    "dualControlThresholdMinor": null,
+    "duplicate": "none",
+    "flags": {
+      "looksEdited": false,
+      "suspiciousText": false,
+      "confidence": 0.95
+    }
+  },
+  "cases": [
+    {
+      "name": "full match",
+      "patch": {},
+      "verdict": "auto_confirm",
+      "reasons": []
+    },
+    {
+      "name": "amount +1 piastre",
+      "patch": {
+        "extract": {
+          "amountMinor": 120001
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "AMOUNT_MISMATCH"
+      ]
+    },
+    {
+      "name": "amount -1 piastre",
+      "patch": {
+        "extract": {
+          "amountMinor": 119999
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "AMOUNT_MISMATCH"
+      ]
+    },
+    {
+      "name": "wrong handle",
+      "patch": {
+        "extract": {
+          "recipientHandle": "someone@instapay"
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "WRONG_HANDLE"
+      ]
+    },
+    {
+      "name": "masked handle",
+      "patch": {
+        "extract": {
+          "recipientHandle": "eb**@instapay"
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "WRONG_HANDLE"
+      ]
+    },
+    {
+      "name": "handle with at sign and uppercase equals payee",
+      "patch": {
+        "extract": {
+          "recipientHandle": "@EBDA@InstaPay"
+        }
+      },
+      "verdict": "auto_confirm",
+      "reasons": []
+    },
+    {
+      "name": "transfer exactly 48 h old",
+      "patch": {
+        "extract": {
+          "transferredAt": 1780920000000
+        }
+      },
+      "verdict": "auto_confirm",
+      "reasons": []
+    },
+    {
+      "name": "48 h + 1 s",
+      "patch": {
+        "extract": {
+          "transferredAt": 1780919999000
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "DATE_STALE"
+      ]
+    },
+    {
+      "name": "now + 10 min passes",
+      "patch": {
+        "extract": {
+          "transferredAt": 1781093400000
+        }
+      },
+      "verdict": "auto_confirm",
+      "reasons": []
+    },
+    {
+      "name": "now + 11 min",
+      "patch": {
+        "extract": {
+          "transferredAt": 1781093460000
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "DATE_FUTURE"
+      ]
+    },
+    {
+      "name": "duplicate reference",
+      "patch": {
+        "duplicate": "reference"
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "DUPLICATE_REFERENCE"
+      ]
+    },
+    {
+      "name": "duplicate image",
+      "patch": {
+        "duplicate": "image"
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "DUPLICATE_IMAGE"
+      ]
+    },
+    {
+      "name": "duplicate both",
+      "patch": {
+        "duplicate": "both"
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "DUPLICATE_REFERENCE",
+        "DUPLICATE_IMAGE"
+      ]
+    },
+    {
+      "name": "first payment at cap",
+      "patch": {
+        "isFirstPayment": true
+      },
+      "verdict": "auto_confirm",
+      "reasons": []
+    },
+    {
+      "name": "first payment cap + 1 piastre",
+      "patch": {
+        "isFirstPayment": true,
+        "extract": {
+          "amountMinor": 120001
+        },
+        "expected": {
+          "amountMinor": 120001
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "FIRST_PAYMENT_OVER_CAP"
+      ]
+    },
+    {
+      "name": "first payment cap - 1 piastre",
+      "patch": {
+        "isFirstPayment": true,
+        "extract": {
+          "amountMinor": 119999
+        },
+        "expected": {
+          "amountMinor": 119999
+        }
+      },
+      "verdict": "auto_confirm",
+      "reasons": []
+    },
+    {
+      "name": "first payment with cap 0 (no plan)",
+      "patch": {
+        "isFirstPayment": true,
+        "firstPaymentCapMinor": 0
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "FIRST_PAYMENT_OVER_CAP"
+      ]
+    },
+    {
+      "name": "not first payment, over cap",
+      "patch": {
+        "extract": {
+          "amountMinor": 1440000
+        },
+        "expected": {
+          "amountMinor": 1440000
+        }
+      },
+      "verdict": "auto_confirm",
+      "reasons": []
+    },
+    {
+      "name": "amount at dual-control threshold",
+      "patch": {
+        "dualControlThresholdMinor": 120000
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "ABOVE_DUAL_CONTROL_THRESHOLD"
+      ]
+    },
+    {
+      "name": "amount just under dual-control threshold",
+      "patch": {
+        "dualControlThresholdMinor": 120001
+      },
+      "verdict": "auto_confirm",
+      "reasons": []
+    },
+    {
+      "name": "mode off",
+      "patch": {
+        "mode": "off"
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "KILL_GLOBAL"
+      ]
+    },
+    {
+      "name": "mode shadow with a full match",
+      "patch": {
+        "mode": "shadow"
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "SHADOW_MODE"
+      ]
+    },
+    {
+      "name": "store disabled",
+      "patch": {
+        "storeEnabled": false
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "KILL_STORE"
+      ]
+    },
+    {
+      "name": "extract null",
+      "patch": {
+        "extract": null
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "EXTRACT_INCOMPLETE"
+      ]
+    },
+    {
+      "name": "amount field null",
+      "patch": {
+        "extract": {
+          "amountMinor": null
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "EXTRACT_INCOMPLETE"
+      ]
+    },
+    {
+      "name": "reference field null",
+      "patch": {
+        "extract": {
+          "reference": null
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "EXTRACT_INCOMPLETE"
+      ]
+    },
+    {
+      "name": "amount not a safe integer",
+      "patch": {
+        "extract": {
+          "amountMinor": 1200.5
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "EXTRACT_INCOMPLETE"
+      ]
+    },
+    {
+      "name": "zero amount on both sides",
+      "patch": {
+        "extract": {
+          "amountMinor": 0
+        },
+        "expected": {
+          "amountMinor": 0
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "EXTRACT_INCOMPLETE",
+        "AMOUNT_MISMATCH"
+      ]
+    },
+    {
+      "name": "negative amount on both sides",
+      "patch": {
+        "extract": {
+          "amountMinor": -5
+        },
+        "expected": {
+          "amountMinor": -5
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "EXTRACT_INCOMPLETE",
+        "AMOUNT_MISMATCH"
+      ]
+    },
+    {
+      "name": "isFirstPayment null applies the cap (unknown can only add a reason)",
+      "patch": {
+        "isFirstPayment": null,
+        "extract": {
+          "amountMinor": 600000
+        },
+        "expected": {
+          "amountMinor": 600000
+        },
+        "firstPaymentCapMinor": 50000
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "FIRST_PAYMENT_OVER_CAP"
+      ]
+    },
+    {
+      "name": "isFirstPayment null at the cap still passes",
+      "patch": {
+        "isFirstPayment": null
+      },
+      "verdict": "auto_confirm",
+      "reasons": []
+    },
+    {
+      "name": "kelvin sign in the handle does not match a latin k payee",
+      "patch": {
+        "extract": {
+          "recipientHandle": "Kebda@instapay"
+        },
+        "expected": {
+          "payeeHandle": "kebda@instapay"
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "WRONG_HANDLE"
+      ]
+    },
+    {
+      "name": "fullwidth letters in the handle do not match",
+      "patch": {
+        "extract": {
+          "recipientHandle": "ｅbda@instapay"
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "WRONG_HANDLE"
+      ]
+    },
+    {
+      "name": "zero-width space in the handle does not match",
+      "patch": {
+        "extract": {
+          "recipientHandle": "ebda​@instapay"
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "WRONG_HANDLE"
+      ]
+    },
+    {
+      "name": "looks edited",
+      "patch": {
+        "flags": {
+          "looksEdited": true
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "LOOKS_EDITED"
+      ]
+    },
+    {
+      "name": "suspicious text",
+      "patch": {
+        "flags": {
+          "suspiciousText": true
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "SUSPICIOUS_TEXT"
+      ]
+    },
+    {
+      "name": "confidence 0.79",
+      "patch": {
+        "flags": {
+          "confidence": 0.79
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "LOW_CONFIDENCE"
+      ]
+    },
+    {
+      "name": "confidence exactly 0.8",
+      "patch": {
+        "flags": {
+          "confidence": 0.8
+        }
+      },
+      "verdict": "auto_confirm",
+      "reasons": []
+    },
+    {
+      "name": "several faults are all reported in code order",
+      "patch": {
+        "mode": "shadow",
+        "duplicate": "both",
+        "flags": {
+          "looksEdited": true,
+          "suspiciousText": true,
+          "confidence": 0.1
+        },
+        "extract": {
+          "amountMinor": 5,
+          "recipientHandle": "x"
+        }
+      },
+      "verdict": "needs_human",
+      "reasons": [
+        "SHADOW_MODE",
+        "AMOUNT_MISMATCH",
+        "WRONG_HANDLE",
+        "DUPLICATE_REFERENCE",
+        "DUPLICATE_IMAGE",
+        "LOOKS_EDITED",
+        "SUSPICIOUS_TEXT",
+        "LOW_CONFIDENCE"
+      ]
+    }
+  ]
+}

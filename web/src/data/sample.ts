@@ -1,11 +1,12 @@
 import { ApiError } from './api';
 import type {
-  AgentSettingsDto, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto,
+  AgentSettingsDto, BotFunnelDto, ConnectorDto, BotSettingsDto, BotSwitchesDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto, NoteDto, QuickReplyDto,
 } from '../../../src/core/api/contract';
 import { normaliseText } from '../../../src/core/text-normalise';
 import { createSampleOperator, createSampleWallet } from './sample-billing';
 import type { SharedTemplatesApi } from './shared-templates';
 import type { InboxSource, TeamApi } from './source';
+import type { AssistantApi } from './assistant';
 
 // Sample data for preview only (labelled in the UI). Names and orders are invented; no real customers.
 const BASE = Date.UTC(2026, 9, 24, 17, 0);
@@ -82,7 +83,7 @@ const CAMPAIGNS: CampaignDto[] = [
   sampleCampaign({ id: 'c-3', name: 'تخفيضات نص الشهر', status: 'paused', pauseReason: 'wallet_empty' }, { recipients: 2100, pending: 1500, sent: 600, delivered: 571, read: 290, failed: 12, skipped: 8 }),
   sampleCampaign({ id: 'c-4', name: 'العملاء الجداد', status: 'completed', finishedAt: BASE - 9 * D, createdAt: BASE - 12 * D, startedAt: BASE - 11 * D }, { recipients: 410, pending: 0, sent: 402, delivered: 396, read: 301, failed: 6, skipped: 8 }),
 ];
-const SEGMENTS: SegmentDto[] = [
+const SEGMENT_SEED: SegmentDto[] = [
   { id: 1, name: 'عملاء VIP', criteria: { tags: { any: ['vip'] } }, createdAt: BASE - 30 * D, updatedAt: BASE - 30 * D },
   { id: 2, name: 'كلمونا آخر 30 يوم', criteria: { lastInboundAfter: BASE - 30 * D }, createdAt: BASE - 20 * D, updatedAt: BASE - 20 * D },
 ];
@@ -120,18 +121,25 @@ export function createSampleSource(): InboxSource {
     tags: s.tags,
     windowOpenUntil: s.windowH === null ? null : BASE + s.windowH * H,
   }));
-  let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, hasApiKey: false, credits: 500, knowledgeReady: false };
+  let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', tone: 'warm', notifyPhone: null, provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, recommendProducts: true, hasApiKey: false, credits: 500, knowledgeReady: false };
+  let switches: BotSwitchesDto = { orderingBot: true, orderConfirmations: false, otpViaWhatsApp: false };
+  const pendingConfirms = new Set<string>();
   let bot: BotSettingsDto = {
     menu: { enabled: false, items: [] },
     hours: { enabled: false, timezone: 'Africa/Cairo', week: { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }, awayMessage: { ar: 'احنا مقفولين دلوقتي، هنرد عليك أول ما نفتح.', en: 'We are closed right now; we will reply as soon as we open.' }, ordersWhileClosed: true },
     location: null,
   };
   let catalog: CatalogStatusDto = { catalogId: null, lastSyncAt: null };
+  const connectorList: ConnectorDto[] = [];
   let retentionDays: number | null = null;
   const contacts: ContactDto[] = [
     ...SEEDS.map((x): ContactDto => ({ waId: x.waId, name: x.name, optedOut: false, tags: x.tags.filter((t) => t !== 'needs_human' && t !== 'cod_pending'), consent: x.id % 2 ? { source: 'keyword_start', at: BASE - 10 * D } : null, lastInboundAt: BASE - x.ago })),
     ...structuredClone(MORE_CONTACTS),
   ];
+  const segments = structuredClone(SEGMENT_SEED);
+  const quick: QuickReplyDto[] = [];
+  const notes = new Map<number, NoteDto[]>();
+  let toolId = 100;
   const campaigns = structuredClone(CAMPAIGNS);
   const numbers = structuredClone(NUMBERS);
   const num = (id: string) => {
@@ -157,7 +165,7 @@ export function createSampleSource(): InboxSource {
   let nextId = 1000;
   return {
     kind: 'sample',
-    capabilities: { codOutcome: true, numbers: true },
+    capabilities: { codOutcome: true, numbers: true, assistant: true },
     role: 'owner',
     currentUserId: 'u-me',
     userNames: { 'u-me': 'أنا', 'u-dina': 'دينا' },
@@ -212,6 +220,16 @@ export function createSampleSource(): InboxSource {
       bot = structuredClone(update);
       return structuredClone(bot);
     },
+    switches: {
+      async get() { return { ...switches }; },
+      async preview() { const confirmToken = crypto.randomUUID().replace(/-/g, '').padEnd(64, '0'); pendingConfirms.add(confirmToken); return { confirmToken }; },
+      async save(change, confirmToken) {
+        if ((change.orderConfirmations === true || change.otpViaWhatsApp === true) && !(confirmToken && pendingConfirms.delete(confirmToken))) throw Object.assign(new Error('confirm_required'), { detail: confirmToken ? 'confirm_invalid' : 'confirm_required' });
+        switches = { ...switches, ...change };
+        return { ...switches };
+      },
+      async throttle() { return { tier: 1000, mps: 80, usedInWindow: 120, waiting: 0, nextSlotAt: null }; },
+    },
     async botFunnel(days) {
       const totals = { 7: [120, 96, 54, 31, 22, 40, 9], 30: [520, 410, 236, 140, 101, 170, 38], 90: [1480, 1150, 650, 390, 281, 470, 104] }[days];
       const steps = ['conversation', 'browse', 'cart', 'checkout', 'order', 'menu', 'handoff'] as const;
@@ -235,6 +253,59 @@ export function createSampleSource(): InboxSource {
         catalog = { ...catalog, commerce: { ...v, failed: null } };
         return v;
       },
+      async linkExisting(catalogId) {
+        catalog = { catalogId, lastSyncAt: null, items: { synced: 0, excluded: 0, rejected: 0 }, leftOut: [], commerce: { catalogVisible: true, cartEnabled: true, failed: null }, error: null, syncing: true, pending: 0 };
+      },
+    },
+    connectors: {
+      list: async () => connectorList.map((c) => ({ ...c })),
+      async save(id, body) {
+        const had = connectorList.findIndex((c) => c.id === id);
+        const prev = had >= 0 ? connectorList[had]! : undefined;
+        if (!prev && !body.secret) throw new ApiError('invalid_request', 400, 'secret_required');
+        const row: ConnectorDto = {
+          id, kind: body.kind, enabled: body.enabled, hasSecret: !!body.secret || !!prev?.hasSecret, config: body.config,
+          tools: body.kind === 'webhook' ? body.config.tools.map((x) => `${id}__${x.name}`) : [`${id}__odoo`], updatedAt: Date.now(), updatedBy: 'u-me',
+        };
+        if (had >= 0) connectorList[had] = row; else connectorList.push(row);
+        return { ...row };
+      },
+      async remove(id) { const i = connectorList.findIndex((c) => c.id === id); if (i >= 0) connectorList.splice(i, 1); },
+      test: async () => ({ ok: true }),
+    },
+    inboxTools: {
+      quickReplies: {
+        list: async () => quick.map((q) => ({ ...q })),
+        async create(text) {
+          if (quick.length >= 20 || quick.some((q) => q.text === text)) throw new ApiError('invalid_request', 409);
+          const q: QuickReplyDto = { id: ++toolId, text, position: quick.length + 1, createdAt: Date.now() };
+          quick.push(q);
+          return { ...q };
+        },
+        async update(id, text) {
+          const q = quick.find((x) => x.id === id);
+          if (!q) throw new ApiError('not_found', 404);
+          q.text = text;
+          return { ...q };
+        },
+        async remove(id) {
+          const i = quick.findIndex((x) => x.id === id);
+          if (i < 0) throw new ApiError('not_found', 404);
+          quick.splice(i, 1);
+        },
+      },
+      notes: async (id) => [...(notes.get(id) ?? [])],
+      async addNote(id, text) {
+        const n: NoteDto = { id: ++toolId, authorUserId: 'u-me', text, at: Date.now() };
+        notes.set(id, [...(notes.get(id) ?? []), n]);
+        return n;
+      },
+      async setTags(id, tags) {
+        const c = convs.find((x) => x.id === id);
+        if (!c) throw new ApiError('not_found', 404);
+        c.tags = [...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))];
+        return { ...c };
+      },
     },
     async assign(id, userId) {
       const c = convs.find((x) => x.id === id);
@@ -247,7 +318,7 @@ export function createSampleSource(): InboxSource {
       list: async () => campaigns.map((c) => ({ ...c })).sort((a, b) => b.createdAt - a.createdAt),
       get: async (id) => ({ ...find(id) }),
       async create(req) {
-        const criteria = 'segmentId' in req.audience ? SEGMENTS.find((x) => x.id === (req.audience as { segmentId: number }).segmentId)!.criteria : req.audience.criteria;
+        const criteria = 'segmentId' in req.audience ? segments.find((x) => x.id === (req.audience as { segmentId: number }).segmentId)!.criteria : req.audience.criteria;
         const audience = preview(criteria).count;
         const c = sampleCampaign({
           id: `c-${nextId++}`, name: req.name, status: 'draft', template: req.template, params: req.params ?? [], linkUrl: req.linkUrl ?? null,
@@ -269,7 +340,7 @@ export function createSampleSource(): InboxSource {
       async resume(id) { return { ...Object.assign(find(id), { status: 'running', pauseReason: null }) }; },
       async cancel(id) { return { ...Object.assign(find(id), { status: 'cancelled', pauseReason: null, finishedAt: Date.now() }) }; },
       async remove(id) { campaigns.splice(campaigns.findIndex((x) => x.id === id), 1); },
-      segments: async () => SEGMENTS,
+      segments: async () => segments.map((x) => ({ ...x })),
       preview: async (k) => preview(k),
     },
     numbers: {
@@ -295,6 +366,7 @@ export function createSampleSource(): InboxSource {
         };
       })(),
     },
+    assistant: createSampleAssistant(),
     team: createSampleTeam(),
     wallet: createSampleWallet(),
     operator: createSampleOperator('u-me'),
@@ -319,6 +391,33 @@ export function createSampleSource(): InboxSource {
       },
       imports: async () => imports.map((i) => ({ ...i })),
       rejects: async () => [{ line: 14, reason: 'invalid_phone' }, { line: 37, reason: 'duplicate_in_file' }],
+      async setContactTags(waId, tags) {
+        const c = contacts.find((x) => x.waId === waId);
+        if (!c) throw new ApiError('not_found', 404);
+        c.tags = [...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))];
+        return { tags: c.tags };
+      },
+      segments: {
+        list: async () => segments.map((x) => ({ ...x })),
+        async create(name, criteria) {
+          if (segments.some((x) => x.name === name)) throw new ApiError('invalid_request', 409, 'name_taken');
+          const seg: SegmentDto = { id: ++toolId, name, criteria, createdAt: Date.now(), updatedAt: Date.now() };
+          segments.push(seg);
+          return { ...seg };
+        },
+        async update(id, patch) {
+          const seg = segments.find((x) => x.id === id);
+          if (!seg) throw new ApiError('not_found', 404);
+          Object.assign(seg, patch, { updatedAt: Date.now() });
+          return { ...seg };
+        },
+        async remove(id) {
+          const i = segments.findIndex((x) => x.id === id);
+          if (i < 0) throw new ApiError('not_found', 404);
+          segments.splice(i, 1);
+        },
+        preview: async (k) => preview(k),
+      },
       async renameContact(waId, name) {
         const c = contacts.find((x) => x.waId === waId);
         if (!c) throw new ApiError('not_found', 404);
@@ -328,6 +427,11 @@ export function createSampleSource(): InboxSource {
       async exportContact(waId) {
         if (!contacts.some((x) => x.waId === waId)) throw new ApiError('not_found', 404);
         return { version: 1, subject: { waId }, messages: [], nextAfter: null };
+      },
+      async eraseContact(waId) {
+        const i = contacts.findIndex((x) => x.waId === waId);
+        if (i < 0) throw new ApiError('contact not found', 404);
+        contacts.splice(i, 1);
       },
       async mergeContacts(fromWaId, intoWaId) {
         const i = contacts.findIndex((x) => x.waId === fromWaId);
@@ -356,11 +460,31 @@ function createSampleSharedTemplates(): SharedTemplatesApi {
   return {
     list: async () => items.map((t) => ({ ...t })),
     sync: async () => ({ upserted: items.length, removed: 0 }),
+    requests: async () => [{ id: 'sr-1', workspaceId: 'ws-sample-1', name: 'order_ready', language: 'ar', category: 'UTILITY', body: 'أهلًا {{1}}، طلبك {{2}} جاهز للاستلام.', status: 'open', createdAt: BASE - 3 * H, decidedAt: null }],
     submit: async (input) => { items.push({ name: input.name, language: input.language, category: input.category, status: 'PENDING', bodyText: input.components[0]!.text, paramCount: 0, rejectedReason: null }); return { status: 'PENDING' }; },
   };
 }
 
 /** Sample team for the preview: the owner, three staff and a package with room for two staff seats (the owner counts as one of three). */
+/** The preview's assistant: one canned grounded answer, so the panel can be seen without a server. */
+function createSampleAssistant(): AssistantApi {
+  return {
+    turn: async () => ({
+      status: 'answered', previews: [], turnId: crypto.randomUUID(),
+      segments: [
+        { kind: 'text', text: 'تقدر تشحن المحفظة من شاشة المحفظة، وبتختار الكارت أو إنستاباي. ' },
+        { kind: 'cap', capabilityId: 'wallet.view', label: 'المحفظة', appPath: '/wallet' },
+      ],
+    }),
+    conversation: async () => [],
+    feedback: async () => undefined,
+    apply: async () => ({ status: 'applied', appliedId: crypto.randomUUID(), undoUntil: Date.now() + 86_400_000 }),
+    undo: async () => ({ status: 'undone' }),
+    confirm: async () => ({ status: 'applied', appliedId: crypto.randomUUID() }),
+    reject: async () => ({ status: 'rejected' }),
+  };
+}
+
 function createSampleTeam(): TeamApi {
   const people = [
     { userId: 'u-me', displayName: 'ليلى', role: 'owner' as const, addedAt: '2026-09-01T00:00:00.000Z' },

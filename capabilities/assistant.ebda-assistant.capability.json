@@ -1,0 +1,57 @@
+{
+  "id": "assistant.ebda-assistant",
+  "status": "live",
+  "area": "assistant",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مساعد ابدأ شات للمحادثة والمهام",
+  "titleEn": "Ebda Chat assistant (how-do-I answers and doing tasks)",
+  "screens": [
+    "AssistantPanel (side panel on every screen, Ctrl/Cmd+J)"
+  ],
+  "api": [
+    "POST /stores/:storeId/assistant/turn",
+    "GET /stores/:storeId/assistant/conversations/:conversationId",
+    "POST /stores/:storeId/assistant/feedback"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ebda-assistant",
+  "questions": {
+    "ar": [
+      "اسأل المساعد ازاي اعمل حاجة",
+      "خليه يعملها بدالي",
+      "عايز مساعد"
+    ],
+    "en": [
+      "Ask the assistant how to do something",
+      "Let the assistant do it for me"
+    ]
+  },
+  "steps": [
+    "Open the assistant panel (button or Ctrl/Cmd+J), ask how to do something, follow the \"show me where\" link",
+    "The assistant answers only from the help guides and from your own data it reads through the normal screens; it never asks for passwords or keys",
+    "Off by default per store; an operator turns it on (answer-only) and can switch it off at once"
+  ],
+  "edgeCases": [
+    "Mode off: the panel is hidden and the route answers status off",
+    "Over 150 turns per store per day: the reply says the limit was reached",
+    "The help index has no confirmed answer: it says so and offers the support team"
+  ],
+  "gaps": [],
+  "readOnlyPost": {
+    "routes": [
+      "POST /stores/:storeId/assistant/turn",
+      "POST /stores/:storeId/assistant/feedback"
+    ],
+    "reason": "A turn answers questions, reads the merchant's own data and builds previews; it applies nothing (the apply and undo routes are the assistant.apply-changes capability). The only thing a turn writes is the assistant's own masked journal row."
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "id": "campaigns.send-now",
+  "status": "live",
+  "area": "campaigns",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إرسال الحملة دلوقتي",
+  "titleEn": "Send a campaign now",
+  "screens": [
+    "CampaignForm review > Send campaign",
+    "view:CampaignForm",
+    "/campaigns"
+  ],
+  "api": [
+    "POST /stores/:storeId/campaigns/:id/send"
+  ],
+  "mcpTool": null,
+  "planGate": "feat_campaigns (Chat 1,500 and 5,000 AI replies packages; not Chat 300 / store-included)",
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/campaigns-and-opt-out",
+  "questions": {
+    "ar": [
+      "ابعت الحملة",
+      "ابدأ الإرسال",
+      "ab3at el hamla delwa2ty"
+    ],
+    "en": [
+      "Send the campaign now"
+    ]
+  },
+  "steps": [
+    "Open draft",
+    "Review cost",
+    "Send campaign"
+  ],
+  "edgeCases": [
+    "Only the owner; staff gets 403",
+    "Template no longer approved: refused",
+    "Wallet empty on shared number: pauses",
+    "Estimated cost only; delivered messages are charged",
+    "Own number: Meta bills the merchant card directly"
+  ],
+  "gaps": [],
+  "assistantNote": "spends money / messages customers; stop with pause or cancel only"
+}

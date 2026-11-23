@@ -1,0 +1,48 @@
+{
+  "id": "catalogue.status",
+  "status": "live",
+  "area": "catalogue",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "حالة كتالوج واتساب",
+  "titleEn": "WhatsApp catalogue status",
+  "screens": [
+    "BotScreen WhatsApp catalog box",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "GET /stores/:storeId/store-link/catalog"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/your-products-on-whatsapp",
+  "questions": {
+    "ar": [
+      "منتجاتي ظهرت في واتساب؟",
+      "كام منتج في الكتالوج؟",
+      "الكتالوج متأخر",
+      "el catalog fih kam montag"
+    ],
+    "en": [
+      "Are my products in the WhatsApp catalogue?"
+    ]
+  },
+  "steps": [
+    "Bot screen shows catalog id, last sync, item count, pending changes"
+  ],
+  "edgeCases": [
+    "Update delayed: retries on its own, contact us after a day",
+    "Nightly full check fixes misses",
+    "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires"
+  ],
+  "gaps": []
+}

@@ -1,15 +1,16 @@
 import { z } from 'zod';
 import {
-  agentSettingsDto, apiError, digestDto, botFunnelDto, botSettingsDto, campaignDto, catalogStatusDto, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
-  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest,
+  agentSettingsDto, apiError, assistantActResponse, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, connectorDto, connectorTestResult, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
+  opsStatusDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
+  instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest, segmentDto, quickReplyDto, listQuickRepliesResponse, noteDto, conversationDto,
 } from '../../../src/core/api/contract';
+import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
 import type { InboxSource } from './source';
 
 export class ApiError extends Error {
   /** `detail` = the server's machine reason for a 409 (e.g. `empty_audience`), when it sends one. */
-  constructor(public readonly code: string, public readonly status: number, public readonly detail?: string, public readonly amountMinor?: number) {
+  constructor(public readonly code: string, public readonly status: number, public readonly detail?: string, public readonly amountMinor?: number, public readonly extra?: { retryAt?: number; issues?: RuleIssue[] }) {
     super(code);
   }
 }
@@ -40,7 +41,7 @@ export function createApiSource(o: Opts): LiveSource {
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       const err = apiError.safeParse(json);
-      throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined, err.success ? err.data.amountMinor : undefined);
+      throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined, err.success ? err.data.amountMinor : undefined, err.success && (err.data.retryAt !== undefined || err.data.issues) ? { ...(err.data.retryAt !== undefined ? { retryAt: err.data.retryAt } : {}), ...(err.data.issues ? { issues: err.data.issues as RuleIssue[] } : {}) } : undefined);
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) throw new Error(`response does not match the contract: ${path}`);
@@ -85,7 +86,30 @@ export function createApiSource(o: Opts): LiveSource {
       return call(`/contacts/${encodeURIComponent(waId)}/orders`, customerOrdersResponse);
     },
     async templates() {
-      return (await call('/templates', listTemplatesResponse)).items;
+      // A store with no own number has no templates to pick from: that is an empty picker, not a failure (the Templates screen explains why).
+      try { return (await call('/templates', listTemplatesResponse)).items; } catch (e) { if (e instanceof ApiError && e.status === 404 && e.detail === 'no_active_number') return []; throw e; }
+    },
+    templatesApi: {
+      list: async () => { const r = await call('/templates', listTemplatesResponse); return { items: r.items, starterInstalled: r.starterInstalled === true }; },
+      detail: (name, lang) => call(`/templates/${encodeURIComponent(name)}/${encodeURIComponent(lang)}`, templateDto),
+      check: (d) => call('/templates/check', checkTemplateResponse, post(d)) as Promise<{ issues: RuleIssue[]; payloadHash: string }>,
+      create: (d, expectedHash) => call('/templates', createTemplateResponse, post({ ...d, expectedHash })),
+      edit: (name, lang, d, expectedHash) => call(`/templates/${encodeURIComponent(name)}/${encodeURIComponent(lang)}`, editTemplateResponse, { method: 'PUT', body: JSON.stringify({ ...d, expectedHash }) }),
+      remove: async (name, lang) => {
+        const res = await f(`${root}/templates/${encodeURIComponent(name)}/${encodeURIComponent(lang)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) {
+          const err = apiError.safeParse(await res.json().catch(() => null));
+          throw new ApiError(err.success ? err.data.error : 'invalid_request', res.status, err.success ? err.data.message : undefined);
+        }
+      },
+      sync: () => call('/templates/sync', z.object({ upserted: z.number(), removed: z.number() }), post({})),
+      shared: {
+        list: async () => (await call('/templates/shared', listSharedTemplatesResponse)).items,
+        requests: async () => (await call('/templates/shared-requests', listSharedRequestsResponse)).items,
+        request: (r) => call('/templates/shared-requests', sharedRequestDto, post(r)),
+      },
+      resubmitCodV2: () => call('/templates/cod-v2/resubmit', z.object({ status: z.string() }), post({})),
+      installDefaults: () => call('/templates/install-defaults', z.object({ submitted: z.array(z.string()), skipped: z.array(z.string()), failed: z.array(z.string()) }), post({})),
     },
     async recordCodOutcome(waId, orderNumber, outcome) {
       const headers = { authorization: `Bearer ${await o.getToken()}`, 'content-type': 'application/json' };
@@ -95,7 +119,8 @@ export function createApiSource(o: Opts): LiveSource {
       if (!res.ok) throw new ApiError('invalid_request', res.status);
     },
     async agentSettings() {
-      try { return await call('/agent', agentSettingsDto); } catch (e) { if (e instanceof ApiError && (e.status === 403 || e.status === 404)) return null; throw e; }
+      // Only a 403 means "not yours to read" (staff, an operator session). A 404 (no workspace) or any other failure is a failed load, never a permission message (CHAT-QA-3/12).
+      try { return await call('/agent', agentSettingsDto); } catch (e) { if (e instanceof ApiError && e.status === 403) return null; throw e; }
     },
     async saveAgentSettings(update) {
       return call('/agent', agentSettingsDto, { method: 'PUT', body: JSON.stringify(update) });
@@ -105,6 +130,14 @@ export function createApiSource(o: Opts): LiveSource {
     },
     async saveBotSettings(update) {
       return call('/store-link/settings', botSettingsDto, { method: 'PATCH', body: JSON.stringify(update) });
+    },
+    switches: {
+      get: () => call('/store-link/settings', botSwitchesDto),
+      preview: (change) => call('/store-link/settings/preview', settingsPreviewResponse, post(change)),
+      save: (change, confirmToken) => call('/store-link/settings', botSwitchesDto, { method: 'PATCH', body: JSON.stringify(confirmToken ? { ...change, confirmToken } : change) }),
+      async throttle() {
+        try { return await call('/throttle', throttleReportDto); } catch (e) { if (e instanceof ApiError && e.status === 404) return null; throw e; }
+      },
     },
     async botFunnel(days) {
       const day = (ms: number) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(ms).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
@@ -116,6 +149,13 @@ export function createApiSource(o: Opts): LiveSource {
       provision: (name) => call('/store-link/catalog/provision', provisionCatalogResponse, post(name ? { name } : {})),
       resync: () => call('/store-link/catalog/resync', catalogResyncResponse, post({})),
       setCommerce: (v) => call('/store-link/catalog/commerce', catalogCommerceRequest, { method: 'PUT', body: JSON.stringify(v) }),
+      linkExisting: async (catalogId) => { await call('/store-link/settings', botSettingsDto, { method: 'PATCH', body: JSON.stringify({ catalogId }) }); },
+    },
+    connectors: {
+      list: () => call('/connectors', z.array(connectorDto)),
+      save: (id, body) => call(`/connectors/${encodeURIComponent(id)}`, connectorDto, { method: 'PUT', body: JSON.stringify(body) }),
+      remove: async (id) => { await call(`/connectors/${encodeURIComponent(id)}`, done, { method: 'DELETE' }); },
+      test: (id) => call(`/connectors/${encodeURIComponent(id)}/test`, connectorTestResult, post({})),
     },
     async assign(id, userId) {
       await call(`/conversations/${id}/assign`, z.unknown(), { method: 'POST', body: JSON.stringify({ userId }) });
@@ -151,6 +191,15 @@ export function createApiSource(o: Opts): LiveSource {
         join: (displayName) => call('/shared-number/join', sharedNumberDto, post(displayName ? { displayName } : {})),
         leave: () => call('/shared-number/leave', sharedNumberDto, post({})),
       },
+    },
+    assistant: {
+      turn: (body) => call('/assistant/turn', assistantTurnResponse, post(body)),
+      conversation: async (id) => (await call(`/assistant/conversations/${encodeURIComponent(id)}`, assistantConversationResponse)).items,
+      apply: (previewId) => call(`/assistant/previews/${encodeURIComponent(previewId)}/apply`, assistantActResponse, post({})),
+      undo: (appliedId) => call(`/assistant/applied/${encodeURIComponent(appliedId)}/undo`, assistantActResponse, post({})),
+      confirm: (approvalId, token) => call(`/assistant/approvals/${encodeURIComponent(approvalId)}/confirm`, assistantActResponse, post({ token })),
+      reject: async (approvalId) => call(`/assistant/approvals/${encodeURIComponent(approvalId)}/reject`, z.object({ status: z.string() }), post({})),
+      feedback: async (turnId, thumb) => { await call('/assistant/feedback', z.object({ ok: z.boolean() }).loose(), post({ turnId, thumb })); },
     },
     team: {
       list: () => call('/members', listMembersResponse),
@@ -189,9 +238,29 @@ export function createApiSource(o: Opts): LiveSource {
         }
         return { ...out, messages, nextAfter: null };
       },
+      eraseContact: async (waId) => { await call(`/contacts/${encodeURIComponent(waId)}`, z.unknown(), { method: 'DELETE' }); },
       mergeContacts: async (fromWaId, intoWaId) => { await call('/contacts/merge', z.unknown(), post({ fromWaId, intoWaId })); },
       retention: () => call('/retention', retentionDto),
       setRetention: (days) => call('/retention', retentionDto, { method: 'PUT', body: JSON.stringify({ days }) }),
+      setContactTags: (waId, tags) => call(`/contacts/${encodeURIComponent(waId)}/tags`, z.object({ tags: z.array(z.string()) }).loose(), { method: 'PUT', body: JSON.stringify({ tags }) }),
+      segments: {
+        list: async () => (await call('/segments', listSegmentsResponse)).items,
+        create: (name, criteria) => call('/segments', segmentDto, post({ name, criteria })),
+        update: (id, patch) => call(`/segments/${id}`, segmentDto, { method: 'PUT', body: JSON.stringify(patch) }),
+        remove: async (id) => { await call(`/segments/${id}`, done, { method: 'DELETE' }); },
+        preview: (criteria) => call('/segments/preview', segmentPreviewDto, post({ criteria })),
+      },
+    },
+    inboxTools: {
+      quickReplies: {
+        list: async () => (await call('/quick-replies', listQuickRepliesResponse)).items,
+        create: (text) => call('/quick-replies', quickReplyDto, post({ text })),
+        update: (id, text) => call(`/quick-replies/${id}`, quickReplyDto, { method: 'PUT', body: JSON.stringify({ text }) }),
+        remove: async (id) => { await call(`/quick-replies/${id}`, done, { method: 'DELETE' }); },
+      },
+      notes: async (id) => (await call(`/conversations/${id}/notes`, items(noteDto))).items,
+      addNote: (id, text) => call(`/conversations/${id}/notes`, noteDto, post({ text })),
+      setTags: (id, tags) => call(`/conversations/${id}/tags`, conversationDto, { method: 'PUT', body: JSON.stringify({ tags }) }),
     },
     wallet: {
       wallet: () => call('/wallet', walletDto),
@@ -221,6 +290,15 @@ export function createApiSource(o: Opts): LiveSource {
       },
       refundRequests: async () => (await call('/wallet/refund-requests', items(refundRequestDto))).items,
       requestRefund: (amountMinor, note) => call('/wallet/refund-requests', refundRequestDto, post({ amountMinor, ...(note.trim() ? { note: note.trim() } : {}) })),
+      previewNumberFunding: (pn) => call(`/numbers/${encodeURIComponent(pn)}/funding/preview`, numberFundingPreviewDto, post({ funding: 'merchant_card' })),
+      confirmNumberFunding: async (pn, c) => { await call(`/numbers/${encodeURIComponent(pn)}/funding`, done, { method: 'PUT', body: JSON.stringify({ funding: 'merchant_card', confirmId: c.confirmId, token: c.token }) }); },
+      yearlyRefund: () => call('/wallet/yearly-refund', yearlyRefundViewDto),
+      previewYearlyRefund: () => call('/wallet/yearly-refund/preview', yearlyRefundPreviewDto, post({})),
+      requestYearlyRefund: (c) => call('/wallet/yearly-refund/requests', yearlyRefundRequestDto, post({ confirmId: c.confirmId, token: c.token })),
+      creditPacks: () => call('/wallet/credit-packs', creditPacksDto),
+      previewCreditPack: (packId) => call('/wallet/credit-packs/preview', creditPackPreviewDto, post({ packId })),
+      buyCreditPack: (packId, c) => call('/wallet/credit-packs/orders', creditOrderDto, post({ packId, confirmId: c.confirmId, token: c.token })),
+      creditOrderState: (orderId) => call(`/wallet/credit-packs/orders/${encodeURIComponent(orderId)}`, creditOrderDto),
     },
     operator: {
       opsStatus: (workspaceId) => op(`/workspaces/${encodeURIComponent(workspaceId)}/ops`, opsStatusDto),
@@ -244,6 +322,10 @@ export function createApiSource(o: Opts): LiveSource {
       confirmInstapay: (id, bankRef, noReferenceReason) => op(`/instapay/${encodeURIComponent(id)}/confirm`, operatorInstapayDto.extend({ needsSecond: z.literal(true).optional() }), post(noReferenceReason ? { noReference: true, reason: noReferenceReason } : bankRef ? { bankRef } : {})),
       releaseInstapay: (id, reason) => op(`/instapay/${encodeURIComponent(id)}/release`, operatorInstapayDto, post({ reason })),
       rejectInstapay: (id, reason) => op(`/instapay/${encodeURIComponent(id)}/reject`, operatorInstapayDto, post({ reason })),
+      autoConfirmations: () => op('/instapay/auto', operatorAutoListDto),
+      revertAutoConfirmed: async (requestId, reason) => { await op(`/instapay/auto/${encodeURIComponent(requestId)}/revert`, done, post({ reason })); },
+      setAutoMode: async (mode, reason) => { await op('/instapay/auto/mode', done, { method: 'PUT', body: JSON.stringify({ mode, reason }) }); },
+      setWorkspaceAuto: async (workspaceId, enabled, reason) => { await op(`/instapay/auto/workspaces/${encodeURIComponent(workspaceId)}`, done, { method: 'PUT', body: JSON.stringify({ enabled, reason }) }); },
       adjustments: async () => (await op('/adjustments', items(adjustmentDto))).items,
       createAdjustment: (workspaceId, amountMinor, reason) => op(`/workspaces/${encodeURIComponent(workspaceId)}/adjustments`, adjustmentDto, post({ amountMinor, reason })),
       decideAdjustment: (id, decision) => op(`/adjustments/${encodeURIComponent(id)}/decision`, adjustmentDto, post({ decision })),
@@ -263,6 +345,7 @@ export function createApiSource(o: Opts): LiveSource {
       yearlyRefundQuote: (orderId) => op(`/package-orders/${encodeURIComponent(orderId)}/refund-quote`, z.object({
         orderId: z.string(), packageId: z.string(), periodMonths: z.number(), monthlyMinor: z.number(), unusedMonths: z.number(), grossMinor: z.number(), debtMinor: z.number(), debtSettledMinor: z.number(), refundMinor: z.number(),
       }).loose()),
+      yearlyRefundRequests: async () => (await op('/yearly-refund-requests', items(yearlyRefundRequestDto.extend({ workspaceId: z.string() })))).items,
       yearlyRefundExecute: (orderId, reason) => op(`/package-orders/${encodeURIComponent(orderId)}/yearly-refund`, z.object({
         orderId: z.string(), shortenedMonths: z.number(), debtSettledMinor: z.number(), cashRefundMinor: z.number(), noMoneyOut: z.boolean(), periodEnd: z.number(),
       }), post({ reason })),
@@ -271,6 +354,7 @@ export function createApiSource(o: Opts): LiveSource {
       list: async () => (await op('/shared-templates', listTemplatesResponse)).items,
       sync: () => op('/shared-templates/sync', z.object({ upserted: z.number(), removed: z.number() }), post({})),
       submit: (input) => op('/shared-templates', z.object({ status: z.string() }).loose(), post(input)),
+      requests: async () => (await op('/shared-template-requests', z.object({ items: z.array(sharedRequestDto.extend({ workspaceId: z.string() })) }))).items,
     },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });
@@ -301,8 +385,10 @@ export function createApiSource(o: Opts): LiveSource {
     async loadCapabilities() {
       try {
         const me = await call('/me', meResponse.partial().loose());
-        source.capabilities = { codOutcome: me.capabilities?.codOutcome === true, numbers: me.capabilities?.numbers === true };
+        source.capabilities = { codOutcome: me.capabilities?.codOutcome === true, numbers: me.capabilities?.numbers === true, assistant: me.capabilities?.assistant === true };
         if (me.role) source.role = me.role;
+        if (me.workspace === false) source.workspaceMissing = true;
+        if (me.stores) source.stores = me.stores;
       } catch (e) {
         source.capabilities = { codOutcome: false };
         if (e instanceof ApiError && e.status === 403 && e.code === 'no_seat') source.noSeat = e.detail === 'seat_over_limit' ? 'over_limit' : 'none';

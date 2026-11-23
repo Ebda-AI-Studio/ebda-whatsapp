@@ -27,6 +27,7 @@ export const EBDA_ORDERING_COPY: OrderingCopy = {
   templates: {
     orderConfirmation: 'order_confirmation',
     codConfirmation: 'cod_confirmation',
+    codConfirmationV2: 'cod_confirmation_v2',
     shippingTracking: 'shipping_tracking',
     shippingStatus: 'shipping_status',
     cartRecovery: 'cart_recovery',
@@ -73,7 +74,12 @@ export const EBDA_ORDERING_COPY: OrderingCopy = {
     chooseAddress: L('التوصيل على أنهي عنوان؟', 'Which address should we deliver to?'),
     addressesButton: L('العناوين', 'Addresses'),
     newAddressRow: L('+ عنوان جديد', '+ New address'),
+    sameAddress: (summary, locale) => (locale === 'ar' ? `نفس العنوان بتاع المرة اللي فاتت؟\n${summary}` : `Same address as last time?\n${summary}`),
+    sameAddressYes: L('أيوه، نفس العنوان', 'Yes, same address'),
+    sameAddressNo: L('عنوان تاني', 'A new address'),
     askAddress: L('ابعتلي عنوان التوصيل: المنطقة الأول، وبعدين الشارع والعمارة. مثلاً: المعادي، شارع 9 عمارة 4.', 'Send your delivery address: the area first, then the street and building. For example: Maadi, Street 9 building 4.'),
+    pinReceived: (label, locale) => (locale === 'ar' ? `وصلتني اللوكيشن 📍 هوصّل على: ${label}` : `Got your location 📍 delivering to: ${label}`),
+    pinNeedsText: L('وصلتني اللوكيشن 📍 اكتبلي كمان سطر فيه المنطقة والشارع والعمارة علشان المندوب يوصلك صح.', 'Got your location 📍 please also write one line with the area, street and building so the courier finds you.'),
     outOfStock: (names, locale) => (locale === 'ar'
       ? `للأسف ${names.join('، ')} خلصوا من المخزون، وشيلتهم من السلة. شوف باقي الطلب.`
       : `Sorry, ${names.join(', ')} just ran out of stock, so I removed them from your cart. Have a look at the rest.`),

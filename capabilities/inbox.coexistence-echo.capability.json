@@ -1,0 +1,44 @@
+{
+  "id": "inbox.coexistence-echo",
+  "status": "live",
+  "area": "inbox",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "الرسايل اللي بتبعتها من تطبيق واتساب بيزنس",
+  "titleEn": "Messages sent from the WhatsApp Business app appear in Ebda Chat",
+  "screens": [
+    "ChatPane (sent from the app marker)",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/connect-your-own-number",
+  "questions": {
+    "ar": [
+      "بعت من تطبيق واتساب بيزنس هيظهر هنا؟",
+      "الرسايل القديمة هتيجي؟",
+      "ينفع استخدم التطبيق والمنصة سوا؟"
+    ],
+    "en": [
+      "If I reply from the Business app, does it show here?"
+    ]
+  },
+  "steps": [
+    "Coexistence echoes arrive via webhook and show marked as sent from the app"
+  ],
+  "edgeCases": [
+    "Business-app number sends max 20 messages/second",
+    "Echo replies start/refresh agent handoff silence"
+  ],
+  "gaps": []
+}

@@ -2,8 +2,9 @@
  * One decision per inbound message, taken inside the customer's turn lock: the ordering bot when the customer is mid-order
  * (or tapped one of its buttons, or sent a cart or a payment picture), otherwise the AI agent when it is switched on. Never both.
  */
+import { isPlainEnglish } from '../franco';
 import type { LinkHost } from '../store-link/host';
-import { orderingActive, orderingEngaged, runBotTurnLocked, serialisedTurn, turnGone, type BotInput } from '../ordering/bot';
+import { awaitingAddress, orderingActive, orderingEngaged, proofExpected, runBotTurnLocked, serialisedTurn, turnGone, type BotInput } from '../ordering/bot';
 import { recordFunnel } from '../bot-funnel';
 import { frontDeskActive, runFrontDesk, runHoursGate } from '../front-desk';
 import { agentConfig } from './config';
@@ -29,8 +30,12 @@ export async function runTurn(host: LinkHost, input: BotInput, now: number): Pro
     if (!agentOn && !orderingOn) return;
     if (agentOn && input.type === 'text' && input.text && !turnGone(host, input) && isHumanRequest(input.text)) {
       const lang = readAgentSettings(host.sql).language;
-      return handoff(host, input, 'asked', lang === 'en' || (lang === 'auto' && /[A-Za-z]/.test(input.text) && !/[؀-ۿ]/.test(input.text)) ? 'en' : 'ar', now);
+      return handoff(host, input, 'asked', lang === 'en' || (lang === 'auto' && isPlainEnglish(input.text)) ? 'en' : 'ar', now);
     }
+    // A location pin answers the address question of an open order; anywhere else the agent politely asks what the customer needs (no model call).
+    if (input.type === 'location' && orderingOn && awaitingAddress(host, input.from, now)) return runBotTurnLocked(host, input, now);
+    // A picture is the ordering bot's only at its payment-proof step; for the agent it is a message it cannot read, answered with one short note.
+    if (agentOn && input.type === 'image' && !proofExpected(host, input.from)) return runAgentTurn(host, input, now);
     if (!ORDERING_TYPES.has(input.type)) return agentOn ? runAgentTurn(host, input, now) : undefined;
     if (orderingOn && (!agentOn || orderingEngaged(host, input, now))) return runBotTurnLocked(host, input, now);
     if (agentOn && agentConfig().copy) return runAgentTurn(host, input, now);

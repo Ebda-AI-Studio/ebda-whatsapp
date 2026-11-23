@@ -1,0 +1,50 @@
+{
+  "id": "agent.promises",
+  "status": "live",
+  "area": "agent",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "إيه اللي المساعد يقدر يوعد بيه",
+  "titleEn": "What the agent may promise (refund, discount, free delivery, exchange, guarantee)",
+  "screens": [
+    "AgentScreen What the agent may promise",
+    "view:AgentScreen",
+    "/agent"
+  ],
+  "api": [
+    "PUT /stores/:storeId/agent {allowRefund,allowDiscount,allowFreeDelivery,allowExchange,allowGuarantee}"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "المساعد مابيقولش مفيش شحن مجاني",
+      "ينفع يوعد بخصم؟",
+      "عايزه يقول استرجاع",
+      "khalli el AI yewe3ed"
+    ],
+    "en": [
+      "Can the agent promise a discount or free shipping?",
+      "Why does the agent hand free-shipping questions to a person?"
+    ]
+  },
+  "steps": [
+    "Five switches, all OFF by default; switch on only what you honour"
+  ],
+  "edgeCases": [
+    "Guard WA-GUARD-PROMISE-1: \"استرجاع\" and \"شحن مجاني\" are treated as promises: a person answers until the flag is on",
+    "pr 79 CHAT-AGENT-2: a declared free-over threshold / return window may be quoted without the flag"
+  ],
+  "gaps": [
+    "Wording of what each flag covers is not in help 07"
+  ],
+  "assistantNote": "legal/commercial commitments made to customers in the merchant name"
+}

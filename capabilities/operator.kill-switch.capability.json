@@ -1,0 +1,59 @@
+{
+  "id": "operator.kill-switch",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مفتاح الإيقاف الطارئ",
+  "titleEn": "Kill switch: suspend/unsuspend, pause all campaigns, evict/readmit shared number, revoke/restore integrations, ops status",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/workspaces/:workspaceId/ops",
+    "POST /operator/workspaces/:workspaceId/suspend",
+    "POST /operator/workspaces/:workspaceId/unsuspend",
+    "POST /operator/workspaces/:workspaceId/campaigns/pause",
+    "POST /operator/workspaces/:workspaceId/shared-number/evict",
+    "POST /operator/workspaces/:workspaceId/shared-number/readmit",
+    "POST /operator/workspaces/:workspaceId/integrations/revoke",
+    "POST /operator/workspaces/:workspaceId/integrations/restore"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "irreversible"
+  },
+  "operatorReason": {
+    "code": "abuse",
+    "text": "abuse / legal / critical incident; merchant has no appeal or reason screen (audit #11)",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "حسابي اتوقف ليه؟",
+      "ليه مش لاقي مفتاح الإيقاف الطارئ عندي؟",
+      "عايز مفتاح الإيقاف الطارئ اكلم مين؟"
+    ],
+    "en": [
+      "Why can I not do this myself: Kill switch: suspend/unsuspend, pause all campaigns, evict/readmit shared number, revoke/restore integrations, ops status?",
+      "Who does this at Ebda?"
+    ]
+  },
+  "steps": [
+    "Super admin only; every write re-checks the session (fails closed) and is audited with actor and reason"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none (abuse, legal, critical incident)"
+  ]
+}

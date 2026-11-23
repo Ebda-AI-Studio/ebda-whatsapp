@@ -1,10 +1,13 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
-  ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, TemplateDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, ConnectorDto, ConnectorPut, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto,
+  MessageDto, OrderSummaryDto, ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto, NoteDto, QuickReplyDto,
 } from '../../../src/core/api/contract';
 
+import type { RuleIssue } from '../../../src/core/meta/template-rules';
+import type { TemplateDraft } from '../../../src/core/template-draft';
 import type { OperatorApi, WalletApi } from './billing';
 import type { SharedTemplatesApi } from './shared-templates';
+import type { AssistantApi } from './assistant';
 
 export type ConversationFilter = 'all' | 'unread' | 'mine' | 'unassigned';
 export type Role = 'owner' | 'staff' | 'super_admin';
@@ -22,6 +25,31 @@ export interface CampaignsApi {
   remove(id: string): Promise<void>;
   segments(): Promise<SegmentDto[]>;
   preview(criteria: SegmentCriteria): Promise<SegmentPreviewDto>;
+}
+
+/**
+ * Merchant template self-service on the merchant's OWN WhatsApp account. The server checks every role; the UI only hides what the role cannot do.
+ * Rejections are ApiErrors: `detail` = exists | in_use | edit_limit (with `extra.retryAt`) | payload_changed | not_editable | not_deletable | token_unavailable | invalid_template (with `extra.issues`) | no_active_number (404).
+ */
+export interface TemplatesApi {
+  list(): Promise<{ items: TemplateDto[]; starterInstalled: boolean }>;
+  detail(name: string, language: string): Promise<TemplateDto>;
+  /** Free: Meta's rules against a draft, and the hash that `create` / `edit` must carry to prove the sent draft is the checked one. */
+  check(d: TemplateDraft): Promise<{ issues: RuleIssue[]; payloadHash: string }>;
+  create(d: TemplateDraft, expectedHash: string): Promise<{ name: string; language: string; status: string; category: TemplateDto['category']; categoryChanged: boolean }>;
+  edit(name: string, language: string, d: TemplateDraft, expectedHash: string): Promise<{ status: string }>;
+  remove(name: string, language: string): Promise<void>;
+  sync(): Promise<{ upserted: number; removed: number }>;
+  installDefaults(): Promise<{ submitted: string[]; skipped: string[]; failed: string[] }>;
+  /** Owner/staff-manager: replaces a REJECTED `cod_confirmation_v2` with a fresh submission for this store (Ruling WA-COD-V2-2). */
+  resubmitCodV2?(): Promise<{ status: string }>;
+  /** A store on the SHARED number (no own number): the platform's sendable templates and its asks for new utility ones. `list` rejects with 404 for a store that is not on the shared number. */
+  shared?: {
+    list(): Promise<SharedTemplateDto[]>;
+    requests(): Promise<SharedRequestDto[]>;
+    /** Rejects with an ApiError `rate_limited` (429, `too_many_open_requests`) at 5 open requests, and 400 `marketing_not_on_shared_number`. */
+    request(r: { name: string; language: string; category: 'UTILITY' | 'AUTHENTICATION'; body: string }): Promise<SharedRequestDto>;
+  };
 }
 
 /** Team seats (owner only; WA-SEATS-1). `assign` rejects with an ApiError `seat_limit` (status 403) when the package has no seat left, and 503 when the team cannot be read. */
@@ -52,6 +80,29 @@ export interface NumbersApi {
   launch?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<{ code: string; event: ConnectNumberRequest['event']; wabaId: string; phoneNumberId: string; businessId?: string }>;
 }
 
+/** The merchant's saved segments (A30). Owner only for every write; the server answers 403 to staff and 404 for an id from another workspace. */
+export interface SegmentsApi {
+  list(): Promise<SegmentDto[]>;
+  create(name: string, criteria: SegmentCriteria): Promise<SegmentDto>;
+  update(id: number, patch: { name?: string; criteria?: SegmentCriteria }): Promise<SegmentDto>;
+  remove(id: number): Promise<void>;
+  preview(criteria: SegmentCriteria): Promise<SegmentPreviewDto>;
+}
+
+/** Inbox helpers on a conversation (A25-A27): the team's quick replies, internal notes and tags. Owner and staff may use all of them. */
+export interface InboxToolsApi {
+  quickReplies: {
+    list(): Promise<QuickReplyDto[]>;
+    create(text: string): Promise<QuickReplyDto>;
+    update(id: number, text: string): Promise<QuickReplyDto>;
+    remove(id: number): Promise<void>;
+  };
+  notes(conversationId: number): Promise<NoteDto[]>;
+  addNote(conversationId: number, text: string): Promise<NoteDto>;
+  /** Replaces the whole tag list; the server trims, lower-cases and de-duplicates and answers with the conversation. */
+  setTags(conversationId: number, tags: string[]): Promise<ConversationDto>;
+}
+
 export type ContactsQuery = { q?: string; tag?: string; optedOut?: boolean; cursor?: string | null };
 
 export interface ContactsApi {
@@ -64,11 +115,16 @@ export interface ContactsApi {
   renameContact(waId: string, name: string | null): Promise<{ waId: string; name: string | null; optedOut: boolean }>;
   /** B5: all of one contact's data (every page of messages joined). Owner only. */
   exportContact(waId: string): Promise<unknown>;
+  /** Data-subject erasure of one contact (owner only). Cannot be undone; financial records stay. */
+  eraseContact(waId: string): Promise<void>;
   /** M-175: the same person on a new number. Owner only; cannot be undone. */
   mergeContacts(fromWaId: string, intoWaId: string): Promise<void>;
   /** B4: how long messages are kept (owner only). `days: null` = the platform default. */
   retention(): Promise<RetentionDto>;
   setRetention(days: number | null): Promise<RetentionDto>;
+  /** A29: replaces the contact's tags (the server lower-cases and de-duplicates). */
+  setContactTags(waId: string, tags: string[]): Promise<{ tags: string[] }>;
+  segments: SegmentsApi;
 }
 
 /** Where the inbox reads from: the live API (contract.ts) or labelled sample data. */
@@ -79,6 +135,12 @@ export interface InboxSource {
   currentUserId: string;
   /** The store this session is for (the upgrade card builds the Store billing link from it). */
   storeId?: string;
+  /** GET /me: this store has NO Chat workspace (Chat was never switched on for it). The app shows its own "not enabled" state and never loads lists (they would all 404). */
+  workspaceMissing?: boolean;
+  /** GET /me: the stores this person can open that have a Chat workspace (for the store picker). Undefined = the server did not say (no picker). */
+  stores?: { id: string; name: string; role: 'owner' | 'staff' }[];
+  /** Opens Chat on another store (a full reload on that store). Absent in sample data. */
+  switchStore?(storeId: string): void;
   /** The signed-in user's role in this store (GET /me); `staff` hides spending actions. */
   role: Role;
   /** Display names of staff for assignee labels. */
@@ -93,7 +155,7 @@ export interface InboxSource {
   /** Confirm or refuse a pending COD order (the store stays the writer of order state). */
   recordCodOutcome(waId: string, orderNumber: string, outcome: 'confirmed' | 'refused'): Promise<void>;
   /** What this source can do today (e.g. COD outcomes need the store route, Phase 4). */
-  capabilities: { codOutcome: boolean; numbers?: boolean };
+  capabilities: { codOutcome: boolean; numbers?: boolean; assistant?: boolean };
   /** A displayable URL for a protected media path (fetch with the token → blob URL). */
   mediaUrl?(path: string): Promise<string>;
   /** Full text of a message longer than 1 KB. */
@@ -114,16 +176,40 @@ export interface InboxSource {
     resync(): Promise<{ started: boolean }>;
     /** Turns the shop button and the cart on the number on or off (owner). Rejects with `detail` = missing_permission | catalog_not_set | meta_error. */
     setCommerce(v: { catalogVisible: boolean; cartEnabled: boolean }): Promise<{ catalogVisible: boolean; cartEnabled: boolean }>;
+    /** Links a catalogue the merchant already has on Meta (owner). Rejects with `detail` = catalog_not_linked (not on this WhatsApp account) | meta_unavailable (503). */
+    linkExisting(catalogId: string): Promise<void>;
+  };
+  /** The agent's connectors to the owner's own systems (owner only; the server refuses staff). A secret goes in on `save` and never comes back: the list carries `hasSecret` only. `save` rejects with `detail` = invalid_url | secret_required | secrets_unavailable | kind_mismatch | too_many_connectors; `test` answers `ok:false` with a code. */
+  connectors?: {
+    list(): Promise<ConnectorDto[]>;
+    save(id: string, body: ConnectorPut): Promise<ConnectorDto>;
+    remove(id: string): Promise<void>;
+    test(id: string): Promise<{ ok: boolean; error?: string; detail?: string }>;
+  };
+  /**
+   * The owner switches (ordering bot, order confirmations, store-login codes over WhatsApp) and the sending-speed report. Turning confirmations or codes ON takes
+   * `preview` first, then `save` with its single-use token (`save` rejects with `detail` = confirm_required | confirm_invalid | confirm_expired). `throttle` is null when no number is connected.
+   */
+  switches?: {
+    get(): Promise<BotSwitchesDto>;
+    preview(change: Partial<BotSwitchesDto>): Promise<{ confirmToken: string }>;
+    save(change: Partial<BotSwitchesDto>, confirmToken?: string): Promise<BotSwitchesDto>;
+    throttle(): Promise<ThrottleReportDto | null>;
   };
   /** Bot results: customers per step over the last 7, 30 or 90 days (Cairo calendar days, today included). Counts only; owner and staff read. */
   botFunnel?(days: 7 | 30 | 90): Promise<BotFunnelDto>;
   /** Assign a conversation (null = unassign). */
   assign?(conversationId: number, userId: string | null): Promise<void>;
   campaigns?: CampaignsApi;
+  /** Create, submit, edit and delete templates; absent in builds that cannot manage them. */
+  templatesApi?: TemplatesApi;
   numbers?: NumbersApi;
+  /** The assistant side panel (answer-only for now); offered only while `capabilities.assistant` is true (the server's own switch for this store). */
+  assistant?: AssistantApi;
   /** The team and its seats; offered to the owner only. */
   team?: TeamApi;
   contacts?: ContactsApi;
+  inboxTools?: InboxToolsApi;
   /** Wallet, statement, top-ups and refunds (Phase 7). */
   wallet?: WalletApi;
   /** Super-admin console; only offered when `role` is super_admin. */

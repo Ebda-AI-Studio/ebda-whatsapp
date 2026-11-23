@@ -1,0 +1,50 @@
+{
+  "id": "inbox.notes",
+  "status": "live",
+  "area": "inbox",
+  "version": 2,
+  "versionDate": "2026-11-14",
+  "titleAr": "ملاحظات داخلية على المحادثة",
+  "titleEn": "Internal notes on a conversation",
+  "screens": [
+    "ChatPane notes and tags panel",
+    "view:ChatPane",
+    "/inbox"
+  ],
+  "api": [
+    "GET /stores/:storeId/conversations/:id/notes",
+    "POST /stores/:storeId/conversations/:id/notes"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner",
+    "staff"
+  ],
+  "policy": "preview",
+  "undo": {
+    "class": "irreversible"
+  },
+  "helpArticle": "whatsapp/notes-tags-and-quick-replies",
+  "questions": {
+    "ar": [
+      "ينفع اكتب ملاحظة عن العميل؟",
+      "عايز ملاحظة محدش يشوفها غير الفريق",
+      "ازاي ملاحظات داخلية على المحادثة؟"
+    ],
+    "en": [
+      "Can I leave an internal note on a chat?"
+    ]
+  },
+  "steps": [
+    "Open a chat, press Notes and tags in the chat header",
+    "Write the note under Internal notes, press Add the note",
+    "The team sees every note on the chat; the customer never does"
+  ],
+  "edgeCases": [
+    "Notes are included in contact export and erasure",
+    "A note cannot be edited or deleted (irreversible)",
+    "A conversation id from another workspace answers 404"
+  ],
+  "gaps": []
+}

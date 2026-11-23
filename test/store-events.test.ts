@@ -3,12 +3,71 @@ import { describe, expect, it, vi } from 'vitest';
 import { FakeStore } from './helpers/fake-store';
 import { BUYER_KEY_1, PHONE_1, WA_1, deliver, flush, iso, sentJobs, storeEvent, storeWorkspace, useStoreLink } from './helpers/store-link';
 import { exec, openChat, rows, workspace } from './helpers/workspace';
+import { EBDA_ORDERING_COPY } from '../src/addons/ebda/store-copy';
+import { codConfirmationV2Seed } from '../src/addons/ebda/templates';
 
 const W = (n: number) => `00000000-0000-4000-8000-0000000041${String(n).padStart(2, '0')}`;
 const link = useStoreLink();
 const cod = (ws: string, extra: Record<string, unknown> = {}, id?: string) =>
   storeEvent(ws, 'order.cod_confirmation_requested', { orderId: 'o1', buyerKey: BUYER_KEY_1, phoneE164: PHONE_1, locale: 'ar', deadlineAt: iso(Date.now() + 86_400_000), orderNumber: '1001', totalMinor: 75_050, currency: 'EGP', ...extra }, id ? { id } : {});
 const tags = (ws: string) => rows<{ tag: string }>(ws, 'SELECT tag FROM conversation_tags');
+
+const ORIGIN = 'https://souq.ebda.app';
+const V2 = { storeName: 'سوق النور', shippingAddressLine: '9 شارع النصر، المعادي، القاهرة', itemCount: 3, orderUrlSuffix: 'o/tok123', storefrontOrigin: ORIGIN };
+const approveV2 = (ws: string, origin = ORIGIN) => {
+  const t = codConfirmationV2Seed(origin);
+  return exec(ws, "INSERT OR REPLACE INTO templates (name, language, category, status, components, updated_at) VALUES (?, ?, ?, 'APPROVED', ?, 1)", t.name, t.language, t.category, JSON.stringify(t.components));
+};
+
+describe('COD confirmation v2 (header, address, items, order link)', () => {
+  it('is built with header, body and URL-button parameters and the quick replies after the URL button', async () => {
+    const ws = W(70);
+    await storeWorkspace(ws);
+    await approveV2(ws);
+    await deliver([cod(ws, V2)]);
+    const [job] = await flush(ws);
+    expect(job).toMatchObject({ kind: 'template', template: { name: 'cod_confirmation_v2', language: 'ar' }, idempotencyKey: 'cod:o1' });
+    expect(job!.template!.components).toEqual([
+      { type: 'header', parameters: [{ type: 'text', text: 'سوق النور' }] },
+      { type: 'body', parameters: ['عميلنا العزيز', '1001', V2.shippingAddressLine, '3', '750.50'].map((text) => ({ type: 'text', text })) },
+      { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'tok123' }] },
+      { type: 'button', sub_type: 'quick_reply', index: '1', parameters: [{ type: 'payload', payload: 'cod:y:o1' }] },
+      { type: 'button', sub_type: 'quick_reply', index: '2', parameters: [{ type: 'payload', payload: 'cod:n:o1' }] },
+    ]);
+    expect(await tags(ws)).toEqual([{ tag: 'cod_pending' }]);
+  });
+
+  it('falls back to the plain template when v2 is not approved for the workspace', async () => {
+    const ws = W(71);
+    await storeWorkspace(ws);
+    const [job] = (await deliver([cod(ws, V2)]), await flush(ws));
+    expect(job!.template!.name).toBe('cod_confirmation');
+  });
+
+  it('falls back when a v2 field is missing', async () => {
+    const ws = W(72);
+    await storeWorkspace(ws);
+    await approveV2(ws);
+    const { shippingAddressLine: _drop, ...partial } = V2;
+    await deliver([cod(ws, partial)]);
+    const [job] = await flush(ws);
+    expect(job!.template!.name).toBe('cod_confirmation');
+  });
+
+  it('falls back when the order link is not under the approved URL base (another storefront domain)', async () => {
+    const ws = W(73);
+    await storeWorkspace(ws);
+    await approveV2(ws, 'https://other.example');
+    await deliver([cod(ws, V2)]);
+    const [job] = await flush(ws);
+    expect(job!.template!.name).toBe('cod_confirmation');
+  });
+
+  it('keeps the quick-reply titles the reply matching knows', () => {
+    const titles = codConfirmationV2Seed(ORIGIN).components.flatMap((c) => (c.type === 'BUTTONS' ? c.buttons ?? [] : [])).filter((b) => b.type === 'QUICK_REPLY').map((b) => b.text);
+    expect(titles).toEqual([...EBDA_ORDERING_COPY.codConfirmTitles, ...EBDA_ORDERING_COPY.codRefuseTitles]);
+  });
+});
 
 describe('COD confirmation request (Review Focus 1)', () => {
   it('sends the template with Confirm/Refuse payloads, tags the chat and schedules the no-reply check', async () => {
@@ -281,8 +340,8 @@ describe('queue consumer', () => {
     expect(warn).toHaveBeenCalledTimes(3);
   });
 
-  it('retries an event for a workspace that is not registered (yet)', async () => {
-    const res = await deliver([storeEvent(W(31), 'store.linked', { ownerUserId: 'u' })]);
+  it('retries an event for a workspace that is not registered (yet): a non-link event is retried a few deliveries, a link whose owner the Store does not confirm is refused (CHAT-ENABLE-1, test/workspace-enable.test.ts)', async () => {
+    const res = await deliver([storeEvent(W(31), 'store.plan_changed', { planCode: 'p', includesWhatsApp: true, ownerUserId: 'u', effectiveAt: iso() })]);
     expect(res.retryMessages?.map((m: { msgId: string }) => m.msgId)).toEqual(['e0']);
   });
 
