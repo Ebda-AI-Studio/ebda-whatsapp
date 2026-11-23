@@ -42,9 +42,9 @@ export async function latestRequest(env: Env, workspaceId: string): Promise<Refu
   return env.DB.prepare(`SELECT ${COLS} FROM yearly_refund_requests WHERE workspace_id = ? ORDER BY (state = 'pending') DESC, created_at DESC LIMIT 1`).bind(workspaceId).first<RefundRequestRow>();
 }
 
-export type CreateRequest = { ok: true; request: RefundRequestRow } | { ok: false; reason: 'request_pending' | 'nothing_to_refund' | 'quote_unavailable' | Exclude<Consumed, 'ok'> };
+export type CreateRequest = { ok: true; request: RefundRequestRow } | { ok: false; reason: 'request_pending' | 'nothing_to_refund' | 'quote_unavailable' | 'offboarding_in_progress' | Exclude<Consumed, 'ok'> };
 
-export async function createYearlyRefundRequest(env: Env, a: { workspaceId: string; userId: string; confirmId: string; token: string }, now = Date.now()): Promise<CreateRequest> {
+export async function createYearlyRefundRequest(env: Env, a: { workspaceId: string; userId: string; confirmId: string; token: string }, now = Date.now(), hooks: { beforeInsert?: () => Promise<void> } = {}): Promise<CreateRequest> {
   if (await pendingRequest(env, a.workspaceId)) return { ok: false, reason: 'request_pending' }; // checked before the token is spent
   const m = await merchantQuote(env, a.workspaceId, now);
   if (!('quote' in m)) return { ok: false, reason: 'quote_unavailable' };
@@ -53,9 +53,14 @@ export async function createYearlyRefundRequest(env: Env, a: { workspaceId: stri
   const c = await consumeConfirmation(env, { workspaceId: a.workspaceId, userId: a.userId, action: 'yearly_refund_request', confirmId: a.confirmId, token: a.token, payload: quotePayload(q) }, now);
   if (c !== 'ok') return { ok: false, reason: c };
   // The confirmation id is the primary key: a replay cannot insert a second row; the unique pending index stops two different ids racing.
-  const r = await env.DB.prepare("INSERT INTO yearly_refund_requests (id, workspace_id, order_id, unused_months, gross_minor, debt_settled_minor, refund_minor, state, requested_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT DO NOTHING")
-    .bind(a.confirmId, a.workspaceId, q.orderId, q.unusedMonths, q.grossMinor, q.debtSettledMinor, q.refundMinor, a.userId, now).run();
-  if (r.meta.changes !== 1) return { ok: false, reason: 'request_pending' };
+  await hooks.beforeInsert?.();
+  // The INSERT itself refuses once the wipe has started (OFFBOARD-FREEZE-1 amendment): a state that flips to running between any earlier check and here writes no row.
+  const r = await env.DB.prepare("INSERT INTO yearly_refund_requests (id, workspace_id, order_id, unused_months, gross_minor, debt_settled_minor, refund_minor, state, requested_by, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ? WHERE NOT EXISTS (SELECT 1 FROM offboarding WHERE workspace_id = ? AND state IN ('running', 'done')) ON CONFLICT DO NOTHING")
+    .bind(a.confirmId, a.workspaceId, q.orderId, q.unusedMonths, q.grossMinor, q.debtSettledMinor, q.refundMinor, a.userId, now, a.workspaceId).run();
+  if (r.meta.changes < 1) {
+    const wiping = await env.DB.prepare("SELECT 1 FROM offboarding WHERE workspace_id = ? AND state IN ('running', 'done')").bind(a.workspaceId).first();
+    return { ok: false, reason: wiping ? 'offboarding_in_progress' : 'request_pending' };
+  }
   return { ok: true, request: (await env.DB.prepare(`SELECT ${COLS} FROM yearly_refund_requests WHERE id = ?`).bind(a.confirmId).first<RefundRequestRow>())! };
 }
 

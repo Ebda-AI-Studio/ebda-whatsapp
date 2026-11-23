@@ -29,7 +29,7 @@ export function NumberFundingAction({ t, api, phoneNumberId, onDone }: { t: Stri
   const msgRef = useFocusOn<HTMLParagraphElement>(msg);
   const preview = async () => {
     setBusy(true); setMsg(null);
-    try { setConfirm((await api.previewNumberFunding(phoneNumberId)).confirm); } catch (err) { setMsg({ kind: 'alert', text: err instanceof ApiError && err.detail === 'operator_funded' ? t.wFundOperator : t.opFailed }); } finally { setBusy(false); }
+    try { setConfirm((await api.previewNumberFunding(phoneNumberId)).confirm); } catch (err) { setMsg({ kind: 'alert', text: err instanceof ApiError && err.detail === 'operator_funded' ? t.wFundOperator : confirmMessage(t, err) }); } finally { setBusy(false); }
   };
   const apply = async () => {
     if (!confirm || flight.current) return;
@@ -76,7 +76,7 @@ export function YearlyRefundCard({ t, lang, api }: Props) {
   );
   const ask = async () => {
     setBusy(true); setMsg(null);
-    try { setPreview(await api.previewYearlyRefund()); } catch (err) { setMsg({ kind: 'alert', text: err instanceof ApiError && err.detail === 'nothing_to_refund' ? t.wYrNothing : t.opFailed }); } finally { setBusy(false); }
+    try { setPreview(await api.previewYearlyRefund()); } catch (err) { setMsg({ kind: 'alert', text: err instanceof ApiError && err.detail === 'nothing_to_refund' ? t.wYrNothing : confirmMessage(t, err) }); } finally { setBusy(false); }
   };
   const send = async () => {
     if (!preview || flight.current) return;

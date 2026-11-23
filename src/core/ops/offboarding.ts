@@ -428,6 +428,8 @@ export async function runOffboarding(env: Env, ws: string, now = Date.now(), hoo
     if (step !== 'suspend' && (await needsApproval(env, live))) return hold('second_approval_required');
     // The point of no return: the balance is read again right before the wipe (a credit may have landed since the first check).
     if (step === 'wipe_do') {
+      const open = await moneyHold(env, ws); // an open refund request (or any money row) that appeared since the start check blocks the wipe
+      if (open) return hold(open);
       const grew = await balanceHold(env, row, now);
       if (grew) return hold(grew);
     }
