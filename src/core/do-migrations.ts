@@ -620,7 +620,7 @@ export const DO_MIGRATIONS: readonly string[] = [
   // ON for one created after it. The marker lives in workspace_meta, a table that is NOT in BACKUP_TABLES (agent_state is, and a restore needs every backed-up table empty,
   // so migrate() must never write into one). migrate() inserts the marker only when no migration had ever run (a brand-new workspace); no row = OFF.
   `CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
-  // v48 (capability templates.quality-rating): Meta's quality score of a template (GREEN / YELLOW / RED / UNKNOWN) from the message_template_quality_update webhook; null = Meta never sent one.
+  // v50 once #136 (v48) and #168 (v49) are in (merge order #136, #168, #169, #170, #171; the version is the array position, so this stays the LAST entry) (capability templates.quality-rating): Meta's quality score of a template (GREEN / YELLOW / RED / UNKNOWN) from the message_template_quality_update webhook; null = Meta never sent one.
   `ALTER TABLE templates ADD COLUMN quality TEXT;`,
 ];
 
