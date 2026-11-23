@@ -10,6 +10,7 @@
   "api": [
     "GET /operator/assistant",
     "PUT /operator/assistant/flags",
+    "GET /operator/workspaces/:workspaceId/assistant",
     "PUT /operator/workspaces/:workspaceId/assistant"
   ],
   "mcpTool": null,
@@ -40,12 +41,10 @@
     ]
   },
   "steps": [
-    "Operator API: set the platform kill switches and a store's assistant mode"
+    "Operator screen (Operations > Assistant) or API: set the platform kill switches and a store's assistant mode"
   ],
   "edgeCases": [
     "A merchant can never raise the mode above the platform cap"
   ],
-  "gaps": [
-    "No operator screen yet: set through the API"
-  ]
+  "gaps": []
 }

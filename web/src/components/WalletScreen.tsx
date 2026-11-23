@@ -193,8 +193,16 @@ function TopupCard({ t, lang, api, wallet, pending, note, go, now, onStarted, ca
     return <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2><p className="muted">{t.wTopupOff}</p></section>;
   }
   // No card provider (Kashier not configured): the card form would only answer 503. InstaPay is the way to top up (Ruling WA-INSTAPAY-LAUNCH-1).
+  // The copy points to the InstaPay card only when that card can be shown (the server says so); otherwise it says plainly that top-ups are off.
   if (wallet.cardCheckout === false) {
-    return <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2><p className="muted">{t.wTopupViaInstapay}</p></section>;
+    if (wallet.instapayAvailable === false) {
+      return <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2><p className="muted">{t.wTopupOff}</p></section>;
+    }
+    return (
+      <section className="wallet-card" aria-labelledby="w-topup-title"><h2 id="w-topup-title">{t.wTopupTitle}</h2>
+        <p className="muted">{t.wTopupViaInstapay} <a href="#w-instapay" onClick={(e) => { e.preventDefault(); const h = document.getElementById('w-ip-title'); h?.scrollIntoView?.({ block: 'start' }); h?.focus(); }}>{t.wTopupInstapayLink}</a></p>
+      </section>
+    );
   }
 
   const start = async (e: FormEvent) => {
@@ -506,9 +514,10 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
   useEffect(load, [load]);
   useEffect(() => { api.packages().then((p) => { setPackages(p); setPackageId((cur) => cur || p[0]?.id || ''); }, () => setPackages([])); }, [api]);
 
-  if (view === 'loading' || view === 'off') return null;
-  if (view === 'error') return <section className="wallet-card" aria-labelledby="w-ip-title"><h2 id="w-ip-title">{t.wIpTitle}</h2><p role="alert" className="error-text">{t.wIpError}</p></section>;
-  if (!view.payee) return <section className="wallet-card" aria-labelledby="w-ip-title"><h2 id="w-ip-title">{t.wIpTitle}</h2><p className="muted">{t.wIpUnavailable}</p></section>;
+  if (view === 'off') return null;
+  if (view === 'loading') return <section className="wallet-card" id="w-instapay" aria-labelledby="w-ip-title"><h2 id="w-ip-title" tabIndex={-1}>{t.wIpTitle}</h2><Skeleton t={t} rows={2} kind="package" /></section>;
+  if (view === 'error') return <section className="wallet-card" id="w-instapay" aria-labelledby="w-ip-title"><h2 id="w-ip-title" tabIndex={-1}>{t.wIpTitle}</h2><p role="alert" className="error-text">{t.wIpError}</p></section>;
+  if (!view.payee) return <section className="wallet-card" id="w-instapay" aria-labelledby="w-ip-title"><h2 id="w-ip-title" tabIndex={-1}>{t.wIpTitle}</h2><p className="muted">{t.wIpUnavailable}</p></section>;
 
   const start = async (e: FormEvent) => {
     e.preventDefault();
@@ -541,8 +550,8 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
   const safeQr = (() => { try { return payee.qrUrl && new URL(payee.qrUrl).protocol === 'https:' ? payee.qrUrl : null; } catch { return null; } })();
 
   return (
-    <section className="wallet-card" aria-labelledby="w-ip-title">
-      <h2 id="w-ip-title">{t.wIpTitle}</h2>
+    <section className="wallet-card" id="w-instapay" aria-labelledby="w-ip-title">
+      <h2 id="w-ip-title" tabIndex={-1}>{t.wIpTitle}</h2>
       <p className="muted">{t.wIpIntro}</p>
       {!created && (
         <form className="wallet-form" onSubmit={(e) => void start(e)} noValidate>
@@ -564,7 +573,7 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
         <>
           <div className="wallet-summary">
             <p><b>{t.wIpPayTo}</b> <bdi dir="ltr">{payee.handle}</bdi> • {t.wIpPayee(payee.name)}</p>
-            {safeQr && <img src={safeQr} alt={t.wIpQrAlt} width={160} height={160} loading="lazy" />}
+            {safeQr && <PayeeQr src={safeQr} alt={t.wIpQrAlt} />}
             <p>{t.wIpExact}: <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(created.amountMinor)}</bdi></b></p>
             <p>{t.wIpReference}: <b><bdi dir="ltr">{created.reference}</bdi></b></p>
             <p className="muted">{t.wIpExpires(dateTime(created.expiresAt, lang))}</p>
@@ -603,6 +612,14 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
       )}
     </section>
   );
+}
+
+/** The payee QR: if the image fails to load (missing object, blocked by CSP), the box disappears; the handle above it stays the way to pay. */
+function PayeeQr({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (failed) return null;
+  return <img src={src} alt={alt} width={160} height={160} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 /** The weekly usage digest (T13): counts and amounts only, in the app; the owner can switch it off. */

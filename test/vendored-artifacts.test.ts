@@ -12,9 +12,8 @@ const PINS: Record<string, string> = {
   // Chat-agent context cases (Store rulings CHAT-AGENT-1 + CHAT-AGENT-6, ebda-store pr 757; v2 adds `degraded` to the search answer): its own file, so the bridge-v1.json pin above moves only with pr 67.
   'vectors/bridge-chat-context-v2.json': '6b960d598bfee5dabbbf154f8972ca46446c89a4158d8b49c98c916768b87c70',
   'vectors/buyer-key-probe.json': 'a38b2f9b58b3eb5cdbd0df21eecea0098109583a040bcbe8a90ca76826605cad',
-  // The Store's studio-pages renderer + brand (packages/shared/src/{studio-pages,brand}/index.ts @ Store 87bf7f3c5, feat/studio-nav-footer-sites): the 404 page of Ruling WA-404-1. Re-vendor both together.
+  // The Store's studio-pages renderer + brand (packages/shared/src/{studio-pages,brand}/index.ts @ Store 87bf7f3c5, feat/studio-nav-footer-sites): the BRAND data of the 404 page of Ruling WA-404-1 (the page shell itself is the foundation's studio-pages, F8).
   'vendor/studio/brand/index.ts': '62a9eefb180a937a9df019d8991d50365f03cd8dc940d4868d7c994bc6373b9a',
-  'vendor/studio/studio-pages/index.ts': 'cf7a071da43aafed7abaadaf0b167294f9cab56f81e2f7343bebcc50eddad0c5',
 };
 
 it('every artifact shared with the Store is byte-identical to the pinned Store copy', () => {

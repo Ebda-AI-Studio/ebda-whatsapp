@@ -1,3 +1,4 @@
+import headers from '../brands/ebda/public/_headers?raw';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -80,7 +81,7 @@ describe('wallet: balance and who pays Meta', () => {
 
   it('shows the AI credits', async () => {
     await openWallet();
-    expect(screen.getByText(/٤٨٠|480/)).toBeTruthy();
+    expect(within(screen.getByRole('main')).getByText(/٤٨٠|480/)).toBeTruthy();
   });
 });
 
@@ -221,6 +222,21 @@ describe('wallet: no card provider (Ruling WA-INSTAPAY-LAUNCH-1)', () => {
     expect(screen.queryByRole('region', { name: t.wPackagesTitle })).toBeNull();
     expect(screen.queryByRole('button', { name: t.wPackageBuy })).toBeNull();
     expect(await screen.findByRole('region', { name: t.wIpTitle })).toBeTruthy();
+  });
+  it('the InstaPay pointer is a link that jumps to the InstaPay card, which is on screen', async () => {
+    await openWallet(withWallet({ cardCheckout: false, instapayAvailable: true }));
+    const topup = screen.getByRole('region', { name: t.wTopupTitle });
+    const link = within(topup).getByRole('link', { name: t.wTopupInstapayLink });
+    const ip = await screen.findByRole('region', { name: t.wIpTitle });
+    fireEvent.click(link);
+    expect(document.activeElement).toBe(within(ip).getByRole('heading', { name: t.wIpTitle }));
+  });
+  it('InstaPay not available on the server: the copy does not point to a card that is not there', async () => {
+    await openWallet(withWallet({ cardCheckout: false, instapayAvailable: false }));
+    const topup = screen.getByRole('region', { name: t.wTopupTitle });
+    expect(within(topup).getByText(t.wTopupOff)).toBeTruthy();
+    expect(within(topup).queryByText(t.wTopupViaInstapay)).toBeNull();
+    expect(within(topup).queryByRole('link')).toBeNull();
   });
   it('cardCheckout true or absent: the card top-up and the card package list are shown as before', async () => {
     await openWallet(withWallet({ cardCheckout: true }));
@@ -491,6 +507,24 @@ describe('wallet: pay with InstaPay', () => {
     expect(within(card).getAllByText(egp(25000)).length).toBeGreaterThanOrEqual(2); // the package option and the exact amount: the server's price, the client never sent one
     expect(within(card).getByText(t.wIpReference, { exact: false })).toBeTruthy();
     expect(within(card).getByLabelText(t.wIpUpload)).toBeTruthy();
+  });
+
+  it('hides the QR box when the image fails to load, keeping the handle visible', async () => {
+    const source = createSampleSource();
+    const realCreate = source.wallet!.createInstapay;
+    source.wallet!.createInstapay = async (input) => { const r = await realCreate(input); return { ...r, payee: { ...r.payee, qrUrl: 'https://media.ebda.app/platform/instapay-qr.jpg' } }; };
+    await openWallet(source);
+    const card = await screen.findByRole('region', { name: t.wIpTitle });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wIpCreate })));
+    const img = await within(card).findByAltText(t.wIpQrAlt);
+    await act(async () => fireEvent.error(img));
+    expect(within(card).queryByAltText(t.wIpQrAlt)).toBeNull();
+    expect(within(card).getByText(/sample@instapay/)).toBeTruthy();
+  });
+
+  it('the Ebda CSP lets the inbox load the QR from media.ebda.app', () => {
+    const csp = headers;
+    expect(csp.match(/img-src[^;]*/)![0]).toContain('https://media.ebda.app');
   });
 
   it('refuses a wrong type or an oversize file before anything is sent, and uploads a valid one', async () => {
