@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AuthVars } from '../core/identity/middleware';
 import type { ListMembersResponse } from '../core/api/contract';
-import { bridgeFor } from '../core/store-link';
+import { bridgeForWorkspace } from '../core/store-link';
 import type { StoreMember } from '../core/store-bridge';
 import type { Env } from '../env';
 
@@ -19,7 +19,7 @@ type Team = { ok: true; items: StoreMember[] } | { ok: false; status: 403 | 404 
 
 /** The live team, asked AS the owner (the Store re-checks that the asker owns the store). */
 async function team(c: { env: Env; get: (k: 'principal') => { userId: string } }, storeId: string): Promise<Team> {
-  const bridge = bridgeFor(c.env);
+  const bridge = bridgeForWorkspace(c.env, storeId);
   if (!bridge) return { ok: false, status: 404, body: { error: 'not_found', message: 'store_link_off' } };
   const r = await bridge.listStoreMembers(storeId, c.get('principal').userId);
   if (r.ok) return { ok: true, items: r.value.items };

@@ -1,0 +1,55 @@
+{
+  "id": "operator.standalone-workspaces",
+  "status": "live",
+  "area": "operator",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "مساحات العمل من غير متجر وأكواد الدعوة",
+  "titleEn": "Standalone workspaces list and creation invite codes",
+  "screens": [
+    "OperatorScreen (operator console)",
+    "view:OperatorScreen",
+    "/operator"
+  ],
+  "api": [
+    "GET /operator/workspaces",
+    "POST /operator/standalone-invites",
+    "GET /operator/standalone-invites",
+    "POST /operator/standalone-invites/:hash/revoke"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "super_admin"
+  ],
+  "policy": "forbidden",
+  "undo": {
+    "class": "reversible"
+  },
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "who may open a Chat workspace without a Store is platform-wide onboarding config (the flag, the invite codes)",
+    "validUnderRule": true
+  },
+  "helpArticle": null,
+  "questions": {
+    "ar": [
+      "ازاي افتح Chat من غير متجر؟",
+      "فين كود الدعوة بتاع Chat؟",
+      "عايز مساحة عمل Chat لعميل مالوش متجر"
+    ],
+    "en": [
+      "How do I get an Ebda Chat workspace without a store?",
+      "Where do I get an invite code?"
+    ]
+  },
+  "steps": [
+    "Super admin only: mint a single-use invite code (shown once), revoke it, and list standalone workspaces; suspend/offboard reuse the existing workspace routes"
+  ],
+  "edgeCases": [
+    "Assistant refuses and offers the merchant-facing alternative or a handoff to Ebda"
+  ],
+  "gaps": [
+    "operator replaces: none (onboarding is invitation-only while STANDALONE_WORKSPACES=invite)"
+  ]
+}

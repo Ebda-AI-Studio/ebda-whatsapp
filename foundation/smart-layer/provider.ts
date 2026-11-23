@@ -21,8 +21,14 @@ export interface LlmProvider {
 export type LlmErrorKind = 'timeout' | 'network' | 'rate_limited' | 'http' | 'bad_response' | 'unconfigured';
 /** Never carries a response body or prompt text: the message is a fixed phrase. */
 export class LlmError extends Error {
-  constructor(readonly kind: LlmErrorKind, readonly retryable: boolean, readonly status?: number) {
+  readonly kind: LlmErrorKind;
+  readonly retryable: boolean;
+  readonly status?: number;
+  constructor(kind: LlmErrorKind, retryable: boolean, status?: number) {
     super(`llm ${kind}${status ? ` ${status}` : ''}`);
+    this.kind = kind;
+    this.retryable = retryable;
+    this.status = status;
     this.name = 'LlmError';
   }
 }
@@ -91,7 +97,12 @@ export function readChatResult(raw: unknown): LlmResponse {
 export class WorkersAiProvider implements LlmProvider {
   readonly byoKey = false;
   /** `model` is a default; a request may carry its own (per-job routing). */
-  constructor(private readonly ai: AiBinding, private readonly model: string) {}
+  private readonly ai: AiBinding;
+  private readonly model: string;
+  constructor(ai: AiBinding, model: string) {
+    this.ai = ai;
+    this.model = model;
+  }
   async complete(req: LlmRequest): Promise<LlmResponse> {
     let raw: unknown;
     try {

@@ -128,7 +128,8 @@ describe('AssistantPanel', () => {
     mount(fakeApi({ turn: vi.fn(async () => reply({ status: 'off', segments: [] })) }), { onUnavailable: gone });
     await ask();
     await waitFor(() => expect(gone).toHaveBeenCalled());
-    expect(screen.getByText(t.assistantOff)).toBeTruthy();
+    // onUnavailable fires in the same tick as setOff(true), before React has rendered it: wait for the note instead of assuming it is already there.
+    expect(await screen.findByText(t.assistantOff)).toBeTruthy();
     expect((screen.getByLabelText(t.assistantPlaceholder) as HTMLTextAreaElement).disabled).toBe(true);
   });
 

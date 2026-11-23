@@ -6,6 +6,7 @@ import {
 } from '../../../src/core/api/contract';
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
+import { assistantFlagsDto, assistantModeDto } from './assistant-rollout';
 import type { InboxSource } from './source';
 
 export class ApiError extends Error {
@@ -360,6 +361,12 @@ export function createApiSource(o: Opts): LiveSource {
       submit: (input) => op('/shared-templates', z.object({ status: z.string() }).loose(), post(input)),
       requests: async () => (await op('/shared-template-requests', z.object({ items: z.array(sharedRequestDto.extend({ workspaceId: z.string() })) }))).items,
     },
+    assistantRollout: {
+      platform: () => op('/assistant', assistantFlagsDto),
+      setPlatform: (patch) => op('/assistant/flags', assistantFlagsDto, { method: 'PUT', body: JSON.stringify(patch) }),
+      workspaceMode: async (ws) => (await op(`/workspaces/${encodeURIComponent(ws)}/assistant`, assistantModeDto)).mode,
+      setWorkspaceMode: async (ws, mode) => (await op(`/workspaces/${encodeURIComponent(ws)}/assistant`, assistantModeDto, { method: 'PUT', body: JSON.stringify({ mode }) })).mode,
+    },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });
       if (!res.ok) throw new ApiError('not_found', res.status);
@@ -400,6 +407,16 @@ export function createApiSource(o: Opts): LiveSource {
     },
   };
   return source;
+}
+
+/** Store-independent super-admin check (GET /operator/me): 200 only for a super admin, 401/403 for everyone else. Any failure reads as "not an operator". */
+export async function isOperator(baseUrl: string, getToken: () => Promise<string>, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`${baseUrl}/api/v1/operator/me`, { headers: { authorization: `Bearer ${await getToken()}` } });
+    return res.ok && ((await res.json().catch(() => null)) as { superAdmin?: unknown } | null)?.superAdmin === true;
+  } catch {
+    return false;
+  }
 }
 
 export interface SocketLike {
