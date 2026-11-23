@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BRAND } from '@brand';
 import { CREATE_WS } from '../i18n-workspace';
-import type { CreateResult } from '../data/workspaces';
+import type { AcceptResult, CreateResult, MyInvitation } from '../data/workspaces';
 
 /**
  * A signed-in person with no Store and no workspace yet (CHAT-SA-5). One decision on the page: name the workspace (country is fixed, Egypt) and, while creation is
@@ -97,6 +97,62 @@ export function NoWorkspaceYet({ failed, onRetry, onSignOut }: { failed: boolean
           {onSignOut && <button type="button" className="btn quiet gate-lang" onClick={onSignOut}>{lang === 'ar' ? 'تسجيل الخروج' : 'Sign out'}</button>}
         </div>
       </div>
+    </main>
+  );
+}
+
+/**
+ * A person whose only way in is an invitation (CHAT-SA-4): one card per pending invitation, one action each. Shown before "create your workspace".
+ * A refused accept stays on the card with its reason (expired / no seat) and a withdrawn invitation drops out of the list.
+ */
+export function Invitations({ items, onAccept, onAccepted, onCreate, onSignOut }: {
+  items: MyInvitation[];
+  onAccept: (workspaceId: string) => Promise<AcceptResult>;
+  onAccepted: () => void;
+  onCreate?: () => void;
+  onSignOut?: () => void;
+}) {
+  const [lang, setLang] = useState<'ar' | 'en'>('ar');
+  const c = CREATE_WS[lang];
+  const [list, setList] = useState(items);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [problem, setProblem] = useState<{ id: string; error: keyof typeof c.invErrors } | null>(null);
+  const when = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { timeZone: 'Africa/Cairo', day: 'numeric', month: 'long', year: 'numeric' }); };
+  const accept = async (id: string) => {
+    if (busy) return;
+    setBusy(id); setProblem(null);
+    const r = await onAccept(id);
+    if (r.ok) { onAccepted(); return; }
+    setBusy(null);
+    setProblem({ id, error: r.error });
+    if (r.error === 'not_found') setList((xs) => xs.filter((x) => x.workspaceId !== id));
+  };
+  return (
+    <main className="gate" lang={lang} dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+      <section className="gate-card gate-form" aria-labelledby="inv-title">
+        <div className="gate-lockup">
+          <img src={BRAND.mark.src} alt="" width={BRAND.mark.width} height={BRAND.mark.height} />
+          <span className="gate-studio">{BRAND.gate?.studio[lang]}</span>
+        </div>
+        <hr className="gate-rule" />
+        <h1 id="inv-title">{c.invTitle}</h1>
+        <p className="gate-lede">{c.invIntro}</p>
+        {problem && <div role="alert" className="gate-error"><p>{c.invErrors[problem.error]}</p></div>}
+        <ul className="inv-list">
+          {list.map((i) => (
+            <li key={i.workspaceId} className="inv-card">
+              <b dir="auto">{i.workspaceName}</b>
+              <small>{c.invExpires}: {when(i.expiresAt)}</small>
+              <button type="button" className="btn gold" disabled={busy !== null} onClick={() => void accept(i.workspaceId)}>{busy === i.workspaceId ? c.invAccepting : c.invAccept}</button>
+            </li>
+          ))}
+        </ul>
+        <div className="gate-links">
+          {onCreate && <button type="button" className="btn quiet gate-lang" onClick={onCreate}>{c.invCreateInstead}</button>}
+          <button type="button" className="btn quiet gate-lang" lang={lang === 'ar' ? 'en' : 'ar'} onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}>{lang === 'ar' ? 'English' : 'العربية'}</button>
+          {onSignOut && <button type="button" className="btn quiet gate-lang" onClick={onSignOut}>{lang === 'ar' ? 'تسجيل الخروج' : 'Sign out'}</button>}
+        </div>
+      </section>
     </main>
   );
 }

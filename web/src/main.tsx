@@ -8,8 +8,8 @@ import { SignInError } from './components/SignInError';
 import { makeAccountsSignOut, makeSignOut } from './signout';
 import { SignedOutLocally } from './components/SignedOutLocally';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
-import { CreateWorkspace, NoWorkspaceYet } from './components/CreateWorkspace';
-import { createWorkspace, fetchMine, isStandaloneId } from './data/workspaces';
+import { CreateWorkspace, Invitations, NoWorkspaceYet } from './components/CreateWorkspace';
+import { acceptInvitation, createWorkspace, fetchInvitations, fetchMine, isStandaloneId } from './data/workspaces';
 import { connectRealtime, createApiSource } from './data/api';
 import { SIGNED_OUT, createTokenProvider, decodeStores, decodeSub } from './data/auth';
 import { SignInGate } from './components/SignInGate';
@@ -87,8 +87,12 @@ async function boot(): Promise<void> {
         try { mine = await fetchMine(location.origin, tokens.getToken); } catch { root.render(<NoWorkspaceYet failed onRetry={() => void showMine()} onSignOut={signOutOnly} />); return; }
         const first = mine.items[0];
         if (first) { openWorkspace(first.id); return; }
+        const create = () => root.render(<CreateWorkspace needsInvite={mine.needsInvite} onCreate={(input) => createWorkspace(location.origin, tokens.getToken, input)} onDone={openWorkspace} onSignOut={signOutOnly} />);
+        // A pending invitation comes first: that person has no workspace YET, but accepting is one press and creating a second one is not what they came for.
+        const invites = await fetchInvitations(location.origin, tokens.getToken).catch(() => []);
+        if (invites.length > 0) { root.render(<Invitations items={invites} onAccept={(id) => acceptInvitation(location.origin, tokens.getToken, id)} onAccepted={() => void showMine()} onCreate={mine.canCreate ? create : undefined} onSignOut={signOutOnly} />); return; }
         if (!mine.canCreate && !mine.needsInvite) { root.render(<NoWorkspaceYet failed={false} onRetry={() => void showMine()} onSignOut={signOutOnly} />); return; }
-        root.render(<CreateWorkspace needsInvite={mine.needsInvite} onCreate={(input) => createWorkspace(location.origin, tokens.getToken, input)} onDone={openWorkspace} onSignOut={signOutOnly} />);
+        create();
       };
       await showMine();
       return;

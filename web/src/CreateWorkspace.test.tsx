@@ -111,3 +111,57 @@ describe('the workspace API client', () => {
     expect((init.headers as Record<string, string>).authorization).toBe('Bearer tok');
   });
 });
+
+import { Invitations } from './components/CreateWorkspace';
+import { acceptInvitation, fetchInvitations } from './data/workspaces';
+
+describe('the invitations screen', () => {
+  const items = [{ workspaceId: ID, workspaceName: 'مكتب النور', expiresAt: '2026-12-01T10:00:00.000Z' }, { workspaceId: 'sw_' + 'b'.repeat(26), workspaceName: 'مكتب الفجر', expiresAt: '2026-12-02T10:00:00.000Z' }];
+  const accept = ar.invAccept;
+
+  it('lists each invitation with its workspace name and expiry, Arabic RTL first, with no store wording', () => {
+    const { container } = render(<Invitations items={items} onAccept={vi.fn()} onAccepted={vi.fn()} />);
+    expect(document.querySelector('main')?.getAttribute('dir')).toBe('rtl');
+    expect(screen.getByText('مكتب النور')).toBeTruthy(); expect(screen.getByText('مكتب الفجر')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: accept })).toHaveLength(2);
+    expect(container.textContent).toContain(ar.invExpires);
+    expect(JSON.stringify([CREATE_WS.ar.invErrors, CREATE_WS.en.invErrors, CREATE_WS.ar.invTitle, CREATE_WS.en.invTitle])).not.toMatch(/متجر|store/i);
+  });
+
+  it('accepting calls the API for that workspace, then reloads the picker', async () => {
+    const onAccept = vi.fn(async () => ({ ok: true as const, workspaceId: ID })); const onAccepted = vi.fn();
+    render(<Invitations items={items} onAccept={onAccept} onAccepted={onAccepted} />);
+    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: accept })[0]!));
+    expect(onAccept).toHaveBeenCalledWith(ID); expect(onAccepted).toHaveBeenCalled();
+  });
+
+  it('404 says it expired and drops the card; 409 says no seat and keeps it', async () => {
+    const onAccept = vi.fn(async (id: string) => ({ ok: false as const, error: id === ID ? 'not_found' as const : 'seat_limit' as const }));
+    render(<Invitations items={items} onAccept={onAccept} onAccepted={vi.fn()} />);
+    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: accept })[0]!));
+    expect((await screen.findByRole('alert')).textContent).toBe(ar.invErrors.not_found);
+    expect(screen.queryByText('مكتب النور')).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: accept })));
+    expect((await screen.findByRole('alert')).textContent).toBe(ar.invErrors.seat_limit);
+    expect(screen.getByText('مكتب الفجر')).toBeTruthy();
+  });
+
+  it('offers creating a workspace only when the caller passes that option', () => {
+    const { rerender } = render(<Invitations items={items} onAccept={vi.fn()} onAccepted={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: ar.invCreateInstead })).toBeNull();
+    rerender(<Invitations items={items} onAccept={vi.fn()} onAccepted={vi.fn()} onCreate={vi.fn()} />);
+    expect(screen.getByRole('button', { name: ar.invCreateInstead })).toBeTruthy();
+  });
+
+  it('API client: lists, accepts, and maps 404 / 409 / other', async () => {
+    const t = async () => 't';
+    expect(await fetchInvitations('https://x', t, json(200, { items }))).toEqual(items);
+    await expect(fetchInvitations('https://x', t, json(503, {}))).rejects.toThrow();
+    const f = json(200, { workspaceId: ID, status: 'accepted' });
+    expect(await acceptInvitation('https://x', t, ID, f)).toEqual({ ok: true, workspaceId: ID });
+    expect((f as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBe(`https://x/api/v1/workspaces/invitations/${ID}/accept`);
+    expect(await acceptInvitation('https://x', t, ID, json(404, {}))).toEqual({ ok: false, error: 'not_found' });
+    expect(await acceptInvitation('https://x', t, ID, json(409, { error: 'seat_limit' }))).toEqual({ ok: false, error: 'seat_limit' });
+    expect(await acceptInvitation('https://x', t, ID, json(503, {}))).toEqual({ ok: false, error: 'failed' });
+  });
+});

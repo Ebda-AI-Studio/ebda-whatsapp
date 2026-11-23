@@ -47,3 +47,29 @@ export function markStandalone(source: InboxSource): void {
   source.standalone = true;
   delete source.catalog; delete source.proactiveRecs; delete source.team;
 }
+
+const invitationsResponse = z.object({ items: z.array(z.object({ workspaceId: z.string(), workspaceName: z.string(), expiresAt: z.string() })).max(20) });
+export type MyInvitation = z.infer<typeof invitationsResponse>['items'][number];
+
+/** GET /workspaces/invitations: pending staff invitations for this identity (CHAT-SA-4). Throws on any failure; the caller then treats it as none. */
+export async function fetchInvitations(baseUrl: string, getToken: () => Promise<string>, f: Fetch = fetch): Promise<MyInvitation[]> {
+  const res = await f(`${baseUrl}/api/v1/workspaces/invitations`, { headers: headers(await getToken()) });
+  if (!res.ok) throw new Error(`invitations_${res.status}`);
+  return invitationsResponse.parse(await res.json()).items;
+}
+
+export type AcceptResult = { ok: true; workspaceId: string } | { ok: false; error: 'not_found' | 'seat_limit' | 'failed' };
+
+/** POST /workspaces/invitations/:id/accept. 404 = expired, revoked, used or not yours; 409 = the workspace has no free seat. */
+export async function acceptInvitation(baseUrl: string, getToken: () => Promise<string>, workspaceId: string, f: Fetch = fetch): Promise<AcceptResult> {
+  let res: Response;
+  try {
+    res = await f(`${baseUrl}/api/v1/workspaces/invitations/${encodeURIComponent(workspaceId)}/accept`, { method: 'POST', headers: headers(await getToken()), body: '{}' });
+  } catch {
+    return { ok: false, error: 'failed' };
+  }
+  if (res.ok) return { ok: true, workspaceId };
+  if (res.status === 404) return { ok: false, error: 'not_found' };
+  if (res.status === 409) return { ok: false, error: 'seat_limit' };
+  return { ok: false, error: 'failed' };
+}

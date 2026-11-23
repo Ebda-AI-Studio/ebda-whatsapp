@@ -93,6 +93,13 @@ export const CREATE_WS = {
     },
     closedTitle: 'مفيش مساحة عمل على حسابك لسه',
     closedBody: 'عمل مساحات العمل الجديدة مقفول دلوقتي، ومفيش مساحة عمل مربوطة بالحساب ده. لو عندك كود دعوة أو محتاج مساعدة، كلّم فريق ابدأ ستوديو.',
+    invTitle: 'دعوات مستنياك', invIntro: 'اتدعيت تشتغل على مساحة عمل على ابدأ شات. اقبل الدعوة علشان تفتحها.',
+    invExpires: 'الدعوة بتنتهي', invAccept: 'اقبل الدعوة', invAccepting: 'بنقبل الدعوة…', invCreateInstead: 'أو اعمل مساحة عملك إنت',
+    invErrors: {
+      not_found: 'الدعوة دي خلصت أو اتلغت أو اتقبلت قبل كده. اطلب من صاحب مساحة العمل يبعتلك دعوة جديدة.',
+      seat_limit: 'مساحة العمل دي مفيهاش مقاعد فاضية دلوقتي. اطلب من صاحبها يفضّي مقعد، وبعدين اقبل الدعوة تاني.',
+      failed: 'مقدرناش نقبل الدعوة. جرّب تاني بعد شوية.',
+    },
     loadFailed: 'مقدرناش نفتح حسابك دلوقتي. جرّب تاني.', retry: 'جرّب تاني',
   },
   en: {
@@ -113,6 +120,13 @@ export const CREATE_WS = {
     },
     closedTitle: 'Your account has no workspace yet',
     closedBody: 'Creating new workspaces is closed right now, and no workspace is linked to this account. If you have an invite code or need help, talk to the Ebda AI Studio team.',
+    invTitle: 'Invitations waiting for you', invIntro: 'You were invited to work in a workspace on Ebda Chat. Accept the invitation to open it.',
+    invExpires: 'Invitation expires', invAccept: 'Accept the invitation', invAccepting: 'Accepting…', invCreateInstead: 'Or create your own workspace',
+    invErrors: {
+      not_found: 'This invitation has expired, been withdrawn or already been accepted. Ask the workspace owner to send a new one.',
+      seat_limit: 'This workspace has no free seat right now. Ask its owner to free one, then accept the invitation again.',
+      failed: 'We could not accept the invitation. Try again in a moment.',
+    },
     loadFailed: 'We could not open your account right now. Try again.', retry: 'Try again',
   },
 } as const;
