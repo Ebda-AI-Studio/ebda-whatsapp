@@ -8,6 +8,7 @@ import { chat, fund, jobOf, queueText, setupBilling } from './helpers/billing';
 import { deliver, iso, storeEvent } from './helpers/store-link';
 import { exec, own, rows, workspace } from './helpers/workspace';
 import { abuseSuspended } from '../src/core/ops/offboarding';
+import { mintStandaloneId } from '../src/core/workspace-kind';
 
 /**
  * STORE-STANDING-1 (ebda-store #839): a Store store that is suspended or deleted stops every Ebda Chat send that costs money (queued sends,
@@ -129,5 +130,147 @@ describe('Store hold vs offboarding (STORE-STANDING-1)', () => {
     await deliver([reactivated(ws, Date.now() + 1)]);
     expect(await d1(ws)).toEqual({ on_: 1, reason: 'abuse report 2026-11-15' });
     expect(await workspace(ws).suspended()).toBe(true);
+  });
+});
+
+/**
+ * STORE-STANDING-2: a linked workspace whose Store has been silent for 24 h stops spending, ONLY when STORE_STANDING_STALE_REFUSE is on (default off). The switch is the
+ * workspace's own `store.standing_strict` row (the DO copies the env var into it on every wake), so a test turns it on by writing that row.
+ */
+describe('STORE-STANDING-2: silence from the Store (default off)', () => {
+  const H = 3_600_000;
+  const set = (ws: string, key: string, value: string) => exec(ws, 'INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
+  const strictOn = (ws: string) => set(ws, 'store.standing_strict', '1');
+  const seen = (ws: string, ago: number) => set(ws, 'store.standing_at', String(Date.now() - ago));
+  const anchor = (ws: string, ago: number) => set(ws, 'store.standing_anchor', String(Date.now() - ago));
+
+  it('flag OFF: a standing 48 h old, or none for 48 h, changes nothing (today\'s behaviour)', async () => {
+    const ws = W(1180);
+    await setupBilling(ws);
+    await seen(ws, 48 * H);
+    expect(await workspace(ws).suspended()).toBe(false);
+    const w2 = W(1181);
+    await setupBilling(w2);
+    await anchor(w2, 48 * H);
+    expect(await workspace(w2).suspended()).toBe(false);
+  });
+
+  it('flag ON, fresh standing (under 24 h): spend allowed', async () => {
+    const ws = W(1182);
+    await setupBilling(ws);
+    await strictOn(ws);
+    await seen(ws, 23 * H);
+    expect(await workspace(ws).suspended()).toBe(false);
+  });
+
+  it('flag ON, stale standing (over 24 h): every send is refused workspace_suspended; the next standing event re-opens it', async () => {
+    const ws = W(1183);
+    await setupBilling(ws);
+    await fund(ws, 100_000);
+    const conv = await chat(ws, 'UTILITY');
+    const job = jobOf(await queueText(ws, conv));
+    await strictOn(ws);
+    await seen(ws, 25 * H);
+    expect(await workspace(ws).suspended()).toBe(true);
+    expect(await workspace(ws).claimSend(job)).toBe('dropped');
+    expect(await rows(ws, 'SELECT status, error_reason FROM messages WHERE idempotency_key = ?', job.idempotencyKey)).toEqual([{ status: 'failed', error_reason: 'workspace_suspended' }]);
+    // a heartbeat (reactivated repeated, even one older than the last applied) proves the Store is alive
+    expect((await deliver([storeEvent(ws, 'store.reactivated', { at: iso(Date.now() - 30 * H) }, { id: crypto.randomUUID() })])).explicitAcks).toEqual(['e0']);
+    expect(await workspace(ws).suspended()).toBe(false);
+    expect(await workspace(ws).claimSend(jobOf(await queueText(ws, conv, 'again')))).toBe('claimed');
+  });
+
+  it('flag ON, no standing ever: allowed inside 24 h of the link, refused after', async () => {
+    const inside = W(1184);
+    await setupBilling(inside);
+    await strictOn(inside);
+    await anchor(inside, 23 * H);
+    expect(await workspace(inside).suspended()).toBe(false);
+    const beyond = W(1185);
+    await setupBilling(beyond);
+    await strictOn(beyond);
+    await anchor(beyond, 25 * H);
+    expect(await workspace(beyond).suspended()).toBe(true);
+    expect(await workspace(beyond).lastStandingAt()).toBeNull();
+  });
+
+  it('flag ON: an unlinked workspace is exempt', async () => {
+    const ws = W(1186);
+    await setupBilling(ws);
+    await strictOn(ws);
+    await seen(ws, 72 * H);
+    await set(ws, 'linked', '0');
+    expect(await workspace(ws).suspended()).toBe(false);
+  });
+
+  it('flag ON: a Store workspace with NO linked row (legacy, predates the row) counts as linked and is gated when stale', async () => {
+    const ws = W(1190);
+    await setupBilling(ws);
+    await strictOn(ws);
+    await seen(ws, 72 * H);
+    expect(await rows(ws, "SELECT 1 FROM store_state WHERE key = 'linked'")).toEqual([]);
+    expect(await workspace(ws).suspended()).toBe(true);
+  });
+
+  it("flag ON: linked '0' is exempt, linked '1' + stale is refused", async () => {
+    const off = W(1191);
+    await setupBilling(off);
+    await strictOn(off); await set(off, 'linked', '0');
+    await seen(off, 72 * H);
+    expect(await workspace(off).suspended()).toBe(false);
+    const on = W(1192);
+    await setupBilling(on);
+    await strictOn(on); await set(on, 'linked', '1');
+    await seen(on, 72 * H);
+    expect(await workspace(on).suspended()).toBe(true);
+  });
+
+  it('flag ON: a standalone sw_ workspace is exempt IN THE GATE even with a hand-written strict row, a linked row and a stale anchor', async () => {
+    const ws = mintStandaloneId();
+    await setupBilling(ws); // the wake wrote the standalone marker
+    await strictOn(ws); await set(ws, 'linked', '1');
+    await anchor(ws, 72 * H); await seen(ws, 72 * H);
+    expect(await workspace(ws).suspended()).toBe(false);
+  });
+
+  it('flag ON in the env: a standalone sw_ workspace is never given the strict row or an anchor (the wake sync skips it), so it is never gated', async () => {
+    const flag = (env as unknown as { STORE_STANDING_STALE_REFUSE?: string });
+    const prev = flag.STORE_STANDING_STALE_REFUSE;
+    flag.STORE_STANDING_STALE_REFUSE = '1';
+    try {
+      const sw = mintStandaloneId();
+      await setupBilling(sw); // the first wake runs syncStandingPolicy with the switch on
+      expect(await rows(sw, "SELECT key FROM store_state WHERE key IN ('store.standing_strict', 'store.standing_anchor')")).toEqual([]);
+      expect(await workspace(sw).suspended()).toBe(false);
+      // control: a Store-id workspace that is explicitly linked DOES get the strict row + an anchor from the same sync
+      const st = W(1193);
+      await setupBilling(st);
+      await workspace(st).suspended(); // wake
+      expect((await rows(st, "SELECT key FROM store_state WHERE key IN ('store.standing_strict')")).length).toBe(1);
+    } finally { flag.STORE_STANDING_STALE_REFUSE = prev; }
+  });
+
+  it('every standing event, including a repeat, is recorded (the console reads it); a re-link restarts the window', async () => {
+    const ws = W(1187);
+    await setupBilling(ws);
+    await chat(ws, 'UTILITY');
+    expect(await workspace(ws).lastStandingAt()).toBeNull();
+    const before = Date.now();
+    await deliver([storeEvent(ws, 'store.reactivated', { at: iso(before) }, { id: crypto.randomUUID() })]);
+    const first = await workspace(ws).lastStandingAt();
+    expect(first).toBeGreaterThanOrEqual(before);
+    await seen(ws, 5 * H);
+    await deliver([storeEvent(ws, 'store.reactivated', { at: iso(before) }, { id: crypto.randomUUID() })]);
+    expect(await workspace(ws).lastStandingAt()).toBeGreaterThanOrEqual(before);
+    await deliver([storeEvent(ws, 'store.linked', { ownerUserId: 'u' }, { id: crypto.randomUUID() })]);
+    expect(await workspace(ws).lastStandingAt()).toBeNull();
+  });
+
+  it('the stale refusal does not touch the Store hold or the operator flag, and a real Store hold still refuses with the policy off', async () => {
+    const ws = W(1188);
+    await setupBilling(ws);
+    await deliver([suspended(ws)]);
+    expect(await workspace(ws).suspended()).toBe(true);
+    expect(await workspace(ws).storeHold()).toContain('store_suspended');
   });
 });

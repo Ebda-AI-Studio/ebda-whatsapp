@@ -29,6 +29,7 @@ const P0_ALERTS = new Set([
   'duplicate_success', 'package_amount_mismatch', 'topup_amount_mismatch', 'credit_pack_amount_mismatch', 'shared_sent_not_recorded', 'number_restricted',
 ]);
 const P1_ALERTS = new Set([
+  'store_standing_stale',
   'search_fold_rebuild_failed', // SEARCH_FOLD=v2 re-index threw on a workspace wake; rolled back, old index serving, retried next wake
   'proactive_recs_enqueue_failed', // a customer message failed to queue (CHAT-RECS-SWITCH-1); the order is marked failed:enqueue
   'agent_reply_blocked_rate', 'ai_cost_per_1k_over_threshold',

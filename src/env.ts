@@ -17,6 +17,8 @@ export type Env = {
   CI_OUTCOMES?: AnalyticsEngineDataset;
   /** Service Binding to the Store API Worker (RPC entrypoint WhatsAppBridge). Unbound = the Store link is off. */
   STORE_BRIDGE?: Fetcher;
+  /** STORE-STANDING-2: '1' = a linked workspace whose Store has been silent for 24 h stops spending. Unset / '0' = off (default). See docs/rulings/STORE-STANDING-2.md. */
+  STORE_STANDING_STALE_REFUSE?: string;
   /** Queue `ebda-store-events` (this service produces). Unbound = outcomes go over the bridge only. */
   STORE_EVENTS?: Queue;
   /** Signs the short-lived links the Store uses to fetch a customer's payment screenshot. */

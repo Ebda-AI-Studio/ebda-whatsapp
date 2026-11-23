@@ -542,6 +542,8 @@ const opsNumberHealth = z.object({ phoneNumberId: z.string(), health: healthStat
 /** GET /operator/workspaces/:id/ops: what the kill-switch card shows for one workspace and for the platform number. */
 export const opsStatusDto = z.object({
   suspended: z.boolean(), suspendedReason: z.string().nullable(), integrationsRevokedAt: z.number().int().nullable(), evicted: z.boolean(),
+  /** STORE-STANDING-2: when the Store's standing last arrived (epoch ms), null = never; so heartbeats can be seen before the stale-refuse switch is turned on. */
+  storeStandingAt: z.number().int().nullable(),
   numbers: z.array(opsNumberHealth), sharedNumber: opsNumberHealth.nullable(),
   recentActions: z.array(z.object({ at: z.number().int(), actor: z.string(), action: z.string(), reason: z.string() })),
 });

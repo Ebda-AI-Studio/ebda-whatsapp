@@ -181,7 +181,7 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
   const offs = new Map<string, OperatorOffboarding>();
   const ops = { suspended: false, evicted: false, revokedAt: null as number | null };
   const opsView = (): OpsStatusDto => ({
-    suspended: ops.suspended, suspendedReason: ops.suspended ? 'sample' : null, integrationsRevokedAt: ops.revokedAt, evicted: ops.evicted,
+    suspended: ops.suspended, suspendedReason: ops.suspended ? 'sample' : null, integrationsRevokedAt: ops.revokedAt, evicted: ops.evicted, storeStandingAt: null,
     numbers: [{ phoneNumberId: 'pn-sample-1', health: 'green', healthReason: null, healthAt: null }],
     sharedNumber: { phoneNumberId: 'pn-platform', health: 'green', healthReason: null, healthAt: null }, recentActions: [],
   });

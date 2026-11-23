@@ -37,7 +37,7 @@ const ar = {
   ks: {
     title: 'إيقاف طارئ', help: 'بتوقف حساب عميل أو جزء منه فورًا. كل خطوة بتتسجّل باسمك وسببها ومينفعش تتمسح. القراءة بتفضل شغّالة، والعميل يقدر يدفع ويمسح بيانات عميل.',
     workspace: 'معرّف حساب العميل', load: 'اعرض الحالة', reason: 'السبب (5 حروف على الأقل)', reasonShort: 'اكتب السبب (5 حروف على الأقل).',
-    stateOn: 'الحساب موقوف', stateOff: 'الحساب شغّال', integrationsRevoked: (d: string) => `توكنات الربط متوقفة من ${d}`, evicted: 'العميل متشال من الرقم المشترك', notEvicted: 'العميل مش متشال من الرقم المشترك',
+    standingAt: (d: string) => `آخر رسالة حالة من المتجر: ${d}`, standingNever: 'لسه ما وصلتش رسالة حالة من المتجر', stateOn: 'الحساب موقوف', stateOff: 'الحساب شغّال', integrationsRevoked: (d: string) => `توكنات الربط متوقفة من ${d}`, evicted: 'العميل متشال من الرقم المشترك', notEvicted: 'العميل مش متشال من الرقم المشترك',
     numbers: 'أرقام العميل', platform: 'الرقم المشترك', none: 'مفيش أرقام متصلة.', history: 'آخر الإجراءات',
     suspend: 'وقّف الحساب', unsuspend: 'شغّل الحساب', pauseCampaigns: 'وقّف كل الحملات', evict: 'شيل من الرقم المشترك', readmit: 'اسمح بالرجوع للرقم المشترك', revoke: 'الغي كل توكنات الربط', restore: 'رجّع توكنات الربط',
     confirm: (what: string) => `هتنفّذ: ${what}. تأكّد؟`, yes: 'أيوه، نفّذ', no: 'لأ', done: 'اتنفّذ وانسجّل.', failed: 'ماتنفّذش. جرّب تاني.',
@@ -484,7 +484,7 @@ const en: typeof ar = {
   ks: {
     title: 'Kill switch', help: 'Stops a customer account, or part of it, at once. Every step is recorded with your id and the reason, and cannot be edited or removed. Reading stays on, and the customer can still pay and erase a contact.',
     workspace: 'Customer account id', load: 'Show status', reason: 'Reason (at least 5 characters)', reasonShort: 'Write the reason (at least 5 characters).',
-    stateOn: 'Account suspended', stateOff: 'Account running', integrationsRevoked: (d: string) => `Integration tokens blocked since ${d}`, evicted: 'Removed from the shared number', notEvicted: 'Not removed from the shared number',
+    standingAt: (d: string) => `Last standing from the Store: ${d}`, standingNever: 'No standing received from the Store yet', stateOn: 'Account suspended', stateOff: 'Account running', integrationsRevoked: (d: string) => `Integration tokens blocked since ${d}`, evicted: 'Removed from the shared number', notEvicted: 'Not removed from the shared number',
     numbers: 'Customer numbers', platform: 'Shared number', none: 'No connected numbers.', history: 'Recent actions',
     suspend: 'Suspend account', unsuspend: 'Unsuspend account', pauseCampaigns: 'Pause all campaigns', evict: 'Remove from shared number', readmit: 'Allow back on shared number', revoke: 'Revoke all integration tokens', restore: 'Restore integration tokens',
     confirm: (what: string) => `You are about to: ${what}. Sure?`, yes: 'Yes, do it', no: 'No', done: 'Done and recorded.', failed: 'It did not go through. Try again.',
