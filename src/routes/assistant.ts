@@ -110,7 +110,7 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     // The confirm token leaves the engine through this callback only: into THIS response for the merchant's own button, nowhere else.
     const approvals: ApprovalToken[] = [];
     const obs = observeTurn(s.adapter, { storeId: s.ctx.storeId });
-    const raw = await runTurn(obs.adapter, s.ctx, { text: body.data.text }, { onApprovalToken: (t) => approvals.push(t), provider: obs.provider });
+    const raw = await runTurn(obs.adapter, s.ctx, { text: body.data.text }, { onApprovalToken: (t) => approvals.push(t), provider: obs.deterministic(body.data.text, body.data.locale) ?? obs.provider });
     const res = obs.refine(raw, body.data.locale, body.data.text);
     c.header('cache-control', 'no-store');
     c.header('x-request-id', obs.requestId);

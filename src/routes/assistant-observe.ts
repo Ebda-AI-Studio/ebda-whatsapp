@@ -5,6 +5,7 @@
  * an empty model completion is retried once and, if it stays empty, is told to the merchant as what it is. Logs carry names, kinds, counts and timings: never a prompt, a reply or a secret.
  */
 import { LlmError, WorkersAiProvider, type LlmProvider, type LlmRequest, type LlmResponse } from '../../foundation/smart-layer/provider';
+import { foldArabic } from '../../foundation/text';
 import type { AuditRow, Segment, SmartLayerAdapter, ToolSpec } from '../../foundation/smart-layer/types';
 
 type L = { ar: string; en: string };
@@ -17,6 +18,10 @@ export const EMPTY_ANSWER: L = { ar: 'الرد جه فاضي من المساعد
 export const NO_STORE_METRICS: L = { ar: 'مفيش عندي أداة لسه بتجيب عدد الطلبات أو المبيعات للمتجر كله. شوف الأرقام دي من لوحة تحكم المتجر.', en: 'I do not have a tool yet that reads your store-wide orders or sales. Please check those numbers in your store dashboard.' };
 const METRIC = /(طلب|طلبات|اوردر|مبيع|ايراد|ارباح|ربح|orders?|sales|revenue|income|profit)/i;
 const PERIOD = /(النهارد|اليوم|امبارح|الاسبوع|الشهر|السنه|today|yesterday|this week|this month|this year|last week|last month)/i;
+const COUNT = /(كام|عدد|اجمال|مجموع|how many|how much|total|number of)/i;
+/** "How many orders / how much in sales ... today": a store-wide figure Chat has no tool for. (A question naming a customer is the customer-orders tool's, and has no count word.) */
+export const isStoreMetricQuestion = (q: string): boolean => { const f = foldArabic(q); return METRIC.test(f) && PERIOD.test(f) && COUNT.test(f); };
+
 // Arabic-Indic (U+0660-0669) and Persian (U+06F0-06F9) digits are written as escapes (DIGITS-1): this is the INPUT side, it must recognise what a model may print.
 const DIGITS = /[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[.,][0-9\u0660-\u0669\u06F0-\u06F9]+)?/g;
 const ASCII_DIGITS = (x: string): string => x.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) & 0xf));
@@ -25,6 +30,8 @@ export type TurnObserver = {
   requestId: string;
   adapter: SmartLayerAdapter;
   provider: LlmProvider;
+  /** A model-free provider for a question Chat has no tool for: the turn still runs every rail, quota and audit step, but the reply is the fixed honest text. */
+  deterministic(question: string, locale: 'ar' | 'en'): LlmProvider | null;
   /** Swaps the engine's generic fallback for the specific reason, when there is one. */
   refine<T extends { status: string; segments: Segment[] }>(res: T, locale: 'ar' | 'en', question?: string): T;
 };
@@ -90,6 +97,11 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; lo
 
   return {
     requestId, adapter: wrapped, provider,
+    deterministic(question, locale) {
+      if (!isStoreMetricQuestion(question)) return null;
+      emit('assistant_store_metric_deterministic', {});
+      return { byoKey: false, complete: async () => ({ text: NO_STORE_METRICS[locale], usage: { inputTokens: 0, outputTokens: 0 } }) };
+    },
     refine(res, locale, question) {
       // A store-wide orders / sales question with a reply that states a figure no tool returned: the figure is invented, so the honest answer replaces it.
       if (question && METRIC.test(question) && PERIOD.test(question)) {
