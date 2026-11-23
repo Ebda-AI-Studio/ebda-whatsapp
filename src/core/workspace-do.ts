@@ -90,6 +90,7 @@ import { ftsMatch, searchFoldOf, searchWords, syncSearchFold } from './search-fo
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
 import { bridgeForWorkspace } from './store-link';
+import { isStandaloneId } from './workspace-kind';
 import { assignSeat, listSeats, pruneSeats, removeSeat, seatState, seatsOverLimit, type AssignResult, type SeatRow, type SeatState } from './seats';
 import { applyEntitlement, expireSubscription, runCreditMonth, featureAllowed, marketingBlocked, memberLimit, readEntitlement, serviceAllowed, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
@@ -2014,7 +2015,8 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   private closeUnseatedSockets(sockets: WebSocket[]): WebSocket[] {
     if (!sockets.some((ws) => (ws.deserializeAttachment() as SocketAttachment | null)?.role === 'staff')) return sockets;
-    if (!bridgeForWorkspace(this.env, this.workspaceId)) return sockets;
+    // A Store workspace without a Store link has no seats. A STANDALONE workspace never has a bridge but always has seats (CHAT-SA-4): its staff sockets are seat-checked regardless.
+    if (!bridgeForWorkspace(this.env, this.workspaceId) && !isStandaloneId(this.workspaceId)) return sockets;
     const seated = new Set(listSeats(this.sql).seats.filter((x) => x.state === 'seated').map((x) => x.userId));
     return sockets.filter((ws) => {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
@@ -2037,6 +2039,16 @@ export class WorkspaceDO extends DurableObject<Env> {
       const close = (code: number, why: string) => { try { ws.close(code, why); } catch { /* already closed */ } };
       if (!att || att.exp <= nowS) { close(WS_CLOSE_TOKEN_EXPIRED, 'token expired'); continue; }
       if (att.sessionId && (await writeSessionState(this.env, att.sessionId)) === 'revoked') { close(WS_CLOSE_NO_SEAT, 'session revoked'); continue; }
+      if (isStandaloneId(this.workspaceId) && att.userId && (att.role === 'owner' || att.role === 'staff')) {
+        // CHAT-SA-2: membership of a standalone workspace is the live D1 row (no Store to ask). Not an active member = closed on this sweep; a changed role is rewritten.
+        // A D1 error leaves the socket for the next sweep (the lifetime cap bounds it); the seat check (closeUnseatedSockets) runs at every push and on every seat change.
+        try {
+          const row = await this.env.DB.prepare('SELECT role, status FROM workspace_members WHERE workspace_id = ? AND user_id = ?').bind(this.workspaceId, att.userId).first<{ role: 'owner' | 'staff'; status: string }>();
+          if (!row || row.status !== 'active') { close(WS_CLOSE_NO_SEAT, 'not a member'); continue; }
+          if (row.role !== att.role) ws.serializeAttachment({ ...att, role: row.role } satisfies SocketAttachment);
+        } catch { /* next sweep */ }
+        continue;
+      }
       if (bridge && att.userId && (att.role === 'owner' || att.role === 'staff')) {
         const live = await bridge.memberRole(this.workspaceId, att.userId);
         if (live.ok && live.value.role === null) close(WS_CLOSE_NO_SEAT, 'not a member');

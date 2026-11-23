@@ -1,4 +1,4 @@
-import { SELF, createExecutionContext, env } from 'cloudflare:test';
+import { SELF, createExecutionContext, env, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import worker, { apiRoutes } from '../src/index';
 import { createStandaloneWorkspace } from '../src/core/workspace-registry';
@@ -184,6 +184,73 @@ describe('call sites reach the Store only through bridgeForWorkspace (standalone
     const r = await get(o, ws, '/members');
     expect(r.status).toBe(404);
     expect(await r.json()).toMatchObject({ message: 'store_link_off' });
+  });
+});
+
+describe('review fixes (#188)', () => {
+  it('a Store merchant\'s /me stays 200 when the standalone picker read fails (table missing / pre-migration deploy)', async () => {
+    const o = uid();
+    await seedNumber('pn-me1', STORE);
+    link.fake.setMembers(STORE, [{ userId: o, role: 'owner' }]);
+    await env.DB.prepare('ALTER TABLE workspace_members RENAME TO wm_hidden').run();
+    try {
+      const r = await get(o, STORE, '/me', { stores: [{ id: STORE, role: 'owner' }] });
+      expect(r.status).toBe(200);
+      const body = (await r.json()) as { kind: string; stores: { kind?: string }[] };
+      expect(body.kind).toBe('store');
+      expect(body.stores.every((x) => x.kind !== 'standalone')).toBe(true);
+    } finally {
+      await env.DB.prepare('ALTER TABLE wm_hidden RENAME TO workspace_members').run();
+    }
+  });
+
+  async function socket(ws: string, sub: string) {
+    const token = await mint(apiKey(), { sub });
+    const res = await SELF.fetch(`https://x/api/v1/stores/${ws}/ws`, { headers: { upgrade: 'websocket', 'sec-websocket-protocol': `inbox.v1, bearer.${token}` } });
+    expect(res.status).toBe(101);
+    const sock = res.webSocket!;
+    sock.accept();
+    const state = { frames: 0, closeCode: 0 };
+    sock.addEventListener('message', () => { state.frames++; });
+    sock.addEventListener('close', (e) => { state.closeCode = e.code; });
+    return state;
+  }
+  const stub = (ws: string) => env.WORKSPACE_DO.get(env.WORKSPACE_DO.idFromName(ws));
+  const sweep = (ws: string) => runInDurableObject(stub(ws), (inst: unknown) => (inst as { sweepSockets(n: number): Promise<void> }).sweepSockets(Date.now() / 1000));
+
+  it('a standalone staff socket closes (4403) when its seat is removed, with no Store bridge involved', async () => {
+    const o = uid(), ws = await standalone(o);
+    const s = uid();
+    await setStaff(ws, s);
+    await seat(ws, s);
+    const sock = await socket(ws, s);
+    await stub(ws).removeSeat(s);
+    await vi.waitFor(() => expect(sock.closeCode).toBe(4403), { timeout: 3000, interval: 10 });
+  });
+  it('a standalone socket whose member row was removed closes on the next sweep, even if the seat row lingers', async () => {
+    const o = uid(), ws = await standalone(o);
+    const s = uid();
+    await setStaff(ws, s);
+    await seat(ws, s);
+    const sock = await socket(ws, s);
+    await setStaff(ws, s, 'removed');
+    await sweep(ws);
+    await vi.waitFor(() => expect(sock.closeCode).toBe(4403), { timeout: 3000, interval: 10 });
+  });
+  it('an active member\'s socket survives a sweep', async () => {
+    const o = uid(), ws = await standalone(o);
+    const sock = await socket(ws, o);
+    await sweep(ws);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(sock.closeCode).toBe(0);
+  });
+  it('a sweep with the membership read failing leaves the socket (next sweep retries)', async () => {
+    const o = uid(), ws = await standalone(o);
+    const sock = await socket(ws, o);
+    await env.DB.prepare('ALTER TABLE workspace_members RENAME TO wm_hidden').run();
+    try { await sweep(ws); } finally { await env.DB.prepare('ALTER TABLE wm_hidden RENAME TO workspace_members').run(); }
+    await new Promise((r) => setTimeout(r, 150));
+    expect(sock.closeCode).toBe(0);
   });
 });
 void A; void B;
