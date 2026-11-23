@@ -1,3 +1,4 @@
+// @repo-guard
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, describe, expect, it } from 'vitest';
 import { apiRoutes } from '../src/index';
