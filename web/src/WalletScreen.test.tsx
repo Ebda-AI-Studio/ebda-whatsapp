@@ -143,7 +143,7 @@ describe('wallet: top-up', () => {
     first.unmount(); // the browser left for the checkout page
 
     render(<WalletScreen {...props} />); // ...and came back
-    expect((await screen.findByRole('status')).textContent).toContain(t.wTopupWaiting);
+    expect((await screen.findByText(t.wTopupWaiting, { exact: false })).textContent).toContain(t.wTopupWaiting); // the loading skeleton is also a status
     await act(async () => { window.dispatchEvent(new Event('focus')); });
     expect(screen.queryByText(t.wTopupArrived)).toBeNull();
     balance += 10000;
