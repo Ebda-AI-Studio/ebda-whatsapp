@@ -7,6 +7,7 @@ import type { Lang, Strings } from '../i18n';
 import { ConfirmCard } from './ConfirmCard';
 import { PreviewCard } from './PreviewCard';
 import type { View } from './Rail';
+import { pathFor } from '../lib/route';
 
 const MAX = 2000;
 
@@ -19,7 +20,7 @@ function Segments({ t, segments, onNavigate }: { t: Strings; segments: Assistant
         if (s.kind === 'cap') {
           const view = viewForPath(s.appPath);
           return view
-            ? <a key={i} className="as-chip as-where" href={`#${view}`} onClick={(e) => { e.preventDefault(); onNavigate(view); }}><MapPin size={14} aria-hidden /><span>{t.assistantShowMe}: <span dir="auto">{s.label}</span></span></a>
+            ? <a key={i} className="as-chip as-where" href={pathFor(view)} onClick={(e) => { e.preventDefault(); onNavigate(view); }}><MapPin size={14} aria-hidden /><span>{t.assistantShowMe}: <span dir="auto">{s.label}</span></span></a>
             : <span key={i} className="as-text" dir="auto">{s.label}</span>;
         }
         const href = s.kind === 'cite' ? safeHref(s.url) : safeHref(s.href);

@@ -4,7 +4,7 @@ import { App } from './App';
 import { createSampleSource } from './data/sample';
 import { STRINGS } from './i18n';
 import { dateTime } from './components/CampaignsScreen';
-import { parsePath } from './lib/route';
+import { legacyHashPath, parsePath, VIEW_PATHS } from './lib/route';
 
 afterEach(cleanup);
 const NOW = Date.UTC(2026, 9, 24, 17, 0);
@@ -67,5 +67,42 @@ describe('unknown is not a value', () => {
   it('a 0 / null / NaN time renders a dash, never 1 January 1970', () => {
     for (const bad of [0, null, undefined, Number.NaN, -1]) expect(dateTime(bad as number, 'ar')).toBe('—');
     expect(dateTime(NOW, 'en')).not.toBe('—');
+  });
+});
+
+describe('legacy #screen links and /inbox', () => {
+  it.each(Object.entries(VIEW_PATHS).filter(([v]) => v !== 'inbox'))('/#%s maps to %s', (view, path) => {
+    expect(legacyHashPath(`#${view}`)).toBe(path);
+    expect(legacyHashPath(`#/${view}`)).toBe(path);
+  });
+  it('#operator is the old key of /ops; an in-page anchor or unknown hash is left alone', () => {
+    expect(legacyHashPath('#operator')).toBe('/ops');
+    expect(legacyHashPath('#w-credits')).toBeNull();
+    expect(legacyHashPath('')).toBeNull();
+  });
+  it('a hard load of /#contacts lands on /contacts (replaceState, query kept) and shows that screen', async () => {
+    history.replaceState(null, '', '/?store=s1#contacts');
+    ownerApp('owner');
+    expect(await screen.findByRole('heading', { name: t.contactsTitle, level: 1 })).toBeTruthy();
+    expect(location.pathname).toBe('/contacts');
+    expect(location.hash).toBe('');
+    expect(location.search).toBe('?store=s1');
+  });
+  it('a hard load of /#wallet lands on /wallet', async () => {
+    history.replaceState(null, '', '/#wallet');
+    ownerApp('owner');
+    expect(await screen.findByRole('heading', { name: t.walletTitle, level: 1 })).toBeTruthy();
+    expect(location.pathname).toBe('/wallet');
+  });
+  it('/inbox shows the inbox and the address becomes /', async () => {
+    history.replaceState(null, '', '/inbox');
+    ownerApp('owner');
+    expect(screen.queryByText(t.nfTitle)).toBeNull();
+    expect(location.pathname).toBe('/');
+  });
+  it('the links in the rail are real paths, so open-in-new-tab and copy-link work', () => {
+    history.replaceState(null, '', '/');
+    ownerApp('owner');
+    expect(screen.getByRole('link', { name: t.walletNav }).getAttribute('href')).toBe('/wallet');
   });
 });

@@ -7,6 +7,7 @@ import { relativeTime } from '../lib/format';
 import { Highlight } from './Highlight';
 import { Skeleton } from './Skeleton';
 import { SearchBox, optionId, type SearchStatus } from './SearchBox';
+import { pathFor } from '../lib/route';
 
 type Props = {
   t: Strings; lang: Lang; now: number;
@@ -57,7 +58,7 @@ export function ConversationList({ t, lang, now, items, selectedId, filter, quer
       {notice.length > 0 && (
         <div className="wallet-banner" data-banner="wallet" role="status">
           <span>{notice.map((line) => <span key={line} className="wallet-banner-line">{line}</span>)}</span>
-          <a href="#wallet" onClick={(e) => { e.preventDefault(); onOpenWallet?.(); }}>{t.wBannerLink}</a>
+          <a href={pathFor('wallet')} onClick={(e) => { e.preventDefault(); onOpenWallet?.(); }}>{t.wBannerLink}</a>
         </div>
       )}
       <ul className="rows" id={LIST_ID} role="listbox" aria-label={t.conversations}>

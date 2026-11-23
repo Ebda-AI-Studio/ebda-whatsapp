@@ -10,6 +10,10 @@ describe('deep links to the Chat shell', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('shell');
   });
+  it('/inbox redirects to / (inbox lives at the root), keeping the query', async () => {
+    const res = await worker.fetch!(new Request('https://wa.ebda.app/inbox?store=abc'), env, createExecutionContext());
+    expect([res.status, res.headers.get('location')]).toEqual([301, '/?store=abc']);
+  });
   it('an unknown path still 404s and an API path is not shadowed', async () => {
         expect((await worker.fetch!(new Request('https://wa.ebda.app/nope'), env, createExecutionContext())).status).toBe(404);
     const api = await worker.fetch!(new Request('https://wa.ebda.app/api/operator/x'), env, createExecutionContext());

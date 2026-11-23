@@ -3,6 +3,7 @@ import { Gauge, PhoneCall, PhoneOff, PlugZap } from 'lucide-react';
 import { num, type Lang, type Strings } from '../i18n';
 import type { ConnectionStatus, Health } from '../lib/connectionStatus';
 import type { View } from './Rail';
+import { pathFor } from '../lib/route';
 
 type Tone = 'ok' | 'warn' | 'bad' | 'idle';
 const toneOf = (h: Health): Tone => (h.kind === 'ok' ? 'ok' : h.kind === 'warn' ? 'warn' : h.kind === 'bad' || h.kind === 'down' ? 'bad' : 'idle');
@@ -28,13 +29,13 @@ export function RailStatus({ t, lang, status, onNavigate }: { t: Strings; lang: 
   return (
     <div className="rail-status" role="group" aria-label={t.hu.railStatus}>
       {copy && (
-        <a href="#numbers" className="rs-tile" data-tone={tone} title={[copy.body, copy.tier].filter(Boolean).join(' ')} aria-label={`${t.hu.healthTitle}: ${copy.label}. ${copy.body}${copy.tier ? ` ${copy.tier}.` : ''}`} onClick={go('numbers')}>
+        <a href={pathFor('numbers')} className="rs-tile" data-tone={tone} title={[copy.body, copy.tier].filter(Boolean).join(' ')} aria-label={`${t.hu.healthTitle}: ${copy.label}. ${copy.body}${copy.tier ? ` ${copy.tier}.` : ''}`} onClick={go('numbers')}>
           <span className="rs-icon"><Icon size={20} aria-hidden /><i className="rs-dot" aria-hidden /></span>
           <span>{copy.label}</span>
         </a>
       )}
       {u && !none && (
-        <a href="#wallet" className="rs-tile" data-tone={u.level} title={[usageText, u.level === 'bad' ? t.hu.usageBad : u.level === 'warn' ? (u.walletLow ? t.hu.walletLow : t.hu.usageWarn) : ''].filter(Boolean).join(' ')} aria-label={`${t.hu.usageTitle}: ${usageText}`} onClick={go('wallet')}>
+        <a href={pathFor('wallet')} className="rs-tile" data-tone={u.level} title={[usageText, u.level === 'bad' ? t.hu.usageBad : u.level === 'warn' ? (u.walletLow ? t.hu.walletLow : t.hu.usageWarn) : ''].filter(Boolean).join(' ')} aria-label={`${t.hu.usageTitle}: ${usageText}`} onClick={go('wallet')}>
           <span className="rs-icon"><Gauge size={20} aria-hidden /><i className="rs-dot" aria-hidden /></span>
           <span>{num(u.left, lang)}</span>
           {u.usedPct !== null && <span className="rs-meter" aria-hidden><span style={{ inlineSize: `${u.usedPct}%` }} /></span>}
@@ -52,7 +53,7 @@ export function ConnectStrip({ t, lang, health, onNavigate }: { t: Strings; lang
   return (
     <div className="connect-strip" data-tone={toneOf(health)} data-banner="number" role={health.kind === 'bad' || health.kind === 'down' ? 'alert' : 'note'}>
       <span><strong>{copy.label}</strong> {copy.body}{copy.tier ? ` ${copy.tier}.` : ''}</span>
-      <a href="#numbers" onClick={(e) => { e.preventDefault(); onNavigate('numbers'); }}>{none ? t.hu.connect : t.hu.fix}</a>
+      <a href={pathFor('numbers')} onClick={(e) => { e.preventDefault(); onNavigate('numbers'); }}>{none ? t.hu.connect : t.hu.fix}</a>
     </div>
   );
 }
