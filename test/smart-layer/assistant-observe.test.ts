@@ -1,7 +1,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureAssistant } from '../../src/routes/assistant';
-import { EMPTY_ANSWER, ENGINE_FALLBACK, NO_STORE_METRICS, TOOL_FAILED, observeTurn } from '../../src/routes/assistant-observe';
+import { EMPTY_ANSWER, ENGINE_FALLBACK, NO_STORE_METRICS, TOOL_FAILED, observeTurn, withLowReasoning } from '../../src/routes/assistant-observe';
 import { apiFor, storeId, useApiKey } from '../helpers/api';
 import { workspace } from '../helpers/workspace';
 import { MSG } from '../../foundation/smart-layer/loop';
@@ -141,5 +141,25 @@ describe('assistant route: store-wide metrics never reach the model (live: order
     await ask(s, token, 'فين رصيد المحفظة؟', 'ar');
     await ask(s, token, 'اطلب قالب جديد النهارده', 'ar');
     expect(m.calls()).toBeGreaterThan(0);
+  });
+});
+
+describe('GLM reasoning budget (live: agent-settings question came back empty, outputTokens = maxTokens)', () => {
+  it('a glm request carries reasoning_effort low, other models and an explicit value are untouched', async () => {
+    const seen: Array<[string, Record<string, unknown>]> = [];
+    const ai = withLowReasoning({ run: async (m, i) => { seen.push([m, i]); return {}; } });
+    await ai.run('@cf/zai-org/glm-5.3', { max_tokens: 700 });
+    await ai.run('@cf/openai/gpt-oss-120b', { max_tokens: 700 });
+    await ai.run('@cf/zai-org/glm-5.3', { reasoning_effort: 'high' });
+    expect(seen[0]![1]).toEqual({ max_tokens: 700, reasoning_effort: 'low' });
+    expect(seen[1]![1]).toEqual({ max_tokens: 700 });
+    expect(seen[2]![1]).toEqual({ reasoning_effort: 'high' });
+  });
+  it('the provider the route uses sends it on the real turn path (checked end to end through observeTurn)', async () => {
+    let sent: Record<string, unknown> | undefined;
+    const adapter = { ai: { run: async (_m: string, i: Record<string, unknown>) => { sent = i; return { choices: [{ message: { content: 'تمام' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }; } }, models: { answer: '@cf/zai-org/glm-5.3', plan: 'x', template: 'x', classify: 'x', judge: 'x', embed: 'x' }, tools: () => [], storage: { appendAudit: async () => undefined } } as unknown as SmartLayerAdapter;
+    const o = observeTurn(adapter, { storeId: 's', log: () => undefined });
+    await o.provider.complete({ system: 's', messages: [{ role: 'user', content: 'q' }], tools: [], maxTokens: 700, model: '@cf/zai-org/glm-5.3' });
+    expect(sent!.reasoning_effort).toBe('low');
   });
 });
