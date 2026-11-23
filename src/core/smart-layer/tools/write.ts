@@ -84,6 +84,8 @@ const hash = (v: unknown): Promise<string> => sha256Hex(canonicalJson(v ?? null)
 /** What a tool factory is given: the route caller and a lookup of the sibling tools (an undo that lands on another tool must compare against THAT tool's view of the state). */
 export type Kit = {
   callApi: CallApi;
+  /** Server-side secret material for values that must not be guessable (generated coupon codes). Unset = such a tool fails closed. */
+  codeSecret?: string;
   find(name: string): ToolSpec | undefined;
   /** The heavy jobs' own plumbing (the template writer): one model call on the `template` job, a short-lived draft cache, and AI credits held before the call. */
   writer?: {

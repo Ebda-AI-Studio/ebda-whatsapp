@@ -1,6 +1,6 @@
 import { mintedKey, mintedRoles } from './issuer';
 import type {
-  Address, BridgeFailure, CustomerProfile, SearchOptions, StorePolicies, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, RecommendationRequest, StoreBridge, StoreProfile,
+  Address, BridgeFailure, CouponCreateRequest, CouponCreated, TopPeriod, TopProducts, CustomerProfile, SearchOptions, StorePolicies, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, RecommendationRequest, StoreBridge, StoreProfile,
 } from '../../src/core/store-bridge';
 
 type Order = {
@@ -97,6 +97,31 @@ export class FakeStore implements StoreBridge {
     const team = this.members.get(storeId);
     if (!team) return { ok: true, value: { role: (() => { const r = mintedRoles.get(mintedKey(storeId, userId)); return r?.has('owner') ? 'owner' as const : r?.has('staff') ? 'staff' as const : null; })() } }; // no team set for this store: the Store knows whoever the test signed in
     return { ok: true, value: { role: team.get(userId)?.role ?? null } };
+  }
+
+  /** Best sellers the Store's analytics would answer (minor units), and the coupons it holds (`createCoupon` writes here). A test reads `coupons` to prove what was or was not written. */
+  topSellers: TopProducts['items'] = [
+    { name: 'Gold ring', nameAr: 'خاتم دهب', units: 12, revenueMinor: 540_000 },
+    { name: 'Silver chain', nameAr: null, units: 7, revenueMinor: 210_000 },
+    { name: 'Pearl set', nameAr: 'طقم لؤلؤ', units: 3, revenueMinor: 175_000 },
+  ];
+  readonly coupons: (CouponCreated & { key: string; createdAt: number })[] = [];
+  /** Like the Store: the live role is read for the asker (owner for the write, owner or staff for the read), a bad window or value is `invalid` + code, a repeat of the same terms is a replay. */
+  private async role(storeId: string, userId: string) { const r = await this.memberRole(storeId, userId); return r.ok ? r.value.role : null; }
+  async getTopProducts(storeId: string, asUserId: string, req: { period: TopPeriod; limit: number }): Promise<BridgeResult<TopProducts>> {
+    const forbidden = !(await this.role(storeId, asUserId));
+    return this.gate<TopProducts>('getTopProducts', storeId, [storeId, asUserId, req], () => forbidden ? { ok: false, reason: 'invalid', code: 'FORBIDDEN' } : { ok: true, value: { currency: 'EGP', period: req.period, fromMs: 0, toMs: 1, items: this.topSellers.slice(0, req.limit) } });
+  }
+  async createCoupon(storeId: string, asUserId: string, req: CouponCreateRequest): Promise<BridgeResult<CouponCreated>> {
+    const role = await this.role(storeId, asUserId);
+    return this.gate<CouponCreated>('createCoupon', storeId, [storeId, asUserId, req], () => {
+      if (role !== 'owner') return { ok: false, reason: 'invalid', code: 'FORBIDDEN' };
+      const hit = this.coupons.find((c) => c.code.toLowerCase() === req.code.toLowerCase());
+      if (hit) return hit.key === req.idempotencyKey ? { ok: true, value: { ...hit, replayed: true } } : { ok: false, reason: 'invalid', code: 'DUPLICATE_CODE' };
+      const c = { couponId: `cp${this.coupons.length + 1}`, code: req.code.toUpperCase(), type: req.type, value: req.value, startsAt: req.startsAt ?? null, expiresAt: req.endsAt ?? new Date(Date.now() + (req.durationDays ?? 1) * 86_400_000).toISOString(), usageLimit: req.usageLimit ?? null, replayed: false, key: req.idempotencyKey, createdAt: Date.now() };
+      this.coupons.push(c);
+      return { ok: true, value: c };
+    });
   }
 
   count(method: string): number {

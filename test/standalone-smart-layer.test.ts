@@ -16,7 +16,7 @@ const noHelp: HelpDeps = { db: env.DB, vectors: undefined, embed: undefined };
 const adapter = (id: string, withId = true) => chatAdapter({ env, ws: workspace(id), ...(withId ? { workspaceId: id } : {}), callApi: async () => ({ status: 200, json: {} }), registry: REGISTRY, corpus: corpusJson as unknown as HelpCorpus, assistantCapability: 'assistant.ebda-assistant', help: noHelp, ai: { run: async () => ({}) } });
 
 /** A capability is Store-coupled when one of its routes reads or writes the Store link, the orders pane, COD outcomes or product recommendations. */
-const COUPLED = /\/store-link\b|\/proactive-recs|cod-outcome|\/contacts\/:waId\/orders\b/;
+const COUPLED = /\/store-link\b|\/proactive-recs|cod-outcome|\/contacts\/:waId\/orders\b|\/store\/(top-products|coupons)\b/;
 const capabilityFiles = import.meta.glob('../capabilities/*.capability.json', { eager: true, import: 'default' }) as Record<string, { id: string; api?: string[] }>;
 const coupledCapabilities = (): Set<string> => new Set(Object.values(capabilityFiles).filter((c) => (c.api ?? []).some((a) => COUPLED.test(a))).map((c) => c.id));
 
