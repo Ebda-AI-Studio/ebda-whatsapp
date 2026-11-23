@@ -7,6 +7,8 @@ import { activeStoreName } from './components/StoreMenu';
 import { OrderPane } from './components/OrderPane';
 import { IntegrationsScreen } from './components/IntegrationsScreen';
 import { Rail, type View } from './components/Rail';
+import { ConnectStrip, RailStatus } from './components/RailStatus';
+import { useConnectionStatus } from './lib/connectionStatus';
 import { BRAND } from '@brand';
 import { AgentScreen } from './components/AgentScreen';
 import { AssistantPanel } from './components/AssistantPanel';
@@ -62,6 +64,7 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
     return () => window.removeEventListener('keydown', onKey);
   }, [assistantOn]);
   const [view, setView] = useState<View>(initialView);
+  const connection = useConnectionStatus(source, view);
   const t = STRINGS[lang];
   const [filter, setFilter] = useState<ConversationFilter>('all');
   const [reloadTick, setReloadTick] = useState(0);
@@ -284,7 +287,7 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
   return (
     <div className="app" data-viewas={source.viewAs ? 'on' : undefined} data-view={view !== 'inbox' ? 'screen' : selectedId === null ? 'list' : 'chat'} data-orders={ordersOpen ? 'open' : 'closed'}>
       {source.viewAs && <p className="view-as-banner" role="status" aria-label={t.viewAsBanner}>{t.viewAsBanner}</p>}
-      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} store={source} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, integrations: canIntegrations, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
+      <Rail t={t} lang={lang} inboxUnread={totalUnread} status={<RailStatus t={t} lang={lang} status={connection} onNavigate={setView} />} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} store={source} show={{ templates: !!source.templatesApi, campaigns: !!source.campaigns, contacts: !!source.contacts, integrations: canIntegrations, agent: !!source.agentSettings, bot: !!source.botSettings, numbers: !!source.numbers && source.capabilities.numbers === true, wallet: !!source.wallet, team: !!source.team && source.role === 'owner', operator: source.role === 'super_admin' && !!source.operator }} assistant={assistantOn ? { open: assistantOpen, onToggle: toggleAssistant } : undefined} />
       {view === 'agent' ? <AgentScreen t={t} lang={lang} source={source} />
         : view === 'integrations' && source.connectors ? (canIntegrations ? <IntegrationsScreen t={t} lang={lang} source={source} readOnly={source.role !== 'owner'} /> : <p className="view-denied" role="alert">{t.notAllowed}</p>)
         : view === 'bot' && source.botSettings ? <BotScreen t={t} lang={lang} source={source} />
@@ -296,7 +299,7 @@ function AppInner({ source, now = Date.now, initialLang = 'ar', initialView = 'i
         : view === 'numbers' && source.numbers ? <NumbersScreen t={t} lang={lang} source={source} api={source.numbers} />
         : view === 'contacts' && source.contacts ? <ContactsScreen t={t} lang={lang} source={source} api={source.contacts} now={now} /> : (
         <>
-      <ConversationList t={t} lang={lang} now={now()} items={shown} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} searchStatus={searching ? search.status : 'idle'} onFilter={setFilter} onQuery={search.setQuery} onOpen={open} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} notice={walletNotice} onOpenWallet={() => setView('wallet')} listState={error ? 'error' : listLoaded ? 'ok' : 'loading'} onRetry={() => void refresh()} />
+      <ConversationList t={t} lang={lang} now={now()} items={shown} selectedId={selectedId} filter={filter} query={query} totalUnread={totalUnread} searchStatus={searching ? search.status : 'idle'} onFilter={setFilter} onQuery={search.setQuery} onOpen={open} onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))} notice={walletNotice} onOpenWallet={() => setView('wallet')} status={<ConnectStrip t={t} lang={lang} health={connection.health} onNavigate={setView} />} listState={error ? 'error' : listLoaded ? 'ok' : 'loading'} onRetry={() => void refresh()} />
       <div className="center">
         {!online && <p className="notice offline" role="status">{t.offline}</p>}
         {error && items.length > 0 && <p className="notice offline" role="alert">{t.loadError} <button type="button" className="btn ghost" onClick={() => void refresh()}>{t.retry}</button></p>}
