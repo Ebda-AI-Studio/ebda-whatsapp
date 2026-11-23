@@ -18,7 +18,7 @@
     "GET .../events (polling)"
   ],
   "mcpTool": null,
-  "planGate": "feat_api (Pro)",
+  "planGate": "feat_api (the Chat 5,000 AI replies package and its yearly twin)",
   "roles": [
     "owner"
   ],
@@ -40,7 +40,7 @@
     ]
   },
   "steps": [
-    "Plan must include API (Pro)",
+    "Package must include API (Chat 5,000 AI replies)",
     "Connect systems > Call the API from your server explains the scopes and opens the account settings",
     "The API client (token issuer) is created, rotated and revoked by the store owner in the account settings; the account service is the only mint (identity contract v1.3, ID-12)",
     "Poll /events with `after`; no websocket for tokens"

@@ -105,6 +105,8 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`DELETE ${S}/offboarding`]: 'person_only',
   [`GET ${S}/retention`]: 'person_only', // message retention window
   [`PUT ${S}/retention`]: 'person_only',
+  [`GET ${S}/proactive-recs`]: 'person_only', // proactive post-order suggestions switch (owner)
+  [`PUT ${S}/proactive-recs`]: 'person_only',
   [`GET ${S}/contacts/:waId/export`]: 'person_only', // data-subject export
   [`GET ${S}/contacts/consent-evidence`]: 'person_only', // per-customer consent record (phone numbers): the owner's file, never a server token
   [`GET ${S}/campaigns/:campaignId/report`]: 'person_only', // compliance report: the owner's proof for Meta
@@ -216,6 +218,7 @@ export const SESSION_UNCHECKED_READS: Readonly<Record<string, string>> = {
   'GET /stores/:storeId/numbers/signup-config': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/shared-number': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/retention': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/proactive-recs': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/wallet': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
   'GET /stores/:storeId/wallet/estimate': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
   'GET /stores/:storeId/wallet/statement': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",

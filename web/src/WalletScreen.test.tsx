@@ -1,3 +1,4 @@
+import headers from '../brands/ebda/public/_headers?raw';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -143,7 +144,7 @@ describe('wallet: top-up', () => {
     first.unmount(); // the browser left for the checkout page
 
     render(<WalletScreen {...props} />); // ...and came back
-    expect((await screen.findByRole('status')).textContent).toContain(t.wTopupWaiting);
+    expect((await screen.findByText(t.wTopupWaiting, { exact: false })).textContent).toContain(t.wTopupWaiting); // the loading skeleton is also a status
     await act(async () => { window.dispatchEvent(new Event('focus')); });
     expect(screen.queryByText(t.wTopupArrived)).toBeNull();
     balance += 10000;
@@ -355,14 +356,14 @@ describe('wallet: packages (owner)', () => {
   it('a yearly package says it is paid once for 12 months with credits added monthly; a monthly one does not', async () => {
     const source = createSampleSource();
     vi.spyOn(source.wallet!, 'packages').mockResolvedValue([
-      { id: 'starter', name: 'Starter', priceMinor: 69000, aiCredits: 300, maxMembers: 2, features: ['members'], periodMonths: 1 },
-      { id: 'starter-yearly', name: 'Starter (yearly)', priceMinor: 621000, aiCredits: 300, maxMembers: 2, features: ['members'], periodMonths: 12 },
+      { id: 'starter', name: 'Chat 300 AI replies', nameAr: 'شات 300 رد ذكي', nameEn: 'Chat 300 AI replies', priceMinor: 69000, aiCredits: 300, maxMembers: 2, features: ['members'], periodMonths: 1 },
+      { id: 'starter-yearly', name: 'Chat 300 AI replies (yearly)', nameAr: 'شات 300 رد ذكي سنوي', nameEn: 'Chat 300 AI replies (yearly)', priceMinor: 621000, aiCredits: 300, maxMembers: 2, features: ['members'], periodMonths: 12 },
     ]);
     render(<WalletScreen {...props(source, vi.fn())} />);
     const card = await screen.findByRole('region', { name: t.wPackagesTitle });
-    const yearly = (await within(card).findByText('Starter (yearly)')).closest('li')!;
+    const yearly = (await within(card).findByText('شات 300 رد ذكي سنوي')).closest('li')!;
     expect(within(yearly).getByText(t.wPackageYearly(num(12, 'ar')))).toBeTruthy();
-    const monthly = (await within(card).findByText('Starter')).closest('li')!;
+    const monthly = (await within(card).findByText('شات 300 رد ذكي')).closest('li')!;
     expect(within(monthly).queryByText(t.wPackageYearly(num(12, 'ar')))).toBeNull();
   });
 
@@ -372,7 +373,7 @@ describe('wallet: packages (owner)', () => {
     vi.spyOn(source.wallet!, 'buyPackage').mockRejectedValue(new ApiError('yearly_queued', 409));
     render(<WalletScreen {...props(source, go)} />);
     const card = await screen.findByRole('region', { name: t.wPackagesTitle });
-    const gold = (await within(card).findByText('Gold')).closest('li')!;
+    const gold = (await within(card).findByText('شات 300 رد ذكي')).closest('li')!;
     await act(async () => fireEvent.click(within(gold).getByRole('button', { name: t.wPackageBuy })));
     expect(await screen.findByText(t.wYearlyQueued('ahlan@ebda.app'))).toBeTruthy();
     expect(go).not.toHaveBeenCalled();
@@ -384,7 +385,7 @@ describe('wallet: packages (owner)', () => {
     const buy = vi.spyOn(source.wallet!, 'buyPackage');
     render(<WalletScreen {...props(source, go)} />);
     const card = await screen.findByRole('region', { name: t.wPackagesTitle });
-    const gold = (await within(card).findByText('Gold')).closest('li')!;
+    const gold = (await within(card).findByText('شات 300 رد ذكي')).closest('li')!;
     expect(within(gold).getByText(egp(50000))).toBeTruthy();
     expect(within(gold).getByText(t.wPackageCredits(num(300, 'ar')))).toBeTruthy();
     await act(async () => fireEvent.click(within(gold).getByRole('button', { name: t.wPackageBuy })));
@@ -491,6 +492,24 @@ describe('wallet: pay with InstaPay', () => {
     expect(within(card).getAllByText(egp(25000)).length).toBeGreaterThanOrEqual(2); // the package option and the exact amount: the server's price, the client never sent one
     expect(within(card).getByText(t.wIpReference, { exact: false })).toBeTruthy();
     expect(within(card).getByLabelText(t.wIpUpload)).toBeTruthy();
+  });
+
+  it('hides the QR box when the image fails to load, keeping the handle visible', async () => {
+    const source = createSampleSource();
+    const realCreate = source.wallet!.createInstapay;
+    source.wallet!.createInstapay = async (input) => { const r = await realCreate(input); return { ...r, payee: { ...r.payee, qrUrl: 'https://media.ebda.app/platform/instapay-qr.jpg' } }; };
+    await openWallet(source);
+    const card = await screen.findByRole('region', { name: t.wIpTitle });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wIpCreate })));
+    const img = await within(card).findByAltText(t.wIpQrAlt);
+    await act(async () => fireEvent.error(img));
+    expect(within(card).queryByAltText(t.wIpQrAlt)).toBeNull();
+    expect(within(card).getByText(/sample@instapay/)).toBeTruthy();
+  });
+
+  it('the Ebda CSP lets the inbox load the QR from media.ebda.app', () => {
+    const csp = headers;
+    expect(csp.match(/img-src[^;]*/)![0]).toContain('https://media.ebda.app');
   });
 
   it('refuses a wrong type or an oversize file before anything is sent, and uploads a valid one', async () => {

@@ -24,7 +24,7 @@ async function takeOwnerTurn(env: Pick<Env, 'DB'>, storeId: string, now: number)
   await env.DB.prepare('DELETE FROM assistant_owner_turns WHERE owner_key = ? AND at <= ?').bind(key, now - DAY).run();
   const r = await env.DB.prepare('INSERT INTO assistant_owner_turns (owner_key, at) SELECT ?1, ?2 WHERE (SELECT count(*) FROM assistant_owner_turns WHERE owner_key = ?1 AND at > ?3) < ?4')
     .bind(key, now, now - DAY, OWNER_FREE_TURNS_PER_DAY).run();
-  return r.meta.changes === 1;
+  return r.meta.changes > 0;
 }
 
 export function chatQuota(storage: Pick<SmartLayerStorage, 'bump'>, ws: Credits, env: Pick<Env, 'DB'>): SmartLayerAdapter['quota'] {
