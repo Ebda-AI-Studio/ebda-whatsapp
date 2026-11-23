@@ -1,0 +1,76 @@
+import { SELF, env } from 'cloudflare:test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { configureAssistant } from '../../src/routes/assistant';
+import { EMPTY_ANSWER, ENGINE_FALLBACK, TOOL_FAILED, observeTurn } from '../../src/routes/assistant-observe';
+import { apiFor, storeId, useApiKey } from '../helpers/api';
+import { workspace } from '../helpers/workspace';
+import type { SmartLayerAdapter, ToolSpec } from '../../foundation/smart-layer/types';
+
+useApiKey();
+
+// WA-ASSIST-OBS-1: "كام طلب جالي النهارده؟" answered the generic fallback 3/3 on Amelia with a 200 and no log line. The engine swallows a model that returns no content
+// (and a failed tool read) into the same sentence; these tests pin the three seams Chat owns.
+type Msg = { content?: string };
+const emptyAi = () => {
+  let modelCalls = 0;
+  return {
+    calls: () => modelCalls,
+    ai: { run: async (_m: string, inputs: Record<string, unknown>) => {
+      const system = ((inputs.messages as Msg[])[0]?.content ?? '') as string;
+      if (system.includes('Classify the merchant message')) return { choices: [{ message: { content: '{"inScope":true,"abuse":false,"injection":false}' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
+      modelCalls++;
+      return { choices: [{ message: { content: null } }], usage: { prompt_tokens: 10, completion_tokens: 900 } };
+    } },
+  };
+};
+beforeEach(async () => { await env.DB.prepare("INSERT INTO platform_flags (key, value, updated_at) VALUES ('sl.global', '{\"mode\":\"answer-only\"}', 0) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(); });
+afterEach(() => { configureAssistant({}); vi.restoreAllMocks(); });
+
+describe('assistant route: a model that returns nothing', () => {
+  it('is retried once, logged with a request id, and told to the merchant as an empty answer (not the generic "could not answer")', async () => {
+    const s = storeId(7101);
+    const { token } = await apiFor(s);
+    await workspace(s).setAssistantMode('answer-only');
+    const m = emptyAi();
+    configureAssistant({ ai: m.ai as never, help: { db: env.DB, embed: async (t: string[]) => t.map(() => [0]), vectors: { upsert: async () => ({ mutationId: 'm' }), deleteByIds: async () => ({ mutationId: 'm' }), query: async () => ({ count: 0, matches: [] }) } as never } });
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((x: unknown) => { lines.push(String(x)); });
+    const res = await SELF.fetch(`https://x/api/v1/stores/${s}/assistant/turn`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ conversationId: crypto.randomUUID(), text: 'كام طلب جالي النهارده؟', locale: 'ar' }) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; segments: Array<{ text: string }> };
+    expect(body.segments[0]!.text).toBe(EMPTY_ANSWER.ar);
+    expect(body.segments[0]!.text).not.toBe(ENGINE_FALLBACK.ar);
+    expect(body.status).toBe('limited');
+    expect(m.calls()).toBe(2); // first completion + one retry
+    const rid = res.headers.get('x-request-id')!;
+    expect(rid).toMatch(/[0-9a-f-]{36}/);
+    const parsed = lines.filter((l) => l.startsWith('{')).map((l) => JSON.parse(l) as { event: string; requestId: string });
+    for (const ev of ['assistant_model_empty', 'assistant_model_empty_after_retry', 'assistant_turn', 'assistant_fallback_reply']) expect(parsed.find((p) => p.event === ev)?.requestId, ev).toBe(rid);
+  });
+});
+
+describe('observeTurn: seams', () => {
+  const adapterWith = (tool: ToolSpec, ai: { run: (m: string, i: Record<string, unknown>) => Promise<unknown> }): SmartLayerAdapter => ({
+    ai, models: { answer: 'm', plan: 'm', template: 'm', classify: 'm', judge: 'm', embed: 'm' },
+    tools: () => [tool], storage: { appendAudit: async () => undefined },
+  } as unknown as SmartLayerAdapter);
+
+  it('a throwing tool read is logged with tool name + upstream status, rethrown, and the fallback is replaced by the tool message', async () => {
+    const lines: Array<Record<string, unknown>> = [];
+    const tool = { name: 'orders_today', policy: 'free', read: async () => { throw Object.assign(new Error('route answered 502'), { name: 'ToolApiError', status: 502 }); } } as unknown as ToolSpec;
+    const o = observeTurn(adapterWith(tool, { run: async () => ({}) }), { storeId: 's', log: (l) => lines.push(l) });
+    await expect(o.adapter.tools()[0]!.read!({} as never, {})).rejects.toThrow('502');
+    expect(lines[0]).toMatchObject({ event: 'assistant_tool_failed', tool: 'orders_today', error: 'ToolApiError', upstreamStatus: 502, requestId: o.requestId });
+    const r = o.refine({ status: 'answered', segments: [{ kind: 'text', text: ENGINE_FALLBACK.en }] }, 'en');
+    expect(r.segments).toEqual([{ kind: 'text', text: TOOL_FAILED.en }]);
+  });
+
+  it('a provider error is logged with its kind and still thrown; a real answer is never rewritten', async () => {
+    const lines: Array<Record<string, unknown>> = [];
+    const o = observeTurn(adapterWith({ name: 't', policy: 'free' } as unknown as ToolSpec, { run: async () => { throw new Error('request timed out'); } }), { storeId: 's', log: (l) => lines.push(l) });
+    await expect(o.provider.complete({ system: 's', messages: [], tools: [], maxTokens: 10 })).rejects.toMatchObject({ kind: 'timeout' });
+    expect(lines[0]).toMatchObject({ event: 'assistant_model_error', kind: 'timeout' });
+    const ok = { status: 'answered', segments: [{ kind: 'text' as const, text: 'جالك 5 طلبات' }] };
+    expect(o.refine(ok, 'ar')).toBe(ok);
+  });
+});
