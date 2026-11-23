@@ -5,6 +5,7 @@ import type { ContactDto, ImportDto, RetentionDto } from '../../../src/core/api/
 import { ApiError } from '../data/api';
 import type { ContactsApi, InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
+import { contactsCsv } from '../lib/contacts-csv';
 import { dateOnly } from '../lib/datetime';
 import { relativeTime } from '../lib/format';
 import { useTypeahead } from '../lib/useTypeahead';
@@ -29,6 +30,10 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
   const owner = source.role !== 'staff';
   const [selected, setSelected] = useState<ContactDto | null>(null);
   const [attemptList, setAttemptList] = useState(0);
+  // CHAT-QA-9: the side panels report a failed load up here, so a broken Customers page shows ONE banner (not one per panel) and their controls stay disabled.
+  const [segFailed, setSegFailed] = useState(false);
+  const [retFailed, setRetFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Typing uses the shared search hook (from the first character, 150 ms pause, older answers dropped); the plain list loads at once.
   // The opted-out chip and a retry re-run the same query.
@@ -59,12 +64,15 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
     return () => clearInterval(id);
   }, [imports, loadImports]);
 
+  const pageFailed = listFailed || importsFailed || segFailed || retFailed;
+  const retryAll = () => { setFailed(false); setAttempt((a) => a + 1); void loadImports(); setReloadKey((k) => k + 1); };
   return (
     <main className="screen" aria-labelledby="contacts-title">
       <header className="screen-head">
         <Users size={20} aria-hidden style={{ color: 'var(--gold-ink)' }} />
         <h1 id="contacts-title">{t.contactsTitle}</h1>
       </header>
+      {pageFailed && <div className="settings wide"><LoadError t={t} onRetry={retryAll} /></div>}
       <div className="settings wide contacts-layout">
         <section aria-label={t.contactsTitle}>
           {/* Enter has nothing to open here (a contact has no detail view yet); the keys still move the active row for screen readers. */}
@@ -73,7 +81,7 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
             <button type="button" className="chip" aria-pressed={!optedOut} onClick={() => setOptedOut(false)}>{t.filterAllContacts}</button>
             <button type="button" className="chip" aria-pressed={optedOut} onClick={() => setOptedOut(true)}>{t.filterOptedOut}</button>
           </div>
-          {listFailed ? <LoadError t={t} onRetry={() => { setFailed(false); setAttempt((a) => a + 1); }} />
+          {listFailed ? null
             : shown === null ? <Skeleton t={t} kind="contact" />
             : shown.length === 0 ? <EmptyState icon={<Users size={22} />} title={t.contactsEmptyTitle} body={t.contactsEmpty} />
             : (
@@ -104,16 +112,17 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
         </section>
         <div className="contact-side">
           <CustomerTools t={t} api={api} owner={owner} contact={selected} onRenamed={(name) => { setSelected((c) => (c ? { ...c, name } : c)); setAttemptList((a) => a + 1); }} onMerged={() => { setSelected(null); setAttemptList((a) => a + 1); }} onTagged={(tags) => { setSelected((c) => (c ? { ...c, tags } : c)); setAttemptList((a) => a + 1); }} />
-          {owner && <RetentionCard t={t} api={api} />}
-          {owner && <SegmentsPanel t={t} lang={lang} api={api.segments} now={now} />}
+          {source.role === 'owner' && <ExportAllCard t={t} api={api} />}
+          {owner && <RetentionCard t={t} api={api} reloadKey={reloadKey} onLoadFailed={setRetFailed} />}
+          {owner && <SegmentsPanel t={t} lang={lang} api={api.segments} now={now} reloadKey={reloadKey} onLoadFailed={setSegFailed} />}
         </div>
-        {owner && <ImportPanel t={t} lang={lang} api={api} imports={imports} failed={importsFailed} onRetry={() => void loadImports()} onStarted={() => void loadImports()} />}
+        {owner && <ImportPanel t={t} lang={lang} api={api} imports={imports} failed={importsFailed} onStarted={() => void loadImports()} />}
       </div>
     </main>
   );
 }
 
-function ImportPanel({ t, lang, api, imports, failed, onRetry, onStarted }: { t: Strings; lang: Lang; api: ContactsApi; imports: ImportDto[]; failed: boolean; onRetry: () => void; onStarted: () => void }) {
+function ImportPanel({ t, lang, api, imports, failed, onStarted }: { t: Strings; lang: Lang; api: ContactsApi; imports: ImportDto[]; failed: boolean; onStarted: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [consented, setConsented] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -153,7 +162,7 @@ function ImportPanel({ t, lang, api, imports, failed, onRetry, onStarted }: { t:
       <label className="file-pick">
         <Upload size={18} aria-hidden />
         <span>{file ? <bdi>{file.name}</bdi> : t.chooseFile}</span>
-        <input type="file" accept=".csv,text/csv" aria-label={t.chooseFile} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <input type="file" accept=".csv,text/csv" aria-label={t.chooseFile} disabled={failed} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </label>
       <label className="check">
         <input type="checkbox" checked={consented} onChange={(e) => setConsented(e.target.checked)} aria-describedby="consent-hint" />
@@ -161,11 +170,10 @@ function ImportPanel({ t, lang, api, imports, failed, onRetry, onStarted }: { t:
       </label>
       <small id="consent-hint" className="muted">{t.importConsentHint}</small>
       <div className="settings-actions">
-        <button type="button" className="btn primary" disabled={!file || busy} onClick={() => void start()}>{t.startImport}</button>
+        <button type="button" className="btn primary" disabled={!file || busy || failed} onClick={() => void start()}>{t.startImport}</button>
         {busy && <span className="muted" role="status">{t.importing}</span>}
       </div>
       {error && <p role="alert" className="error-text">{t.importFailed}</p>}
-      {failed && <LoadError t={t} onRetry={onRetry} />}
 
       {imports.length > 0 && (
         <>
@@ -265,11 +273,11 @@ function CustomerTools({ t, api, owner, contact, onRenamed, onMerged, onTagged }
   );
 }
 
-function RetentionCard({ t, api }: { t: Strings; api: ContactsApi }) {
+function RetentionCard({ t, api, reloadKey, onLoadFailed }: { t: Strings; api: ContactsApi; reloadKey: number; onLoadFailed: (failed: boolean) => void }) {
   const [view, setView] = useState<RetentionDto | null>(null);
   const [days, setDays] = useState('730');
   const [msg, setMsg] = useState<{ kind: 'ok' | 'alert'; text: string } | null>(null);
-  useEffect(() => { void api.retention().then((v) => { setView(v); setDays(String(v.effectiveDays)); }, () => undefined); }, [api]);
+  useEffect(() => { void api.retention().then((v) => { setView(v); setDays(String(v.effectiveDays)); onLoadFailed(false); }, () => onLoadFailed(true)); }, [api, reloadKey, onLoadFailed]);
   const options = Object.keys(t.rtOptions).map(Number);
   if (view && !options.includes(view.effectiveDays)) options.push(view.effectiveDays);
   options.sort((a, b) => a - b);
@@ -292,6 +300,35 @@ function RetentionCard({ t, api }: { t: Strings; api: ContactsApi }) {
       </label>
       <div className="settings-actions"><button type="button" className="btn primary" disabled={!view} onClick={() => void save()}>{t.rtSave}</button></div>
       {msg && <p role={msg.kind === 'alert' ? 'alert' : 'status'} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
+    </section>
+  );
+}
+
+/** Self-service export of every contact (owner only, audited by the server): a CSV the owner keeps. */
+function ExportAllCard({ t, api }: { t: Strings; api: ContactsApi }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'failed'>('idle');
+  const [count, setCount] = useState(0);
+  const run = async () => {
+    setState('busy');
+    try {
+      const all = await api.exportAllContacts();
+      const url = URL.createObjectURL(new Blob([contactsCsv(all)], { type: 'text/csv;charset=utf-8' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'contacts.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+      setCount(all.length);
+      setState('done');
+    } catch { setState('failed'); }
+  };
+  return (
+    <section className="import-panel" aria-labelledby="cx-title">
+      <h2 id="cx-title">{t.cxTitle}</h2>
+      <p className="muted small">{t.cxHint}</p>
+      <div className="settings-actions"><button type="button" className="btn" disabled={state === 'busy'} onClick={() => void run()}>{state === 'busy' ? t.cxBusy : t.cxButton}</button></div>
+      {state === 'done' && <p role="status" className="wallet-ok">{t.cxDone(count)}</p>}
+      {state === 'failed' && <p role="alert" className="error-text">{t.cxFailed}</p>}
     </section>
   );
 }

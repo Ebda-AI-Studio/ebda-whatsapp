@@ -14,7 +14,7 @@ import { acceptVersion, locale, orderRow, rememberBuyerKey, schedulePendingPushe
 import { applyConsentChanged, forgetBuyer, recordCheckoutConsent, recordWithdrawal } from './consent';
 import { alert } from '../observability';
 import { funnelOnce } from '../funnel';
-import { setStoreHoldFlag } from '../numbers/health';
+import { noteStandingSeen, noteStoreLinked, setStoreHoldFlag } from '../numbers/health';
 import { scheduleProactiveRecs } from './proactive-recs';
 
 export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
@@ -157,6 +157,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       if (!acceptVersion(host, 'store:link', at(event.occurredAt))) return { status: 'stale' };
       putState(host, 'linked', event.type === 'store.linked' ? '1' : '0');
       if (event.type === 'store.linked') {
+        noteStoreLinked(host.sql, now); // STORE-STANDING-2: the missing-standing window starts here
         if (event.data.storefrontOrigin) putState(host, 'storefront_origin', event.data.storefrontOrigin);
         funnelOnce(host, 'linked');
         schedulePendingPushes(host, now);
@@ -167,6 +168,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
     case 'store.reactivated':
     case 'store.deleted':
       // STORE-STANDING-1: never gated by link state (an unlinked store that stops paying must still stop spending). Older than the last applied = dropped.
+      noteStandingSeen(host.sql, now); // STORE-STANDING-2: the Store is alive, even if this event is older than the last applied
       if (!acceptVersion(host, 'store:standing', at(event.data.at))) return { status: 'stale' };
       setStoreHoldFlag(host.sql, event.type !== 'store.reactivated', event.type === 'store.suspended' ? `store_suspended:${event.data.reason}` : 'store_deleted');
       return { status: 'applied' };

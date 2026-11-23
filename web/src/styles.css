@@ -36,7 +36,7 @@
   --radius: 14px; /* surface: cards, popovers, sheets */
   --radius-control: 12px; /* buttons, inputs, chips */
   --radius-s: 8px;
-  --rail: 72px;
+  --rail: 84px;
   --list: 340px;
   --orders: 344px;
   /* MOTION-1 (foundation design language): same values as the shared ease and duration tokens; the ratchet test pins them. */
@@ -74,10 +74,10 @@ textarea { caret-color: var(--gold-ink); }
 @media (min-width: 1200px) { .app[data-nostore='on'] { grid-template-columns: var(--rail) var(--list) minmax(0, 1fr); } }
 .rail { background: var(--night); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 0; }
 .rail-mark { width: 30px; height: 36px; margin-bottom: 18px; }
-.rail a { width: 56px; min-height: 56px; display: grid; place-items: center; gap: 2px; border-radius: 12px; color: var(--on-night-2); text-decoration: none; font-size: 12px; padding: 6px 0; }
+.rail a { width: 76px; min-height: 56px; display: grid; place-items: center; gap: 2px; border-radius: 12px; color: var(--on-night-2); text-decoration: none; font-size: 12px; padding: 6px 0; }
 .rail a[aria-current='page'] { background: var(--night-2); color: var(--lift); }
 .rail a:hover { color: var(--on-night); }
-.rail-signout { margin-top: auto; width: 56px; min-height: 56px; display: grid; place-items: center; gap: 2px; border: 0; background: none; border-radius: 12px; color: var(--on-night-2); font: inherit; font-size: 12px; padding: 6px 0; cursor: pointer; }
+.rail-signout { margin-top: auto; width: 76px; min-height: 56px; display: grid; place-items: center; gap: 2px; border: 0; background: none; border-radius: 12px; color: var(--on-night-2); font: inherit; font-size: 12px; padding: 6px 0; cursor: pointer; }
 .rail-signout:hover { color: var(--on-night); }
 .list-meta { display: inline-flex; align-items: center; gap: 10px; }
 .lang-btn { border: 1px solid var(--line); background: var(--paper); border-radius: 999px; min-height: 32px; padding: 0 12px; font-size: 14px; cursor: pointer; }
@@ -624,7 +624,7 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
 .tpl-mine { display: grid; gap: 8px; }
 
 /* Assistant side panel. A floating layer: the only place a shadow is allowed. Logical properties throughout (it opens at the inline-end edge in both directions). */
-.rail-assistant { width: 56px; min-height: 56px; display: grid; place-items: center; gap: 2px; border-radius: 12px; border: 0; background: none; color: var(--on-night-2); font-size: 12px; padding: 6px 0; cursor: pointer; margin-block-start: auto; }
+.rail-assistant { width: 76px; min-height: 56px; display: grid; place-items: center; gap: 2px; border-radius: 12px; border: 0; background: none; color: var(--on-night-2); font-size: 12px; padding: 6px 0; cursor: pointer; margin-block-start: auto; }
 .rail-assistant:hover { color: var(--on-night); }
 .rail-assistant[aria-expanded='true'] { background: var(--night-2); color: var(--lift); }
 .rail-assistant + .rail-signout { margin-block-start: 0; }
@@ -707,8 +707,8 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
 /* Store picker + account menu (rail) */
 .store-menu { margin-block-start: auto; position: relative; }
 .rail-assistant ~ .store-menu { margin-block-start: 0; }
-.rail-store { width: 56px; min-height: 56px; display: grid; place-items: center; gap: 2px; border: 0; background: none; border-radius: 12px; color: var(--on-night-2); font: inherit; font-size: 12px; padding: 6px 2px; cursor: pointer; }
-.rail-store > span { max-width: 52px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-store { width: 76px; min-height: 56px; display: grid; place-items: center; gap: 2px; border: 0; background: none; border-radius: 12px; color: var(--on-night-2); font: inherit; font-size: 12px; padding: 6px 2px; cursor: pointer; }
+.rail-store > span { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-store:hover, .rail-store[aria-expanded='true'] { color: var(--on-night); }
 .store-menu-panel { position: fixed; inset-block-end: 12px; inset-inline-start: calc(var(--rail) + 8px); z-index: 9; width: min(280px, calc(100vw - 24px)); background: var(--night); color: var(--on-night); border: 1px solid var(--night-2); border-radius: 12px; padding: 12px; display: grid; gap: 4px; box-shadow: var(--elev-3); }
 .store-menu-panel ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 40vh; overflow-y: auto; }
@@ -725,7 +725,22 @@ mark { background: color-mix(in srgb, var(--gold) 26%, transparent); color: inhe
   .store-menu-panel { inset-inline: 12px; inset-block-end: 72px; width: auto; }
 }
 @media (max-width: 479px) { .rail-store > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
+.account-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 12px; }
+.gate .btn.ghost { color: var(--on-night); border-color: var(--night-line); }
+.gate-account { margin-top: 6px; color: var(--lift); }
+.gate-account-en { color: var(--on-night-2); font-size: 12px; }
 
+/* CHAT-QA-10: on the desktop rail every label is ONE line (the rail is 84 px, items 76 px, so the longest Arabic label, المساعد الذكي, fits at 12 px); a longer one
+   in another language is cut with an ellipsis instead of wrapping into two lines that overlap the icon. The phone rail keeps its own rules above. */
+@media (min-width: 820px) {
+  .rail a > span, .rail-assistant > span, .rail-signout > span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* CHAT-QA-13: the help link ("إزاي؟" / "How?") is brand brass, not the browser's default blue; it never turns visited-purple. */
+.help-link, .help-link:visited { color: var(--gold-ink); text-decoration: underline; text-underline-offset: 3px; }
+.help-link:hover { color: var(--ink); }
+.howto, .howto:visited { color: var(--gold-ink); text-decoration: underline; text-underline-offset: 3px; } /* Team + Numbers links keep the .howto touch-target class; same brand brass */
+.howto:hover { color: var(--ink); }
 /* CHAT-QA-6: the Cairo reading under a datetime-local picker (the picker itself is drawn by the browser). */
 .cairo-when { display: block; margin-block: 2px 8px; font-size: 12px; }
 

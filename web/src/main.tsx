@@ -3,15 +3,18 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { accountsUrlFor, chooseMode, pickStore, signInMode, viewAsStore } from './boot';
 import { STRINGS } from './i18n';
+import { NotLinked } from './components/NotLinked';
 import { NoSeat } from './components/NoSeat';
 import { SignInError } from './components/SignInError';
-import { makeAccountsSignOut, makeSignOut } from './signout';
+import { makeAccountsSignOut, makeGateActions, makeSignOut } from './signout';
+import { AccountActions } from './components/AccountActions';
+import { clearAssistantConversations } from './data/assistant';
 import { SignedOutLocally } from './components/SignedOutLocally';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
 import { CreateWorkspace, Invitations, NoWorkspaceYet } from './components/CreateWorkspace';
 import { acceptInvitation, createWorkspace, fetchInvitations, fetchMine, isStandaloneId } from './data/workspaces';
 import { connectRealtime, createApiSource, isOperator } from './data/api';
-import { SIGNED_OUT, createTokenProvider, decodeStores, decodeSub } from './data/auth';
+import { SIGNED_OUT, createTokenProvider, decodeEmail, decodeStores, decodeSub } from './data/auth';
 import { SignInGate } from './components/SignInGate';
 import { CALLBACK_PATH, OidcSignInError, createOidcSession } from './data/oidc';
 import type { InboxSource } from './data/source';
@@ -37,23 +40,35 @@ async function boot(): Promise<void> {
     if (mode === 'none') { root.render(<SignInNotConfigured />); return; }
     let tokens: { getToken: () => Promise<string> };
     let oidcSession: ReturnType<typeof createOidcSession> | null = null;
+    let accountsTokens: ReturnType<typeof createTokenProvider> | null = null;
+    // The way out of a gate screen: the SAME sign-out the rail uses (makeAccountsSignOut / makeSignOut). Accounts mode ends the shared session
+    // (one POST /logout) then `after` runs: reload lands on the sign-in entry, 'use another account' goes straight to the login URL.
+    let stopRealtimeNow: () => void = () => undefined;
+    const { signOutNow, switchAccount } = makeGateActions({
+      stopRealtime: () => stopRealtimeNow(),
+      oidc: () => oidcSession,
+      accounts: () => ({ accountsUrl: ACCOUNTS_URL!, getToken: () => tokens.getToken(), loginUrl: () => (accountsTokens ? accountsTokens.loginUrl() : '/') }),
+      onSignedOutLocally: (signIn) => root.render(<SignedOutLocally onSignIn={signIn} />),
+      reload: () => location.reload(),
+      assign: (url) => location.assign(url),
+    });
     if (mode === 'oidc') {
       const session = createOidcSession({ oidc: BRAND.oidc!, origin: location.origin });
+      oidcSession = session; // BEFORE the callback: a refused sign-in renders SignInError, and its sign-out / switch buttons must find the OIDC session (not the accounts path, where `tokens` is still unassigned)
       if (location.pathname === CALLBACK_PATH) {
         try {
           await session.handleCallback(location.search);
         } catch (e) {
           // Show why, with one explicit retry: a refused answer never bounces back to the provider by itself.
           const code = e instanceof OidcSignInError ? e.code : 'token';
-          root.render(<SignInError code={code} onRetry={() => { void session.startSignIn('/'); }} />);
+          root.render(<SignInError code={code} onRetry={() => { void session.startSignIn('/'); }} onSignOut={signOutNow} onSwitch={switchAccount} />);
           return;
         }
       }
       tokens = session;
-      oidcSession = session;
     } else {
       // Signed out: show the brand's own sign-in entry; its button (not an automatic redirect) goes to the shared sign-in and returns here.
-      tokens = createTokenProvider({
+      tokens = accountsTokens = createTokenProvider({
         accountsUrl: ACCOUNTS_URL!,
         ...(BRAND.signInProduct ? { product: BRAND.signInProduct } : {}),
         redirect: (url) => root.render(<SignInGate kind="signedOut" onContinue={() => location.assign(url)} />),
@@ -71,12 +86,11 @@ async function boot(): Promise<void> {
     const viewAsId = viewAsStore(location.search);
     const reason = viewAsId ? (window.prompt(STRINGS.ar.viewAsPrompt) ?? '').trim() : '';
     if (viewAsId && reason.length < 10) {
-      document.body.textContent = STRINGS.ar.viewAsNeedsReason;
+      root.render(<main className="screen"><div className="placeholder" role="alert"><p lang="ar" dir="rtl">{STRINGS.ar.viewAsNeedsReason}</p><AccountActions onSignOut={signOutNow} onSwitch={switchAccount} /></div></main>);
       return;
     }
     // CHAT-SA-5: a Store id (the token's `stores`) takes today's path untouched. A `?store=sw_...` names a standalone workspace (the server checks membership on every request);
     // an identity with no Store at all asks which standalone workspaces it has, and is offered the create screen when it has none.
-    const signOutOnly = ACCOUNTS_URL ? makeAccountsSignOut({ stopRealtime: () => undefined, accountsUrl: ACCOUNTS_URL, getToken: tokens.getToken, reload: () => location.reload() }) : oidcSession ? makeSignOut({ stopRealtime: () => undefined, session: oidcSession, onLocal: () => root.render(<SignedOutLocally onSignIn={() => { void oidcSession!.startSignIn('/'); }} />) }) : undefined;
     const openWorkspace = (id: string) => { const u = new URL(location.href); u.searchParams.set('store', id); u.searchParams.delete('viewAs'); location.assign(u); };
     const wantedId = new URLSearchParams(location.search).get('store');
     const tokenStores = decodeStores(token);
@@ -86,21 +100,21 @@ async function boot(): Promise<void> {
     if (!pickedStore && !operatorOnly && tokenStores.length === 0) {
       const showMine = async (): Promise<void> => {
         let mine: Awaited<ReturnType<typeof fetchMine>>;
-        try { mine = await fetchMine(location.origin, tokens.getToken); } catch { root.render(<NoWorkspaceYet failed onRetry={() => void showMine()} onSignOut={signOutOnly} />); return; }
+        try { mine = await fetchMine(location.origin, tokens.getToken); } catch { root.render(<NoWorkspaceYet failed onRetry={() => void showMine()} onSignOut={signOutNow} />); return; }
         const first = mine.items[0];
         if (first) { openWorkspace(first.id); return; }
-        const create = () => root.render(<CreateWorkspace needsInvite={mine.needsInvite} onCreate={(input) => createWorkspace(location.origin, tokens.getToken, input)} onDone={openWorkspace} onSignOut={signOutOnly} />);
+        const create = () => root.render(<CreateWorkspace needsInvite={mine.needsInvite} onCreate={(input) => createWorkspace(location.origin, tokens.getToken, input)} onDone={openWorkspace} onSignOut={signOutNow} />);
         // A pending invitation comes first: that person has no workspace YET, but accepting is one press and creating a second one is not what they came for.
         const invites = await fetchInvitations(location.origin, tokens.getToken).catch(() => []);
-        if (invites.length > 0) { root.render(<Invitations items={invites} onAccept={(id) => acceptInvitation(location.origin, tokens.getToken, id)} onAccepted={() => void showMine()} onCreate={mine.canCreate ? create : undefined} onSignOut={signOutOnly} />); return; }
-        if (!mine.canCreate && !mine.needsInvite) { root.render(<NoWorkspaceYet failed={false} onRetry={() => void showMine()} onSignOut={signOutOnly} />); return; }
+        if (invites.length > 0) { root.render(<Invitations items={invites} onAccept={(id) => acceptInvitation(location.origin, tokens.getToken, id)} onAccepted={() => void showMine()} onCreate={mine.canCreate ? create : undefined} onSignOut={signOutNow} />); return; }
+        if (!mine.canCreate && !mine.needsInvite) { root.render(<NoWorkspaceYet failed={false} onRetry={() => void showMine()} onSignOut={signOutNow} />); return; }
         create();
       };
       await showMine();
       return;
     }
     if (!pickedStore && !operatorOnly) {
-      document.body.textContent = 'حسابك مش مربوط بأي متجر لسه. / Your account is not linked to a store yet.';
+      root.render(<NotLinked email={decodeEmail(token)} onSignOut={signOutNow} onSwitch={switchAccount} />);
       return;
     }
     const storeId = pickedStore ?? '';
@@ -113,10 +127,11 @@ async function boot(): Promise<void> {
       onReload: api.reload,
       fetchEvents: api.fetchEvents,
     });
+    stopRealtimeNow = stopRealtime;
     if (operatorOnly) { api.role = 'super_admin'; api.operatorOnly = true; } else await api.loadCapabilities();
     if (api.noSeat) { // a member the owner has not seated (or whose seat the package no longer covers): say so, with a retry, instead of an inbox that cannot load
       stopRealtime();
-      root.render(<NoSeat reason={api.noSeat} onRetry={() => location.reload()} standalone={isStandaloneId(storeId)} />);
+      root.render(<NoSeat reason={api.noSeat} onRetry={() => location.reload()} onSignOut={signOutNow} onSwitch={switchAccount} standalone={isStandaloneId(storeId)} />);
       return;
     }
     if (oidcSession) {

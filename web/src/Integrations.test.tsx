@@ -5,7 +5,7 @@ import { ApiError } from './data/api';
 import { createSampleSource } from './data/sample';
 import { STRINGS } from './i18n';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); history.replaceState(null, '', '/'); });
 const now = () => Date.UTC(2026, 9, 24, 17, 0);
 const t = STRINGS.ar;
 const SECRET = 'whsec-0123456789abcdef-never-shown';
@@ -94,7 +94,8 @@ describe('agent connectors (A35)', () => {
   it('a staff user who lands on the integrations screen (typed address) sees a not-allowed state, never the form', async () => {
     const staff = createSampleSource();
     staff.role = 'staff';
-    render(<App source={staff} now={now} initialView="integrations" />);
+    history.replaceState(null, '', '/integrations');
+    render(<App source={staff} now={now} />);
     expect((await screen.findByRole('alert')).textContent).toContain(t.notAllowed);
     expect(screen.queryByRole('heading', { name: t.intTitle })).toBeNull();
     expect(screen.queryByLabelText(t.connSecretWebhook)).toBeNull();
@@ -105,7 +106,8 @@ describe('agent connectors (A35)', () => {
     admin.role = 'super_admin';
     admin.connectors!.list = vi.fn().mockResolvedValue([{ id: 'crm', kind: 'webhook', enabled: true, hasSecret: true, config: { url: 'https://hooks.acme-client.com/wa', tools: JSON.parse(tools) }, tools: ['check_booking'] }]);
     const save = vi.spyOn(admin.connectors!, 'save');
-    render(<App source={admin} now={now} initialView="integrations" />);
+    history.replaceState(null, '', '/integrations');
+    render(<App source={admin} now={now} />);
     expect(await screen.findByRole('heading', { name: t.intTitle })).toBeTruthy();
     expect(await screen.findByRole('article', { name: 'crm' })).toBeTruthy();
     expect(screen.getByText(t.connReadOnly)).toBeTruthy();
@@ -258,7 +260,8 @@ describe('integration tokens (A36): issued by the account, not by Ebda Chat', ()
   it('explains the scopes and sends the owner to the account settings; Chat holds and shows no token', async () => {
     await openIntegrations();
     const panel = screen.getByRole('region', { name: t.apiTitle });
-    expect(panel.textContent).toContain('messages:send');
+    expect(panel.textContent).toContain(t.apiScopeLabels['messages:send']!); // the human label, never the raw scope id (CHAT-QA-13)
+    expect(panel.textContent).not.toContain('messages:send');
     const link = within(panel).getByRole('link', { name: t.apiOpen }) as HTMLAnchorElement;
     expect(link.href).toBe('https://accounts.ebda.app/');
     expect(link.rel).toContain('noopener');

@@ -45,7 +45,7 @@ const R: Record<string, Role> = {
   'POST /store-link/catalog/resync': 'manager', 'PUT /store-link/catalog/commerce': 'manager',
   // agent, connectors, retention (WA-SECRETS-1: what writes or tests a merchant's secrets is the owner's alone; a super admin keeps the GET, which never carries a secret)
   'GET /agent': 'manager', 'PUT /agent': 'owner', 'GET /connectors': 'manager', 'PUT /connectors/:connectorId': 'owner', 'DELETE /connectors/:connectorId': 'owner',
-  'POST /connectors/:connectorId/test': 'owner', 'GET /retention': 'manager', 'PUT /retention': 'manager',
+  'POST /connectors/:connectorId/test': 'owner', 'GET /contacts/export': 'owner', 'GET /retention': 'manager', 'PUT /retention': 'manager',
   // numbers and shared number
   'GET /numbers': 'member', 'POST /numbers/:phoneNumberId/refresh': 'member', 'GET /shared-number': 'member',
   'GET /numbers/signup-config': 'manager', 'POST /numbers/connect': 'manager', 'POST /numbers/notices/:noticeId/dismiss': 'manager',
@@ -56,6 +56,7 @@ const R: Record<string, Role> = {
   'GET /wallet/statement': 'manager',
   'PUT /digest': 'owner', 'GET /wallet/refund-requests': 'owner', 'POST /wallet/refund-requests': 'owner', 'POST /wallet/topups': 'owner', 'GET /wallet/topups/:orderId': 'owner',
   'GET /wallet/instapay': 'owner', 'POST /wallet/instapay': 'owner', 'PUT /wallet/instapay/:requestId/proof': 'owner',
+  'POST /wallet/instapay/:requestId/cancel': 'owner', 'POST /wallet/instapay/:requestId/contest': 'owner',
   'GET /wallet/yearly-refund': 'owner', 'POST /wallet/yearly-refund/preview': 'owner', 'POST /wallet/yearly-refund/requests': 'owner',
   'GET /wallet/credit-packs': 'owner', 'POST /wallet/credit-packs/preview': 'owner', 'POST /wallet/credit-packs/orders': 'owner', 'GET /wallet/credit-packs/orders/:orderId': 'owner',
   'POST /numbers/:phoneNumberId/funding/preview': 'owner', 'PUT /numbers/:phoneNumberId/funding': 'owner',
@@ -64,11 +65,20 @@ const R: Record<string, Role> = {
   'GET /members': 'owner', 'PUT /members/:userId/seat': 'owner', 'DELETE /members/:userId/seat': 'owner',
   'GET /offboarding': 'manager', 'POST /offboarding': 'owner', 'DELETE /offboarding': 'owner',
   // the assistant acts on the person's own session (a super admin's is refused on the writes; history is a read)
+  // later additions, each recorded from the handler's own check (see the PR table): quick replies have NO role check by design (staff keep the team's canned texts)
+  'GET /quick-replies': 'member', 'POST /quick-replies': 'member', 'PUT /quick-replies/:quickReplyId': 'member', 'DELETE /quick-replies/:quickReplyId': 'member',
+  'GET /campaigns/:campaignId/report': 'manager', 'POST /templates/install-seasonal': 'manager', 'POST /templates/cod-v2/resubmit': 'manager',
+  'GET /proactive-recs': 'manager', 'PUT /proactive-recs': 'manager',
+  'GET /contacts/consent-evidence': 'owner', 'GET /audit': 'owner',
+  // standalone workspaces only (CHAT-SA-4): `storeRole !== 'owner'` is the check, but the id-shape 404 runs first on a Store id (role refusal is covered in standalone-members.test.ts)
+  'POST /members/invite': 'owner', 'DELETE /members/:userId': 'owner', 'DELETE /members/invitations/:userId': 'owner',
   'GET /assistant/conversations/:conversationId': 'member',
   'POST /assistant/turn': 'assistant', 'POST /assistant/feedback': 'assistant', 'POST /assistant/previews/:previewId/apply': 'assistant',
   'POST /assistant/applied/:appliedId/undo': 'assistant', 'POST /assistant/approvals/:approvalId/confirm': 'assistant', 'POST /assistant/approvals/:approvalId/reject': 'assistant',
 };
 
+/** Owner routes that exist only on a standalone (sw_) workspace: on the Store-linked workspaces this suite walks they answer 404 before any role check. */
+const STANDALONE_ONLY = new Set(['POST /members/invite', 'DELETE /members/:userId', 'DELETE /members/invitations/:userId']);
 const PREFIX = '/stores/:storeId';
 const registered = (): string[] => {
   const seen = new Set<string>();
@@ -130,7 +140,8 @@ describe('ROUTE-AUTZ-1: the role of every store route', () => {
     const bad: string[] = [];
     for (const k of registered()) {
       const r = await hit(staff, ws, k);
-      const refused = R[k] === 'manager' || R[k] === 'owner';
+      const refused = (R[k] === 'manager' || R[k] === 'owner') && !STANDALONE_ONLY.has(k);
+      if (STANDALONE_ONLY.has(k) && r.status !== 404) bad.push(`${k} (standalone only) -> ${r.status}`);
       if (r.roleRefused !== refused) bad.push(`${k} (${R[k]}) -> ${r.status} ${JSON.stringify(r.body)}`);
     }
     expect(bad).toEqual([]);
@@ -143,6 +154,7 @@ describe('ROUTE-AUTZ-1: the role of every store route', () => {
     const bad: string[] = [];
     for (const k of registered()) {
       const r = await hit(op, ws, k);
+      if (STANDALONE_ONLY.has(k)) { if (r.status !== 404) bad.push(`${k} (standalone only) -> ${r.status}`); continue; }
       const refused = R[k] === 'owner' || (R[k] === 'assistant' && r.body?.message === 'operator_session');
       const expectRefused = R[k] === 'owner' || R[k] === 'assistant';
       if (expectRefused ? !(refused && r.status === 403) && !(R[k] === 'owner' && r.roleRefused) : r.roleRefused) bad.push(`${k} (${R[k]}) -> ${r.status} ${JSON.stringify(r.body)}`);

@@ -264,6 +264,8 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
 
   // Not eligible at all: nothing is read, nothing is claimed.
   if (r.state !== 'under_review' || !r.proof_key) return done('decide_human', { verdict: 'skipped:not_reviewable', reasons: [] }, false);
+  // A contested rejection (the owner asked for a second look) is a PERSON's decision: the machine never confirms a payment a person already refused.
+  if (r.contested_at !== null) return done('decide_human', { verdict: 'skipped:contested', reasons: [] }, false);
   if (r.held_reason) return done('decide_human', { verdict: 'skipped:held', reasons: [r.held_reason === 'duplicate_image' ? 'DUPLICATE_IMAGE' : 'DUPLICATE_REFERENCE'] }, false); // the existing hold already alerted
   if (mode === 'off' || !ready.ready || !wsOn) {
     const gates: ReasonCode[] = [];
@@ -393,7 +395,7 @@ export async function sweepAutoConfirm(env: Env, now = Date.now()): Promise<{ de
   if ((await getAutoMode(env)) === 'off') return { decided: 0, completed: stuck.results.length };
   const { results } = await env.DB.prepare(
     `SELECT r.id FROM instapay_requests r LEFT JOIN instapay_auto_confirmations a ON a.request_id = r.id
-      WHERE r.state = 'under_review' AND r.proof_key IS NOT NULL AND r.held_reason IS NULL AND r.proof_at <= ?1
+      WHERE r.state = 'under_review' AND r.proof_key IS NOT NULL AND r.held_reason IS NULL AND r.contested_at IS NULL AND r.proof_at <= ?1
         AND (a.id IS NULL OR (a.state = 'pending_decision' AND a.updated_at <= ?2)) ORDER BY r.proof_at, r.id LIMIT 100`,
   ).bind(now - SWEEP_AFTER_MS, now - DECISION_LEASE_MS).all<{ id: string }>();
   for (const x of results) await triggerAutoConfirm(env, x.id, now);

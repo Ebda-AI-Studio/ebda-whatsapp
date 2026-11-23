@@ -1,3 +1,4 @@
+// @repo-guard
 import { SELF, createExecutionContext, env, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import worker, { apiRoutes } from '../src/index';
@@ -328,7 +329,7 @@ describe('route walk: every non-GET store route is decided (sends and number set
     'DELETE /stores/:storeId/connectors/:connectorId', 'POST /stores/:storeId/connectors/:connectorId/test', 'PUT /stores/:storeId/connectors/:connectorId',
     'PUT /stores/:storeId/contacts/:waId/tags', 'POST /stores/:storeId/conversations/:conversationId/assign', 'POST /stores/:storeId/conversations/:conversationId/notes',
     'POST /stores/:storeId/conversations/:conversationId/read', 'PUT /stores/:storeId/conversations/:conversationId/tags', 'POST /stores/:storeId/imports',
-    'POST /stores/:storeId/wallet/instapay', 'PUT /stores/:storeId/wallet/instapay/:requestId/proof', 'POST /stores/:storeId/numbers/:phoneNumberId/disconnect', 'POST /stores/:storeId/numbers/notices/:noticeId/dismiss',
+    'POST /stores/:storeId/wallet/instapay', 'PUT /stores/:storeId/wallet/instapay/:requestId/proof', 'POST /stores/:storeId/wallet/instapay/:requestId/cancel', 'POST /stores/:storeId/wallet/instapay/:requestId/contest', 'POST /stores/:storeId/numbers/:phoneNumberId/disconnect', 'POST /stores/:storeId/numbers/notices/:noticeId/dismiss',
     'POST /stores/:storeId/numbers/:phoneNumberId/refresh', 'PATCH /stores/:storeId/store-link/settings', 'POST /stores/:storeId/store-link/settings/preview', 'POST /stores/:storeId/contacts/:waId/orders/:orderNumber/cod-outcome',
     'POST /stores/:storeId/store-link/catalog/provision', 'POST /stores/:storeId/store-link/catalog/resync', 'PUT /stores/:storeId/store-link/catalog/commerce', 'POST /stores/:storeId/packages/:packageId/checkout', 'DELETE /stores/:storeId/segments/:segmentId',
     'POST /stores/:storeId/quick-replies', 'PUT /stores/:storeId/quick-replies/:quickReplyId', 'DELETE /stores/:storeId/quick-replies/:quickReplyId', // a canned text kept for the composer: nothing is sent

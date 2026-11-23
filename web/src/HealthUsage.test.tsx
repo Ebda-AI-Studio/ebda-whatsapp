@@ -40,8 +40,8 @@ describe('shell badges', () => {
     render(<App source={createSampleSource()} now={now} />);
     const group = await screen.findByRole('group', { name: 'حالة الحساب' });
     const health = within(group).getByRole('link', { name: /حالة رقم واتساب/ });
-    expect(health.getAttribute('href')).toBe('#numbers');
-    expect(within(group).getByRole('link', { name: /استهلاك الباقة/ }).getAttribute('href')).toBe('#wallet');
+    expect(health.getAttribute('href')).toBe('/numbers');
+    expect(within(group).getByRole('link', { name: /استهلاك الباقة/ }).getAttribute('href')).toBe('/wallet');
     await act(async () => fireEvent.click(health));
     await screen.findByRole('heading', { name: 'رقم واتساب' });
   });
@@ -58,7 +58,7 @@ describe('shell badges', () => {
     source.numbers!.list = async () => [];
     render(<App source={source} now={now} />);
     const strip = await screen.findByText('اربط الرقم');
-    expect(strip.getAttribute('href')).toBe('#numbers');
+    expect(strip.getAttribute('href')).toBe('/numbers');
     expect(screen.queryByRole('link', { name: /استهلاك الباقة/ })).toBeNull();
   });
 

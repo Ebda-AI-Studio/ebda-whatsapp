@@ -26,6 +26,7 @@ Press **Sign out** at the bottom of the side rail. What the app keeps in your br
 
 ## If you cannot get in
 - **"We could not sign you in"** with a reason underneath: the sign-in provider refused or cancelled the request, the request was already used, or the answer did not match the request. In every case press **Try signing in again** and start from the beginning; do not reopen an old sign-in link.
+- **"Your account is not linked to a store":** you are signed in with an account that has no store on Ebda Chat. The page shows the signed-in email (partly hidden). Press **Use another account** to sign in with the right one, or **Sign out**. The same two buttons appear on the "no seat" and sign-in failure pages.
 - **"We could not reach the sign-in service right now":** the service is not answering. Wait a moment and press **Try again**.
 - **You were signed out suddenly and saving says "session revoked":** your session was closed. Sign in again.
 - **The page says sign-in is not configured:** open Ebda Chat from your own portal, or ask whoever set the app up for you.

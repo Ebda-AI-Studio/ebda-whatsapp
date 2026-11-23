@@ -47,23 +47,25 @@ type Row = {
   id: string; reference: string; workspace_id: string; kind: 'package' | 'topup'; package_id: string | null; amount_minor: number; currency: string; state: RequestState;
   created_by: string; created_at: number; expires_at: number; proof_key: string | null; proof_mime: string | null; proof_at: number | null;
   first_approver: string | null; decided_by: string | null; decided_at: number | null; reject_reason: string | null; granted_at: number | null;
-  held_reason: 'duplicate_image' | 'duplicate_reference' | null; held_of: string | null; bank_ref: string | null;
-  pending_bank_ref: string | null; proof_sha256: string | null; reverted_at: number | null;
+  held_reason: 'duplicate_image' | 'duplicate_reference' | null; held_of: string | null; held_at: number | null; bank_ref: string | null;
+  pending_bank_ref: string | null; proof_sha256: string | null; reverted_at: number | null; cancelled_at: number | null; contested_at: number | null; contest_note: string | null;
 };
-const COLS = 'id, reference, workspace_id, kind, package_id, amount_minor, currency, state, created_by, created_at, expires_at, proof_key, proof_mime, proof_at, first_approver, decided_by, decided_at, reject_reason, granted_at, held_reason, held_of, bank_ref, pending_bank_ref, proof_sha256, reverted_at';
+const COLS = 'id, reference, workspace_id, kind, package_id, amount_minor, currency, state, created_by, created_at, expires_at, proof_key, proof_mime, proof_at, first_approver, decided_by, decided_at, reject_reason, granted_at, held_reason, held_of, held_at, bank_ref, pending_bank_ref, proof_sha256, reverted_at, cancelled_at, contested_at, contest_note';
 export type InstapayRequestDto = {
   id: string; reference: string; kind: 'package' | 'topup'; packageId: string | null; amountMinor: number; currency: string; state: RequestState;
   createdAt: number; expiresAt: number; hasProof: boolean; rejectReason: string | null; decidedAt: number | null;
   /** InstaPay auto-confirm: confirmed by the system / being checked now / reverted ("not received") with the end of its grace. */
   autoConfirmed: boolean; revertedAt: number | null; checking?: boolean; graceUntil?: number | null;
+  /** Self-service: set when the owner withdrew the request before sending a proof / asked for a second look at the rejection. */
+  cancelledAt: number | null; contestedAt: number | null;
 };
-export type OperatorInstapayDto = InstapayRequestDto & { workspaceId: string; createdBy: string; proofAt: number | null; firstApprover: string | null; decidedBy: string | null; proofMime: string | null; heldReason: Row['held_reason']; heldOf: string | null; bankRef: string | null };
+export type OperatorInstapayDto = InstapayRequestDto & { workspaceId: string; createdBy: string; proofAt: number | null; firstApprover: string | null; decidedBy: string | null; proofMime: string | null; heldReason: Row['held_reason']; heldOf: string | null; bankRef: string | null; contestNote: string | null; aiRead?: { reference: string; amountMinor: number | null } | null };
 const dto = (r: Row): InstapayRequestDto => ({
   id: r.id, reference: r.reference, kind: r.kind, packageId: r.package_id, amountMinor: r.amount_minor, currency: r.currency, state: r.state, createdAt: r.created_at, expiresAt: r.expires_at,
   hasProof: r.proof_key !== null, rejectReason: r.reject_reason, decidedAt: r.decided_at,
-  autoConfirmed: r.decided_by === 'system:auto-confirm', revertedAt: r.reverted_at,
+  autoConfirmed: r.decided_by === 'system:auto-confirm', revertedAt: r.reverted_at, cancelledAt: r.cancelled_at, contestedAt: r.contested_at,
 });
-const opDto = (r: Row): OperatorInstapayDto => ({ ...dto(r), workspaceId: r.workspace_id, createdBy: r.created_by, proofAt: r.proof_at, firstApprover: r.first_approver, decidedBy: r.decided_by, proofMime: r.proof_mime, heldReason: r.held_reason, heldOf: r.held_of, bankRef: r.bank_ref });
+const opDto = (r: Row): OperatorInstapayDto => ({ ...dto(r), workspaceId: r.workspace_id, createdBy: r.created_by, proofAt: r.proof_at, firstApprover: r.first_approver, decidedBy: r.decided_by, proofMime: r.proof_mime, heldReason: r.held_reason, heldOf: r.held_of, bankRef: r.bank_ref, contestNote: r.contest_note });
 /**
  * The ONE guarded claim that confirms a request (`?1` id, `?2` actor, `?3` now, `?4` bank reference, `?5` no-reference flag, `?6..?8` the no-reference twin window). The human path and the
  * auto-confirm path (instapay-auto.ts) both run it, so the two cannot drift: one conditional UPDATE, so confirm/reject/expire/upload racing each other end in one outcome.
@@ -138,8 +140,21 @@ export async function listForWorkspace(env: Env, workspaceId: string): Promise<I
 }
 export async function listForOperator(env: Env, state?: string): Promise<OperatorInstapayDto[]> {
   const ok = state && ['awaiting_proof', 'under_review', 'confirmed', 'rejected', 'expired'].includes(state);
-  const { results } = await env.DB.prepare(`SELECT ${COLS} FROM instapay_requests ${ok ? 'WHERE state = ?' : ''} ORDER BY created_at LIMIT 200`).bind(...(ok ? [state] : [])).all<Row>();
-  return results.map(opDto);
+  // A SUGGESTION only: what the receipt reader saw, so the reviewer can compare it with the proof instead of retyping it. Confirming still needs a person's own bankRef.
+  // One scalar subquery in the single queue query (request_id is UNIQUE): no IN (...) list, so no D1 100-bound-parameter cap however long the queue is.
+  const { results } = await env.DB.prepare(`SELECT ${COLS}, (SELECT a.extracted_json FROM instapay_auto_confirmations a WHERE a.request_id = instapay_requests.id) AS ai_json FROM instapay_requests ${ok ? 'WHERE state = ?' : ''} ORDER BY created_at LIMIT 200`).bind(...(ok ? [state] : [])).all<Row & { ai_json: string | null }>();
+  return results.map((r) => ({ ...opDto(r), aiRead: parseAiRead(r.ai_json) }));
+}
+
+/** The reference (and amount) the receipt reader saw, from the auto-confirmation row; null when nothing usable was read. */
+export function parseAiRead(json: string | null): { reference: string; amountMinor: number | null } | null {
+  if (!json) return null;
+  try {
+    const o = JSON.parse(json) as { reference?: unknown; amountMinor?: unknown };
+    const reference = typeof o.reference === 'string' ? o.reference.trim().slice(0, 60) : '';
+    if (!reference) return null;
+    return { reference, amountMinor: typeof o.amountMinor === 'number' && Number.isInteger(o.amountMinor) ? o.amountMinor : null };
+  } catch { return null; }
 }
 
 // ---- the proof -------------------------------------------------------------------------------------------------------------------
@@ -480,6 +495,97 @@ export async function rejectInstapay(env: Env, a: { id: string; actor: string; r
   await audit(env, { at: now, actor: a.actor, action: 'instapay_rejected', workspaceId: r.workspace_id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor }, reason: a.reason });
   await releaseClaimsOf(env, r); // M7: a rejected payment no longer holds its receipt in the shared duplicate index (a burned one stays burned)
   return { ok: true, request: opDto((await get(env, r.id))!) };
+}
+
+// ---- the merchant's own decisions (self-service) -----------------------------------------------------------------------------------
+// The merchant may change the STATE of their own request, never decide the money: neither function confirms, grants or credits anything. Both are ONE conditional
+// UPDATE keyed by id AND workspace (another store's id matches nothing), and the order rows follow in the same D1 batch only when that claim won.
+
+/** How long after a rejection the owner may still ask for a second look (inside the 180 days the proof is kept). */
+export const CONTEST_WINDOW_MS = 30 * 86_400_000;
+export const CONTEST_NOTE_MAX = 500;
+
+export type SelfDecision = { ok: true; request: InstapayRequestDto } | { ok: false; reason: 'not_found' | 'bad_state' | 'session_revoked' | 'unavailable' | 'offboarding' | 'already_contested' | 'too_many_open' | 'not_contestable' };
+
+async function selfGuard(env: Env, a: { workspaceId: string; requestId: string; sessionId: string }): Promise<{ ok: true; r: Row } | { ok: false; reason: 'not_found' | 'session_revoked' | 'unavailable' }> {
+  if (!instapayEnabled(env)) return { ok: false, reason: 'unavailable' };
+  const session = await sessionState(env, a.sessionId);
+  if (session === 'revoked') return { ok: false, reason: 'session_revoked' };
+  if (session === 'unavailable') return { ok: false, reason: 'unavailable' };
+  const r = await get(env, a.requestId);
+  if (!r || r.workspace_id !== a.workspaceId) return { ok: false, reason: 'not_found' }; // another store's request looks exactly like a missing one
+  return { ok: true, r };
+}
+
+/**
+ * Withdraw a request that has NO proof yet (`awaiting_proof`): no transfer has been shown to us, so nothing can be owed. A request with a proof is a person's to decide
+ * (the money may already have moved) and is refused as `bad_state`. State becomes 'expired' with `cancelled_at` set; the order closes with it.
+ */
+export async function cancelInstapay(env: Env, a: { workspaceId: string; requestId: string; sessionId: string; userId: string }, now = Date.now()): Promise<SelfDecision> {
+  const g = await selfGuard(env, a);
+  if (!g.ok) return g;
+  const res = await env.DB.batch([
+    env.DB.prepare("UPDATE instapay_requests SET state = 'expired', cancelled_at = ?3, pending_bank_ref = NULL WHERE id = ?1 AND workspace_id = ?2 AND state = 'awaiting_proof'").bind(a.requestId, a.workspaceId, now),
+    env.DB.prepare("UPDATE package_orders SET status = 'expired' WHERE order_id = ?1 AND workspace_id = ?2 AND provider = 'instapay' AND status = 'pending' AND EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?1 AND state = 'expired' AND cancelled_at = ?3)").bind(a.requestId, a.workspaceId, now),
+    env.DB.prepare("UPDATE topups SET state = 'expired' WHERE order_id = ?1 AND workspace_id = ?2 AND provider = 'instapay' AND state = 'pending' AND EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?1 AND state = 'expired' AND cancelled_at = ?3)").bind(a.requestId, a.workspaceId, now),
+  ]);
+  if (!(res[0]!.meta.changes > 0)) return { ok: false, reason: 'bad_state' }; // exactly one row or nothing: raced with a proof upload / expiry / another cancel
+  await audit(env, { at: now, actor: a.userId, action: 'instapay_cancelled_by_owner', workspaceId: a.workspaceId, after: { id: a.requestId, kind: g.r.kind, amountMinor: g.r.amount_minor } });
+  return { ok: true, request: dto((await get(env, a.requestId))!) };
+}
+
+const IMG_TWIN = "SELECT o.id FROM instapay_requests o WHERE instapay_requests.proof_sha256 IS NOT NULL AND o.proof_sha256 = instapay_requests.proof_sha256 AND o.id <> ?1 AND o.state IN ('under_review', 'confirmed') AND o.id NOT IN (SELECT twin_of FROM instapay_releases WHERE request_id = ?1 AND twin_of IS NOT NULL)";
+const REF_TWIN = "SELECT o.id FROM instapay_requests o WHERE coalesce(instapay_requests.bank_ref, instapay_requests.pending_bank_ref) IS NOT NULL AND (o.bank_ref = coalesce(instapay_requests.bank_ref, instapay_requests.pending_bank_ref) OR o.pending_bank_ref = coalesce(instapay_requests.bank_ref, instapay_requests.pending_bank_ref)) AND o.id <> ?1 AND o.state NOT IN ('rejected', 'expired')";
+/**
+ * Ask for a second look at a rejection, ONCE, within 30 days, while the proof is still kept. The request goes back to `under_review` for a PERSON (maker-checker and the
+ * duplicate checks are unchanged; the auto-confirm path is not triggered); it never confirms anything. Refused for a system decision, a second contest, a request with no
+ * proof, a full queue (the same cap as creating one) and a workspace that is being offboarded.
+ */
+export async function contestInstapay(env: Env, a: { workspaceId: string; requestId: string; sessionId: string; userId: string; note: string }, now = Date.now()): Promise<SelfDecision> {
+  const g = await selfGuard(env, a);
+  if (!g.ok) return g;
+  if (await frozenForOffboarding(env, a.workspaceId)) return { ok: false, reason: 'offboarding' }; // OFFBOARD-FREEZE-1
+  const r = g.r;
+  if (r.state !== 'rejected') return { ok: false, reason: 'bad_state' };
+  if (r.contested_at !== null) return { ok: false, reason: 'already_contested' };
+  // Refused: any system decision (auto-confirm and its reverts, or any `system:*` value), a request that was ever granted or reverted, no kept proof, or outside the window.
+  if ((r.decided_by?.startsWith('system:') ?? false) || r.reverted_at !== null || r.granted_at !== null || r.proof_key === null || r.decided_at === null || now - r.decided_at > CONTEST_WINDOW_MS) return { ok: false, reason: 'not_contestable' };
+  const res = await env.DB.batch([
+    env.DB.prepare(
+      // The duplicate checks run AGAIN in this statement (the proof may now match a request that arrived after the rejection; a rejection released its shared-index claim). An existing hold
+      // (held_reason / held_of / held_at) is KEPT as it is. Twins a person already released for this request do not hold it again (same rule as `unreviewedTwin`).
+      `UPDATE instapay_requests SET state = 'under_review', contested_at = ?3, contest_note = ?4, decided_by = NULL, decided_at = NULL, first_approver = NULL, first_approved_at = NULL, notice_seen_at = ?3,
+         held_reason = CASE WHEN held_reason IS NOT NULL THEN held_reason WHEN EXISTS (${IMG_TWIN}) THEN 'duplicate_image' WHEN EXISTS (${REF_TWIN}) THEN 'duplicate_reference' ELSE NULL END,
+         held_of = CASE WHEN held_reason IS NOT NULL THEN held_of WHEN EXISTS (${IMG_TWIN}) THEN (${IMG_TWIN} ORDER BY o.proof_at, o.id LIMIT 1) WHEN EXISTS (${REF_TWIN}) THEN (${REF_TWIN} LIMIT 1) ELSE NULL END,
+         held_at = CASE WHEN held_reason IS NOT NULL THEN held_at WHEN EXISTS (${IMG_TWIN}) OR EXISTS (${REF_TWIN}) THEN ?3 ELSE NULL END
+       WHERE id = ?1 AND workspace_id = ?2 AND state = 'rejected' AND contested_at IS NULL AND proof_key IS NOT NULL
+         AND reverted_at IS NULL AND granted_at IS NULL AND (decided_by IS NULL OR decided_by NOT LIKE 'system:%') AND decided_at > ?5
+         AND (SELECT count(*) FROM instapay_requests WHERE workspace_id = ?2 AND state IN ('awaiting_proof', 'under_review')) < ${MAX_OPEN_PER_WORKSPACE}`,
+    ).bind(a.requestId, a.workspaceId, now, a.note, now - CONTEST_WINDOW_MS),
+    // The order the rejection closed opens again with it, in the same transaction and only if the claim above won.
+    env.DB.prepare("UPDATE package_orders SET status = 'pending' WHERE order_id = ?1 AND workspace_id = ?2 AND provider = 'instapay' AND status = 'failed' AND EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?1 AND state = 'under_review' AND contested_at = ?3)").bind(a.requestId, a.workspaceId, now),
+    env.DB.prepare("UPDATE topups SET state = 'pending' WHERE order_id = ?1 AND workspace_id = ?2 AND provider = 'instapay' AND state = 'failed' AND EXISTS (SELECT 1 FROM instapay_requests WHERE id = ?1 AND state = 'under_review' AND contested_at = ?3)").bind(a.requestId, a.workspaceId, now),
+  ]);
+  if (!(res[0]!.meta.changes > 0)) {
+    const cur = await get(env, a.requestId);
+    const open = (await env.DB.prepare("SELECT count(*) AS n FROM instapay_requests WHERE workspace_id = ? AND state IN ('awaiting_proof', 'under_review')").bind(a.workspaceId).first<{ n: number }>())?.n ?? 0;
+    if (cur?.state === 'rejected' && cur.contested_at === null && open >= MAX_OPEN_PER_WORKSPACE) return { ok: false, reason: 'too_many_open' };
+    return { ok: false, reason: cur?.contested_at ? 'already_contested' : 'bad_state' };
+  }
+  // The original rejection is kept in the audit row (the request row's decided_by / decided_at are cleared for the new review; reject_reason stays on the row for the reviewer).
+  await audit(env, { at: now, actor: a.userId, action: 'instapay_contested_by_owner', workspaceId: a.workspaceId, after: { id: a.requestId, kind: r.kind, amountMinor: r.amount_minor, originalRejection: { rejectReason: r.reject_reason, decidedBy: r.decided_by, decidedAt: r.decided_at, firstApprover: r.first_approver } }, reason: a.note });
+  const held = await get(env, a.requestId);
+  if (held?.held_reason && held.held_at === now) { // the duplicate checks held it on contest: hold the earlier twin too, audit and alert (as a fresh proof would)
+    if (held.held_reason === 'duplicate_image' && held.proof_sha256) await announceDuplicate(env, a.requestId, held.proof_sha256, now);
+    else {
+      await audit(env, { at: now, actor: 'system', action: 'instapay_held', workspaceId: a.workspaceId, after: { id: a.requestId, reason: held.held_reason, of: held.held_of } });
+      alert('instapay_duplicate_proof', { severity: 'P1', workspace: a.workspaceId, id: a.requestId, reason: held.held_reason });
+    }
+  }
+  // The same review clock as a fresh proof: 4 business hours, then the overdue alert (a failure to schedule is alerted, never silent).
+  await stubOf(env, a.workspaceId).scheduleInstapayOverdue(a.requestId, addBusinessMs(now, REVIEW_SLA_BUSINESS_MS))
+    .catch((err: unknown) => alert('instapay_sla_not_scheduled', { id: a.requestId, error: err instanceof Error ? err.name : 'error' }));
+  return { ok: true, request: dto((await get(env, a.requestId))!) };
 }
 
 // ---- daily passes ----------------------------------------------------------------------------------------------------------------

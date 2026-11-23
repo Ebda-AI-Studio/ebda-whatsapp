@@ -26,13 +26,24 @@ export function questionLocale(q: string, ui: 'ar' | 'en'): 'ar' | 'en' {
   const en = (q.match(/[A-Za-z]/g) ?? []).length;
   return ar === 0 && en === 0 ? ui : ar >= en ? 'ar' : 'en';
 }
-const COUNT = /(كام|عدد|اجمال|مجموع|how many|how much|total|number of)/i;
+const COUNT = /(كام|عدد|اجمال|مجموع|ايه|وريني|عرض|how many|how much|total|number of|what|show|tell|give|list)/i;
+const SALES = /(مبيع|ايراد|ارباح|ربح|sales|revenue|income|profit)/i;
+const ORDERS = /(طلب|طلبات|اوردر|orders?)/i;
 /** "How many orders / how much in sales ... today": a store-wide figure Chat has no tool for. (A question naming a customer is the customer-orders tool's, and has no count word.) */
-export const isStoreMetricQuestion = (q: string): boolean => { const f = foldArabic(q); return METRIC.test(f) && PERIOD.test(f) && COUNT.test(f); };
+export const isStoreMetricQuestion = (q: string): boolean => { const f = foldArabic(q); return PERIOD.test(f) && (SALES.test(f) || (ORDERS.test(f) && COUNT.test(f))); };
 
 // Arabic-Indic (U+0660-0669) and Persian (U+06F0-06F9) digits are written as escapes (DIGITS-1): this is the INPUT side, it must recognise what a model may print.
 const DIGITS = /[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[.,][0-9\u0660-\u0669\u06F0-\u06F9]+)?/g;
 const ASCII_DIGITS = (x: string): string => x.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) & 0xf));
+
+/**
+ * GLM-5.3 cannot switch reasoning off (levels max | high | low, default max). Live 2026-11-23: with 15 tools offered the model spent the whole 700-token output budget on reasoning
+ * and returned no content and no tool call (assistant_model_empty: outputTokens 700 = maxTokens 700, and again 1400 = 1400 on the retry), so a question that needs a tool read came back empty.
+ * The engine does not set the field, so Chat's binding adds the lowest level for GLM models.
+ */
+export const withLowReasoning = (ai: SmartLayerAdapter['ai']): SmartLayerAdapter['ai'] => ({
+  run: (model, inputs) => ai.run(model, /glm/i.test(model) && inputs.reasoning_effort === undefined ? { ...inputs, reasoning_effort: 'low' } : inputs),
+});
 
 export type TurnObserver = {
   requestId: string;
@@ -50,7 +61,7 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; lo
   const emit = (event: string, f: Record<string, unknown>) => log({ event, requestId, storeId: o.storeId, ...f });
   const state = { toolFailed: false, emptyFinal: false, fixedReply: false, toolOut: [] as string[] };
 
-  const inner = new WorkersAiProvider(adapter.ai, adapter.models.answer);
+  const inner = new WorkersAiProvider(withLowReasoning(adapter.ai), adapter.models.answer);
   const provider: LlmProvider = {
     byoKey: false,
     async complete(req: LlmRequest): Promise<LlmResponse> {

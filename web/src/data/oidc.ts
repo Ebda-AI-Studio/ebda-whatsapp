@@ -116,7 +116,7 @@ export function createOidcSession(o: Opts) {
     return endpoints;
   }
 
-  async function startSignIn(returnTo: string): Promise<void> {
+  async function startSignIn(returnTo: string, opts: { prompt?: 'select_account' | 'login' } = {}): Promise<void> {
     const ep = await discover();
     const { verifier, challenge } = await pkcePair();
     const txn: Txn = { state: randomToken(16), nonce: randomToken(16), verifier, returnTo: safeReturnPath(returnTo), at: now() };
@@ -133,6 +133,7 @@ export function createOidcSession(o: Opts) {
     q.set('code_challenge', challenge);
     q.set('code_challenge_method', 'S256');
     if (o.oidc.audience) q.set('audience', o.oidc.audience);
+    if (opts.prompt) q.set('prompt', opts.prompt); // 'use another account': the provider shows its account picker / login even when it still holds a session
     redirect(url.toString());
   }
 

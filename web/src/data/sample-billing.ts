@@ -116,6 +116,20 @@ export function createSampleWallet(): WalletApi {
       Object.assign(r, { state: 'under_review', hasProof: true });
       return { ...r };
     },
+    async cancelInstapay(requestId) {
+      const r = instapayItems.find((x) => x.id === requestId);
+      if (!r) throw new ApiError('not_found', 404);
+      if (r.state !== 'awaiting_proof') throw new ApiError('invalid_request', 409, 'bad_state');
+      Object.assign(r, { state: 'expired', cancelledAt: Date.now() });
+      return { ...r };
+    },
+    async contestInstapay(requestId) {
+      const r = instapayItems.find((x) => x.id === requestId);
+      if (!r) throw new ApiError('not_found', 404);
+      if (r.state !== 'rejected' || r.contestedAt) throw new ApiError('invalid_request', 409, r.contestedAt ? 'already_contested' : 'bad_state');
+      Object.assign(r, { state: 'under_review', contestedAt: Date.now(), decidedAt: null });
+      return { ...r };
+    },
     refundRequests: async () => refunds.map((r) => ({ ...r })).sort((a, b) => b.createdAt - a.createdAt),
     async requestRefund(amountMinor, note) {
       if (amountMinor < 5000) throw new ApiError('invalid_request', 409, 'below_minimum');
@@ -167,7 +181,7 @@ export function createSampleOperator(currentUserId: string): OperatorApi {
   const offs = new Map<string, OperatorOffboarding>();
   const ops = { suspended: false, evicted: false, revokedAt: null as number | null };
   const opsView = (): OpsStatusDto => ({
-    suspended: ops.suspended, suspendedReason: ops.suspended ? 'sample' : null, integrationsRevokedAt: ops.revokedAt, evicted: ops.evicted,
+    suspended: ops.suspended, suspendedReason: ops.suspended ? 'sample' : null, integrationsRevokedAt: ops.revokedAt, evicted: ops.evicted, storeStandingAt: null,
     numbers: [{ phoneNumberId: 'pn-sample-1', health: 'green', healthReason: null, healthAt: null }],
     sharedNumber: { phoneNumberId: 'pn-platform', health: 'green', healthReason: null, healthAt: null }, recentActions: [],
   });
