@@ -298,24 +298,34 @@ describe('handoff counts in the bot results', () => {
 });
 
 describe('handoff vs erasure in the bot results', () => {
-  it('a customer erased while the handoff turn runs leaves no marker behind', async () => {
+  // Deterministic, and independent of WHO runs the due turn. The first version armed its spy after the webhook and ran the turn itself, so under load the
+  // DO's own alarm could claim the turn first (the lease makes the test's runner skip it): the spy then saw one HMAC instead of two and the test failed
+  // (seen once in a full-suite run, 0/30 in isolation and 0/30 under load afterwards). Here the spy is armed BEFORE the webhook and counts only the
+  // funnel tokens (an HMAC over the customer's wa id: the conversation step, then the handoff step), so the erasure lands between the handoff turn's
+  // token and its marker write whichever runner executes the turn.
+  it('a customer erased while the handoff turn runs leaves no marker behind (whichever runner executes the turn)', async () => {
     const ws = W(71);
     const pn = await agentWorkspace(ws, { language: 'auto' });
     await grant(ws);
     model([]);
     stubGraph();
-    expect((await postWebhook(SELF, rawMessagePayload(pn, text('I want to talk to a human')))).status).toBe(200);
+    const message = text('I want to talk to a human');
+    const waId = String(message.from ?? '201001234567');
+    let storage!: DurableObjectState['storage'];
+    await runInDurableObject(workspace(ws), async (_inst, state) => { storage = state.storage; });
     const real = crypto.subtle.sign.bind(crypto.subtle);
-    let calls = 0;
-    // Run the due turn inside the DO. 1st token = the conversation step, 2nd = the handoff step: the customer is erased while it is computed.
-    await runInDurableObject(workspace(ws), async (inst, state) => {
-      const spy = vi.spyOn(crypto.subtle, 'sign').mockImplementation(async (...a: Parameters<typeof real>) => {
-        if (++calls === 2) state.storage.sql.exec('DELETE FROM messages');
-        return real(...a);
-      });
-      try { await (inst as unknown as { runDueTasks(): Promise<unknown> }).runDueTasks(); } finally { spy.mockRestore(); }
+    let tokens = 0;
+    const spy = vi.spyOn(crypto.subtle, 'sign').mockImplementation(async (...a: Parameters<typeof real>) => {
+      const data = a[2] as BufferSource;
+      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      if (new TextDecoder().decode(bytes) === waId && ++tokens === 2) storage.sql.exec('DELETE FROM messages'); // the customer is erased while the handoff token is computed
+      return real(...a);
     });
-    expect(calls).toBe(2);
+    try {
+      expect((await postWebhook(SELF, rawMessagePayload(pn, message))).status).toBe(200);
+      await workspace(ws).runDueTasks(); // also waits for an alarm run already in flight
+    } finally { spy.mockRestore(); }
+    expect(tokens).toBe(2);
     expect(await rows(ws, 'SELECT step FROM bot_funnel_markers ORDER BY step')).toEqual([{ step: 'conversation' }]);
   });
 });

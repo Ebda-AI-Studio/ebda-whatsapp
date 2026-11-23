@@ -25,6 +25,8 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
 
   if (settings === undefined) return <main className="screen"><div className="placeholder">…</div></main>;
   if (settings === 'error') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
+  // The owner is never told "owner only": a refusal for a session that IS the owner means the check and the session disagree, which is a load problem to retry, not a permission message (CHAT-QA-12).
+  if ((settings === null || !draft) && source.role === 'owner') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
   if (settings === null || !draft) return <main className="screen"><div className="placeholder">{t.ownerOnly}</div></main>;
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => { setDraft({ ...draft, [k]: v }); setStatus('idle'); };
@@ -91,6 +93,13 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
           <textarea id="agent-faq" dir="auto" rows={6} maxLength={20000} value={draft.faqText} onChange={(e) => set('faqText', e.target.value)} aria-describedby="faq-hint" />
           <small id="faq-hint" className="muted">{t.agentFaqHint} · {faqSmall ? t.agentFaqInline : settings.knowledgeReady ? t.agentKbReady : t.agentKbPending}</small>
           {faqBigPending && <small role="alert" className="key-set">{t.agentFaqBigPending}</small>}
+        </div>
+        <div className="field">
+          <div className="setting-row">
+            <span id="agent-recommend-label">{t.agentRecommend}</span>
+            <button type="button" role="switch" aria-checked={draft.recommendProducts} aria-labelledby="agent-recommend-label" aria-describedby="agent-recommend-hint" className="switch" onClick={() => set('recommendProducts', !draft.recommendProducts)}><span /></button>
+          </div>
+          <small id="agent-recommend-hint" className="muted">{t.agentRecommendHint}</small>
         </div>
         <fieldset className="field">
           <legend>{t.agentPromises}</legend>

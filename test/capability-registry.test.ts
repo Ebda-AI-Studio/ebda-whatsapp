@@ -38,8 +38,14 @@ function bypassFiles(): { path: string; src: string }[] {
 }
 
 describe('capability registry rules (lens 192)', () => {
-  it('loads every seeded capability', () => {
-    expect(entries.length).toBe(181); // + templates.check-draft (Smart Layer template tools) + assistant.apply-changes (Smart Layer apply/undo) + operator.assistant-controls (Smart Layer assistant) + wallet.yearly-refund-request (money surfaces) + operator.instapay-auto-confirm (InstaPay auto-confirm); 172 seeded + templates.shared-list, templates.shared-request, templates.shared-number-marketing, operator.shared-template-requests
+  it('loads every capability file on disk (the expected count is the file count: no literal to bump, no merge conflict between capability PRs)', () => {
+    const files = readdirSync(join(ROOT, 'capabilities')).filter((f) => f.endsWith('.capability.json'));
+    expect(files.length).toBeGreaterThan(100); // not vacuous
+    expect(entries.map((e) => e.id).sort()).toEqual(files.map((f) => JSON.parse(readFileSync(join(ROOT, 'capabilities', f), 'utf8')).id as string).sort());
+  });
+  it('the bundled assistant registry (assistant/registry.generated.json) lists exactly the capabilities on disk', () => {
+    const bundled = (JSON.parse(readFileSync(join(ROOT, 'assistant/registry.generated.json'), 'utf8')) as { id: string }[]).map((c) => c.id).sort();
+    expect(bundled).toEqual(entries.map((e) => e.id).sort());
   });
   it('has no new registry violation and no stale baseline id', () => {
     expect(judge('registry', violations).failures).toEqual([]);

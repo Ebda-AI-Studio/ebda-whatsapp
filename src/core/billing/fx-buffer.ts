@@ -10,7 +10,7 @@
  *   fall limit = the buffer may rise at once but falls at most 50 bps a day, and never exceeds 700 (an unpinned value above 700 steps down to 700 at once)
  *   fewer than 60 vol windows of history (about 70 days) -> 700 (the safe default; a 365-day backfill satisfies this at once)
  *
- * A and B were calibrated on the real series (docs/plans/2026-11-12-daily-fx-rate.md): with A = 1 and B = 20 the calm periods sit at ~500 and the worst
+ * A and B were calibrated on the real series (docs/plans/done/2026-11-12-daily-fx-rate.md): with A = 1 and B = 20 the calm periods sit at ~500 and the worst
  * 14-day windows (+10%) reach 700. test/fx-buffer.test.ts replays that series and pins the table in the plan.
  */
 export const FX_BUFFER = { minBps: 500, maxBps: 700, a: 1, b: 20, jumpPct: 3, maxFallBps: 50, windowDays: 14, baselineDays: 365, minWindows: 60, minReturnsPerWindow: 10 } as const;

@@ -1,0 +1,3 @@
+# LEGAL-REVIEWED-1
+
+Ruling LEGAL-REVIEWED-1 - the Ebda Chat legal sources lose their pending-review markers and "not reviewed by a lawyer" wording. Ahmad confirmed in chat on 2026-11-19 that counsel reviewed and approved the texts; ebda.app already published them without a marker since ebda-store LEGAL-FINAL-1 (2026-11-10). Clause 6.5 (Refunds) keeps its wording and number; only the `<!-- PENDING LEGAL REVIEW: refunds -->` comment is removed, so a re-import into ebda-store cannot bring a marker back. No version bump (no published text changes; a bump would end a pending notice, LEGAL-5(k)). Full ruling: ebda-store `docs/rulings/LEGAL-REVIEWED-1.md`. Cost if wrong: if counsel's approval is later disputed, the only dated record is this ruling and the register row.

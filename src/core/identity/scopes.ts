@@ -54,6 +54,11 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/conversations/:conversationId/notes`]: 'person_only',
   [`POST ${S}/conversations/:conversationId/read`]: 'person_only',
   [`PUT ${S}/conversations/:conversationId/tags`]: 'person_only',
+  // Quick replies (A25): a team's canned texts for the composer, used by people in the inbox; no integration token needs them.
+  [`GET ${S}/quick-replies`]: 'person_only',
+  [`POST ${S}/quick-replies`]: 'person_only',
+  [`PUT ${S}/quick-replies/:quickReplyId`]: 'person_only',
+  [`DELETE ${S}/quick-replies/:quickReplyId`]: 'person_only',
 
   [`POST ${S}/assistant/turn`]: 'person_only', // the assistant acts on the merchant's own session: never an integration token
   [`GET ${S}/assistant/conversations/:conversationId`]: 'person_only',
@@ -130,6 +135,7 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/templates`]: 'person_only',
   [`POST ${S}/templates/sync`]: 'person_only',
   [`POST ${S}/templates/install-defaults`]: 'person_only',
+  [`POST ${S}/templates/cod-v2/resubmit`]: 'person_only',
   [`POST ${S}/templates/shared-requests`]: 'person_only',
   [`PUT ${S}/templates/:name/:language`]: 'person_only',
   [`DELETE ${S}/templates/:name/:language`]: 'person_only',
@@ -197,6 +203,7 @@ export const SESSION_UNCHECKED_READS: Readonly<Record<string, string>> = {
   'GET /stores/:storeId/segments/:segmentId/preview': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/ws': "WebSocket upgrade: the token is verified once at the upgrade; a revoked session's socket is closed by the realtime layer",
   'GET /stores/:storeId/conversations/:conversationId/notes': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
+  'GET /stores/:storeId/quick-replies': "inbox or catalogue read: high volume, and a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/agent': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/connectors': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/store-link/settings': "settings read of the merchant's own configuration: no customer data",

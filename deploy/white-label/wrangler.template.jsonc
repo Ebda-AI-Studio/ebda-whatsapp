@@ -7,6 +7,8 @@
   "name": "__PREFIX__",
   "account_id": "__ACCOUNT_ID__",
   "main": "../../src/index.ts",
+  // assistant/*.generated.json are build output (Ruling WA-GEN-1): deploy.sh runs wrangler from the repo root (it cd's there), and wrangler runs this in its cwd.
+  "build": { "command": "node scripts/build-help-corpus.mjs" },
   "compatibility_date": "2026-10-24",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
