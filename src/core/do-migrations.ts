@@ -625,6 +625,10 @@ export const DO_MIGRATIONS: readonly string[] = [
   // The table has no per-row attribution to keep. SQLite lower() folds ASCII only, which is all a Latin-script tag has to fold (Arabic has no case).
   `INSERT OR IGNORE INTO conversation_tags (conversation_id, tag) SELECT conversation_id, lower(trim(tag)) FROM conversation_tags WHERE tag <> lower(trim(tag)) AND lower(trim(tag)) <> '';
    DELETE FROM conversation_tags WHERE tag <> lower(trim(tag));`,
+  // v49 (Ruling CHAT-RECS-SWITCH-1; follows #136's v48 tag fold, so rebase after it merges and keep this entry LAST): what the proactive post-order suggestion did for this order ('sent', 'skipped:<reason>', 'failed:enqueue'); NULL = not decided yet. It is the
+  // idempotency claim (one decision per order) and the customer frequency cap. Lives on store_orders, so it is erased with the customer (by wa_id) and backed up with the order.
+  `ALTER TABLE store_orders ADD COLUMN recs_outcome TEXT;
+   ALTER TABLE store_orders ADD COLUMN recs_at INTEGER;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

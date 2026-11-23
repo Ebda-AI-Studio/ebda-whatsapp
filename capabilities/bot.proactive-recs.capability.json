@@ -1,0 +1,54 @@
+{
+  "id": "bot.proactive-recs",
+  "status": "in-pr",
+  "pr": "ebda-whatsapp feat/chat-proactive-recs",
+  "area": "bot",
+  "version": 1,
+  "versionDate": "2026-11-23",
+  "titleAr": "ترشيح منتجات بعد الطلب (رسالة بقالب)",
+  "titleEn": "Product suggestions after an order (template message)",
+  "screens": [
+    "BotScreen Product suggestions after an order",
+    "view:BotScreen",
+    "/bot"
+  ],
+  "api": [
+    "GET /stores/:storeId/proactive-recs",
+    "PUT /stores/:storeId/proactive-recs"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/ai-agent",
+  "questions": {
+    "ar": [
+      "عايز ابعت للعميل منتجات تعجبه بعد ما يطلب",
+      "ازاي اشغّل ترشيح المنتجات بعد الطلب؟",
+      "ليه ترشيح المنتجات بعد الطلب مقفول؟"
+    ],
+    "en": [
+      "Can I send customers product suggestions after they order?",
+      "Why are post-order suggestions off?"
+    ]
+  },
+  "steps": [
+    "Get a MARKETING template approved by Meta with two body variables: customer name and product list",
+    "Settings > Bot > Product suggestions after an order: enter the approved template name and save",
+    "Turn on the switch (owner only; off by default)"
+  ],
+  "edgeCases": [
+    "Sent only when the template is APPROVED, the customer has explicit marketing consent and no STOP, it is outside 21:00-09:00 shop time, and the customer had none in the last 14 days",
+    "Charged to the wallet per message; nothing is held while the switch is off or any condition is false",
+    "Every skip is recorded on the order with its reason"
+  ],
+  "gaps": [
+    "Store checkout consent wording does not yet name product suggestions; keep the switch off until it does (Ruling CHAT-RECS-SWITCH-1)"
+  ],
+  "assistantNote": "it is a message the store starts and it costs wallet credit; never turn it on for the owner without the approved template name"
+}

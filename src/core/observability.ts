@@ -89,6 +89,7 @@ const P0_ALERTS = new Set([
   'duplicate_success', 'package_amount_mismatch', 'topup_amount_mismatch', 'credit_pack_amount_mismatch', 'shared_sent_not_recorded', 'number_restricted',
 ]);
 const P1_ALERTS = new Set([
+  'proactive_recs_enqueue_failed', // a customer message failed to queue (CHAT-RECS-SWITCH-1); the order is marked failed:enqueue
   'agent_reply_blocked_rate', 'ai_cost_per_1k_over_threshold',
   'send_dlq', 'unhandled_error', 'secret_misconfigured', 'binding_missing', 'entitlement_push_failed', 'entitlement_reconcile_failed', 'entitlement_event_not_queued', 'webhook_reconfirm_failed',
   'webhook_unconfirmed_abandoned', 'webhook_unconfirmed_aged', 'topup_repair_failed', 'package_repair_failed', 'instapay_repair_failed', 'card_refund_reconcile_failed', 'card_refund_stuck',

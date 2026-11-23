@@ -410,6 +410,10 @@ export const mergeContactsRequest = z.object({ fromWaId: z.string().regex(/^[1-9
 export const exportContactQuery = z.object({ after: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(1000).default(500) });
 /** PUT /retention (B4): the owner's message window in days; null = the platform default. */
 export const retentionRequest = z.object({ days: z.number().int().min(30).max(3650).nullable() }).strict();
+/** PUT /proactive-recs (CHAT-RECS-SWITCH-1): the owner's switch (default OFF) and the name of the APPROVED marketing template. Turning it on needs a name. */
+export const proactiveRecsRequest = z.object({ enabled: z.boolean().optional(), templateName: z.string().regex(/^[a-z0-9_]{1,512}$/).nullable().optional() }).strict().refine((v) => v.enabled !== undefined || v.templateName !== undefined);
+export const proactiveRecsDto = z.object({ enabled: z.boolean(), templateName: z.string().nullable(), suggestions: z.number().int(), capDays: z.number().int(), quietFrom: z.number().int(), quietTo: z.number().int() });
+export type ProactiveRecsDto = z.infer<typeof proactiveRecsDto>;
 export const retentionDto = z.object({ days: z.number().int().nullable(), effectiveDays: z.number().int(), defaultDays: z.number().int(), minDays: z.number().int(), maxDays: z.number().int() });
 /**
  * GET /members (WA-SEATS-1): the team as the Store knows it, with each person's seat here. `seat` is 'owner' (always works, counts as one), 'seated',
