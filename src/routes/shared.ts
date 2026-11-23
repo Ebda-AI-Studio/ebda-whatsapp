@@ -67,6 +67,9 @@ export const managesStore = (c: ApiContext): boolean => {
   return r === 'owner' || r === 'super_admin';
 };
 
+/** Ruling WA-SECRETS-1: the owner alone (fail-closed: any other role, a platform super admin included, is refused). For endpoints that write or test a merchant's secrets. */
+export const ownsStore = (c: ApiContext): boolean => c.get('storeRole') === 'owner';
+
 /** WA-NOFREE-1: 403 plan_required unless the workspace has a package in good standing (or inside its bounded past_due grace). Null = go on. */
 export async function planRequired(c: ApiContext, ws: { serviceOk(): Promise<boolean> }): Promise<Response | null> {
   return (await ws.serviceOk()) ? null : apiError(c, 403, 'plan_required');

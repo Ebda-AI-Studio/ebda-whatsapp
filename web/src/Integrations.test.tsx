@@ -260,7 +260,8 @@ describe('integration tokens (A36): issued by the account, not by Ebda Chat', ()
   it('explains the scopes and sends the owner to the account settings; Chat holds and shows no token', async () => {
     await openIntegrations();
     const panel = screen.getByRole('region', { name: t.apiTitle });
-    expect(panel.textContent).toContain('messages:send');
+    expect(panel.textContent).toContain(t.apiScopeLabels['messages:send']!); // the human label, never the raw scope id (CHAT-QA-13)
+    expect(panel.textContent).not.toContain('messages:send');
     const link = within(panel).getByRole('link', { name: t.apiOpen }) as HTMLAnchorElement;
     expect(link.href).toBe('https://accounts.ebda.app/');
     expect(link.rel).toContain('noopener');

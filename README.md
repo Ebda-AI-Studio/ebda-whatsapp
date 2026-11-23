@@ -20,3 +20,11 @@ Every merchant-facing view, API route and operator action belongs to a capabilit
 4. `capabilities/baselines/*.json` hold today's debt and are shrink-only: fixing an offender means deleting its id in the same PR. The `capability ratchet` workflow fails a PR that adds an id. Never add an id to hide a new offender.
 5. Route scopes stay with `test/route-decisions.test.ts` and `test/integrator-tokens.test.ts`; this guard owns capabilities.
 
+
+## Pre-push guard gate
+
+Some tests scan the whole repo (legacy brand strings, Arabic-Indic digits, offboarding / plan / route decisions). They are cheap, and CI fails a PR that breaks one, so they run before every push: `scripts/prepush-guards.mjs` runs exactly the tests tagged `// @repo-guard` on their first line (guards, brand, offboarding, plan-required, integrator-tokens, route-decisions) plus `tsc --noEmit`, never the full suite (about 40 s total).
+
+- Install once per clone with `npm run hooks:install`. It writes a stub into the shared git hooks dir, so every worktree is covered, and the global `core.hooksPath` dispatcher (which also runs the worktree deps hook) chains to it.
+- Run it by hand with `npm run prepush:guards`. A worktree needs its dependencies first (`bash ~/.claude/scripts/wt-deps.sh .`).
+- Writing a new repo-wide scanner test? Put `// @repo-guard` on its first line and it joins the gate; nothing else to edit. `test/prepush-guards.test.ts` proves the gate exits non-zero when a guard fails.
