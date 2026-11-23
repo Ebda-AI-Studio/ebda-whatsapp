@@ -2,8 +2,8 @@
 title: Ebda Chat Data Processing Agreement
 slug: whatsapp-dpa
 lang: en
-updated: 2026-11-09
-version: 1.1
+updated: 2026-11-10
+version: 1.2
 ---
 
 Arabic version prevails.
@@ -50,7 +50,7 @@ The Processor applies appropriate technical and organisational measures, includi
 
 ## 7. Assistance with data subject requests
 
-The Processor gives the Controller the tools and help it reasonably needs to answer requests from data subjects, including erasing a contact, exporting data and recording opt-outs. If a data subject contacts the Processor directly, the Processor refers them to the Controller. Deletion requests can also be made through https://ebda.app/legal/data-deletion/.
+The Processor gives the Controller the tools and help it reasonably needs to answer requests from data subjects, including erasing a contact, exporting data and recording opt-outs. If a data subject contacts the Processor directly, the Processor refers them to the Controller. Deletion requests can also be made through https://ebda.app/en/legal/data-deletion/.
 
 ## 8. Personal data breach
 
