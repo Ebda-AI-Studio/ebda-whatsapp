@@ -29,6 +29,7 @@ import { inboxTools } from './tools/inbox.tools';
 import { readTools, type CallApi } from './tools/read.tools';
 import type { Kit } from './tools/write';
 import { contactReadTools, inboxReadTools } from './tools/reads.tools';
+import { storeTools } from './tools/store.tools';
 import { segmentTools } from './tools/segments.tools';
 import { templateTools } from './tools/templates.tools';
 import { chatPackageName } from '../billing/package-names';
@@ -67,7 +68,7 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
   };
   const tools: ToolSpec[] = [
     ...[...readTools({ callApi: d.callApi, helpSearch: searchHelp, registry: d.registry, assistantCapability: d.assistantCapability }),
-    ...inboxTools(kit), ...contactTools(kit), ...segmentTools(kit), ...botTools(kit), ...campaignTools(kit), ...templateTools(kit), ...inboxReadTools(kit), ...contactReadTools(kit), ...accountReadTools(kit), ...accountWriteTools(kit), ...explainTools(explainJson as unknown as ExplainData)].map(withKeywords),
+    ...inboxTools(kit), ...contactTools(kit), ...segmentTools(kit), ...botTools(kit), ...campaignTools(kit), ...templateTools(kit), ...inboxReadTools(kit), ...contactReadTools(kit), ...accountReadTools(kit), ...accountWriteTools(kit), ...storeTools(kit), ...explainTools(explainJson as unknown as ExplainData)].map(withKeywords),
   ];
   return {
     product: 'chat',

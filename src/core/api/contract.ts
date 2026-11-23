@@ -793,6 +793,28 @@ export const botFunnelQuery = z.object({ from: ymd, to: ymd }).strict().refine((
 export const botFunnelDto = z.object({ from: ymd, to: ymd, days: z.array(z.string()), steps: z.array(z.object({ step: funnelStep, total: z.number().int(), series: z.array(z.number().int()) })) });
 export type BotFunnelDto = z.infer<typeof botFunnelDto>;
 
+// ---- Owner assistant over the Store (Store ruling CHAT-ASSIST-1). Money is integer minor units; the Store re-checks every limit. ----
+export const storeTopProductsQuery = z.object({ period: z.enum(['today', '7d', '30d']).default('30d'), limit: z.coerce.number().int().min(1).max(10).default(5) }).strict();
+export const storeTopProductsDto = z.object({
+  currency: z.string().length(3), period: z.enum(['today', '7d', '30d']), from: z.number().int(), to: z.number().int(),
+  items: z.array(z.object({ name: z.string(), nameAr: z.string().nullable(), units: z.number().int().nonnegative(), revenueMinor: z.number().int().nonnegative() })).max(10),
+});
+export const storeCouponRequest = z.object({
+  code: z.string().trim().min(3).max(24).regex(/^[A-Za-z0-9_-]+$/),
+  type: z.enum(['percentage', 'fixed']),
+  /** percentage: whole 1-90; fixed: minor units, 1..5,000,000 (50,000 EGP). */
+  value: z.number().int().min(1),
+  startsAt: z.string().datetime({ offset: true }).optional(),
+  endsAt: z.string().datetime({ offset: true }).optional(),
+  durationDays: z.number().int().min(1).max(90).optional(),
+  usageLimit: z.number().int().min(1).max(100_000).optional(),
+  idempotencyKey: z.string().uuid(),
+}).strict()
+  .refine((v) => (v.endsAt !== undefined) !== (v.durationDays !== undefined), 'exactly one of endsAt / durationDays')
+  .refine((v) => v.type !== 'percentage' || v.value <= 90, 'percentage 1-90')
+  .refine((v) => v.type !== 'fixed' || v.value <= 5_000_000, 'fixed amount too large');
+export const storeCouponDto = z.object({ couponId: z.string(), code: z.string(), type: z.enum(['percentage', 'fixed']), value: z.number().int(), startsAt: z.string().nullable(), expiresAt: z.string(), usageLimit: z.number().int().nullable(), replayed: z.boolean() });
+
 export const ROUTES = {
   conversations: 'GET /conversations',
   messages: 'GET /conversations/:conversationId/messages',
@@ -819,6 +841,8 @@ export const ROUTES = {
   storeLinkCatalog: 'GET /store-link/catalog',
   provisionCatalog: 'POST /store-link/catalog/provision',
   botFunnel: 'GET /bot/funnel',
+  storeTopProducts: 'GET /store/top-products',
+  storeCoupons: 'POST /store/coupons',
   agent: 'GET|PUT /agent',
   connectors: 'GET /connectors',
   connector: 'PUT|DELETE /connectors/:connectorId',

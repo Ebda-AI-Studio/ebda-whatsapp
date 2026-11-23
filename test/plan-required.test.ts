@@ -320,6 +320,7 @@ describe('route walk: every non-GET store route is decided (sends and number set
   ]);
   // Decided: cannot send a WhatsApp message or set a number up, or are gated by the campaigns feature (plan_feature, see package-feature-gates-campaigns-ordering).
   const NOT_SENDING = new Set([
+    'POST /stores/:storeId/store/coupons', // CHAT-ASSIST-1: a coupon in the STORE (its own feature switch decides; coupons are in every Store plan); no message, no Chat spend
     'PUT /stores/:storeId/members/:userId/seat', 'DELETE /stores/:storeId/members/:userId/seat', // WA-SEATS-1: the owner's seat choices; no message, no spend
     'POST /stores/:storeId/members/invite', 'DELETE /stores/:storeId/members/:userId', 'DELETE /stores/:storeId/members/invitations/:userId', // CHAT-SA-4: a standalone team's invite / remove / cancel: seat-limited by the package in the handler (409 seat_limit), owner-only; no message to a customer, no spend
     'POST /stores/:storeId/assistant/turn', 'POST /stores/:storeId/assistant/feedback', 'POST /stores/:storeId/assistant/previews/:previewId/apply', 'POST /stores/:storeId/assistant/applied/:appliedId/undo', 'POST /stores/:storeId/assistant/approvals/:approvalId/confirm', 'POST /stores/:storeId/assistant/approvals/:approvalId/reject', // apply/undo run the merchant's own routes with their own plan gates, so a package check here would double-gate; the assistant answers and reads in phase A (it sends nothing and spends only the free cap); it must work for a workspace that is still choosing a package

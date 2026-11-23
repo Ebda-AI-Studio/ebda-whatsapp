@@ -3,6 +3,8 @@ capabilities:
   - assistant.ebda-assistant@1
   - assistant.apply-changes@1
   - support.in-product-help@1
+  - store.top-products@1
+  - store.coupon-create@1
 ---
 
 # The Ebda Chat assistant: ask how to do anything
@@ -27,6 +29,10 @@ The assistant answers your questions about Ebda Chat in plain language and shows
 - Changes that involve money, deletion, messages to your customers, more than 20 items or a price change, or that cannot be undone (like an internal note), need your explicit confirmation: a confirm card shows the reason and you press **Yes, do it** yourself. Typing "yes" in the chat does nothing on its own, the card expires after 15 minutes, and if something changed since the card was made you get a new one.
 - Campaigns: it prepares the campaign as a draft, and before sending or scheduling it shows how many people it reaches, the template with its parameters and the expected wallet cost. Messages sent to customers cannot be taken back.
 - It finds a customer by the name you typed. If two customers share that name it does not guess; it asks you to be more specific.
+
+## Ask about your store, and create a coupon
+- **Best sellers:** ask "What is my best-selling product?" or "top 3 products this week". It reads your store live and answers with each product's name, units sold and revenue for today, the last 7 days or the last 30 days (30 if you do not say), up to 10 products. The numbers are your store's own; it never estimates one. Total orders or total sales for a day are not covered yet: it points you to your store dashboard.
+- **Create a coupon (owner only):** say "Create a 10% discount coupon for one day". Percentage coupons go from 1% to 90%, fixed coupons up to 50,000, a coupon can last up to 90 days, and you can add a usage limit and your own code (one is generated if you give none). A confirm card shows the code, the discount, the window and the limit. Nothing is created until you press **Yes, do it**; pressing twice creates one coupon. The coupon is created by your store itself, so it appears in your store's Coupons page, where you can switch it off. The assistant cannot delete a coupon, and staff cannot create one.
 
 ## What it never does
 - It never asks for a password, a verification code, a key or card details, and it does not accept them if you type them. You enter those on the secure screen only, and it shows you where.
