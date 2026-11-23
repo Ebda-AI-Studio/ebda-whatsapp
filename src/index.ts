@@ -87,6 +87,7 @@ const STORE_EVENTS_QUEUE = 'ebda-wa-events';
 const SEND_DLQ_QUEUE = 'ebda-wa-send-dlq';
 
 import { pruneAgentHealth } from './core/ai/health';
+import { pruneWorkspaceCreations } from './core/workspace-registry';
 import { WorkspaceDO as WorkspaceDOBase } from './core/workspace-do';
 /** The workspace Durable Object, wrapped so its fetch / alarm / RPC errors reach Sentry (iceberg E2). Same class name and methods for the bindings. */
 export const WorkspaceDO = Sentry.instrumentDurableObjectWithSentry(
@@ -429,6 +430,7 @@ export default Sentry.withSentry((env: Env) => {
     // The FX pull is its own task (not inside dailyBilling, which tests drive directly): a failure in either never skips the other.
     ctx.waitUntil(runDailyFx(env));
     ctx.waitUntil(pruneAgentHealth(env)); // AGENT-HEALTH-1 counters older than 8 days
+    ctx.waitUntil(pruneWorkspaceCreations(env)); // CHAT-SA-3 creation-attempt log older than 2 days
     ctx.waitUntil(dailyBilling(env).then(() => console.log(JSON.stringify({ cron: 'daily_billing', done: true }))));
   },
   async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
