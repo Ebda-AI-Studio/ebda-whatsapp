@@ -26,6 +26,15 @@ export const isStoreMetricQuestion = (q: string): boolean => { const f = foldAra
 const DIGITS = /[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[.,][0-9\u0660-\u0669\u06F0-\u06F9]+)?/g;
 const ASCII_DIGITS = (x: string): string => x.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) & 0xf));
 
+/**
+ * GLM-5.3 cannot switch reasoning off (levels max | high | low, default max). Live 2026-11-23: with 15 tools offered the model spent the whole 700-token output budget on reasoning
+ * and returned no content and no tool call (assistant_model_empty: outputTokens 700 = maxTokens 700, and again 1400 = 1400 on the retry), so a question that needs a tool read came back empty.
+ * The engine does not set the field, so Chat's binding adds the lowest level for GLM models.
+ */
+export const withLowReasoning = (ai: SmartLayerAdapter['ai']): SmartLayerAdapter['ai'] => ({
+  run: (model, inputs) => ai.run(model, /glm/i.test(model) && inputs.reasoning_effort === undefined ? { ...inputs, reasoning_effort: 'low' } : inputs),
+});
+
 export type TurnObserver = {
   requestId: string;
   adapter: SmartLayerAdapter;
@@ -42,7 +51,7 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; lo
   const emit = (event: string, f: Record<string, unknown>) => log({ event, requestId, storeId: o.storeId, ...f });
   const state = { toolFailed: false, emptyFinal: false, toolOut: [] as string[] };
 
-  const inner = new WorkersAiProvider(adapter.ai, adapter.models.answer);
+  const inner = new WorkersAiProvider(withLowReasoning(adapter.ai), adapter.models.answer);
   const provider: LlmProvider = {
     byoKey: false,
     async complete(req: LlmRequest): Promise<LlmResponse> {
