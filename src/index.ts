@@ -15,7 +15,7 @@ import { configureAgent } from './core/ai/config';
 import { signupEnabled } from './core/numbers/numbers';
 import { verifyMetaSignature } from './core/meta/signature';
 import { parseSignedRequest, processRequest, recordRequest, requestStatus, statusPage, sweepDeletionRequests } from './core/meta/data-deletion';
-import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
+import { extractAccountEvents, extractCoexistence, extractEvents, extractQualityEvents, extractNameUpdates, extractTemplateCategoryUpdates, extractTemplateQualityUpdates, extractTemplateStatuses, extractTierUpdates } from './core/meta/webhook-schema';
 import { numberForDisplayPhone, workspaceForPhoneNumber, workspacesForWaba } from './core/routing';
 import { mark } from './core/timing';
 import { checkFxStale, fxHealth, runDailyFx } from './core/billing/fx-daily';
@@ -199,7 +199,7 @@ api.route('/', mediaRoutes);
 api.route('/', ordersRoutes);
 registerStarterSet(PACK.templates);
 registerPerStoreTemplate(PACK.perStoreTemplate ?? null);
-api.route('/', templatesRoutes(PACK.templates));
+api.route('/', templatesRoutes(PACK.templates, PACK.seasonalTemplates ?? {}));
 api.route('/', proofRoutes);
 api.route('/', agentRoutes);
 api.route('/', connectorRoutes);
@@ -315,6 +315,11 @@ app.post('/meta/webhook', async (c) => {
     await applySharedTemplateEvent(c.env, t.wabaId, t.name, t.language, { category: t.newCategory });
     for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
       await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateCategory(t.name, t.language, t.newCategory);
+    }
+  }
+  for (const t of extractTemplateQualityUpdates(payload)) {
+    for (const workspaceId of await workspacesForWaba(c.env.DB, t.wabaId)) {
+      await c.env.WORKSPACE_DO.get(c.env.WORKSPACE_DO.idFromName(workspaceId)).applyTemplateQuality(t.name, t.language, t.score);
     }
   }
   for (const u of extractTierUpdates(payload)) {

@@ -99,11 +99,11 @@ export function readTools(d: ToolDeps): ToolSpec[] {
     }),
     t({
       name: 'templates_list', capabilityId: 'templates.list', policy: 'free', undo: 'none', resultTrust: 'store-data',
-      description: 'The merchant\'s WhatsApp message templates with their category and approval status.',
+      description: 'The merchant\'s WhatsApp message templates with their category, approval status and Meta\'s quality rating (GREEN high, YELLOW medium, RED low, null = Meta has not rated it yet).',
       args: none, jsonSchema: NO_ARGS,
       read: async (ctx) => {
         const r = (await ok(d.callApi(ctx, '/templates'))) as { items?: Array<Record<string, unknown>> };
-        return { items: (r.items ?? []).slice(0, 20).map((x) => ({ name: x.name, language: x.language, category: x.category, status: x.status, rejectedReason: x.rejectedReason ?? null })) };
+        return { items: (r.items ?? []).slice(0, 20).map((x) => ({ name: x.name, language: x.language, category: x.category, status: x.status, quality: x.quality ?? null, rejectedReason: x.rejectedReason ?? null })) };
       },
     }),
     t({

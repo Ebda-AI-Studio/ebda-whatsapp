@@ -98,3 +98,31 @@ export const EBDA_DEFAULT_TEMPLATES: readonly TemplateSeed[] = [
     components: [{ type: 'BODY', text: 'أهلاً {{1}}، طلبك رقم {{2}} {{3}}.', example: { body_text: [['أحمد', '1001', 'اتسلّم']] } }],
   },
 ];
+
+/**
+ * The Ramadan pack (capability campaigns.seasonal-ramadan): three MARKETING templates in Egyptian Arabic. Installed only when the merchant asks (never on connect),
+ * submitted to Meta for approval like any template, and sent through the normal campaign gates (consent, content guard, frequency cap). Hours are a variable the
+ * merchant fills per send, so the pack never states a time of its own.
+ */
+export const EBDA_RAMADAN_TEMPLATES: readonly TemplateSeed[] = [
+  {
+    name: 'ramadan_greeting',
+    language: 'ar',
+    category: 'MARKETING',
+    components: [{ type: 'BODY', text: 'رمضان كريم يا {{1}} 🌙 كل سنة وانت طيب من فريق {{2}}. نورت حياتنا طول السنة، وإحنا جاهزين لخدمتك في الشهر الكريم.', example: { body_text: [['أحمد', 'متجر النور']] } }],
+  },
+  {
+    name: 'ramadan_offer',
+    language: 'ar',
+    category: 'MARKETING',
+    components: [{ type: 'BODY', text: 'أهلاً {{1}} 🌙 عرض رمضان من {{2}}: {{3}}. العرض لفترة محدودة، اطلب دلوقتي.', example: { body_text: [['أحمد', 'متجر النور', 'خصم عشرين في المية على كل المنتجات']] } }],
+  },
+  {
+    name: 'ramadan_hours',
+    language: 'ar',
+    category: 'MARKETING',
+    components: [{ type: 'BODY', text: 'أهلاً {{1}} 🌙 مواعيد {{2}} في رمضان: {{3}}. هنكون في خدمتك في المواعيد دي.', example: { body_text: [['أحمد', 'متجر النور', 'من 10 صباحاً لحد 4 العصر ومن 9 مساءً لحد 1 بعد منتصف الليل']] } }],
+  },
+];
+
+export const EBDA_SEASONAL_TEMPLATES: Readonly<Record<string, readonly TemplateSeed[]>> = { ramadan: EBDA_RAMADAN_TEMPLATES };

@@ -121,8 +121,8 @@ export type IngestBatch = { phoneNumberId: string; inbound: InboundMessage[]; st
 export type CoexBatch = { phoneNumberId: string; echoes: CoexMessage[]; history: CoexMessage[]; contacts: SyncedContact[] };
 export type IngestResult = { stored: number; duplicates: number; replies: SendJob[] };
 export type WorkspaceConfig = { autoReplyText?: string; optInKeywords?: string[] };
-const TEMPLATE_COLS = 'name, language, category, status, components, rejected_reason, updated_at, meta_id, label';
-type TemplateRowSql = { name: string; language: string; category: string; status: string; components: string; rejected_reason: string | null; updated_at: number; meta_id: string | null; label: string | null };
+const TEMPLATE_COLS = 'name, language, category, status, components, rejected_reason, updated_at, meta_id, label, quality';
+type TemplateRowSql = { name: string; language: string; category: string; status: string; components: string; rejected_reason: string | null; updated_at: number; meta_id: string | null; label: string | null; quality: string | null };
 const TEMPLATE_EDIT_DAY_MS = 86_400_000;
 const TEMPLATE_EDIT_MONTH_MS = 30 * 86_400_000;
 const TEMPLATE_EDITS_PER_MONTH = 10;
@@ -920,7 +920,7 @@ export class WorkspaceDO extends DurableObject<Env> {
     return {
       name: t.name, language: t.language, category: t.category as TemplateDto['category'], status: t.status as TemplateDto['status'],
       bodyText: bodyTextOf(parts), paramCount: paramCount(parts, t.category), rejectedReason: t.rejected_reason,
-      label: t.label, components: parts, updatedAt: t.updated_at, editAllowance: this.editAllowanceOf(t.name, t.language, t.status, now),
+      label: t.label, quality: (t.quality as TemplateDto['quality']) ?? null, components: parts, updatedAt: t.updated_at, editAllowance: this.editAllowanceOf(t.name, t.language, t.status, now),
       ...(rejectionAdvice(t.rejected_reason, t.status) ? { advice: rejectionAdvice(t.rejected_reason, t.status)! } : {}),
     };
   }
@@ -1061,6 +1061,12 @@ export class WorkspaceDO extends DurableObject<Env> {
     // The real set of rejection codes is not in Meta's docs: an unfamiliar enum is logged (code only, never free text) so it can be added to the advice and the fixture.
     if (clean && status === 'REJECTED' && !knownReason(clean) && isEnumLikeReason(clean)) console.log(JSON.stringify({ event: 'template_reason_unmapped', code: clean }));
     const r = this.sql.exec('UPDATE templates SET status = ?, rejected_reason = ?, meta_id = COALESCE(?, meta_id), updated_at = ? WHERE name = ? AND language = ?', status, clean, metaId, Date.now(), name, language);
+    return { applied: r.rowsWritten > 0 };
+  }
+
+  /** Meta rated a template (green / yellow / red / unknown). Only the rating column changes: not the status, not the edit clock. Redelivery is harmless (same value). */
+  async applyTemplateQuality(name: string, language: string, score: 'GREEN' | 'YELLOW' | 'RED' | 'UNKNOWN'): Promise<{ applied: boolean }> {
+    const r = this.sql.exec('UPDATE templates SET quality = ? WHERE name = ? AND language = ?', score, name, language);
     return { applied: r.rowsWritten > 0 };
   }
 
