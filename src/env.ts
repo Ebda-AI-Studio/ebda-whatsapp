@@ -108,6 +108,8 @@ export type Env = {
   TOKEN_ENC_KEY?: string;
   /** ERASURE-KEY-1: HMAC key (secret, at least 32 characters) for the erasure subject hash, the offboarding pseudonym, the audit target ids and the view-as record hashes. NEVER rotated (a rotation would orphan every erasure record); independent of TOKEN_ENC_KEY. */
   ERASURE_HMAC_KEY?: string;
+  /** CHAT-SA-3: who may create a standalone workspace (Chat without a Store): off (default, and any other value) | invite (an operator code) | open. */
+  STANDALONE_WORKSPACES?: 'off' | 'invite' | 'open' | string;
   /** M-174: HMAC key (secret, at least 32 characters) that signs backup manifests; PREVIOUS only verifies older backups during a key change. */
   BACKUP_HMAC_KEY?: string;
   BACKUP_HMAC_KEY_PREVIOUS?: string;
