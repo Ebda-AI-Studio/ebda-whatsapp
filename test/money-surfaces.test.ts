@@ -454,7 +454,7 @@ describe('confirmation tokens', () => {
   });
 });
 
-describe('the offboarding freeze (OFFBOARD-FREEZE-1) holds on every money surface', () => {
+describe('the offboarding freeze (OFFBOARD-FREEZE-1) holds on every money-IN surface and never blocks a refund', () => {
   const freeze = (ws: string) => env.DB.prepare("INSERT INTO offboarding (workspace_id, state, requested_by, requested_role, requested_at, execute_after) VALUES (?, 'pending', 'u1', 'owner', ?, ?)").bind(ws, Date.now(), Date.now() + 14 * DAY).run();
   it('own-number funding: preview and write are refused with offboarding_pending, nothing written', async () => {
     const ws = W(50);
@@ -469,17 +469,16 @@ describe('the offboarding freeze (OFFBOARD-FREEZE-1) holds on every money surfac
     expect([put.status, (await json(put)).message]).toEqual([409, 'offboarding_pending']);
     expect(await fundingOf('pn-o50')).toBeNull();
   });
-  it('yearly refund: preview and request are refused with offboarding_pending, no request filed', async () => {
+  it('yearly refund stays OPEN while deletion is pending (OFFBOARD-FREEZE-1: refunds are how money leaves)', async () => {
     const ws = W(51);
     await buyYearly(ws);
     const a = await apiFor(ws);
-    const prev = await json(await a.call('POST', '/wallet/yearly-refund/preview', {}));
     await freeze(ws);
     const p = await a.call('POST', '/wallet/yearly-refund/preview', {});
-    expect([p.status, (await json(p)).message]).toEqual([409, 'offboarding_pending']);
-    const r = await a.call('POST', '/wallet/yearly-refund/requests', tok(prev.confirm));
-    expect([r.status, (await json(r)).message]).toEqual([409, 'offboarding_pending']);
-    expect(await env.DB.prepare('SELECT count(*) AS n FROM yearly_refund_requests WHERE workspace_id = ?').bind(ws).first()).toEqual({ n: 0 });
+    expect(p.status).toBe(200);
+    const r = await a.call('POST', '/wallet/yearly-refund/requests', tok((await json(p)).confirm));
+    expect([r.status, r.status === 201 ? '' : await json(r)]).toEqual([201, '']);
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM yearly_refund_requests WHERE workspace_id = ?').bind(ws).first()).toEqual({ n: 1 });
   });
   it('credit packs stay refused too (the reference behaviour)', async () => {
     const ws = W(52);

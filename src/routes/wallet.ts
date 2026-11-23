@@ -162,7 +162,6 @@ walletRoutes.get('/stores/:storeId/wallet/yearly-refund', async (c) => {
 
 walletRoutes.post('/stores/:storeId/wallet/yearly-refund/preview', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
-  if (await frozen(c)) return apiError(c, 409, 'invalid_request', 'offboarding_pending');
   const storeId = c.req.param('storeId')!;
   const m = await merchantQuote(c.env, storeId);
   if (!('quote' in m)) return apiError(c, 409, 'invalid_request', m.reason);
@@ -173,7 +172,6 @@ walletRoutes.post('/stores/:storeId/wallet/yearly-refund/preview', async (c) => 
 
 walletRoutes.post('/stores/:storeId/wallet/yearly-refund/requests', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
-  if (await frozen(c)) return apiError(c, 409, 'invalid_request', 'offboarding_pending');
   const body = confirmToken.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return apiError(c, 400, 'invalid_request');
   const r = await createYearlyRefundRequest(c.env, { workspaceId: c.req.param('storeId')!, userId: c.get('principal').userId, ...body.data });
