@@ -8,6 +8,7 @@ import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
 import { assistantFlagsDto, assistantModeDto } from './assistant-rollout';
 import type { InboxSource } from './source';
+import { isStandaloneId, markStandalone } from './workspaces';
 
 export class ApiError extends Error {
   /** `detail` = the server's machine reason for a 409 (e.g. `empty_audience`), when it sends one. */
@@ -394,12 +395,16 @@ export function createApiSource(o: Opts): LiveSource {
     emit: (e) => listeners.forEach((l) => l(e)),
     reload: () => reloaders.forEach((r) => r()),
     async loadCapabilities() {
+      // CHAT-SA-5: a standalone workspace has no Store, so everything that talks to one is switched off (the routes would only 404). The `sw_` id says so before /me does (and when /me fails).
+      const standAlone = () => markStandalone(source);
+      if (isStandaloneId(o.storeId)) standAlone();
       try {
         const me = await call('/me', meResponse.partial().loose());
         source.capabilities = { codOutcome: me.capabilities?.codOutcome === true, numbers: me.capabilities?.numbers === true, assistant: me.capabilities?.assistant === true };
         if (me.role) source.role = me.role;
         if (me.workspace === false) source.workspaceMissing = true;
         if (me.stores) source.stores = me.stores;
+        if ((me as { kind?: unknown }).kind === 'standalone') standAlone();
       } catch (e) {
         source.capabilities = { codOutcome: false };
         if (e instanceof ApiError && e.status === 403 && e.code === 'no_seat') source.noSeat = e.detail === 'seat_over_limit' ? 'over_limit' : 'none';

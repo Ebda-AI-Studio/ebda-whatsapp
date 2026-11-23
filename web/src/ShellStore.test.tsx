@@ -136,3 +136,20 @@ describe('other lists: a failed read is an error, never the empty copy', () => {
     expect(within(card).queryByText(t.wCrOff)).toBeNull();
   });
 });
+
+describe('CHAT-SA-5: a Store workspace is unchanged', () => {
+  it('still has the orders pane, the recommend toggle, the catalogue and the Store wording', async () => {
+    const source = createSampleSource();
+    source.storeId = '3f2b8c1e-0000-4000-8000-000000000000';
+    const { container } = render(<App source={source} now={now} />);
+    expect(container.querySelector('.orders')).toBeTruthy();
+    expect(container.querySelector('.app')?.getAttribute('data-nostore')).toBeNull();
+    expect(source.standalone).toBeUndefined();
+    expect(source.catalog).toBeTruthy(); expect(source.proactiveRecs).toBeTruthy(); expect(source.team).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole('link', { name: t.agent })));
+    expect(await screen.findByText(t.agentRecommend)).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole('link', { name: t.botNav })));
+    expect(await screen.findByText(t.swTitle)).toBeTruthy();
+    expect(await screen.findByText(t.catTitle)).toBeTruthy();
+  });
+});

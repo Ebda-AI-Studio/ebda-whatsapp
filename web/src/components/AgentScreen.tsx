@@ -95,6 +95,7 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
           <small id="faq-hint" className="muted">{t.agentFaqHint} · {faqSmall ? t.agentFaqInline : settings.knowledgeReady ? t.agentKbReady : t.agentKbPending}</small>
           {faqBigPending && <small role="alert" className="key-set">{t.agentFaqBigPending}</small>}
         </div>
+        {!source.standalone && (
         <div className="field">
           <div className="setting-row">
             <span id="agent-recommend-label">{t.agentRecommend}</span>
@@ -102,6 +103,7 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
           </div>
           <small id="agent-recommend-hint" className="muted">{t.agentRecommendHint}</small>
         </div>
+        )}
         <fieldset className="field">
           <legend>{t.agentPromises}</legend>
           <small className="muted">{t.agentPromisesHint}</small>
