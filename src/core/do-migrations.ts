@@ -620,6 +620,11 @@ export const DO_MIGRATIONS: readonly string[] = [
   // ON for one created after it. The marker lives in workspace_meta, a table that is NOT in BACKUP_TABLES (agent_state is, and a restore needs every backed-up table empty,
   // so migrate() must never write into one). migrate() inserts the marker only when no migration had ever run (a brand-new workspace); no row = OFF.
   `CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // v48 (inbox tools follow-up): conversation tags are lower-cased at write time since A27, so older mixed-case rows ('VIP' next to 'vip') are folded once. The lower-case twin is
+  // inserted first with OR IGNORE (the primary key merges a duplicate into the row that is already there, and the conversation link is kept), then the mixed-case originals go.
+  // The table has no per-row attribution to keep. SQLite lower() folds ASCII only, which is all a Latin-script tag has to fold (Arabic has no case).
+  `INSERT OR IGNORE INTO conversation_tags (conversation_id, tag) SELECT conversation_id, lower(trim(tag)) FROM conversation_tags WHERE tag <> lower(trim(tag)) AND lower(trim(tag)) <> '';
+   DELETE FROM conversation_tags WHERE tag <> lower(trim(tag));`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
