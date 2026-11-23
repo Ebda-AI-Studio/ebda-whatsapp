@@ -206,3 +206,66 @@ describe('contest vs the auto-confirm machine (live mode)', () => {
     expect(await autoRow(r.id)).not.toMatchObject({ state: 'auto_confirmed' });
   });
 });
+
+describe('contest guards (security review of #161)', () => {
+  const note = { note: 'The transfer went through at 14:05, the amount on the receipt is 200 EGP' };
+  const held = (id: string) => env.DB.prepare('SELECT state, held_reason, held_of, held_at FROM instapay_requests WHERE id = ?').bind(id).first<{ state: string; held_reason: string | null; held_of: string | null; held_at: number | null }>();
+
+  it.each([
+    ['reverted_at is set', "UPDATE instapay_requests SET reverted_at = 1 WHERE id = ?"],
+    ['granted_at is set', "UPDATE instapay_requests SET granted_at = 1 WHERE id = ?"],
+    ['decided_by is a system:* value other than auto-confirm', "UPDATE instapay_requests SET decided_by = 'system:revert' WHERE id = ?"],
+  ])('refuses to contest when %s (409, still rejected, nothing reopened)', async (_n, sql) => {
+    const ws = W(30 + ['reverted_at is set', 'granted_at is set'].indexOf(_n) + (_n.startsWith('decided_by') ? 3 : 0));
+    const { api, r } = await rejected(ws, `guard-${_n}`);
+    await env.DB.prepare(sql).bind(r.id).run();
+    const res = await api.call('POST', `/wallet/instapay/${r.id}/contest`, note);
+    expect(res.status).toBe(409);
+    expect((await row(r.id))!.state).toBe('rejected');
+    expect(await order(r.id)).toEqual({ state: 'failed' });
+    expect(await audited('instapay_contested_by_owner', ws)).toBe(0);
+  });
+
+  it('keeps an existing hold (held_reason / held_of / held_at) across a contest', async () => {
+    const ws = W(1101);
+    const { api, r } = await rejected(ws, 'keep-hold');
+    await env.DB.prepare("UPDATE instapay_requests SET held_reason = 'duplicate_image', held_of = 'other-id', held_at = 123 WHERE id = ?").bind(r.id).run();
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, note)).status).toBe(200);
+    expect(await held(r.id)).toEqual({ state: 'under_review', held_reason: 'duplicate_image', held_of: 'other-id', held_at: 123 });
+  });
+
+  it('re-runs the duplicate-image check: the same receipt now on another live request holds BOTH, with an audit row', async () => {
+    const ws = W(1102);
+    const { api, r } = await rejected(ws, 'same-receipt');
+    const otherApi = await apiFor(W(1103));
+    const b = await create(otherApi);
+    expect(await upload(otherApi, b.id, 'same-receipt')).toBe(200); // r is rejected, so b is not held at upload
+    expect((await held(b.id))!.held_reason).toBeNull();
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, note)).status).toBe(200);
+    expect(await held(r.id)).toMatchObject({ state: 'under_review', held_reason: 'duplicate_image', held_of: b.id });
+    expect((await held(b.id))!.held_reason).toBe('duplicate_image');
+    expect(await audited('instapay_held', ws)).toBe(1);
+  });
+
+  it('re-runs the duplicate bank-reference check: a reference already on another live request holds the contested one', async () => {
+    const ws = W(1104);
+    const { api, r } = await rejected(ws, 'ref-dup-a');
+    const otherApi = await apiFor(W(1105));
+    const c = await create(otherApi);
+    expect(await upload(otherApi, c.id, 'ref-dup-c')).toBe(200);
+    await env.DB.prepare("UPDATE instapay_requests SET pending_bank_ref = 'BK-DUP-1' WHERE id = ?").bind(c.id).run();
+    await env.DB.prepare("UPDATE instapay_requests SET pending_bank_ref = 'BK-DUP-1' WHERE id = ?").bind(r.id).run();
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, note)).status).toBe(200);
+    expect(await held(r.id)).toMatchObject({ state: 'under_review', held_reason: 'duplicate_reference', held_of: c.id });
+  });
+
+  it('records the original rejection in the audit row and shows the reviewer why it was rejected', async () => {
+    const ws = W(1106);
+    const { api, r } = await rejected(ws, 'audit-orig');
+    expect((await api.call('POST', `/wallet/instapay/${r.id}/contest`, note)).status).toBe(200);
+    const a = await env.DB.prepare("SELECT after_json FROM billing_audit WHERE action = 'instapay_contested_by_owner' AND workspace_id = ?").bind(ws).first<{ after_json: string }>();
+    expect(JSON.parse(a!.after_json).originalRejection).toMatchObject({ rejectReason: 'The amount on the receipt is 150', decidedBy: OP1, decidedAt: expect.any(Number) });
+    const ops = await (await operatorCall(OP1, 'GET', '/instapay?state=under_review')).json() as { items: { id: string; rejectReason: string | null; contestedAt: number | null }[] };
+    expect(ops.items.find((i) => i.id === r.id)).toMatchObject({ rejectReason: 'The amount on the receipt is 150', contestedAt: expect.any(Number) });
+  });
+});
