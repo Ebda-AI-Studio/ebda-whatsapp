@@ -15,6 +15,7 @@ import { applyConsentChanged, forgetBuyer, recordCheckoutConsent, recordWithdraw
 import { alert } from '../observability';
 import { funnelOnce } from '../funnel';
 import { setStoreHoldFlag } from '../numbers/health';
+import { scheduleProactiveRecs } from './proactive-recs';
 
 export type StoreEventOutcome = { status: 'applied' | 'duplicate' | 'stale' | 'skipped' | 'retry'; detail?: string };
 
@@ -207,6 +208,7 @@ function handle(host: LinkHost, event: StoreEvent, opts: { phoneNumberId: string
       const d = event.data;
       const waId = d.phoneE164.slice(1);
       upsertOrder(host, { orderId: d.orderId, orderNumber: d.orderNumber, waId, buyerKey: d.buyerKey, paymentMethod: d.paymentMethod, status: 'created', totalMinor: d.totalMinor, currency: d.currency, locale: locale(d.locale) }, now);
+      scheduleProactiveRecs(host, { orderId: d.orderId, phoneNumberId: opts.phoneNumberId, now }); // CHAT-RECS-SWITCH-1: nothing unless the owner switched it on
       // COD orders are confirmed through the COD request; orders placed in this chat were already confirmed in the chat.
       if (d.paymentMethod === 'cod' || d.channel === 'whatsapp') return { status: 'applied' };
       if (!readSettings(host).orderConfirmations) return { status: 'skipped', detail: 'disabled' };
