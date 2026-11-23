@@ -10,7 +10,7 @@ import { createRefundRequest, listRefundRequests } from '../core/billing/refunds
 import { issueConfirmation, consumeConfirmation, type Consumed } from '../core/billing/confirmation';
 import { creditCheckoutOn, creditPacks, getCreditOrder, packPayload, startCreditPack } from '../core/billing/credit-packs';
 import { ownNumberFunding, setOwnNumberCard } from '../core/billing/funding';
-import { frozenForOffboarding } from '../core/ops/offboarded';
+import { frozenForOffboarding, offboardingInProgress } from '../core/ops/offboarded';
 import { createYearlyRefundRequest, latestRequest, merchantQuote, quotePayload, requestDto } from '../core/billing/yearly-refund-request';
 import { apiError, managesStore, senderNumber, workspaceStub, type ApiContext, type ApiEnv } from './shared';
 
@@ -162,6 +162,7 @@ walletRoutes.get('/stores/:storeId/wallet/yearly-refund', async (c) => {
 
 walletRoutes.post('/stores/:storeId/wallet/yearly-refund/preview', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
+  if (await offboardingInProgress(c.env, c.req.param('storeId')!)) return apiError(c, 409, 'invalid_request', 'offboarding_in_progress'); // pending stays open (refunds are how money leaves); running/done is refused
   const storeId = c.req.param('storeId')!;
   const m = await merchantQuote(c.env, storeId);
   if (!('quote' in m)) return apiError(c, 409, 'invalid_request', m.reason);
@@ -172,11 +173,12 @@ walletRoutes.post('/stores/:storeId/wallet/yearly-refund/preview', async (c) => 
 
 walletRoutes.post('/stores/:storeId/wallet/yearly-refund/requests', async (c) => {
   if (!owner(c)) return apiError(c, 403, 'forbidden');
+  if (await offboardingInProgress(c.env, c.req.param('storeId')!)) return apiError(c, 409, 'invalid_request', 'offboarding_in_progress'); // pending stays open (refunds are how money leaves); running/done is refused
   const body = confirmToken.safeParse(await c.req.json().catch(() => null));
   if (!body.success) return apiError(c, 400, 'invalid_request');
   const r = await createYearlyRefundRequest(c.env, { workspaceId: c.req.param('storeId')!, userId: c.get('principal').userId, ...body.data });
   if (r.ok) return c.json(requestDto(r.request), 201);
-  if (r.reason === 'request_pending' || r.reason === 'nothing_to_refund' || r.reason === 'quote_unavailable') return apiError(c, 409, 'invalid_request', r.reason);
+  if (r.reason === 'request_pending' || r.reason === 'nothing_to_refund' || r.reason === 'quote_unavailable' || r.reason === 'offboarding_in_progress') return apiError(c, 409, 'invalid_request', r.reason);
   return confirmRefusal(c, r.reason);
 });
 

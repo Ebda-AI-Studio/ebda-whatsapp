@@ -16,6 +16,11 @@ export async function frozenForOffboarding(env: Env, ws: string): Promise<boolea
   return !!(await env.DB.prepare("SELECT 1 FROM offboarding WHERE workspace_id = ? AND state IN ('pending', 'running')").bind(ws).first());
 }
 
+/** The wipe has started or finished (OFFBOARD-FREEZE-1 amendment): a refund REQUEST filed now would be lost or orphaned, so it is refused; while `pending` it stays open. */
+export async function offboardingInProgress(env: Env, ws: string): Promise<boolean> {
+  return !!(await env.DB.prepare("SELECT 1 FROM offboarding WHERE workspace_id = ? AND state IN ('running', 'done')").bind(ws).first());
+}
+
 /** Past the point of no return: the id is a pseudonym, the run finished, or the workspace's own storage is already wiped. */
 export async function isOffboarded(env: Env, ws: string): Promise<boolean> {
   if (PSEUDONYM_RE.test(ws)) return true;

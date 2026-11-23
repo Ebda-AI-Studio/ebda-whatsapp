@@ -6,6 +6,8 @@ import { KashierProvider, configurePayments, type PaymentProvider } from '../src
 import { executeYearlyRefund, startPackageCheckout } from '../src/core/billing/package-orders';
 import { handleProviderWebhook } from '../src/core/billing/topups';
 import { repairCreditOrders, creditPacks, startCreditPack } from '../src/core/billing/credit-packs';
+import { createYearlyRefundRequest, merchantQuote, quotePayload } from '../src/core/billing/yearly-refund-request';
+import { issueConfirmation } from '../src/core/billing/confirmation';
 import { setOwnNumberCard } from '../src/core/billing/funding';
 import { configureSessionCheck } from '../src/core/identity/session';
 import { OP1, apiFor, operatorCall, storeId as W0, useApiKey } from './helpers/api';
@@ -479,6 +481,33 @@ describe('the offboarding freeze (OFFBOARD-FREEZE-1) holds on every money-IN sur
     const r = await a.call('POST', '/wallet/yearly-refund/requests', tok((await json(p)).confirm));
     expect([r.status, r.status === 201 ? '' : await json(r)]).toEqual([201, '']);
     expect(await env.DB.prepare('SELECT count(*) AS n FROM yearly_refund_requests WHERE workspace_id = ?').bind(ws).first()).toEqual({ n: 1 });
+  });
+  it('yearly refund is REFUSED once the wipe is running or done (409 offboarding_in_progress), no row', async () => {
+    const ws = W(53);
+    await buyYearly(ws);
+    const a = await apiFor(ws);
+    const prev = await json(await a.call('POST', '/wallet/yearly-refund/preview', {})); // issued while nothing was deleting
+    await freeze(ws);
+    await env.DB.prepare("UPDATE offboarding SET state = 'running' WHERE workspace_id = ?").bind(ws).run();
+    const p = await a.call('POST', '/wallet/yearly-refund/preview', {});
+    expect([p.status, (await json(p)).message]).toEqual([409, 'offboarding_in_progress']);
+    const r = await a.call('POST', '/wallet/yearly-refund/requests', tok(prev.confirm));
+    expect([r.status, (await json(r)).message]).toEqual([409, 'offboarding_in_progress']);
+    await env.DB.prepare("UPDATE offboarding SET state = 'done' WHERE workspace_id = ?").bind(ws).run();
+    expect((await a.call('POST', '/wallet/yearly-refund/preview', {})).status).toBe(409);
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM yearly_refund_requests WHERE workspace_id = ?').bind(ws).first()).toEqual({ n: 0 });
+  });
+  it('a race: the state flips to running between the check and the insert, so the INSERT writes no row', async () => {
+    const ws = W(54);
+    await buyYearly(ws);
+    await freeze(ws);
+    const m = await merchantQuote(env, ws);
+    if (!('quote' in m)) throw new Error('no quote');
+    const userId = 'u-race';
+    const c = await issueConfirmation(env, { workspaceId: ws, userId, action: 'yearly_refund_request', payload: quotePayload(m.quote) });
+    const r = await createYearlyRefundRequest(env, { workspaceId: ws, userId, ...tok(c) }, Date.now(), { beforeInsert: async () => { await env.DB.prepare("UPDATE offboarding SET state = 'running' WHERE workspace_id = ?").bind(ws).run(); } });
+    expect(r).toEqual({ ok: false, reason: 'offboarding_in_progress' });
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM yearly_refund_requests WHERE workspace_id = ?').bind(ws).first()).toEqual({ n: 0 });
   });
   it('credit packs stay refused too (the reference behaviour)', async () => {
     const ws = W(52);
