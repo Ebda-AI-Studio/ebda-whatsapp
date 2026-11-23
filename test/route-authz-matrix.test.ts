@@ -45,7 +45,7 @@ const R: Record<string, Role> = {
   'POST /store-link/catalog/resync': 'manager', 'PUT /store-link/catalog/commerce': 'manager',
   // agent, connectors, retention (WA-SECRETS-1: what writes or tests a merchant's secrets is the owner's alone; a super admin keeps the GET, which never carries a secret)
   'GET /agent': 'manager', 'PUT /agent': 'owner', 'GET /connectors': 'manager', 'PUT /connectors/:connectorId': 'owner', 'DELETE /connectors/:connectorId': 'owner',
-  'POST /connectors/:connectorId/test': 'owner', 'GET /retention': 'manager', 'PUT /retention': 'manager',
+  'POST /connectors/:connectorId/test': 'owner', 'GET /contacts/export': 'owner', 'GET /retention': 'manager', 'PUT /retention': 'manager',
   // numbers and shared number
   'GET /numbers': 'member', 'POST /numbers/:phoneNumberId/refresh': 'member', 'GET /shared-number': 'member',
   'GET /numbers/signup-config': 'manager', 'POST /numbers/connect': 'manager', 'POST /numbers/notices/:noticeId/dismiss': 'manager',
@@ -56,6 +56,7 @@ const R: Record<string, Role> = {
   'GET /wallet/statement': 'manager',
   'PUT /digest': 'owner', 'GET /wallet/refund-requests': 'owner', 'POST /wallet/refund-requests': 'owner', 'POST /wallet/topups': 'owner', 'GET /wallet/topups/:orderId': 'owner',
   'GET /wallet/instapay': 'owner', 'POST /wallet/instapay': 'owner', 'PUT /wallet/instapay/:requestId/proof': 'owner',
+  'POST /wallet/instapay/:requestId/cancel': 'owner', 'POST /wallet/instapay/:requestId/contest': 'owner',
   'GET /wallet/yearly-refund': 'owner', 'POST /wallet/yearly-refund/preview': 'owner', 'POST /wallet/yearly-refund/requests': 'owner',
   'GET /wallet/credit-packs': 'owner', 'POST /wallet/credit-packs/preview': 'owner', 'POST /wallet/credit-packs/orders': 'owner', 'GET /wallet/credit-packs/orders/:orderId': 'owner',
   'POST /numbers/:phoneNumberId/funding/preview': 'owner', 'PUT /numbers/:phoneNumberId/funding': 'owner',
