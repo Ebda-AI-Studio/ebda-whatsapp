@@ -6,6 +6,7 @@ import { selectTools } from '../../foundation/smart-layer/plan/select-tools';
 import { chatAdapter } from '../../src/core/smart-layer/adapter';
 import type { HelpCorpus } from '../../src/core/smart-layer/help-index';
 import { viewOf, type StoredCap } from '../../src/core/smart-layer/registry';
+import { COUPON_LIMITS } from '../../src/core/store-bridge';
 import { KEYWORDS } from '../../src/core/smart-layer/tools/keywords';
 import { configureAssistant } from '../../src/routes/assistant';
 import { NO_STORE_METRICS, isStoreMetricQuestion, observeTurn } from '../../src/routes/assistant-observe';
@@ -285,6 +286,14 @@ describe('POST /store/coupons: idempotent and validated at the edge', () => {
       expect((await t.api.call('POST', '/store/coupons', body(o))).status, JSON.stringify(o)).toBe(400);
     }
     expect(link.fake.count('createCoupon')).toBe(0);
+  });
+});
+
+describe('contract pin: the limits Chat checks early are the ones the Store applies', () => {
+  // The Store's owner-tools.ts exports MAX_PERCENT / MAX_FIXED_MINOR / MAX_WINDOW_DAYS / MAX_USAGE_LIMIT and pins the same literals in
+  // tests/unit/wa-bridge/wa-bridge-owner-tools.test.ts (ebda-store). Change both repos together.
+  it('COUPON_LIMITS equals the Store values', () => {
+    expect(COUPON_LIMITS).toEqual({ percentMax: 90, fixedMaxMinor: 5_000_000, windowDaysMax: 90, usageLimitMax: 100_000 });
   });
 });
 
