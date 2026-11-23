@@ -8,11 +8,16 @@ import { buildAssets } from '../../scripts/build-help-corpus.mjs';
 const ROOT = join(import.meta.dirname, '..', '..');
 
 describe('assistant assets', () => {
-  it('registry, help-corpus and explain .generated.json are current (run node scripts/build-help-corpus.mjs)', async () => {
+  it('registry, help-corpus and explain .generated.json on disk match a fresh build (they are build output, never committed)', async () => {
     const { registry, corpus, explain } = (await buildAssets()) as { registry: string; corpus: string; explain: string };
     expect(readFileSync(join(ROOT, 'assistant/registry.generated.json'), 'utf8') === registry).toBe(true);
     expect(readFileSync(join(ROOT, 'assistant/help-corpus.generated.json'), 'utf8') === corpus).toBe(true);
     expect(readFileSync(join(ROOT, 'assistant/explain.generated.json'), 'utf8') === explain).toBe(true);
+  });
+  it('the build is deterministic: two builds give identical bytes (so regenerating on every build cannot make a deploy differ)', async () => {
+    const a = await buildAssets();
+    const b = await buildAssets();
+    expect(b).toEqual(a);
   });
   it('every help chunk fits the engine limit and every guide has an Arabic and an English twin', async () => {
     const { corpus } = (await buildAssets()) as { corpus: string };

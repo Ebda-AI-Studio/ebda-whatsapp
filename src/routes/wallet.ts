@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { confirmToken, costEstimateQuery, creditOrderDto, creditPackBuy, creditPackPick, digestSettings, numberFundingChoice, numberFundingConfirm, refundRequestCreate, statementQuery, topupRequest, yearlyRefundPreviewDto, yearlyRefundViewDto, type WalletDto } from '../core/api/contract';
 import { statementCsv } from '../core/billing/statement';
+import { namePlan } from '../core/billing/store-plan';
 import { cardCheckoutReady, topupsEnabled } from '../core/billing/payments';
 import { rejectionNotice } from '../core/billing/instapay';
 import { getTopup, startTopup } from '../core/billing/topups';
@@ -26,10 +27,11 @@ walletRoutes.get('/stores/:storeId/wallet', async (c) => {
       SELECT sn.phone_number_id, sn.display_phone, nf.funding, 1, sn.rowid FROM shared_number_members m JOIN shared_numbers sn ON sn.phone_number_id = m.phone_number_id LEFT JOIN number_funding nf ON nf.phone_number_id = sn.phone_number_id WHERE m.workspace_id = ?1 AND m.status = 'active'
     ) ORDER BY grp, ord`)
     .bind(c.req.param('storeId')!).all<{ phone_number_id: string; display_phone: string | null; funding: 'merchant_card' | 'platform_line' | null }>();
+  const namedPlan = await namePlan(c.env, c.req.param('storeId')!, v.plan as WalletDto['plan']);
   const dto: WalletDto = {
     balanceMinor: v.balanceMinor, heldMinor: v.heldMinor, availableMinor: v.availableMinor, debtMinor: v.debtMinor, creditLimitMinor: v.creditLimitMinor, currency: 'EGP',
     funding: results.map((r) => ({ phoneNumberId: r.phone_number_id, displayPhone: r.display_phone, funding: r.funding ?? 'unknown' })),
-    topupsEnabled: topupsEnabled(c.env), cardCheckout: cardCheckoutReady(c.env), lowBalance: v.lowBalance, lowBalanceThresholdMinor: v.lowBalanceThresholdMinor, aiCredits: v.aiCredits, plan: v.plan as WalletDto['plan'],
+    topupsEnabled: topupsEnabled(c.env), cardCheckout: cardCheckoutReady(c.env), lowBalance: v.lowBalance, lowBalanceThresholdMinor: v.lowBalanceThresholdMinor, aiCredits: v.aiCredits, plan: namedPlan,
     ...(owner(c) ? { instapayNotice: await rejectionNotice(c.env, c.req.param('storeId')!) } : {}),
   };
   return c.json(dto);

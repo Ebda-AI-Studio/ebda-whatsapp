@@ -2,8 +2,8 @@
 title: Ebda Chat Terms of Service
 slug: whatsapp-terms
 lang: en
-updated: 2026-11-09
-version: 1.1
+updated: 2026-11-10
+version: 1.2
 ---
 
 Arabic version prevails.
@@ -60,7 +60,7 @@ You give us accurate information and keep your login details secret. You are res
 
 6.4.1 Packages. A package you buy runs for its period. If you renew the same package before the period ends, the new period starts when the current one ends, so you keep the days and the AI credits of the current period until then. If a package payment is refunded or reversed by your bank or card issuer (a chargeback), the package ends at once: AI credits you already used are not reversed, and the unused AI credits of that package are removed. If only part of the payment is refunded, the package period and its unused AI credits are reduced in the same proportion instead. If your Store plan includes a package, that package applies again.
 
-6.5 Refunds. <!-- PENDING LEGAL REVIEW: refunds --> The remaining wallet balance can be refunded for 12 months after you cancel, once any debt is settled. The minimum refund is 50 EGP. Refunds go to the original payment method through the payment provider where possible; otherwise by bank transfer or InstaPay after an identity check. The following are not refundable: card fees already paid, AI credits that came with a package, the current package period (which keeps working until it ends), and purchased AI credits that were used or are older than 14 days. For a yearly package, the whole months left after the current month can be refunded at the package's monthly price (the yearly price divided by 12), up to what you paid for that year and after any debt is settled; the current month is not refunded. To ask for a refund, write to ahlan@ebda.app. We keep financial records as the law requires, even after you cancel or ask for deletion of data.
+6.5 Refunds. The remaining wallet balance can be refunded for 12 months after you cancel, once any debt is settled. The minimum refund is 50 EGP. Refunds go to the original payment method through the payment provider where possible; otherwise by bank transfer or InstaPay after an identity check. The following are not refundable: card fees already paid, AI credits that came with a package, the current package period (which keeps working until it ends), and purchased AI credits that were used or are older than 14 days. For a yearly package, the whole months left after the current month can be refunded at the package's monthly price (the yearly price divided by 12), up to what you paid for that year and after any debt is settled; the current month is not refunded. To ask for a refund, write to ahlan@ebda.app. We keep financial records as the law requires, even after you cancel or ask for deletion of data.
 
 6.6 Prices and VAT. All prices are final amounts in Egyptian pounds. We are not registered for value-added tax (VAT) and therefore charge none. If we become registered, VAT will be introduced only after at least 30 days of written notice, as a change to fees, will be shown as a separate line, and will never apply retroactively to any amount already paid or invoiced.
 
@@ -88,7 +88,7 @@ You will not use the Service to: send spam or unsolicited messages; send unlawfu
 
 ## 10. Your data
 
-Your customers' messages and contact data are processed as described in the Ebda Chat Privacy Policy and the Data Processing Agreement, which form part of these terms. Contact deletion is available as described at https://ebda.app/legal/data-deletion/.
+Your customers' messages and contact data are processed as described in the Ebda Chat Privacy Policy and the Data Processing Agreement, which form part of these terms. Contact deletion is available as described at https://ebda.app/en/legal/data-deletion/.
 
 ## 11. Suspension and termination
 

@@ -37,6 +37,9 @@ export type Env = {
   /** The platform model's price in USD per million tokens (input / output), for the cost-per-credit log and alert (M-084). Unset = cost unknown, no alert. */
   AI_PRICE_INPUT_USD_PER_M?: string;
   AI_PRICE_OUTPUT_USD_PER_M?: string;
+  /** Same, for `@cf/openai/gpt-oss-120b` (the agentModel flag, Ruling WA-MODEL-FLAG-1). Unset = cost unknown while that model is on: set both BEFORE flipping. */
+  AI_PRICE_INPUT_USD_PER_M_GPT_OSS?: string;
+  AI_PRICE_OUTPUT_USD_PER_M_GPT_OSS?: string;
   /** Voice-note transcription: price in USD per audio minute of the speech model (Cloudflare pricing page), and the voice notes one store may have transcribed per UTC day (default 60). */
   AI_STT_PRICE_USD_PER_MIN?: string;
   VOICE_DAILY_CAP?: string;

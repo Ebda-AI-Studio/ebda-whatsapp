@@ -163,9 +163,10 @@ export type SharedRequestDto = z.infer<typeof sharedRequestDto>;
 export const listTemplatesResponse = z.object({ items: z.array(templateDto), /** the brand's starter set is in place for the connected number (the screen installs it once when this is false and the list is empty) */ starterInstalled: z.boolean().optional() });
 
 export const noteDto = z.object({ id: z.number().int(), authorUserId: z.string(), text: z.string(), at: z.number().int() });
-export const addNoteRequest = z.object({ text: z.string().min(1).max(2000) });
+export const addNoteRequest = z.object({ text: z.string().trim().min(1).max(2000) }).strict();
 export const assignRequest = z.object({ userId: z.string().nullable() });
-export const setTagsRequest = z.object({ tags: z.array(z.string().min(1).max(32)).max(10) });
+/** PUT /conversations/:id/tags: the whole tag list (trimmed, lower-cased and de-duplicated by the server, like a contact's tags). */
+export const setTagsRequest = z.object({ tags: z.array(z.string().trim().min(1).max(32)).max(10) }).strict();
 export const searchQuery = z.object({ q: z.string().min(1).max(100), limit: z.coerce.number().int().min(1).max(50).default(20) });
 export const searchResponse = z.object({ items: z.array(z.object({ conversationId: z.number().int(), messageId: z.number().int(), snippet: z.string(), at: z.number().int() })) });
 
@@ -202,6 +203,10 @@ export const meResponse = z.object({
   storeId: z.string(),
   role: z.enum(['owner', 'staff', 'super_admin']),
   capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional(), assistant: z.boolean().optional() }),
+  /** Whether THIS store has a Chat workspace. false = Chat was never switched on for it (every workspace route answers 404). Additive: absent from older servers. */
+  workspace: z.boolean().optional(),
+  /** The stores this person may act on that DO have a Chat workspace (id, name, role), for the store picker. At most 50. */
+  stores: z.array(z.object({ id: z.string(), name: z.string(), role: z.enum(['owner', 'staff']) })).max(50).optional(),
 });
 export type MeResponse = z.infer<typeof meResponse>;
 
@@ -316,6 +321,8 @@ export const agentSettingsFields = z.object({
   allowFreeDelivery: z.boolean(),
   allowExchange: z.boolean(),
   allowGuarantee: z.boolean(),
+  /** The agent may recommend products from the catalogue (similar items, complements, after an order, budget asks). Proactive (it can message a customer after an order), so Ruling WA-RECS-1: OFF for workspaces that existed before it, ON for new ones; off = it only answers what was asked. */
+  recommendProducts: z.boolean(),
 });
 export const agentSettingsDto = agentSettingsFields.extend({
   hasApiKey: z.boolean(),
@@ -460,6 +467,14 @@ export const updateSegmentRequest = createSegmentRequest.partial().refine((p) =>
 export const segmentPreviewRequest = z.object({ criteria: segmentCriteria });
 /** `count` = people who would receive a marketing send; `excluded` = people the filter matches but who cannot be messaged, and why. */
 export const segmentPreviewDto = z.object({ count: z.number().int().nonnegative(), excluded: z.object({ optedOut: z.number().int().nonnegative(), noConsent: z.number().int().nonnegative() }) });
+/** A canned reply the merchant keeps for the inbox composer (A25). At most MAX_QUICK_REPLIES per workspace; the text is unique. */
+export const MAX_QUICK_REPLIES = 20;
+export const quickReplyText = z.string().trim().min(1).max(500);
+export const quickReplyDto = z.object({ id: z.number().int(), text: quickReplyText, position: z.number().int(), createdAt: z.number().int() });
+export const createQuickReplyRequest = z.object({ text: quickReplyText }).strict();
+export const updateQuickReplyRequest = z.object({ text: quickReplyText }).strict();
+export const listQuickRepliesResponse = z.object({ items: z.array(quickReplyDto) });
+export type QuickReplyDto = z.infer<typeof quickReplyDto>;
 export const listSegmentsResponse = z.object({ items: z.array(segmentDto) });
 export type SegmentDto = z.infer<typeof segmentDto>;
 export type SegmentPreviewDto = z.infer<typeof segmentPreviewDto>;
@@ -598,7 +613,13 @@ export const walletDto = z.object({
   lowBalanceThresholdMinor: z.number().int().nonnegative(),
   /** One credit = one AI turn. `low` = available under a tenth of the monthly `allowance` (never under 5 credits, `lowThreshold`). */
   aiCredits: z.object({ balance: z.number().int(), available: z.number().int(), low: z.boolean(), lowThreshold: z.number().int().nonnegative(), allowance: z.number().int().nonnegative() }),
-  plan: z.object({ packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable() }).nullable(),
+  plan: z.object({
+    packageId: z.string(), status: z.enum(['trialing', 'active', 'past_due', 'cancelled', 'expired']), periodEnd: z.number().int(), cancelledAt: z.number().int().nullable(),
+    /** Additive (CHAT-QA-13): the Chat package's own name, for a package bought in Chat. */
+    packageName: z.string().optional(),
+    /** Additive (CHAT-QA-13): the Store plan, by the Store's own name, when the running package is the one the Store plan includes. */
+    storePlan: z.object({ code: z.string(), nameAr: z.string(), nameEn: z.string() }).optional(),
+  }).nullable(),
 });
 export type WalletDto = z.infer<typeof walletDto>;
 
@@ -777,6 +798,8 @@ export const ROUTES = {
   connectorTest: 'POST /connectors/:connectorId/test',
   contacts: 'GET /contacts',
   contactTags: 'PUT /contacts/:waId/tags',
+  quickReplies: 'GET|POST /quick-replies',
+  quickReply: 'PUT|DELETE /quick-replies/:quickReplyId',
   imports: 'GET|POST /imports',
   import: 'GET /imports/:importId',
   importRejects: 'GET /imports/:importId/rejects',

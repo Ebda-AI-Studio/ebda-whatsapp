@@ -59,10 +59,10 @@ function codV2Params(host: LinkHost, name: string | undefined, loc: Locale, d: {
 
 /** The order a COD request is about, when neither the event nor an earlier event named its number and total. */
 type LookedUp = { orderNumber: string; totalMinor: number; currency: string };
-async function lookupOrder(host: LinkHost, buyerKeyHex: string, orderId: string): Promise<LookedUp | 'retry' | null> {
+async function lookupOrder(host: LinkHost, buyerKeyHex: string, phoneE164: string, orderId: string): Promise<LookedUp | 'retry' | null> {
   const bridge = bridgeFor(host.env);
   if (!bridge) return null;
-  const res = await bridge.listCustomerOrders(host.workspaceId, buyerKeyHex, 20);
+  const res = await bridge.listCustomerOrders(host.workspaceId, buyerKeyHex, 20, phoneE164);
   if (!res.ok) return res.reason === 'unavailable' ? 'retry' : null;
   const hit = res.value.items.find((o) => o.orderId === orderId);
   return hit ? { orderNumber: hit.orderNumber, totalMinor: hit.totalMinor, currency: hit.currency } : null;
@@ -104,7 +104,7 @@ export async function applyStoreEvent(host: LinkHost, event: StoreEvent, opts: {
     const d = event.data;
     const have = orderRow(host, d.orderId);
     if (!d.orderNumber && !have?.order_number) {
-      codLookup = await lookupOrder(host, d.buyerKey, d.orderId);
+      codLookup = await lookupOrder(host, d.buyerKey, d.phoneE164, d.orderId);
       if (codLookup === 'retry') return { status: 'retry', detail: 'store_unavailable' };
     }
   } else if (event.type === 'customer.erased') {

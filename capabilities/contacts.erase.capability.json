@@ -2,11 +2,15 @@
   "id": "contacts.erase",
   "status": "live",
   "area": "contacts",
-  "version": 1,
+  "version": 2,
   "versionDate": "2026-11-14",
   "titleAr": "مسح بيانات عميل نهائي",
   "titleEn": "Erase a customer (data-subject request)",
-  "screens": [],
+  "screens": [
+    "ContactsScreen erase panel",
+    "view:ContactsScreen",
+    "/contacts"
+  ],
   "api": [
     "DELETE /stores/:storeId/contacts/:waId"
   ],
@@ -33,14 +37,12 @@
     ]
   },
   "steps": [
-    "Owner API route exists; running import for that customer is stopped and its file deleted"
+    "Pick the customer on Contacts, read the warning, type their full phone number (Arabic or Latin digits), press Erase customer permanently",
+    "Owner route erases the contact; running import for that customer is stopped and its file deleted"
   ],
   "edgeCases": [
     "Cannot be undone; financial records stay",
     "Stops in-flight agent turns for that customer"
   ],
-  "gaps": [
-    "NO merchant UI calls DELETE contact (audit #10 says operator-only: owner route exists in src/index.ts but nothing in web)",
-    "Help 13 does not describe erasure"
-  ]
+  "gaps": []
 }

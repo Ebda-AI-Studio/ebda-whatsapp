@@ -1,6 +1,6 @@
 ---
 capabilities:
-  - contacts.erase@1
+  - contacts.erase@2
   - contacts.export@1
   - contacts.list@1
   - contacts.merge@1
@@ -18,10 +18,16 @@ Under "How long messages are kept" the store owner picks the period: 90 days, 6 
 ## Download one customer's data
 Pick the customer in the list and choose **Download the customer's data** (store owner only). You get a JSON file with their messages, your notes, their tags and orders. Use it when a customer asks what you hold about them. Every download is recorded in the action log.
 
+## Tag a customer
+Pick the customer and use **Customer's tags**: type a tag and choose **Add the tag**, or press the x on a tag to remove it. Owner and staff can both do it. See [Quick replies, notes and tags](23-notes-tags-and-quick-replies.md).
+
 ## Rename a customer
 Pick the customer, type the name, **Save the name**. The name you set stays: WhatsApp's profile name no longer replaces it.
 
 ## Merge two numbers
 When one person writes from a new number, pick the old one, type the new number and choose **Merge the two customers** (store owner only). Messages, notes and tags move to the new number and the old one disappears from the list. **It cannot be undone.** If either number asked to stop messages, both are stopped.
+
+## Erase a customer
+When a customer asks you to delete their data, pick them, read the warning, type their full phone number (Arabic or Latin digits) and choose **Erase customer permanently** (store owner only). Their messages and data are removed from this workspace. **It cannot be undone.** Money and order records stay as they are. Ebda AI Studio staff are not needed; they only act on a written request that came to them directly.
 
 Last checked: 2026-10-27.

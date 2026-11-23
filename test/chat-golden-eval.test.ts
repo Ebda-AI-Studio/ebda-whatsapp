@@ -75,6 +75,18 @@ describe('golden set: the rubric fails what it must (negative controls)', () => 
     const v = await withModel('gift-ar-1', [{ tools: [{ name: 'search_catalog', arguments: { query: 'gift' } }] }, { text: 'Here are some ideas for you' }], 5);
     expect(v.failed).toEqual(expect.arrayContaining(['wrong_script', 'budget_not_used']));
   });
+  it('GIFT-BUDGET-TOOL-1: a card over the budget fails, a gave-up ask fails, and recommend_products with the ceiling passes', async () => {
+    const over = await withModel('gift-ar-1', [{ tools: [{ name: 'search_catalog', arguments: { query: 'هدية', maxPrice: 500 } }] }, { tools: [{ name: 'show_products', arguments: { ids: ['v6'] } }] }, { text: 'اختيار حلو' }], 6); // v6 costs 550
+    expect(over.failed).toContain('over_budget_shown');
+    const gaveUp = await withModel('gift-ar-1', [{ tools: [{ name: 'search_catalog', arguments: { query: 'هدية', maxPrice: 500 } }] }, { text: 'مفيش حاجة مناسبة' }], 7);
+    expect(gaveUp.failed).toContain('gave_up_on_explicit_ask');
+    const viaRec = await withModel('gift-ar-1', [{ tools: [{ name: 'recommend_products', arguments: { basis: 'budget', query: 'هدية للسيدات', maxPrice: 500 } }] }, { text: 'اخترتلك دول في ميزانيتك' }], 8);
+    expect(viaRec.failed).toEqual([]);
+  });
+  it('GIFT-BUDGET-TOOL-1: at the ration limit, stopping after the refused recommend_products fails; falling back to search_catalog passes', async () => {
+    const stopped = await withModel('gift-ration-ar-1', [{ tools: [{ name: 'recommend_products', arguments: { basis: 'budget', query: 'هدية للسيدات', maxPrice: 500 } }] }, { text: 'مفيش اقتراحات دلوقتي' }], 9);
+    expect(stopped.failed).toEqual(expect.arrayContaining(['missing_tool:search_catalog', 'gave_up_on_explicit_ask']));
+  });
   it('grade() on a clean run is empty', () => {
     expect(grade(byId('off-ar-2'), { replies: ['أنا مساعد المتجر وبرد على أسئلة المنتجات والطلبات بس.'], outcome: 'reply', tools: [] })).toEqual([]);
   });
