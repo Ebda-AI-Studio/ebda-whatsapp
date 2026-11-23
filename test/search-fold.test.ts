@@ -27,10 +27,12 @@ it('FDN-SEARCH-1: flag off = legacy fold; flipping on re-indexes names AND messa
   await chat(ws, '201000000011', 'سؤال', 'مرحبا');
   await chat(ws, '201000000012', 'کوتشی', 'عايز كوتشي ابيض');
   await chat(ws, '201000000013', 'ﻻ', 'hello');
+  await chat(ws, '201000000014', 'مسئول', 'x4');
   // legacy: ؤ and Persian ک/ی are NOT folded; NFKC IS applied (the lam-alef presentation form U+FEFB becomes لا)
   expect(await find(api, 'سوال')).toEqual([]);
   expect(await find(api, 'كوتشي')).toEqual(['201000000012']); // via the MESSAGE text "كوتشي"
   expect(await find(api, 'لا')).toEqual(['201000000013']);
+  expect(await find(api, 'مسؤول')).toEqual([]); // ؤ and ئ are not unified by the legacy fold
 
   expect(await flip(ws, true)).toBe(true);
   expect(await flip(ws, true)).toBe(false); // already there: no second rebuild
@@ -38,12 +40,14 @@ it('FDN-SEARCH-1: flag off = legacy fold; flipping on re-indexes names AND messa
   expect(await find(api, 'سوال')).toEqual(['201000000011']); // ؤ -> و
   expect(await find(api, 'كوتشي')).toContain('201000000012'); // Persian name and the message both match now
   expect(await find(api, 'كوت')).toContain('201000000012'); // name prefix
-  // DOCUMENTED REGRESSION (PR body): the shared fold has no NFKC (the SQL twin cannot), so a name pasted with a presentation form no longer meets the typed letters
-  expect(await find(api, 'لا')).toEqual([]);
+  expect(await find(api, 'لا')).toEqual(['201000000013']); // F7-HAMZA-1: the shared fold runs NFKC too, so the pasted ligature still meets the typed letters
+  expect(await find(api, 'مسؤول')).toEqual(['201000000014']); // hamza seats unified: مسئول = مسؤول
+  expect(await find(api, 'سئوال')).toEqual(['201000000011']); // سؤال = سوال = سئوال
 
   expect(await flip(ws, false)).toBe(true);
   expect(await rows(ws, "SELECT value FROM store_state WHERE key = 'search_fold'")).toEqual([]);
   expect(await find(api, 'سوال')).toEqual([]);
+  expect(await find(api, 'مسؤول')).toEqual([]);
   expect(await find(api, 'لا')).toEqual(['201000000013']);
 });
 

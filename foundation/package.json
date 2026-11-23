@@ -1,7 +1,7 @@
 {
   "name": "@ebda/foundation",
   "version": "0.3.4",
-  "foundationCommit": "0c84e948df4f679d9c4acab696dc68e5dab7525b",
+  "foundationCommit": "e919acf069617bca8b0321a4d2df428dcdf0c054",
   "private": true,
   "license": "UNLICENSED",
   "exports": {

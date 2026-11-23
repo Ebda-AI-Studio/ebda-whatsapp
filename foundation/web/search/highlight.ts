@@ -16,16 +16,28 @@ export function highlightSegments(text: string, query: string): HighlightSegment
   const tokens = searchTokens(query);
   if (tokens.length === 0) return [{ text, match: false }];
 
-  // Fold per original character so every folded index maps back to one original index. A character
-  // that folds to nothing (a diacritic) maps to no folded position and is carried by its neighbour.
+  // Fold per original character so every folded index maps back to a range of the original. A character that folds to nothing (a
+  // diacritic, a hamza seat) maps to no folded position and is carried by its neighbour; a run of و that the fold collapses (ؤ after a
+  // deleted hamza seat) extends the range of the one و it became. The fold of a lone character equals its share of the fold of the text
+  // for every step except the و collapse, which is redone here.
   let folded = '';
-  const origin: number[] = [];
+  const startOf: number[] = [];
+  const endOf: number[] = [];
+  const dropped: boolean[] = []; // per original UTF-16 unit: folds to nothing and is not a space
   let i = 0;
   for (const ch of text) {
     const f = foldArabic(ch);
-    for (let k = 0; k < f.length; k++) origin.push(i);
-    folded += f;
-    i += ch.length;
+    const next = i + ch.length;
+    for (let k = 0; k < ch.length; k++) dropped.push(f === '' && ch.trim() !== '');
+    for (const c of f) {
+      if (c === 'و' && folded.endsWith('و')) endOf[endOf.length - 1] = next;
+      else {
+        folded += c;
+        startOf.push(i);
+        endOf.push(next);
+      }
+    }
+    i = next;
   }
 
   const hit = new Array<boolean>(text.length).fill(false);
@@ -34,8 +46,9 @@ export function highlightSegments(text: string, query: string): HighlightSegment
     for (;;) {
       const at = folded.indexOf(token, from);
       if (at === -1) break;
-      const start = origin[at] ?? 0;
-      const end = (origin[at + token.length - 1] ?? 0) + 1;
+      const start = startOf[at] ?? 0;
+      let end = endOf[at + token.length - 1] ?? 0;
+      while (end < text.length && dropped[end]) end++; // trailing diacritics / hamza seats belong to the matched letter
       for (let p = start; p < end; p++) hit[p] = true;
       from = at + token.length;
     }

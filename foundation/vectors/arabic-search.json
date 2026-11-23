@@ -1,5 +1,5 @@
 {
- "comment": "F7 shared search vectors: does `query` find `text` when both go through the shared fold? A query matches when every searchTokens(query) word is a PREFIX of some word of indexTokens(text) (the FTS5 `\"tok\"*` rule Chat uses and the LIKE-prefix rule the Store uses). Real Egyptian catalogue / contact / message samples. `match:false` rows pin KNOWN limits of the canonical fold (Ruling SEARCH-2), they are not wishes.",
+ "comment": "F7 shared search vectors: does `query` find `text` when both go through the shared fold? A query matches when every searchTokens(query) word is a PREFIX of some word of indexTokens(text) (the FTS5 `\"tok\"*` rule Chat uses and the LIKE-prefix rule the Store uses). Real Egyptian catalogue / contact / message samples. `match:false` rows pin words the fold must NOT merge (and the prefix rule: a query is a prefix of a word, not a substring). Hamza carriers fold together (Ruling F7-HAMZA-1).",
  "cases": [
   {
    "q": "شنطه",
@@ -99,12 +99,12 @@
   {
    "q": "مسئول",
    "text": "مسؤول",
-   "match": false
+   "match": true
   },
   {
    "q": "حذاء",
    "text": "حذائي",
-   "match": false
+   "match": true
   },
   {
    "q": "حذاء",
@@ -120,6 +120,86 @@
    "q": "برد",
    "text": "شتاء بارد",
    "match": false
+  },
+  {
+   "q": "مسؤول",
+   "text": "مسئول الحسابات",
+   "match": true
+  },
+  {
+   "q": "مسئول",
+   "text": "المسؤول عن الطلب",
+   "match": false
+  },
+  {
+   "q": "مسئول",
+   "text": "مسؤول الحسابات",
+   "match": true
+  },
+  {
+   "q": "سوال",
+   "text": "سؤال عن الشحن",
+   "match": true
+  },
+  {
+   "q": "سئوال",
+   "text": "سؤال عن الشحن",
+   "match": true
+  },
+  {
+   "q": "سؤال",
+   "text": "سوال",
+   "match": true
+  },
+  {
+   "q": "سائل",
+   "text": "ساءل",
+   "match": true
+  },
+  {
+   "q": "ساءل",
+   "text": "سائل منوي",
+   "match": true
+  },
+  {
+   "q": "مسئول",
+   "text": "مسلول",
+   "match": false
+  },
+  {
+   "q": "سؤال",
+   "text": "سلال",
+   "match": false
+  },
+  {
+   "q": "رئيس",
+   "text": "رسيس",
+   "match": false
+  },
+  {
+   "q": "رئيس",
+   "text": "الرئيس التنفيذي",
+   "match": false
+  },
+  {
+   "q": "ريس",
+   "text": "رئيس الشركة",
+   "match": true
+  },
+  {
+   "q": "لا",
+   "text": "ﻻ تنسى",
+   "match": true
+  },
+  {
+   "q": "محمد",
+   "text": "ﻣﺤﻤﺪ علي",
+   "match": true
+  },
+  {
+   "q": "123",
+   "text": "رقم １２٣",
+   "match": true
   }
  ]
 }
