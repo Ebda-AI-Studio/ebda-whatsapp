@@ -2,72 +2,12 @@ import * as Sentry from '@sentry/cloudflare';
 import type { ErrorEvent } from '@sentry/cloudflare';
 import { fetchWithTimeout } from './net/fetch-with-timeout';
 
-// A run of 8+ digits (ASCII, Arabic-Indic or Persian), optionally with +, spaces, dashes, dots or parentheses between them.
-const DIGIT = '[0-9\\u0660-\\u0669\\u06f0-\\u06f9]';
-// Separators include Unicode format characters (\p{Cf}: bidi marks, zero-width joiners) so they cannot split a number past the mask.
-const PHONE_LIKE = new RegExp(`\\+?${DIGIT}(?:[\\s\\-().\\p{Cf}]*${DIGIT}){7,}`, 'gu');
-// Allowlist: anything else (auth, cookies, signatures, client IPs) never leaves the worker.
-const SAFE_HEADERS = new Set(['user-agent', 'content-type', 'content-length', 'cf-ray', 'accept']);
+import { errClass, maskPhones, memoryThrottle, renderFields as renderAlertFields, runbookUrl as foundationRunbookUrl, safeMessage, scrubEvent as scrubFoundationEvent, telegramAlert, type EventLike } from '../../foundation/observe';
 
-export const maskPhones = (s: string | undefined) => s?.replace(PHONE_LIKE, '[phone]');
-
-function scrubUrl(url: string): string | undefined {
-  try {
-    const u = new URL(url);
-    u.search = '';
-    u.hash = '';
-    // The segment after /contacts/ is a phone number by position, whatever its encoding.
-    const path = u.pathname.replace(/(\/contacts\/)[^/]+/, '$1__PHONE__');
-    return maskPhones(decodeURI(`${u.origin}${path}`))?.replace('__PHONE__', '[phone]');
-  } catch {
-    return undefined;
-  }
-}
-
-/** Sentry beforeSend: no bodies, cookies, query strings, extra/contexts/tags or non-allowlisted headers; no user; phones masked. */
-export function scrubEvent(event: ErrorEvent): ErrorEvent {
-  if (event.request) {
-    delete event.request.data;
-    delete event.request.cookies;
-    delete event.request.query_string;
-    if (event.request.headers) {
-      event.request.headers = Object.fromEntries(Object.entries(event.request.headers).filter(([k]) => SAFE_HEADERS.has(k.toLowerCase())));
-    }
-    if (event.request.url) {
-      const url = scrubUrl(event.request.url);
-      if (url) event.request.url = url;
-      else delete event.request.url;
-    }
-  }
-  delete event.user;
-  delete event.extra;
-  delete event.tags;
-  delete event.contexts;
-  if (event.message) event.message = maskPhones(event.message);
-  for (const v of event.exception?.values ?? []) if (v.value) v.value = maskPhones(v.value);
-  if (event.breadcrumbs) {
-    event.breadcrumbs = event.breadcrumbs.map(({ data: _data, message, ...rest }) => ({ ...rest, ...(message ? { message: maskPhones(message) } : {}) }));
-  }
-  return event;
-}
-
-const EMAIL = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu;
-
-/**
- * What may be logged about a caught value: its class (and a short machine code if it has one), never its text. Error
- * messages routinely echo input (a phone number, an e-mail, a body), and `throw "string"` has no class at all.
- */
-export function errClass(err: unknown): string {
-  const name = err instanceof Error ? (err.constructor?.name || err.name || 'Error') : err === null ? 'null' : typeof err;
-  const code = (err as { code?: unknown } | null)?.code;
-  return typeof code === 'number' || (typeof code === 'string' && /^[A-Za-z0-9_.-]{1,40}$/.test(code)) ? `${name}:${code}` : name;
-}
-
-/** An error's text for storage next to a task (operators read it): phones and e-mails masked, bounded. Never for logs. */
-export function safeMessage(err: unknown, max = 200): string {
-  const raw = String((err as { message?: unknown } | null)?.message ?? err);
-  return (maskPhones(raw) ?? '').replace(EMAIL, '[email]').slice(0, max);
-}
+// Masks, errClass, safeMessage and the Sentry scrub are the foundation's (F6, Ruling FDN-OBSERVE-1): one implementation for every product in the suite.
+export { errClass, maskPhones, safeMessage };
+/** Sentry beforeSend: no bodies, cookies, query strings, extra/contexts/tags or non-allowlisted headers; no user; phones, e-mails and path secrets masked. */
+export const scrubEvent = (event: ErrorEvent): ErrorEvent => scrubFoundationEvent(event as unknown as EventLike) as unknown as ErrorEvent;
 
 // ---- Alerts that reach a human (iceberg E1/E2, W1-OBS) ---------------------------------------------------------------------------------
 
@@ -132,7 +72,7 @@ const defaultDeps = (): AlertDeps => ({
   captureException: (err) => { Sentry.captureException(err); },
 });
 let deps: AlertDeps = defaultDeps();
-const lastSent = new Map<string, { at: number; suppressed: number }>();
+const throttle = memoryThrottle();
 
 /** Called at every entry point (request, queue batch, cron, Durable Object) so alert() knows the secrets and how to outlive the response. */
 export function bindAlerts(d: Partial<AlertDeps> & { env: AlertEnv }): void {
@@ -141,41 +81,13 @@ export function bindAlerts(d: Partial<AlertDeps> & { env: AlertEnv }): void {
 }
 export function resetAlerts(): void {
   deps = defaultDeps();
-  lastSent.clear();
+  throttle.reset();
 }
 
-// Keys whose values can be a person's data or a credential: never rendered, whatever the caller passed.
-const DENIED_KEY = /^(to|from|body|text|code|email|caption|address|message|name|customer\w*)$|phone|wa_?id|token|secret|password|authorization/i;
-function renderFields(fields: Record<string, unknown>): string[] {
-  const out: string[] = [];
-  for (const [k, v] of Object.entries(fields)) {
-    if (k === 'severity' || k === 'workspace' || DENIED_KEY.test(k)) continue;
-    const raw = Array.isArray(v) ? v.filter((x) => ['string', 'number', 'boolean'].includes(typeof x)).join(',') : ['string', 'number', 'boolean'].includes(typeof v) ? String(v) : '';
-    if (!raw) continue;
-    out.push(`${k}=${(maskPhones(raw) ?? '').replace(PHONE_ANYWHERE, '[phone]').slice(0, 80)}`);
-  }
-  return out.slice(0, 12);
-}
-// Belt and braces on top of maskPhones: any run of 8+ digits that survived is hidden too.
-const PHONE_ANYWHERE = /[0-9\u0660-\u0669\u06f0-\u06f9]{8,}/g;
-
+const renderFields = (fields: Record<string, unknown>): string[] => renderAlertFields(Object.fromEntries(Object.entries(fields).filter(([k]) => k !== 'severity' && k !== 'workspace')));
+/** T25: the incident runbook of ONE alert (docs/runbooks/alerts/<name>.md; test/alert-runbooks.test.ts proves every P0/P1 name has one). Base URL = var RUNBOOK_BASE_URL; unset = the repo-relative path. */
+const runbookUrl = (name: string, env: AlertEnv): string => foundationRunbookUrl(name, typeof env.RUNBOOK_BASE_URL === 'string' ? env.RUNBOOK_BASE_URL : undefined);
 const shortWorkspace = (ws: string): string => (ws.length > 8 ? `${ws.slice(0, 8)}…` : ws);
-
-/** T25: the incident runbook of ONE alert, as a URL a phone can open (docs/runbooks/alerts/<name>.md; test/alert-runbooks.test.ts proves every P0/P1 name has one). The base URL is the var RUNBOOK_BASE_URL (wrangler.jsonc); unset = the repo-relative path. */
-const runbookUrl = (name: string, env: AlertEnv): string =>
-  `${typeof env.RUNBOOK_BASE_URL === 'string' && /^https:\/\//.test(env.RUNBOOK_BASE_URL) ? env.RUNBOOK_BASE_URL.replace(/\/$/, '') : 'docs/runbooks/alerts'}/${name}.md`;
-
-function telegramText(name: string, sev: AlertSeverity, workspace: string | undefined, fields: string[], suppressed: number, env: AlertEnv): string {
-  const lines = [
-    `${sev === 'P0' ? '🔴' : '🟠'} ${env.ALERT_PRODUCT ?? 'WhatsApp'}: ${name}`,
-    `[${sev} ${workspace ? 'WORKSPACE' : 'PLATFORM'}]`,
-    ...(workspace ? [`workspace=${shortWorkspace(workspace)}`] : []),
-    `env=${env.ENVIRONMENT ?? 'production'} · runbook=${runbookUrl(name, env)}`,
-    ...fields,
-    ...(suppressed > 0 ? [`(suppressed ${suppressed} more since the last alert)`] : []),
-  ];
-  return lines.join('\n').slice(0, 4000);
-}
 
 /**
  * THE way a code path says "a human should know". Always writes the JSON log line (the existing `{ alert: name, ...fields }` shape). For P0/P1 it also
@@ -191,28 +103,22 @@ export function alert(name: string, fields: AlertFields = {}): void {
     const sev = severityOf(name, fields.severity);
     if (sev === 'info') return;
     const workspace = typeof fields.workspace === 'string' ? fields.workspace : undefined;
-    const key = `${name}|${workspace ?? ''}`;
-    const now = Date.now();
-    const seen = lastSent.get(key);
-    if (seen && now - seen.at < THROTTLE_MS) {
-      seen.suppressed++;
-      return;
-    }
-    const suppressed = seen?.suppressed ?? 0;
-    lastSent.set(key, { at: now, suppressed: 0 });
+    const claim = throttle.claim(`${name}|${workspace ?? ''}`, THROTTLE_MS); // sync: throttles Sentry and Telegram alike
+    if (!claim.send) return;
     const d = deps;
     const rendered = renderFields(fields);
     const message = `${name} [${sev}]${workspace ? ` workspace=${shortWorkspace(workspace)}` : ''}${rendered.length ? ` ${rendered.join(' ')}` : ''}`;
     try {
       d.captureMessage(maskPhones(message) ?? name, sev === 'P0' ? 'error' : 'warning');
     } catch { /* Sentry must never break the caller */ }
-    const { TELEGRAM_BOT_TOKEN: token, TELEGRAM_ALERT_CHAT_ID: chat } = d.env;
-    if (!token || !chat) return;
-    const send = fetchWithTimeout(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: chat, text: telegramText(name, sev, workspace, rendered, suppressed, d.env) }),
-    }, { label: 'telegram.alert', timeoutMs: 5000 }).then(() => undefined, () => undefined);
+    // Telegram: the foundation builds the message (same header as the Store's) and sends it; this file only supplies the transport rule (Ruling PERF-TIMEOUTS-1).
+    const send = telegramAlert(
+      { token: d.env.TELEGRAM_BOT_TOKEN, chatId: d.env.TELEGRAM_ALERT_CHAT_ID, fetch: (u, init) => fetchWithTimeout(u, init, { label: 'telegram.alert', timeoutMs: 5000 }) },
+      {
+        product: d.env.ALERT_PRODUCT ?? 'WhatsApp', level: sev === 'P0' ? 'p0' : 'p1', scope: workspace ? 'workspace' : 'platform', ...(workspace ? { scopeLine: shortWorkspace(workspace) } : {}),
+        title: name, env: d.env.ENVIRONMENT ?? 'production', runbook: runbookUrl(name, d.env), fields: Object.fromEntries(Object.entries(fields).filter(([k]) => k !== 'severity' && k !== 'workspace')), suppressed: claim.suppressed,
+      },
+    ).then(() => undefined, () => undefined);
     try {
       d.waitUntil(send);
     } catch { /* a stale execution context: the promise still runs, just unowned */ }

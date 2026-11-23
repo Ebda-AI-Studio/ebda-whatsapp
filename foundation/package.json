@@ -1,7 +1,7 @@
 {
   "name": "@ebda/foundation",
   "version": "0.3.4",
-  "foundationCommit": "5bbd34724c6dd70ff6dcb43a104136374a904aea",
+  "foundationCommit": "a44430ee201a456d8c5c53a7f92eb2f0bc02b2b4",
   "private": true,
   "license": "UNLICENSED",
   "exports": {
@@ -20,16 +20,21 @@
     "./instapay-digest": "./instapay-digest.ts",
     "./instapay-extract": "./instapay-extract.ts",
     "./instapay-state": "./instapay-state.ts",
+    "./observe": "./observe/index.ts",
+    "./observe/mask": "./observe/mask.ts",
+    "./observe/url-scrub": "./observe/url-scrub.ts",
     "./phone": "./phone.ts",
     "./ratchet": "./ratchet.ts",
     "./request-guard": "./request-guard.ts",
     "./self-service-routes": "./self-service-routes.ts",
     "./slugs": "./slugs.ts",
+    "./studio-pages": "./studio-pages.ts",
     "./smart-layer": "./smart-layer/index.ts",
     "./smart-layer-bypass": "./smart-layer-bypass.ts",
     "./text": "./text.ts",
     "./tokens": "./tokens.ts",
-    "./tokens.css": "./tokens.css"
+    "./tokens.css": "./tokens.css",
+    "./web/search": "./web/search/index.ts"
   },
   "peerDependencies": {
     "zod": "4.6.7"

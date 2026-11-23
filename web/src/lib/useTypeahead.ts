@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
+import { useLiveSearch } from '../../../foundation/web/search';
 
 /** The one debounce for every search box (plan: 150 ms, shared by the web app). */
 export const SEARCH_DEBOUNCE_MS = 150;
@@ -6,34 +7,19 @@ export const SEARCH_DEBOUNCE_MS = 150;
 export type TypeaheadStatus = 'idle' | 'loading' | 'done' | 'error';
 
 /**
- * Search as you type: starts at `minChars` (default 1), waits `debounceMs` (default 150) after the last keystroke, aborts the previous
- * request, and drops any answer (or error) that arrives for a query that is no longer the current one. An empty query is idle with no request.
+ * Search as you type, on the foundation's `useLiveSearch` (Ruling FDN-SEARCH-1; Store and Chat share one behaviour): starts at `minChars`
+ * (default 1), waits `debounceMs` (default 150) after the last keystroke, aborts the previous request, and never shows an answer for a query
+ * that is no longer the current one. An empty query is idle with no request. This wrapper only owns the box's text and keeps Chat's status names.
+ *
+ * `deps`: anything the fetcher closes over that should re-run the SAME query when it changes (a filter, a reload tick). Keep its length constant.
  */
 export function useTypeahead<T>(fetcher: (q: string, signal: AbortSignal) => Promise<T[]>, opts: { debounceMs?: number; minChars?: number; deps?: readonly unknown[] } = {}) {
   const { debounceMs = SEARCH_DEBOUNCE_MS, minChars = 1, deps = [] } = opts;
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<T[]>([]);
-  const [status, setStatus] = useState<TypeaheadStatus>('idle');
-  const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
-  const trimmed = query.trim();
-
-  useEffect(() => {
-    if (trimmed.length < minChars) { setResults([]); setStatus('idle'); return; }
-    const controller = new AbortController();
-    // Set before the debounce: while the user is still typing the old results are not shown as if they answered this query.
-    setStatus('loading');
-    const timer = setTimeout(() => {
-      fetcherRef.current(trimmed, controller.signal).then(
-        (rows) => { if (controller.signal.aborted) return; setResults(rows); setStatus('done'); },
-        () => { if (controller.signal.aborted) return; setResults([]); setStatus('error'); },
-      );
-    }, debounceMs);
-    // Cleanup runs when the query changes (and on unmount): aborting here is what makes every older answer land on a dead signal.
-    return () => { clearTimeout(timer); controller.abort(); };
-    // `deps`: anything the fetcher closes over that should re-run the SAME query when it changes (a filter, a reload tick). Keep its length constant.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trimmed, debounceMs, minChars, ...deps]);
-
-  return { query, setQuery, results, status };
+  // A new `deps` array every render must not re-run the search: only a changed element does.
+  const seen = useRef({ deps, gen: 0 });
+  if (deps.length !== seen.current.deps.length || deps.some((d, i) => !Object.is(d, seen.current.deps[i]))) seen.current = { deps, gen: seen.current.gen + 1 };
+  const live = useLiveSearch<T>({ query, search: fetcher, debounceMs, minChars, cacheSize: 0, refreshKey: seen.current.gen });
+  const status: TypeaheadStatus = live.status === 'ready' ? 'done' : live.status;
+  return { query, setQuery, results: live.results, status };
 }

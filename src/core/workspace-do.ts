@@ -25,7 +25,7 @@ import { applySharedHealth, noteSharedError, noteSharedSend } from './numbers/he
 import { writeSessionState } from './identity/session';
 import { DAILY_KINDS, addTask, dailyHour, retryDelayMs, claimDueTasks, earliestDue, type TaskKind } from './scheduler';
 import { sendJobSchema } from './send-queue';
-import { normaliseText, phoneDigits } from './text-normalise';
+import { phoneDigits } from './text-normalise';
 import { conversationDto, type ConversationRow } from './dto';
 import type { ConversationDto, NoteDto } from './api/contract';
 import { DEFAULT_MPS, DEFAULT_TIER, TIER_WINDOW_MS, bucketDecision } from './throttle';
@@ -86,6 +86,7 @@ import type { WalletPosted } from './billing/engine';
 import { PRICING_MAX_AGE_MS, applyPricing, copyCursor, fundingOf, pullPricing } from './billing/pricing';
 import { parentHoldRef } from './campaigns/campaigns';
 import { indexContactName, rebuildContactIndex } from './contact-index';
+import { ftsMatch, searchFoldOf, searchWords, syncSearchFold } from './search-fold';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
 import { bridgeFor } from './store-link';
@@ -184,6 +185,8 @@ export class WorkspaceDO extends DurableObject<Env> {
       migrate(ctx.storage);
       this.reindexIfEmpty();
       this.reindexContactsIfEmpty();
+      // Platform flag SEARCH_FOLD ('v2' = shared foundation fold). Off by default; flipping it re-indexes this workspace once, in one transaction.
+      this.ctx.storage.transactionSync(() => syncSearchFold(this.sql, env.SEARCH_FOLD === 'v2', () => this.rebuildFts()));
       this.lastBroadcast = this.sql.exec<{ s: number | null }>('SELECT max(seq) AS s FROM events').one().s ?? 0;
     });
   }
@@ -2138,7 +2141,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Adds one message to the full-text index. Text is normalised here and at query time with the same function. */
   private indexMessage(messageId: number, preview: string | null): void {
-    const t = preview ? normaliseText(preview) : '';
+    const t = preview ? searchFoldOf(this.sql)(preview) : '';
     if (t) this.sql.exec('INSERT INTO messages_fts (rowid, text) VALUES (?, ?)', messageId, t);
   }
 
@@ -2216,9 +2219,9 @@ export class WorkspaceDO extends DurableObject<Env> {
    * The query is only ever a bound parameter or a quoted letters/digits token; it is never logged.
    */
   async searchConversations(q: string, filter: 'all' | 'unread' | 'mine' | 'unassigned', limit: number, userId: string, now = Date.now()): Promise<ConversationDto[]> {
-    const tokens = normaliseText(q).split(' ').filter(Boolean).slice(0, 8);
+    const tokens = searchWords(this.sql, q);
     const digits = phoneDigits(q);
-    const match = tokens.map((t) => `"${t}"*`).join(' ');
+    const match = ftsMatch(tokens);
     const any: string[] = [];
     const params: SqlStorageValue[] = [];
     if (tokens.length) {
@@ -2346,10 +2349,10 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** Full-text search over message previews: every word is a prefix match, both sides normalised the same way. */
   async search(q: string, limit: number): Promise<{ conversationId: number; messageId: number; snippet: string; at: number }[]> {
-    const tokens = normaliseText(q).split(' ').filter(Boolean).slice(0, 8);
+    const tokens = searchWords(this.sql, q);
     if (!tokens.length) return [];
     // Tokens are letters/digits only after normalisation, so quoting them cannot be broken out of.
-    const match = tokens.map((t) => `"${t}"*`).join(' ');
+    const match = ftsMatch(tokens);
     return this.sql
       .exec<{ id: number; conversation_id: number; preview: string | null; created_at: number }>(
         'SELECT m.id, m.conversation_id, m.preview, m.created_at FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?',
