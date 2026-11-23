@@ -336,7 +336,7 @@ describe('route walk: every non-GET store route is decided (sends and number set
     'POST /stores/:storeId/offboarding', 'DELETE /stores/:storeId/offboarding', // deleting the workspace needs no plan (a lapsed merchant can still leave)
     'PUT /stores/:storeId/retention', 'PUT /stores/:storeId/proactive-recs', 'PATCH /stores/:storeId/contacts/:waId', 'POST /stores/:storeId/contacts/merge', // data rights and housekeeping: no message leaves
     // Template management talks to Meta's template catalog, not to a customer: no message leaves.
-    'POST /stores/:storeId/templates/sync', 'POST /stores/:storeId/templates', 'POST /stores/:storeId/templates/install-defaults', 'POST /stores/:storeId/templates/cod-v2/resubmit',
+    'POST /stores/:storeId/templates/sync', 'POST /stores/:storeId/templates', 'POST /stores/:storeId/templates/install-defaults', 'POST /stores/:storeId/templates/install-seasonal', 'POST /stores/:storeId/templates/cod-v2/resubmit',
     'POST /stores/:storeId/templates/check', 'PUT /stores/:storeId/templates/:name/:language', 'DELETE /stores/:storeId/templates/:name/:language', // self-service: a check calls nobody; edit and delete act on Meta's catalog
     // Money surfaces (self-service A9, A21, A22): previews and confirmed actions on funding, a yearly-refund request and AI credit packs; no WhatsApp message leaves (a lapsed merchant may still buy credits or ask to cancel).
     'POST /stores/:storeId/numbers/:phoneNumberId/funding/preview', 'PUT /stores/:storeId/numbers/:phoneNumberId/funding',

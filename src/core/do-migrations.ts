@@ -629,6 +629,8 @@ export const DO_MIGRATIONS: readonly string[] = [
   // idempotency claim (one decision per order) and the customer frequency cap. Lives on store_orders, so it is erased with the customer (by wa_id) and backed up with the order.
   `ALTER TABLE store_orders ADD COLUMN recs_outcome TEXT;
    ALTER TABLE store_orders ADD COLUMN recs_at INTEGER;`,
+  // v50 once #136 (v48) and #168 (v49) are in (merge order #136, #168, #169, #170, #171; the version is the array position, so this stays the LAST entry) (capability templates.quality-rating): Meta's quality score of a template (GREEN / YELLOW / RED / UNKNOWN) from the message_template_quality_update webhook; null = Meta never sent one.
+  `ALTER TABLE templates ADD COLUMN quality TEXT;`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {

@@ -121,3 +121,24 @@ describe('template tools over the templates service', () => {
     expect(JSON.stringify(out.previews[0]!.rows)).toContain('30');
   });
 });
+
+describe('templates_install_seasonal (confirm, irreversible): the Ramadan pack', () => {
+  it('a confirm card; nothing goes to Meta before the press; the press submits the three; asking again builds no card', async () => {
+    const t = await setup(7599);
+    graph = created();
+    const out = await t.ask('ركّب قوالب رمضان', { name: 'templates_install_seasonal', args: {} });
+    expect(out.previews[0]).toMatchObject({ policy: 'confirm', undo: 'irreversible' });
+    expect(submits()).toHaveLength(0);
+    const done = (await (await t.confirm(out.approvals![0]!.approvalId, out.approvals![0]!.token)).json()) as { status: string };
+    expect(done.status).toBe('applied');
+    expect(submits()).toHaveLength(3);
+    expect((await t.ask('ركّب قوالب رمضان', { name: 'templates_install_seasonal', args: {} })).previews).toEqual([]);
+  });
+  it('staff cannot build the card (the route refuses managing templates)', async () => {
+    const t = await setup(7598, 'staff');
+    graph = created();
+    const out = await t.ask('ركّب قوالب رمضان', { name: 'templates_install_seasonal', args: {} });
+    if (out.approvals?.[0]) await t.confirm(out.approvals[0].approvalId, out.approvals[0].token);
+    expect(submits()).toHaveLength(0);
+  });
+});
