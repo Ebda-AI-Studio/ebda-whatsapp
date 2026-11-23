@@ -11,6 +11,7 @@ A list of every guide, grouped by what you need.
 - [Verify your business on Meta](01-verify-your-business-on-meta.md)
 - [Connect your own number](02-connect-your-own-number.md) or [use the shared number](03-use-the-shared-number.md)
 - [Sign in and language](18-sign-in-language-and-sign-out.md)
+- [Start Ebda Chat without a store](31-start-chat-without-a-store.md)
 
 ## Everyday conversations
 - [Filters and search](19-find-your-conversations.md)
