@@ -564,7 +564,7 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
         <>
           <div className="wallet-summary">
             <p><b>{t.wIpPayTo}</b> <bdi dir="ltr">{payee.handle}</bdi> • {t.wIpPayee(payee.name)}</p>
-            {safeQr && <img src={safeQr} alt={t.wIpQrAlt} width={160} height={160} loading="lazy" />}
+            {safeQr && <PayeeQr src={safeQr} alt={t.wIpQrAlt} />}
             <p>{t.wIpExact}: <b><bdi dir={lang === 'ar' ? 'rtl' : 'ltr'}>{money(created.amountMinor)}</bdi></b></p>
             <p>{t.wIpReference}: <b><bdi dir="ltr">{created.reference}</bdi></b></p>
             <p className="muted">{t.wIpExpires(dateTime(created.expiresAt, lang))}</p>
@@ -603,6 +603,14 @@ function InstapayCard({ t, lang, api }: { t: Strings; lang: Lang; api: WalletApi
       )}
     </section>
   );
+}
+
+/** The payee QR: if the image fails to load (missing object, blocked by CSP), the box disappears; the handle above it stays the way to pay. */
+function PayeeQr({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (failed) return null;
+  return <img src={src} alt={alt} width={160} height={160} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 /** The weekly usage digest (T13): counts and amounts only, in the app; the owner can switch it off. */

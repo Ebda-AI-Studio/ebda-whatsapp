@@ -1,3 +1,4 @@
+import headers from '../brands/ebda/public/_headers?raw';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -491,6 +492,24 @@ describe('wallet: pay with InstaPay', () => {
     expect(within(card).getAllByText(egp(25000)).length).toBeGreaterThanOrEqual(2); // the package option and the exact amount: the server's price, the client never sent one
     expect(within(card).getByText(t.wIpReference, { exact: false })).toBeTruthy();
     expect(within(card).getByLabelText(t.wIpUpload)).toBeTruthy();
+  });
+
+  it('hides the QR box when the image fails to load, keeping the handle visible', async () => {
+    const source = createSampleSource();
+    const realCreate = source.wallet!.createInstapay;
+    source.wallet!.createInstapay = async (input) => { const r = await realCreate(input); return { ...r, payee: { ...r.payee, qrUrl: 'https://media.ebda.app/platform/instapay-qr.jpg' } }; };
+    await openWallet(source);
+    const card = await screen.findByRole('region', { name: t.wIpTitle });
+    await act(async () => fireEvent.click(within(card).getByRole('button', { name: t.wIpCreate })));
+    const img = await within(card).findByAltText(t.wIpQrAlt);
+    await act(async () => fireEvent.error(img));
+    expect(within(card).queryByAltText(t.wIpQrAlt)).toBeNull();
+    expect(within(card).getByText(/sample@instapay/)).toBeTruthy();
+  });
+
+  it('the Ebda CSP lets the inbox load the QR from media.ebda.app', () => {
+    const csp = headers;
+    expect(csp.match(/img-src[^;]*/)![0]).toContain('https://media.ebda.app');
   });
 
   it('refuses a wrong type or an oversize file before anything is sent, and uploads a valid one', async () => {
