@@ -158,7 +158,7 @@ describe('store_create_coupon: never writes without the merchant\'s confirm pres
     const card = out.previews[0]!;
     expect(card).toMatchObject({ policy: 'confirm', undo: 'irreversible' });
     expect(card.reasons).toEqual(expect.arrayContaining(['money']));
-    expect(JSON.stringify(card.rows)).toMatch(/SALE10-[A-Z2-9]{4}/);
+    expect(JSON.stringify(card.rows)).toMatch(/SALE10-[A-HJKMN-Z2-9]{10}/);
     expect(JSON.stringify(card.rows)).toContain('10%');
     expect(link.fake.count('createCoupon')).toBe(0); // the card alone wrote nothing
     expect(link.fake.coupons).toEqual([]);
@@ -193,7 +193,7 @@ describe('store_create_coupon: never writes without the merchant\'s confirm pres
     const t = await workspaceFor(7822);
     const a = await t.ask(COUPON_Q, coupon());
     const b = await t.ask(COUPON_Q, coupon());
-    const codeOf = (c: { rows: unknown[] }) => /SALE10-[A-Z2-9]{4}/.exec(JSON.stringify(c.rows))![0];
+    const codeOf = (c: { rows: unknown[] }) => /SALE10-[A-HJKMN-Z2-9]{10}/.exec(JSON.stringify(c.rows))![0];
     expect(codeOf(b.previews[0]!)).toBe(codeOf(a.previews[0]!));
     const ap = a.approvals![0]!;
     await t.confirm(ap.approvalId, ap.token);
@@ -202,6 +202,26 @@ describe('store_create_coupon: never writes without the merchant\'s confirm pres
     expect(JSON.stringify(f.previews[0]!.rows)).toContain('EID50');
     await t.confirm(f.approvals![0]!.approvalId, f.approvals![0]!.token);
     expect(link.fake.coupons[1]).toMatchObject({ code: 'EID50', type: 'fixed', value: 5000 });
+  });
+
+  it('the generated code cannot be computed from the terms: 10 unambiguous characters, different for another store, other terms or another day, same on the card, the re-preview and the confirm', async () => {
+    const t1 = await workspaceFor(7840);
+    const t2 = await workspaceFor(7841);
+    const codeOf = (c: { rows: unknown[] }) => /SALE\d+-([A-HJKMN-Z2-9]{10})/.exec(JSON.stringify(c.rows))![0];
+    const a1 = await t1.ask(COUPON_Q, coupon());
+    const a2 = await t2.ask(COUPON_Q, coupon()); // identical terms, another store
+    const b1 = await t1.ask(COUPON_Q, coupon({ durationDays: 2 })); // other terms
+    const codes = [a1, a2, b1].map((o) => codeOf(o.previews[0]!));
+    expect(new Set(codes).size).toBe(3);
+    expect(codes[0]!.split('-')[1]).not.toMatch(/[01OIL]/);
+    // the old formula (sha256 over the terms, 4 chars) must not reproduce any tail
+    const { sha256Hex } = await import('../../foundation/smart-layer/release');
+    const h = await sha256Hex([t1.s, 'percentage', 10, 1, '', '', '', new Date().toISOString().slice(0, 10)].join('|'));
+    const old = Array.from({ length: 4 }, (_, i) => 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[Number.parseInt(h.slice(i * 2, i * 2 + 2), 16) % 31]).join('');
+    expect(codes[0]!.split('-')[1]!.startsWith(old)).toBe(false);
+    // the confirm creates exactly the code the card showed
+    await t1.confirm(a1.approvals![0]!.approvalId, a1.approvals![0]!.token);
+    expect(link.fake.coupons.at(-1)!.code).toBe(codes[0]);
   });
 
   it('is audit-logged with before/after (actor, coupon id, terms) and the Store was asked as the calling owner', async () => {

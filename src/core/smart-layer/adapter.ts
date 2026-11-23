@@ -59,6 +59,7 @@ export function chatAdapter(d: ChatAdapterDeps): SmartLayerAdapter {
   const models = resolveModels();
   const kit: Kit = {
     callApi: d.callApi, find: (n) => tools.find((t) => t.name === n),
+    ...(d.env.TOKEN_ENC_KEY ? { codeSecret: d.env.TOKEN_ENC_KEY } : {}),
     writer: {
       // One call on the `template` job; the merchant's text is fenced by the writer, the answer is parsed and checked by the templates service before anyone sees it.
       complete: async (system, user) => (await new WorkersAiProvider(ai, models.template).complete({ system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 1400, model: models.template })).text ?? '',

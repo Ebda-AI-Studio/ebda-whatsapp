@@ -48,15 +48,23 @@ const couponArgs = z.object({
 });
 type CouponArgs = z.infer<typeof couponArgs>;
 
+/** No 0/O/1/I/L: nothing a shopper can mistype or misread. */
 const BASE32 = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const TAIL = 10;
 /**
- * The generated code is a pure function of the store, the terms and the day, so the card and the press (which re-plans) show and create the SAME code, and a retry of the same
- * preview finds its own coupon. The day is part of the state the etag covers: a card held across midnight re-previews with the new code instead of creating a different one.
+ * The generated code must not be guessable (an outsider who could compute it could redeem it before the merchant shares it): the tail is an HMAC (key derived from a server secret,
+ * domain-separated) over the store, the person, the terms and the day, 10 characters of an unambiguous alphabet (~5e14). The engine re-runs `preview` at the press and compares it
+ * byte for byte, so the code cannot be random per call: it is a pure function of the secret and the inputs, hence identical on the card and at the confirm. The day is part of the
+ * state the etag covers: a card held across midnight re-previews with the new code instead of creating a different one. Identical terms on the same day give the same code (one intent;
+ * the Store answers a repeat with the coupon it already made). No secret = no generated code (the tool fails closed; the merchant can still give a code).
  */
-async function generatedCode(storeId: string, a: CouponArgs, day: string): Promise<string> {
-  const h = await sha256Hex([storeId, a.type, a.value, a.durationDays ?? '', a.startsAt ?? '', a.endsAt ?? '', a.usageLimit ?? '', day].join('|'));
-  const tail = Array.from({ length: 4 }, (_, i) => BASE32[Number.parseInt(h.slice(i * 2, i * 2 + 2), 16) % BASE32.length]).join('');
-  return `${a.type === 'percentage' ? 'SALE' : 'SAVE'}${a.value}-${tail}`.slice(0, 24).toUpperCase();
+async function generatedCode(secret: string | undefined, storeId: string, userId: string, a: CouponArgs, day: string): Promise<string> {
+  if (!secret) throw new ToolInputError('unavailable');
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(`coupon-code-v1|${secret}`), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode([storeId, userId, a.type, a.value, a.durationDays ?? '', a.startsAt ?? '', a.endsAt ?? '', a.usageLimit ?? '', day].join('|'))));
+  const tail = Array.from({ length: TAIL }, (_, i) => BASE32[mac[i]! % BASE32.length]).join('');
+  return `${a.type === 'percentage' ? 'SALE' : 'SAVE'}${Math.round(a.value)}-${tail}`.slice(0, 24);
 }
 
 const when = (ms: number): string => new Date(ms).toLocaleString('en-GB', { timeZone: 'Africa/Cairo', dateStyle: 'medium', timeStyle: 'short' });
@@ -97,7 +105,7 @@ export function storeTools(kit: Kit): ToolSpec[] {
         const end = a.endsAt ? Date.parse(a.endsAt) : ctx.now + (a.durationDays ?? 0) * DAY_MS;
         const begins = a.startsAt ? Date.parse(a.startsAt) : ctx.now;
         if (!(end > begins) || end - begins > COUPON_LIMITS.windowDaysMax * DAY_MS || end <= ctx.now) throw new ToolInputError('invalid');
-        const code = (a.code ?? (await generatedCode(s.storeId, a, s.day))).toUpperCase();
+        const code = (a.code ?? (await generatedCode(kit.codeSecret, s.storeId, ctx.userId, a, s.day))).toUpperCase();
         const off = a.type === 'percentage' ? `${a.value}%` : money(minor, s.currency);
         const windowText = a.durationDays !== undefined && !a.startsAt
           ? { ar: `يبدأ لما تأكد، ويستمر ${a.durationDays} يوم`, en: `Starts when you confirm, lasts ${a.durationDays} day(s)` }
