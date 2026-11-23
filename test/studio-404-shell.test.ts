@@ -15,7 +15,9 @@ it.each(['ar', 'en'])('%s: 404 status, shell bytes pinned, no inline script / ha
   expect(res.status).toBe(404);
   const html = await res.text();
   expect(await sha(html.replace(/© 20\d{2}/, '© YYYY'))).toBe(PINS[lang]);
-  expect([...html.matchAll(/<script\b[^>]*>/g)].map((m) => m[0])).toEqual(['<script src="https://help.ebda.app/assets/typeahead.js" defer>']);
+  // split on any case / whitespace variant of a script open tag: exactly one element, and it is the help typeahead.
+  const scripts = html.split(/<\s*script\b/i).slice(1).map((rest) => rest.slice(0, rest.indexOf('>')).trim());
+  expect(scripts).toEqual(['src="https://help.ebda.app/assets/typeahead.js" defer']);
   expect(html).not.toMatch(/\son[a-z]+=/i);
   expect(html).not.toMatch(/\sstyle="/i);
   expect(html.match(/<style>/g)).toHaveLength(1);
