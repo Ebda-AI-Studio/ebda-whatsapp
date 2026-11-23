@@ -76,47 +76,15 @@ export async function readCapped(req: Request, max: number): Promise<Uint8Array 
 
 // ---- rate limiting ----
 
-const V4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
-const H16 = /^[0-9a-f]{1,4}$/;
-
-/** Eight 16-bit groups of a valid IPv6 literal (an embedded dotted IPv4 tail counts as two groups), or null when it is not valid. */
-function ipv6Groups(ip: string): number[] | null {
-  let s = ip;
-  const m = V4.exec(s.slice(s.lastIndexOf(':') + 1));
-  if (s.includes('.')) {
-    if (!m) return null;
-    const tail = m.slice(1).map(Number);
-    s = s.slice(0, s.lastIndexOf(':') + 1) + ((tail[0]! << 8) | tail[1]!).toString(16) + ':' + ((tail[2]! << 8) | tail[3]!).toString(16);
-  }
-  const parts = s.split('::');
-  if (parts.length > 2) return null;
-  const side = (x: string) => (x === '' ? [] : x.split(':'));
-  const left = side(parts[0]!);
-  const right = parts.length === 2 ? side(parts[1]!) : [];
-  if (![...left, ...right].every((g) => H16.test(g))) return null;
-  if (parts.length === 1 ? left.length !== 8 : left.length + right.length > 7) return null;
-  const fill = parts.length === 2 ? Array<string>(8 - left.length - right.length).fill('0') : [];
-  return [...left, ...fill, ...right].map((g) => parseInt(g, 16));
-}
-
-/**
- * A client for rate limiting. IPv4 -> the address (/32). IPv6 -> its /64 (one subscriber's prefix), except IPv4-mapped (::ffff:a.b.c.d) and
- * IPv4-compatible (::a.b.c.d) forms, which key as the embedded IPv4 so they neither share one bucket nor dodge the IPv4 one. A `%zone` suffix is
- * dropped and case folded. Anything that is not a valid address keys as its own raw string (`raw:`), never a shared bucket; no IP = `unknown`.
- */
+/** A client for rate limiting: the IPv4 address, or the IPv6 /64 (one subscriber's prefix), so rotating within one /64 buys nothing. */
 export function clientKey(ip: string | null): string {
   if (!ip) return 'unknown';
-  const raw = ip;
-  if (ip.length > 64) return `raw:${raw.slice(0, 128)}`; // no real address (with a zone) is this long; never parse hostile length
-  const z = ip.indexOf('%');
-  const s = (z === -1 ? ip : ip.slice(0, z)).trim().toLowerCase();
-  if (V4.test(s)) return s;
-  const g = s.includes(':') ? ipv6Groups(s) : null;
-  if (!g) return `raw:${raw.slice(0, 128)}`;
-  const v4 = (): string => `${g[6]! >> 8}.${g[6]! & 255}.${g[7]! >> 8}.${g[7]! & 255}`;
-  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return v4();
-  if (g.slice(0, 6).every((x) => x === 0) && (g[6]! > 0 || g[7]! > 1)) return v4(); // :: and ::1 stay IPv6
-  return g.slice(0, 4).map((x) => x.toString(16)).join(':') + '::/64';
+  if (!ip.includes(':')) return ip;
+  const [head, tail = ''] = ip.split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const full = [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right];
+  return full.slice(0, 4).map((h) => (h || '0').toLowerCase().replace(/^0+(?=.)/, '')).join(':') + '::/64';
 }
 
 /**
