@@ -134,12 +134,12 @@ describe('Store hold vs offboarding (STORE-STANDING-1)', () => {
 
 /**
  * STORE-STANDING-2: a linked workspace whose Store has been silent for 24 h stops spending, ONLY when STORE_STANDING_STALE_REFUSE is on (default off). The switch is the
- * workspace's own `store.standing_enforce` row (the DO copies the env var into it on every wake), so a test turns it on by writing that row.
+ * workspace's own `store.standing_strict` row (the DO copies the env var into it on every wake), so a test turns it on by writing that row.
  */
 describe('STORE-STANDING-2: silence from the Store (default off)', () => {
   const H = 3_600_000;
   const set = (ws: string, key: string, value: string) => exec(ws, 'INSERT INTO store_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
-  const enforce = (ws: string) => set(ws, 'store.standing_enforce', '1');
+  const strictOn = (ws: string) => set(ws, 'store.standing_strict', '1');
   const seen = (ws: string, ago: number) => set(ws, 'store.standing_at', String(Date.now() - ago));
   const anchor = (ws: string, ago: number) => set(ws, 'store.standing_anchor', String(Date.now() - ago));
 
@@ -157,7 +157,7 @@ describe('STORE-STANDING-2: silence from the Store (default off)', () => {
   it('flag ON, fresh standing (under 24 h): spend allowed', async () => {
     const ws = W(1182);
     await setupBilling(ws);
-    await enforce(ws);
+    await strictOn(ws);
     await seen(ws, 23 * H);
     expect(await workspace(ws).suspended()).toBe(false);
   });
@@ -168,7 +168,7 @@ describe('STORE-STANDING-2: silence from the Store (default off)', () => {
     await fund(ws, 100_000);
     const conv = await chat(ws, 'UTILITY');
     const job = jobOf(await queueText(ws, conv));
-    await enforce(ws);
+    await strictOn(ws);
     await seen(ws, 25 * H);
     expect(await workspace(ws).suspended()).toBe(true);
     expect(await workspace(ws).claimSend(job)).toBe('dropped');
@@ -182,12 +182,12 @@ describe('STORE-STANDING-2: silence from the Store (default off)', () => {
   it('flag ON, no standing ever: allowed inside 24 h of the link, refused after', async () => {
     const inside = W(1184);
     await setupBilling(inside);
-    await enforce(inside);
+    await strictOn(inside);
     await anchor(inside, 23 * H);
     expect(await workspace(inside).suspended()).toBe(false);
     const beyond = W(1185);
     await setupBilling(beyond);
-    await enforce(beyond);
+    await strictOn(beyond);
     await anchor(beyond, 25 * H);
     expect(await workspace(beyond).suspended()).toBe(true);
     expect(await workspace(beyond).lastStandingAt()).toBeNull();
@@ -196,7 +196,7 @@ describe('STORE-STANDING-2: silence from the Store (default off)', () => {
   it('flag ON: an unlinked workspace is exempt', async () => {
     const ws = W(1186);
     await setupBilling(ws);
-    await enforce(ws);
+    await strictOn(ws);
     await seen(ws, 72 * H);
     await set(ws, 'linked', '0');
     expect(await workspace(ws).suspended()).toBe(false);

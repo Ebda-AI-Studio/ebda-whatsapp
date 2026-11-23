@@ -146,7 +146,7 @@ const STANDING_AT_KEY = 'store.standing_at';
 /** Epoch ms of the last `store.linked` (or the moment the policy was switched on, for a workspace that predates it): the start of the missing-standing window. */
 const STANDING_ANCHOR_KEY = 'store.standing_anchor';
 /** The policy switch, copied from the env var by the workspace on every wake so the synchronous gate reads it from its own SQLite. */
-const STANDING_ENFORCE_KEY = 'store.standing_enforce';
+const STANDING_STRICT_KEY = 'store.standing_strict';
 /** The Store re-sends standing every 12 h; two missed heartbeats (24 h) is silence, and 24 h is also how long a freshly linked store may wait for its first one. */
 export const STANDING_WINDOW_MS = 24 * 60 * 60 * 1000;
 const stateValue = (sql: SqlStorage, key: string): string | null => sql.exec<{ value: string }>('SELECT value FROM store_state WHERE key = ?', key).toArray()[0]?.value ?? null;
@@ -156,7 +156,7 @@ export const noteStandingSeen = (sql: SqlStorage, now: number): void => putState
 export const noteStoreLinked = (sql: SqlStorage, now: number): void => { putStateValue(sql, STANDING_ANCHOR_KEY, String(now)); sql.exec('DELETE FROM store_state WHERE key = ?', STANDING_AT_KEY); };
 /** When the Store's standing last arrived (epoch ms), or null if it never has. */
 export const lastStandingAt = (sql: SqlStorage): number | null => { const v = stateValue(sql, STANDING_AT_KEY); return v === null ? null : Number(v); };
-export const standingEnforced = (sql: SqlStorage): boolean => stateValue(sql, STANDING_ENFORCE_KEY) === '1';
+export const standingStrict = (sql: SqlStorage): boolean => stateValue(sql, STANDING_STRICT_KEY) === '1';
 /**
  * Copies the env switch into the workspace's own SQLite. Unset leaves it alone; '1' turns it on (anchoring the missing-standing window at `now` for a workspace
  * that has no `store.linked` anchor yet, so enabling never refuses anyone before a full window has passed); anything else turns it off.
@@ -164,16 +164,16 @@ export const standingEnforced = (sql: SqlStorage): boolean => stateValue(sql, ST
 export function syncStandingPolicy(sql: SqlStorage, flag: string | undefined, now: number): void {
   if (flag === undefined) return;
   if (flag.trim() === '1') {
-    if (!standingEnforced(sql)) putStateValue(sql, STANDING_ENFORCE_KEY, '1');
+    if (!standingStrict(sql)) putStateValue(sql, STANDING_STRICT_KEY, '1');
     if (stateValue(sql, STANDING_ANCHOR_KEY) === null) putStateValue(sql, STANDING_ANCHOR_KEY, String(now));
-  } else sql.exec('DELETE FROM store_state WHERE key = ?', STANDING_ENFORCE_KEY);
+  } else sql.exec('DELETE FROM store_state WHERE key = ?', STANDING_STRICT_KEY);
 }
 /**
  * True when the policy is on, the workspace is linked (an unlinked one is exempt) and the Store has been silent for more than 24 h: the last standing is older than
  * that, or none ever came and the link (or the policy switch) is older than that. Fail closed on silence, never on a Store that answered.
  */
 export function standingStale(sql: SqlStorage, now: number): boolean {
-  if (!standingEnforced(sql) || stateValue(sql, 'linked') === '0') return false;
+  if (!standingStrict(sql) || stateValue(sql, 'linked') === '0') return false;
   const seen = stateValue(sql, STANDING_AT_KEY) ?? stateValue(sql, STANDING_ANCHOR_KEY);
   return seen !== null && now - Number(seen) > STANDING_WINDOW_MS;
 }
