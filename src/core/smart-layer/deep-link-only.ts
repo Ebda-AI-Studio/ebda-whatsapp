@@ -19,6 +19,7 @@ export const DEEP_LINK_ONLY: Readonly<Record<string, { secret: string } | { scre
   'inbox.send-media': { screen: 'a photo or file is chosen on the screen' },
   'contacts.import-csv': { screen: 'a CSV file is chosen and the consent wording is attested on the screen' },
   'contacts.export': { screen: 'a data export is a file download' },
+  'workspace.standalone-create': { screen: 'the single-use invite code and the name are typed on the workspace-creation screen, and the assistant only exists inside a workspace, which this task creates' },
   'inbox.quick-replies': { screen: 'quick replies are the merchant\'s own canned wording, typed and edited in the composer where they are sent; the assistant does not author them' },
 };
 
