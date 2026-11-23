@@ -347,9 +347,9 @@ describe('store_orders_summary: the owner\'s orders and sales from the Store', (
     const t = await workspaceFor(7853, 'staff');
     const r = await ask(t, 'كام طلب النهارده؟', 'ar', 'دي أرقام المالك.');
     expect(r.seen).toContain('owner_only');
-    expect(link.fake.count('getOrdersSummary')).toBe(0);
     const direct = await t.api.call('GET', '/store/orders-summary?period=today');
     expect(direct.status).toBe(403);
+    expect(link.fake.count('getOrdersSummary')).toBe(0); // after the direct call: the ROUTE refuses staff before the Store is asked (the Store would refuse too, so only this count proves Chat's own check)
   });
 
   it('a Store that cannot answer is a tool failure, never zeros', async () => {
