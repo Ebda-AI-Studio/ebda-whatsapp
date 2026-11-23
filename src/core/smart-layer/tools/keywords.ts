@@ -81,6 +81,7 @@ export const KEYWORDS: Readonly<Record<string, string>> = {
   campaign_report: 'تقرير الحملة نتايج الحملة اثبات ميتا وصلت اتخطت report campaign compliance',
   consent_evidence_summary: 'اثبات الموافقة العملاء الموافقين الغوا الاشتراك اوبت اوت سجل الموافقة ميتا consent opt out evidence proof',
   audit_trail_view: 'سجل النشاط مين غيّر ايه اتغير الايام اللي فاتت مين عمل audit log who changed history',
+  templates_install_seasonal: 'قوالب رمضان رمضان كريم عرض رمضان مواعيد رمضان موسمية ramadan seasonal templates',
   catalogue_provision: 'انشئ كتالوج جديد واتساب ميتا مفيش كتالوج provision create catalogue',
   numbers_disconnect: 'افصل الرقم فصل رقم واتساب disconnect number',
   numbers_finish_registration: 'كمّل تسجيل الرقم التسجيل مخلصش registration finish pending',

@@ -138,6 +138,7 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/templates`]: 'person_only',
   [`POST ${S}/templates/sync`]: 'person_only',
   [`POST ${S}/templates/install-defaults`]: 'person_only',
+  [`POST ${S}/templates/install-seasonal`]: 'person_only',
   [`POST ${S}/templates/cod-v2/resubmit`]: 'person_only',
   [`POST ${S}/templates/shared-requests`]: 'person_only',
   [`PUT ${S}/templates/:name/:language`]: 'person_only',

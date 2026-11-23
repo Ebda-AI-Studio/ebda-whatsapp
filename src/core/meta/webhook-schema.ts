@@ -383,6 +383,31 @@ export function extractNameUpdates(payload: unknown): NameUpdateEvent[] {
   return out;
 }
 
+export type TemplateQualityEvent = { wabaId: string; name: string; language: string; score: 'GREEN' | 'YELLOW' | 'RED' | 'UNKNOWN' };
+const templateQualityChangeSchema = z.object({
+  field: z.literal('message_template_quality_update'),
+  value: z.object({ message_template_name: z.string(), message_template_language: z.string(), new_quality_score: z.string() }).loose(),
+}).loose();
+
+/**
+ * `message_template_quality_update`: Meta's rating of one template changed (GREEN high, YELLOW medium, RED low, UNKNOWN not enough sends yet). Field names follow
+ * Meta's documented payload; NOT yet seen against live traffic. An unfamiliar score is treated as UNKNOWN rather than stored as typed.
+ */
+export function extractTemplateQualityUpdates(payload: unknown): TemplateQualityEvent[] {
+  const parsed = payloadSchema.extend({ entry: z.array(z.object({ id: z.string(), changes: z.array(z.unknown()) }).loose()) }).safeParse(payload);
+  if (!parsed.success) return [];
+  const out: TemplateQualityEvent[] = [];
+  for (const entry of parsed.data.entry) {
+    for (const ch of entry.changes) {
+      const c = templateQualityChangeSchema.safeParse(ch);
+      if (!c.success) continue;
+      const raw = c.data.value.new_quality_score.toUpperCase();
+      out.push({ wabaId: entry.id, name: c.data.value.message_template_name, language: c.data.value.message_template_language, score: raw === 'GREEN' || raw === 'YELLOW' || raw === 'RED' ? raw : 'UNKNOWN' });
+    }
+  }
+  return out;
+}
+
 export type TemplateCategoryEvent = { wabaId: string; name: string; language: string; newCategory: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION' };
 const categoryChangeSchema = z.object({
   field: z.literal('template_category_update'),
