@@ -38,6 +38,7 @@ import { FLAG, readPlatformFlags, setPlatformFlag } from '../core/smart-layer/co
 import { AGENT_MODEL_IDS, readAgentModelFlag, setAgentModelFlag } from '../core/ai/model-flag';
 import { readAgentHealth } from '../core/ai/health';
 import { DEFAULT_WORKERS_AI_MODEL } from '../core/ai/config';
+import { isStandaloneId } from '../core/workspace-kind';
 import { INVITE_DEFAULT_DAYS, INVITE_MAX_DAYS, listInvites, mintInvite, revokeInvite } from '../core/standalone/invites';
 
 type E = { Bindings: Env; Variables: AuthVars };
@@ -246,6 +247,7 @@ operatorRoutes.put('/workspaces/:workspaceId/subscription', async (c) => {
   if (!ws || !pkg) return c.json({ error: 'not_found' }, 404);
   // WA-NOFREE-1: the free package belongs to the Store plan alone; an operator assigns a paid package (a deal or a goodwill extension of one).
   if (b.data.packageId === STORE_INCLUDED) return bad(c, 'store_included_is_store_plan_only');
+  if (isStandaloneId(workspaceId!) && b.data.status === 'trialing') return bad(c, 'standalone_no_trial'); // CHAT-SA-6 (CHAT-ENABLE-1): a Chat-only workspace has no trial clock
   // An in-effect status needs a future end: the workspace would deny it anyway (WA-CANCEL-1), so refuse the contradiction instead of storing it.
   if ((b.data.status === 'active' || b.data.status === 'trialing') && b.data.periodEnd <= Date.now()) return bad(c, 'period_end_in_the_past');
   const r = await setSubscription(c.env, { workspaceId, packageId: b.data.packageId, status: b.data.status, periodStart: Date.now(), periodEnd: b.data.periodEnd, source: 'operator', ref: actor(c), reason: b.data.reason });

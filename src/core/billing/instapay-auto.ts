@@ -23,6 +23,7 @@ import { billingAudit, PLATFORM_WORKSPACE } from '../audit-reason';
 import { announceSubscription } from './subscriptions';
 import { alert } from '../observability';
 import { isOffboarded } from '../ops/offboarded';
+import { isStandaloneId } from '../workspace-kind';
 import { adjustmentThreshold } from './operator';
 import { planPurchase } from './package-orders';
 import { proofReaderAvailable, readProofForAutoConfirm } from './instapay-reader';
@@ -311,7 +312,8 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
     expected: { amountMinor: expected.amountMinor, payeeHandle: payeeHandle(env) ?? '' },
     now, mode, storeEnabled: wsOn, isFirstPayment: first,
     // INSTAPAY-CAP-1: the cap left after what was already auto-confirmed and not yet seen in a sent digest.
-    firstPaymentCapMinor: Math.max(0, firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor }) - history.uncleanAutoMinor),
+    // CHAT-SA-6: the FIRST InstaPay payment of a standalone workspace (no Store behind it, nobody vouching for it) is always a person's: cap 0 = FIRST_PAYMENT_OVER_CAP for any amount.
+    firstPaymentCapMinor: isStandaloneId(r.workspace_id) && first ? 0 : Math.max(0, firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor }) - history.uncleanAutoMinor),
     // The two-approver threshold ALWAYS wins (a threshold of 0 sends a kind a person must review straight to a person).
     dualControlThresholdMinor: expected.reviewKind ? 0 : adjustmentThreshold(env),
     duplicate,
@@ -339,9 +341,11 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
     alert('instapay_amount_mismatch', { severity: 'P1', id: r.id, workspace: r.workspace_id });
     return done('decide_human', { ...base, verdict: 'needs_human', reasons: ['AMOUNT_MISMATCH'] }, true);
   }
+  // The cap IN the confirm write (the safety layer) follows the same rule as the decision: 0 for a standalone workspace until a person has confirmed a payment (CHAT-SA-6).
+  const backstopCap = isStandaloneId(r.workspace_id) ? 0 : firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor });
   let claimed: D1Result | null = null;
   try {
-    claimed = await env.DB.prepare(autoConfirmClaimSql()).bind(r.id, SYSTEM_ACTOR, now, bankRef, 0, r.workspace_id, r.amount_minor, now - NO_REF_WINDOW_MS, first ? firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor }) : null).run();
+    claimed = await env.DB.prepare(autoConfirmClaimSql()).bind(r.id, SYSTEM_ACTOR, now, bankRef, 0, r.workspace_id, r.amount_minor, now - NO_REF_WINDOW_MS, first ? backstopCap : null).run();
   } catch (err) {
     if (!/UNIQUE/i.test(errMsg(err))) throw err;
   }
@@ -351,7 +355,7 @@ async function decide(env: Env, r: InstapayRow, autoId: string, now: number): Pr
     const cur = await getRequestRow(env, r.id);
     if (cur && (cur.state === 'rejected' || cur.state === 'expired')) await releaseClaimsOf(env, cur, extract!.reference);
     // N2: still under review and the cap no longer fits = another decision of this workspace confirmed first (the cap is checked IN the write): a person decides.
-    const capLost = first && cur?.state === 'under_review' && (await uncleanAutoSum(env, r.workspace_id, r.id)) + r.amount_minor > firstPaymentCapMinor({ monthlyPriceMinor: expected.capMonthlyMinor });
+    const capLost = first && cur?.state === 'under_review' && (await uncleanAutoSum(env, r.workspace_id, r.id)) + r.amount_minor > backstopCap;
     return done('decide_human', { ...base, verdict: 'needs_human', reasons: [capLost ? 'FIRST_PAYMENT_OVER_CAP' : 'DUPLICATE_REFERENCE'] }, true);
   }
   await billingAudit(env, { at: now, actor: SYSTEM_ACTOR, action: 'instapay_auto_confirmed', workspaceId: r.workspace_id, ref: r.id, after: { id: r.id, kind: r.kind, amountMinor: r.amount_minor, isFirstPayment: first } });
