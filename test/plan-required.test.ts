@@ -1,3 +1,4 @@
+// @repo-guard
 import { SELF, createExecutionContext, env, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import worker, { apiRoutes } from '../src/index';
