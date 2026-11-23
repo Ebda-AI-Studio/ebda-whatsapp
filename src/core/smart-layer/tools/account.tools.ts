@@ -67,6 +67,19 @@ export function accountReadTools(kit: Kit): ToolSpec[] {
     read(kit, { name: 'wallet_statement', capabilityId: 'wallet.statement', resultTrust: 'typed-source', description: 'The wallet statement for one month (YYYY-MM): what was spent and topped up. Owner only.',
       args: z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) }).strict(),
       run: async (ctx, a) => api(ctx).get('/wallet/statement', { month: a.month, format: 'json' }) }),
+    read(kit, { name: 'campaign_report', capabilityId: 'campaigns.report-export', resultTrust: 'store-data', description: 'The compliance report of one campaign (owner only): how many people it reached, delivered, read, failed and skipped, why recipients were skipped, and that only customers with a consent on record were messaged. Counts only, no phone numbers. Give the campaign name.',
+      args: z.object({ campaign: z.string().trim().min(1).max(100).describe('the campaign name as the merchant wrote it') }).strict(),
+      run: async (ctx, a) => {
+        const list = (await api(ctx).get('/campaigns', { limit: '50' })) as { items?: Array<{ id: string; name: string }> };
+        const c = pickByName(list.items ?? [], (x) => x.name, a.campaign);
+        const r = (await api(ctx).get(`/campaigns/${c.id}/report`)) as { campaign: { name: string; status: string; template: { name: string }; category: string; startedAt: number | null; finishedAt: number | null }; consentGated: boolean; totals: Record<string, number>; clicks: { unique: number; total: number }; skippedByReason: Record<string, number> };
+        return { campaign: r.campaign.name, status: r.campaign.status, template: r.campaign.template.name, category: r.campaign.category, startedAt: iso(r.campaign.startedAt), finishedAt: iso(r.campaign.finishedAt), onlyConsentedCustomersMessaged: r.consentGated, totals: r.totals, linkClicks: r.clicks, skippedByReason: r.skippedByReason, csv: 'the owner can download it as a file from the report route with format=csv' };
+      } }),
+    read(kit, { name: 'consent_evidence_summary', capabilityId: 'compliance.opt-out-evidence', resultTrust: 'typed-source', description: 'How many customers have a consent on record (by how it was given), how many have a consent proof with the wording they agreed to, and how many opted out (owner only). Counts only: the per-customer list contains phone numbers, so it is the owner\'s file download, never read into the chat.', args: none,
+      run: async (ctx) => { const r = (await api(ctx).get('/contacts/consent-evidence', { limit: '1' })) as { summary: Record<string, unknown> }; return { ...r.summary, download: 'the owner can download the per-customer record as a file (format=csv), 200 customers per page' }; } }),
+    read(kit, { name: 'audit_trail_view', capabilityId: 'compliance.audit-trail', resultTrust: 'store-data', description: 'The latest changes made in this workspace, newest first (owner only): the action, who did it (role and user id), when, and whether it went through. Never a message or a phone number.',
+      args: z.object({ limit: z.number().int().min(1).max(30).default(15) }).strict(),
+      run: async (ctx, a) => { const r = (await api(ctx).get('/audit', { limit: String(a.limit) })) as { items?: Array<{ at: number; role: string; action: string; status: number }> }; return { changes: (r.items ?? []).map((x) => ({ at: iso(x.at), by: x.role, action: x.action, ok: x.status < 400 })) }; } }),
   ];
 }
 

@@ -1,7 +1,6 @@
 {
   "id": "numbers.migrate",
-  "status": "planned",
-  "plan": "none yet (future)",
+  "status": "live",
   "area": "numbers",
   "version": 1,
   "versionDate": "2026-11-14",
@@ -31,12 +30,15 @@
     ]
   },
   "steps": [
-    "Disconnect the old number then connect the new one (campaigns/chats stay by workspace); no migration wizard"
+    "No wizard: turn off two-step verification (the PIN) at the old provider, then connect the number in Numbers the normal way",
+    "Templates do not move with the number: install the starter templates and re-submit",
+    "Chats and campaigns stay in the workspace; to change number, disconnect the old and connect the new"
   ],
   "edgeCases": [
-    "Number conflict if it is attached to another workspace"
+    "Number conflict if it is still attached to another account or workspace: remove it there first",
+    "Meta decides the quality rating and limit after a move"
   ],
   "gaps": [
-    "No migration flow or guide; moving a number from another BSP is manual at Meta"
+    "Meta does the move; Ebda Chat has no migration screen (a guide only)"
   ]
 }

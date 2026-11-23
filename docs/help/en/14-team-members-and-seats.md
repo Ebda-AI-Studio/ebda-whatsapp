@@ -1,6 +1,7 @@
 ---
 capabilities:
   - access.roles@1
+  - compliance.audit-trail@1
   - team.seat-assign@1
   - team.seat-remove@1
   - team.seats-view@1
@@ -33,3 +34,6 @@ Nothing is deleted. The people who were given seats first keep working, up to th
 - If we cannot reach your store's team list for a moment, the page says so and changes nothing. Try again shortly.
 
 Last checked: 2026-10-29.
+
+## Who did what: the audit trail
+The store owner can see who changed what in this workspace, newest first: the action, who did it (their role and user id), when, and whether it went through. It never shows a message or a phone number. Ask the assistant "what changed lately", or open `/stores/<store>/audit` (`?before=<id>` for older entries).
