@@ -11,6 +11,7 @@ import { storeLink } from '../store-link';
 import { uuidFromKey } from '../store-link/orders';
 import type { EntitlementEvent } from './entitlements';
 import { alert } from '../observability';
+import { isStandaloneId } from '../workspace-kind';
 
 export const STORE_INCLUDED = 'store-included';
 /** `col` (ms) plus N whole calendar months, N being a SQL expression. */
@@ -118,6 +119,12 @@ export async function runWrite(env: Env, write: D1PreparedStatement, audit: D1Pr
  * A `renewal` of the same running package leaves the running period alone and queues one more (`queued_periods`).
  */
 export async function setSubscription(env: Env, a: SetSubscription, now = Date.now(), o: WriteOpts = {}): Promise<WriteResult> {
+  // CHAT-SA-6: a standalone workspace (no Store) buys Chat packages and nothing else: never the Store's `store-included`, never a Store-plan write, never a trial (CHAT-ENABLE-1).
+  // The one writer refuses it for EVERY caller (Store events, the operator route, a future path); nothing is written and a person is told.
+  if (isStandaloneId(a.workspaceId) && (a.packageId === STORE_INCLUDED || a.source === 'store_plan' || a.status === 'trialing')) {
+    alert('standalone_subscription_refused', { workspace: a.workspaceId, source: a.source, packageId: a.packageId, status: a.status });
+    return { version: 0, written: false, applied: false, eventQueued: false, pre: [0] };
+  }
   const RUNNING = "workspace_subscriptions.package_id = excluded.package_id AND workspace_subscriptions.period_end > ? AND workspace_subscriptions.status IN ('active', 'trialing')";
   const sql = `INSERT INTO workspace_subscriptions (workspace_id, package_id, status, period_start, period_end, cancelled_at, version, updated_at, source, queued_periods, past_due_since)
     SELECT ?, ?, ?, ?, ?, CASE WHEN ? = 'cancelled' THEN ? END, 1, ?, ?, 0, CASE WHEN ? = 'past_due' THEN coalesce(?, ?) END WHERE ${o.only?.sql ?? '1'}
@@ -192,6 +199,7 @@ export async function currentEvent(env: Env, workspaceId: string): Promise<Entit
  * (the Store's last plan event is remembered in `store_plan_applied`). A running package, or one with a paid queued period, is never touched.
  */
 export async function fallbackToStorePlan(env: Env, workspaceId: string, now: number): Promise<boolean> {
+  if (isStandaloneId(workspaceId)) return false; // CHAT-SA-6: no Store plan to fall back to, ever (belt and braces: `store_plan_applied` has no row for it)
   const p = await env.DB.prepare('SELECT includes_whatsapp, status, period_end FROM store_plan_applied WHERE workspace_id = ?').bind(workspaceId).first<{ includes_whatsapp: number; status: EntitlementEvent['status']; period_end: number | null }>();
   if (!p || p.includes_whatsapp !== 1) return false;
   const r = await setSubscription(env, { workspaceId, packageId: STORE_INCLUDED, status: p.status, periodStart: now, periodEnd: p.period_end ?? now + 31 * 86_400_000, source: 'store_plan', ref: 'store_plan_fallback' }, now, {

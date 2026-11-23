@@ -12,6 +12,7 @@ import { Highlight } from './Highlight';
 import { LoadError } from './LoadError';
 import { EmptyState } from './EmptyState';
 import { SearchBox, optionId } from './SearchBox';
+import { Skeleton } from './Skeleton';
 import { SegmentsPanel } from './SegmentsPanel';
 import { TagEditor } from './TagEditor';
 
@@ -80,7 +81,7 @@ export function ContactsScreen({ t, lang, source, api, now }: Props) {
             <button type="button" className="chip" aria-pressed={optedOut} onClick={() => setOptedOut(true)}>{t.filterOptedOut}</button>
           </div>
           {listFailed ? null
-            : shown === null ? <div className="placeholder">…</div>
+            : shown === null ? <Skeleton t={t} kind="contact" />
             : shown.length === 0 ? <EmptyState icon={<Users size={22} />} title={t.contactsEmptyTitle} body={t.contactsEmpty} />
             : (
               <ul className="contact-list" id={LIST_ID} role="listbox" aria-label={t.contactsTitle}>

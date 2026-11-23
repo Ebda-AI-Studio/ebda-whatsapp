@@ -52,7 +52,7 @@ const png = (tag: string) => { const b = new Uint8Array([0x89, 0x50, 0x4e, 0x47,
 
 /** A request with its proof uploaded (the auto attempt triggered by the upload runs with `e`; use mode off to keep it for the test to call). */
 export async function request(ws: string, kind: 'package' | 'topup', o: { amountMinor?: number; packageId?: string; e?: typeof env; bytes?: ArrayBuffer } = {}): Promise<{ id: string; amountMinor: number }> {
-  await seedNumber(`pn-ia-${ws.slice(-8)}`, ws);
+  if (!ws.startsWith('sw_')) await seedNumber(`pn-ia-${ws.slice(-8)}`, ws); // a standalone workspace already exists (createStandaloneWorkspace); seedNumber would insert it as a Store row, which the kind trigger refuses
   const r = await createInstapayRequest(env, { workspaceId: ws, userId: 'merchant-1', sessionId: 's1', input: kind === 'package' ? { kind, packageId: o.packageId ?? 'gold' } : { kind, amountMinor: o.amountMinor ?? 20_000 }, payee: PAYEE });
   if (!r.ok) throw new Error(r.reason);
   // The upload would trigger the auto attempt: keep the mode off while uploading (unless the test passes its own env to exercise the trigger), so the test calls it itself.

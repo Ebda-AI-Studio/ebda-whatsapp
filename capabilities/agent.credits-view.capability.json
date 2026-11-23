@@ -41,7 +41,7 @@
     ]
   },
   "steps": [
-    "1 credit = one agent reply regardless of length; package gives monthly credits (Starter 300, Growth 1500, Pro 5000; store-included 100)"
+    "1 credit = one agent reply regardless of length; package gives monthly credits (Chat 300 / 1,500 / 5,000 AI replies packages give 300 / 1500 / 5000; store-included 100)"
   ],
   "edgeCases": [
     "AI credits run out: the agent stops and hands the chat to staff",

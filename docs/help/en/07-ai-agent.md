@@ -1,6 +1,7 @@
 ---
 capabilities:
   - agent.credits-topup@2
+  - agent.customer-memory@1
   - agent.credits-view@2
   - agent.enable@2
   - agent.faq@1
@@ -11,6 +12,7 @@ capabilities:
   - agent.promises@1
   - agent.recommendations@1
   - agent.provider-byok@1
+  - agent.read-typing-franco@1
   - agent.store-facts@1
   - agent.store-search@1
   - agent.tone@1
@@ -18,6 +20,7 @@ capabilities:
   - inbox.assign-takeover@1
   - inbox.handoff-needs-human@1
   - inbox.voice-note-transcript@1
+  - orders.same-address@1
   - orders.tracking@1
 ---
 
@@ -63,7 +66,8 @@ The agent suggests products from your catalog as picture cards: items similar to
 - It follows your **persona** (tone) when it introduces the cards.
 - **Default (Ruling WA-RECS-1):** a suggestion after an order is a message your store starts, so it is **off for stores that existed before 2026-11-17** until you turn on **Agent recommends products** in Settings > AI agent, and **on for new stores**. The budget ceiling is at most 1,000,000.
 - To switch it off, turn off **Agent recommends products** in Settings > AI agent. Your automatic recommendations on the storefront are a separate switch in Ebda Store.
-- Suggestions are only sent inside the 24-hour window; there is no automatic follow-up after it.
+- The agent itself only suggests inside the 24-hour window.
+- **Automatic suggestion after an order (off by default, owner only):** in Settings > Bot > Product suggestions after an order you can let your store send one message from a Meta-approved marketing template with up to 3 products. It is charged to your wallet and it is only sent when the template is approved, the customer explicitly agreed to marketing messages and has not stopped them, it is outside 9 pm to 9 am shop time, and the customer has not had one in the last 14 days. While Meta has not approved the template, nothing is sent.
 
 ## Location pins
 When a customer sends a **location pin** while the agent is asking for the delivery address, the pin's name or address text becomes the delivery address and the agent shows it back. A pin with no text makes the agent ask for one line (area, street, building). Anywhere else, the agent just asks what the customer needs and offers to start an order. The coordinates are kept in the chat only until the order is placed and are never sent to the Store or to any outside service.

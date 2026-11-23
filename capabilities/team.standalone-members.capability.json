@@ -1,0 +1,57 @@
+{
+  "id": "team.standalone-members",
+  "status": "live",
+  "area": "team",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "دعوة موظف وشيله من الفريق (من غير متجر)",
+  "titleEn": "Invite and remove teammates (workspace without a Store)",
+  "screens": [
+    "TeamScreen Invite",
+    "view:TeamScreen",
+    "/team"
+  ],
+  "api": [
+    "POST /stores/:storeId/members/invite",
+    "DELETE /stores/:storeId/members/:userId",
+    "DELETE /stores/:storeId/members/invitations/:userId",
+    "GET /workspaces/invitations",
+    "POST /workspaces/invitations/:workspaceId/accept"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/team-members-and-seats",
+  "questions": {
+    "ar": [
+      "ازاي ادعو موظف في Chat؟",
+      "عايز اشيل موظف من الفريق",
+      "ضيف موظف على مساحة العمل"
+    ],
+    "en": [
+      "How do I invite a teammate to my Chat workspace?",
+      "How do I remove a teammate?"
+    ]
+  },
+  "steps": [
+    "Team > Invite a teammate (first name + email) > Send invite; the person accepts the invitation after signing in",
+    "Team > Cancel invitation / Remove from team"
+  ],
+  "edgeCases": [
+    "Standalone workspaces only: a Store workspace's team is managed in Ebda Store",
+    "An invitation is not access: the person gets a seat only after they accept, signed in as the invited identity; it expires after 7 days and can be cancelled",
+    "The owner sees only the name and address they typed until the person accepts; the answer to an invite is the same whether or not the address already has an account",
+    "The package's member limit applies; the owner cannot be removed; removal ends access on the person's next request",
+    "At most 20 invitations a day per workspace and 30 per owner"
+  ],
+  "gaps": [
+    "No custom roles"
+  ],
+  "assistantNote": "an invite emails a link; access starts only when the person accepts; cancel the invitation or remove the person to undo"
+}

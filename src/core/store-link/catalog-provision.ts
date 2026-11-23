@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { provisionCatalogRequest } from '../api/contract';
 import { connectCatalogToWaba, createCatalog, listOwnedCatalogs, listOwnedWabas, type CatalogApiResult } from '../meta/catalog-api';
 import { ownGraphTokenFor, TokenUnavailable } from '../numbers/token';
-import { bridgeFor } from '../store-link';
+import { bridgeForWorkspace } from '../store-link';
 import { catalogBelongsToWaba } from './catalog';
 import type { LinkHost } from './host';
 import { getState, putState, readSettings } from './settings';
@@ -46,7 +46,7 @@ export async function provisionCatalog(host: LinkHost, a: { name?: string; wabaI
   if (readSettings(host).catalogId) return { ok: false, code: 'already_set', retryable: false };
   let name = a.name;
   if (!name) {
-    const profile = await bridgeFor(host.env)?.getStoreProfile(host.workspaceId);
+    const profile = await bridgeForWorkspace(host.env, host.workspaceId)?.getStoreProfile(host.workspaceId);
     name = profile?.ok ? profile.value.name.trim().slice(0, CATALOG_NAME_MAX) : undefined;
   }
   const pending0 = readPending(host);

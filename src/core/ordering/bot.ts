@@ -19,7 +19,7 @@ import type { InboundLocation, InboundMedia, InboundOrder, InboundReply } from '
 import { isE164 } from '../phone';
 import type { SendJob } from '../send-queue';
 import { MAX_RETAILER_ID, type Address, type Buyer, type NewAddress, type CatalogRow, type ChatPaymentMethod, type OrderLine, type StoreBridge, type StoreProfile } from '../store-bridge';
-import { bridgeFor, storeLink } from '../store-link';
+import { bridgeForWorkspace, storeLink } from '../store-link';
 import { dropProfile, loadProfile } from '../ai/context';
 import type { LinkHost } from '../store-link/host';
 import { upsertOrder } from '../store-link/order-store';
@@ -160,8 +160,8 @@ function serialised<T>(key: string, run: () => Promise<T>): Promise<T> {
 }
 
 /** The bot answers only while the Store link is on: a Store bound, copy registered, store linked and the switch on. */
-export function orderingActive(host: Pick<LinkHost, 'sql' | 'env'>): boolean {
-  return !isSuspended(host.sql) && bridgeFor(host.env) !== null && storeLink().copy !== null && isLinked(host) && readSettings(host).orderingBot && featureAllowed(host.sql, 'order_in_chat');
+export function orderingActive(host: Pick<LinkHost, 'sql' | 'env' | 'workspaceId'>): boolean {
+  return !isSuspended(host.sql) && bridgeForWorkspace(host.env, host.workspaceId) !== null && storeLink().copy !== null && isLinked(host) && readSettings(host).orderingBot && featureAllowed(host.sql, 'order_in_chat');
 }
 
 function loadSession(host: LinkHost, waId: string): Session {
@@ -211,7 +211,7 @@ export function orderingEngaged(host: Pick<LinkHost, 'sql'>, input: BotInput, no
 /** The ordering turn itself; the caller holds the customer's turn lock (`serialisedTurn`). `restart` opens the catalog regardless of the message (the AI agent hands over with it). */
 export async function runBotTurnLocked(host: LinkHost, input: BotInput, now: number, opts: { restart?: boolean } = {}): Promise<void> {
   const copy = storeLink().copy;
-  const bridge = bridgeFor(host.env);
+  const bridge = bridgeForWorkspace(host.env, host.workspaceId);
   if (!copy || !bridge || !orderingActive(host)) return;
   const session = loadSession(host, input.from);
   if (session.data.lastMessageId >= input.messageId) return; // already applied (a replayed task)

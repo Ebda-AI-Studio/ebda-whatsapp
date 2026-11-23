@@ -1,7 +1,6 @@
 {
   "id": "agent.recommendations",
-  "status": "in-pr",
-  "pr": "ebda-whatsapp (this PR) + ebda-store bridge getRecommendations (stacked on Store #742)",
+  "status": "live",
   "area": "agent",
   "version": 1,
   "versionDate": "2026-11-14",
@@ -11,13 +10,12 @@
     "Settings > AI agent > Agent recommends products"
   ],
   "api": [
-    "PUT /stores/:storeId/agent {recommendProducts}"
+    "PUT /stores/:storeId/agent"
   ],
   "mcpTool": null,
   "planGate": null,
   "roles": [
-    "owner",
-    "staff"
+    "owner"
   ],
   "policy": "confirm",
   "undo": {
@@ -51,6 +49,6 @@
     "Catalogue not synced to Meta: text answer with names, prices and links instead of cards"
   ],
   "gaps": [
-    "No proactive 'you might also like' after an order outside the 24 h window (needs an approved template)"
+    "Proactive 'you might also like' after an order outside the 24 h window is the separate capability bot.proactive-recs"
   ]
 }

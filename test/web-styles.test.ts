@@ -38,4 +38,15 @@ it('the desktop rail is wide enough for one-line labels, and says so (CHAT-QA-10
 
 it('the help link is brand brass and never the browser default blue or visited purple (CHAT-QA-13)', () => {
   expect(/\.help-link,\s*\.help-link:visited\s*\{[^}]*color:\s*var\(--gold-ink\)/.test(css)).toBe(true);
+  expect(/\.howto,\s*\.howto:visited\s*\{[^}]*color:\s*var\(--gold-ink\)/.test(css)).toBe(true);
+});
+
+// A later `.btn.danger { color: var(--bad) }` once matched the filled --bad background and hid every destructive confirm label (operator Assistant screen, 2026-11-23).
+it('no plain `.btn.danger` rule sets a text colour other than white; the filled background is --bad', () => {
+  const rules = [...css.matchAll(/(^|\n)\.btn\.danger\s*\{([^}]*)\}/g)].map((m) => m[2]!);
+  expect(rules.some((b) => /background:\s*var\(--bad\)/.test(b))).toBe(true);
+  for (const body of rules) {
+    const c = /(^|;|\s)color:\s*([^;]+)/.exec(body)?.[2]?.trim();
+    if (c) expect(c).toBe('#fff');
+  }
 });

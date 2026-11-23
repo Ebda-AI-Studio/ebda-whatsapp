@@ -76,6 +76,16 @@ describe('ConfirmCard', () => {
     await screen.findByText(STRINGS.en.assistantCardUndone);
   });
 
+  it('an Undo the server could not do (name taken since the delete) says so and changes nothing; the card stays', async () => {
+    const a = api({ undo: vi.fn(async () => ({ status: 'failed' })) });
+    mount(card({ undo: 'reversible', reasons: ['delete'] }), a);
+    fireEvent.click(screen.getByRole('button', { name: t.assistantConfirmYes }));
+    fireEvent.click(await screen.findByRole('button', { name: t.assistantUndo }));
+    expect((await screen.findByText(t.assistantUndoFailed)).textContent).toContain('نفس الاسم');
+    expect(screen.queryByText(t.assistantCardUndone)).toBeNull();
+    expect(screen.getByText(t.assistantConfirmDone)).toBeTruthy();
+  });
+
   it('in the panel, a confirm card appears only for a card whose token came with the turn', async () => {
     const reply = { status: 'answered' as const, turnId: 't1', segments: [{ kind: 'text' as const, text: 'جهزت الرسالة' }], previews: [card()], approvals: [ap] };
     const a = api({ turn: vi.fn(async () => reply) });

@@ -40,7 +40,7 @@ describe('wallet plan naming', () => {
     await deliver([plan(ws, 'business')]);
     await workspace(ws).applyEntitlement({ version: 99, packageId: 'pro', status: 'active', periodStart: Date.now() - 1000, periodEnd: Date.now() + DAY * 20, aiCredits: 40 });
     const p = (await wallet(ws)).plan!;
-    expect(p).toMatchObject({ packageId: 'pro', packageName: 'Pro' });
+    expect(p).toMatchObject({ packageId: 'pro', packageName: 'Chat 5,000 AI replies', packageNameAr: 'شات 5000 رد ذكي' });
     expect(p.storePlan).toBeUndefined();
   });
 

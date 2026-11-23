@@ -53,10 +53,10 @@ describe('CHAT-QA-13: human permission names and a brand-styled help link', () =
     expect((help as HTMLAnchorElement).href).toContain('help.ebda.app');
   });
 
-  it('the Team and Numbers help links use the same brand class', async () => {
+  it('the Team and Numbers help links (.howto) get the same brand brass', async () => {
     render(<App source={createSampleSource()} now={now} />);
     await act(async () => fireEvent.click(screen.getByRole('link', { name: t.teamNav })));
     await screen.findByRole('heading', { name: t.teamTitle, level: 1 });
-    expect(screen.getAllByRole('link', { name: t.howTo }).every((a) => a.className === 'help-link')).toBe(true);
+    expect(screen.getAllByRole('link', { name: t.howTo }).every((a) => a.className === 'howto')).toBe(true);
   });
 });

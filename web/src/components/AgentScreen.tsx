@@ -4,6 +4,7 @@ import type { AgentSettingsDto, AgentSettingsUpdate } from '../../../src/core/ap
 import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { LoadError } from './LoadError';
+import { Skeleton } from './Skeleton';
 
 const PROMISE_FLAGS = [['allowRefund', 'promiseRefund'], ['allowDiscount', 'promiseDiscount'], ['allowFreeDelivery', 'promiseFreeDelivery'], ['allowExchange', 'promiseExchange'], ['allowGuarantee', 'promiseGuarantee']] as const;
 type Draft = Omit<AgentSettingsDto, 'hasApiKey' | 'credits' | 'knowledgeReady'> & { apiKey: string };
@@ -23,7 +24,7 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
   }, [source]);
   useEffect(load, [load]);
 
-  if (settings === undefined) return <main className="screen"><div className="placeholder">…</div></main>;
+  if (settings === undefined) return <Skeleton t={t} screen kind="setting" rows={4} />;
   if (settings === 'error') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
   // The owner is never told "owner only": a refusal for a session that IS the owner means the check and the session disagree, which is a load problem to retry, not a permission message (CHAT-QA-12).
   if ((settings === null || !draft) && source.role === 'owner') return <main className="screen"><div className="placeholder"><LoadError t={t} onRetry={load} /></div></main>;
@@ -94,6 +95,7 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
           <small id="faq-hint" className="muted">{t.agentFaqHint} · {faqSmall ? t.agentFaqInline : settings.knowledgeReady ? t.agentKbReady : t.agentKbPending}</small>
           {faqBigPending && <small role="alert" className="key-set">{t.agentFaqBigPending}</small>}
         </div>
+        {!source.standalone && (
         <div className="field">
           <div className="setting-row">
             <span id="agent-recommend-label">{t.agentRecommend}</span>
@@ -101,6 +103,7 @@ export function AgentScreen({ t, lang, source }: { t: Strings; lang: Lang; sourc
           </div>
           <small id="agent-recommend-hint" className="muted">{t.agentRecommendHint}</small>
         </div>
+        )}
         <fieldset className="field">
           <legend>{t.agentPromises}</legend>
           <small className="muted">{t.agentPromisesHint}</small>
