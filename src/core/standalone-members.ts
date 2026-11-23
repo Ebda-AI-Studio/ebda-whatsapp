@@ -39,7 +39,7 @@ export async function listStandaloneMembers(env: Pick<Env, 'DB' | 'ACCOUNTS'>, w
 
 export type InviteResult = { status: 'invite_sent' } | { status: 'seat_limit'; limit: number } | { status: 'unavailable' } | { status: 'rate_limited'; retryAfterS: number };
 
-/** The accounts mail cap is per ADDRESS only: without a cap here an owner could send Ebda-branded mail to unlimited addresses. Counted from the audit log (one `member.invite_attempt` per call that reaches accounts, failures included). */
+/** The accounts mail cap is per ADDRESS only: without a cap here an owner could send branded mail to unlimited addresses. Counted from the audit log (one `member.invite_attempt` per call that reaches accounts, failures included). */
 export const INVITE_CAP = { perWorkspaceDay: 20, perInviterDay: 30 } as const;
 const DAY_MS = 86_400_000;
 /** A workspace name goes into a mail subject: no line breaks or other control characters (header injection), no runs of space. */
