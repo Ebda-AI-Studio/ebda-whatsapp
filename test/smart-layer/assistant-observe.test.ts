@@ -4,6 +4,7 @@ import { configureAssistant } from '../../src/routes/assistant';
 import { EMPTY_ANSWER, ENGINE_FALLBACK, NO_STORE_METRICS, TOOL_FAILED, observeTurn } from '../../src/routes/assistant-observe';
 import { apiFor, storeId, useApiKey } from '../helpers/api';
 import { workspace } from '../helpers/workspace';
+import { MSG } from '../../foundation/smart-layer/loop';
 import type { SmartLayerAdapter, ToolSpec } from '../../foundation/smart-layer/types';
 
 useApiKey();
@@ -41,7 +42,8 @@ describe('assistant route: a model that returns nothing', () => {
     const res = await SELF.fetch(`https://x/api/v1/stores/${s}/assistant/turn`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ conversationId: crypto.randomUUID(), text: 'كام طلب جالي النهارده؟', locale: 'ar' }) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string; segments: Array<{ text: string }> };
-    expect(body.segments[0]!.text).toBe(EMPTY_ANSWER.ar);
+    expect(body.segments[0]!.text).toBe(MSG.emptyModel.ar); // the engine (foundation v0.4.2) now says it itself; Chat's EMPTY_ANSWER is the same sentence
+    expect(EMPTY_ANSWER).toEqual(MSG.emptyModel);
     expect(body.segments[0]!.text).not.toBe(ENGINE_FALLBACK.ar);
     expect(body.status).toBe('limited');
     expect(m.calls()).toBe(2); // first completion + one retry
@@ -50,7 +52,7 @@ describe('assistant route: a model that returns nothing', () => {
     const rid = res.headers.get('x-request-id')!;
     expect(rid).toMatch(/[0-9a-f-]{36}/);
     const parsed = lines.filter((l) => l.startsWith('{')).map((l) => JSON.parse(l) as { event: string; requestId: string });
-    for (const ev of ['assistant_model_empty', 'assistant_model_empty_after_retry', 'assistant_turn', 'assistant_fallback_reply']) expect(parsed.find((p) => p.event === ev)?.requestId, ev).toBe(rid);
+    for (const ev of ['assistant_model_empty', 'assistant_model_empty_after_retry', 'assistant_turn']) expect(parsed.find((p) => p.event === ev)?.requestId, ev).toBe(rid);
   });
 });
 
@@ -83,11 +85,12 @@ describe('observeTurn: seams', () => {
 describe('observeTurn: store-wide metrics questions', () => {
   const adapter = (): SmartLayerAdapter => ({ ai: { run: async () => ({}) }, models: { answer: 'm', plan: 'm', template: 'm', classify: 'm', judge: 'm', embed: 'm' }, tools: () => [], storage: { appendAudit: async () => undefined } } as unknown as SmartLayerAdapter);
   const say = (text: string) => ({ status: 'answered', segments: [{ kind: 'text' as const, text }] });
-  const digits = (r: { segments: Array<{ kind: string; text?: string }> }) => r.segments.map((s) => s.text ?? '').join('').match(/[0-9٠-٩]+/g);
+  const indic = (n: string): string => [...n].map((d) => String.fromCharCode(0x660 + Number(d))).join('');
+  const digits = (r: { segments: Array<{ kind: string; text?: string }> }) => r.segments.map((s) => s.text ?? '').join('').match(/[0-9\u0660-\u0669]+/g);
 
   it('orders today with no matching tool: an invented number never reaches the merchant (AR digits, Latin digits, English)', () => {
     const o = observeTurn(adapter(), { storeId: 's', log: () => undefined });
-    for (const [q, lang, a] of [['كام طلب جالي النهارده؟', 'ar', 'النهاردة جالك 12 طلب'], ['كام طلب جالي النهارده؟', 'ar', 'جالك ١٢ طلب النهاردة'], ['How many orders did I get today?', 'en', 'You got 12 orders today.'], ['كام مبيعاتي النهارده', 'ar', 'مبيعاتك 4,500 جنيه']] as const) {
+    for (const [q, lang, a] of [['كام طلب جالي النهارده؟', 'ar', 'النهاردة جالك 12 طلب'], ['كام طلب جالي النهارده؟', 'ar', `جالك ${indic('12')} طلب النهاردة`], ['How many orders did I get today?', 'en', 'You got 12 orders today.'], ['كام مبيعاتي النهارده', 'ar', 'مبيعاتك 4,500 جنيه']] as const) {
       const r = o.refine(say(a), lang, q);
       expect(digits(r)).toBeNull();
       expect(r.segments[0]).toEqual({ kind: 'text', text: NO_STORE_METRICS[lang] });

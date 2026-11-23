@@ -17,8 +17,9 @@ export const EMPTY_ANSWER: L = { ar: 'الرد جه فاضي من المساعد
 export const NO_STORE_METRICS: L = { ar: 'مفيش عندي أداة لسه بتجيب عدد الطلبات أو المبيعات للمتجر كله. شوف الأرقام دي من لوحة تحكم المتجر.', en: 'I do not have a tool yet that reads your store-wide orders or sales. Please check those numbers in your store dashboard.' };
 const METRIC = /(طلب|طلبات|اوردر|مبيع|ايراد|ارباح|ربح|orders?|sales|revenue|income|profit)/i;
 const PERIOD = /(النهارد|اليوم|امبارح|الاسبوع|الشهر|السنه|today|yesterday|this week|this month|this year|last week|last month)/i;
-const DIGITS = /[0-9٠-٩]+(?:[.,][0-9٠-٩]+)?/g;
-const ASCII_DIGITS = (x: string): string => x.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+// Arabic-Indic (U+0660-0669) and Persian (U+06F0-06F9) digits are written as escapes (DIGITS-1): this is the INPUT side, it must recognise what a model may print.
+const DIGITS = /[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[.,][0-9\u0660-\u0669\u06F0-\u06F9]+)?/g;
+const ASCII_DIGITS = (x: string): string => x.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) & 0xf));
 
 export type TurnObserver = {
   requestId: string;
