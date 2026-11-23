@@ -3,7 +3,8 @@ import type { LinkHost } from '../store-link/host';
 import type { ColumnMap, ImportRejectReason } from './csv';
 import { MAX_TAGS_PER_CONTACT } from './csv';
 import { indexContactName } from '../contact-index';
-import { normaliseText, phoneDigits } from '../text-normalise';
+import { phoneDigits } from '../text-normalise';
+import { searchWords } from '../search-fold';
 
 /** Hard limits of one import: file size is checked at the edge, rows here. */
 export const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
@@ -199,7 +200,7 @@ export function listContacts(host: LinkHost, q: ContactQuery): { items: ContactI
     // Same matching as the conversation search: every typed word is a prefix of a name word (contacts_fts, through the shared normaliser, so
     // hamza / taa marbuta / yaa variants and diacritics are insensitive), OR the typed digits (Arabic-Indic folded, 3 or more) occur in wa_id.
     // The query is only a bound parameter or a quoted letters/digits token (normaliseText leaves nothing else); an unmatchable one finds nothing.
-    const tokens = normaliseText(q.q).split(' ').filter(Boolean).slice(0, 8);
+    const tokens = searchWords(host.sql, q.q);
     const digits = phoneDigits(q.q);
     const any: string[] = [];
     if (tokens.length) { any.push('c.id IN (SELECT rowid FROM contacts_fts WHERE contacts_fts MATCH ?)'); params.push(tokens.map((t) => `"${t}"*`).join(' ')); }

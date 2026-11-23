@@ -39,3 +39,13 @@ export function indexTokens(input: string): string {
 export function phoneDigits(s: string): string {
   return foldArabic(s).replace(/\D+/g, '');
 }
+
+/** The words of a typed query after the fold: at most `max` (default 8), none empty. Store search and every product's typeahead split a query this way. */
+export function searchTokens(input: string, max = 8): string[] {
+  return foldArabic(input ?? '').split(' ').filter(Boolean).slice(0, max);
+}
+
+/** Escape a token for a SQL LIKE pattern with the default `\` escape. */
+export function escapeLike(token: string): string {
+  return token.replace(/[\\%_]/g, (m) => `\\${m}`);
+}

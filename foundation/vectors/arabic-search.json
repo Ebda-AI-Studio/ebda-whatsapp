@@ -1,0 +1,125 @@
+{
+ "comment": "F7 shared search vectors: does `query` find `text` when both go through the shared fold? A query matches when every searchTokens(query) word is a PREFIX of some word of indexTokens(text) (the FTS5 `\"tok\"*` rule Chat uses and the LIKE-prefix rule the Store uses). Real Egyptian catalogue / contact / message samples. `match:false` rows pin KNOWN limits of the canonical fold (Ruling SEARCH-2), they are not wishes.",
+ "cases": [
+  {
+   "q": "شنطه",
+   "text": "شنطة جلد حريمي",
+   "match": true
+  },
+  {
+   "q": "شنطة",
+   "text": "شنطه جلد",
+   "match": true
+  },
+  {
+   "q": "احذيه",
+   "text": "أحذية رياضية",
+   "match": true
+  },
+  {
+   "q": "أحذية",
+   "text": "احذيه رياضيه",
+   "match": true
+  },
+  {
+   "q": "اسدال",
+   "text": "إسدال صلاة",
+   "match": true
+  },
+  {
+   "q": "ايس كريم",
+   "text": "آيس كريم فانيليا",
+   "match": true
+  },
+  {
+   "q": "جزمة",
+   "text": "جَزْمَة شتوي",
+   "match": true
+  },
+  {
+   "q": "عباية",
+   "text": "عبـــاية سوداء",
+   "match": true
+  },
+  {
+   "q": "مقاس 42",
+   "text": "مقاس ٤٢ أسود",
+   "match": true
+  },
+  {
+   "q": "مقاس ٤٢",
+   "text": "مقاس 42",
+   "match": true
+  },
+  {
+   "q": "مستشفي",
+   "text": "مستشفى الدمرداش",
+   "match": true
+  },
+  {
+   "q": "كوتشي",
+   "text": "کوتشی ابيض",
+   "match": true
+  },
+  {
+   "q": "مح",
+   "text": "محمد علي حسن",
+   "match": true
+  },
+  {
+   "q": "محمد حس",
+   "text": "محمد علي حسن",
+   "match": true
+  },
+  {
+   "q": "ابو",
+   "text": "أبو العلا",
+   "match": true
+  },
+  {
+   "q": "SHOES",
+   "text": "Running shoes",
+   "match": true
+  },
+  {
+   "q": "3abaya",
+   "text": "3ABAYA black",
+   "match": true
+  },
+  {
+   "q": "ايفون ١٥",
+   "text": "ايفون 15 برو",
+   "match": true
+  },
+  {
+   "q": "سؤال",
+   "text": "سوال",
+   "match": true
+  },
+  {
+   "q": "مسئول",
+   "text": "مسؤول",
+   "match": false
+  },
+  {
+   "q": "حذاء",
+   "text": "حذائي",
+   "match": false
+  },
+  {
+   "q": "حذاء",
+   "text": "حذاءان",
+   "match": true
+  },
+  {
+   "q": "ورد",
+   "text": "وردة حمراء",
+   "match": true
+  },
+  {
+   "q": "برد",
+   "text": "شتاء بارد",
+   "match": false
+  }
+ ]
+}

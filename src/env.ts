@@ -1,6 +1,8 @@
 import type { WorkspaceDO } from './core/workspace-do';
 
 export type Env = {
+  /** Platform flag: 'v2' = contact/message search indexes use the shared foundation fold (Ruling FDN-SEARCH-1). Unset/anything else = legacy `normaliseText`. */
+  SEARCH_FOLD?: string;
   WORKSPACE_DO: DurableObjectNamespace<WorkspaceDO>;
   DB: D1Database;
   /** Static assets (the inbox SPA). `not_found_handling` is "none": an unknown path reaches the Worker, which answers the 404 page (WA-404-1). */
