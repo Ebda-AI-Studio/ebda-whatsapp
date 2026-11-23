@@ -8,6 +8,8 @@ import type { LinkHost } from './host';
 import { locale, upsertOrder } from './order-store';
 import { queueFreeText, setTag } from './outbound';
 import { alert } from '../observability';
+import { buyerKey } from '../buyer-key';
+import { isE164 } from '../phone';
 
 export type CodResolution = 'resolved' | 'already' | 'conflict' | 'closed' | 'not_cod' | 'unknown_order';
 
@@ -132,8 +134,8 @@ export type PushResult = { pushed: true } | { pushed: false; reason: 'nothing_to
  * retries with backoff. Without a bridge or a queue there is nothing to push to; the outcome stays recorded for later.
  */
 export async function pushCodOutcome(host: LinkHost, orderId: string, now = Date.now()): Promise<PushResult> {
-  const row = host.sql.exec<{ outcome: string | null; outcome_at: number | null; outcome_idem: string | null; outcome_pushed_at: number | null; buyer_key: string | null }>(
-    'SELECT outcome, outcome_at, outcome_idem, outcome_pushed_at, buyer_key FROM store_orders WHERE order_id = ?', orderId,
+  const row = host.sql.exec<{ outcome: string | null; outcome_at: number | null; outcome_idem: string | null; outcome_pushed_at: number | null; buyer_key: string | null; wa_id: string | null }>(
+    'SELECT outcome, outcome_at, outcome_idem, outcome_pushed_at, buyer_key, wa_id FROM store_orders WHERE order_id = ?', orderId,
   ).toArray()[0];
   if (!row?.outcome || !row.outcome_idem || row.outcome_pushed_at !== null) return { pushed: false, reason: 'nothing_to_push' };
   const bridge = bridgeForWorkspace(host.env, host.workspaceId);
@@ -142,7 +144,11 @@ export async function pushCodOutcome(host: LinkHost, orderId: string, now = Date
   const outcome = row.outcome as CodOutcome;
   const at = new Date(row.outcome_at ?? now).toISOString();
   if (bridge) {
-    const res = await bridge.recordCodOutcome(host.workspaceId, { orderId, ...(row.buyer_key ? { buyerKey: row.buyer_key } : {}), outcome, at, idempotencyKey: row.outcome_idem });
+    // The Store (WA_BRIDGE_REQUIRE_BUYER_PROOF) refuses this call without the buyer's key. An order tracked before its key was stored
+    // has none, so derive it from the verified sender on the order, exactly as the bot does; never send a guess.
+    const secret = storeLink().buyerSecret(host.env);
+    const proof = row.buyer_key ?? (secret && row.wa_id && isE164(`+${row.wa_id}`) ? await buyerKey(secret, `+${row.wa_id}`) : null);
+    const res = await bridge.recordCodOutcome(host.workspaceId, { orderId, ...(proof ? { buyerKey: proof } : {}), outcome, at, idempotencyKey: row.outcome_idem });
     if (!res.ok && res.reason === 'unavailable') throw new Error(`store unavailable: ${res.message ?? ''}`.slice(0, 120));
     // not_found / not_linked / invalid are answers, not outages: retrying would not change them.
     if (!res.ok) alert('cod_outcome_refused', { workspace: host.workspaceId, reason: res.reason });

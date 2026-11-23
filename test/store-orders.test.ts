@@ -67,6 +67,17 @@ describe('GET /contacts/:waId/orders', () => {
 });
 
 describe('POST cod-outcome (merchant)', () => {
+  it('an order tracked without a stored buyer key still carries the buyer proof (derived from the sender)', async () => {
+    const ws = S(16);
+    const api = await apiFor(ws, 'staff');
+    await storeWorkspace(ws);
+    const o = await codOrder(ws, `k-legacy-${ws}`);
+    await exec(ws, 'UPDATE store_orders SET buyer_key = NULL WHERE order_id = ?', o.orderId);
+    const res = await api.call('POST', `/contacts/${WA_1}/orders/${o.orderNumber}/cod-outcome`, { outcome: 'confirmed', idempotencyKey: K(16) });
+    expect(res.status).toBe(200);
+    expect((link.fake.lastCall('recordCodOutcome')[1] as { buyerKey?: string }).buyerKey).toBe(BUYER_KEY_1);
+  });
+
   it('confirms: the Store is told once with the request key, the event is queued, the tag goes', async () => {
     const ws = S(10);
     const api = await apiFor(ws, 'staff');
