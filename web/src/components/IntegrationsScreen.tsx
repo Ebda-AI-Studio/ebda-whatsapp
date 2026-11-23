@@ -7,6 +7,7 @@ import type { InboxSource } from '../data/source';
 import type { Lang, Strings } from '../i18n';
 import { LoadError } from './LoadError';
 import { Skeleton } from './Skeleton';
+import { IntegrationMark } from './IntegrationMark';
 
 type Connectors = NonNullable<InboxSource['connectors']>;
 type Draft = { id: string; kind: 'webhook' | 'odoo'; enabled: boolean; url: string; tools: string; database: string; login: string; secret: string; existing: boolean };
@@ -118,7 +119,7 @@ export function IntegrationsScreen({ t, source, readOnly = false }: { t: Strings
         {Array.isArray(list) && list.length === 0 && !draft && <p className="muted">{t.connNone}</p>}
         {Array.isArray(list) && list.map((c) => (
           <article key={c.id} className="campaign" aria-label={c.id}>
-            <h3 dir="auto">{c.id} · {c.kind}{c.enabled ? '' : ` · ${t.connOff}`}</h3>
+            <h3 dir="auto" className="int-title"><IntegrationMark kind={c.kind} />{c.id} · {c.kind}{c.enabled ? '' : ` · ${t.connOff}`}</h3>
             <p className="muted small" dir="auto">{hostOf(c.config.url)} · {t.connToolsLine(c.tools.join('، '))}</p>
             {c.hasSecret && <p className="muted small">{t.connHasSecret}</p>}
             {tests[c.id] && <p role="status" className="muted">{tests[c.id]}</p>}

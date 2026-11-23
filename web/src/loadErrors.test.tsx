@@ -41,8 +41,11 @@ describe('a failed load shows an error with Retry, never the empty copy', () => 
 
   it('numbers', async () => {
     const source = createSampleSource();
+    render(<App source={source} now={now} />);
+    await screen.findByRole('group', { name: 'حالة الحساب' }); // the rail's status read has used its call; the numbers screen's first read fails
     failOnce(source.numbers!, 'list');
-    await openFailing('رقم واتساب', 'رقم واتساب', source);
+    await act(async () => fireEvent.click(screen.getByRole('link', { name: 'رقم واتساب' })));
+    await screen.findByRole('heading', { name: 'رقم واتساب' });
     expect(screen.queryByText(t.numbersEmpty)).toBeNull();
     const alert = await screen.findByRole('alert');
     await act(async () => fireEvent.click(within(alert).getByRole('button', { name: t.retry })));

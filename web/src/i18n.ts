@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { billingCategory, campaignPauseReason, CampaignDto, ImportDto, NumberDto, WalletDto } from '../../src/core/api/contract';
 import type { RefundRequest } from './data/billing';
 import type { SignInErrorCode } from './data/oidc';
+import { huAr, huEn } from './i18n-status';
 
 export type Lang = 'ar' | 'en';
 
@@ -28,6 +29,7 @@ const ar = {
     suspend: 'وقّف الحساب', unsuspend: 'شغّل الحساب', pauseCampaigns: 'وقّف كل الحملات', evict: 'شيل من الرقم المشترك', readmit: 'اسمح بالرجوع للرقم المشترك', revoke: 'الغي كل توكنات الربط', restore: 'رجّع توكنات الربط',
     confirm: (what: string) => `هتنفّذ: ${what}. تأكّد؟`, yes: 'أيوه، نفّذ', no: 'لأ', done: 'اتنفّذ وانسجّل.', failed: 'ماتنفّذش. جرّب تاني.',
   },
+  hu: huAr,
   numberHealth: { green: 'سليم', yellow: 'جودة الرقم قلّت', red: 'جودة الرقم وحشة', restricted: 'واتساب قيّد الرقم' } as Record<string, string>,
   numberHealthHelp: { yellow: 'واتساب نبّهنا إن جودة الرقم قلّت. وقفنا حملاتك علشان نحمي الرقم. راجع رسايلك وكمّل الحملة بنفسك لما تطمّن.', red: 'جودة الرقم وحشة. مش هنبعت قوالب جديدة من الرقم ده لحد ما واتساب يحسّن التقييم. تقدر ترد على عملائك جوه نافذة الـ24 ساعة، والحملات واقفة.', restricted: 'واتساب قيّد الرقم ده. مش هنبعت قوالب جديدة منه، وتقدر ترد على عملائك جوه نافذة الـ24 ساعة. لما واتساب يرفع التقييد كمّل حملاتك بنفسك.' } as Record<string, string>,
   searchLoading: 'بندوّر…', searchFailed: 'البحث مشتغلش دلوقتي، جرّب تاني.', searchNone: (q: string) => `مفيش نتايج لـ «${q}»`,
@@ -452,6 +454,7 @@ const en: typeof ar = {
     suspend: 'Suspend account', unsuspend: 'Unsuspend account', pauseCampaigns: 'Pause all campaigns', evict: 'Remove from shared number', readmit: 'Allow back on shared number', revoke: 'Revoke all integration tokens', restore: 'Restore integration tokens',
     confirm: (what: string) => `You are about to: ${what}. Sure?`, yes: 'Yes, do it', no: 'No', done: 'Done and recorded.', failed: 'It did not go through. Try again.',
   },
+  hu: huEn,
   numberHealth: { green: 'Healthy', yellow: 'Quality dropped', red: 'Quality is poor', restricted: 'Restricted by WhatsApp' } as Record<string, string>,
   numberHealthHelp: { yellow: 'WhatsApp warned that this number\'s quality dropped. We paused your campaigns to protect the number. Check your messages and resume the campaign yourself once you are comfortable.', red: 'The number\'s quality is poor. We will not send new templates from it until WhatsApp improves the rating. You can still reply to customers inside the 24-hour window; campaigns are paused.', restricted: 'WhatsApp restricted this number. We will not send new templates from it, and you can still reply inside the 24-hour window. When WhatsApp lifts the restriction, resume your campaigns yourself.' } as Record<string, string>,
   searchLoading: 'Searching…', searchFailed: 'Search is not working right now, try again.', searchNone: (q: string) => `No results for “${q}”`,
