@@ -15,6 +15,7 @@ import { eraseSharedFor } from './shared/shared-number';
 import { dropErased } from './erasure';
 import { deleteTargets } from './erasure-targets';
 import { exportContact, mergeContacts, renameContact } from './contact-data';
+import { proactiveRecsView, runProactiveRecs, writeProactiveRecs } from './store-link/proactive-recs';
 import { RETENTION_BATCH, RETENTION_MAX_BATCHES, cutoffFor, hasExpired, purgeBatch, purgeOldEvents, retentionView, stillReferenced, writeRetentionDays } from './retention';
 import { MEDIA_FETCH_MAX_ATTEMPTS, downloadToR2, outboundMediaFor } from './media';
 import { detectOptOutMessage, matchOptIn } from './consent';
@@ -2536,6 +2537,8 @@ export class WorkspaceDO extends DurableObject<Env> {
         return runKbIndex(this.host(), now);
       case 'catalog_embed':
         return runCatalogEmbed(this.host(), now);
+      case 'proactive_recs':
+        return runProactiveRecs(this.host(), payload, now, attempts);
       case 'catalog_sync':
         return runCatalogSync(this.host(), now);
       case 'catalog_reconcile':
@@ -2811,6 +2814,15 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   // ---- Retention (B4 / T7), data-subject export (B5), contact edit and merge (M-175) -------------------------------------------------
+
+  /** Proactive post-order suggestions (CHAT-RECS-SWITCH-1): the owner's switch and template name. Role is checked by the route. */
+  async getProactiveRecs() {
+    return proactiveRecsView(this.host());
+  }
+
+  async setProactiveRecs(patch: { enabled?: boolean; templateName?: string | null }) {
+    return this.ctx.storage.transactionSync(() => writeProactiveRecs(this.host(), patch));
+  }
 
   async getRetention() {
     return retentionView(this.sql);

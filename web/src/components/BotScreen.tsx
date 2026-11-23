@@ -7,6 +7,7 @@ import type { InboxSource } from '../data/source';
 import { num, type Lang, type Strings } from '../i18n';
 import { dateTime } from '../lib/datetime';
 import { BotSwitches } from './BotSwitches';
+import { ProactiveRecs } from './ProactiveRecs';
 import { LoadError } from './LoadError';
 
 type Menu = BotSettingsDto['menu'];
@@ -296,6 +297,7 @@ export function BotScreen({ t, lang, source }: { t: Strings; lang: Lang; source:
         {guide && <a className="muted" href={guide} target="_blank" rel="noopener">{t.botGuide}</a>}
       </header>
       {source.switches && <BotSwitches t={t} lang={lang} source={source} readOnly={readOnly} />}
+      {source.proactiveRecs && !readOnly && <ProactiveRecs t={t} source={source} />}
       {source.botFunnel && <FunnelSection t={t} lang={lang} source={source} />}
       {source.catalog && <CatalogSection t={t} lang={lang} source={source} readOnly={readOnly} />}
       <form className="settings" onSubmit={(e) => { e.preventDefault(); void save(); }}>

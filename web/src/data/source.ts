@@ -1,5 +1,5 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, ConnectorDto, ConnectorPut, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, ConnectorDto, ConnectorPut, BotSettingsDto, BotSwitchesDto, ProactiveRecsDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto,
   MessageDto, OrderSummaryDto, ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto, NoteDto, QuickReplyDto,
 } from '../../../src/core/api/contract';
 
@@ -195,6 +195,11 @@ export interface InboxSource {
     preview(change: Partial<BotSwitchesDto>): Promise<{ confirmToken: string }>;
     save(change: Partial<BotSwitchesDto>, confirmToken?: string): Promise<BotSwitchesDto>;
     throttle(): Promise<ThrottleReportDto | null>;
+  };
+  /** Proactive post-order product suggestions (owner only; the server refuses staff). OFF by default; ON needs a template name. `save` rejects when the template name is missing or invalid. */
+  proactiveRecs?: {
+    get(): Promise<ProactiveRecsDto>;
+    save(change: { enabled?: boolean; templateName?: string | null }): Promise<ProactiveRecsDto>;
   };
   /** Bot results: customers per step over the last 7, 30 or 90 days (Cairo calendar days, today included). Counts only; owner and staff read. */
   botFunnel?(days: 7 | 30 | 90): Promise<BotFunnelDto>;

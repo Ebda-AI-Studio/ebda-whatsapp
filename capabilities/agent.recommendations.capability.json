@@ -51,6 +51,6 @@
     "Catalogue not synced to Meta: text answer with names, prices and links instead of cards"
   ],
   "gaps": [
-    "No proactive 'you might also like' after an order outside the 24 h window (needs an approved template)"
+    "Proactive 'you might also like' after an order outside the 24 h window is the separate capability bot.proactive-recs"
   ]
 }
