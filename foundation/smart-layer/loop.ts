@@ -38,6 +38,8 @@ export const MSG = {
   limited: { ar: 'وصلت للحد المسموح دلوقتي. جرّب تاني بعد شوية.', en: 'You have reached the limit for now. Please try again in a little while.' } as L,
   partial: { ar: 'وقفت هنا عشان وصلت للحد المسموح للرد الواحد. اسألني تاني لو عايز نكمل.', en: 'I stopped here because I reached the limit for one reply. Ask me again if you want to continue.' } as L,
   providerFail: { ar: 'مقدرتش أرد دلوقتي. جرّب تاني بعد لحظة.', en: 'I could not answer just now. Please try again in a moment.' } as L,
+  emptyModel: { ar: 'الرد جه فاضي من المساعد. جرّب تسأل بصيغة تانية أو ابعت السؤال تاني.', en: 'The assistant came back with an empty answer. Try rephrasing, or send the question again.' } as L,
+  emptyRender: { ar: 'مقدرتش أعرض الرد ده بشكل سليم. جرّب تسأل بصيغة تانية.', en: 'I could not show that reply safely. Try rephrasing the question.' } as L,
   refusedOff: { ar: 'أنا هنا عشان أساعدك في متجرك بس. اسألني عن المنتجات أو الطلبات أو الإعدادات.', en: 'I am here to help with your store only. Ask me about products, orders or settings.' } as L,
   refusedAbuse: { ar: 'مش هقدر أساعد في الطلب ده. لو عندك سؤال عن متجرك أنا معاك.', en: 'I cannot help with that request. If you have a question about your store I am here.' } as L,
   refusedAdmin: { ar: 'ده خارج صلاحياتي. أقدر أساعدك في متجرك أنت بس.', en: 'That is outside what I can do. I can only help with your own store.' } as L,
@@ -327,6 +329,8 @@ export async function runTurn(a: SmartLayerAdapter, ctx: TurnCtx, input: TurnInp
   }
   if (providerFailed && !text && !partial) return finalize('limited', one(MSG.providerFail, ctx.locale), previews);
   if (!text) text = partial;
+  // The model answered, but with no content at all (a reasoning model out of output budget): its own message and rail, never the provider-failure sentence.
+  if (!text && !providerFailed && !limited) { rails.emptyModel = 1; return finalize('limited', one(MSG.emptyModel, ctx.locale), previews); }
 
   // 10 register: one regenerate, then ship (ruling SL-REG-1)
   stage('register');
@@ -382,6 +386,10 @@ export async function runTurn(a: SmartLayerAdapter, ctx: TurnCtx, input: TurnInp
   const links = allowLinks(rendered.segments, domains);
   rails.linksRemoved = links.removed.length;
 
-  const segments = links.segments.length ? links.segments : one(MSG.providerFail, ctx.locale);
-  return finalize(limited ? 'limited' : 'answered', segments, previews);
+  // Every rail stripped the reply to nothing: that is not a provider failure and not an answer. Its own message, status 'limited', and a rail that says which stage emptied it.
+  if (!links.segments.length) {
+    rails.emptyRender = rendered.segments.length === 0 ? 'render' : 'links';
+    return finalize('limited', one(MSG.emptyRender, ctx.locale), previews);
+  }
+  return finalize(limited ? 'limited' : 'answered', links.segments, previews);
 }
