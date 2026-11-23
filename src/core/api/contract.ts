@@ -747,6 +747,8 @@ export const operatorInstapayDto = instapayRequestDto.extend({
   workspaceId: z.string(), createdBy: z.string(), proofAt: z.number().int().nullable(), firstApprover: z.string().nullable(), decidedBy: z.string().nullable(), proofMime: z.string().nullable(),
   /** C2: set while the request cannot be confirmed because its image or bank reference was seen on another request (`heldOf`). */
   heldReason: z.enum(['duplicate_image', 'duplicate_reference']).nullable().optional(), heldOf: z.string().nullable().optional(), bankRef: z.string().nullable().optional(), contestNote: z.string().nullable().optional(),
+  /** What the receipt reader saw (a suggestion for the reviewer to compare with the proof; never an approval). */
+  aiRead: z.object({ reference: z.string(), amountMinor: z.number().int().nullable() }).nullable().optional(),
 });
 /** Confirming may carry the bank's own transaction reference, read from the proof (optional; a re-used one is refused). */
 /** DUP-REF-REQUIRED-1: the bank reference is required for every amount; a proof that shows none is confirmed with `noReference: true` and a reason (audited). */

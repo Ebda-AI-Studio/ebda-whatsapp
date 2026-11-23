@@ -59,7 +59,7 @@ export type InstapayRequestDto = {
   /** Self-service: set when the owner withdrew the request before sending a proof / asked for a second look at the rejection. */
   cancelledAt: number | null; contestedAt: number | null;
 };
-export type OperatorInstapayDto = InstapayRequestDto & { workspaceId: string; createdBy: string; proofAt: number | null; firstApprover: string | null; decidedBy: string | null; proofMime: string | null; heldReason: Row['held_reason']; heldOf: string | null; bankRef: string | null; contestNote: string | null };
+export type OperatorInstapayDto = InstapayRequestDto & { workspaceId: string; createdBy: string; proofAt: number | null; firstApprover: string | null; decidedBy: string | null; proofMime: string | null; heldReason: Row['held_reason']; heldOf: string | null; bankRef: string | null; contestNote: string | null; aiRead?: { reference: string; amountMinor: number | null } | null };
 const dto = (r: Row): InstapayRequestDto => ({
   id: r.id, reference: r.reference, kind: r.kind, packageId: r.package_id, amountMinor: r.amount_minor, currency: r.currency, state: r.state, createdAt: r.created_at, expiresAt: r.expires_at,
   hasProof: r.proof_key !== null, rejectReason: r.reject_reason, decidedAt: r.decided_at,
@@ -140,8 +140,21 @@ export async function listForWorkspace(env: Env, workspaceId: string): Promise<I
 }
 export async function listForOperator(env: Env, state?: string): Promise<OperatorInstapayDto[]> {
   const ok = state && ['awaiting_proof', 'under_review', 'confirmed', 'rejected', 'expired'].includes(state);
-  const { results } = await env.DB.prepare(`SELECT ${COLS} FROM instapay_requests ${ok ? 'WHERE state = ?' : ''} ORDER BY created_at LIMIT 200`).bind(...(ok ? [state] : [])).all<Row>();
-  return results.map(opDto);
+  // A SUGGESTION only: what the receipt reader saw, so the reviewer can compare it with the proof instead of retyping it. Confirming still needs a person's own bankRef.
+  // One scalar subquery in the single queue query (request_id is UNIQUE): no IN (...) list, so no D1 100-bound-parameter cap however long the queue is.
+  const { results } = await env.DB.prepare(`SELECT ${COLS}, (SELECT a.extracted_json FROM instapay_auto_confirmations a WHERE a.request_id = instapay_requests.id) AS ai_json FROM instapay_requests ${ok ? 'WHERE state = ?' : ''} ORDER BY created_at LIMIT 200`).bind(...(ok ? [state] : [])).all<Row & { ai_json: string | null }>();
+  return results.map((r) => ({ ...opDto(r), aiRead: parseAiRead(r.ai_json) }));
+}
+
+/** The reference (and amount) the receipt reader saw, from the auto-confirmation row; null when nothing usable was read. */
+export function parseAiRead(json: string | null): { reference: string; amountMinor: number | null } | null {
+  if (!json) return null;
+  try {
+    const o = JSON.parse(json) as { reference?: unknown; amountMinor?: unknown };
+    const reference = typeof o.reference === 'string' ? o.reference.trim().slice(0, 60) : '';
+    if (!reference) return null;
+    return { reference, amountMinor: typeof o.amountMinor === 'number' && Number.isInteger(o.amountMinor) ? o.amountMinor : null };
+  } catch { return null; }
 }
 
 // ---- the proof -------------------------------------------------------------------------------------------------------------------
