@@ -4,6 +4,7 @@ capabilities:
   - compliance.audit-trail@1
   - team.seat-assign@1
   - team.seat-remove@1
+  - team.standalone-members@1
   - team.seats-view@1
 ---
 
@@ -37,3 +38,8 @@ Last checked: 2026-10-29.
 
 ## Who did what: the audit trail
 The store owner can see who changed what in this workspace, newest first: the action, who did it (their role and user id), when, and whether it went through. It never shows a message or a phone number. Ask the assistant "what changed lately", or open `/stores/<store>/audit` (`?before=<id>` for older entries).
+
+## If you use Ebda Chat without an Ebda Store
+Your team is managed right here, not in a store. Open **Team**, type the person's first name and email under **Invite a teammate** and press **Send invite**. They get an email with a link to sign in, and they can work straight away: the invite gives them a seat. The message you see is the same whether or not that email already had an account.
+- Your package's limit counts you. When it is full, the page says so and offers the upgrade instead of inviting.
+- **Remove from team** ends the person's access on their very next request and frees their seat. You cannot remove yourself.

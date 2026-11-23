@@ -108,3 +108,54 @@ describe('no seat page', () => {
     expect(screen.getByText(STRINGS.ar.noSeatOver)).toBeTruthy();
   });
 });
+
+// CHAT-SA-4: a standalone workspace manages its team in Chat (the server says so with `canInvite`); a Store workspace shows no invite form.
+describe('standalone team (invite and remove in Chat)', () => {
+  const standaloneTeam = (over: Partial<NonNullable<InboxSource['team']>> = {}) => {
+    const items = [{ userId: 'u-me', displayName: 'ليلى', role: 'owner' as const, addedAt: '2026-09-01T00:00:00.000Z', seat: 'owner' as const }];
+    const team = {
+      list: vi.fn(async () => ({ items: [...items], seats: { limit: 3, used: items.length, overLimit: false }, canInvite: true })),
+      assign: vi.fn(async () => {}),
+      unassign: vi.fn(async () => {}),
+      invite: vi.fn(async () => { items.push({ userId: 'u-9', displayName: 'سارة', role: 'staff' as never, addedAt: '2026-09-02T00:00:00.000Z', seat: 'seated' as never }); }),
+      remove: vi.fn(async () => { items.pop(); }),
+      ...over,
+    };
+    return team;
+  };
+
+  it('shows the invite form, sends an invite, shows the same confirmation and the new member, then removes them', async () => {
+    const team = standaloneTeam();
+    const { open } = await openTeam('owner', (s) => { s.team = team; });
+    await open();
+    await screen.findByRole('heading', { name: t.teamInviteTitle });
+    fireEvent.change(screen.getByLabelText(t.teamInviteName), { target: { value: 'سارة' } });
+    fireEvent.change(screen.getByLabelText(t.teamInviteEmail), { target: { value: 'sara@example.com' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: t.teamInviteSend })));
+    expect(team.invite).toHaveBeenCalledWith({ email: 'sara@example.com', firstName: 'سارة', language: 'ar' });
+    expect(await screen.findByText(t.teamInviteSent)).toBeTruthy();
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: t.teamRemoveFor('سارة') })));
+    expect(team.remove).toHaveBeenCalledWith('u-9');
+    expect(screen.queryByRole('button', { name: t.teamRemoveFor('سارة') })).toBeNull();
+  });
+
+  it('a full package shows the upgrade card, not a failure', async () => {
+    const team = standaloneTeam({ invite: vi.fn(async () => { throw new ApiError('seat_limit', 409); }) });
+    const { open } = await openTeam('owner', (s) => { s.team = team; });
+    await open();
+    await screen.findByRole('heading', { name: t.teamInviteTitle });
+    fireEvent.change(screen.getByLabelText(t.teamInviteName), { target: { value: 'سارة' } });
+    fireEvent.change(screen.getByLabelText(t.teamInviteEmail), { target: { value: 'sara@example.com' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: t.teamInviteSend })));
+    expect(await screen.findByText(t.upgradeTeamTitle)).toBeTruthy();
+    expect(screen.queryByText(t.teamFailed)).toBeNull();
+  });
+
+  it('a Store workspace (no canInvite) shows no invite form and no remove button', async () => {
+    const { open } = await openTeam();
+    await open();
+    await screen.findByRole('heading', { name: t.teamTitle });
+    expect(screen.queryByRole('heading', { name: t.teamInviteTitle })).toBeNull();
+    expect(screen.queryByRole('button', { name: t.teamRemoveFor('مصطفى') })).toBeNull();
+  });
+});

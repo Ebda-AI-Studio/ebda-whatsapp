@@ -100,6 +100,8 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`GET ${S}/members`]: 'person_only', // the team and its seats (owner only)
   [`PUT ${S}/members/:userId/seat`]: 'person_only',
   [`DELETE ${S}/members/:userId/seat`]: 'person_only',
+  [`POST ${S}/members/invite`]: 'person_only', // CHAT-SA-4: standalone team (owner only)
+  [`DELETE ${S}/members/:userId`]: 'person_only',
   [`GET ${S}/offboarding`]: 'person_only', // workspace deletion
   [`POST ${S}/offboarding`]: 'person_only',
   [`DELETE ${S}/offboarding`]: 'person_only',

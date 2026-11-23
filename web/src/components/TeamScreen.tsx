@@ -1,6 +1,6 @@
 import { UsersRound } from 'lucide-react';
 import { BRAND } from '@brand';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { ListMembersResponse, MemberDto } from '../../../src/core/api/contract';
 import { ApiError } from '../data/api';
 import type { InboxSource, TeamApi } from '../data/source';
@@ -18,6 +18,8 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<Note | null>(null);
   const [seatLimit, setSeatLimit] = useState(false);
+  const [email, setEmail] = useState('');
+  const [firstName, setFirstName] = useState('');
 
   const load = useCallback(() => {
     setData(undefined);
@@ -45,6 +47,38 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
     }
   };
   const staff = data.items.filter((m) => m.role === 'staff');
+  const manage = data.canInvite === true && api.invite !== undefined && api.remove !== undefined;
+  const invite = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy('invite');
+    setNote(null);
+    setSeatLimit(false);
+    try {
+      await api.invite!({ email: email.trim(), firstName: firstName.trim(), language: lang });
+      setNote({ kind: 'status', text: t.teamInviteSent });
+      setEmail('');
+      setFirstName('');
+      setData(await api.list());
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'seat_limit') setSeatLimit(true);
+      else if (err instanceof ApiError && err.status === 503) setNote({ kind: 'alert', text: t.teamUnavailable });
+      else setNote({ kind: 'alert', text: t.teamFailed });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const remove = async (m: MemberDto) => {
+    setBusy(m.userId);
+    setNote(null);
+    try {
+      await api.remove!(m.userId);
+      setData(await api.list());
+    } catch {
+      setNote({ kind: 'alert', text: t.teamFailed });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <main className="screen" aria-labelledby="team-title">
@@ -60,6 +94,14 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
           {(data.seats.overLimit || seatLimit) && <UpgradeCard title={t.upgradeTeamTitle} body={data.seats.overLimit ? t.teamOverLimit : t.teamSeatLimit(num(data.seats.limit, lang))} cta={t.upgradeCta} href={billingUrl(source.storeId)} />}
         </div>
         {note && <p role={note.kind} className={note.kind === 'alert' ? 'error-text' : 'muted'}>{note.text}</p>}
+        {manage && (
+          <form className="team-invite" onSubmit={(e) => void invite(e)} aria-labelledby="team-invite-title">
+            <h2 id="team-invite-title">{t.teamInviteTitle}</h2>
+            <label>{t.teamInviteName}<input value={firstName} onChange={(e) => setFirstName(e.target.value)} required maxLength={100} autoComplete="off" dir="auto" /></label>
+            <label>{t.teamInviteEmail}<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required maxLength={254} autoComplete="off" dir="ltr" /></label>
+            <button type="submit" className="btn primary" disabled={busy !== null}>{t.teamInviteSend}</button>
+          </form>
+        )}
         <ul className="team-list">
           {data.items.map((m) => (
             <li key={m.userId} className="team-row" data-seat={m.seat}>
@@ -71,10 +113,11 @@ export function TeamScreen({ t, lang, source, api }: { t: Strings; lang: Lang; s
               {m.role === 'staff' && (m.seat === 'none'
                 ? <button type="button" className="btn primary" disabled={busy !== null} aria-label={t.teamAssignFor(m.displayName)} onClick={() => void change(m, true)}>{t.teamAssign}</button>
                 : <button type="button" className="btn" disabled={busy !== null} aria-label={t.teamUnassignFor(m.displayName)} onClick={() => void change(m, false)}>{t.teamUnassign}</button>)}
+              {manage && m.role === 'staff' && <button type="button" className="btn" disabled={busy !== null} aria-label={t.teamRemoveFor(m.displayName)} onClick={() => void remove(m)}>{t.teamRemove}</button>}
             </li>
           ))}
         </ul>
-        {staff.length === 0 && <p className="muted">{t.teamEmpty}</p>}
+        {staff.length === 0 && <p className="muted">{manage ? t.teamEmptyOwn : t.teamEmpty}</p>}
       </section>
     </main>
   );

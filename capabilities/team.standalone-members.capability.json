@@ -1,0 +1,52 @@
+{
+  "id": "team.standalone-members",
+  "status": "live",
+  "area": "team",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "دعوة موظف وشيله من الفريق (من غير متجر)",
+  "titleEn": "Invite and remove teammates (workspace without a Store)",
+  "screens": [
+    "TeamScreen Invite",
+    "view:TeamScreen",
+    "/team"
+  ],
+  "api": [
+    "POST /stores/:storeId/members/invite",
+    "DELETE /stores/:storeId/members/:userId"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "reversible"
+  },
+  "helpArticle": "whatsapp/team-members-and-seats",
+  "questions": {
+    "ar": [
+      "ازاي ادعو موظف في Chat؟",
+      "عايز اشيل موظف من الفريق",
+      "ضيف موظف على مساحة العمل"
+    ],
+    "en": [
+      "How do I invite a teammate to my Chat workspace?",
+      "How do I remove a teammate?"
+    ]
+  },
+  "steps": [
+    "Team > Invite a teammate (first name + email) > Send invite",
+    "Team > Remove from team"
+  ],
+  "edgeCases": [
+    "Standalone workspaces only: a Store workspace's team is managed in Ebda Store",
+    "The answer is the same whether or not the address already has an account",
+    "The package's member limit applies; the owner cannot be removed; removal ends access on the person's next request"
+  ],
+  "gaps": [
+    "No custom roles"
+  ],
+  "assistantNote": "invite sends a sign-in link by email; removal is immediate, re-invite to undo"
+}

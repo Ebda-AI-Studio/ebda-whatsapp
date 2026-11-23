@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   agentSettingsDto, apiError, assistantActResponse, assistantConversationResponse, assistantTurnResponse, digestDto, botFunnelDto, botSettingsDto, botSwitchesDto, settingsPreviewResponse, throttleReportDto, campaignDto, catalogStatusDto, connectorDto, connectorTestResult, catalogResyncResponse, catalogCommerceRequest, provisionCatalogResponse, customerOrdersResponse, eventsResponse, getMessagesResponse, importRejectsResponse, listCampaignsResponse,
-  opsStatusDto, proactiveRecsDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
+  opsStatusDto, proactiveRecsDto, changeLogItemDto, costEstimateDto, listContactsResponse, listMembersResponse, inviteMemberResponse, seatResponse, listConversationsResponse, listNumbersResponse, numberDto, signupConfigDto, listImportsResponse, listSegmentsResponse, listTemplatesResponse, listSharedTemplatesResponse, listSharedRequestsResponse, sharedRequestDto, templateDto, checkTemplateResponse, createTemplateResponse, editTemplateResponse, messageDto, meResponse, offboardingDto, operatorOffboardingDto, auditLogItemDto, retentionDto, contactSummaryDto,
   instapayCreatedDto, sharedNumberDto, instapayRequestDto, instapayViewDto, operatorInstapayDto, operatorAutoListDto, packageDto, packageOrderDto, pricingSettingsDto, realtimeEvent, refundRequestDto, numberFundingPreviewDto, yearlyRefundViewDto, yearlyRefundPreviewDto, yearlyRefundRequestDto, creditPacksDto, creditPackPreviewDto, creditOrderDto, segmentPreviewDto, statementDto, topupDto, walletDto, type RealtimeEvent, type SendMessageRequest, segmentDto, quickReplyDto, listQuickRepliesResponse, noteDto, conversationDto,
 } from '../../../src/core/api/contract';
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
@@ -210,6 +210,11 @@ export function createApiSource(o: Opts): LiveSource {
       assign: async (userId) => { await call(`/members/${encodeURIComponent(userId)}/seat`, seatResponse, { method: 'PUT' }); },
       unassign: async (userId) => {
         const res = await f(`${root}/members/${encodeURIComponent(userId)}/seat`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
+        if (!res.ok) throw new ApiError('invalid_request', res.status);
+      },
+      invite: async (a) => { await call('/members/invite', inviteMemberResponse, post(a)); },
+      remove: async (userId) => {
+        const res = await f(`${root}/members/${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { authorization: `Bearer ${await o.getToken()}` } });
         if (!res.ok) throw new ApiError('invalid_request', res.status);
       },
     },
