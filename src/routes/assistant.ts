@@ -21,6 +21,7 @@ import registryJson from '../../assistant/registry.generated.json';
 import corpusJson from '../../assistant/help-corpus.generated.json';
 import { ensureHelpIndex, helpDeps } from '../core/smart-layer/help-index';
 import type { CallApi } from '../core/smart-layer/tools/read.tools';
+import { observeTurn } from './assistant-observe';
 import { apiError, workspaceStub, type ApiContext, type ApiEnv } from './shared';
 
 const turnBody = z.object({ conversationId: z.string().uuid(), text: z.string().min(1).max(BUDGET.inputChars), locale: z.enum(['ar', 'en']) });
@@ -108,8 +109,11 @@ export function assistantRoutes(api: Hono<ApiEnv>) {
     }
     // The confirm token leaves the engine through this callback only: into THIS response for the merchant's own button, nowhere else.
     const approvals: ApprovalToken[] = [];
-    const res = await runTurn(s.adapter, s.ctx, { text: body.data.text }, { onApprovalToken: (t) => approvals.push(t) });
+    const obs = observeTurn(s.adapter, { storeId: s.ctx.storeId });
+    const raw = await runTurn(obs.adapter, s.ctx, { text: body.data.text }, { onApprovalToken: (t) => approvals.push(t), provider: obs.provider });
+    const res = obs.refine(raw, body.data.locale, body.data.text);
     c.header('cache-control', 'no-store');
+    c.header('x-request-id', obs.requestId);
     return c.json({ status: res.status, segments: res.segments, previews: res.previews, ...(approvals.length ? { approvals } : {}), turnId: res.turnId });
   });
 
