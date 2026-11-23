@@ -1,6 +1,6 @@
 /**
  * Ruling CHAT-SA-2: two workspace kinds with disjoint id spaces. A Store-linked workspace id IS the Store id (a Postgres UUID); a standalone workspace id is minted here as
- * `sw_` + 26 lowercase base32 chars (130 bits). The two shapes can never collide, and D1 enforces `kind = 'standalone'` iff the id starts with `sw_` (migration 0042).
+ * `sw_` + 26 lowercase base32 chars (130 bits). The two shapes can never collide, and D1 checks `kind = 'standalone'` iff the id starts with `sw_` (migration 0042).
  * Every auth decision branches on the id SHAPE first (`isStoreId` / `isStandaloneId`), so a Store id can never take the standalone path and the reverse.
  */
 export const STANDALONE_PREFIX = 'sw_';

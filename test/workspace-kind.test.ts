@@ -4,7 +4,7 @@ import { isStandaloneId, isStoreId, mintStandaloneId } from '../src/core/workspa
 import { createStandaloneWorkspace, ensureWorkspace, pruneWorkspaceCreations } from '../src/core/workspace-registry';
 import { deliver, storeEvent, useStoreLink } from './helpers/store-link';
 
-// Ruling CHAT-SA-2 / CHAT-SA-3: a second workspace kind with its own id space, enforced by D1 triggers; one atomic creation.
+// Ruling CHAT-SA-2 / CHAT-SA-3: a second workspace kind with its own id space, checked by D1 triggers; one atomic creation.
 useStoreLink();
 beforeEach(() => { vi.spyOn(console, 'warn').mockImplementation(() => {}); vi.spyOn(console, 'log').mockImplementation(() => {}); });
 const U = (n: number) => `10000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`;

@@ -4,7 +4,7 @@
 ALTER TABLE workspaces ADD COLUMN kind TEXT NOT NULL DEFAULT 'store' CHECK (kind IN ('store', 'standalone'));
 ALTER TABLE workspaces ADD COLUMN country TEXT NOT NULL DEFAULT 'EG';
 
--- D1/SQLite cannot add a two-column CHECK through ALTER: `kind = 'standalone'` iff the id starts with 'sw_' is enforced by triggers. substr() is case-sensitive (LIKE is not).
+-- D1/SQLite cannot add a two-column CHECK through ALTER: `kind = 'standalone'` iff the id starts with 'sw_' is checked by triggers. substr() is case-sensitive (LIKE is not).
 CREATE TRIGGER workspaces_kind_id_insert BEFORE INSERT ON workspaces
 WHEN (NEW.kind = 'standalone') <> (substr(NEW.id, 1, 3) = 'sw_')
 BEGIN SELECT RAISE(ABORT, 'workspace_kind_id_mismatch'); END;
