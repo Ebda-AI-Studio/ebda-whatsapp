@@ -1,7 +1,7 @@
 {
   "name": "@ebda/foundation",
-  "version": "0.3.3",
-  "foundationCommit": "1689afe5e29425008a81fcc623343ed562d8cda1",
+  "version": "0.3.4",
+  "foundationCommit": "25d9a5792b9e0cc7c0c1ac3ce6a969a86e9cba14",
   "private": true,
   "license": "UNLICENSED",
   "exports": {
@@ -20,6 +20,7 @@
     "./ratchet": "./ratchet.ts",
     "./self-service-routes": "./self-service-routes.ts",
     "./slugs": "./slugs.ts",
+    "./studio-pages": "./studio-pages.ts",
     "./smart-layer": "./smart-layer/index.ts",
     "./smart-layer-bypass": "./smart-layer-bypass.ts",
     "./text": "./text.ts",

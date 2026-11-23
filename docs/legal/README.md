@@ -9,6 +9,8 @@ These texts were reviewed and approved by counsel (confirmed by Ahmad, 2026-11-1
 | `ar/whatsapp-privacy.md`, `en/whatsapp-privacy.md` | https://ebda.app/legal/whatsapp-privacy/ |
 | `ar/whatsapp-dpa.md`, `en/whatsapp-dpa.md` | https://ebda.app/legal/whatsapp-dpa/ |
 
+The six texts are also vendored from ebda-foundation (`foundation/legal/whatsapp/`, Ruling FDN-LEGAL-1) and pinned by `foundation.lock.json`: `test/guards.test.ts` fails when a file here differs from its pin, so a text changes only through a foundation release (and counsel), never by a local edit.
+
 The data-deletion page is shared with other products and lives at https://ebda.app/legal/data-deletion/. The pages link to it; it is not written here.
 
 Each page carries frontmatter (title, slug, lang, updated: 2026-11-10, version: 1.2) and the line "Arabic version prevails". Strip the frontmatter and the HTML comments when rendering; the comments are not visible text.
