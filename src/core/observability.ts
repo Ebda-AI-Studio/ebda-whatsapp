@@ -48,6 +48,8 @@ const P1_ALERTS = new Set([
   'instapay_sla_not_scheduled', 'proof_url_not_configured', 'catalog_mass_delete_refused', 'catalog_business_mismatch', 'catalog_sync_stuck', 'catalog_permission_missing', 'rate_missing_estimate_charged', 'bot_buyer_key_unavailable',
   'package_refunded', 'package_partial_refund', 'number_quality_flagged', 'number_error_spike', 'number_member_abuse', 'shared_health_push_failed',
   'switch_order_stale', 'store_plan_incomplete', 'upgrade_refund_not_reverted', 'upgrade_stranded_by_owner_refund', 'yearly_refund_debt_not_posted', 'backup_export_mismatch', 'ai_cost_over_threshold', 'meta_deletion_needs_review', 'meta_user_removed_app', 'offboarding_failed', 'offboarding_held', 'offboarding_backlog', 'credit_after_offboard', 'audit_write_failed', 'erasure_record_failed', 'instapay_duplicate_proof', 'billing_pass_backlog', 'billing_pass_row_failed', 'instapay_proof_purge_failed', 'refund_exceeds_charge',
+  // CHAT-SA: creating a standalone workspace failed in D1; or a Store-plan, free-package or trial write reached a standalone workspace and was refused (an upstream bug).
+  'standalone_create_failed', 'standalone_subscription_refused', 'standalone_store_plan_event',
 ]);
 /** Known and deliberately log-only. A NEW alert name must be added to exactly one of P0_ALERTS / P1_ALERTS / INFO_ALERTS (test/guards.test.ts fails otherwise). */
 export const INFO_ALERTS = new Set([
