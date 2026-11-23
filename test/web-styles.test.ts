@@ -3,10 +3,10 @@ import { expect, it } from 'vitest';
 
 // M-167 (UI-16): small touch-target and label-size items of the web app, pinned against the stylesheet.
 const css = readFileSync(new URL('../web/src/styles.css', import.meta.url), 'utf8');
-/** The body of the first `@media` block whose query contains `needle` (brace-balanced). */
-function media(needle: string): string {
+/** The body of the nth (default first) `@media` block whose query contains `needle` (brace-balanced). */
+function media(needle: string, nth = 0): string {
   const lines = css.split('\n');
-  const at = lines.findIndex((l) => l.startsWith('@media') && l.includes(needle));
+  const at = lines.map((l, i) => (l.startsWith('@media') && l.includes(needle) ? i : -1)).filter((i) => i >= 0)[nth] ?? -1;
   expect(at, `@media ${needle}`).toBeGreaterThanOrEqual(0);
   const rest = lines.slice(at).join('\n');
   let depth = 0;
@@ -26,6 +26,19 @@ it('the phone rail label is 12 px, not 11', () => {
   const phone = media('max-width: 819px');
   expect(hasRule(phone, '.rail a', /font-size:\s*12px/)).toBe(true);
   expect(hasRule(phone, '.rail a', /font-size:\s*11px/)).toBe(false);
+});
+
+it('the desktop rail is wide enough for one-line labels, and says so (CHAT-QA-10)', () => {
+  expect(Number(/--rail:\s*(\d+)px/.exec(css)?.[1])).toBeGreaterThanOrEqual(84); // the first --rail is the desktop value
+  const desk = [0, 1].map((n) => media('min-width: 820px', n)).join('\n'); // main also has an earlier 820 px block (workspace picker); the rail-label rule is in a later one
+  expect(hasRule(desk, '.rail a > span', /white-space:\s*nowrap/)).toBe(true);
+  expect(hasRule(desk, '.rail a > span', /text-overflow:\s*ellipsis/)).toBe(true);
+  expect(/\.rail a \{ width: 7[6-9]px;/.test(css)).toBe(true);
+});
+
+it('the help link is brand brass and never the browser default blue or visited purple (CHAT-QA-13)', () => {
+  expect(/\.help-link,\s*\.help-link:visited\s*\{[^}]*color:\s*var\(--gold-ink\)/.test(css)).toBe(true);
+  expect(/\.howto,\s*\.howto:visited\s*\{[^}]*color:\s*var\(--gold-ink\)/.test(css)).toBe(true);
 });
 
 // A later `.btn.danger { color: var(--bad) }` once matched the filled --bad background and hid every destructive confirm label (operator Assistant screen, 2026-11-23).

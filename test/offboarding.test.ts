@@ -1,3 +1,4 @@
+// @repo-guard
 import { SELF, env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureSessionCheck } from '../src/core/identity/session';

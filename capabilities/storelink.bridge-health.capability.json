@@ -37,7 +37,7 @@
   ],
   "edgeCases": [
     "Ebda Store bridge down/unbound: store-linked features fall back (agent answers text only; orders cannot be created; COD outcomes cannot be recorded) and alert fires",
-    "WA_BRIDGE_REQUIRE_BUYER_PROOF is not required in production yet (wa#67 pending)",
+    "The Store requires the buyer proof (WA_BRIDGE_REQUIRE_BUYER_PROOF=1 committed in ebda-store apps/api/wrangler.jsonc; unset also means strict, Store ruling WA-BRIDGE-BIND-4): a bridge call without phoneE164/buyerKey is refused, so Chat must always send the verified sender proof",
     "Events queue ebda-wa-events with DLQ"
   ],
   "gaps": [

@@ -36,7 +36,7 @@ function toForm(s: SegmentDto, now: number): Form {
 }
 
 /** Saved segments (A30): create, edit, delete. Owner only (the server answers 403 to staff). Delete asks for the segment's name first. */
-export function SegmentsPanel({ t, lang, api, now }: { t: Strings; lang: Lang; api: SegmentsApi; now: () => number }) {
+export function SegmentsPanel({ t, lang, api, now, reloadKey = 0, onLoadFailed }: { t: Strings; lang: Lang; api: SegmentsApi; now: () => number; reloadKey?: number; onLoadFailed?: (failed: boolean) => void }) {
   const [items, setItems] = useState<SegmentDto[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [editing, setEditing] = useState<SegmentDto | null>(null);
@@ -47,8 +47,8 @@ export function SegmentsPanel({ t, lang, api, now }: { t: Strings; lang: Lang; a
   const [msg, setMsg] = useState<{ kind: 'ok' | 'alert' | 'preview'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => { setLoadFailed(false); void api.list().then(setItems, () => setLoadFailed(true)); }, [api]);
-  useEffect(load, [load]);
+  const load = useCallback(() => { setLoadFailed(false); onLoadFailed?.(false); void api.list().then(setItems, () => { setLoadFailed(true); onLoadFailed?.(true); }); }, [api, onLoadFailed]);
+  useEffect(load, [load, reloadKey]);
 
   const criteria = toCriteria(form, editing?.criteria ?? {}, now(), initialDays);
   const valid = form.name.trim() !== '' && !isEmpty(criteria);
@@ -76,7 +76,7 @@ export function SegmentsPanel({ t, lang, api, now }: { t: Strings; lang: Lang; a
     <section className="import-panel segments-panel" aria-labelledby="sg-title">
       <h2 id="sg-title">{t.sgTitle}</h2>
       <p className="muted small">{t.sgHint}</p>
-      {loadFailed && <LoadError t={t} onRetry={load} />}
+      {loadFailed && !onLoadFailed && <LoadError t={t} onRetry={load} />}
       {items && items.length === 0 && <p className="muted small">{t.sgEmpty}</p>}
       {items && items.length > 0 && (
         <ul className="segment-list">
@@ -118,8 +118,8 @@ export function SegmentsPanel({ t, lang, api, now }: { t: Strings; lang: Lang; a
       )}
       {form.name.trim() !== '' && isEmpty(criteria) && <small className="muted">{t.sgNeedFilter}</small>}
       <div className="settings-actions">
-        <button type="button" className="btn primary" disabled={busy || !valid} onClick={() => void save()}>{editing ? t.sgSave : t.sgCreate}</button>
-        <button type="button" className="btn" disabled={busy || isEmpty(criteria)} onClick={() => void preview()}>{t.sgPreview}</button>
+        <button type="button" className="btn primary" disabled={busy || !valid || loadFailed} onClick={() => void save()}>{editing ? t.sgSave : t.sgCreate}</button>
+        <button type="button" className="btn" disabled={busy || isEmpty(criteria) || loadFailed} onClick={() => void preview()}>{t.sgPreview}</button>
         {editing && <button type="button" className="btn" onClick={reset}>{t.sgCancel}</button>}
       </div>
       {msg && <p role={msg.kind === 'alert' ? 'alert' : 'status'} className={msg.kind === 'alert' ? 'error-text' : 'wallet-ok'}>{msg.text}</p>}
