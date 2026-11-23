@@ -1,3 +1,4 @@
+// @repo-guard
 import { createExecutionContext, env } from 'cloudflare:test';
 import { SignJWT } from 'jose';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';

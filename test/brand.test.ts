@@ -1,3 +1,4 @@
+// @repo-guard
 import { describe, expect, it } from 'vitest';
 import { EBDA_PACK } from '../src/addons/ebda/pack';
 import { DEMO_PACK } from '../src/addons/demo/pack';
