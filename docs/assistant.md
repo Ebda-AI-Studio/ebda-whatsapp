@@ -4,7 +4,7 @@ What it is: a side panel in the inbox app that answers "how do I ..." in Egyptia
 
 ## Code map
 - `foundation/smart-layer/` vendored engine (never edit here). `src/core/smart-layer/` the adapter: `adapter.ts` (wiring), `tools/read.tools.ts` (free tools), `storage-do.ts` (journal in the WorkspaceDO, `sl_*` tables, the engine's storage contract runs against it in `test/smart-layer/storage-contract.test.ts`), `controls.ts`, `quota.ts`, `help-index.ts`, `handoff.ts`.
-- `src/routes/assistant.ts` the three routes; `assistant/*.generated.json` the bundled registry and help corpus (`node scripts/build-help-corpus.mjs`; `test/smart-layer/assets.test.ts` fails when stale).
+- `src/routes/assistant.ts` the three routes; `assistant/*.generated.json` the bundled registry and help corpus, BUILD OUTPUT and gitignored (Ruling WA-GEN-1: rebuilt by `wrangler build`, `npm run typecheck` and the vitest config via `node scripts/build-help-corpus.mjs`, so no branch can go stale or conflict on it; `test/smart-layer/assets.test.ts` fails when stale).
 - `web/src/components/AssistantPanel.tsx` + `web/src/data/assistant.ts` the panel.
 
 ## Rollout switches (no deploy)

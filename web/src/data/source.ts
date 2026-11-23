@@ -1,6 +1,6 @@
 import type {
-  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto,
-  ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto,
+  AgentSettingsDto, AgentSettingsUpdate, BotFunnelDto, ConnectorDto, ConnectorPut, BotSettingsDto, BotSwitchesDto, ThrottleReportDto, CatalogStatusDto, CampaignCreate, ConnectNumberRequest, NumberDto, NumberNoticeDto, CampaignDto, ContactDto, ConversationDto, ImportDto,
+  MessageDto, OrderSummaryDto, ListMembersResponse, RealtimeEvent, RetentionDto, SegmentCriteria, SegmentDto, SegmentPreviewDto, SendMessageRequest, SharedNumberDto, SharedRequestDto, SharedTemplateDto, TemplateDto, NoteDto, QuickReplyDto,
 } from '../../../src/core/api/contract';
 
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
@@ -80,6 +80,29 @@ export interface NumbersApi {
   launch?: (cfg: { appId: string; configId: string; graphVersion: string }) => Promise<{ code: string; event: ConnectNumberRequest['event']; wabaId: string; phoneNumberId: string; businessId?: string }>;
 }
 
+/** The merchant's saved segments (A30). Owner only for every write; the server answers 403 to staff and 404 for an id from another workspace. */
+export interface SegmentsApi {
+  list(): Promise<SegmentDto[]>;
+  create(name: string, criteria: SegmentCriteria): Promise<SegmentDto>;
+  update(id: number, patch: { name?: string; criteria?: SegmentCriteria }): Promise<SegmentDto>;
+  remove(id: number): Promise<void>;
+  preview(criteria: SegmentCriteria): Promise<SegmentPreviewDto>;
+}
+
+/** Inbox helpers on a conversation (A25-A27): the team's quick replies, internal notes and tags. Owner and staff may use all of them. */
+export interface InboxToolsApi {
+  quickReplies: {
+    list(): Promise<QuickReplyDto[]>;
+    create(text: string): Promise<QuickReplyDto>;
+    update(id: number, text: string): Promise<QuickReplyDto>;
+    remove(id: number): Promise<void>;
+  };
+  notes(conversationId: number): Promise<NoteDto[]>;
+  addNote(conversationId: number, text: string): Promise<NoteDto>;
+  /** Replaces the whole tag list; the server trims, lower-cases and de-duplicates and answers with the conversation. */
+  setTags(conversationId: number, tags: string[]): Promise<ConversationDto>;
+}
+
 export type ContactsQuery = { q?: string; tag?: string; optedOut?: boolean; cursor?: string | null };
 
 export interface ContactsApi {
@@ -92,11 +115,16 @@ export interface ContactsApi {
   renameContact(waId: string, name: string | null): Promise<{ waId: string; name: string | null; optedOut: boolean }>;
   /** B5: all of one contact's data (every page of messages joined). Owner only. */
   exportContact(waId: string): Promise<unknown>;
+  /** Data-subject erasure of one contact (owner only). Cannot be undone; financial records stay. */
+  eraseContact(waId: string): Promise<void>;
   /** M-175: the same person on a new number. Owner only; cannot be undone. */
   mergeContacts(fromWaId: string, intoWaId: string): Promise<void>;
   /** B4: how long messages are kept (owner only). `days: null` = the platform default. */
   retention(): Promise<RetentionDto>;
   setRetention(days: number | null): Promise<RetentionDto>;
+  /** A29: replaces the contact's tags (the server lower-cases and de-duplicates). */
+  setContactTags(waId: string, tags: string[]): Promise<{ tags: string[] }>;
+  segments: SegmentsApi;
 }
 
 /** Where the inbox reads from: the live API (contract.ts) or labelled sample data. */
@@ -107,6 +135,12 @@ export interface InboxSource {
   currentUserId: string;
   /** The store this session is for (the upgrade card builds the Store billing link from it). */
   storeId?: string;
+  /** GET /me: this store has NO Chat workspace (Chat was never switched on for it). The app shows its own "not enabled" state and never loads lists (they would all 404). */
+  workspaceMissing?: boolean;
+  /** GET /me: the stores this person can open that have a Chat workspace (for the store picker). Undefined = the server did not say (no picker). */
+  stores?: { id: string; name: string; role: 'owner' | 'staff' }[];
+  /** Opens Chat on another store (a full reload on that store). Absent in sample data. */
+  switchStore?(storeId: string): void;
   /** The signed-in user's role in this store (GET /me); `staff` hides spending actions. */
   role: Role;
   /** Display names of staff for assignee labels. */
@@ -142,6 +176,15 @@ export interface InboxSource {
     resync(): Promise<{ started: boolean }>;
     /** Turns the shop button and the cart on the number on or off (owner). Rejects with `detail` = missing_permission | catalog_not_set | meta_error. */
     setCommerce(v: { catalogVisible: boolean; cartEnabled: boolean }): Promise<{ catalogVisible: boolean; cartEnabled: boolean }>;
+    /** Links a catalogue the merchant already has on Meta (owner). Rejects with `detail` = catalog_not_linked (not on this WhatsApp account) | meta_unavailable (503). */
+    linkExisting(catalogId: string): Promise<void>;
+  };
+  /** The agent's connectors to the owner's own systems (owner only; the server refuses staff). A secret goes in on `save` and never comes back: the list carries `hasSecret` only. `save` rejects with `detail` = invalid_url | secret_required | secrets_unavailable | kind_mismatch | too_many_connectors; `test` answers `ok:false` with a code. */
+  connectors?: {
+    list(): Promise<ConnectorDto[]>;
+    save(id: string, body: ConnectorPut): Promise<ConnectorDto>;
+    remove(id: string): Promise<void>;
+    test(id: string): Promise<{ ok: boolean; error?: string; detail?: string }>;
   };
   /**
    * The owner switches (ordering bot, order confirmations, store-login codes over WhatsApp) and the sending-speed report. Turning confirmations or codes ON takes
@@ -166,6 +209,7 @@ export interface InboxSource {
   /** The team and its seats; offered to the owner only. */
   team?: TeamApi;
   contacts?: ContactsApi;
+  inboxTools?: InboxToolsApi;
   /** Wallet, statement, top-ups and refunds (Phase 7). */
   wallet?: WalletApi;
   /** Super-admin console; only offered when `role` is super_admin. */

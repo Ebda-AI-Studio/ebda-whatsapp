@@ -340,8 +340,8 @@ describe('queue consumer', () => {
     expect(warn).toHaveBeenCalledTimes(3);
   });
 
-  it('retries an event for a workspace that is not registered (yet)', async () => {
-    const res = await deliver([storeEvent(W(31), 'store.linked', { ownerUserId: 'u' })]);
+  it('retries an event for a workspace that is not registered (yet): a non-link event is retried a few deliveries, a link whose owner the Store does not confirm is refused (CHAT-ENABLE-1, test/workspace-enable.test.ts)', async () => {
+    const res = await deliver([storeEvent(W(31), 'store.plan_changed', { planCode: 'p', includesWhatsApp: true, ownerUserId: 'u', effectiveAt: iso() })]);
     expect(res.retryMessages?.map((m: { msgId: string }) => m.msgId)).toEqual(['e0']);
   });
 

@@ -10,7 +10,7 @@ import { OpenAiCompatibleProvider, WorkersAiProvider, type LlmProvider } from '.
 /** Words of the agent, supplied by the product addon. */
 export type AgentCopy = {
   /** The system prompt: persona, language rule, how to use the tools, the knowledge base chunks. The core appends only the instruction boundary (`BOUNDARY` in agent.ts). */
-  systemPrompt: (a: { persona: string; language: 'ar' | 'en' | 'auto'; tone?: 'warm' | 'professional' | 'playful'; storeName: string | null; knowledge: string[]; tools: string[]; /** The merchant's declared store facts (policies) as lines, or a notice that they could not be loaded; null = no Store linked. */ facts?: string | null; /** What the Store knows about this customer, or null. */ customer?: string | null; /** The merchant's FAQ when it is small enough to read whole (else the knowledge chunks carry it). */ faq?: string | null }) => string;
+  systemPrompt: (a: { persona: string; language: 'ar' | 'en' | 'auto'; tone?: 'warm' | 'professional' | 'playful'; storeName: string | null; knowledge: string[]; tools: string[]; /** The merchant's declared store facts (policies) as lines, or a notice that they could not be loaded; null = no Store linked. */ facts?: string | null; /** What the Store knows about this customer, or null. */ customer?: string | null; /** The merchant's FAQ when it is small enough to read whole (else the knowledge chunks carry it). */ faq?: string | null; /** Ruling WA-MODEL-FLAG-1: the stricter Egyptian-style block of the flagged model; absent/false = the prompt is byte-identical to before. */ strict?: boolean }) => string;
   /** Used when the merchant wrote no persona. */
   defaultPersona: Localised;
   /** Matched against the normalised message (`normaliseText`): any hit sends the customer to a person without calling the model. */
@@ -22,6 +22,12 @@ export type AgentCopy = {
     handoffAck: Localised;
     /** Pictures and files: the agent reads text only (a voice note is transcribed, see the two below). */
     textOnly: Localised;
+    /** A location pin outside the address step: ask what the customer needs and offer to start an order (no model call). */
+    locationNote: Localised;
+    /** A picture, document, video or audio file: ask the customer to say it in words, or offer a person. Once per MEDIA_NOTE_GAP_MS per customer. */
+    mediaNote: Localised;
+    /** A sticker: a friendly one-liner (same throttle). */
+    stickerNote: Localised;
     /** A voice note that is too long or over the store's daily limit: ask for text. */
     voiceDeclined: Localised;
     /** A voice note that could not be heard (unclear, failed): ask the customer to type. */
@@ -53,6 +59,8 @@ export type AgentConfig = {
   allowedHosts: (env: Env) => string[];
   /** An answer expected to take longer than this gets a quick acknowledgement first. */
   slowMs: number;
+  /** One model call longer than this is abandoned as a retryable timeout (then retried once, then handed to a person): a stalled Workers AI call must not hold a customer for a minute (live eval 2026-11-19: one 81 s call). */
+  modelTimeoutMs: number;
   /** Workers AI model used for the platform-funded agent. */
   defaultModel: (env: Env) => string;
   /** F1: AI turns one customer may use per rolling 24 h; the next message is handed to a person without calling the model. */
@@ -95,6 +103,7 @@ let current: AgentConfig = {
   secretsKey: (env) => env.AGENT_SECRETS_KEY,
   allowedHosts: (env) => (env.AGENT_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim()).filter(Boolean),
   slowMs: 2000,
+  modelTimeoutMs: 25_000,
   defaultModel: (env) => env.AGENT_MODEL || DEFAULT_WORKERS_AI_MODEL,
   turnsPerDay: 30,
 };

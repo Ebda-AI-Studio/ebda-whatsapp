@@ -5,7 +5,7 @@ import { accountsUrlFor, chooseMode, pickStore, signInMode, viewAsStore } from '
 import { STRINGS } from './i18n';
 import { NoSeat } from './components/NoSeat';
 import { SignInError } from './components/SignInError';
-import { makeSignOut } from './signout';
+import { makeAccountsSignOut, makeSignOut } from './signout';
 import { SignedOutLocally } from './components/SignedOutLocally';
 import { SignInNotConfigured } from './components/SignInNotConfigured';
 import { connectRealtime, createApiSource } from './data/api';
@@ -96,6 +96,9 @@ async function boot(): Promise<void> {
       const session = oidcSession;
       api.signOut = makeSignOut({ stopRealtime, session, onLocal: () => root.render(<SignedOutLocally onSignIn={() => { void session.startSignIn('/'); }} />) });
     }
+    else if (ACCOUNTS_URL) api.signOut = makeAccountsSignOut({ stopRealtime, accountsUrl: ACCOUNTS_URL, getToken: tokens.getToken, reload: () => location.reload() });
+    // The store picker reloads Chat on the chosen store (boot reads ?store= and the server checks the token lists it).
+    api.switchStore = (id) => { const u = new URL(location.href); u.searchParams.set('store', id); u.searchParams.delete('viewAs'); location.assign(u); };
     source = api;
   }
   root.render(

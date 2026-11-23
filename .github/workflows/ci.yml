@@ -21,10 +21,9 @@ jobs:
     name: Typecheck, tests, audit
     # Never run code from a fork's PR on a self-hosted runner.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # Umbra self-hosted runner when the repo variable EBDA_RUNS_ON is set, else GitHub-hosted.
-    # EBDA_RUNS_ON must be a JSON value, e.g. ["self-hosted","umbra-ebda"], not a bare label.
-    # ubuntu-latest became 26.04 (2026-11); Playwright 1.60 unsupported — Ruling CI-HOSTED-2
-    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '"ubuntu-24.04"') }}
+    # The Mac runner pool: the repo variable EBDA_RUNS_ON (a JSON value, e.g. ["ebda-mac-light"], not a bare label), else the Mac label itself.
+    # Never a GitHub-hosted runner (Ahmad 2026-11-16: no hosted minutes); test/workflow-no-hosted-runners.test.ts pins it.
+    runs-on: ${{ fromJSON(vars.EBDA_RUNS_ON || '["ebda-mac-light"]') }}
     # The full suite takes 19-27 min on the shared VM under load from other products' jobs (main run at 0976248: 19 min; PR #43 run 40840747987 was cut at 25 while still passing files).
     timeout-minutes: 40
     steps:
@@ -37,7 +36,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           # Remote Actions cache only on hosted runners; on Umbra ~/.npm is already local.
-          cache: ${{ vars.EBDA_RUNS_ON == '' && 'npm' || '' }}
       - run: npm ci
       - run: npm run typecheck
       # CI-only: 2 workers (the shared 4.9 GB VM ran out of memory and time with the default pool); local runs keep the default.
@@ -68,4 +66,12 @@ jobs:
           echo "::notice title=Suite duration::${secs}s"
           echo "### Test suite (${mode}): ${secs}s" >> "$GITHUB_STEP_SUMMARY"
           exit $rc
-      - run: npm audit --audit-level=low
+      - name: Audit production dependencies (blocking)
+        # Ruling AUDIT-SPLIT-1: `npm audit --omit=dev`, zero tolerance beyond .github/audit-allow.json (id, package, reason, expiry; an expired
+        # entry fails this step). Was `npm audit --audit-level=low` over EVERY dependency: GHSA-fc5q-39xc-vjpf (picomatch ReDoS, no patched
+        # version, build/test tooling only) turned every PR red.
+        run: node .github/scripts/audit-gate.mjs
+      - name: Report development advisories (non-blocking)
+        # The same allow-list over EVERY dependency; red for an unlisted advisory, never stops a merge.
+        continue-on-error: true
+        run: node .github/scripts/audit-gate.mjs --all

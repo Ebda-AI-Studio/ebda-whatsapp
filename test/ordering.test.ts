@@ -168,7 +168,7 @@ describe('cart and checkout paths', () => {
     expect(order).toMatchObject({ paymentMethod: 'cod', lines: [{ variantId: 'v2', quantity: 2 }], totalMinor: 21_000, buyerKey: BUYER_KEY_1 });
     const create = link.fake.lastCall('createOrderFromChat')[1] as { addressId?: string; address?: unknown; buyer: { phoneE164: string }; idempotencyKey: string };
     expect(create.addressId).toBe('addr-1'); // saved for next time, then used
-    expect(link.fake.lastCall('saveCustomerAddress')).toEqual([ws, BUYER_KEY_1, { area: 'المعادي', street: 'شارع 9 عمارة 4' }]);
+    expect(link.fake.lastCall('saveCustomerAddress')).toEqual([ws, BUYER_KEY_1, { area: 'المعادي', street: 'شارع 9 عمارة 4' }, '+201001234567']);
     expect(create.buyer.phoneE164).toBe('+201001234567');
     expect(link.fake.stock.v2).toBe(48);
     expect(await rows(ws, 'SELECT order_id, payment_method, status, total_minor, wa_id FROM store_orders')).toEqual([{ order_id: 'ord-1001', payment_method: 'cod', status: 'created', total_minor: 21_000, wa_id: WA_1 }]);

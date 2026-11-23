@@ -15,3 +15,6 @@ web/dist/
 # White-label rendered configs (client account ids); only the template is versioned
 deploy/white-label/wrangler.*.jsonc
 !deploy/white-label/wrangler.template.jsonc
+
+# Built by scripts/build-help-corpus.mjs (wrangler build, typecheck, vitest config); never committed (Ruling WA-GEN-1)
+assistant/*.generated.json
