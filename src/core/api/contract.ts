@@ -404,6 +404,8 @@ export const listContactsQuery = z.object({
   cursor: z.string().regex(/^\d{1,15}$/).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
+/** Owner export of ALL the store's contacts, a page at a time (cursor = the last contact id of the previous page). */
+export const exportContactsQuery = z.object({ cursor: z.string().regex(/^\d{1,15}$/).optional(), limit: z.coerce.number().int().min(1).max(500).default(200) });
 export const listContactsResponse = z.object({ items: z.array(contactDto), nextCursor: z.string().nullable() });
 export const setContactTagsRequest = z.object({ tags: z.array(tagName).max(10) });
 /** PATCH /contacts/:waId: a name the merchant gives the contact (null = follow WhatsApp's name again). */
@@ -731,14 +733,18 @@ export const instapayRequestDto = z.object({
   createdAt: z.number().int(), expiresAt: z.number().int(), hasProof: z.boolean(), rejectReason: z.string().nullable(), decidedAt: z.number().int().nullable(),
   /** InstaPay auto-confirm: confirmed by the system, being checked right now, or reverted ("not received") with the end of its 48 h grace. All optional: older servers send none. */
   autoConfirmed: z.boolean().optional(), checking: z.boolean().optional(), revertedAt: z.number().int().nullable().optional(), graceUntil: z.number().int().nullable().optional(),
+  /** Self-service: the owner withdrew it before sending a proof / asked for a second look at the rejection. Optional: older servers send none. */
+  cancelledAt: z.number().int().nullable().optional(), contestedAt: z.number().int().nullable().optional(),
 });
+/** The owner's second-look request on a rejected InstaPay payment: a short note for the person who reviews it. */
+export const instapayContest = z.object({ note: z.string().trim().min(5).max(500) }).strict();
 /** GET /wallet/instapay: `payee` is null when the brand has no InstaPay account configured (the card is then shown as unavailable). */
 export const instapayViewDto = z.object({ enabled: z.boolean(), payee: instapayPayeeDto.nullable(), items: z.array(instapayRequestDto), revert: z.object({ requestId: z.string(), kind: z.enum(['package', 'topup']), graceUntil: z.number().int() }).nullable().optional() });
 export const instapayCreatedDto = instapayRequestDto.extend({ payee: instapayPayeeDto });
 export const operatorInstapayDto = instapayRequestDto.extend({
   workspaceId: z.string(), createdBy: z.string(), proofAt: z.number().int().nullable(), firstApprover: z.string().nullable(), decidedBy: z.string().nullable(), proofMime: z.string().nullable(),
   /** C2: set while the request cannot be confirmed because its image or bank reference was seen on another request (`heldOf`). */
-  heldReason: z.enum(['duplicate_image', 'duplicate_reference']).nullable().optional(), heldOf: z.string().nullable().optional(), bankRef: z.string().nullable().optional(),
+  heldReason: z.enum(['duplicate_image', 'duplicate_reference']).nullable().optional(), heldOf: z.string().nullable().optional(), bankRef: z.string().nullable().optional(), contestNote: z.string().nullable().optional(),
 });
 /** Confirming may carry the bank's own transaction reference, read from the proof (optional; a re-used one is refused). */
 /** DUP-REF-REQUIRED-1: the bank reference is required for every amount; a proof that shows none is confirmed with `noReference: true` and a reason (audited). */

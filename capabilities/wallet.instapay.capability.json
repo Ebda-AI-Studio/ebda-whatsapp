@@ -2,10 +2,10 @@
   "id": "wallet.instapay",
   "status": "live",
   "area": "billing",
-  "version": 1,
-  "versionDate": "2026-11-14",
-  "titleAr": "الدفع بانستاباي ورفع الإيصال",
-  "titleEn": "Pay by InstaPay (package or top-up) with receipt upload",
+  "version": 2,
+  "versionDate": "2026-11-19",
+  "titleAr": "الدفع بانستاباي ورفع الإيصال وإلغاء الطلب أو الاعتراض على الرفض",
+  "titleEn": "Pay by InstaPay (package or top-up) with receipt upload, cancel a request, contest a rejection",
   "screens": [
     "WalletScreen Pay with InstaPay",
     "view:WalletScreen",
@@ -15,7 +15,9 @@
   "api": [
     "GET /stores/:storeId/wallet/instapay",
     "POST /stores/:storeId/wallet/instapay",
-    "PUT /stores/:storeId/wallet/instapay/:requestId/proof"
+    "PUT /stores/:storeId/wallet/instapay/:requestId/proof",
+    "POST /stores/:storeId/wallet/instapay/:requestId/cancel",
+    "POST /stores/:storeId/wallet/instapay/:requestId/contest"
   ],
   "mcpTool": null,
   "planGate": null,
@@ -32,18 +34,22 @@
       "ازاي ادفع بانستاباي؟",
       "رفعت الإيصال ولسه مااتفعلش",
       "الإيصال اترفض ليه؟",
-      "ادفع instapay"
+      "ادفع instapay",
+      "ازاي الغي طلب انستاباي؟"
     ],
     "en": [
       "How do I pay with InstaPay?",
-      "My receipt is under review"
+      "My receipt is under review",
+      "How do I cancel an InstaPay request?"
     ]
   },
   "steps": [
     "Choose Package or Top up (amount)",
     "Send the exact amount to our InstaPay address with the WA- reference in the note",
     "Upload receipt (JPG/PNG/WebP/PDF up to 5 MB)",
-    "Reviewed within 4 business hours Sun-Thu 9-17 Cairo; confirmed activates, rejected shows reason"
+    "Reviewed within 4 business hours Sun-Thu 9-17 Cairo; confirmed activates, rejected shows reason",
+    "Before a receipt is sent: Cancel the request (nothing is owed)",
+    "After a rejection (within 30 days, once): Ask for a second review with a note; a person reviews it again, nothing is confirmed by the request"
   ],
   "edgeCases": [
     "Reference valid 48h; expired = start a new request",
@@ -51,7 +57,9 @@
     "Held for duplicate image/reference",
     "Large amounts need a second operator",
     "Outside business hours: waits",
-    "Rejected banner in the inbox"
+    "Rejected banner in the inbox",
+    "Cancel is refused once a receipt was sent (a person decides it: the transfer may have happened)",
+    "Contest is once only, within 30 days, not for a system decision, not while 5 requests are open or the workspace is being closed; it never confirms or credits anything"
   ],
   "gaps": [
     "Confirmation is operator-only today (BLOCKER #4) so activation waits for staff"

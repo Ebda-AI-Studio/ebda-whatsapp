@@ -5,7 +5,7 @@ capabilities:
   - agent.credits-topup@2
   - packages.yearly-switch@1
   - wallet.card-topup@1
-  - wallet.instapay@1
+  - wallet.instapay@2
   - wallet.instapay-auto-confirm@2
   - wallet.refund-request@2
   - wallet.statement@1
@@ -48,6 +48,10 @@ While card payment is not switched on for your account, you pay by InstaPay tran
 
 *Notes:* the reference is valid for **48 hours**; after that the request expires and you start a new one. A receipt uploaded after it expired is refused. One reference is used for one payment only. Only the owner can pay.
 
+
+**Changed your mind before uploading the receipt:** press **Cancel the request** next to it. You have not sent a receipt yet, so nothing is owed. Once a receipt is sent the request is with our team and cannot be cancelled from here (the transfer may already have happened).
+
+**The receipt was rejected but you really did transfer:** press **Ask for a second review** and tell us what is missing or wrong. You can do it once, within 30 days of the rejection, and not for an automatic decision. The request goes back to **under review** with a person on our team and is confirmed by the same rules: nothing is added to your account until a person reviews it, and only we can confirm your payment.
 
 ## Automatic confirmation of InstaPay payments
 When you upload a receipt that matches exactly (the amount due, our InstaPay address, a transfer from the last 48 hours, and a transaction number never used before), your payment can be confirmed **within minutes** with no one reviewing it. Anything that does not match waits for a person, as before.

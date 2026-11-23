@@ -74,6 +74,10 @@ export interface WalletApi {
   createInstapay(input: { kind: 'package'; packageId: string } | { kind: 'topup'; amountMinor: number }): Promise<InstapayCreated>;
   /** Uploads the transfer proof (jpeg / png / webp / pdf, up to 5 MB). */
   uploadInstapayProof(requestId: string, file: File): Promise<InstapayRequest>;
+  /** Withdraws a request that has no proof yet (owner). Never moves money. */
+  cancelInstapay(requestId: string): Promise<InstapayRequest>;
+  /** Asks for a second look at a rejection, once (owner): the request goes back to a person; it confirms nothing. */
+  contestInstapay(requestId: string, note: string): Promise<InstapayRequest>;
   refundRequests(): Promise<RefundRequest[]>;
   requestRefund(amountMinor: number, note: string): Promise<RefundRequest>;
   /** Owner. Who pays Meta for an OWN number: preview issues a single-use confirmation, then the write. Only the card is offered; the platform line is the operator's (403). */
