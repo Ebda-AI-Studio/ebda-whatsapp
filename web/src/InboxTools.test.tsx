@@ -190,6 +190,9 @@ describe('saved segments (A30)', () => {
   it('shows an error when the list cannot load', async () => {
     const base = createSampleSource().contacts!;
     openContacts('owner', { segments: { ...base.segments, list: vi.fn().mockRejectedValue(new ApiError('not_found', 404)) } });
-    expect(await within(await panel()).findByRole('alert')).toBeTruthy();
+    // CHAT-QA-9: the failure is ONE page banner (not one per panel) and the panel's write controls are disabled.
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(within(await panel()).queryByRole('alert')).toBeNull();
+    expect((within(await panel()).getByRole('button', { name: STRINGS.ar.sgCreate }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
