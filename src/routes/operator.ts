@@ -65,6 +65,9 @@ operatorRoutes.use('*', async (c, next) => {
 const actor = (c: { get(k: 'principal'): { userId: string } }) => c.get('principal').userId;
 const bad = (c: { json(b: unknown, s: 400): Response }, message?: string) => c.json({ error: 'invalid_request', ...(message ? { message } : {}) }, 400);
 
+/** Who am I, store-independent: the web asks this when the token lists no store, to boot straight into the console. requireSuperAdmin already refused everyone else (403). */
+operatorRoutes.get('/me', (c) => c.json({ superAdmin: true as const, userId: actor(c) }));
+
 operatorRoutes.get('/pricing-settings', async (c) => c.json({ items: await listSettings(c.env) }));
 operatorRoutes.post('/pricing-settings', async (c) => {
   const b = pricingSettingsPublish.safeParse(await c.req.json().catch(() => null));

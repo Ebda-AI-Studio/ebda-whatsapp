@@ -402,6 +402,16 @@ export function createApiSource(o: Opts): LiveSource {
   return source;
 }
 
+/** Store-independent super-admin check (GET /operator/me): 200 only for a super admin, 401/403 for everyone else. Any failure reads as "not an operator". */
+export async function isOperator(baseUrl: string, getToken: () => Promise<string>, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`${baseUrl}/api/v1/operator/me`, { headers: { authorization: `Bearer ${await getToken()}` } });
+    return res.ok && ((await res.json().catch(() => null)) as { superAdmin?: unknown } | null)?.superAdmin === true;
+  } catch {
+    return false;
+  }
+}
+
 export interface SocketLike {
   onopen: (() => void) | null;
   onmessage: ((e: { data: string }) => void) | null;

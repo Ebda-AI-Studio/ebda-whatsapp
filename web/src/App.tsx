@@ -29,17 +29,34 @@ type Props = { source: InboxSource; now?: () => number; initialLang?: Lang; /** 
 
 /** A store with no Chat workspace gets its own screen (rail + the "not enabled" state); the inbox and its list calls never run (they would all 404 and read as failures). */
 export function App(props: Props) {
-  return props.source.workspaceMissing ? <NoWorkspaceShell {...props} /> : <AppInner {...props} />;
+  return props.source.operatorOnly ? <OperatorShell {...props} /> : props.source.workspaceMissing ? <NoWorkspaceShell {...props} /> : <AppInner {...props} />;
 }
 
-function NoWorkspaceShell({ source, initialLang = 'ar' }: Props) {
+/** A super admin with no store: the operator console alone (the rail's one item), no inbox and no store-scoped call. The console's "view a merchant's account" form is the way into a store, read-only and with a reason. */
+function OperatorShell({ source, now = Date.now, initialLang = 'ar' }: Props) {
   const [lang] = useState<Lang>(initialLang);
   const t = STRINGS[lang];
-  const none = { templates: false, campaigns: false, contacts: false, integrations: false, agent: false, bot: false, numbers: false, wallet: false, team: false, operator: false };
+  const only = { templates: false, campaigns: false, contacts: false, integrations: false, agent: false, bot: false, numbers: false, wallet: false, team: false, operator: true };
   return (
     <div className="app" data-view="screen">
-      <Rail t={t} view="inbox" onNavigate={() => undefined} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={none} store={source} />
-      <NoWorkspace t={t} lang={lang} storeId={source.storeId} storeName={activeStoreName(source, t.storeUnnamed)} />
+      <Rail t={t} view="operator" onNavigate={() => undefined} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={only} store={source} />
+      {source.operator && source.role === 'super_admin' && <OperatorScreen t={t} lang={lang} source={source} api={source.operator} now={now} />}
+    </div>
+  );
+}
+
+function NoWorkspaceShell({ source, now = Date.now, initialLang = 'ar' }: Props) {
+  const [lang] = useState<Lang>(initialLang);
+  const t = STRINGS[lang];
+  // A super admin who opened a store with no workspace still reaches the operator console from the rail.
+  const none = { templates: false, campaigns: false, contacts: false, integrations: false, agent: false, bot: false, numbers: false, wallet: false, team: false, operator: source.role === 'super_admin' && !!source.operator };
+  const [view, setView] = useState<View>('inbox');
+  return (
+    <div className="app" data-view="screen">
+      <Rail t={t} view={view} onNavigate={setView} onSignOut={source.signOut ? () => source.signOut!() : undefined} show={none} store={source} />
+      {view === 'operator' && none.operator && source.operator
+        ? <OperatorScreen t={t} lang={lang} source={source} api={source.operator} now={now} />
+        : <NoWorkspace t={t} lang={lang} storeId={source.storeId} storeName={activeStoreName(source, t.storeUnnamed)} />}
     </div>
   );
 }
