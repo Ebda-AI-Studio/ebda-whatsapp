@@ -6,6 +6,7 @@ import type {
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import type { TemplateDraft } from '../../../src/core/template-draft';
 import type { OperatorApi, WalletApi } from './billing';
+import type { AssistantRolloutApi } from './assistant-rollout';
 import type { SharedTemplatesApi } from './shared-templates';
 import type { AssistantApi } from './assistant';
 
@@ -225,6 +226,8 @@ export interface InboxSource {
   signOut?(): void;
   /** The platform WABA's templates (super admin only, with `operator`). */
   sharedTemplates?: SharedTemplatesApi;
+  /** Smart Layer rollout switches (super admin only, with `operator`). */
+  assistantRollout?: AssistantRolloutApi;
   /** Called when events were missed beyond repair; the app reloads its list and open chat. */
   onReload?(cb: () => void): () => void;
   /** Realtime events; returns an unsubscribe function. */

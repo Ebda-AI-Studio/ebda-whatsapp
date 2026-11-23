@@ -6,6 +6,7 @@ import {
 } from '../../../src/core/api/contract';
 import type { RuleIssue } from '../../../src/core/meta/template-rules';
 import { adjustmentDto, fxRateDto, marginOverrideDto, rateCardVersionDto } from './billing';
+import { assistantFlagsDto, assistantModeDto } from './assistant-rollout';
 import type { InboxSource } from './source';
 
 export class ApiError extends Error {
@@ -359,6 +360,12 @@ export function createApiSource(o: Opts): LiveSource {
       sync: () => op('/shared-templates/sync', z.object({ upserted: z.number(), removed: z.number() }), post({})),
       submit: (input) => op('/shared-templates', z.object({ status: z.string() }).loose(), post(input)),
       requests: async () => (await op('/shared-template-requests', z.object({ items: z.array(sharedRequestDto.extend({ workspaceId: z.string() })) }))).items,
+    },
+    assistantRollout: {
+      platform: () => op('/assistant', assistantFlagsDto),
+      setPlatform: (patch) => op('/assistant/flags', assistantFlagsDto, { method: 'PUT', body: JSON.stringify(patch) }),
+      workspaceMode: async (ws) => (await op(`/workspaces/${encodeURIComponent(ws)}/assistant`, assistantModeDto)).mode,
+      setWorkspaceMode: async (ws, mode) => (await op(`/workspaces/${encodeURIComponent(ws)}/assistant`, assistantModeDto, { method: 'PUT', body: JSON.stringify({ mode }) })).mode,
     },
     async mediaUrl(path) {
       const res = await f(`${o.baseUrl}${path}`, { headers: { authorization: `Bearer ${await o.getToken()}` } });

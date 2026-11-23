@@ -1,4 +1,5 @@
 import { ApiError } from './api';
+import { createSampleAssistantRollout } from './assistant-rollout';
 import type {
   AgentSettingsDto, BotFunnelDto, ConnectorDto, BotSettingsDto, BotSwitchesDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto, NoteDto, QuickReplyDto,
 } from '../../../src/core/api/contract';
@@ -381,6 +382,7 @@ export function createSampleSource(): InboxSource {
     wallet: createSampleWallet(),
     operator: createSampleOperator('u-me'),
     sharedTemplates: createSampleSharedTemplates(),
+    assistantRollout: createSampleAssistantRollout(),
     contacts: {
       async list(q) {
         const query = normaliseText(q.q ?? '');
