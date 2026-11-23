@@ -39,7 +39,7 @@ describe('assistant route: a model that returns nothing', () => {
     configureAssistant({ ai: m.ai as never, help: { db: env.DB, embed: async (t: string[]) => t.map(() => [0]), vectors: { upsert: async () => ({ mutationId: 'm' }), deleteByIds: async () => ({ mutationId: 'm' }), query: async () => ({ count: 0, matches: [] }) } as never } });
     const lines: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((x: unknown) => { lines.push(String(x)); });
-    const res = await SELF.fetch(`https://x/api/v1/stores/${s}/assistant/turn`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ conversationId: crypto.randomUUID(), text: 'كام طلب جالي النهارده؟', locale: 'ar' }) });
+    const res = await SELF.fetch(`https://x/api/v1/stores/${s}/assistant/turn`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ conversationId: crypto.randomUUID(), text: 'فين رصيد المحفظة؟', locale: 'ar' }) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string; segments: Array<{ text: string }> };
     expect(body.segments[0]!.text).toBe(MSG.emptyModel.ar); // the engine (foundation v0.4.2) now says it itself; Chat's EMPTY_ANSWER is the same sentence
@@ -107,5 +107,39 @@ describe('observeTurn: store-wide metrics questions', () => {
     expect(o.refine(real, 'ar', 'كام طلب جالي النهارده؟')).toBe(real);
     const other = say('جالك 12 طلب');
     expect(digits(o.refine(other, 'ar', 'كام طلب جالي النهارده؟'))).toBeNull();
+  });
+});
+
+describe('assistant route: store-wide metrics never reach the model (live: orders-today came back empty every time)', () => {
+  const ask = async (s: string, token: string, text: string, locale: 'ar' | 'en') => {
+    const res = await SELF.fetch(`https://x/api/v1/stores/${s}/assistant/turn`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ conversationId: crypto.randomUUID(), text, locale }) });
+    return { res, body: (await res.json()) as { status: string; segments: Array<{ text: string }> } };
+  };
+  const help = { db: env.DB, embed: async (t: string[]) => t.map(() => [0]), vectors: { upsert: async () => ({ mutationId: 'm' }), deleteByIds: async () => ({ mutationId: 'm' }), query: async () => ({ count: 0, matches: [] }) } as never };
+
+  it('orders / sales today: the fixed honest answer with no model call, even if the model would have returned nothing or a number', async () => {
+    const s = storeId(7102);
+    const { token } = await apiFor(s);
+    await workspace(s).setAssistantMode('answer-only');
+    const m = emptyAi();
+    configureAssistant({ ai: m.ai as never, help });
+    for (const [q, lang] of [['كام طلب جالي النهارده؟', 'ar'], ['إجمالي المبيعات النهارده كام؟', 'ar'], ['How many orders did I get today?', 'en']] as const) {
+      const { res, body } = await ask(s, token, q, lang);
+      expect(res.status).toBe(200);
+      expect(body.segments).toEqual([{ kind: 'text', text: NO_STORE_METRICS[lang] }]);
+      expect(body.segments[0]!.text).not.toMatch(/[0-9]/);
+    }
+    expect(m.calls()).toBe(0); // the model was never asked: nothing it returns can be empty or invented
+  });
+
+  it('a question that is not a store-wide figure still goes to the model', async () => {
+    const s = storeId(7103);
+    const { token } = await apiFor(s);
+    await workspace(s).setAssistantMode('answer-only');
+    const m = emptyAi();
+    configureAssistant({ ai: m.ai as never, help });
+    await ask(s, token, 'فين رصيد المحفظة؟', 'ar');
+    await ask(s, token, 'اطلب قالب جديد النهارده', 'ar');
+    expect(m.calls()).toBeGreaterThan(0);
   });
 });
