@@ -46,6 +46,7 @@ import { commerceAuth, ensureCommerce, type CommerceState } from './store-link/c
 import { catalogStatus } from './store-link/catalog-status';
 import { errClass, safeMessage, alert, bindAlerts } from './observability';
 import { recordClick } from './campaigns/campaigns';
+import { campaignReport, consentEvidence } from './campaigns/report';
 import { PAGE_SIZE, PARK_MS, campaignActivate, campaignPage, campaignStart, cancelCampaign, createCampaign, deleteDraft, endInstance, gateFor, getCampaign, launchCampaign, listCampaigns, pauseCampaign, resumeCampaign, sendCampaign, settleWallet, sweepCampaigns, type CreateArgs } from './campaigns/campaigns';
 import { audiencePage, createSegment, deleteSegment, getSegment, listSegments, previewAudience, updateSegment } from './campaigns/segments';
 import { MAX_QUICK_REPLIES, type QuickReplyDto, type SegmentCriteria } from './api/contract';
@@ -1548,6 +1549,14 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   async getCampaign(id: string) {
     return getCampaign(this.host(), id);
+  }
+
+  async getCampaignReport(id: string) {
+    return campaignReport(this.host(), id);
+  }
+
+  async getConsentEvidence(after: number, limit: number) {
+    return consentEvidence(this.sql, after, limit);
   }
 
   async listCampaigns(q: { status?: Parameters<typeof listCampaigns>[1]['status']; cursor?: number; limit: number }) {

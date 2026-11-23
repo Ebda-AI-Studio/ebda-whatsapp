@@ -577,6 +577,11 @@ export const listCampaignsQuery = z.object({
   cursor: z.string().regex(/^\d{1,15}$/).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
+export const campaignReportQuery = z.object({ format: z.enum(['json', 'csv']).default('json') });
+/** Owner-only compliance evidence: one page of the per-contact consent / opt-out record (after = the last contact id of the previous page). */
+export const consentEvidenceQuery = z.object({ after: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0), limit: z.coerce.number().int().min(1).max(500).default(200), format: z.enum(['json', 'csv']).default('json') });
+/** The merchant's own audit trail (owner only): who did what, when. Ids and counts, never a phone number or a message. */
+export const auditTrailQuery = z.object({ before: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
 export const listCampaignsResponse = z.object({ items: z.array(campaignDto), nextCursor: z.string().nullable() });
 export type CampaignDto = z.infer<typeof campaignDto>;
 export type CampaignParam = z.infer<typeof campaignParam>;

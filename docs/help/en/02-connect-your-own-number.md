@@ -65,6 +65,15 @@ Ebda Chat creates the two-step verification PIN (6 digits) automatically and sto
 - **The window closed before I finished, or "the code expired":** start again. Ebda Chat does not charge for the connection itself.
 - **The number shows "Disconnected":** open Numbers and choose **Refresh status**. If it persists, disconnect the number and connect it again.
 
+## Move a number from another provider, or change your number
+There is no migration wizard: the move is done at Meta and then you connect the number the normal way.
+1. **At your old provider (or old WhatsApp Business account):** turn off two-step verification (the PIN) for the number, and make sure it is not still active in another WhatsApp Business account. Ask the old provider if you are not sure how.
+2. **In Ebda Chat:** open **Numbers** and connect the number with the steps above. Meta's flow asks you to confirm the number and the new PIN.
+3. If Meta says the number is already used, it is still attached to the old account (or to another Ebda Chat workspace). Remove it there first, wait a few minutes and try again.
+- **Message templates do not move with the number.** Install the starter templates and re-submit the ones you need ([guide 16](16-write-and-submit-a-template.md)).
+- **Chats and campaigns stay in your workspace.** If you only want a different number, disconnect the old one and connect the new one; your customers' history stays where it is.
+- Meta decides what happens to the number's quality rating and daily limit after a move. Check **Numbers** after connecting.
+
 ## After connecting
 Create your templates ([guide 4](04-templates-and-the-24-hour-window.md)) and read [Wallet, top-ups and refunds](09-wallet-top-ups-and-refunds.md).
 
