@@ -18,6 +18,11 @@ export function relativeTime(at: number, now: number, lang: Lang): string {
   return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'short' }).format(at);
 }
 
+/** A Chat package's display name in the UI language: size-based (Ahmad 2026-11-19), from the server's `nameAr` / `nameEn`, falling back to the stored `name`. */
+export function packageLabel(p: { name: string; nameAr?: string | undefined; nameEn?: string | undefined }, lang: Lang): string {
+  return (lang === 'ar' ? p.nameAr : p.nameEn) ?? p.name;
+}
+
 export function clockTime(at: number, lang: Lang): string {
   return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', { hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Cairo' }).format(at);
 }

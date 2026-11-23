@@ -89,11 +89,12 @@ export function readTools(d: ToolDeps): ToolSpec[] {
     }),
     t({
       name: 'plan_status', capabilityId: 'packages.plan-status', policy: 'free', undo: 'none', resultTrust: 'typed-source',
-      description: 'The workspace\'s package: its id, status (trialing, active, past_due, cancelled, expired) and when the period ends.',
+      description: 'The workspace\'s package: its display name (say THIS, never the id), status (trialing, active, past_due, cancelled, expired) and when the period ends.',
       args: none, jsonSchema: NO_ARGS,
       read: async (ctx) => {
-        const p = ((await ok(d.callApi(ctx, '/wallet'))) as { plan: { packageId: string; status: string; periodEnd: number; cancelledAt: number | null } | null }).plan;
-        return p ? { package: p.packageId, status: p.status, periodEnd: new Date(p.periodEnd).toISOString().slice(0, 10), cancelled: p.cancelledAt !== null } : { package: null };
+        const p = ((await ok(d.callApi(ctx, '/wallet'))) as { plan: { packageId: string; status: string; periodEnd: number; cancelledAt: number | null; packageName?: string; storePlan?: { nameEn: string } } | null }).plan;
+        // The id is an internal code ('growth' is not a tier name any more): the assistant says the display name, a size for a Chat package or the Store plan's own name.
+        return p ? { package: p.packageId, name: p.packageName ?? p.storePlan?.nameEn ?? null, status: p.status, periodEnd: new Date(p.periodEnd).toISOString().slice(0, 10), cancelled: p.cancelledAt !== null } : { package: null };
       },
     }),
     t({
