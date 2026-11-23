@@ -11,6 +11,7 @@ capabilities:
 - [توثيق نشاطك على ميتا](01-verify-your-business-on-meta.md)
 - [ربط رقمك الخاص](02-connect-your-own-number.md) أو [الرقم المشترك](03-use-the-shared-number.md)
 - [تسجيل الدخول واللغة](18-sign-in-language-and-sign-out.md)
+- [ابدأ Ebda Chat من غير متجر](31-start-chat-without-a-store.md)
 
 ## المحادثات اليومية
 - [الفلاتر والبحث](19-find-your-conversations.md)

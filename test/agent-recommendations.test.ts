@@ -289,6 +289,9 @@ describe('recommendProducts default (Ruling WA-RECS-1)', () => {
       state.storage.sql.exec('DELETE FROM workspace_meta');
       state.storage.sql.exec('DELETE FROM _migrations WHERE version >= 47');
       state.storage.sql.exec('DROP TABLE workspace_meta');
+      state.storage.sql.exec('ALTER TABLE store_orders DROP COLUMN recs_outcome'); // v49 is re-run with v47 below
+      state.storage.sql.exec('ALTER TABLE store_orders DROP COLUMN recs_at');
+      state.storage.sql.exec('ALTER TABLE templates DROP COLUMN quality'); // v50 (#171) is re-run with v47 below
       migrate(state.storage); // an old workspace: done > 0, so no marker is written
     });
     expect(await rows(id, "SELECT 1 FROM workspace_meta WHERE key = 'recs_default_on'")).toEqual([]);

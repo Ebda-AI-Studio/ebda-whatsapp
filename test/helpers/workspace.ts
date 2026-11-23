@@ -2,7 +2,8 @@ import { env, runInDurableObject } from 'cloudflare:test';
 
 export async function seedNumber(phoneNumberId: string, workspaceId: string, status: 'active' | 'disconnected' = 'active', wabaId = 'waba-1', displayPhone: string | null = null): Promise<void> {
   await env.DB.batch([
-    env.DB.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').bind(workspaceId, workspaceId, Date.now()),
+    // CHAT-SA: the kind follows the id space (D1 trigger): an sw_ id is a standalone workspace.
+    env.DB.prepare("INSERT OR IGNORE INTO workspaces (id, name, created_at, kind) VALUES (?, ?, ?, CASE WHEN substr(?, 1, 3) = 'sw_' THEN 'standalone' ELSE 'store' END)").bind(workspaceId, workspaceId, Date.now(), workspaceId),
     // Idempotent: seeding an already-seeded number is a no-op, so callers never need to swallow errors (a swallowed D1 failure left the
     // number unregistered and its funding unknown, which only showed on a slow CI runner).
     env.DB.prepare('INSERT OR IGNORE INTO phone_numbers (phone_number_id, waba_id, workspace_id, status, display_phone) VALUES (?, ?, ?, ?, ?)').bind(phoneNumberId, wabaId, workspaceId, status, displayPhone),

@@ -1,4 +1,5 @@
 import { ApiError } from './api';
+import { createSampleAssistantRollout } from './assistant-rollout';
 import type {
   AgentSettingsDto, BotFunnelDto, ConnectorDto, BotSettingsDto, BotSwitchesDto, CatalogStatusDto, CampaignDto, NumberDto, ContactDto, ConversationDto, ImportDto, MessageDto, OrderSummaryDto, RealtimeEvent, SegmentCriteria, SegmentDto, TemplateDto, NoteDto, QuickReplyDto,
 } from '../../../src/core/api/contract';
@@ -122,6 +123,7 @@ export function createSampleSource(): InboxSource {
     windowOpenUntil: s.windowH === null ? null : BASE + s.windowH * H,
   }));
   let agent: AgentSettingsDto = { enabled: false, persona: '', language: 'ar', handoffMinutes: 120, faqText: '', tone: 'warm', notifyPhone: null, provider: 'workers-ai', model: null, baseUrl: null, allowRefund: false, allowDiscount: false, allowFreeDelivery: false, allowExchange: false, allowGuarantee: false, recommendProducts: true, hasApiKey: false, credits: 500, knowledgeReady: false };
+  let recs = { enabled: false, templateName: null as string | null, suggestions: 3, capDays: 14, quietFrom: 21, quietTo: 9 };
   let switches: BotSwitchesDto = { orderingBot: true, orderConfirmations: false, otpViaWhatsApp: false };
   const pendingConfirms = new Set<string>();
   let bot: BotSettingsDto = {
@@ -219,6 +221,15 @@ export function createSampleSource(): InboxSource {
     async saveBotSettings(update) {
       bot = structuredClone(update);
       return structuredClone(bot);
+    },
+    proactiveRecs: {
+      async get() { return { ...recs }; },
+      async save(change) {
+        const name = change.templateName === undefined ? recs.templateName : change.templateName;
+        if ((change.enabled ?? recs.enabled) && !name) throw Object.assign(new Error('template_required'), { detail: 'template_required' });
+        recs = { ...recs, enabled: change.enabled ?? recs.enabled, templateName: name };
+        return { ...recs };
+      },
     },
     switches: {
       async get() { return { ...switches }; },
@@ -371,6 +382,7 @@ export function createSampleSource(): InboxSource {
     wallet: createSampleWallet(),
     operator: createSampleOperator('u-me'),
     sharedTemplates: createSampleSharedTemplates(),
+    assistantRollout: createSampleAssistantRollout(),
     contacts: {
       async list(q) {
         const query = normaliseText(q.q ?? '');

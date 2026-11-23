@@ -131,3 +131,6 @@ The Store's real RPC and queues; `PUBLIC_BASE_URL`/`PROOF_URL_SECRET` values; wa
 
 ## Store-side ask: delivery coordinates (optional)
 Chat accepts a WhatsApp location pin as the delivery address, but `newAddress` in bridge v1 (`{label?, area, street}`) has no coordinates field, so only the pin's own name/address text reaches the Store; the coordinates stay in Chat's bot session and are dropped when the order is placed. If the Store wants them for couriers, add an optional `location: { latitude, longitude }` (numbers, -90..90 / -180..180) to `newAddress` and the order `address`; Chat will then send it (a contract change on both sides first, with the vendored vector).
+
+## Standalone workspaces have no bridge (CHAT-SA-2, CHAT-SA-5)
+A workspace whose id starts with `sw_` was created in Chat, not linked from a Store: `bridgeForWorkspace` answers null, so every Store-coupled feature takes its "no Store" branch (orders pane, catalogue, COD, product recommendations, store-link settings: `store_link_off`), and no Store event can create or change it. The web hides those screens and the assistant is not offered their tools (`src/core/smart-layer/store-tools.ts`, `docs/assistant.md`). Store-linked workspaces (UUID ids) are unchanged.

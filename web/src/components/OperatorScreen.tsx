@@ -9,6 +9,7 @@ import { parseRates, parseScaled, toMicros } from '../lib/rates';
 import { CairoWhen } from './CairoWhen';
 import { dateTime } from '../lib/datetime';
 import { SharedTemplatesPanel } from './SharedTemplatesPanel';
+import { AssistantRolloutPanel } from './AssistantRolloutPanel';
 
 type Props = { t: Strings; lang: Lang; source: InboxSource; api: OperatorApi; now: () => number };
 type Note = { kind: 'alert' | 'status'; lines: string[] } | null;
@@ -18,7 +19,7 @@ type PanelProps = { t: Strings; lang: Lang; api: OperatorApi; now: () => number;
 const HOUR = 3_600_000;
 const SETTINGS_LEAD_H = 1;
 const RATE_LEAD_H = 24;
-const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared', 'killswitch', 'offboarding', 'audit'] as const;
+const TABS = ['pricing', 'rates', 'account', 'queues', 'log', 'shared', 'assistant', 'killswitch', 'offboarding', 'audit'] as const;
 type Tab = (typeof TABS)[number];
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -72,7 +73,7 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
         <p className="muted intro">{t.opIntro}</p>
         <ViewAsCard t={t} />
         <div className="chips" role="group" aria-label={t.opTitle}>
-          {TABS.filter((k) => k !== 'shared' || source.sharedTemplates).map((k) => <button key={k} type="button" className="chip" aria-pressed={tab === k} onClick={() => { setTab(k); setNote(null); }}>{t.opTabs[k]}</button>)}
+          {TABS.filter((k) => (k !== 'shared' || source.sharedTemplates) && (k !== 'assistant' || source.assistantRollout)).map((k) => <button key={k} type="button" className="chip" aria-pressed={tab === k} onClick={() => { setTab(k); setNote(null); }}>{t.opTabs[k]}</button>)}
         </div>
         {note && <div role={note.kind} className={note.kind === 'alert' ? 'error-text op-note' : 'wallet-ok op-note'}>{note.lines.map((l) => <p key={l}>{l}</p>)}</div>}
         {tab === 'pricing' && <PricingPanel {...panel} />}
@@ -80,6 +81,7 @@ export function OperatorScreen({ t, lang, source, api, now }: Props) {
         {tab === 'account' && <AccountPanel {...panel} />}
         {tab === 'queues' && <QueuesPanel {...panel} />}
         {tab === 'log' && <LogPanel {...panel} />}
+        {tab === 'assistant' && source.assistantRollout && <AssistantRolloutPanel t={t} api={source.assistantRollout} run={run} fail={fail} />}
         {tab === 'killswitch' && <KillSwitchPanel {...panel} />}
         {tab === 'offboarding' && <OffboardingOpPanel {...panel} />}
         {tab === 'audit' && <AuditPanel {...panel} />}

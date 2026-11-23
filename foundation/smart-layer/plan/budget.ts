@@ -5,8 +5,10 @@ export const BUDGET = { toolsOffered: 15, toolCalls: 6, modelCalls: 7, outputTok
 export type BudgetKey = keyof typeof BUDGET;
 
 export class BudgetExceeded extends Error {
-  constructor(readonly which: 'toolCalls' | 'modelCalls') {
+  readonly which: 'toolCalls' | 'modelCalls';
+  constructor(which: 'toolCalls' | 'modelCalls') {
     super(`budget exceeded: ${which}`);
+    this.which = which;
     this.name = 'BudgetExceeded';
   }
 }
