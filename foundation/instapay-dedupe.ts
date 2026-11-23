@@ -101,7 +101,12 @@ export interface D1Like {
 }
 
 export class D1DuplicateIndex implements DuplicateIndex {
-  constructor(private db: D1Like, private now: () => number = Date.now) {}
+  private db: D1Like;
+  private now: () => number;
+  constructor(db: D1Like, now: () => number = Date.now) {
+    this.db = db;
+    this.now = now;
+  }
 
   private insert(kind: 'ref' | 'img', key: string, e: DedupeEntry, state: 'held' | 'burned'): D1StatementLike {
     return this.db
