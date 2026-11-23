@@ -204,11 +204,13 @@ export const meResponse = z.object({
   userId: z.string(),
   storeId: z.string(),
   role: z.enum(['owner', 'staff', 'super_admin']),
-  capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional(), assistant: z.boolean().optional() }),
+  capabilities: z.object({ codOutcome: z.boolean(), numbers: z.boolean().optional(), assistant: z.boolean().optional(), /** false = no Store behind this workspace (standalone): orders, catalogue, COD and recommendations are off. Additive. */ store: z.boolean().optional() }),
+  /** CHAT-SA-2: which kind of workspace this is. Additive: absent from older servers (= 'store'). */
+  kind: z.enum(['store', 'standalone']).optional(),
   /** Whether THIS store has a Chat workspace. false = Chat was never switched on for it (every workspace route answers 404). Additive: absent from older servers. */
   workspace: z.boolean().optional(),
   /** The stores this person may act on that DO have a Chat workspace (id, name, role), for the store picker. At most 50. */
-  stores: z.array(z.object({ id: z.string(), name: z.string(), role: z.enum(['owner', 'staff']) })).max(50).optional(),
+  stores: z.array(z.object({ id: z.string(), name: z.string(), role: z.enum(['owner', 'staff']), kind: z.enum(['store', 'standalone']).optional() })).max(50).optional(),
 });
 export type MeResponse = z.infer<typeof meResponse>;
 

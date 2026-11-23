@@ -89,7 +89,7 @@ import { indexContactName, rebuildContactIndex } from './contact-index';
 import { ftsMatch, searchFoldOf, searchWords, syncSearchFold } from './search-fold';
 import { currentEvent, rollRenewals } from './billing/subscriptions';
 import { overdueOne } from './billing/instapay';
-import { bridgeFor } from './store-link';
+import { bridgeForWorkspace } from './store-link';
 import { assignSeat, listSeats, pruneSeats, removeSeat, seatState, seatsOverLimit, type AssignResult, type SeatRow, type SeatState } from './seats';
 import { applyEntitlement, expireSubscription, runCreditMonth, featureAllowed, marketingBlocked, memberLimit, readEntitlement, serviceAllowed, type EntitlementEvent, type PlanFeature } from './billing/entitlements';
 import { closeUnanswered, handleCodReply, pushErasedOrders, merchantCod, pushCodOutcome, type MerchantCodArgs } from './store-link/orders';
@@ -2014,7 +2014,7 @@ export class WorkspaceDO extends DurableObject<Env> {
    */
   private closeUnseatedSockets(sockets: WebSocket[]): WebSocket[] {
     if (!sockets.some((ws) => (ws.deserializeAttachment() as SocketAttachment | null)?.role === 'staff')) return sockets;
-    if (!bridgeFor(this.env)) return sockets;
+    if (!bridgeForWorkspace(this.env, this.workspaceId)) return sockets;
     const seated = new Set(listSeats(this.sql).seats.filter((x) => x.state === 'seated').map((x) => x.userId));
     return sockets.filter((ws) => {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
@@ -2031,7 +2031,7 @@ export class WorkspaceDO extends DurableObject<Env> {
    * is revoked, closes 4403; a changed role is re-read and applied (downgrade). A check that cannot be answered (Store or accounts down) leaves the socket for the next sweep: the lifetime cap bounds that window.
    */
   private async sweepSockets(nowS: number): Promise<void> {
-    const bridge = bridgeFor(this.env);
+    const bridge = bridgeForWorkspace(this.env, this.workspaceId);
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
       const close = (code: number, why: string) => { try { ws.close(code, why); } catch { /* already closed */ } };
