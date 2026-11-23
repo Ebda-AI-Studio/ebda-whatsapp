@@ -1,7 +1,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureAssistant } from '../../src/routes/assistant';
-import { EMPTY_ANSWER, ENGINE_FALLBACK, NO_STORE_METRICS, TOOL_FAILED, observeTurn } from '../../src/routes/assistant-observe';
+import { EMPTY_ANSWER, ENGINE_FALLBACK, NO_STORE_METRICS, STORE_DASHBOARD, questionLocale, TOOL_FAILED, observeTurn } from '../../src/routes/assistant-observe';
 import { apiFor, storeId, useApiKey } from '../helpers/api';
 import { workspace } from '../helpers/workspace';
 import { MSG } from '../../foundation/smart-layer/loop';
@@ -126,7 +126,7 @@ describe('assistant route: store-wide metrics never reach the model (live: order
     for (const [q, lang] of [['كام طلب جالي النهارده؟', 'ar'], ['إجمالي المبيعات النهارده كام؟', 'ar'], ['How many orders did I get today?', 'en']] as const) {
       const { res, body } = await ask(s, token, q, lang);
       expect(res.status).toBe(200);
-      expect(body.segments).toEqual([{ kind: 'text', text: NO_STORE_METRICS[lang] }]);
+      expect(body.segments).toEqual([{ kind: 'text', text: NO_STORE_METRICS[lang] }, { kind: 'link', href: STORE_DASHBOARD.href, text: STORE_DASHBOARD.text[lang] }]);
       expect(body.segments[0]!.text).not.toMatch(/[0-9]/);
     }
     expect(m.calls()).toBe(0); // the model was never asked: nothing it returns can be empty or invented
@@ -141,5 +141,29 @@ describe('assistant route: store-wide metrics never reach the model (live: order
     await ask(s, token, 'فين رصيد المحفظة؟', 'ar');
     await ask(s, token, 'اطلب قالب جديد النهارده', 'ar');
     expect(m.calls()).toBeGreaterThan(0);
+  });
+});
+
+describe('assistant route: the fixed metrics reply follows the language of the question', () => {
+  const help = { db: env.DB, embed: async (t: string[]) => t.map(() => [0]), vectors: { upsert: async () => ({ mutationId: 'm' }), deleteByIds: async () => ({ mutationId: 'm' }), query: async () => ({ count: 0, matches: [] }) } as never };
+  it('an English question gets English even when the UI locale is Arabic (and the reverse), and neither needs the model', async () => {
+    const s = storeId(7104);
+    const { token } = await apiFor(s);
+    await workspace(s).setAssistantMode('answer-only');
+    const m = emptyAi();
+    configureAssistant({ ai: m.ai as never, help });
+    for (const [q, ui, want] of [['How many orders did I get today?', 'ar', 'en'], ['كام طلب جالي النهارده؟', 'en', 'ar']] as const) {
+      const res = await SELF.fetch(`https://x/api/v1/stores/${s}/assistant/turn`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ conversationId: crypto.randomUUID(), text: q, locale: ui }) });
+      const body = (await res.json()) as { segments: Array<{ kind: string; text: string; href?: string }> };
+      expect(body.segments[0]!.text).toBe(NO_STORE_METRICS[want]);
+      expect(body.segments[1]).toEqual({ kind: 'link', href: STORE_DASHBOARD.href, text: STORE_DASHBOARD.text[want] });
+    }
+    expect(m.calls()).toBe(0);
+  });
+  it('questionLocale: script of the question wins, the UI locale only breaks a tie of nothing', () => {
+    expect(questionLocale('How many orders today?', 'ar')).toBe('en');
+    expect(questionLocale('كام طلب النهارده', 'en')).toBe('ar');
+    expect(questionLocale('12345', 'en')).toBe('en');
+    expect(questionLocale('', 'ar')).toBe('ar');
   });
 });
