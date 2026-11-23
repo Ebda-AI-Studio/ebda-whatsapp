@@ -100,12 +100,20 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`GET ${S}/members`]: 'person_only', // the team and its seats (owner only)
   [`PUT ${S}/members/:userId/seat`]: 'person_only',
   [`DELETE ${S}/members/:userId/seat`]: 'person_only',
+  [`POST ${S}/members/invite`]: 'person_only', // CHAT-SA-4: standalone team (owner only)
+  [`DELETE ${S}/members/:userId`]: 'person_only',
+  [`DELETE ${S}/members/invitations/:userId`]: 'person_only',
   [`GET ${S}/offboarding`]: 'person_only', // workspace deletion
   [`POST ${S}/offboarding`]: 'person_only',
   [`DELETE ${S}/offboarding`]: 'person_only',
   [`GET ${S}/retention`]: 'person_only', // message retention window
   [`PUT ${S}/retention`]: 'person_only',
+  [`GET ${S}/proactive-recs`]: 'person_only', // proactive post-order suggestions switch (owner)
+  [`PUT ${S}/proactive-recs`]: 'person_only',
   [`GET ${S}/contacts/:waId/export`]: 'person_only', // data-subject export
+  [`GET ${S}/contacts/consent-evidence`]: 'person_only', // per-customer consent record (phone numbers): the owner's file, never a server token
+  [`GET ${S}/campaigns/:campaignId/report`]: 'person_only', // compliance report: the owner's proof for Meta
+  [`GET ${S}/audit`]: 'person_only', // who changed what in the workspace
   [`PATCH ${S}/contacts/:waId`]: 'person_only', // contact edit
   [`POST ${S}/contacts/merge`]: 'person_only',
 
@@ -135,6 +143,7 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/templates`]: 'person_only',
   [`POST ${S}/templates/sync`]: 'person_only',
   [`POST ${S}/templates/install-defaults`]: 'person_only',
+  [`POST ${S}/templates/install-seasonal`]: 'person_only',
   [`POST ${S}/templates/cod-v2/resubmit`]: 'person_only',
   [`POST ${S}/templates/shared-requests`]: 'person_only',
   [`PUT ${S}/templates/:name/:language`]: 'person_only',
@@ -178,7 +187,7 @@ export function gateForRoute(method: string, pattern: string): Gate | null {
  * `test/route-decisions.test.ts` fails when a read route is in neither, so a new read cannot be added without a decision. (Operator routes are the opposite and cheaper
  * to get right: checked unless listed.)
  */
-export const SESSION_CHECKED_READS: ReadonlySet<string> = new Set(['GET /stores/:storeId/contacts/:waId/export', 'GET /stores/:storeId/offboarding', 'GET /stores/:storeId/members']); // the deletion status names the balance being given up; the team list names people
+export const SESSION_CHECKED_READS: ReadonlySet<string> = new Set(['GET /stores/:storeId/contacts/:waId/export', 'GET /stores/:storeId/contacts/consent-evidence', 'GET /stores/:storeId/campaigns/:campaignId/report', 'GET /stores/:storeId/audit', 'GET /stores/:storeId/offboarding', 'GET /stores/:storeId/members']); // the deletion status names the balance being given up; the team list names people
 export const SESSION_UNCHECKED_READS: Readonly<Record<string, string>> = {
   'GET /stores/:storeId/assistant/conversations/:conversationId': "the caller's own masked assistant turns (secrets and phones masked before storage): the merchant's own text; a revoked token expires within minutes (Ruling READ-SESSION-1)",
   'GET /stores/:storeId/digest': "the weekly usage summary: counts only, no personal data; low-risk aggregate (Ruling READ-SESSION-1: a revoked token expires within minutes)",
@@ -213,6 +222,7 @@ export const SESSION_UNCHECKED_READS: Readonly<Record<string, string>> = {
   'GET /stores/:storeId/numbers/signup-config': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/shared-number': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/retention': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/proactive-recs': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/wallet': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
   'GET /stores/:storeId/wallet/estimate': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",
   'GET /stores/:storeId/wallet/statement': "the merchant's own balance, statement or plan: not another person's data; money WRITES re-check the session",

@@ -21,8 +21,14 @@ export interface LlmProvider {
 export type LlmErrorKind = 'timeout' | 'network' | 'rate_limited' | 'http' | 'bad_response' | 'unconfigured';
 /** Never carries a response body or prompt text: the message is a fixed phrase. */
 export class LlmError extends Error {
-  constructor(readonly kind: LlmErrorKind, readonly retryable: boolean, readonly status?: number) {
+  readonly kind: LlmErrorKind;
+  readonly retryable: boolean;
+  readonly status?: number;
+  constructor(kind: LlmErrorKind, retryable: boolean, status?: number) {
     super(`llm ${kind}${status ? ` ${status}` : ''}`);
+    this.kind = kind;
+    this.retryable = retryable;
+    this.status = status;
     this.name = 'LlmError';
   }
 }
@@ -44,12 +50,14 @@ const parseArgs = (raw: unknown): unknown => {
   }
 };
 
+// An assistant turn that only calls tools has NO text. Workers AI's chat schema rejects `content: null` (HTTP 400 code 5006, measured 2026-11-17 on
+// the Llama 3.3 70B fast model), which turned every tool-using turn into a provider error; an empty string is accepted by Workers AI and OpenAI alike.
 function toWire(req: LlmRequest): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [{ role: 'system', content: req.system }];
   for (const m of req.messages) {
     if (m.role === 'user') out.push({ role: 'user', content: m.content });
     else if (m.role === 'tool') out.push({ role: 'tool', content: m.content, tool_call_id: m.toolCallId, name: m.name });
-    else out.push({ role: 'assistant', content: m.content || null, ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.arguments ?? {}) } })) } : {}) });
+    else out.push({ role: 'assistant', content: m.content ?? '', ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.arguments ?? {}) } })) } : {}) });
   }
   return out;
 }
@@ -89,7 +97,12 @@ export function readChatResult(raw: unknown): LlmResponse {
 export class WorkersAiProvider implements LlmProvider {
   readonly byoKey = false;
   /** `model` is a default; a request may carry its own (per-job routing). */
-  constructor(private readonly ai: AiBinding, private readonly model: string) {}
+  private readonly ai: AiBinding;
+  private readonly model: string;
+  constructor(ai: AiBinding, model: string) {
+    this.ai = ai;
+    this.model = model;
+  }
   async complete(req: LlmRequest): Promise<LlmResponse> {
     let raw: unknown;
     try {

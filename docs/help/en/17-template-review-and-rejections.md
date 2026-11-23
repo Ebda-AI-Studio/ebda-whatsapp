@@ -1,6 +1,7 @@
 ---
 capabilities:
   - templates.edit-delete@2
+  - templates.quality-rating@1
   - templates.status-webhook@1
 appPath: /templates
 ---
@@ -32,6 +33,9 @@ Open the template and press **Edit and resubmit**. A rejected template keeps its
 
 ## Delete
 Open the template and press **Delete the template**. Every campaign that uses it must finish first, and a message still waiting to be sent counts too. Deleting removes one language only. The name of an approved template cannot be used again for 30 days after deleting it. A disabled template cannot be deleted.
+
+## The quality rating
+Meta also rates each approved template by how customers react to it: **green** (high), **yellow** (medium), **red** (low), or no rating yet when it has not been sent to enough people. Meta tells Ebda Chat when the rating changes, and the assistant shows it when you ask about a template. A template whose rating drops can be paused by Meta (see "Paused" above). If it turns yellow or red, shorten it, make it more useful to the customer and send it only to people who asked for it. A rating that has never arrived is shown as "no rating yet", not as green.
 
 ## Meta tells us by itself
 As soon as Meta decides (approves, rejects, pauses or disables a template) it sends us the status and the reason, and the app updates the template without you doing anything. A review takes from minutes to about a day. You see the reason when you open the template.

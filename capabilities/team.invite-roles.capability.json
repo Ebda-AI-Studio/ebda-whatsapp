@@ -31,10 +31,10 @@
     ]
   },
   "steps": [
-    "Invites and roles are managed in Ebda Store (accounts); Chat only assigns seats; only owner and staff roles exist"
+    "Store workspaces: invites and roles are managed in Ebda Store (accounts); Chat only assigns seats. Standalone workspaces (no Store): see team.standalone-members"
   ],
   "edgeCases": [],
   "gaps": [
-    "No custom roles; no in-Chat invite"
+    "No custom roles"
   ]
 }

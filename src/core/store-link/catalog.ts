@@ -4,7 +4,7 @@ import { ensureCommerce } from './catalog-commerce';
 import { plainAmount } from '../ordering/money';
 import { addTask } from '../scheduler';
 import type { CatalogRow } from '../store-bridge';
-import { bridgeFor } from '../store-link';
+import { bridgeForWorkspace } from '../store-link';
 import type { Env } from '../../env';
 import { graphTokenFor, TokenUnavailable } from '../numbers/token';
 import type { LinkHost } from './host';
@@ -247,7 +247,7 @@ export function runCatalogSync(host: LinkHost, now: number): Promise<number | un
 }
 
 async function syncOnce(host: LinkHost, now: number): Promise<number | undefined> {
-  const bridge = bridgeFor(host.env);
+  const bridge = bridgeForWorkspace(host.env, host.workspaceId);
   if (!bridge || !readSettings(host).catalogId) return undefined;
   const auth = await verifiedAuth(host);
   if (!auth) return undefined; // off: the rows stay, and configuring the catalog schedules a full reconcile
@@ -308,7 +308,7 @@ export function runCatalogReconcile(host: LinkHost, now: number, opts: { allowMa
 }
 
 async function reconcileOnce(host: LinkHost, now: number, opts: { allowMassDelete?: boolean }): Promise<number | undefined> {
-  const bridge = bridgeFor(host.env);
+  const bridge = bridgeForWorkspace(host.env, host.workspaceId);
   if (!bridge || !readSettings(host).catalogId) return undefined;
   const auth = await verifiedAuth(host);
   if (!auth) return undefined;

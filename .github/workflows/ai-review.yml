@@ -8,7 +8,10 @@ name: AI review
 # deleted existing test is reviewed, because several safety guards are test files.
 # FORK PRs are never reviewed with secrets and never skipped: the `fork-gate` job fails until a maintainer reviews the PR and adds the label
 # `ai-review-passed` (the `labeled` event re-runs it green). A manual label on a same-repo PR (e.g. an oversized diff) is honoured the same way.
-# A diff over 400 KB fails with a clear message: it needs human/controller review, then the label `ai-review-passed` by hand.
+# A diff over 400 KB is not bot-reviewed (Ruling AI-REVIEW-SIZE-1, source: ebda-foundation ci/ai-review/size-stamp.mjs): it passes only if the head
+# carries a success commit status `controller/review` or `controller/money-review` from an allowed account (AI_REVIEW_STAMP_CREATORS, default
+# voidengineer-911; newest wins); otherwise it fails. Stamp, then RE-RUN the AI review job: a status added afterwards does not retrigger it.
+# Labelling `ai-review-passed` by hand still works.
 # Risky + any infra problem (no secret, CLI crash, bad JSON) = FAIL, never pass. Secret: CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`).
 # Copy of ebda-foundation/.github/workflows/ai-review.yml with `on:` = pull_request_target (foundation Ruling AIR-3: switch to `uses:` once the
 # foundation's Actions access is `organization`). Everything under `jobs:` must stay identical to the foundation file.
@@ -103,7 +106,10 @@ jobs:
           echo "$RUNNER_TEMP/claude-cli/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/claude-cli/bin/claude" --version
       - name: Build the diff (fail closed when it is too large)
+        id: diff
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD: ${{ github.event.pull_request.head.sha }}
@@ -114,10 +120,18 @@ jobs:
           git diff --no-renames --unified=3 "origin/$BASE_REF...refs/pr/head" > pr.diff
           size="$(wc -c < pr.diff | tr -d ' ')"
           if [ "$size" -ge 400000 ]; then
-            echo "::error::The diff is $size bytes (limit 400000). Labels are left untouched (an existing ai-review-passed stays). A partial review would pass what it never read, so this PR is NOT reviewed automatically: it needs human/controller review, then the label ai-review-passed applied by hand. Splitting the PR is the better fix."
+            # Ruling AI-REVIEW-SIZE-1: a controller stamp on this head (allowed creator, newest is success) stands in for the bot review.
+            # The decision script comes from the base checkout and only reads status JSON; no PR code runs.
+            if gh api "repos/$GH_REPO/commits/$HEAD/statuses?per_page=100" | node .github/ai-review/size-stamp.mjs; then
+              echo "size_stamped=true" >> "$GITHUB_OUTPUT"
+              echo "The diff is $size bytes (limit 400000): bot review skipped, controller stamp accepted."
+              exit 0
+            fi
+            echo "::error::The diff is $size bytes (limit 400000). A partial review would pass what it never read, so a controller review is required for diffs over 400 KB: the controller stamps this head (commit status controller/review or controller/money-review, success) and then RE-RUNS this AI review job (a stamp added afterwards does not retrigger it). Labels are left untouched. Splitting the PR is the better fix."
             exit 1
           fi
       - name: Review the diff
+        if: steps.diff.outputs.size_stamped != 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
@@ -137,6 +151,7 @@ jobs:
           done
           exit 1
       - name: Post findings and gate
+        if: steps.diff.outputs.size_stamped != 'true'
         id: gate
         env:
           GITHUB_TOKEN: ${{ github.token }}

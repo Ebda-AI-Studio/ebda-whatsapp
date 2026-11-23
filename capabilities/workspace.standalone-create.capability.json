@@ -1,0 +1,53 @@
+{
+  "id": "workspace.standalone-create",
+  "status": "live",
+  "area": "access",
+  "version": 1,
+  "versionDate": "2026-11-14",
+  "titleAr": "فتح مساحة عمل Chat من غير متجر",
+  "titleEn": "Create an Ebda Chat workspace without a Store",
+  "screens": [
+    "view:NoWorkspace",
+    "/inbox"
+  ],
+  "api": [
+    "GET /workspaces",
+    "POST /workspaces",
+    "PUT /workspaces",
+    "PATCH /workspaces",
+    "DELETE /workspaces",
+    "GET /workspaces/mine"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "confirm",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/start-chat-without-a-store",
+  "questions": {
+    "ar": [
+      "ازاي افتح Ebda Chat من غير متجر؟",
+      "عندي كود دعوة لـ Chat",
+      "عايز اعمل مساحة عمل جديدة"
+    ],
+    "en": [
+      "How do I start Ebda Chat without a store?",
+      "I have an invite code"
+    ]
+  },
+  "steps": [
+    "Sign in with an Ebda account, enter the invite code and a workspace name, then open the inbox"
+  ],
+  "edgeCases": [
+    "While the flag is `invite`, creation needs an operator-minted single-use code; one owned workspace per person; the other methods on /workspaces are refused (person-level wildcard mount)",
+    "Standalone workspaces have no orders, catalogue, COD or recommendations"
+  ],
+  "gaps": [
+    "Self-serve (flag open) is not on yet; no self-service account deletion in Chat"
+  ],
+  "assistantNote": "creating a workspace needs an invite code while the flag is invite-only; hand off to Ebda for a code"
+}

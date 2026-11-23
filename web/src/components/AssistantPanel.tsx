@@ -1,3 +1,4 @@
+import { BRAND } from '@brand';
 import { ArrowUp, CircleAlert, ExternalLink, MapPin, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AssistantSegment } from '../../../src/core/api/contract';
@@ -120,6 +121,7 @@ export function AssistantPanel({ t, lang, storeId, userId, api, onNavigate, onCl
             <ul className="as-suggest">
               {t.assistantSuggest.map((q) => <li key={q}><button type="button" className="chip" onClick={() => void ask(q)}>{q}</button></li>)}
             </ul>
+            {BRAND.supportEmail && <p className="state-body as-support">{t.assistantSupport} <a href={`mailto:${BRAND.supportEmail}`} dir="ltr">{BRAND.supportEmail}</a></p>}
           </div>
         )}
         {items.map((m) => m.role === 'merchant'

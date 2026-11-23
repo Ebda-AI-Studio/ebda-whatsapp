@@ -3,6 +3,7 @@
  * the concrete pieces once at start-up (`configureStoreLink`), and tests register fakes the same way.
  */
 import type { Env } from '../env';
+import { isStandaloneId } from './workspace-kind';
 import type { OutboundStoreEvent } from './api/store-events';
 import type { OrderingCopy } from './ordering/copy';
 import { DEFAULT_OTP_POLICY, type OtpPolicy } from './otp-policy';
@@ -36,3 +37,8 @@ export function configureStoreLink(next: Partial<StoreLinkConfig>): StoreLinkCon
 }
 export const storeLink = (): StoreLinkConfig => current;
 export const bridgeFor = (env: Env): StoreBridge | null => current.bridge(env);
+/**
+ * CHAT-SA-2: the Store bridge is per DEPLOY, not per workspace, so every call that acts for a workspace goes through here. A standalone (`sw_`) workspace has no Store: always null,
+ * which switches every store-coupled feature off by construction. `bridgeFor` stays only for code with no workspace in scope (the Store-event consumer, UUID-only).
+ */
+export const bridgeForWorkspace = (env: Env, workspaceId: string): StoreBridge | null => (isStandaloneId(workspaceId) ? null : bridgeFor(env));

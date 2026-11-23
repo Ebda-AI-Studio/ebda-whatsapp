@@ -26,6 +26,30 @@ describe('operator assistant controls', () => {
     expect((await chatControls(env, workspace(s))).mode).toBe('answer-only');
   });
 
+  it('an operator can read a workspace mode back (404 for an unknown workspace)', async () => {
+    const s = storeId(7105);
+    await apiFor(s);
+    expect(await (await operatorCall(OP1, 'GET', `/workspaces/${s}/assistant`)).json()).toEqual({ mode: 'off' });
+    await operatorCall(OP1, 'PUT', `/workspaces/${s}/assistant`, { mode: 'suggest' });
+    expect(await (await operatorCall(OP1, 'GET', `/workspaces/${s}/assistant`)).json()).toEqual({ mode: 'suggest' });
+    expect((await operatorCall(OP1, 'GET', `/workspaces/${storeId(7198)}/assistant`)).status).toBe(404);
+  });
+
+  it('the audit rows for the assistant switches carry before and after values (not NULL detail)', async () => {
+    const s = storeId(7106);
+    await apiFor(s);
+    await operatorCall(OP1, 'PUT', '/assistant/flags', { global: { kill: false, mode: 'answer-only', shadow: false }, product: { kill: false }, killedTools: [] });
+    await operatorCall(OP1, 'PUT', '/assistant/flags', { global: { kill: true, mode: 'act', shadow: false }, killedTools: ['wallet_view'] });
+    await operatorCall(OP1, 'PUT', `/workspaces/${s}/assistant`, { mode: 'suggest' });
+    await operatorCall(OP1, 'PUT', `/workspaces/${s}/assistant`, { mode: 'act' });
+    const rows = (await env.DB.prepare("SELECT action, detail FROM audit_log WHERE action LIKE 'PUT /operator/%assistant%' AND (workspace_id = ? OR workspace_id IS NULL) ORDER BY id").bind(s).all<{ action: string; detail: string | null }>()).results;
+    const flags = rows.filter((r) => r.action.endsWith('/assistant/flags') && r.detail).map((r) => JSON.parse(r.detail ?? 'null'));
+    expect(flags.at(-1)).toMatchObject({ globalKillFrom: false, globalKillTo: true, globalModeFrom: 'answer-only', globalModeTo: 'act', killedToolsFrom: '', killedToolsTo: 'wallet_view' });
+    expect(flags.at(-1)).not.toHaveProperty('chatKillFrom'); // untouched switches are not claimed
+    const modes = rows.filter((r) => r.action.endsWith(':workspaceId/assistant')).map((r) => JSON.parse(r.detail ?? 'null'));
+    expect(modes).toEqual([{ modeFrom: 'off', modeTo: 'suggest' }, { modeFrom: 'suggest', modeTo: 'act' }]);
+  });
+
   it('refuses an unknown mode, an unknown field and an unknown workspace', async () => {
     const s = storeId(7102);
     await apiFor(s);

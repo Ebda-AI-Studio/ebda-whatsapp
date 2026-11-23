@@ -1,7 +1,6 @@
 {
   "id": "agent.golden-eval",
-  "status": "in-pr",
-  "pr": "ebda-whatsapp#79 (open, stacked on #78)",
+  "status": "live",
   "area": "agent",
   "version": 1,
   "versionDate": "2026-11-14",
@@ -12,7 +11,7 @@
   "mcpTool": null,
   "planGate": null,
   "roles": [
-    "owner"
+    "super_admin"
   ],
   "policy": "forbidden",
   "undo": {
@@ -34,8 +33,12 @@
   ],
   "edgeCases": [],
   "gaps": [
-    "No real-model score exists yet: the assistant must not claim accuracy",
-    "roles unverified"
+    "No real-model score exists yet: the assistant must not claim accuracy"
   ],
-  "assistantNote": "internal quality gate, not a merchant feature"
+  "assistantNote": "internal quality gate, not a merchant feature",
+  "operatorReason": {
+    "code": "platform-config",
+    "text": "an internal quality gate the Ebda team runs (76 scripted cases in CI); merchants never run it and the assistant must not claim an accuracy figure",
+    "validUnderRule": true
+  }
 }
