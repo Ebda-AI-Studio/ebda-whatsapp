@@ -1,7 +1,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureAssistant } from '../../src/routes/assistant';
-import { EMPTY_ANSWER, ENGINE_FALLBACK, NO_STORE_METRICS, TOOL_FAILED, observeTurn, withLowReasoning } from '../../src/routes/assistant-observe';
+import { EMPTY_ANSWER, ENGINE_FALLBACK, NO_STORE_METRICS, STORE_DASHBOARD, isStoreMetricQuestion, questionLocale, TOOL_FAILED, observeTurn, withLowReasoning, CHIP_RULE } from '../../src/routes/assistant-observe';
 import { apiFor, storeId, useApiKey } from '../helpers/api';
 import { workspace } from '../helpers/workspace';
 import { MSG } from '../../foundation/smart-layer/loop';
@@ -123,10 +123,10 @@ describe('assistant route: store-wide metrics never reach the model (live: order
     await workspace(s).setAssistantMode('answer-only');
     const m = emptyAi();
     configureAssistant({ ai: m.ai as never, help });
-    for (const [q, lang] of [['كام طلب جالي النهارده؟', 'ar'], ['إجمالي المبيعات النهارده كام؟', 'ar'], ['How many orders did I get today?', 'en']] as const) {
+    for (const [q, lang] of [['كام طلب جالي النهارده؟', 'ar'], ['كام طلب النهارده؟', 'ar'], ['What were my sales this week?', 'en'], ['إجمالي المبيعات النهارده كام؟', 'ar'], ['How many orders did I get today?', 'en']] as const) {
       const { res, body } = await ask(s, token, q, lang);
       expect(res.status).toBe(200);
-      expect(body.segments).toEqual([{ kind: 'text', text: NO_STORE_METRICS[lang] }]);
+      expect(body.segments).toEqual([{ kind: 'text', text: NO_STORE_METRICS[lang] }, { kind: 'link', href: STORE_DASHBOARD.href, text: STORE_DASHBOARD.text[lang] }]);
       expect(body.segments[0]!.text).not.toMatch(/[0-9]/);
     }
     expect(m.calls()).toBe(0); // the model was never asked: nothing it returns can be empty or invented
@@ -141,6 +141,30 @@ describe('assistant route: store-wide metrics never reach the model (live: order
     await ask(s, token, 'فين رصيد المحفظة؟', 'ar');
     await ask(s, token, 'اطلب قالب جديد النهارده', 'ar');
     expect(m.calls()).toBeGreaterThan(0);
+  });
+});
+
+describe('assistant route: the fixed metrics reply follows the language of the question', () => {
+  const help = { db: env.DB, embed: async (t: string[]) => t.map(() => [0]), vectors: { upsert: async () => ({ mutationId: 'm' }), deleteByIds: async () => ({ mutationId: 'm' }), query: async () => ({ count: 0, matches: [] }) } as never };
+  it('an English question gets English even when the UI locale is Arabic (and the reverse), and neither needs the model', async () => {
+    const s = storeId(7104);
+    const { token } = await apiFor(s);
+    await workspace(s).setAssistantMode('answer-only');
+    const m = emptyAi();
+    configureAssistant({ ai: m.ai as never, help });
+    for (const [q, ui, want] of [['What were my sales this week?', 'ar', 'en'], ['How many orders did I get today?', 'ar', 'en'], ['كام طلب جالي النهارده؟', 'en', 'ar']] as const) {
+      const res = await SELF.fetch(`https://x/api/v1/stores/${s}/assistant/turn`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ conversationId: crypto.randomUUID(), text: q, locale: ui }) });
+      const body = (await res.json()) as { segments: Array<{ kind: string; text: string; href?: string }> };
+      expect(body.segments[0]!.text).toBe(NO_STORE_METRICS[want]);
+      expect(body.segments[1]).toEqual({ kind: 'link', href: STORE_DASHBOARD.href, text: STORE_DASHBOARD.text[want] });
+    }
+    expect(m.calls()).toBe(0);
+  });
+  it('questionLocale: script of the question wins, the UI locale only breaks a tie of nothing', () => {
+    expect(questionLocale('How many orders today?', 'ar')).toBe('en');
+    expect(questionLocale('كام طلب النهارده', 'en')).toBe('ar');
+    expect(questionLocale('12345', 'en')).toBe('en');
+    expect(questionLocale('', 'ar')).toBe('ar');
   });
 });
 
@@ -161,5 +185,30 @@ describe('GLM reasoning budget (live: agent-settings question came back empty, o
     const o = observeTurn(adapter, { storeId: 's', log: () => undefined });
     await o.provider.complete({ system: 's', messages: [{ role: 'user', content: 'q' }], tools: [], maxTokens: 700, model: '@cf/zai-org/glm-5.3' });
     expect(sent!.reasoning_effort).toBe('low');
+  });
+});
+
+describe('isStoreMetricQuestion', () => {
+  it('store-wide sales / order-count questions match; a customer-specific or how-to question does not', () => {
+    for (const q of ['كام طلب النهارده؟', 'كام طلب جالي النهارده؟', 'إجمالي المبيعات النهارده كام؟', 'What were my sales this week?', 'How many orders did I get today?', 'show me revenue this month', 'مبيعات الاسبوع ده']) expect(isStoreMetricQuestion(q), q).toBe(true);
+    for (const q of ['طلبات احمد النهارده', 'ازاي اطلب قالب جديد', 'فين رصيد المحفظة؟', 'what is my plan']) expect(isStoreMetricQuestion(q), q).toBe(false);
+  });
+});
+
+describe('capability chip wording', () => {
+  it('every model request carries the chip rule once (standalone pointer, never a word in a sentence), also on the empty-completion retry', async () => {
+    const systems: string[] = [];
+    const adapter = { ai: { run: async (_m: string, i: Record<string, unknown>) => { systems.push(((i.messages as Array<{ content: string }>)[0]!.content)); return { choices: [{ message: { content: null } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }; } }, models: { answer: 'm', plan: 'm', template: 'm', classify: 'm', judge: 'm', embed: 'm' }, tools: () => [], storage: { appendAudit: async () => undefined } } as unknown as SmartLayerAdapter;
+    const o = observeTurn(adapter, { storeId: 's', log: () => undefined });
+    await o.provider.complete({ system: 'BASE', messages: [{ role: 'user', content: 'q' }], tools: [], maxTokens: 10 });
+    expect(systems.length).toBe(2); // first call + the empty retry
+    for (const s of systems) {
+      expect(s.startsWith('BASE')).toBe(true);
+      expect(s.split(CHIP_RULE).length - 1).toBe(1);
+    }
+    expect(CHIP_RULE).toContain('شوف: [[cap:...]]');
+    expect(CHIP_RULE).toContain('روابط مفيدة:');
+    expect(CHIP_RULE).toContain('See: [[cap:...]]');
+    expect(CHIP_RULE).toMatch(/never use it as a word inside a sentence/i);
   });
 });

@@ -18,12 +18,22 @@ export const EMPTY_ANSWER: L = { ar: 'الرد جه فاضي من المساعد
 export const NO_STORE_METRICS: L = { ar: 'مفيش عندي أداة لسه بتجيب عدد الطلبات أو المبيعات للمتجر كله. شوف الأرقام دي من لوحة تحكم المتجر.', en: 'I do not have a tool yet that reads your store-wide orders or sales. Please check those numbers in your store dashboard.' };
 const METRIC = /(طلب|طلبات|اوردر|مبيع|ايراد|ارباح|ربح|orders?|sales|revenue|income|profit)/i;
 const PERIOD = /(النهارد|اليوم|امبارح|الاسبوع|الشهر|السنه|today|yesterday|this week|this month|this year|last week|last month)/i;
-const COUNT = /(كام|عدد|اجمال|مجموع|how many|how much|total|number of)/i;
+/** The store's own dashboard (Ebda Store admin). `link` segments are outside the engine's allow-list for a model reply, so the fixed reply gets it appended after the rails ran. */
+export const STORE_DASHBOARD = { href: 'https://store.ebda.app/', text: { ar: 'لوحة تحكم المتجر', en: 'Store dashboard' } as L };
+/** The language the merchant WROTE in (Arabic script vs Latin letters); the UI locale only when the question has neither. */
+export function questionLocale(q: string, ui: 'ar' | 'en'): 'ar' | 'en' {
+  const ar = (q.match(/[\u0600-\u06FF]/g) ?? []).length;
+  const en = (q.match(/[A-Za-z]/g) ?? []).length;
+  return ar === 0 && en === 0 ? ui : ar >= en ? 'ar' : 'en';
+}
+const COUNT = /(كام|عدد|اجمال|مجموع|ايه|وريني|عرض|how many|how much|total|number of|what|show|tell|give|list)/i;
+const SALES = /(مبيع|ايراد|ارباح|ربح|sales|revenue|income|profit)/i;
+const ORDERS = /(طلب|طلبات|اوردر|orders?)/i;
 /** "Which product sells most / the top sellers ...": answered by `store_top_products`, so it is NOT a question without a tool (a superlative on products or on what sells; "how many orders" has none). */
 const TOP_SELLERS = /(اكتر|اكثر|اعلي|افضل|top|best|most)[^.?!]{0,30}(منتج|صنف|بيتباع|بتتباع|اتباع|مبيعا|seller|selling|products?|items?|sold)|(بيتباع|بتتباع|best.?sell|top.?sell)/i;
 export const isTopSellersQuestion = (q: string): boolean => TOP_SELLERS.test(foldArabic(q));
-/** "How many orders / how much in sales ... today": a store-wide figure Chat has no tool for. (A question naming a customer is the customer-orders tool's, and has no count word; a best-sellers question has its own tool.) */
-export const isStoreMetricQuestion = (q: string): boolean => { const f = foldArabic(q); return METRIC.test(f) && PERIOD.test(f) && COUNT.test(f) && !isTopSellersQuestion(q); };
+/** "How many orders / how much in sales ... today": a store-wide figure Chat has no tool for. (A question naming a customer is the customer-orders tool's, and has no count word.) */
+export const isStoreMetricQuestion = (q: string): boolean => { const f = foldArabic(q); return PERIOD.test(f) && (SALES.test(f) || (ORDERS.test(f) && COUNT.test(f))) && !isTopSellersQuestion(q); };
 
 // Arabic-Indic (U+0660-0669) and Persian (U+06F0-06F9) digits are written as escapes (DIGITS-1): this is the INPUT side, it must recognise what a model may print.
 const DIGITS = /[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[.,][0-9\u0660-\u0669\u06F0-\u06F9]+)?/g;
@@ -40,6 +50,12 @@ export const withLowReasoning = (ai: SmartLayerAdapter['ai']): SmartLayerAdapter
   run: (model, inputs) => ai.run(model, /glm/i.test(model) && inputs.reasoning_effort === undefined ? { ...inputs, reasoning_effort: 'low' } : inputs),
 });
 
+/**
+ * A [[cap:...]] / [[help:...]] marker is drawn as a button that carries its OWN title, right where the marker stands. Written inside a sentence it reads as a broken one
+ * ("... تفاصيل النقل [نقل الرقم أو تغييره]", live 2026-11-24). The engine prompt (vendored) does not say how to place it, so Chat appends this rule to every model request.
+ */
+export const CHIP_RULE = '- A [[cap:...]] or [[help:...]] marker is shown to the merchant as a button with its own title. Put it as a standalone pointer: end a line with "شوف: [[cap:...]]" (English: "See: [[cap:...]]"), or list pointers at the end under "روابط مفيدة:" ("Useful links:"). Never use it as a word inside a sentence, and never repeat its title in your own words next to it.';
+
 export type TurnObserver = {
   requestId: string;
   adapter: SmartLayerAdapter;
@@ -54,7 +70,7 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; /*
   const requestId = crypto.randomUUID();
   const log = o.log ?? ((line) => console.log(JSON.stringify(line)));
   const emit = (event: string, f: Record<string, unknown>) => log({ event, requestId, storeId: o.storeId, ...f });
-  const state = { toolFailed: false, emptyFinal: false, toolOut: [] as string[] };
+  const state = { toolFailed: false, emptyFinal: false, fixedReply: false, toolOut: [] as string[] };
 
   const inner = new WorkersAiProvider(withLowReasoning(adapter.ai), adapter.models.answer);
   const provider: LlmProvider = {
@@ -69,6 +85,7 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; /*
           throw err;
         }
       };
+      req = { ...req, system: req.system.includes(CHIP_RULE) ? req.system : `${req.system}\n${CHIP_RULE}` };
       let res = await run(req);
       const empty = (x: LlmResponse) => !x.text && !x.toolCalls?.length;
       if (empty(res)) {
@@ -113,10 +130,17 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; /*
     requestId, adapter: wrapped, provider,
     deterministic(question, locale) {
       if (o.storeLinked || !isStoreMetricQuestion(question)) return null; // a store-linked workspace has the orders tool; the fixed reply is for Chat-only workspaces
-      emit('assistant_store_metric_deterministic', {});
-      return { byoKey: false, complete: async () => ({ text: NO_STORE_METRICS[locale], usage: { inputTokens: 0, outputTokens: 0 } }) };
+      const lang = questionLocale(question, locale);
+      state.fixedReply = true;
+      emit('assistant_store_metric_deterministic', { lang });
+      return { byoKey: false, complete: async () => ({ text: NO_STORE_METRICS[lang], usage: { inputTokens: 0, outputTokens: 0 } }) };
     },
     refine(res, locale, question) {
+      if (state.fixedReply && question) {
+        const lang = questionLocale(question, locale);
+        if (res.segments.length === 1 && res.segments[0]!.kind === 'text') return { ...res, segments: [...res.segments, { kind: 'link', href: STORE_DASHBOARD.href, text: STORE_DASHBOARD.text[lang] }] };
+        return res;
+      }
       // A store-wide orders / sales question with a reply that states a figure no tool returned: the figure is invented, so the honest answer replaces it.
       if (question && METRIC.test(question) && PERIOD.test(question)) {
         const said = res.segments.map((x) => (x.kind === 'text' ? x.text : '')).join(' ');
