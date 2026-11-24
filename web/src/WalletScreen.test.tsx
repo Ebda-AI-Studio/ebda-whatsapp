@@ -404,20 +404,26 @@ describe('wallet: packages (owner)', () => {
     expect(within(gold).getByText(egp(50000))).toBeTruthy();
     expect(within(gold).getByText(t.wPackageCredits(num(300, 'ar')))).toBeTruthy();
     await act(async () => fireEvent.click(within(gold).getByRole('button', { name: t.wPackageBuy })));
+    await waitFor(() => expect(go).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\//))); // go() runs after `await api.buyPackage`
     expect(buy).toHaveBeenCalledWith('gold');
-    expect(go).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\//));
     expect(screen.queryByText(t.wPackageActivated)).toBeNull(); // paying has not been confirmed yet
   });
 
   it('refuses a non-https checkout url and says so', async () => {
     const source = createSampleSource();
-    source.wallet!.buyPackage = async (id) => ({ orderId: 'P-9', state: 'pending', packageId: id, amountMinor: 50000, checkoutUrl: 'javascript:alert(1)' });
+    // The error is set after `await api.buyPackage`: the test owns that promise (a deferred), so nothing depends on how fast microtasks or timers run under CI load,
+    // and the assertion waits for the alert (a condition), never asserts right after the click.
+    let answer!: (o: Awaited<ReturnType<NonNullable<typeof source.wallet>['buyPackage']>>) => void;
+    source.wallet!.buyPackage = (id) => new Promise((resolve) => { answer = (o) => resolve({ ...o, packageId: id }); });
     const go = vi.fn();
     render(<WalletScreen {...props(source, go)} />);
     const card = await screen.findByRole('region', { name: t.wPackagesTitle });
-    await act(async () => fireEvent.click((await within(card).findAllByRole('button', { name: t.wPackageBuy }))[0]!));
+    fireEvent.click((await within(card).findAllByRole('button', { name: t.wPackageBuy }))[0]!);
+    await waitFor(() => expect(answer).toBeTypeOf('function')); // the click reached buyPackage
+    expect(within(card).queryByRole('alert')).toBeNull(); // nothing answered yet
+    await act(async () => answer({ orderId: 'P-9', state: 'pending', packageId: 'gold', amountMinor: 50000, checkoutUrl: 'javascript:alert(1)' }));
+    expect((await within(card).findByRole('alert')).textContent).toBe(t.wPackageError);
     expect(go).not.toHaveBeenCalled();
-    expect(within(card).getByRole('alert').textContent).toBe(t.wPackageError);
   });
 
   it('after the card form, a waiting order polls and turns into "activated" when the server says paid', async () => {
