@@ -64,6 +64,11 @@ describe('wallet plan naming (CHAT-QA-13)', () => {
     expect(await screen.findByText(t.wPlanStore('الأعمال'))).toBeTruthy();
     expect(document.body.textContent).not.toContain('store-included');
   });
+  it('a Store-included package whose Store plan code was never recorded (applied before the code was kept) reads "Store plan", never the raw package id', async () => {
+    await open({ ...base, packageId: 'store-included' });
+    expect(await screen.findByText(t.wPlanStoreGeneric)).toBeTruthy();
+    expect(document.body.textContent).not.toContain('store-included');
+  });
   it('a bought package reads by its size-based name', async () => {
     await open({ ...base, packageId: 'pro', packageName: 'Chat 5,000 AI replies', packageNameAr: 'شات 5000 رد ذكي' });
     expect(await screen.findByText('شات 5000 رد ذكي')).toBeTruthy(); // the size-based name alone: it starts with "Chat", so no prefix is needed

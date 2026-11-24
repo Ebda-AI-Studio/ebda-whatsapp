@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { createSampleSource } from './data/sample';
 import { STRINGS } from './i18n';
-import { WHATSAPP_SCOPES } from '../../src/core/identity/scopes';
+import { ROUTE_SCOPES, WHATSAPP_SCOPES } from '../../src/core/identity/scopes';
 
 afterEach(cleanup);
 const now = () => Date.UTC(2026, 9, 24, 17, 0);
@@ -39,6 +39,20 @@ describe('CHAT-QA-13: human permission names and a brand-styled help link', () =
     for (const lang of ['ar', 'en'] as const) {
       for (const s of WHATSAPP_SCOPES) expect(STRINGS[lang].apiScopeLabels[s], `${lang} ${s}`).toBeTruthy();
       expect(Object.keys(STRINGS[lang].apiScopeLabels).sort()).toEqual([...WHATSAPP_SCOPES].sort());
+    }
+  });
+
+  it('no scope can ship raw: every scope a route gate names is in the catalogue, the catalogue is the Store accounts list (apps/accounts/src/client-scopes.ts), and no label is the id or looks like one', () => {
+    const gates = new Set(Object.values(ROUTE_SCOPES).filter((g) => g !== 'any' && g !== 'person_only'));
+    for (const g of gates) expect((WHATSAPP_SCOPES as readonly string[]).includes(g), `gate scope ${g} is not in WHATSAPP_SCOPES`).toBe(true);
+    expect([...WHATSAPP_SCOPES]).toEqual(['conversations:read', 'messages:send', 'templates:read', 'contacts:read', 'contacts:write', 'campaigns:read']); // same list the Store issues (change both together)
+    for (const lang of ['ar', 'en'] as const) {
+      for (const s of WHATSAPP_SCOPES) {
+        const label = STRINGS[lang].apiScopeLabels[s]!;
+        expect(label.trim().length, `${lang} ${s}`).toBeGreaterThan(3);
+        expect(label, `${lang} ${s}`).not.toBe(s);
+        expect(label, `${lang} ${s}`).not.toMatch(/[a-z]+:[a-z]+/);
+      }
     }
   });
 
