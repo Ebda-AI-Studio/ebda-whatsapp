@@ -85,6 +85,8 @@ export function renderReply(reply: string, reg: RegistryView, locale: Locale, hi
     else segments.push(s.kind === 'text' ? { ...s } : s);
   }
   for (const s of segments) if (s.kind === 'text') s.text = s.text.replace(/[ \t]{2,}/g, ' ');
+  // Removing a quoted label or a path leaves the space that stood before it: "...simple \u00ab\u0627\u0633\u0645\u00bb:" became "...simple :". Close it up, only where something was removed.
+  if (removed.length) for (const s of segments) if (s.kind === 'text') s.text = s.text.replace(/[ \t]+([:;,.!?\u060C\u061B\u061F])/g, '$1');
   const tail = segments[segments.length - 1];
   if (tail?.kind === 'text') tail.text = tail.text.replace(/[ \t]+$/, '');
   return { segments: segments.filter((s) => s.kind !== 'text' || s.text !== ''), removed };

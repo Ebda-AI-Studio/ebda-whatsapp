@@ -32,14 +32,15 @@ const POINTER = {
 const LIST_ITEM = /^\s*(?:[-*\u2022]|(?:\d+|[\u0660-\u0669]+)[.)\u060C-]?)\s+/;
 const NUMBERED = /^(\s*)(\d+)([.)])(\s+)/;
 
-function renumber(text: string): string {
+/** `dropped`: the numbers of the numbered lines that were dropped. A block whose first surviving item is "2." because "1." was dropped restarts at 1. */
+function renumber(text: string, dropped: ReadonlySet<number>): string {
   const lines = text.split('\n');
   let next = 0;
   let prevNumbered = false;
   return lines.map((l) => {
     const m = NUMBERED.exec(l);
     if (!m) { prevNumbered = false; next = 0; return l; }
-    if (!prevNumbered) next = Number(m[2]);
+    if (!prevNumbered) { next = Number(m[2]); while (next > 1 && dropped.has(next - 1)) next--; }
     prevNumbered = true;
     const out = `${m[1]}${next}${m[3]}${m[4]}${l.slice(m[0].length)}`;
     next++;
@@ -108,13 +109,14 @@ export function checkBindingClaims(reply: string, sources: BindingSource[], tool
   });
   // A flagged piece on a list line drops that WHOLE line (the "2." marker is a piece of its own, split off by the sentence splitter).
   let droppedItem = false;
+  const droppedNums = new Set<number>();
   let start = 0;
   for (let i = 0; i < pieces.length; i++) {
     if (!pieces[i]!.endsWith('\n') && i < pieces.length - 1) continue;
     const range = Array.from({ length: i - start + 1 }, (_, k) => start + k);
-    if (range.some((k) => flagged.has(k)) && LIST_ITEM.test(range.map((k) => pieces[k]).join(''))) { for (const k of range) out[k] = ''; droppedItem = true; }
+    if (range.some((k) => flagged.has(k)) && LIST_ITEM.test(range.map((k) => pieces[k]).join(''))) { const n = NUMBERED.exec(range.map((k) => pieces[k]).join(''))?.[2]; if (n) droppedNums.add(Number(n)); for (const k of range) out[k] = ''; droppedItem = true; }
     start = i + 1;
   }
   const joined = out.join('');
-  return { text: droppedItem ? renumber(joined) : joined, removed };
+  return { text: droppedItem ? renumber(joined, droppedNums) : joined, removed };
 }
