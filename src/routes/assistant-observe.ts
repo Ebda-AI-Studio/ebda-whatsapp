@@ -5,6 +5,7 @@
  * an empty model completion is retried once and, if it stays empty, is told to the merchant as what it is. Logs carry names, kinds, counts and timings: never a prompt, a reply or a secret.
  */
 import { LlmError, WorkersAiProvider, type LlmProvider, type LlmRequest, type LlmResponse } from '../../foundation/smart-layer/provider';
+import { renderOrdersSummary, type OrdersFigures } from '../core/smart-layer/tools/store.tools';
 import { foldArabic } from '../../foundation/text';
 import type { AuditRow, Segment, SmartLayerAdapter, ToolSpec } from '../../foundation/smart-layer/types';
 
@@ -70,7 +71,7 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; /*
   const requestId = crypto.randomUUID();
   const log = o.log ?? ((line) => console.log(JSON.stringify(line)));
   const emit = (event: string, f: Record<string, unknown>) => log({ event, requestId, storeId: o.storeId, ...f });
-  const state = { toolFailed: false, emptyFinal: false, fixedReply: false, toolOut: [] as string[] };
+  const state = { toolFailed: false, emptyFinal: false, fixedReply: false, toolOut: [] as string[], toolRuns: [] as Array<{ name: string; out: unknown }> };
 
   const inner = new WorkersAiProvider(withLowReasoning(adapter.ai), adapter.models.answer);
   const provider: LlmProvider = {
@@ -108,6 +109,7 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; /*
       try {
         const out = await read(ctx, args);
         state.toolOut.push(JSON.stringify(out) ?? '');
+        state.toolRuns.push({ name: t.name, out });
         return out;
       } catch (err) {
         state.toolFailed = true;
@@ -136,6 +138,13 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; /*
       return { byoKey: false, complete: async () => ({ text: NO_STORE_METRICS[lang], usage: { inputTokens: 0, outputTokens: 0 } }) };
     },
     refine(res, locale, question) {
+      // The orders summary is written from the Store's figures in the question's language (see `renderOrdersSummary`): the model's own prose about it was cut by the binding-claims rail
+      // (a refund word) and followed the UI language. Only when it was the turn's one tool; an owner-only refusal has no figures and keeps the model's reply.
+      const ordersFigures = state.toolRuns.length === 1 && state.toolRuns[0]!.name === 'store_orders_summary' ? (state.toolRuns[0]!.out as { figures?: OrdersFigures }).figures : undefined;
+      if (ordersFigures && (res.status === 'answered' || res.status === 'limited')) {
+        emit('assistant_orders_summary_rendered', {});
+        return { ...res, status: 'answered', segments: [{ kind: 'text', text: renderOrdersSummary(ordersFigures, questionLocale(question ?? '', locale)) }] };
+      }
       if (state.fixedReply && question) {
         const lang = questionLocale(question, locale);
         if (res.segments.length === 1 && res.segments[0]!.kind === 'text') return { ...res, segments: [...res.segments, { kind: 'link', href: STORE_DASHBOARD.href, text: STORE_DASHBOARD.text[lang] }] };

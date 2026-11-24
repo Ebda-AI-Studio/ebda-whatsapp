@@ -28,6 +28,27 @@ const topArgs = z.object({
 /** "13,000.00 EGP" / "13,000.00 جنيه": Latin digits and a comma grouping in both languages (the house style of the Arabic copy and what the invented-figure guard compares), the currency word per language. */
 const fmtMoney = (minor: number, currency: string, locale: 'ar' | 'en'): string => `${(Math.round(minor) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${locale === 'ar' && currency === 'EGP' ? 'جنيه' : currency}`;
 const fmtCount = (n: number): string => n.toLocaleString('en-US');
+export type OrdersFigures = { period: 'today' | 'yesterday' | 'this_week' | 'last_7_days' | 'this_month'; currency: string; orderCount: number; collectedOrders: number; salesMinor: number; refundsMinor: number; avgOrderMinor: number };
+const PERIOD_LABEL: Record<OrdersFigures['period'], { ar: string; en: string }> = {
+  today: { ar: 'النهارده', en: 'Today' }, yesterday: { ar: 'امبارح', en: 'Yesterday' }, this_week: { ar: 'الأسبوع ده', en: 'This week' },
+  last_7_days: { ar: 'آخر 7 أيام', en: 'The last 7 days' }, this_month: { ar: 'الشهر ده', en: 'This month' },
+};
+/**
+ * The orders answer, written from the Store's figures and nothing else, in the language the merchant ASKED in. The binding-claims rail (vendored) treats a refund word as a billing / legal term that only a typed source
+ * may back, so a model sentence about refunds with a store-data figure was replaced by "see the Terms page", and the model answered in the UI language, not the question's. This text never goes through the model: every
+ * figure is the tool's, refunds are always stated (0.00 when none), and nothing can be invented. `routes/assistant-observe.ts` swaps it in when this tool was the turn's only tool.
+ */
+export function renderOrdersSummary(f: OrdersFigures, lang: 'ar' | 'en'): string {
+  const m = (minor: number) => fmtMoney(minor, f.currency, lang);
+  const label = PERIOD_LABEL[f.period][lang];
+  if (lang === 'ar') {
+    if (f.orderCount === 0) return `${label}: مفيش طلبات. المبيعات المحصّلة ${m(0)}، والمرتجعات ${m(f.refundsMinor)}.`;
+    return `${label}: ${fmtCount(f.orderCount)} طلب، والمبيعات المحصّلة ${m(f.salesMinor)} (من ${fmtCount(f.collectedOrders)} طلب مدفوع أو اتسلّم)، والمرتجعات ${m(f.refundsMinor)}${f.collectedOrders > 0 ? `، ومتوسط قيمة الطلب ${m(f.avgOrderMinor)}` : ''}.`;
+  }
+  if (f.orderCount === 0) return `${label}: no orders. Collected sales ${m(0)}, refunds ${m(f.refundsMinor)}.`;
+  return `${label}: ${fmtCount(f.orderCount)} order${f.orderCount === 1 ? '' : 's'}, collected sales ${m(f.salesMinor)} (from ${fmtCount(f.collectedOrders)} paid or delivered), refunds ${m(f.refundsMinor)}${f.collectedOrders > 0 ? `, average order value ${m(f.avgOrderMinor)}` : ''}.`;
+}
+
 const ordersArgs = z.object({
   period: z.enum(ORDER_PERIODS).default('today').describe("'today' (النهارده), 'yesterday' (امبارح), 'this_week' (الأسبوع ده, from Saturday), 'last_7_days' (آخر 7 أيام) or 'this_month' (الشهر ده); default today"),
 }).strict();
@@ -106,6 +127,7 @@ export function storeTools(kit: Kit): ToolSpec[] {
         const m = (minor: number) => fmtMoney(minor, r.currency, ctx.locale);
         return {
           period: r.period, answerLanguage: ctx.locale,
+          figures: { period: r.period, currency: r.currency, orderCount: r.orderCount, collectedOrders: r.collectedOrders, salesMinor: r.salesMinor, refundsMinor: r.refundsMinor, avgOrderMinor: r.avgOrderMinor } satisfies OrdersFigures,
           orders: fmtCount(r.orderCount), collectedOrders: fmtCount(r.collectedOrders),
           salesCollected: m(r.salesMinor), refunds: m(r.refundsMinor), averageOrderValue: r.collectedOrders > 0 ? m(r.avgOrderMinor) : 'n/a',
           definition: 'orders = orders placed in the period that count as sales; salesCollected = paid orders plus delivered cash-on-delivery orders, net of refunds; averageOrderValue = salesCollected / collectedOrders',
