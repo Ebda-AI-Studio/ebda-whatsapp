@@ -153,7 +153,7 @@ export function WalletScreen({ t, lang, source, api, now, go = (u) => window.loc
             <h2 id="w-plan-title">{t.wPlanTitle}</h2>
             {wallet.plan === null ? <p className="muted">{t.wPlanNone}</p> : (
               <>
-                <p><b>{wallet.plan.storePlan ? t.wPlanStore(lang === 'ar' ? wallet.plan.storePlan.nameAr : wallet.plan.storePlan.nameEn) : (lang === 'ar' ? wallet.plan.packageNameAr : wallet.plan.packageName) ?? wallet.plan.packageId}</b> <span className="status-chip" data-status={wallet.plan.status === 'active' ? 'running' : wallet.plan.status === 'trialing' ? 'scheduled' : wallet.plan.status === 'past_due' ? 'paused' : 'cancelled'}>{t.planStatus[wallet.plan.status]}</span></p>
+                <p><b>{wallet.plan.storePlan ? t.wPlanStore(lang === 'ar' ? wallet.plan.storePlan.nameAr : wallet.plan.storePlan.nameEn) : (lang === 'ar' ? wallet.plan.packageNameAr : wallet.plan.packageName) ?? (wallet.plan.packageId === 'store-included' ? t.wPlanStoreGeneric : wallet.plan.packageId)}</b> <span className="status-chip" data-status={wallet.plan.status === 'active' ? 'running' : wallet.plan.status === 'trialing' ? 'scheduled' : wallet.plan.status === 'past_due' ? 'paused' : 'cancelled'}>{t.planStatus[wallet.plan.status]}</span></p>
                 <p className="muted">{t.wPlanEnds(dateTime(wallet.plan.periodEnd, lang))}</p>
                 {wallet.plan.status === 'past_due' && <p className="campaign-reason">{t.wPlanPastDue}</p>}
               </>
