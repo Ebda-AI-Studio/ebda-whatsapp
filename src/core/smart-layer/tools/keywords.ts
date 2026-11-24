@@ -57,6 +57,7 @@ export const KEYWORDS: Readonly<Record<string, string>> = {
   inbox_read_thread: 'اقرا اعرض المحادثة الرسايل بتاعة العميل قال ايه آخر رسايل read thread',
   inbox_customer_orders: 'طلبات العميل اوردرات اوردر العميل ايه طلبات orders',
   store_top_products: 'اكتر منتج بيتباع الاكثر مبيعا افضل المنتجات الاعلى مبيعا ترتيب المنتجات المنتجات اللي بتتباع best selling top products best sellers bestseller most sold akter montag byetba3 aktar montag el akthar mabee3at',
+  store_orders_summary: 'كام طلب اوردر اوردرات الطلبات النهارده امبارح الاسبوع الشهر مبيعات المبيعات ايراد الايراد اجمالي عدد مرتجعات متوسط الطلب مبيعاتي orders how many orders sales revenue today yesterday this week this month average order value refunds kam talab order el nharda mabee3at',
   store_create_coupon: 'كوبون خصم كود خصم اعمل انشئ جهز تخفيض عرض نسبة جنيه لمدة يوم يومين اسبوع create coupon discount code percent off promo coupon koboun kobon khasm 3ml 3mal e3mel koud',
   inbox_send_throttle: 'حد الارسال الرسايل المستنية سرعة الارسال الحد اليومي throttle tier',
   contacts_consent_proof: 'موافقة العميل اثبات موافقة تسويق اشتراك consent opt in',

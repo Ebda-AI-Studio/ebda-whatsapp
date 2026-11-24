@@ -11,7 +11,7 @@ export const NEEDS_STORE: ReadonlySet<string> = new Set([
   'catalogue_status', 'catalogue_left_out', 'catalogue_resync', 'catalogue_toggles_set', 'catalogue_link_existing', 'catalogue_provision',
   'storelink_bridge_health', 'bot_funnel', 'bot_ordering_toggle', 'bot_order_confirmations_toggle', 'otp_toggle',
   'bot_menu_set', 'bot_hours_set', 'bot_location_set',
-  'agent_recommendations_toggle', 'inbox_cod_outcome', 'inbox_customer_orders', 'store_top_products', 'store_create_coupon',
+  'agent_recommendations_toggle', 'inbox_cod_outcome', 'inbox_customer_orders', 'store_top_products', 'store_create_coupon', 'store_orders_summary',
 ]);
 
 /** Every tool for a Store workspace; for a standalone one, without the Store-coupled ones. */

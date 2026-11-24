@@ -14,7 +14,7 @@ export const ENGINE_FALLBACK: L = { ar: 'مقدرتش أرد دلوقتي. جر�
 export const TOOL_FAILED: L = { ar: 'مقدرتش أقرا بيانات متجرك دلوقتي. جرّب تاني بعد لحظة.', en: 'I could not read your store data right now. Please try again in a moment.' };
 export const EMPTY_ANSWER: L = { ar: 'الرد جه فاضي من المساعد. جرّب تسأل بصيغة تانية أو ابعت السؤال تاني.', en: 'The assistant came back with an empty answer. Try rephrasing, or send the question again.' };
 
-/** Chat has no store-wide orders-count / sales-total / revenue tool (those live in the store's own dashboard); best sellers ARE a tool (`store_top_products`). Asking for the missing ones must never produce a number the model made up. */
+/** A workspace with NO Store (Chat-only) has no orders / sales / revenue source (those live in the store's own dashboard); a store-linked one has `store_orders_summary`, best sellers are `store_top_products`. Asking for what has no source must never produce a number the model made up. */
 export const NO_STORE_METRICS: L = { ar: 'مفيش عندي أداة لسه بتجيب عدد الطلبات أو المبيعات للمتجر كله. شوف الأرقام دي من لوحة تحكم المتجر.', en: 'I do not have a tool yet that reads your store-wide orders or sales. Please check those numbers in your store dashboard.' };
 const METRIC = /(طلب|طلبات|اوردر|مبيع|ايراد|ارباح|ربح|orders?|sales|revenue|income|profit)/i;
 const PERIOD = /(النهارد|اليوم|امبارح|الاسبوع|الشهر|السنه|today|yesterday|this week|this month|this year|last week|last month)/i;
@@ -66,7 +66,7 @@ export type TurnObserver = {
   refine<T extends { status: string; segments: Segment[] }>(res: T, locale: 'ar' | 'en', question?: string): T;
 };
 
-export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; log?: (line: Record<string, unknown>) => void }): TurnObserver {
+export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; /** The workspace has a Store bridge: orders / sales questions go to `store_orders_summary` instead of the fixed no-tool reply. */ storeLinked?: boolean; log?: (line: Record<string, unknown>) => void }): TurnObserver {
   const requestId = crypto.randomUUID();
   const log = o.log ?? ((line) => console.log(JSON.stringify(line)));
   const emit = (event: string, f: Record<string, unknown>) => log({ event, requestId, storeId: o.storeId, ...f });
@@ -129,7 +129,7 @@ export function observeTurn(adapter: SmartLayerAdapter, o: { storeId: string; lo
   return {
     requestId, adapter: wrapped, provider,
     deterministic(question, locale) {
-      if (!isStoreMetricQuestion(question)) return null;
+      if (o.storeLinked || !isStoreMetricQuestion(question)) return null; // a store-linked workspace has the orders tool; the fixed reply is for Chat-only workspaces
       const lang = questionLocale(question, locale);
       state.fixedReply = true;
       emit('assistant_store_metric_deterministic', { lang });

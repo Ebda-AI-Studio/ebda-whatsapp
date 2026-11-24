@@ -170,6 +170,14 @@ export const topProductsSchema = z.object({
   items: z.array(z.object({ name: z.string(), nameAr: z.string().nullable(), units: z.number().int().nonnegative(), revenueMinor: z.number().int().nonnegative() })).max(10),
 });
 export type TopProducts = z.infer<typeof topProductsSchema>;
+export const ORDER_PERIODS = ['today', 'yesterday', 'this_week', 'last_7_days', 'this_month'] as const;
+export type OrderPeriod = (typeof ORDER_PERIODS)[number];
+/** Store ruling CHAT-ASSIST-ORDERS-1. Minor units. `orderCount` = the dashboard's sales population; `collectedOrders` / `salesMinor` = paid or delivered cash-on-delivery, net of refunds. */
+export const ordersSummarySchema = z.object({
+  currency: z.string().length(3), period: z.enum(ORDER_PERIODS), fromMs: z.number().int(), toMs: z.number().int(),
+  orderCount: z.number().int().nonnegative(), collectedOrders: z.number().int().nonnegative(), salesMinor: z.number().int(), refundsMinor: z.number().int().nonnegative(), avgOrderMinor: z.number().int(),
+});
+export type OrdersSummary = z.infer<typeof ordersSummarySchema>;
 /** The limits the Store applies too (owner-tools.ts); mirrored here so a preview never promises what the Store will refuse. */
 export const COUPON_LIMITS = { percentMax: 90, fixedMaxMinor: 5_000_000, windowDaysMax: 90, usageLimitMax: 100_000 } as const;
 export type CouponCreateRequest = {
@@ -206,6 +214,8 @@ export interface StoreBridge {
   getRecommendations(storeId: string, req: RecommendationRequest): Promise<BridgeResult<{ items: CatalogRow[] }>>;
   /** Best sellers of a period, owner or active staff (live role). Numbers are the Store's analytics, in minor units. */
   getTopProducts(storeId: string, asUserId: string, req: { period: TopPeriod; limit: number }): Promise<BridgeResult<TopProducts>>;
+  /** Order count, collected sales, refunds and average order value for a Cairo-day period. OWNER only (live role); the Store caches it 60 s per store + period. */
+  getOrdersSummary(storeId: string, asUserId: string, req: { period: OrderPeriod }): Promise<BridgeResult<OrdersSummary>>;
   /** Creates a coupon through the Store's own coupon service. OWNER only (live role), replay-safe on code + terms. Chat calls it only after the merchant's confirm press. */
   createCoupon(storeId: string, asUserId: string, req: CouponCreateRequest): Promise<BridgeResult<CouponCreated>>;
   /** Owner + active staff. `invalid` (message FORBIDDEN) = the asker is not the owner; `unavailable` = the Store could not answer (never read as "no members"). */

@@ -5,6 +5,7 @@ capabilities:
   - support.in-product-help@1
   - store.top-products@1
   - store.coupon-create@1
+  - store.orders-summary@1
 ---
 
 # The Ebda Chat assistant: ask how to do anything
@@ -31,7 +32,8 @@ The assistant answers your questions about Ebda Chat in plain language and shows
 - It finds a customer by the name you typed. If two customers share that name it does not guess; it asks you to be more specific.
 
 ## Ask about your store, and create a coupon
-- **Best sellers:** ask "What is my best-selling product?" or "top 3 products this week". It reads your store live and answers with each product's name, units sold and revenue for today, the last 7 days or the last 30 days (30 if you do not say), up to 10 products. The numbers are your store's own; it never estimates one. Total orders or total sales for a day are not covered yet: it points you to your store dashboard.
+- **Best sellers:** ask "What is my best-selling product?" or "top 3 products this week". It reads your store live and answers with each product's name, units sold and revenue for today, the last 7 days or the last 30 days (30 if you do not say), up to 10 products. The numbers are your store's own; it never estimates one. 
+- **Orders and sales (owner only):** ask "How many orders today?" or "What were my sales this week?" for today, yesterday, this week (the week starts on Saturday), the last 7 days or this month. It answers with the number of orders, the sales collected (paid orders plus cash-on-delivery orders that were delivered, after refunds), the refunds and the average order value, in the language you asked in. The figures come from your store and can be up to a minute old; your store dashboard is always the live source. Staff are told these figures are the owner's.
 - **Create a coupon (owner only):** say "Create a 10% discount coupon for one day". Percentage coupons go from 1% to 90%, fixed coupons up to 50,000, a coupon can last up to 90 days, and you can add a usage limit and your own code (one is generated if you give none). A confirm card shows the code, the discount, the window and the limit. Nothing is created until you press **Yes, do it**; pressing twice creates one coupon. The coupon is created by your store itself, so it appears in your store's Coupons page, where you can switch it off. The assistant cannot delete a coupon, and staff cannot create one.
 
 ## What it never does

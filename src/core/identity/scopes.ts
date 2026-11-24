@@ -82,6 +82,7 @@ export const ROUTE_SCOPES: Readonly<Record<string, Gate>> = {
   [`POST ${S}/store-link/settings/preview`]: 'person_only', // confirm token for turning customer sending on
   [`GET ${S}/bot/funnel`]: 'person_only', // bot analytics
   [`GET ${S}/store/top-products`]: 'person_only', // best sellers for the owner assistant: the Store authorises the calling PERSON, a server token has none
+  [`GET ${S}/store/orders-summary`]: 'person_only', // the owner's own sales figures: the Store authorises the calling PERSON
   [`POST ${S}/store/coupons`]: 'person_only', // creates a coupon (changes prices): the owner's own press, never a server token
   [`GET ${S}/store-link/catalog`]: 'person_only',
   [`POST ${S}/store-link/catalog/provision`]: 'person_only',
@@ -222,6 +223,7 @@ export const SESSION_UNCHECKED_READS: Readonly<Record<string, string>> = {
   'GET /stores/:storeId/connectors': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/store-link/settings': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/bot/funnel': "settings read of the merchant's own configuration: no customer data",
+  'GET /stores/:storeId/store/orders-summary': "the merchant's own store figures, read live from the Store, which re-checks the person's membership on every call",
   'GET /stores/:storeId/store/top-products': "the merchant's own store figures, read live from the Store, which re-checks the person's membership on every call",
   'GET /stores/:storeId/store-link/catalog': "settings read of the merchant's own configuration: no customer data",
   'GET /stores/:storeId/numbers': "settings read of the merchant's own configuration: no customer data",

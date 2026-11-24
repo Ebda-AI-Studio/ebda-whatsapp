@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { storeCouponRequest, storeTopProductsQuery } from '../core/api/contract';
+import { storeCouponRequest, storeOrdersSummaryQuery, storeTopProductsQuery } from '../core/api/contract';
 import { recordAudit } from '../core/audit';
 import { bridgeForWorkspace } from '../core/store-link';
 import type { BridgeResult } from '../core/store-bridge';
@@ -30,6 +30,19 @@ storeAssistRoutes.get('/stores/:storeId/store/top-products', async (c) => {
   const r = await bridge.getTopProducts(c.req.param('storeId')!, c.get('principal').userId, q.data);
   if (!r.ok) return refusal(c, r);
   return c.json({ currency: r.value.currency, period: r.value.period, from: r.value.fromMs, to: r.value.toMs, items: r.value.items });
+});
+
+/** Orders, collected sales, refunds and average order value for a period (OWNER only; the Store re-checks the live role and caches the figures 60 s). */
+storeAssistRoutes.get('/stores/:storeId/store/orders-summary', async (c) => {
+  if (!ownsStore(c)) return apiError(c, 403, 'forbidden');
+  const q = storeOrdersSummaryQuery.safeParse({ period: c.req.query('period') });
+  if (!q.success) return apiError(c, 400, 'invalid_request');
+  if (!(await workspaceStub(c))) return apiError(c, 404, 'not_found');
+  const bridge = bridgeForWorkspace(c.env, c.req.param('storeId')!);
+  if (!bridge) return apiError(c, 503, 'rate_limited', 'store_link_off');
+  const r = await bridge.getOrdersSummary(c.req.param('storeId')!, c.get('principal').userId, q.data);
+  if (!r.ok) return refusal(c, r);
+  return c.json({ currency: r.value.currency, period: r.value.period, from: r.value.fromMs, to: r.value.toMs, orderCount: r.value.orderCount, collectedOrders: r.value.collectedOrders, salesMinor: r.value.salesMinor, refundsMinor: r.value.refundsMinor, avgOrderMinor: r.value.avgOrderMinor });
 });
 
 /** Creates a coupon through the Store's own coupon service (owner only; a platform super admin's session never creates one). */

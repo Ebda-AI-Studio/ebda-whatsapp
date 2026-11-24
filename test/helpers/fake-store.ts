@@ -1,6 +1,6 @@
 import { mintedKey, mintedRoles } from './issuer';
 import type {
-  Address, BridgeFailure, CouponCreateRequest, CouponCreated, TopPeriod, TopProducts, CustomerProfile, SearchOptions, StorePolicies, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, RecommendationRequest, StoreBridge, StoreProfile,
+  Address, BridgeFailure, CouponCreateRequest, CouponCreated, OrderPeriod, OrdersSummary, TopPeriod, TopProducts, CustomerProfile, SearchOptions, StorePolicies, MemberRole, StoreMember, BridgeOrderSummary, BridgeResult, Buyer, CatalogRow, ChatPaymentMethod, CodOutcome, NewAddress, OrderCreated, OrderLine, RecommendationRequest, StoreBridge, StoreProfile,
 } from '../../src/core/store-bridge';
 
 type Order = {
@@ -111,6 +111,12 @@ export class FakeStore implements StoreBridge {
   async getTopProducts(storeId: string, asUserId: string, req: { period: TopPeriod; limit: number }): Promise<BridgeResult<TopProducts>> {
     const forbidden = !(await this.role(storeId, asUserId));
     return this.gate<TopProducts>('getTopProducts', storeId, [storeId, asUserId, req], () => forbidden ? { ok: false, reason: 'invalid', code: 'FORBIDDEN' } : { ok: true, value: { currency: 'EGP', period: req.period, fromMs: 0, toMs: 1, items: this.topSellers.slice(0, req.limit) } });
+  }
+  /** What the Store's orders summary answers (minor units); a test replaces it. Owner only, like the Store. */
+  ordersSummary: Omit<OrdersSummary, 'currency' | 'period' | 'fromMs' | 'toMs'> = { orderCount: 7, collectedOrders: 4, salesMinor: 1_234_550, refundsMinor: 50_000, avgOrderMinor: 308_638 };
+  async getOrdersSummary(storeId: string, asUserId: string, req: { period: OrderPeriod }): Promise<BridgeResult<OrdersSummary>> {
+    const role = await this.role(storeId, asUserId);
+    return this.gate<OrdersSummary>('getOrdersSummary', storeId, [storeId, asUserId, req], () => role !== 'owner' ? { ok: false, reason: 'invalid', code: 'FORBIDDEN' } : { ok: true, value: { currency: 'EGP', period: req.period, fromMs: 0, toMs: 1, ...this.ordersSummary } });
   }
   async createCoupon(storeId: string, asUserId: string, req: CouponCreateRequest): Promise<BridgeResult<CouponCreated>> {
     const role = await this.role(storeId, asUserId);

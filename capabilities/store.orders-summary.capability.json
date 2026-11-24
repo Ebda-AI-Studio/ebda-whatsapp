@@ -1,0 +1,47 @@
+{
+  "id": "store.orders-summary",
+  "status": "live",
+  "area": "orders",
+  "version": 1,
+  "versionDate": "2026-11-24",
+  "titleAr": "عدد الطلبات والمبيعات",
+  "titleEn": "Orders and sales summary",
+  "screens": [],
+  "api": [
+    "GET /stores/:storeId/store/orders-summary"
+  ],
+  "mcpTool": null,
+  "planGate": null,
+  "roles": [
+    "owner"
+  ],
+  "policy": "free",
+  "undo": {
+    "class": "none"
+  },
+  "helpArticle": "whatsapp/ebda-assistant",
+  "questions": {
+    "ar": [
+      "كام طلب النهارده؟",
+      "مبيعاتي الأسبوع ده كام؟",
+      "kam talab el nharda"
+    ],
+    "en": [
+      "What were my sales this week?"
+    ]
+  },
+  "steps": [
+    "Ask the assistant for your orders and sales for today, yesterday, this week (from Saturday), the last 7 days or this month",
+    "It returns the number of orders, sales collected (paid orders plus delivered cash-on-delivery orders, net of refunds), refunds and the average order value, in your language, read live from the store"
+  ],
+  "edgeCases": [
+    "Owner only: a staff member is told the figures are the owner's",
+    "No store bound (standalone workspace): the tool is not offered and the assistant says it has no store figures",
+    "Figures can be up to a minute old (cached for 60 seconds per period); the store dashboard is the live source",
+    "Cash-on-delivery orders that are not delivered yet count as orders but not as collected sales",
+    "A period with more than 20,000 orders is refused rather than summed partly"
+  ],
+  "gaps": [
+    "No screen yet: the assistant reads it, or the route"
+  ]
+}

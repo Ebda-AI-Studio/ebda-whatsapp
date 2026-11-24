@@ -116,8 +116,19 @@ describe('the metric-question guard', () => {
     const body = (await res.json()) as { segments: Array<{ text: string }> };
     expect(body.segments.map((s) => s.text).join(' ')).toContain('خاتم دهب');
     expect(link.fake.count('getTopProducts')).toBe(1);
-    const orders = await t.ask('كام طلب جالي النهارده؟');
-    expect(JSON.stringify(orders)).toContain(NO_STORE_METRICS.ar);
+    // Store-linked: orders-today is the orders tool's now, not a fixed no-tool reply (that stays for Chat-only workspaces, see observeTurn below).
+    const ai2 = scriptedAi([{ text: 'تمام.' }]);
+    await t.ask('كام طلب جالي النهارده؟', undefined, ai2);
+    expect(ai2.seen.length).toBeGreaterThan(0);
+  });
+
+  it('observeTurn: the fixed no-tool reply is for Chat-only workspaces; a store-linked one gets the model and its tool', () => {
+    const ad = { ai: { run: async () => ({}) }, models: { answer: 'm', plan: 'm', template: 'm', classify: 'm', judge: 'm', embed: 'm' }, tools: () => [], storage: { appendAudit: async () => undefined } } as never;
+    for (const q of ['كام طلب جالي النهارده؟', 'How many orders did I get today?']) {
+      expect(observeTurn(ad, { storeId: 's', log: () => undefined }).deterministic(q, 'ar'), q).not.toBeNull();
+      expect(observeTurn(ad, { storeId: 's', storeLinked: false, log: () => undefined }).deterministic(q, 'ar'), q).not.toBeNull();
+      expect(observeTurn(ad, { storeId: 's', storeLinked: true, log: () => undefined }).deterministic(q, 'ar'), q).toBeNull();
+    }
   });
 });
 
@@ -289,6 +300,75 @@ describe('POST /store/coupons: idempotent and validated at the edge', () => {
   });
 });
 
+describe('store_orders_summary: the owner\'s orders and sales from the Store', () => {
+  const ask = async (t: T, text: string, locale: 'ar' | 'en', say: string, args: unknown = {}) => {
+    const ai = scriptedAi([{ call: { name: 'store_orders_summary', args } }, { text: say }]);
+    configureAssistant({ ai: ai as never, help: noHelp });
+    const res = await SELF.fetch(`https://x/api/v1/stores/${t.s}/assistant/turn`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${t.api.token}` }, body: JSON.stringify({ conversationId: crypto.randomUUID(), text, locale }) });
+    const body = (await res.json()) as { segments: Array<{ text: string }> };
+    return { seen: ai.seen.join(' ').replace(/\\"/g, '"'), said: body.segments.map((x) => x.text).join(' ') };
+  };
+
+  it('answers from the Store in the question\'s language: Arabic gets the Arabic currency word, English the code, both Latin digits with a comma grouping', async () => {
+    const t = await workspaceFor(7850);
+    const ar = await ask(t, 'كام طلب النهارده؟', 'ar', 'النهارده 7 طلبات والمبيعات 12,345.50 جنيه', { period: 'today' });
+    expect(ar.seen).toContain('"salesCollected":"12,345.50 جنيه"');
+    expect(ar.seen).toContain('"orders":"7"');
+    expect(ar.seen).toContain('"answerLanguage":"ar"');
+    expect(ar.said).toContain('12,345.50');
+    const en = await ask(t, 'What were my sales this week?', 'en', 'You made 12,345.50 EGP from 4 collected orders.', { period: 'this_week' });
+    expect(en.seen).toContain('"salesCollected":"12,345.50 EGP"');
+    expect(en.seen).toContain('"refunds":"500.00 EGP"');
+    expect(en.seen).toContain('"averageOrderValue":"3,086.38 EGP"');
+    expect(en.seen).toContain('"answerLanguage":"en"');
+    expect(en.said).toContain('12,345.50 EGP');
+    expect(link.fake.lastCall('getOrdersSummary')).toEqual([t.s, expect.any(String), { period: 'this_week' }]);
+  });
+
+  it('defaults to today; an unknown period or a store argument never reaches the Store', async () => {
+    const t = await workspaceFor(7851);
+    await ask(t, 'كام طلب النهارده؟', 'ar', 'تمام.', {});
+    expect(link.fake.lastCall('getOrdersSummary')[2]).toEqual({ period: 'today' });
+    const before = link.fake.count('getOrdersSummary');
+    for (const args of [{ period: 'year' }, { storeId: 'x' }]) await ask(t, 'كام طلب النهارده؟', 'ar', 'تمام.', args);
+    expect(link.fake.count('getOrdersSummary')).toBe(before);
+  });
+
+  it('no invented numbers: a figure the tool did not return is replaced by the honest answer; the tool\'s own figures stay', async () => {
+    const t = await workspaceFor(7852);
+    const bad = await ask(t, 'كام طلب النهارده؟', 'ar', 'النهارده جالك 999 طلب');
+    expect(bad.said).toBe(NO_STORE_METRICS.ar);
+    const good = await ask(t, 'كام طلب النهارده؟', 'ar', 'النهارده جالك 7 طلب');
+    expect(good.said).toContain('7');
+    expect(good.said).not.toBe(NO_STORE_METRICS.ar);
+  });
+
+  it('owner only: staff are told the figures are the owner\'s and the Store is never asked', async () => {
+    const t = await workspaceFor(7853, 'staff');
+    const r = await ask(t, 'كام طلب النهارده؟', 'ar', 'دي أرقام المالك.');
+    expect(r.seen).toContain('owner_only');
+    const direct = await t.api.call('GET', '/store/orders-summary?period=today');
+    expect(direct.status).toBe(403);
+    expect(link.fake.count('getOrdersSummary')).toBe(0); // after the direct call: the ROUTE refuses staff before the Store is asked (the Store would refuse too, so only this count proves Chat's own check)
+  });
+
+  it('a Store that cannot answer is a tool failure, never zeros', async () => {
+    const t = await workspaceFor(7854);
+    link.fake.failNext.set('getOrdersSummary', 'unavailable');
+    const r = await ask(t, 'كام طلب النهارده؟', 'ar', 'مقدرتش اقرا.');
+    expect(r.seen).toContain('tool_failed');
+    expect(r.seen).not.toContain('"orders":"0"');
+  });
+
+  it('a period with no orders says so', async () => {
+    const t = await workspaceFor(7855);
+    link.fake.ordersSummary = { orderCount: 0, collectedOrders: 0, salesMinor: 0, refundsMinor: 0, avgOrderMinor: 0 };
+    const r = await ask(t, 'كام طلب امبارح؟', 'ar', 'مفيش طلبات.', { period: 'yesterday' });
+    expect(r.seen).toContain('no orders in this period');
+    expect(r.seen).toContain('"averageOrderValue":"n/a"');
+  });
+});
+
 describe('contract pin: the limits Chat checks early are the ones the Store applies', () => {
   // The Store's owner-tools.ts exports MAX_PERCENT / MAX_FIXED_MINOR / MAX_WINDOW_DAYS / MAX_USAGE_LIMIT and pins the same literals in
   // tests/unit/wa-bridge/wa-bridge-owner-tools.test.ts (ebda-store). Change both repos together.
@@ -300,6 +380,7 @@ describe('contract pin: the limits Chat checks early are the ones the Store appl
 describe('registration: both tools are in the registry, retrievable by an Arabic ask, and offered to Store workspaces only', () => {
   it('each tool\'s capability is live, in the registry, with the policy the tool has', () => {
     expect(REGISTRY.caps.get('store.top-products')).toMatchObject({ status: 'live', policy: 'free' });
+    expect(REGISTRY.caps.get('store.orders-summary')).toMatchObject({ status: 'live', policy: 'free' });
     expect(REGISTRY.caps.get('store.coupon-create')).toMatchObject({ status: 'live', policy: 'confirm', undo: 'irreversible' });
     expect(tool('store_top_products')).toMatchObject({ capabilityId: 'store.top-products', policy: 'free' });
     expect(tool('store_create_coupon')).toMatchObject({ capabilityId: 'store.coupon-create', policy: 'confirm', money: true });
@@ -307,6 +388,7 @@ describe('registration: both tools are in the registry, retrievable by an Arabic
   it('the merchant\'s own words find them (Arabic, Franco, English)', () => {
     const offered = (q: string) => selectTools(q, TOOLS, REGISTRY, { mode: 'act', untrustedInContext: false }).map((x) => x.name);
     for (const q of [TOP_Q, 'اكتر منتج بيتباع', 'akter montag byetba3', 'best selling products']) expect(offered(q), q).toContain('store_top_products');
+    for (const q of ['كام طلب النهارده؟', 'مبيعاتي الأسبوع ده كام', 'kam talab el nharda', 'What were my sales this week?']) expect(offered(q), q).toContain('store_orders_summary');
     for (const q of [COUPON_Q, 'e3mel koboun khasm', 'create a discount coupon']) expect(offered(q), q).toContain('store_create_coupon');
     expect(KEYWORDS.store_create_coupon).toBeTruthy();
   });

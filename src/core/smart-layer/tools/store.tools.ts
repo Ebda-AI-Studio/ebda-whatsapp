@@ -10,7 +10,7 @@
 import { z } from 'zod';
 import { sha256Hex } from '../../../../foundation/smart-layer/release';
 import type { ToolSpec, TurnCtx } from '../../../../foundation/smart-layer/types';
-import { COUPON_LIMITS } from '../../store-bridge';
+import { COUPON_LIMITS, ORDER_PERIODS } from '../../store-bridge';
 import { read } from './reads.tools';
 import { ToolInputError, readerFor, row, stableUuid, writeTool, type Kit, type Reader } from './write';
 
@@ -24,6 +24,14 @@ const topArgs = z.object({
   period: z.enum(['today', '7d', '30d']).default('30d').describe("'today', '7d' (last 7 days) or '30d' (last 30 days, the default)"),
   limit: z.number().int().min(1).max(10).default(5).describe('how many products, 1 to 10 (default 5)'),
 }).strict();
+
+/** "13,000.00 EGP" / "13,000.00 جنيه": Latin digits and a comma grouping in both languages (the house style of the Arabic copy and what the invented-figure guard compares), the currency word per language. */
+const fmtMoney = (minor: number, currency: string, locale: 'ar' | 'en'): string => `${(Math.round(minor) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${locale === 'ar' && currency === 'EGP' ? 'جنيه' : currency}`;
+const fmtCount = (n: number): string => n.toLocaleString('en-US');
+const ordersArgs = z.object({
+  period: z.enum(ORDER_PERIODS).default('today').describe("'today' (النهارده), 'yesterday' (امبارح), 'this_week' (الأسبوع ده, from Saturday), 'last_7_days' (آخر 7 أيام) or 'this_month' (الشهر ده); default today"),
+}).strict();
+type OrdersAnswer = { currency: string; period: (typeof ORDER_PERIODS)[number]; orderCount: number; collectedOrders: number; salesMinor: number; refundsMinor: number; avgOrderMinor: number };
 
 const ISO = z.string().datetime({ offset: true });
 const DAY_MS = 86_400_000;
@@ -83,6 +91,25 @@ export function storeTools(kit: Kit): ToolSpec[] {
           period: r.period, periodDays: PERIOD_DAYS[r.period], currency: r.currency,
           products: items.map((p, i) => ({ rank: i + 1, name: ctx.locale === 'ar' ? (p.nameAr ?? p.name) : p.name, unitsSold: p.units, revenue: money(p.revenueMinor, r.currency) })),
           ...(items.length === 0 ? { note: 'no sales in this period' } : {}),
+        };
+      },
+    }),
+
+    read(kit, {
+      name: 'store_orders_summary', capabilityId: 'store.orders-summary', resultTrust: 'store-data',
+      description: "The store's orders and sales for a period (today, yesterday, this week from Saturday, last 7 days, this month): number of orders, sales collected (paid, or cash-on-delivery delivered), refunds, average order value. Owner only. Read live from the connected store; answer in the merchant's language and quote the figures exactly as returned.",
+      args: ordersArgs,
+      run: async (ctx, a) => {
+        // Sales figures are the owner's alone: the answer says so instead of a failed read (the route would refuse a staff session anyway).
+        if (ctx.role !== 'owner') return { available: false, reason: 'owner_only: only the store owner can see order and sales figures' };
+        const r = (await api(ctx).get('/store/orders-summary', { period: a.period })) as OrdersAnswer;
+        const m = (minor: number) => fmtMoney(minor, r.currency, ctx.locale);
+        return {
+          period: r.period, answerLanguage: ctx.locale,
+          orders: fmtCount(r.orderCount), collectedOrders: fmtCount(r.collectedOrders),
+          salesCollected: m(r.salesMinor), refunds: m(r.refundsMinor), averageOrderValue: r.collectedOrders > 0 ? m(r.avgOrderMinor) : 'n/a',
+          definition: 'orders = orders placed in the period that count as sales; salesCollected = paid orders plus delivered cash-on-delivery orders, net of refunds; averageOrderValue = salesCollected / collectedOrders',
+          ...(r.orderCount === 0 ? { note: 'no orders in this period' } : {}),
         };
       },
     }),
