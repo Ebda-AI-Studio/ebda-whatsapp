@@ -7,6 +7,7 @@ import { chatAdapter } from '../../src/core/smart-layer/adapter';
 import type { HelpCorpus } from '../../src/core/smart-layer/help-index';
 import { viewOf, type StoredCap } from '../../src/core/smart-layer/registry';
 import { COUPON_LIMITS } from '../../src/core/store-bridge';
+import { checkBindingClaims } from '../../foundation/smart-layer/rails/binding-claims';
 import { KEYWORDS } from '../../src/core/smart-layer/tools/keywords';
 import { configureAssistant } from '../../src/routes/assistant';
 import { NO_STORE_METRICS, isStoreMetricQuestion, observeTurn } from '../../src/routes/assistant-observe';
@@ -334,13 +335,47 @@ describe('store_orders_summary: the owner\'s orders and sales from the Store', (
     expect(link.fake.count('getOrdersSummary')).toBe(before);
   });
 
-  it('no invented numbers: a figure the tool did not return is replaced by the honest answer; the tool\'s own figures stay', async () => {
+  it('no invented numbers: the answer is written from the tool\'s figures only, whatever the model said', async () => {
     const t = await workspaceFor(7852);
-    const bad = await ask(t, 'كام طلب النهارده؟', 'ar', 'النهارده جالك 999 طلب');
-    expect(bad.said).toBe(NO_STORE_METRICS.ar);
-    const good = await ask(t, 'كام طلب النهارده؟', 'ar', 'النهارده جالك 7 طلب');
-    expect(good.said).toContain('7');
-    expect(good.said).not.toBe(NO_STORE_METRICS.ar);
+    for (const say of ['النهارده جالك 999 طلب', 'النهارده جالك 7 طلب']) {
+      const r = await ask(t, 'كام طلب النهارده؟', 'ar', say);
+      expect(r.said).toContain('7 طلب');
+      expect(r.said).not.toContain('999');
+    }
+  });
+
+  // Live QA on Amelia (rids e4285f8d, bd9109bb, bb40b8b9): the rail cut the refund sentence, the English question got an Arabic answer, refunds were never stated.
+  it('the cause: a refund word makes the vendored binding-claims rail demand a typed source, so a store-data refund figure was replaced by the Terms pointer', () => {
+    const out = checkBindingClaims('المرتجعات 500.00 جنيه', [], ['{"refunds":"500.00 جنيه"}'], []);
+    expect(out.removed.map((x) => x.reason)).toEqual(['policy_term']);
+    expect(out.text).toContain('الشروط والسياسات');
+  });
+
+  it('"كام طلب النهارده؟" with no orders today: an answer with the count, sales and refunds (0.00), never the Terms pointer', async () => {
+    const t = await workspaceFor(7856);
+    link.fake.ordersSummary = { orderCount: 0, collectedOrders: 0, salesMinor: 0, refundsMinor: 0, avgOrderMinor: 0 };
+    const r = await ask(t, 'كام طلب النهارده؟', 'ar', 'النهارده مفيش طلبات. المرتجعات 0 جنيه، شوف التفاصيل في صفحة الشروط والسياسات.', { period: 'today' });
+    expect(r.said).toBe('النهارده: مفيش طلبات. المبيعات المحصّلة 0.00 جنيه، والمرتجعات 0.00 جنيه.');
+    expect(r.said).not.toContain('الشروط');
+  });
+
+  it('"What were my sales this week?" asked in English from an Arabic UI answers in English, with refunds', async () => {
+    const t = await workspaceFor(7857);
+    const r = await ask(t, 'What were my sales this week?', 'ar', 'مبيعاتك الأسبوع ده 12,345.50 جنيه', { period: 'this_week' });
+    expect(r.said).toBe('This week: 7 orders, collected sales 12,345.50 EGP (from 4 paid or delivered), refunds 500.00 EGP, average order value 3,086.38 EGP.');
+  });
+
+  it('the month question matches the admin figures and states refunds as 0.00 when there are none', async () => {
+    const t = await workspaceFor(7858);
+    link.fake.ordersSummary = { orderCount: 4, collectedOrders: 4, salesMinor: 1_246_000, refundsMinor: 0, avgOrderMinor: 311_500 };
+    const r = await ask(t, 'مبيعاتي الشهر ده كام؟', 'ar', 'مبيعاتك 12,460 جنيه.', { period: 'this_month' });
+    expect(r.said).toBe('الشهر ده: 4 طلب، والمبيعات المحصّلة 12,460.00 جنيه (من 4 طلب مدفوع أو اتسلّم)، والمرتجعات 0.00 جنيه، ومتوسط قيمة الطلب 3,115.00 جنيه.');
+  });
+
+  it('a staff answer keeps the model\'s own reply (no figures to render)', async () => {
+    const t = await workspaceFor(7859, 'staff');
+    const r = await ask(t, 'كام طلب النهارده؟', 'ar', 'دي أرقام المالك.');
+    expect(r.said).toBe('دي أرقام المالك.');
   });
 
   it('owner only: staff are told the figures are the owner\'s and the Store is never asked', async () => {
